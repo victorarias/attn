@@ -12,7 +12,7 @@
 // mark-read / retry issues the command and the resulting broadcast drives the
 // refetch, mirroring the Tasks panel's broadcast-authoritative pattern.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DaemonNotification, NotebookTask } from '../hooks/useDaemonSocket';
+import type { DaemonNotification, Task } from '../hooks/useDaemonSocket';
 import './NotificationsPanel.css';
 
 interface NotificationsPanelProps {
@@ -20,7 +20,7 @@ interface NotificationsPanelProps {
   onClose: () => void;
   listNotifications: () => Promise<{ notifications: DaemonNotification[]; unreadCount: number }>;
   markRead: (notificationId?: string) => Promise<number>;
-  retryTask: (taskId: string) => Promise<NotebookTask | null>;
+  retryTask: (taskId: string) => Promise<Task | null>;
   // Bumps on every notifications_updated broadcast so an open panel re-lists.
   changeSignal: number;
 }

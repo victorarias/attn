@@ -19,7 +19,6 @@ import type {
   FsWriteResult,
   NotebookEntry,
   NotebookSendToChiefResult,
-  NotebookTask,
 } from '../../src/hooks/useDaemonSocket';
 import type { HarnessProps } from '../types';
 
@@ -112,8 +111,6 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
     window.__HARNESS__.recordCall('sendToChief', [selection, sourcePath]);
     return { path: 'inbox.md', nudged: false };
   }, []);
-  const listTasks = useCallback(async (): Promise<NotebookTask[]> => [], []);
-  const retryTask = useCallback(async (): Promise<NotebookTask | null> => null, []);
   // The whole vault (recursive, .md only) for the Cmd+P finder — the same shape
   // notebook_list returns. Titles let the finder rank/label by heading.
   const listFiles = useCallback(async (): Promise<NotebookEntry[]> => [
@@ -152,9 +149,6 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
       sendToChief={sendToChief}
       listFiles={listFiles}
       changeSignal={changeSignal}
-      listTasks={listTasks}
-      retryTask={retryTask}
-      taskChangeSignal={0}
       chiefActive
     />
   );

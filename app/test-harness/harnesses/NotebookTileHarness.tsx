@@ -11,7 +11,7 @@ import { useCallback, useMemo, useState, useEffect } from 'react';
 import '../../src/App.css';
 import { NotebookSurfaceProvider, type NotebookSurfaceDaemon } from '../../src/contexts/NotebookSurfaceContext';
 import { NotebookTile } from '../../src/components/notebook/NotebookTile';
-import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../../src/hooks/useDaemonSocket';
+import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../../src/hooks/useDaemonSocket';
 import type { HarnessProps } from '../types';
 
 const TREE: Record<string, FsEntry[]> = {
@@ -71,8 +71,6 @@ export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProp
     window.__HARNESS__.recordCall('sendToChief', [selection, sourcePath]);
     return { path: 'inbox.md', nudged: false };
   }, []);
-  const listTasks = useCallback(async (): Promise<NotebookTask[]> => [], []);
-  const retryTask = useCallback(async (): Promise<NotebookTask | null> => null, []);
   const listFiles = useCallback(async (): Promise<NotebookEntry[]> => FILES, []);
 
   const daemon = useMemo<NotebookSurfaceDaemon>(() => ({
@@ -82,12 +80,9 @@ export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProp
     existsFile,
     backlinksNotebook,
     sendToChief,
-    listTasks,
-    retryTask,
     listFiles,
     changeSignal: 0,
-    taskChangeSignal: 0,
-  }), [listDir, readFile, writeFile, existsFile, backlinksNotebook, sendToChief, listTasks, retryTask, listFiles]);
+  }), [listDir, readFile, writeFile, existsFile, backlinksNotebook, sendToChief, listFiles]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', 'dark');

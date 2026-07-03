@@ -7,7 +7,7 @@ import {
   DaemonPlugin,
   DaemonPluginIssue,
   DaemonSettings,
-  NotebookTask,
+  Task,
   PluginListResult,
 } from '../hooks/useDaemonSocket';
 import { BackgroundTasksSettings } from './BackgroundTasksSettings';
@@ -76,8 +76,8 @@ interface SettingsModalProps {
   onMatchAppTicketBoardScale?: () => void;
   /** Durable task-runner list for the Background Tasks section. Optional so tests
       that don't exercise that section can omit them; App.tsx always provides them. */
-  listTasks?: () => Promise<NotebookTask[]>;
-  retryTask?: (taskId: string) => Promise<NotebookTask | null>;
+  listTasks?: () => Promise<Task[]>;
+  retryTask?: (taskId: string) => Promise<Task | null>;
   taskChangeSignal?: number;
 }
 

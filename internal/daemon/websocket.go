@@ -893,12 +893,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdNotebookSendToChief:
 		nbChief := msg.(*protocol.NotebookSendToChiefMessage)
 		go d.sendNotebookToChiefWSResult(client, protocol.Deref(nbChief.RequestID), protocol.Deref(nbChief.SourcePath), nbChief.Selection)
-	case protocol.CmdNotebookTaskList:
-		nbTaskList := msg.(*protocol.NotebookTaskListMessage)
-		go d.sendNotebookTaskListWSResult(client, protocol.Deref(nbTaskList.RequestID))
-	case protocol.CmdNotebookTaskRetry:
-		nbTaskRetry := msg.(*protocol.NotebookTaskRetryMessage)
-		go d.sendNotebookTaskRetryWSResult(client, protocol.Deref(nbTaskRetry.RequestID), nbTaskRetry.TaskID)
+	case protocol.CmdTaskList:
+		nbTaskList := msg.(*protocol.TaskListMessage)
+		go d.sendTaskListWSResult(client, protocol.Deref(nbTaskList.RequestID))
+	case protocol.CmdTaskRetry:
+		nbTaskRetry := msg.(*protocol.TaskRetryMessage)
+		go d.sendTaskRetryWSResult(client, protocol.Deref(nbTaskRetry.RequestID), nbTaskRetry.TaskID)
 	case protocol.CmdNotificationList:
 		notifList := msg.(*protocol.NotificationListMessage)
 		go d.sendNotificationListWSResult(client, protocol.Deref(notifList.RequestID))

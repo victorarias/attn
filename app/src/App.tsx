@@ -481,9 +481,9 @@ function App() {
   // any file under the root). The browser reads via the generic fs surface, so
   // fs_changed — not notebook_changed — is its refresh signal.
   const [fsChangeSignal, setFsChangeSignal] = useState(0);
-  // Bumped on every notebook_tasks_changed broadcast so an open Tasks panel
+  // Bumped on every tasks_changed broadcast so an open Tasks panel
   // re-fetches the durable runner's task list (covers any lifecycle transition).
-  const [notebookTaskChangeSignal, setNotebookTaskChangeSignal] = useState(0);
+  const [notebookTaskChangeSignal, setTaskChangeSignal] = useState(0);
   // Global notifications feed: the unread count drives the sidebar badge; the
   // change signal bumps on every notifications_updated broadcast so an open
   // notifications panel re-lists. Seeded once initial state arrives (below).
@@ -524,8 +524,8 @@ function App() {
     sendFsRead,
     sendFsWrite,
     sendFsExists,
-    sendNotebookTaskList,
-    sendNotebookTaskRetry,
+    sendTaskList,
+    sendTaskRetry,
     sendNotificationList,
     sendNotificationMarkRead,
     sendNotebookBacklinks,
@@ -587,7 +587,7 @@ function App() {
     onFsChanged: () => setFsChangeSignal((n) => n + 1),
     // A task lifecycle transition broadcast bumps the signal so an open Tasks panel
     // refetches the runner's list (the broadcast itself is payload-free).
-    onNotebookTasksChanged: () => setNotebookTaskChangeSignal((n) => n + 1),
+    onTasksChanged: () => setTaskChangeSignal((n) => n + 1),
     // A notifications_updated broadcast carries the authoritative unread count;
     // set the badge and bump the signal so an open panel re-lists.
     onNotificationsUpdated: (unread) => {
@@ -688,8 +688,8 @@ function App() {
         sendFsRead={sendFsRead}
         sendFsWrite={sendFsWrite}
         sendFsExists={sendFsExists}
-        sendNotebookTaskList={sendNotebookTaskList}
-        sendNotebookTaskRetry={sendNotebookTaskRetry}
+        sendTaskList={sendTaskList}
+        sendTaskRetry={sendTaskRetry}
         sendNotificationList={sendNotificationList}
         sendNotificationMarkRead={sendNotificationMarkRead}
         notificationsUnread={notificationsUnread}
@@ -804,8 +804,8 @@ interface AppContentProps {
   sendFsRead: ReturnType<typeof useDaemonSocket>['sendFsRead'];
   sendFsWrite: ReturnType<typeof useDaemonSocket>['sendFsWrite'];
   sendFsExists: ReturnType<typeof useDaemonSocket>['sendFsExists'];
-  sendNotebookTaskList: ReturnType<typeof useDaemonSocket>['sendNotebookTaskList'];
-  sendNotebookTaskRetry: ReturnType<typeof useDaemonSocket>['sendNotebookTaskRetry'];
+  sendTaskList: ReturnType<typeof useDaemonSocket>['sendTaskList'];
+  sendTaskRetry: ReturnType<typeof useDaemonSocket>['sendTaskRetry'];
   sendNotificationList: ReturnType<typeof useDaemonSocket>['sendNotificationList'];
   sendNotificationMarkRead: ReturnType<typeof useDaemonSocket>['sendNotificationMarkRead'];
   notificationsUnread: number;
@@ -914,8 +914,8 @@ function AppContent({
   sendFsRead,
   sendFsWrite,
   sendFsExists,
-  sendNotebookTaskList,
-  sendNotebookTaskRetry,
+  sendTaskList,
+  sendTaskRetry,
   sendNotificationList,
   sendNotificationMarkRead,
   notificationsUnread,
@@ -3987,7 +3987,7 @@ sendFetchPRDetails,
         onClose={closeNotificationsPanel}
         listNotifications={sendNotificationList}
         markRead={sendNotificationMarkRead}
-        retryTask={sendNotebookTaskRetry}
+        retryTask={sendTaskRetry}
         changeSignal={notificationsChangeSignal}
       />
       <ActionMenu
@@ -4047,8 +4047,8 @@ sendFetchPRDetails,
         onIncreaseTicketBoardScale={ticketBoardScale.increaseScale}
         onDecreaseTicketBoardScale={ticketBoardScale.decreaseScale}
         onMatchAppTicketBoardScale={ticketBoardScale.matchApp}
-        listTasks={sendNotebookTaskList}
-        retryTask={sendNotebookTaskRetry}
+        listTasks={sendTaskList}
+        retryTask={sendTaskRetry}
         taskChangeSignal={notebookTaskChangeSignal}
       />
     </div>

@@ -822,13 +822,13 @@ model NotebookGuideMessage {
 // failed/dead one. state and kind are plain strings (not enums) so the on-disk
 // record stays self-describing and a new TypeSpec enum cannot trip the quicktype
 // identical-enum-merge that drops a generated export.
-model NotebookTaskListMessage {
-  cmd: "notebook_task_list";
+model TaskListMessage {
+  cmd: "task_list";
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
-model NotebookTaskRetryMessage {
-  cmd: "notebook_task_retry";
+model TaskRetryMessage {
+  cmd: "task_retry";
   request_id?: string; // set by the WS frontend for result correlation
   task_id: string;
 }
@@ -2297,7 +2297,7 @@ model NotebookGuideResult {
 // strings, never Go/TypeSpec enums). The runner's internal Meta bag (transcript
 // filesystem paths and other kind-specific inputs) is deliberately omitted — it
 // carries internal inputs that must never reach the user-facing protocol.
-model NotebookTask {
+model Task {
   id: string;
   kind: string;
   subject: string;
@@ -2363,30 +2363,30 @@ model NotebookSendToChiefResultMessage {
   result?: NotebookSendToChiefResult;
 }
 
-// Result of notebook_task_list: the durable runner's records, newest-updated
+// Result of task_list: the durable runner's records, newest-updated
 // first. An empty/absent tasks array means the runner is disabled or has no work.
-model NotebookTaskListResultMessage {
-  event: "notebook_task_list_result";
+model TaskListResultMessage {
+  event: "task_list_result";
   request_id: string;
   success: boolean;
   error?: string;
-  tasks?: NotebookTask[];
+  tasks?: Task[];
 }
 
-// Result of notebook_task_retry. task echoes the record after the retry flip
+// Result of task_retry. task echoes the record after the retry flip
 // (failed/dead -> queued); absent when the runner could not act on the id.
-model NotebookTaskRetryResultMessage {
-  event: "notebook_task_retry_result";
+model TaskRetryResultMessage {
+  event: "task_retry_result";
   request_id: string;
   success: boolean;
   error?: string;
-  task?: NotebookTask;
+  task?: Task;
 }
 
 // Broadcast (no request_id) when any task lifecycle transition occurs, so an open
 // task panel re-lists. Fired from the runner's OnChange callback.
-model NotebookTasksChangedMessage {
-  event: "notebook_tasks_changed";
+model TasksChangedMessage {
+  event: "tasks_changed";
 }
 
 // One durable notification in the global feed. read_at is empty while unread and
@@ -2694,9 +2694,9 @@ alias DaemonEvent =
   | NotebookBacklinksResultMessage
   | NotebookWriteResultMessage
   | NotebookSendToChiefResultMessage
-  | NotebookTaskListResultMessage
-  | NotebookTaskRetryResultMessage
-  | NotebookTasksChangedMessage
+  | TaskListResultMessage
+  | TaskRetryResultMessage
+  | TasksChangedMessage
   | NotificationListResultMessage
   | NotificationMarkReadResultMessage
   | NotificationsUpdatedMessage

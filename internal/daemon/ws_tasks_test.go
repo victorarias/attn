@@ -43,7 +43,7 @@ func installInstrumentedTaskRunner(t *testing.T, d *Daemon) (*tasks.Runner, *ato
 	}); err != nil {
 		t.Fatalf("register %s: %v", testTaskKind, err)
 	}
-	runner.OnChange(func() { d.broadcastNotebookTasksChanged() })
+	runner.OnChange(func() { d.broadcastTasksChanged() })
 	if err := runner.Start(); err != nil {
 		t.Fatalf("start runner: %v", err)
 	}
@@ -52,10 +52,10 @@ func installInstrumentedTaskRunner(t *testing.T, d *Daemon) (*tasks.Runner, *ato
 	return runner, shouldFail
 }
 
-// TestNotebookTaskToProtocolMapsFieldsAndOmitsMeta verifies the field mapping and,
+// TestTaskToProtocolMapsFieldsAndOmitsMeta verifies the field mapping and,
 // critically, that the internal Meta bag (transcript filesystem paths and other
 // kind-specific inputs) never reaches the user-facing protocol type.
-func TestNotebookTaskToProtocolMapsFieldsAndOmitsMeta(t *testing.T) {
+func TestTaskToProtocolMapsFieldsAndOmitsMeta(t *testing.T) {
 	next := time.Date(2026, 6, 14, 9, 30, 0, 0, time.UTC)
 	created := time.Date(2026, 6, 14, 9, 0, 0, 0, time.UTC)
 	updated := time.Date(2026, 6, 14, 9, 15, 0, 0, time.UTC)
@@ -73,7 +73,7 @@ func TestNotebookTaskToProtocolMapsFieldsAndOmitsMeta(t *testing.T) {
 		Meta:          map[string]string{"transcript_path": secret},
 	}
 
-	pt := notebookTaskToProtocol(task)
+	pt := taskToProtocol(task)
 
 	if pt.ID != task.ID || pt.Kind != task.Kind || pt.Subject != task.Subject {
 		t.Fatalf("identity fields = %+v, want id/kind/subject from %+v", pt, task)
@@ -109,30 +109,30 @@ func TestNotebookTaskToProtocolMapsFieldsAndOmitsMeta(t *testing.T) {
 
 	// An empty LastError stays a nil pointer (omitted on the wire).
 	task.LastError = ""
-	if got := notebookTaskToProtocol(task); got.LastError != nil {
+	if got := taskToProtocol(task); got.LastError != nil {
 		t.Fatalf("empty last_error = %v, want nil pointer", got.LastError)
 	}
 }
 
-// TestNotebookTasksToProtocolSkipsNil guards the nil-skip in the slice converter so
+// TestTasksToProtocolSkipsNil guards the nil-skip in the slice converter so
 // a sparse runner list can never index-panic or emit a zero-value record.
-func TestNotebookTasksToProtocolSkipsNil(t *testing.T) {
+func TestTasksToProtocolSkipsNil(t *testing.T) {
 	in := []*tasks.Task{
 		{ID: "a", Kind: testTaskKind, Subject: "a", State: tasks.StateQueued},
 		nil,
 		{ID: "b", Kind: testTaskKind, Subject: "b", State: tasks.StateDone},
 	}
-	out := notebookTasksToProtocol(in)
+	out := tasksToProtocol(in)
 	if len(out) != 2 || out[0].ID != "a" || out[1].ID != "b" {
 		t.Fatalf("converted = %+v, want [a b] skipping nil", out)
 	}
 }
 
-// TestSendNotebookTaskListWSResult exercises the websocket list path (the only
+// TestSendTaskListWSResult exercises the websocket list path (the only
 // list path after the unix-socket CLI was removed): a started runner's records
-// come back as a notebook_task_list_result correlated by request, with each
+// come back as a task_list_result correlated by request, with each
 // record's id/kind/state mapped through.
-func TestSendNotebookTaskListWSResult(t *testing.T) {
+func TestSendTaskListWSResult(t *testing.T) {
 	d := newNotebookDaemon(t)
 	runner, _ := installInstrumentedTaskRunner(t, d)
 	if _, err := runner.Enqueue(testTaskKind, "ws-a", tasks.EnqueueOptions{}); err != nil {
@@ -146,14 +146,14 @@ func TestSendNotebookTaskListWSResult(t *testing.T) {
 	waitForTaskState(t, d, testTaskKind, "ws-b", tasks.StateDone)
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendNotebookTaskListWSResult(client, "list-1")
+	d.sendTaskListWSResult(client, "list-1")
 
-	var msg protocol.NotebookTaskListResultMessage
+	var msg protocol.TaskListResultMessage
 	readNotebookWSEvent(t, client.send, &msg)
-	if msg.Event != protocol.EventNotebookTaskListResult || msg.RequestID != "list-1" || !msg.Success {
-		t.Fatalf("list result = %+v, want success notebook_task_list_result for list-1", msg)
+	if msg.Event != protocol.EventTaskListResult || msg.RequestID != "list-1" || !msg.Success {
+		t.Fatalf("list result = %+v, want success task_list_result for list-1", msg)
 	}
-	got := map[string]protocol.NotebookTask{}
+	got := map[string]protocol.Task{}
 	for _, task := range msg.Tasks {
 		got[task.Subject] = task
 	}
@@ -174,26 +174,26 @@ func TestSendNotebookTaskListWSResult(t *testing.T) {
 	}
 }
 
-// TestSendNotebookTaskListWSResultNilRunner confirms a nil runner is a successful
+// TestSendTaskListWSResultNilRunner confirms a nil runner is a successful
 // empty WS result, not a transport error.
-func TestSendNotebookTaskListWSResultNilRunner(t *testing.T) {
+func TestSendTaskListWSResultNilRunner(t *testing.T) {
 	d := newNotebookDaemon(t)
 	d.compactRunner = nil
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendNotebookTaskListWSResult(client, "list-nil")
+	d.sendTaskListWSResult(client, "list-nil")
 
-	var msg protocol.NotebookTaskListResultMessage
+	var msg protocol.TaskListResultMessage
 	readNotebookWSEvent(t, client.send, &msg)
 	if !msg.Success || msg.RequestID != "list-nil" || len(msg.Tasks) != 0 || msg.Error != nil {
 		t.Fatalf("nil-runner list result = %+v, want success empty list", msg)
 	}
 }
 
-// TestSendNotebookTaskRetryWSResultRequeuesDeadTask drives a real task to dead
+// TestSendTaskRetryWSResultRequeuesDeadTask drives a real task to dead
 // (MaxAttempts=1 + a failing executor) then retries it over the WS path: the result
 // must carry the task flipped back to queued with NextAttemptAt advanced to ~now.
-func TestSendNotebookTaskRetryWSResultRequeuesDeadTask(t *testing.T) {
+func TestSendTaskRetryWSResultRequeuesDeadTask(t *testing.T) {
 	d := newNotebookDaemon(t)
 	runner, shouldFail := installInstrumentedTaskRunner(t, d)
 	shouldFail.Store(true)
@@ -208,12 +208,12 @@ func TestSendNotebookTaskRetryWSResultRequeuesDeadTask(t *testing.T) {
 
 	before := time.Now()
 	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendNotebookTaskRetryWSResult(client, "retry-1", tasks.TaskID(testTaskKind, "ws-fail"))
+	d.sendTaskRetryWSResult(client, "retry-1", tasks.TaskID(testTaskKind, "ws-fail"))
 
-	var msg protocol.NotebookTaskRetryResultMessage
+	var msg protocol.TaskRetryResultMessage
 	readNotebookWSEvent(t, client.send, &msg)
-	if msg.Event != protocol.EventNotebookTaskRetryResult || msg.RequestID != "retry-1" || !msg.Success {
-		t.Fatalf("retry result = %+v, want success notebook_task_retry_result for retry-1", msg)
+	if msg.Event != protocol.EventTaskRetryResult || msg.RequestID != "retry-1" || !msg.Success {
+		t.Fatalf("retry result = %+v, want success task_retry_result for retry-1", msg)
 	}
 	if msg.Task == nil || msg.Task.State != string(tasks.StateQueued) {
 		t.Fatalf("retry result task = %+v, want state queued", msg.Task)
@@ -231,37 +231,37 @@ func TestSendNotebookTaskRetryWSResultRequeuesDeadTask(t *testing.T) {
 	}
 }
 
-// TestSendNotebookTaskRetryWSResultNilRunner confirms the disabled-runner retry path
+// TestSendTaskRetryWSResultNilRunner confirms the disabled-runner retry path
 // is a clear, non-panicking failure result rather than a silent success.
-func TestSendNotebookTaskRetryWSResultNilRunner(t *testing.T) {
+func TestSendTaskRetryWSResultNilRunner(t *testing.T) {
 	d := newNotebookDaemon(t)
 	d.compactRunner = nil
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendNotebookTaskRetryWSResult(client, "retry-nil", "test_task:gone")
+	d.sendTaskRetryWSResult(client, "retry-nil", "test_task:gone")
 
-	var msg protocol.NotebookTaskRetryResultMessage
+	var msg protocol.TaskRetryResultMessage
 	readNotebookWSEvent(t, client.send, &msg)
 	if msg.Success || msg.Error == nil || *msg.Error != "task runner unavailable" {
 		t.Fatalf("nil-runner retry result = %+v, want failure 'task runner unavailable'", msg)
 	}
 }
 
-// TestNotebookTasksChangedBroadcastReachesClient drives a REAL task transition
-// through the daemon-wired runner and asserts the live notebook_tasks_changed
+// TestTasksChangedBroadcastReachesClient drives a REAL task transition
+// through the daemon-wired runner and asserts the live tasks_changed
 // broadcast actually lands on a subscribed websocket client with the correct event
 // name. This covers the end-to-end path startCompactRunner relies on (runner.OnChange
-// -> d.broadcastNotebookTasksChanged -> wsHub), which the per-handler result tests
+// -> d.broadcastTasksChanged -> wsHub), which the per-handler result tests
 // cannot see: a renamed event or a broken broadcast message would slip past them but
 // is caught here. (That the runner invokes OnChange at all is a tasks-package property
 // already covered by internal/tasks; this test owns the daemon's wiring of it.)
-func TestNotebookTasksChangedBroadcastReachesClient(t *testing.T) {
+func TestTasksChangedBroadcastReachesClient(t *testing.T) {
 	d := newNotebookDaemon(t)
 	client := &wsClient{send: make(chan outboundMessage, 8)}
 	d.wsHub.clients[client] = true
 	go d.wsHub.run()
 
-	// installInstrumentedTaskRunner wires runner.OnChange -> broadcastNotebookTasksChanged
+	// installInstrumentedTaskRunner wires runner.OnChange -> broadcastTasksChanged
 	// exactly as startCompactRunner does, so a real transition exercises the live path.
 	runner, _ := installInstrumentedTaskRunner(t, d)
 	if _, err := runner.Enqueue(testTaskKind, "ws-bcast", tasks.EnqueueOptions{}); err != nil {
@@ -269,21 +269,21 @@ func TestNotebookTasksChangedBroadcastReachesClient(t *testing.T) {
 	}
 
 	// The enqueue and the worker's queued->running->done each fire the broadcast.
-	// Assert at least one notebook_tasks_changed reaches the client.
+	// Assert at least one tasks_changed reaches the client.
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
 		case message := <-client.send:
-			var event protocol.NotebookTasksChangedMessage
+			var event protocol.TasksChangedMessage
 			if err := json.Unmarshal(message.payload, &event); err != nil {
 				t.Fatalf("decode broadcast: %v", err)
 			}
-			if event.Event != protocol.EventNotebookTasksChanged {
-				t.Fatalf("broadcast event = %q, want notebook_tasks_changed", event.Event)
+			if event.Event != protocol.EventTasksChanged {
+				t.Fatalf("broadcast event = %q, want tasks_changed", event.Event)
 			}
 			return
 		case <-deadline:
-			t.Fatal("notebook_tasks_changed was not broadcast on a task transition")
+			t.Fatal("tasks_changed was not broadcast on a task transition")
 		}
 	}
 }

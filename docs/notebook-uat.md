@@ -209,7 +209,7 @@ cat ~/attn-notebook-dev/.attn/raw/context-snapshots/<wsID>.md
    (`ATTN_PROFILE=dev ./attn daemon stop`), then `… daemon ensure`. The orphaned `running`
    task is reset to `queued` at startup and re-runs.
 5. **Retry:** click Retry on a failed/dead row → it moves to `queued` and re-executes; the
-   panel refreshes live (the `notebook_tasks_changed` broadcast).
+   panel refreshes live (the `tasks_changed` broadcast).
 
 **Expected states:** `queued → running → {done | failed}`; `failed → queued` (backoff) or
 `→ dead` (attempts exhausted); `failed/dead → queued` on Retry.

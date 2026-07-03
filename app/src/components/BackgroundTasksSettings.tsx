@@ -6,16 +6,16 @@
 // are a global daemon concern, not a notebook one, so they belong in Settings.
 //
 // Broadcast-authoritative, like the old panel: it fetches on mount and on every
-// notebook_tasks_changed bump (taskChangeSignal), and a Retry only issues the
+// tasks_changed bump (taskChangeSignal), and a Retry only issues the
 // command — the resulting broadcast drives the refetch that reflects truth.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NotebookTask } from '../hooks/useDaemonSocket';
+import type { Task } from '../hooks/useDaemonSocket';
 import './BackgroundTasksSettings.css';
 
 interface BackgroundTasksSettingsProps {
-  listTasks: () => Promise<NotebookTask[]>;
-  retryTask: (taskId: string) => Promise<NotebookTask | null>;
-  // Bumps on every notebook_tasks_changed broadcast so the list re-fetches.
+  listTasks: () => Promise<Task[]>;
+  retryTask: (taskId: string) => Promise<Task | null>;
+  // Bumps on every tasks_changed broadcast so the list re-fetches.
   taskChangeSignal: number;
 }
 
@@ -42,7 +42,7 @@ export function BackgroundTasksSettings({
   retryTask,
   taskChangeSignal,
 }: BackgroundTasksSettingsProps) {
-  const [tasks, setTasks] = useState<NotebookTask[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());

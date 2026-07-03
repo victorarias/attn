@@ -18,7 +18,7 @@ import type {
   WorkflowRun as GeneratedWorkflowRun,
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
-  NotebookTask as GeneratedNotebookTask,
+  Task as GeneratedTask,
   Notification as GeneratedNotification,
   Ticket as GeneratedTicket,
   PRRole,
@@ -166,7 +166,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '142';
+export const PROTOCOL_VERSION = '143';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -406,10 +406,10 @@ export interface NotebookReadResult {
   hash: string;
 }
 
-// One durable runner task as surfaced by notebook_task_list / notebook_task_retry.
-// Mirrors the daemon's protocol.NotebookTask (which deliberately omits the runner's
+// One durable runner task as surfaced by task_list / task_retry.
+// Mirrors the daemon's protocol.Task (which deliberately omits the runner's
 // internal Meta/CommitGuard so transcript paths etc. never reach the UI).
-export type NotebookTask = GeneratedNotebookTask;
+export type Task = GeneratedTask;
 export type DaemonNotification = GeneratedNotification;
 
 // The outcome of a Notebook hash-CAS save. conflict=true means the note changed
@@ -476,8 +476,8 @@ interface UseDaemonSocketOptions {
   onNotebookChanged?: (origin: string, paths: string[]) => void;
   // Fired when the durable task runner's task set changes (any lifecycle
   // transition: queue/run/retry/fail/done). Carries no payload — an open Tasks
-  // panel refetches via notebook_task_list to reflect truth.
-  onNotebookTasksChanged?: () => void;
+  // panel refetches via task_list to reflect truth.
+  onTasksChanged?: () => void;
   // Fired when the global notifications feed changes (a notification is added or
   // one/all are marked read). Carries the authoritative post-change unread count
   // so the sidebar badge updates without a re-list; an open panel re-lists.
@@ -768,7 +768,7 @@ export async function retryTransientAttachRequest<T>(
 export function useDaemonSocket({
   onSessionsUpdate,
   onNotebookChanged,
-  onNotebookTasksChanged,
+  onTasksChanged,
   onNotificationsUpdated,
   onFsChanged,
   onTicketsUpdate,
@@ -799,7 +799,7 @@ export function useDaemonSocket({
   const callbacksRef = useRef({
     onSessionsUpdate,
     onNotebookChanged,
-    onNotebookTasksChanged,
+    onTasksChanged,
     onNotificationsUpdated,
     onFsChanged,
     onTicketsUpdate,
@@ -819,7 +819,7 @@ export function useDaemonSocket({
   callbacksRef.current = {
     onSessionsUpdate,
     onNotebookChanged,
-    onNotebookTasksChanged,
+    onTasksChanged,
     onNotificationsUpdated,
     onFsChanged,
     onTicketsUpdate,
@@ -1492,10 +1492,10 @@ export function useDaemonSocket({
             );
             break;
 
-          case 'notebook_tasks_changed':
+          case 'tasks_changed':
             // Payload-free broadcast: an open Tasks panel refetches the list so it
             // reflects the runner's truth (no optimistic mutation here).
-            callbacksRef.current.onNotebookTasksChanged?.();
+            callbacksRef.current.onTasksChanged?.();
             break;
 
           case 'notifications_updated':
@@ -1693,12 +1693,12 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'notebook_task_list_result': {
+          case 'task_list_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') {
               break;
             }
-            const key = `notebook_task_list:${requestId}`;
+            const key = `task_list:${requestId}`;
             const pending = pendingActionsRef.current.get(key);
             if (!pending) {
               break;
@@ -1712,12 +1712,12 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'notebook_task_retry_result': {
+          case 'task_retry_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') {
               break;
             }
-            const key = `notebook_task_retry:${requestId}`;
+            const key = `task_retry:${requestId}`;
             const pending = pendingActionsRef.current.get(key);
             if (!pending) {
               break;
@@ -4056,17 +4056,17 @@ export function useDaemonSocket({
 
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
-  const sendNotebookTaskList = useCallback((): Promise<NotebookTask[]> => {
+  const sendTaskList = useCallback((): Promise<Task[]> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         reject(new Error('WebSocket not connected'));
         return;
       }
-      const requestId = nextRequestID('notebook_task_list');
-      const key = `notebook_task_list:${requestId}`;
+      const requestId = nextRequestID('task_list');
+      const key = `task_list:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'notebook_task_list', request_id: requestId }));
+      ws.send(JSON.stringify({ cmd: 'task_list', request_id: requestId }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -4078,18 +4078,18 @@ export function useDaemonSocket({
 
   // Force a failed|dead task back to queued (runs immediately). Resolves with the
   // requeued task, or null when the task was non-terminal (a no-op retry). The
-  // notebook_tasks_changed broadcast then drives the panel's refetch.
-  const sendNotebookTaskRetry = useCallback((taskId: string): Promise<NotebookTask | null> => {
+  // tasks_changed broadcast then drives the panel's refetch.
+  const sendTaskRetry = useCallback((taskId: string): Promise<Task | null> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         reject(new Error('WebSocket not connected'));
         return;
       }
-      const requestId = nextRequestID('notebook_task_retry');
-      const key = `notebook_task_retry:${requestId}`;
+      const requestId = nextRequestID('task_retry');
+      const key = `task_retry:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'notebook_task_retry', request_id: requestId, task_id: taskId }));
+      ws.send(JSON.stringify({ cmd: 'task_retry', request_id: requestId, task_id: taskId }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -4930,8 +4930,8 @@ export function useDaemonSocket({
     sendTicketChangeStatus,
     sendTicketAddComment,
     sendTicketEditDescription,
-    sendNotebookTaskList,
-    sendNotebookTaskRetry,
+    sendTaskList,
+    sendTaskRetry,
     sendNotificationList,
     sendNotificationMarkRead,
     sendNotebookBacklinks,
