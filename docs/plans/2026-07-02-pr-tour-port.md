@@ -1,5 +1,11 @@
 # Plan: PR tours in attn (jaunt port) — direction plan
 
+> **SUPERSEDED (2026-07-04)** by [docs/vision/present.md](../vision/present.md).
+> The design pivoted: instead of overlaying a tour on the existing diff panel,
+> **Present** replaces that panel with an agent-triggered presentation surface
+> (own window, rounds, doc annotation, teaching). The jaunt inventory below
+> remains accurate and useful; the decisions and slices do not govern anything.
+
 ## Goal
 
 Port jaunt into attn: a delegated agent authors a **guided PR tour** — an ordered
