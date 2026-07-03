@@ -74,6 +74,17 @@ const (
 	// because its native Write/Edit enforce read-before-write CAS on the shared
 	// journal; see parseNotebookNarrationConfig.
 	SettingNotebookNarrateWorkspace = "notebook.narrate_workspace"
+	// SettingChiefContextWindowCap caps the chief-of-staff session's effective
+	// context window (in tokens): auto-compaction triggers at this threshold
+	// instead of at the model's full window, so each cache-cold chief wake
+	// re-reads less context. Empty/unset => DefaultContextWindowCap. Applied only
+	// to chief launches; delegated interactive agents are never capped.
+	SettingChiefContextWindowCap = "chief_context_window_cap"
+	// SettingHeadlessContextWindowCap caps every headless run (keeper narration,
+	// ticket reconciliation, workflow subagents) the same way. Headless runs are
+	// one-shot and cache-cold by construction; one that grows past this is treated
+	// as a bug, not accommodated. Empty/unset => DefaultContextWindowCap.
+	SettingHeadlessContextWindowCap = "headless_context_window_cap"
 	// SettingNotebookTasksEnabled is the master switch for ALL keeper async
 	// background duties (per-session summarize, workspace narrate, context
 	// compaction). Default ON: a blank/unset value means enabled, so existing
@@ -110,6 +121,9 @@ func (d *Daemon) handleSetSettingWS(client *wsClient, msg *protocol.SetSettingMe
 	d.store.SetSetting(msg.Key, msg.Value)
 	if msg.Key == SettingTailscaleEnabled {
 		d.ensureTailscaleServeFromSettings()
+	}
+	if msg.Key == SettingHeadlessContextWindowCap {
+		d.applyHeadlessContextWindowCap()
 	}
 	d.broadcastSettings(msg.Key)
 }
@@ -232,6 +246,10 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	// reflects the default-ON semantics (blank/unset => "true") rather than an
 	// absent key the frontend would read as off.
 	settings[SettingNotebookTasksEnabled] = strconv.FormatBool(d.notebookTasksEnabled())
+	// Surface the EFFECTIVE token caps so the UI shows the concrete default
+	// (128000) rather than an absent key when the operator has not set one.
+	settings[SettingChiefContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingChiefContextWindowCap]))
+	settings[SettingHeadlessContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingHeadlessContextWindowCap]))
 
 	tailscale := d.tailscaleStateSnapshot()
 	if tailscale.status != "" {
@@ -280,6 +298,27 @@ func (d *Daemon) chiefLaunchModel(agent string, chief bool) string {
 	return strings.TrimSpace(d.store.GetSetting(SettingChiefModelPrefix + strings.ToLower(strings.TrimSpace(agent))))
 }
 
+// chiefContextWindowCap returns the effective context-window token cap for a
+// chief-of-staff launch, or 0 (no cap) when this is not a chief launch. Mirrors
+// chiefLaunchModel: the policy (what the cap is, and that only the chief gets
+// one) lives here; the driver decides how to apply it.
+func (d *Daemon) chiefContextWindowCap(chief bool) int {
+	if !chief {
+		return 0
+	}
+	return resolveContextWindowCap(d.store.GetSetting(SettingChiefContextWindowCap))
+}
+
+// applyHeadlessContextWindowCap pushes the headless_context_window_cap setting
+// into the process-global that the headless spawn seam reads. Called at startup
+// and on every settings change so headless runs always use the current value.
+func (d *Daemon) applyHeadlessContextWindowCap() {
+	if d.store == nil {
+		return
+	}
+	agentdriver.SetHeadlessContextWindowCap(resolveContextWindowCap(d.store.GetSetting(SettingHeadlessContextWindowCap)))
+}
+
 func (d *Daemon) validateSetting(key, value string) error {
 	switch key {
 	case SettingProjectsDirectory:
@@ -301,6 +340,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return validateTheme(value)
 	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled:
 		return validateBooleanSetting(value)
+	case SettingChiefContextWindowCap, SettingHeadlessContextWindowCap:
+		return validateContextWindowCap(value)
 	case SettingKeeperCompact:
 		return d.validateKeeperCompactSetting(value)
 	case SettingNotebookSummarizeSession:
@@ -360,6 +401,43 @@ func validateUIScale(value string) error {
 		return fmt.Errorf("scale must be between 0.5 and 2.0")
 	}
 	return nil
+}
+
+// contextWindowCap bounds. The knob can only REDUCE the effective window (a value
+// above the model's real limit is clamped/ignored by the agent), so the ceiling
+// is a fat-finger guard rather than a hard limit; the floor keeps compaction from
+// thrashing on a pathologically small window.
+const (
+	contextWindowCapMin = 10000
+	contextWindowCapMax = 2000000
+)
+
+// validateContextWindowCap accepts an empty value (meaning DefaultContextWindowCap)
+// or a whole number of tokens within [contextWindowCapMin, contextWindowCapMax].
+func validateContextWindowCap(value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return fmt.Errorf("context window cap must be a whole number of tokens: %s", value)
+	}
+	if n < contextWindowCapMin || n > contextWindowCapMax {
+		return fmt.Errorf("context window cap must be between %d and %d tokens", contextWindowCapMin, contextWindowCapMax)
+	}
+	return nil
+}
+
+// resolveContextWindowCap turns a stored setting value into an effective token
+// cap, applying DefaultContextWindowCap when unset/blank/unparseable.
+func resolveContextWindowCap(stored string) int {
+	if trimmed := strings.TrimSpace(stored); trimmed != "" {
+		if n, err := strconv.Atoi(trimmed); err == nil && n > 0 {
+			return n
+		}
+	}
+	return agentdriver.DefaultContextWindowCap
 }
 
 // validateNotebookRoot accepts an empty value (meaning the profile-derived

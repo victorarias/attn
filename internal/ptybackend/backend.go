@@ -61,6 +61,14 @@ type SpawnOptions struct {
 	// from a delegation's --effort flag; the worker exports it as ATTN_EFFORT.
 	// Empty means the agent's own default.
 	Effort string
+
+	// ChiefContextWindowCap, when > 0, is the token threshold the chief-of-staff
+	// launch caps its context window at; the worker exports it as
+	// ATTN_CHIEF_AUTO_COMPACT_WINDOW and the launched agent applies it (Claude:
+	// CLAUDE_CODE_AUTO_COMPACT_WINDOW; Codex: model_auto_compact_token_limit).
+	// Sourced from the chief_context_window_cap setting and set only for chief
+	// launches, so non-chief sessions stay uncapped.
+	ChiefContextWindowCap int
 }
 
 type AttachInfo struct {

@@ -646,6 +646,10 @@ func (d *Daemon) Start() error {
 	if d.pluginProcesses == nil {
 		d.pluginProcesses = newPluginProcessRegistry()
 	}
+	// Push the headless context-window cap into the agent package's process-global
+	// before any headless run can start, so the default (or configured) cap
+	// applies from the first keeper/narration/reconcile run.
+	d.applyHeadlessContextWindowCap()
 	reapedWorkspaceIDs := d.loadWorkspacesFromStore()
 	if d.daemonInstanceID == "" {
 		instanceID, err := ensureDaemonInstanceID(d.dataRoot)

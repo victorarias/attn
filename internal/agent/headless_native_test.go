@@ -112,7 +112,7 @@ func TestCodexHeadlessArgsUsesWorkspaceWriteAndDropsMCPPin(t *testing.T) {
 		Model:   "gpt-test",
 		Prompt:  "compact the context file",
 		WorkDir: "/tmp/scratch",
-	})
+	}, 0)
 
 	assertContainsAll(t, "Codex native args", args,
 		"exec",

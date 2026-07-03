@@ -488,6 +488,9 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if effort := strings.TrimSpace(opts.Effort); effort != "" {
 		workerEnv = append(workerEnv, "ATTN_EFFORT="+effort)
 	}
+	if opts.ChiefContextWindowCap > 0 {
+		workerEnv = append(workerEnv, "ATTN_CHIEF_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.ChiefContextWindowCap))
+	}
 	if len(opts.LoginShellEnv) > 0 {
 		if envJSON, err := json.Marshal(opts.LoginShellEnv); err == nil {
 			workerEnv = append(workerEnv, "ATTN_CACHED_SHELL_ENV="+string(envJSON))

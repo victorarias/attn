@@ -87,7 +87,7 @@ func TestHeadlessSubagentArgvCarriesNoWorkflowGuidance(t *testing.T) {
 		MCPServerArgs:    []string{"_workflow-result-mcp", "--result-file", "/tmp/result"},
 	}
 
-	codexArgv := buildCodexHeadlessArgs(req, "/tmp/work/last.txt")
+	codexArgv := buildCodexHeadlessArgs(req, "/tmp/work/last.txt", 0)
 	claudeArgv, err := buildClaudeHeadlessArgs(req)
 	if err != nil {
 		t.Fatalf("buildClaudeHeadlessArgs: %v", err)

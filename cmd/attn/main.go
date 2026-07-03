@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -2258,6 +2259,13 @@ func runAgentDirectly(requestedAgent string) {
 	// reasoning effort (delegate --effort).
 	opts.Model = strings.TrimSpace(os.Getenv("ATTN_MODEL"))
 	opts.Effort = strings.TrimSpace(os.Getenv("ATTN_EFFORT"))
+	// ATTN_CHIEF_AUTO_COMPACT_WINDOW caps the chief's context window. The worker
+	// exports it only for chief launches, so a delegated agent never sees it.
+	if window := strings.TrimSpace(os.Getenv("ATTN_CHIEF_AUTO_COMPACT_WINDOW")); window != "" {
+		if n, err := strconv.Atoi(window); err == nil && n > 0 {
+			opts.AutoCompactWindow = n
+		}
+	}
 	if cp, ok := agentdriver.GetConfigOverrideProvider(driver); ok {
 		opts.ConfigOverrides = cp.GenerateConfigOverrides(opts)
 	}
