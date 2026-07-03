@@ -566,6 +566,18 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`},
+	{62, "create notifications table", `CREATE TABLE IF NOT EXISTS notifications (
+		id TEXT PRIMARY KEY,
+		kind TEXT NOT NULL,
+		title TEXT NOT NULL DEFAULT '',
+		body TEXT NOT NULL DEFAULT '',
+		detail TEXT NOT NULL DEFAULT '',
+		source_kind TEXT NOT NULL DEFAULT '',
+		source_id TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		read_at TEXT NOT NULL DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

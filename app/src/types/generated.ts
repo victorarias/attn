@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewState, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookTask, NotebookTaskListMessage, NotebookTaskListResultMessage, NotebookTaskRetryMessage, NotebookTaskRetryResultMessage, NotebookTasksChangedMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewState, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -137,6 +137,12 @@
 //   const notebookWriteMessage = Convert.toNotebookWriteMessage(json);
 //   const notebookWriteResult = Convert.toNotebookWriteResult(json);
 //   const notebookWriteResultMessage = Convert.toNotebookWriteResultMessage(json);
+//   const notification = Convert.toNotification(json);
+//   const notificationListMessage = Convert.toNotificationListMessage(json);
+//   const notificationListResultMessage = Convert.toNotificationListResultMessage(json);
+//   const notificationMarkReadMessage = Convert.toNotificationMarkReadMessage(json);
+//   const notificationMarkReadResultMessage = Convert.toNotificationMarkReadResultMessage(json);
+//   const notificationsUpdatedMessage = Convert.toNotificationsUpdatedMessage(json);
 //   const openBrowserMessage = Convert.toOpenBrowserMessage(json);
 //   const openMarkdownMessage = Convert.toOpenMarkdownMessage(json);
 //   const pathInspection = Convert.toPathInspection(json);
@@ -2241,6 +2247,90 @@ export interface NotebookWriteObject {
     hash?:         string;
     path:          string;
     [property: string]: any;
+}
+
+export interface Notification {
+    body:        string;
+    created_at:  string;
+    detail:      string;
+    id:          string;
+    kind:        string;
+    read_at:     string;
+    source_id:   string;
+    source_kind: string;
+    title:       string;
+    [property: string]: any;
+}
+
+export interface NotificationListMessage {
+    cmd:         NotificationListMessageCmd;
+    request_id?: string;
+    [property: string]: any;
+}
+
+export enum NotificationListMessageCmd {
+    NotificationList = "notification_list",
+}
+
+export interface NotificationListResultMessage {
+    error?:         string;
+    event:          NotificationListResultMessageEvent;
+    notifications?: NotificationElement[];
+    request_id:     string;
+    success:        boolean;
+    unread_count:   number;
+    [property: string]: any;
+}
+
+export enum NotificationListResultMessageEvent {
+    NotificationListResult = "notification_list_result",
+}
+
+export interface NotificationElement {
+    body:        string;
+    created_at:  string;
+    detail:      string;
+    id:          string;
+    kind:        string;
+    read_at:     string;
+    source_id:   string;
+    source_kind: string;
+    title:       string;
+    [property: string]: any;
+}
+
+export interface NotificationMarkReadMessage {
+    cmd:              NotificationMarkReadMessageCmd;
+    notification_id?: string;
+    request_id?:      string;
+    [property: string]: any;
+}
+
+export enum NotificationMarkReadMessageCmd {
+    NotificationMarkRead = "notification_mark_read",
+}
+
+export interface NotificationMarkReadResultMessage {
+    error?:       string;
+    event:        NotificationMarkReadResultMessageEvent;
+    request_id:   string;
+    success:      boolean;
+    unread_count: number;
+    [property: string]: any;
+}
+
+export enum NotificationMarkReadResultMessageEvent {
+    NotificationMarkReadResult = "notification_mark_read_result",
+}
+
+export interface NotificationsUpdatedMessage {
+    event:        NotificationsUpdatedMessageEvent;
+    unread_count: number;
+    [property: string]: any;
+}
+
+export enum NotificationsUpdatedMessageEvent {
+    NotificationsUpdated = "notifications_updated",
 }
 
 export interface OpenBrowserMessage {
@@ -5342,6 +5432,54 @@ export class Convert {
         return JSON.stringify(uncast(value, r("NotebookWriteResultMessage")), null, 2);
     }
 
+    public static toNotification(json: string): Notification {
+        return cast(JSON.parse(json), r("Notification"));
+    }
+
+    public static notificationToJson(value: Notification): string {
+        return JSON.stringify(uncast(value, r("Notification")), null, 2);
+    }
+
+    public static toNotificationListMessage(json: string): NotificationListMessage {
+        return cast(JSON.parse(json), r("NotificationListMessage"));
+    }
+
+    public static notificationListMessageToJson(value: NotificationListMessage): string {
+        return JSON.stringify(uncast(value, r("NotificationListMessage")), null, 2);
+    }
+
+    public static toNotificationListResultMessage(json: string): NotificationListResultMessage {
+        return cast(JSON.parse(json), r("NotificationListResultMessage"));
+    }
+
+    public static notificationListResultMessageToJson(value: NotificationListResultMessage): string {
+        return JSON.stringify(uncast(value, r("NotificationListResultMessage")), null, 2);
+    }
+
+    public static toNotificationMarkReadMessage(json: string): NotificationMarkReadMessage {
+        return cast(JSON.parse(json), r("NotificationMarkReadMessage"));
+    }
+
+    public static notificationMarkReadMessageToJson(value: NotificationMarkReadMessage): string {
+        return JSON.stringify(uncast(value, r("NotificationMarkReadMessage")), null, 2);
+    }
+
+    public static toNotificationMarkReadResultMessage(json: string): NotificationMarkReadResultMessage {
+        return cast(JSON.parse(json), r("NotificationMarkReadResultMessage"));
+    }
+
+    public static notificationMarkReadResultMessageToJson(value: NotificationMarkReadResultMessage): string {
+        return JSON.stringify(uncast(value, r("NotificationMarkReadResultMessage")), null, 2);
+    }
+
+    public static toNotificationsUpdatedMessage(json: string): NotificationsUpdatedMessage {
+        return cast(JSON.parse(json), r("NotificationsUpdatedMessage"));
+    }
+
+    public static notificationsUpdatedMessageToJson(value: NotificationsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("NotificationsUpdatedMessage")), null, 2);
+    }
+
     public static toOpenBrowserMessage(json: string): OpenBrowserMessage {
         return cast(JSON.parse(json), r("OpenBrowserMessage"));
     }
@@ -7915,6 +8053,56 @@ const typeMap: any = {
         { json: "hash", js: "hash", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
     ], "any"),
+    "Notification": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "detail", js: "detail", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "read_at", js: "read_at", typ: "" },
+        { json: "source_id", js: "source_id", typ: "" },
+        { json: "source_kind", js: "source_kind", typ: "" },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "NotificationListMessage": o([
+        { json: "cmd", js: "cmd", typ: r("NotificationListMessageCmd") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "NotificationListResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("NotificationListResultMessageEvent") },
+        { json: "notifications", js: "notifications", typ: u(undefined, a(r("NotificationElement"))) },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+        { json: "unread_count", js: "unread_count", typ: 0 },
+    ], "any"),
+    "NotificationElement": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "detail", js: "detail", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "read_at", js: "read_at", typ: "" },
+        { json: "source_id", js: "source_id", typ: "" },
+        { json: "source_kind", js: "source_kind", typ: "" },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "NotificationMarkReadMessage": o([
+        { json: "cmd", js: "cmd", typ: r("NotificationMarkReadMessageCmd") },
+        { json: "notification_id", js: "notification_id", typ: u(undefined, "") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "NotificationMarkReadResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("NotificationMarkReadResultMessageEvent") },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+        { json: "unread_count", js: "unread_count", typ: 0 },
+    ], "any"),
+    "NotificationsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("NotificationsUpdatedMessageEvent") },
+        { json: "unread_count", js: "unread_count", typ: 0 },
+    ], "any"),
     "OpenBrowserMessage": o([
         { json: "cmd", js: "cmd", typ: r("OpenBrowserMessageCmd") },
         { json: "session_id", js: "session_id", typ: u(undefined, "") },
@@ -9462,6 +9650,21 @@ const typeMap: any = {
     ],
     "NotebookWriteResultMessageEvent": [
         "notebook_write_result",
+    ],
+    "NotificationListMessageCmd": [
+        "notification_list",
+    ],
+    "NotificationListResultMessageEvent": [
+        "notification_list_result",
+    ],
+    "NotificationMarkReadMessageCmd": [
+        "notification_mark_read",
+    ],
+    "NotificationMarkReadResultMessageEvent": [
+        "notification_mark_read_result",
+    ],
+    "NotificationsUpdatedMessageEvent": [
+        "notifications_updated",
     ],
     "OpenBrowserMessageCmd": [
         "open_browser",

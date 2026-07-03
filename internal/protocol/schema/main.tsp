@@ -833,6 +833,24 @@ model NotebookTaskRetryMessage {
   task_id: string;
 }
 
+// Notifications surface: a global, daemon-level feed of durable notifications
+// (see docs/plans/2026-07-02-bg-task-notifications.md). The producer is the task
+// runner, which adds one when a background task reaches terminal `dead`. The
+// frontend lists them, marks them read, and re-lists on the notifications_updated
+// broadcast; the unread count drives a sidebar badge.
+model NotificationListMessage {
+  cmd: "notification_list";
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+// Mark notifications read. notification_id marks that one; when absent, ALL
+// unread notifications are marked read ("mark all read").
+model NotificationMarkReadMessage {
+  cmd: "notification_mark_read";
+  request_id?: string; // set by the WS frontend for result correlation
+  notification_id?: string;
+}
+
 // ============================================================================
 // Generic filesystem surface (fs_*). A plain view over the configurable root
 // (the notebook.root setting): list a directory, read a file, write a file with
@@ -2371,6 +2389,52 @@ model NotebookTasksChangedMessage {
   event: "notebook_tasks_changed";
 }
 
+// One durable notification in the global feed. read_at is empty while unread and
+// an RFC3339 timestamp once read. source_kind/source_id point back at the origin
+// (e.g. "task" + the task id) so the detail dialog's Retry can act on it. kind and
+// source_kind are plain strings (not enums) to avoid the quicktype identical-enum
+// merge that drops a generated export.
+model Notification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  detail: string;
+  source_kind: string;
+  source_id: string;
+  created_at: string;
+  read_at: string; // "" while unread
+}
+
+// Result of notification_list: the whole feed, newest-created first, plus the
+// current unread count so the client can set its badge authoritatively.
+model NotificationListResultMessage {
+  event: "notification_list_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  notifications?: Notification[];
+  unread_count: int32;
+}
+
+// Result of notification_mark_read. unread_count is the post-mark count so the
+// caller can update its badge without a re-list.
+model NotificationMarkReadResultMessage {
+  event: "notification_mark_read_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  unread_count: int32;
+}
+
+// Broadcast (no request_id) whenever the feed changes — a new notification is
+// added or one/all are marked read — so every client updates its badge and any
+// open panel re-lists. unread_count is the authoritative post-change count.
+model NotificationsUpdatedMessage {
+  event: "notifications_updated";
+  unread_count: int32;
+}
+
 // ---- Generic filesystem surface results (fs_*) ----
 
 // One child of a listed directory. is_dir distinguishes a subdirectory (which the
@@ -2633,6 +2697,9 @@ alias DaemonEvent =
   | NotebookTaskListResultMessage
   | NotebookTaskRetryResultMessage
   | NotebookTasksChangedMessage
+  | NotificationListResultMessage
+  | NotificationMarkReadResultMessage
+  | NotificationsUpdatedMessage
   | MarkFileViewedResultMessage
   | AddCommentResultMessage
   | UpdateCommentResultMessage

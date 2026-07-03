@@ -137,6 +137,15 @@ type Runner struct {
 	// multiple goroutines; the daemon's wiring just emits a websocket event.
 	onChange func()
 
+	// onTerminalFailure, if set, fires exactly once when a task crosses into the
+	// terminal StateDead (retries exhausted) — the actionable "this background work
+	// gave up" signal the notifications surface is built on. Like onChange it may be
+	// invoked from the dispatch goroutine or an in-flight run's finish(), so it must
+	// be concurrency-safe; unlike onChange it is fired only on the dead transition,
+	// never on a transient failed/retry. It always runs AFTER ioMu is released with a
+	// cloned record, so the callback may touch the store without lock-ordering risk.
+	onTerminalFailure func(*Task)
+
 	mu        sync.Mutex
 	executors map[string]executor
 	started   bool
@@ -233,6 +242,15 @@ func (r *Runner) Disabled() bool { return r.disabled }
 func (r *Runner) OnChange(fn func()) {
 	r.mu.Lock()
 	r.onChange = fn
+	r.mu.Unlock()
+}
+
+// OnTerminalFailure registers a callback fired once when a task reaches StateDead
+// (retries exhausted). It is optional (the notifications surface uses it) and must
+// be cheap and concurrency-safe; pass nil to clear.
+func (r *Runner) OnTerminalFailure(fn func(*Task)) {
+	r.mu.Lock()
+	r.onTerminalFailure = fn
 	r.mu.Unlock()
 }
 
@@ -659,6 +677,7 @@ func (r *Runner) dispatch() (progressed bool, err error) {
 		run  *activeRun
 	}
 	var launch []launchSpec
+	var deadTasks []*Task
 	failedUnknown := false
 
 	for _, t := range eligible {
@@ -671,7 +690,9 @@ func (r *Runner) dispatch() (progressed bool, err error) {
 			r.mu.Unlock()
 			// No executor for this kind (e.g. a stale record from an old build). Fail
 			// it in place so it surfaces rather than being re-selected every pass.
-			r.recordFailureLocked(t, fmt.Errorf("%w: %s", ErrUnknownKind, t.Kind))
+			if r.recordFailureLocked(t, fmt.Errorf("%w: %s", ErrUnknownKind, t.Kind)) {
+				deadTasks = append(deadTasks, t)
+			}
 			failedUnknown = true
 			continue
 		}
@@ -714,6 +735,9 @@ func (r *Runner) dispatch() (progressed bool, err error) {
 
 	if failedUnknown || len(launch) > 0 {
 		r.notifyChange()
+	}
+	for _, dt := range deadTasks {
+		r.notifyTerminalFailure(dt)
 	}
 	for _, ls := range launch {
 		go r.execute(ls.task, ls.exec, ls.ctx, ls.run)
@@ -827,6 +851,7 @@ func (r *Runner) finish(id string, runErr error) {
 	}
 
 	requeue := false
+	wentDead := false
 	if runErr != nil {
 		if cur.Requeued {
 			// A re-enqueue arrived mid-run (e.g. the removal-boundary final task
@@ -851,7 +876,7 @@ func (r *Runner) finish(id string, runErr error) {
 			}
 			requeue = true
 		} else {
-			r.recordFailureLocked(cur, runErr)
+			wentDead = r.recordFailureLocked(cur, runErr)
 		}
 	} else {
 		now := r.now()
@@ -877,20 +902,26 @@ func (r *Runner) finish(id string, runErr error) {
 	r.ioMu.Unlock()
 
 	r.notifyChange()
+	if wentDead {
+		r.notifyTerminalFailure(cur)
+	}
 	if requeue {
 		r.nudge()
 	}
 }
 
 // recordFailureLocked persists a failed outcome with capped-exponential backoff,
-// or dead once the attempt cap is reached. The caller holds ioMu.
-func (r *Runner) recordFailureLocked(t *Task, cause error) {
+// or dead once the attempt cap is reached. The caller holds ioMu. It reports
+// whether this transition crossed into StateDead so the caller can fire the
+// terminal-failure hook AFTER releasing ioMu (never under it).
+func (r *Runner) recordFailureLocked(t *Task, cause error) (wentDead bool) {
 	now := r.now()
 	t.LastError = cause.Error()
 	t.UpdatedAt = now
 	if t.Attempts >= r.maxAttempts {
 		t.State = StateDead
 		t.NextAttemptAt = now
+		wentDead = true
 		r.log("tasks: %s dead after %d attempts: %v", t.ID, t.Attempts, cause)
 	} else {
 		t.State = StateFailed
@@ -900,6 +931,19 @@ func (r *Runner) recordFailureLocked(t *Task, cause error) {
 	}
 	if err := r.store.Save(t); err != nil {
 		r.log("tasks: persist failure state for %s: %v", t.ID, err)
+	}
+	return wentDead
+}
+
+// notifyTerminalFailure invokes the terminal-failure hook (if set) with a cloned
+// record. Mirrors notifyChange: it snapshots the callback under mu and calls it
+// WITHOUT holding mu or ioMu, so the callback may touch the store freely.
+func (r *Runner) notifyTerminalFailure(t *Task) {
+	r.mu.Lock()
+	fn := r.onTerminalFailure
+	r.mu.Unlock()
+	if fn != nil {
+		fn(t.clone())
 	}
 }
 

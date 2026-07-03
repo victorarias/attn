@@ -1932,6 +1932,99 @@ type NotebookWriteResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type Notification struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// Detail corresponds to the JSON schema field "detail".
+	Detail string `json:"detail"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// ReadAt corresponds to the JSON schema field "read_at".
+	ReadAt string `json:"read_at"`
+
+	// SourceID corresponds to the JSON schema field "source_id".
+	SourceID string `json:"source_id"`
+
+	// SourceKind corresponds to the JSON schema field "source_kind".
+	SourceKind string `json:"source_kind"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type NotificationListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type NotificationListResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Notifications corresponds to the JSON schema field "notifications".
+	Notifications []Notification `json:"notifications,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// UnreadCount corresponds to the JSON schema field "unread_count".
+	UnreadCount int `json:"unread_count"`
+}
+
+type NotificationMarkReadMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// NotificationID corresponds to the JSON schema field "notification_id".
+	NotificationID *string `json:"notification_id,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type NotificationMarkReadResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// UnreadCount corresponds to the JSON schema field "unread_count".
+	UnreadCount int `json:"unread_count"`
+}
+
+type NotificationsUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// UnreadCount corresponds to the JSON schema field "unread_count".
+	UnreadCount int `json:"unread_count"`
+}
+
 type OpenBrowserMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
