@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
@@ -318,6 +319,72 @@ func TestReloadSessionAgentAbortsWhenLaunchParamsNotRecorded(t *testing.T) {
 	if d.consumeReloading("chief") {
 		t.Fatal("reloading flag must not be set when the reload aborts")
 	}
+}
+
+// A reload reconstructs SpawnOptions from scratch, so it must re-attach the chief
+// context-window cap or a runtime reload/respawn would silently bring a chief back
+// UNCAPPED even though a fresh chief launch is capped. The cap is keyed on the
+// persisted chief role (not a spawn-time request flag), which is the same source
+// the wrapper's NotebookGuide RPC uses to decide chief-ness — so the reloaded cap
+// and the reloaded guidance stay consistent. Ordinary/delegated sessions stay
+// uncapped through reload even when a cap is configured.
+func TestBuildReloadSpawnOptionsCarriesChiefContextWindowCap(t *testing.T) {
+	// No transcript on disk → deterministic resume resolution (fresh-spawn), which
+	// keeps buildReloadSpawnOptions from depending on a resumable transcript.
+	t.Setenv("HOME", t.TempDir())
+
+	newDaemonWithSession := func(t *testing.T, sessionID string) *Daemon {
+		t.Helper()
+		backend := &fakeReloadBackend{params: ptybackend.SessionLaunchParams{Recorded: true}}
+		d := newReloadTestDaemon(t, backend)
+		addReloadSession(d, sessionID, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+		return d
+	}
+
+	t.Run("reloaded chief keeps the configured cap", func(t *testing.T) {
+		d := newDaemonWithSession(t, "chief")
+		if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "chief"); err != nil {
+			t.Fatalf("assign chief role: %v", err)
+		}
+		d.store.SetSetting(SettingChiefContextWindowCap, "160000")
+
+		opts, err := d.buildReloadSpawnOptions(d.store.Get("chief"))
+		if err != nil {
+			t.Fatalf("buildReloadSpawnOptions: %v", err)
+		}
+		if opts.ChiefContextWindowCap != 160000 {
+			t.Fatalf("ChiefContextWindowCap = %d, want 160000 (reloaded chief must stay capped)", opts.ChiefContextWindowCap)
+		}
+	})
+
+	t.Run("reloaded chief with no configured cap falls back to the default", func(t *testing.T) {
+		d := newDaemonWithSession(t, "chief")
+		if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "chief"); err != nil {
+			t.Fatalf("assign chief role: %v", err)
+		}
+
+		opts, err := d.buildReloadSpawnOptions(d.store.Get("chief"))
+		if err != nil {
+			t.Fatalf("buildReloadSpawnOptions: %v", err)
+		}
+		if opts.ChiefContextWindowCap != agentdriver.DefaultContextWindowCap {
+			t.Fatalf("ChiefContextWindowCap = %d, want default %d", opts.ChiefContextWindowCap, agentdriver.DefaultContextWindowCap)
+		}
+	})
+
+	t.Run("reloaded non-chief session stays uncapped even with a cap configured", func(t *testing.T) {
+		d := newDaemonWithSession(t, "worker")
+		// A configured chief cap must not leak onto a delegated/ordinary reload.
+		d.store.SetSetting(SettingChiefContextWindowCap, "160000")
+
+		opts, err := d.buildReloadSpawnOptions(d.store.Get("worker"))
+		if err != nil {
+			t.Fatalf("buildReloadSpawnOptions: %v", err)
+		}
+		if opts.ChiefContextWindowCap != 0 {
+			t.Fatalf("ChiefContextWindowCap = %d, want 0 (non-chief reload must stay uncapped)", opts.ChiefContextWindowCap)
+		}
+	})
 }
 
 func TestReloadSessionAgentSkipsWhenNoLiveWorker(t *testing.T) {

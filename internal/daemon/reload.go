@@ -237,5 +237,12 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 		LoginShellEnv:           d.cachedLoginShellEnv(),
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
 		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
+		// Carry the chief context-window cap across an in-place reload so a
+		// reloaded chief comes back capped, not just a fresh launch. The wrapper
+		// re-derives the chief's NotebookRoot (and thus emits the cap) via the
+		// NotebookGuide RPC keyed on sessionID, so gate on the persisted chief
+		// role here to stay consistent with that RPC; non-chief sessions resolve
+		// to 0 (uncapped), matching delegated/ordinary reloads.
+		ChiefContextWindowCap: d.chiefContextWindowCap(d.isChiefOfStaffSession(sessionID)),
 	}, nil
 }
