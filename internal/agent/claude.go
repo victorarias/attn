@@ -336,9 +336,15 @@ func buildClaudeHeadlessArgs(request HeadlessTaskRequest) ([]string, error) {
 // the agent gets its own file tools and writes into cmd.Dir (the scratch
 // WorkDir). Only the allow-list and permission mode let it read/write its cwd
 // unprompted.
+//
+// DisableTools is the one exception: it skips the claudeNativeDefaultTools
+// fallback entirely and emits an empty --allowedTools, so the run gets no
+// tools at all (a pure single-shot completion). Without this special case, an
+// empty AllowedTools alone would silently re-enable the native defaults —
+// exactly the trap DisableTools exists to avoid.
 func claudeHeadlessArgs(request HeadlessTaskRequest) []string {
 	tools := request.AllowedTools
-	if len(tools) == 0 {
+	if len(tools) == 0 && !request.DisableTools {
 		tools = claudeNativeDefaultTools
 	}
 	args := []string{"--print"}

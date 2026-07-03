@@ -15,16 +15,19 @@ import (
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/tasks"
+	"github.com/victorarias/attn/internal/transcript"
 )
 
 // Orphaned-ticket reconciliation (docs/plans/2026-07-01-orphaned-ticket-
 // reconciliation.md). Invariant: no non-terminal ticket without a live owning
 // session. When an owning session ends, this seam judges every bound
 // non-terminal ticket: mid-flight deaths keep the Crashed stamp
-// (ticket_crash.go), and — for all deaths — a capped headless `claude -p`
-// classifier reads the dead session's transcript against the ticket's brief and
-// posts a structured verdict as an attn-authored comment. The classifier never
-// moves the column; the chief and the board badge present, Victor decides.
+// (ticket_crash.go), and — for all deaths — the dead session's transcript is
+// deterministically pre-sliced (internal/transcript) and inlined into a single
+// tool-less, capped headless `claude -p` completion that judges it against the
+// ticket's brief and posts a structured verdict as an attn-authored comment.
+// The classifier never moves the column; the chief and the board badge
+// present, Victor decides.
 
 const (
 	// ticketReconcileCommentPrefix marks every reconciliation comment (verdict or
@@ -32,9 +35,16 @@ const (
 	// whose verdict never landed.
 	ticketReconcileCommentPrefix = "🩺 Reconciliation"
 
-	defaultTicketReconcileModel        = "sonnet"
-	defaultTicketReconcileMaxTurns     = 15
-	defaultTicketReconcileMaxBudgetUSD = "0.50"
+	defaultTicketReconcileModel = "haiku"
+	// The transcript is now deterministically pre-sliced and inlined, so the
+	// classifier is a single tool-less completion — it cannot loop on tools and
+	// cannot balloon on transcript size. These caps are a pure runaway backstop
+	// with real headroom, NOT the primary control: an observed haiku run costs
+	// ~$0.07 over ~2 model turns, so 4 turns / $0.20 leaves comfortable margin
+	// while still catching a true runaway well below the old $0.50 a big
+	// transcript used to blow.
+	defaultTicketReconcileMaxTurns     = 4
+	defaultTicketReconcileMaxBudgetUSD = "0.20"
 	defaultTicketReconcileTimeout      = 5 * time.Minute
 
 	// ticketReconcileFailureDetail{Head,Tail} bound the raw classifier output
@@ -489,9 +499,19 @@ func renderTicketReconcileComment(in ticketReconcileInputs, verdict *ticketRecon
 // Claude Code headless, regardless of which CLI the judged agent ran — a
 // transcript is just a file, and Claude Code is the one agent CLI with
 // enforceable turn/dollar caps (--max-turns / --max-budget-usd) and
-// schema-enforced output (--json-schema). Read-only tools; the caps are a
-// runaway backstop, the prompt's early-exit instruction is the primary control.
+// schema-enforced output (--json-schema). The transcript is deterministically
+// pre-sliced (internal/transcript) and inlined into the prompt, so the run
+// needs no tools at all; the caps remain a runaway backstop, not the primary
+// control.
 func (d *Daemon) execTicketReconcileClassifier(ctx context.Context, in ticketReconcileInputs) (agentdriver.HeadlessTaskResult, error) {
+	slice, err := transcript.ExtractConversationSlice(in.TranscriptPath, transcript.DefaultSliceOptions())
+	if err != nil {
+		return agentdriver.HeadlessTaskResult{}, fmt.Errorf("read transcript: %w", err)
+	}
+	if slice.Empty() {
+		return agentdriver.HeadlessTaskResult{}, errors.New("transcript had no readable conversation turns")
+	}
+
 	driver := agentdriver.Get("claude")
 	if driver == nil {
 		return agentdriver.HeadlessTaskResult{}, errors.New("claude driver unavailable")
@@ -514,9 +534,10 @@ func (d *Daemon) execTicketReconcileClassifier(ctx context.Context, in ticketRec
 	request := agentdriver.HeadlessTaskRequest{
 		Executable:   executablePath,
 		Model:        ticketReconcileModel(),
-		Prompt:       buildTicketReconcilePrompt(in),
+		Prompt:       buildTicketReconcilePrompt(in, slice),
 		WorkDir:      tempDir,
-		AllowedTools: []string{"Read", "Grep", "Glob"},
+		AllowedTools: nil,
+		DisableTools: true,
 		MaxTurns:     ticketReconcileMaxTurns(),
 		MaxBudgetUSD: ticketReconcileMaxBudgetUSD(),
 		OutputSchema: json.RawMessage(ticketReconcileVerdictSchema),
@@ -524,29 +545,30 @@ func (d *Daemon) execTicketReconcileClassifier(ctx context.Context, in ticketRec
 	return provider.RunHeadlessTask(ctx, request)
 }
 
-func buildTicketReconcilePrompt(in ticketReconcileInputs) string {
+func buildTicketReconcilePrompt(in ticketReconcileInputs, slice transcript.ConversationSlice) string {
 	return fmt.Sprintf(`A delegated agent session ended without driving its ticket to a terminal state. Judge the dead session's work against the ticket's brief and render a verdict.
 
+You have no tools; do not attempt to read files -- judge only from the conversation slice below.
+
 Ticket: %s — %s
-Ticket brief (the definition of done):
+Ticket brief (the definition of done), as filed:
 %s
 
 Ticket column at session end: %s
 How the session ended: %s
-Transcript file (%s agent): %s
 
-Read the transcript with the Read tool. Read backwards from the tail in chunks (check the file size first, then use offset/limit). Stop as soon as you can support a verdict — but judge against the BRIEF above, never the final messages alone: an agent can sound finished while the brief is half-done.
+Stop as soon as you can support a verdict — but judge against the BRIEF above, never the final messages alone: an agent can sound finished while the brief is half-done.
 
-The brief is the starting definition of done, not the final one: the user can re-scope the work mid-session. If the transcript shows the user explicitly authorizing, narrowing, or extending the scope, judge against that latest explicit agreement — work the user approved in-session is in scope even where the original brief's wording says otherwise.
+The brief is the starting definition of done, not the final one: the user can re-scope the work mid-session. If the conversation slice shows the user explicitly authorizing, narrowing, or extending the scope, judge against that latest explicit agreement — work the user approved in-session is in scope even where the original brief's wording says otherwise. The slice's first human turn is often the more detailed real instruction (the delegation prompt) — read it alongside the filed brief above; they can differ and both matter.
 
-Claude transcripts are JSONL message lines; Codex rollout transcripts are JSONL response items. Either way, extract what the agent actually did and what remains.
+%s
 
 Report via structured output:
 - assessment: done | partial | interrupted | blocked_unreported
 - confidence: high | medium | low
 - whats_left: one line; empty string when assessment is done
 - evidence: which turn(s) support the verdict — position/timestamp plus a short quote`,
-		in.TicketID, in.Title, in.Brief, in.StatusAtClaim, in.CloseContext, in.Agent, in.TranscriptPath)
+		in.TicketID, in.Title, in.Brief, in.StatusAtClaim, in.CloseContext, slice.Render())
 }
 
 // --- the sweep backstop ---

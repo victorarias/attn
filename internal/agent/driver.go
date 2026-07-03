@@ -386,6 +386,15 @@ type HeadlessTaskRequest struct {
 	// (the keeper/notebook tasks), which wires no MCP server.
 	AllowedTools []string
 
+	// DisableTools, when true, runs the native-tools headless path with NO
+	// tools at all — a pure single-shot completion. This overrides
+	// AllowedTools entirely: an empty AllowedTools alone still falls back to
+	// the provider's native default tool set, so DisableTools is the explicit
+	// way to get a truly tool-less run. Empty/false is byte-for-byte identical
+	// to today's behavior. Used by the ticket reconciliation classifier, which
+	// judges a pre-extracted transcript slice with no need to touch disk.
+	DisableTools bool
+
 	// ExtraWritableRoots optionally widens the set of directories the agent may
 	// WRITE to, beyond the scratch WorkDir. The notebook narration tasks use this
 	// so a headless agent can write the curated journal / raw tier under the
