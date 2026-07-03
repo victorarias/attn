@@ -212,13 +212,15 @@ func (d *Daemon) startCompactRunner() {
 	if root != "" {
 		d.migrateLegacyTasksToSQLite(root)
 	}
-	// Tasks now persist in the profile SQLite DB via the injected store, not under
-	// the notebook root. PR1 keeps the runner's enable gate keyed on the notebook
-	// root to preserve today's behavior (no root ⇒ disabled ⇒ inline compaction
-	// fallback); a later slice drops that gate once reconcile — which needs no
-	// notebook — becomes a task kind (docs/plans/2026-07-02-bg-task-notifications.md).
+	// Tasks persist in the profile SQLite DB via the injected store, NOT under the
+	// notebook root — so the runner's enable gate is keyed only on the store now,
+	// not on a resolvable notebook root. That gate-drop is what lets the reconcile
+	// kind (which must run for any dead session, notebook or not) become an
+	// ordinary task (docs/plans/2026-07-02-bg-task-notifications.md). The
+	// notebook-scoped executors (compact_context, summarize_session,
+	// narrate_workspace) keep their own no-op-when-no-notebook guards.
 	opts := tasks.Options{Log: d.logf}
-	if root != "" && d.store != nil {
+	if d.store != nil {
 		opts.Store = d.newSQLTaskStore()
 	}
 	// Build and register on a LOCAL pointer, then publish it once under the write
@@ -250,6 +252,21 @@ func (d *Daemon) startCompactRunner() {
 			notebookNarrateWorkspaceTimeout,
 		); err != nil {
 			d.logf("notebook narration: register narrate_workspace: %v", err)
+		}
+		// Orphaned-ticket reconciliation joins the same durable runner as a task
+		// kind. It runs regardless of notebook config and is the one kind that wants
+		// real concurrency: a workspace teardown can kill several delegated sessions
+		// at once, so cap it at ticketReconcileConcurrency classifier subprocesses
+		// (the per-kind bound the runner now owns, replacing the old semaphore).
+		if err := runner.RegisterWith(
+			reconcileKind,
+			d.reconcileTaskExecutor,
+			tasks.ExecutorConfig{
+				Timeout:       ticketReconcileTimeout(),
+				MaxConcurrent: ticketReconcileConcurrency,
+			},
+		); err != nil {
+			d.logf("ticket reconcile: register reconcile: %v", err)
 		}
 	}
 	// Surface lifecycle transitions to any open task panel. OnChange may fire

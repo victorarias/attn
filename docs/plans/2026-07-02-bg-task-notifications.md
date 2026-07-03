@@ -215,13 +215,62 @@ Isolate this in its own PR so the invariant change is reviewed alone.
       `runner.Stop()`/`cancelAll` is NOT reachable in prod (nothing calls
       `Daemon.Stop()` outside the test harness — the daemon is killed and relies on
       orphan recovery), so that path stays covered by `TestStopDrainsConcurrentInFlightRuns`.
-- [ ] **PR3 — Reconcile → `reconcile` task kind.** *Land after PR #454 merges;
+- [x] **PR3 — Reconcile → `reconcile` task kind.** *Land after PR #454 merges;
       rebase over main and build on its classifier body — do not port the old
       one.* Register the executor (body = classifier incl. drop-rule/🩺 comment);
       enqueue on session-end and from the sweep (sweep enqueues, no longer runs
-      inline); per-kind cap 2; delete the bespoke goroutine + semaphore + sweep
-      ticker and `maybeRepairAbandonedReconcileClaim` (runner orphan-recovery
-      replaces it); likely retire the `reconciled_at` column. Backend + tests.
+      inline); per-kind cap 2; delete the semaphore + the bespoke `go
+      d.runTicketReconciliation` goroutines + `maybeRepairAbandonedReconcileClaim`
+      (runner orphan-recovery replaces it). Backend + tests.
+
+      **Refinement vs the original plan (settled during implementation):**
+      - **Keep `reconciled_at`, do NOT retire it.** It is not merely an internal
+        claim flag — non-terminal + `reconciled_at` set drives the *user-visible
+        orphan badge* on the board (`app/src/utils/ticketOrphan.ts`,
+        `ticket_board.go` projection, `main.tsp`). Retiring it is a
+        protocol/frontend change, out of scope for a backend-only PR3.
+      - **`ClaimTicketReconciliation` stays the trigger gate; only the inline
+        `go` becomes an `Enqueue`.** Session-end still claims (set-if-unset), which
+        (a) lights the badge immediately, exactly as today, and (b) dedupes the
+        handlePTYExit+dropSessionRecord double-fire so the FIRST fire — the one
+        with the session row still present, hence the freshest inputs — wins and
+        the loser exits. On a winning claim it enqueues `reconcile:<ticketID>`
+        (inputs serialized into `Task.Meta`) instead of spawning a goroutine. The
+        executor runs the classifier + drop-rule + 🩺 comment; it does NOT stamp
+        `reconciled_at` (the claim already did).
+      - **The durable task record is the sweep's dedup ledger.** The sweep enqueues
+        only when `runner.Get("reconcile:<id>") == nil`. That both replaces the old
+        `reconciled_at`-gated skip AND recovers the one gap the claim-then-enqueue
+        split opens: a daemon death after the claim but before the enqueue persists
+        leaves `reconciled_at` set with no task — the sweep sees no task and
+        enqueues a real reconciliation (what the old maybeRepair pass hand-rolled a
+        generic note for). The sweep still claims (badge) before it enqueues.
+      - **maybeRepair deleted:** its "verdict never ran" role is now covered by the
+        durable task (queued/running survives restart; orphan-recovery re-runs a
+        run that died mid-flight) and by the sweep's task-existence enqueue.
+      - **Accepted micro-windows (both negligible, both strictly better than
+        today):** (1) a daemon kill in the microseconds between the executor's
+        `AddTicketComment` committing and the runner marking the task done → next
+        boot's orphan-recovery re-runs and posts one duplicate 🩺 comment (today's
+        equivalent crash produces *no* verdict at all). (2) a reassign + new-session
+        death whose seam is *also* lost to a crash won't be swept if a done
+        `reconcile:<id>` task from the prior cycle still exists — vanishingly rare,
+        and the common reassign+redeath is handled by the session-end seam
+        (coalesces onto the record with fresh inputs).
+
+      Backend + tests only — no protocol/frontend change. Deletes the bespoke
+      semaphore, the two `go d.runTicketReconciliation` goroutines, and
+      `maybeRepairAbandonedReconcileClaim`; drops the runner's notebook-root enable
+      gate (enabled whenever the store exists). `go test ./internal/{daemon,tasks,
+      store}` green; tasks race-clean. **Live-app smoke** (throwaway profile, real
+      daemon from the branch, fast sweep/grace env): inserted an orphaned
+      dead-owner ticket → the sweep discovered it after grace, claimed
+      (`reconciled_at` stamped = orphan badge), enqueued `reconcile:<id>` onto the
+      SQLite-backed runner, and the registered executor deserialized its Meta
+      inputs and posted the attn-authored 🩺 note (no-transcript path, no real
+      `claude` spawn); the task reached `done` (attempts=1, one-shot). Repeated
+      sweep passes left exactly one comment / one task / an unchanged badge — the
+      durable task record is the "already handled" ledger.
 - [ ] **PR4 — Notifications + Tasks-in-Settings (backend + frontend).** One PR:
       - *Backend:* `notifications` table (migration {62}) + store methods;
         protocol (`notification_list` / `notification_mark_read` /
@@ -274,9 +323,12 @@ last so reconcile failures (PR3) flow through the notifications it introduces.
   recovery. The **sweep stays** but for its *other* job: discovering orphaned
   tickets (a session that ended without firing the seam) and **enqueuing** a
   `reconcile:<ticketID>` task instead of running the classifier inline. Task
-  coalescing (one task per ticket) replaces the claim's dedup role; the 🩺 comment
-  is the durable "already handled" ledger — so PR3 can likely retire the
-  `reconciled_at` column too (settle during PR3).
+  the durable *task record* (not a comment scan) is the sweep's "already handled"
+  ledger — it enqueues only when no `reconcile:<ticketID>` task exists yet.
+  **Settled during PR3:** the `reconciled_at` column is **kept** (not retired) —
+  it drives the user-visible orphan badge — and `ClaimTicketReconciliation` stays
+  the trigger-time gate (badge + session-end double-fire dedup), so only the
+  inline goroutine became a durable `Enqueue`. See the PR3 refinement note above.
 - **Notification retention — unbounded for v1.** No cap/prune. Revisit only if
   growth becomes a real problem (listed under Follow-ups).
 

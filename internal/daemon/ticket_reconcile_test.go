@@ -12,7 +12,44 @@ import (
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/tasks"
 )
+
+// installReconcileRunner builds and starts a durable runner with only the
+// reconcile executor registered, then publishes it on the daemon — so the
+// session-end seam and the sweep have a live runner to Enqueue onto. A tiny poll
+// interval avoids real-time waits. Callers arm the classifier + done hook (see
+// armReconcileObserver) before triggering.
+func installReconcileRunner(t *testing.T, d *Daemon) {
+	t.Helper()
+	runner := tasks.New(tasks.Options{
+		Root:         filepath.Join(t.TempDir(), "tasks"),
+		Log:          func(string, ...interface{}) {},
+		PollInterval: 2 * time.Millisecond,
+	})
+	if err := runner.RegisterWith(reconcileKind, d.reconcileTaskExecutor, tasks.ExecutorConfig{
+		Timeout:       ticketReconcileTimeout(),
+		MaxConcurrent: ticketReconcileConcurrency,
+	}); err != nil {
+		t.Fatalf("register reconcile: %v", err)
+	}
+	if err := runner.Start(); err != nil {
+		t.Fatalf("start runner: %v", err)
+	}
+	t.Cleanup(runner.Stop)
+	d.compactRunner = runner
+}
+
+// reconcileTask wraps captured inputs into the durable record the executor reads,
+// so a test can drive reconcileTaskExecutor directly without a running runner.
+func reconcileTask(in ticketReconcileInputs) *tasks.Task {
+	return &tasks.Task{
+		ID:      tasks.TaskID(reconcileKind, in.TicketID),
+		Kind:    reconcileKind,
+		Subject: in.TicketID,
+		Meta:    reconcileInputsToMeta(in),
+	}
+}
 
 // reconcileComments returns the attn-authored reconciliation comments (verdict
 // or failure notes) on a ticket, oldest first.
@@ -73,6 +110,7 @@ func TestReconcileSeamNeutralEndPostsFailureNote(t *testing.T) {
 	sessionID := delegateBoundSession(t, d)
 	ticketID := boundTicketID(t, d, sessionID)
 	done, calls := armReconcileObserver(d, agentdriver.HeadlessTaskResult{}, nil)
+	installReconcileRunner(t, d)
 
 	d.reconcileTicketsOnSessionEnd(sessionID, protocol.StateIdle)
 	waitReconcileDone(t, done)
@@ -106,6 +144,7 @@ func TestReconcileSeamMidFlightStampsCrashedAndClaims(t *testing.T) {
 	sessionID := delegateBoundSession(t, d)
 	ticketID := boundTicketID(t, d, sessionID)
 	done, _ := armReconcileObserver(d, agentdriver.HeadlessTaskResult{}, nil)
+	installReconcileRunner(t, d)
 
 	d.reconcileTicketsOnSessionEnd(sessionID, protocol.StateWorking)
 	waitReconcileDone(t, done)
@@ -132,9 +171,12 @@ func TestReconcileSeamDoubleFireSingleClaim(t *testing.T) {
 	sessionID := delegateBoundSession(t, d)
 	ticketID := boundTicketID(t, d, sessionID)
 	done, _ := armReconcileObserver(d, agentdriver.HeadlessTaskResult{}, nil)
+	installReconcileRunner(t, d)
 
 	d.reconcileTicketsOnSessionEnd(sessionID, protocol.StateIdle)
 	waitReconcileDone(t, done)
+	// The second fire's claim fails (set-if-unset), so it never enqueues a second
+	// task — exactly one verdict lands.
 	d.reconcileTicketsOnSessionEnd(sessionID, protocol.StateIdle)
 
 	if comments := reconcileComments(t, d, ticketID); len(comments) != 1 {
@@ -153,9 +195,6 @@ func TestRunTicketReconciliationPostsVerdict(t *testing.T) {
 	if err := os.WriteFile(transcript, []byte("{}\n"), 0o600); err != nil {
 		t.Fatalf("write transcript: %v", err)
 	}
-	if claimed, err := d.store.ClaimTicketReconciliation(ticketID, time.Now()); err != nil || !claimed {
-		t.Fatalf("claim: %v, %v", claimed, err)
-	}
 	var seen ticketReconcileInputs
 	d.ticketReconcileExec = func(ctx context.Context, in ticketReconcileInputs) (agentdriver.HeadlessTaskResult, error) {
 		seen = in
@@ -166,7 +205,7 @@ func TestRunTicketReconciliationPostsVerdict(t *testing.T) {
 		}, nil
 	}
 
-	d.runTicketReconciliation(ticketReconcileInputs{
+	if err := d.reconcileTaskExecutor(context.Background(), reconcileTask(ticketReconcileInputs{
 		TicketID:       ticketID,
 		Title:          "Migrate the store to X",
 		Brief:          "Move the store onto the new backend.",
@@ -175,7 +214,9 @@ func TestRunTicketReconciliationPostsVerdict(t *testing.T) {
 		Agent:          "codex",
 		TranscriptPath: transcript,
 		CloseContext:   "the session was closed (user close or teardown) while the ticket was working",
-	})
+	})); err != nil {
+		t.Fatalf("reconcileTaskExecutor: %v", err)
+	}
 
 	comments := reconcileComments(t, d, ticketID)
 	if len(comments) != 1 {
@@ -220,13 +261,15 @@ func TestRunTicketReconciliationDropsVerdictWhenStatusMoved(t *testing.T) {
 		}, nil
 	}
 
-	d.runTicketReconciliation(ticketReconcileInputs{
+	if err := d.reconcileTaskExecutor(context.Background(), reconcileTask(ticketReconcileInputs{
 		TicketID:       ticketID,
 		StatusAtClaim:  store.TicketStatusWorking,
 		SessionID:      sessionID,
 		Agent:          "codex",
 		TranscriptPath: transcript,
-	})
+	})); err != nil {
+		t.Fatalf("reconcileTaskExecutor: %v", err)
+	}
 
 	if comments := reconcileComments(t, d, ticketID); len(comments) != 0 {
 		t.Fatalf("reconcile comments = %d, want 0 (verdict dropped after status move)", len(comments))
@@ -254,13 +297,15 @@ func TestRunTicketReconciliationExecErrorPostsFailureNote(t *testing.T) {
 		}, errors.New("headless agent MCP tool server failed: exit status 1")
 	}
 
-	d.runTicketReconciliation(ticketReconcileInputs{
+	if err := d.reconcileTaskExecutor(context.Background(), reconcileTask(ticketReconcileInputs{
 		TicketID:       ticketID,
 		StatusAtClaim:  store.TicketStatusWorking,
 		SessionID:      sessionID,
 		Agent:          "claude",
 		TranscriptPath: transcript,
-	})
+	})); err != nil {
+		t.Fatalf("reconcileTaskExecutor: %v", err)
+	}
 
 	comments := reconcileComments(t, d, ticketID)
 	if len(comments) != 1 {
@@ -285,11 +330,12 @@ func TestRunTicketReconciliationExecErrorPostsFailureNote(t *testing.T) {
 	}
 }
 
-// The sweep claims a dead-owner ticket only after the grace period, then runs
-// the same reconciliation path.
+// The sweep claims a dead-owner ticket only after the grace period, then enqueues
+// the durable reconcile task, which runs the same reconciliation path.
 func TestSweepClaimsDeadOwnerAfterGrace(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	done, _ := armReconcileObserver(d, agentdriver.HeadlessTaskResult{}, nil)
+	installReconcileRunner(t, d)
 	// No session row for the assignee: the owner is dead (rows are deleted on close).
 	if _, err := d.store.CreateTicket(store.Ticket{
 		ID: "orphaned", Title: "t", Assignee: "sess-dead", Status: store.TicketStatusInReview,
@@ -321,6 +367,7 @@ func TestSweepClaimsDeadOwnerAfterGrace(t *testing.T) {
 func TestSweepSkipsLiveHumanAndUnassigned(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	armReconcileObserver(d, agentdriver.HeadlessTaskResult{}, nil)
+	installReconcileRunner(t, d)
 
 	// A session row without a backend runtime reads as live (CLI/remote sessions
 	// have no daemon PTY; their death-hook is the unregister path).
@@ -345,54 +392,67 @@ func TestSweepSkipsLiveHumanAndUnassigned(t *testing.T) {
 	}
 }
 
-// A claim whose verdict never landed (daemon died mid-run) is repaired with the
-// rule-7 failure note — but only when nothing else happened since the claim.
-func TestSweepRepairsAbandonedClaim(t *testing.T) {
+// An abandoned session-end claim — reconciled_at stamped but the daemon died
+// before the durable task was enqueued — is recovered by the sweep. With no
+// reconcile task on record, the sweep re-enqueues after grace and the executor
+// posts a REAL verdict/failure note. This replaces the old bespoke
+// maybeRepairAbandonedReconcileClaim pass (and its generic "interrupted before a
+// verdict landed" note) with a genuine reconciliation run.
+func TestSweepRecoversAbandonedClaim(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	armReconcileObserver(d, agentdriver.HeadlessTaskResult{}, nil)
+	done, _ := armReconcileObserver(d, agentdriver.HeadlessTaskResult{}, nil)
+	installReconcileRunner(t, d)
 	past := time.Now().Add(-time.Hour)
 	if _, err := d.store.CreateTicket(store.Ticket{
 		ID: "abandoned", Title: "t", Assignee: "sess-dead", Status: store.TicketStatusWorking,
 	}, "chief", past); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
+	// The crash gap: the seam claimed (badge stamped) but the enqueue never landed,
+	// so no reconcile task exists.
 	if claimed, err := d.store.ClaimTicketReconciliation("abandoned", past); err != nil || !claimed {
 		t.Fatalf("claim: %v, %v", claimed, err)
 	}
 
-	d.ticketReconcileSweepPass(time.Now())
-
-	comments := reconcileComments(t, d, "abandoned")
-	if len(comments) != 1 || !strings.Contains(comments[0], "interrupted before a verdict landed") {
-		t.Fatalf("repair comments = %v, want one interrupted-note", comments)
+	t0 := time.Now()
+	d.ticketReconcileSweepPass(t0) // first sight: grace not elapsed, no enqueue yet
+	if comments := reconcileComments(t, d, "abandoned"); len(comments) != 0 {
+		t.Fatalf("reconciled before grace elapsed: %v", comments)
 	}
-	// Idempotent: the marker comment suppresses a second repair.
-	d.ticketReconcileSweepPass(time.Now())
-	if comments := reconcileComments(t, d, "abandoned"); len(comments) != 1 {
-		t.Fatalf("repair comments after second pass = %d, want 1", len(comments))
+	d.ticketReconcileSweepPass(t0.Add(ticketReconcileGrace() + time.Minute))
+	waitReconcileDone(t, done)
+
+	// A real reconciliation ran (no transcript resolvable ⇒ the rule-7 failure
+	// note), not the old generic interrupted-claim string.
+	comments := reconcileComments(t, d, "abandoned")
+	if len(comments) != 1 || !strings.Contains(comments[0], "could not locate") {
+		t.Fatalf("recovered comments = %v, want one could-not-locate failure note", comments)
 	}
 }
 
-// Post-claim activity (someone acted: a deliberate verdict drop, a human move)
-// suppresses the repair note — a late failure note would be noise.
-func TestSweepRepairSkipsWhenActedUpon(t *testing.T) {
+// Once a reconcile task exists for a ticket (the seam or a prior sweep enqueued
+// it), the sweep leaves it to the runner and never enqueues a duplicate — the
+// durable task record is the "already triggered" ledger.
+func TestSweepSkipsTicketWithExistingTask(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	past := time.Now().Add(-time.Hour)
+	installReconcileRunner(t, d)
+	now := time.Now()
 	if _, err := d.store.CreateTicket(store.Ticket{
-		ID: "acted", Title: "t", Assignee: "sess-dead", Status: store.TicketStatusWorking,
-	}, "chief", past); err != nil {
+		ID: "already", Title: "t", Assignee: "sess-dead", Status: store.TicketStatusWorking,
+	}, "chief", now.Add(-time.Hour)); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
-	if claimed, err := d.store.ClaimTicketReconciliation("acted", past); err != nil || !claimed {
-		t.Fatalf("claim: %v, %v", claimed, err)
-	}
-	if _, err := d.store.AddTicketComment("acted", "chief", "taking a look", time.Now().Add(-30*time.Minute)); err != nil {
-		t.Fatalf("AddTicketComment: %v", err)
+	// A terminal reconcile task already on record stands in for "already handled".
+	runner := d.compactRunnerRef()
+	if _, err := runner.Enqueue(reconcileKind, "already", tasks.EnqueueOptions{
+		Meta: reconcileInputsToMeta(ticketReconcileInputs{TicketID: "already"}),
+	}); err != nil {
+		t.Fatalf("seed reconcile task: %v", err)
 	}
 
-	d.ticketReconcileSweepPass(time.Now())
-
-	if comments := reconcileComments(t, d, "acted"); len(comments) != 0 {
-		t.Fatalf("repair comments = %v, want none (post-claim activity)", comments)
+	// Even well past grace, the sweep must not re-claim: a task exists.
+	d.ticketReconcileSweepPass(now.Add(ticketReconcileGrace() + time.Hour))
+	if got := reconciledAt(t, d, "already"); got != nil {
+		t.Fatalf("sweep re-claimed a ticket with an existing task (%v)", got)
 	}
 }
