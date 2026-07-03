@@ -130,14 +130,15 @@ type Daemon struct {
 	// a capped headless classifier judges the dead transcript against the brief.
 	// ticketReconcileExec is the classifier spawn — New() wires the real claude
 	// headless run; it stays nil on test daemons so unit tests never shell out
-	// (the runner logs and skips). ticketReconcileDone is a test observation hook
-	// fired after a claim's verdict (or failure note) lands. ticketOrphanFirstSeen
-	// is the sweep's grace tracker (ticket id -> first pass that saw the owner
-	// dead); in-memory by design — a restart merely restarts the grace clock.
-	// All lazy/nil-safe under ticketReconcileMu.
+	// (the executor logs and skips). ticketReconcileDone is a test observation hook
+	// fired when a reconcile task run reaches any terminal outcome. Concurrency is
+	// no longer a bespoke semaphore here — the durable runner bounds it per-kind
+	// (reconcileKind at ticketReconcileConcurrency). ticketOrphanFirstSeen is the
+	// sweep's grace tracker (ticket id -> first pass that saw the owner dead);
+	// in-memory by design — a restart merely restarts the grace clock. All
+	// lazy/nil-safe under ticketReconcileMu.
 	ticketReconcileMu     sync.Mutex
 	ticketReconcileExec   func(ctx context.Context, in ticketReconcileInputs) (agentdriver.HeadlessTaskResult, error)
-	ticketReconcileSem    chan struct{}
 	ticketReconcileDone   func(ticketID string)
 	ticketOrphanFirstSeen map[string]time.Time
 	// reloadingSessions marks sessions whose agent is being re-spawned in place
