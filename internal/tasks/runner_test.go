@@ -286,6 +286,73 @@ func TestFailedTaskBackoffScheduleAndDeadCap(t *testing.T) {
 	}
 }
 
+// TestOnTerminalFailureFiresOnceOnDead proves the notification-producer hook:
+// the callback fires exactly once, only when a task crosses into the terminal
+// dead state, carrying the failed record (kind/subject/last_error). It must not
+// fire for a task that eventually succeeds, nor on intermediate failed states.
+func TestOnTerminalFailureFiresOnceOnDead(t *testing.T) {
+	root := t.TempDir()
+	r := New(Options{
+		Root:         root,
+		PollInterval: 2 * time.Millisecond,
+		MaxAttempts:  1, // first failure hits the cap → straight to dead
+		BackoffBase:  time.Millisecond,
+		BackoffCap:   time.Millisecond,
+		Log:          func(string, ...interface{}) {},
+	})
+	failErr := errors.New("boom: kaput")
+	_ = r.Register("always_fail", func(context.Context, *Task) error { return failErr })
+	_ = r.Register("always_ok", func(context.Context, *Task) error { return nil })
+
+	var mu sync.Mutex
+	var dead []*Task
+	r.OnTerminalFailure(func(task *Task) {
+		mu.Lock()
+		dead = append(dead, task)
+		mu.Unlock()
+	})
+
+	if err := r.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer r.Stop()
+
+	if _, err := r.Enqueue("always_fail", "s1", EnqueueOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Enqueue("always_ok", "s2", EnqueueOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, "failing task to reach dead", func() bool {
+		task, _ := r.Get(TaskID("always_fail", "s1"))
+		return task != nil && task.State == StateDead
+	})
+	waitFor(t, "ok task to reach done", func() bool {
+		task, _ := r.Get(TaskID("always_ok", "s2"))
+		return task != nil && task.State == StateDone
+	})
+
+	// Give any spurious extra callback a chance to land before asserting count.
+	time.Sleep(20 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(dead) != 1 {
+		t.Fatalf("OnTerminalFailure fired %d times, want exactly 1", len(dead))
+	}
+	got := dead[0]
+	if got.State != StateDead {
+		t.Fatalf("callback task state = %s, want dead", got.State)
+	}
+	if got.Kind != "always_fail" || got.Subject != "s1" {
+		t.Fatalf("callback task identity = %s:%s, want always_fail:s1", got.Kind, got.Subject)
+	}
+	if got.LastError != failErr.Error() {
+		t.Fatalf("callback last_error = %q, want %q", got.LastError, failErr.Error())
+	}
+}
+
 func TestBackoffIsCapped(t *testing.T) {
 	r := New(Options{Root: t.TempDir(), BackoffBase: time.Minute, BackoffCap: time.Hour})
 	// 1m,2m,4m,8m,16m,32m,64m->cap. attempt 7 would be 64m > 60m cap.
