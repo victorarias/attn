@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
-import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
+import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { useNotebookFileIndex } from '../hooks/useNotebookFileIndex';
 import { useTileAutoFold } from '../hooks/useTileAutoFold';
@@ -61,15 +61,6 @@ export interface NotebookSurfaceProps {
   // tree (handled by FileTree) and reloads the open file (covering agent and external
   // writes).
   changeSignal?: number;
-  // List the durable runner's tasks (newest-updated first). Resolves empty when
-  // the runner is disabled or has no tasks.
-  listTasks: () => Promise<NotebookTask[]>;
-  // Force a failed|dead task back to queued. Resolves with the requeued task, or
-  // null when the task was non-terminal (a no-op retry).
-  retryTask: (taskId: string) => Promise<NotebookTask | null>;
-  // Increments whenever a notebook_tasks_changed broadcast arrives, so an open
-  // Tasks panel re-fetches the list (any runner lifecycle transition).
-  taskChangeSignal?: number;
   // Walk the whole vault (flat list of notes, with titles) for the in-tile fuzzy
   // finder. Tile-only: when provided, a tile gains its Cmd+P finder; the modal
   // omits it (it navigates via the tree), so it's optional.
@@ -109,9 +100,6 @@ export function NotebookSurface({
   backlinksNotebook,
   sendToChief,
   changeSignal = 0,
-  listTasks,
-  retryTask,
-  taskChangeSignal = 0,
   listFiles,
   chiefActive,
 }: NotebookSurfaceProps) {
@@ -126,19 +114,6 @@ export function NotebookSurface({
   // other note links here." — until the slow walk resolves. While true, the panel
   // renders a neutral loading line instead of stale or misleading metadata.
   const [backlinksLoading, setBacklinksLoading] = useState(false);
-  // --- Tasks panel (durable runner) ---
-  const [tasks, setTasks] = useState<NotebookTask[]>([]);
-  const [tasksError, setTasksError] = useState<string | null>(null);
-  const [tasksLoading, setTasksLoading] = useState(false);
-  // The Tasks section is collapsible; collapsed by default so it doesn't crowd the
-  // file tree. Opening it (or a taskChangeSignal bump) triggers a refetch.
-  const [tasksOpen, setTasksOpen] = useState(false);
-  // Task ids whose Retry click is in flight, so their button can disable without
-  // optimistically mutating the row (the broadcast-driven refetch reflects truth).
-  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
-  // Monotonic load token for the tasks fetch: a slow response from a superseded
-  // fetch (panel closed/refetched) is dropped instead of stamping stale rows.
-  const tasksSeqRef = useRef(0);
   // selectedPath drives loads; this ref lets the change-signal effect reload the
   // current file without depending on (and re-running for) selectedPath itself.
   const selectedPathRef = useRef<string | null>(null);
@@ -265,48 +240,6 @@ export function NotebookSurface({
   // handled by the finder input's onKeyDown directly, no stack involved.)
   useEscapeStack(handleEscape, variant === 'modal' && active);
   useEscapeStack(() => setFinderOpen(false), variant === 'modal' && active && finderOpen);
-
-  // Fetch the durable runner's task list. A transient WS failure surfaces an error
-  // rather than silently wiping the rows. The stale-guard drops a response that
-  // resolved after a newer fetch (or a panel close).
-  const refreshTasks = useCallback(async () => {
-    const seq = ++tasksSeqRef.current;
-    setTasksLoading(true);
-    try {
-      const next = await listTasks();
-      if (tasksSeqRef.current !== seq) return;
-      setTasks(next);
-      setTasksError(null);
-    } catch (err) {
-      if (tasksSeqRef.current !== seq) return;
-      setTasksError(err instanceof Error ? err.message : 'Could not load tasks');
-    } finally {
-      if (tasksSeqRef.current === seq) setTasksLoading(false);
-    }
-  }, [listTasks]);
-
-  // Force a failed|dead task back to queued. The button is disabled while in
-  // flight; on resolve/reject we only clear the in-flight mark — the
-  // notebook_tasks_changed broadcast drives the refetch that reflects the truth,
-  // so we never optimistically mutate the row here.
-  const handleRetry = useCallback(async (taskId: string) => {
-    setRetryingIds((prev) => {
-      const next = new Set(prev);
-      next.add(taskId);
-      return next;
-    });
-    try {
-      await retryTask(taskId);
-    } catch {
-      // A failed retry leaves the row as-is; the next broadcast/refetch reconciles.
-    } finally {
-      setRetryingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(taskId);
-        return next;
-      });
-    }
-  }, [retryTask]);
 
   // Load `path` into the document pane. `prefetched` lets a caller that already read
   // the file (the on-open existence probe) seed the editor without a second read.
@@ -703,22 +636,6 @@ export function NotebookSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changeSignal]);
 
-  // Fetch tasks while the Tasks section is open (and the surface is active): once on
-  // open, and again whenever a notebook_tasks_changed broadcast bumps taskChangeSignal
-  // so runner transitions show without reopening the section.
-  useEffect(() => {
-    if (!active || !tasksOpen) return;
-    void refreshTasks();
-  }, [active, tasksOpen, refreshTasks, taskChangeSignal]);
-
-  // Drop the staleness token when the surface goes idle so an in-flight tasks fetch
-  // can't stamp rows onto a reactivated panel.
-  useEffect(() => {
-    if (active) return;
-    tasksSeqRef.current += 1;
-    setTasksLoading(false);
-  }, [active]);
-
   // Navigating to another file clears the previous file's edit status. Keyed on
   // selectedPath, so it fires on navigation but not on a same-file live reload
   // (which keeps selectedPath unchanged).
@@ -844,81 +761,6 @@ export function NotebookSurface({
           onSelectFile={(path) => void loadFile(path)}
           changeSignal={changeSignal}
         />
-
-        <section className="notebook-browser-tasks" aria-label="Tasks">
-          <button
-            type="button"
-            className="notebook-browser-tasks-toggle"
-            aria-expanded={tasksOpen}
-            onClick={() => setTasksOpen((open) => !open)}
-          >
-            <span className={`notebook-browser-tasks-caret${tasksOpen ? ' is-open' : ''}`} aria-hidden="true" />
-            <span className="notebook-browser-tasks-title">Tasks</span>
-            {tasksOpen && tasks.length > 0 && (
-              <span className="notebook-browser-tasks-count">{tasks.length}</span>
-            )}
-          </button>
-          {tasksOpen && (
-            <div className="notebook-browser-tasks-body">
-              {tasksError && (
-                <div className="notebook-browser-tasks-state">
-                  <span>{tasksError}</span>
-                  <button type="button" onClick={() => void refreshTasks()}>Try again</button>
-                </div>
-              )}
-              {!tasksError && tasksLoading && tasks.length === 0 && (
-                <div className="notebook-browser-tasks-state">Loading tasks…</div>
-              )}
-              {!tasksError && !tasksLoading && tasks.length === 0 && (
-                <p className="notebook-browser-tasks-empty">No tasks.</p>
-              )}
-              {tasks.length > 0 && (
-                <ul className="notebook-browser-tasks-list">
-                  {tasks.map((task) => {
-                    const nextAttempt = TASK_TERMINAL_STATES.has(task.state)
-                      ? ''
-                      : formatNextAttempt(task.next_attempt_at);
-                    const canRetry = task.state === 'failed' || task.state === 'dead';
-                    return (
-                      <li className="notebook-browser-task" key={task.id}>
-                        <div className="notebook-browser-task-head">
-                          <span
-                            className={`notebook-browser-task-badge is-${task.state}`}
-                            title={task.state}
-                          >
-                            {task.state}
-                          </span>
-                          <span className="notebook-browser-task-subject" title={`${task.kind}:${task.subject}`}>
-                            {task.kind}:{task.subject}
-                          </span>
-                          {canRetry && (
-                            <button
-                              type="button"
-                              className="notebook-browser-task-retry"
-                              onClick={() => void handleRetry(task.id)}
-                              disabled={retryingIds.has(task.id)}
-                            >
-                              {retryingIds.has(task.id) ? 'Retrying…' : 'Retry'}
-                            </button>
-                          )}
-                        </div>
-                        <div className="notebook-browser-task-meta">
-                          <span>attempts: {task.attempts}</span>
-                          {nextAttempt && <span>next: {nextAttempt}</span>}
-                        </div>
-                        {task.last_error && (
-                          <p className="notebook-browser-task-error" title={task.last_error}>
-                            {task.last_error}
-                          </p>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          )}
-        </section>
       </aside>
 
       <main className="notebook-browser-document">
@@ -1267,26 +1109,6 @@ export function parseNotebookHref(href: string): NotebookHref {
 function basename(path: string): string {
   const name = path.slice(path.lastIndexOf('/') + 1);
   return name.endsWith('.md') ? name.slice(0, -3) : name;
-}
-
-// A terminal task isn't waiting on a next attempt, so its scheduled time is noise.
-const TASK_TERMINAL_STATES = new Set(['done', 'dead']);
-
-// formatNextAttempt renders an RFC3339 next_attempt_at as a short relative phrase
-// ("in 2m", "5s ago", "now"). Returns '' for an unparseable/zero timestamp so the
-// row can omit it.
-function formatNextAttempt(iso: string): string {
-  if (!iso) return '';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '';
-  // The runner stamps a zero time (year <= 1) when there is no scheduled attempt.
-  if (new Date(t).getUTCFullYear() <= 1) return '';
-  const now = Date.now();
-  const deltaSec = Math.round((t - now) / 1000);
-  const abs = Math.abs(deltaSec);
-  if (abs < 5) return 'now';
-  const unit = abs < 60 ? `${abs}s` : abs < 3600 ? `${Math.round(abs / 60)}m` : `${Math.round(abs / 3600)}h`;
-  return deltaSec >= 0 ? `in ${unit}` : `${unit} ago`;
 }
 
 function NotebookIcon() {

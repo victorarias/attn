@@ -1,4 +1,4 @@
-import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult, NotebookTask } from '../hooks/useDaemonSocket';
+import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
 import { NotebookSurface } from './NotebookSurface';
 
 // parseNotebookHref / NotebookHref moved to NotebookSurface with the rest of the
@@ -33,15 +33,6 @@ interface NotebookBrowserProps {
   // List the whole notebook vault (recursive, .md only) for the Cmd+P finder. The
   // fullscreen surface gets the same finder as a tile; omit to disable it.
   listFiles: () => Promise<NotebookEntry[]>;
-  // List the durable runner's tasks (newest-updated first). Resolves empty when
-  // the runner is disabled or has no tasks.
-  listTasks: () => Promise<NotebookTask[]>;
-  // Force a failed|dead task back to queued. Resolves with the requeued task, or
-  // null when the task was non-terminal (a no-op retry).
-  retryTask: (taskId: string) => Promise<NotebookTask | null>;
-  // Increments whenever a notebook_tasks_changed broadcast arrives, so an open
-  // Tasks panel re-fetches the list (any runner lifecycle transition).
-  taskChangeSignal?: number;
   // The chief-pulse state for the top-bar indicator: true = a chief-of-staff session
   // is working, false = a chief exists but is idle, undefined = no chief session at
   // all (the indicator is hidden). Derived locally by the parent, not a socket call.

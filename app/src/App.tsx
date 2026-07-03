@@ -34,6 +34,7 @@ import { WhatsNewModal } from './components/WhatsNewModal';
 import { ActionMenu, type ActionMenuItem } from './components/ActionMenu';
 import { WorkspaceContextNavigator, type WorkspaceContextView } from './components/WorkspaceContextNavigator';
 import { NotebookBrowser } from './components/NotebookBrowser';
+import { NotificationsPanel } from './components/NotificationsPanel';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { ChordLeaderHud } from './components/ChordLeaderHud';
 import { DaemonProvider } from './contexts/DaemonContext';
@@ -143,6 +144,21 @@ function BoardActionIcon() {
       <rect x="2.5" y="2.5" width="3" height="11" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
       <rect x="6.5" y="2.5" width="3" height="7" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
       <rect x="10.5" y="2.5" width="3" height="9" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function NotificationsBellIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M8 2.2c-2.1 0-3.5 1.6-3.5 3.7 0 2.6-.7 3.6-1.4 4.3-.3.3-.1.9.4.9h9c.5 0 .7-.6.4-.9-.7-.7-1.4-1.7-1.4-4.3 0-2.1-1.4-3.7-3.5-3.7Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M6.6 12.6a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }
@@ -468,6 +484,11 @@ function App() {
   // Bumped on every notebook_tasks_changed broadcast so an open Tasks panel
   // re-fetches the durable runner's task list (covers any lifecycle transition).
   const [notebookTaskChangeSignal, setNotebookTaskChangeSignal] = useState(0);
+  // Global notifications feed: the unread count drives the sidebar badge; the
+  // change signal bumps on every notifications_updated broadcast so an open
+  // notifications panel re-lists. Seeded once initial state arrives (below).
+  const [notificationsUnread, setNotificationsUnread] = useState(0);
+  const [notificationsChangeSignal, setNotificationsChangeSignal] = useState(0);
 
   // Connect to daemon WebSocket
   const {
@@ -505,6 +526,8 @@ function App() {
     sendFsExists,
     sendNotebookTaskList,
     sendNotebookTaskRetry,
+    sendNotificationList,
+    sendNotificationMarkRead,
     sendNotebookBacklinks,
     sendNotebookToChief,
     sendNotebookList,
@@ -565,6 +588,12 @@ function App() {
     // A task lifecycle transition broadcast bumps the signal so an open Tasks panel
     // refetches the runner's list (the broadcast itself is payload-free).
     onNotebookTasksChanged: () => setNotebookTaskChangeSignal((n) => n + 1),
+    // A notifications_updated broadcast carries the authoritative unread count;
+    // set the badge and bump the signal so an open panel re-lists.
+    onNotificationsUpdated: (unread) => {
+      setNotificationsUnread(unread);
+      setNotificationsChangeSignal((n) => n + 1);
+    },
     onTicketsUpdate: setTickets,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
@@ -582,6 +611,24 @@ function App() {
 
   // Memoize clearGitStatus to prevent subscription effect from re-running
   const clearGitStatus = useCallback(() => setGitStatus(null), []);
+
+  // Seed the notifications unread badge once the socket is up. The
+  // notifications_updated broadcast keeps it live thereafter; this one read
+  // primes the count for notifications that already existed at connect time.
+  useEffect(() => {
+    if (!hasReceivedInitialState) return;
+    let cancelled = false;
+    sendNotificationList()
+      .then((r) => {
+        if (!cancelled) setNotificationsUnread(r.unreadCount);
+      })
+      .catch(() => {
+        /* transient (not connected / timeout); the next broadcast reseeds */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasReceivedInitialState, sendNotificationList]);
 
   // Wrap the app content with SettingsProvider so useUIScale can access settings.
   // KeybindingsProvider (inside it) syncs shortcut overrides into the resolver.
@@ -643,6 +690,10 @@ function App() {
         sendFsExists={sendFsExists}
         sendNotebookTaskList={sendNotebookTaskList}
         sendNotebookTaskRetry={sendNotebookTaskRetry}
+        sendNotificationList={sendNotificationList}
+        sendNotificationMarkRead={sendNotificationMarkRead}
+        notificationsUnread={notificationsUnread}
+        notificationsChangeSignal={notificationsChangeSignal}
         sendNotebookBacklinks={sendNotebookBacklinks}
         sendNotebookToChief={sendNotebookToChief}
         sendNotebookList={sendNotebookList}
@@ -755,6 +806,10 @@ interface AppContentProps {
   sendFsExists: ReturnType<typeof useDaemonSocket>['sendFsExists'];
   sendNotebookTaskList: ReturnType<typeof useDaemonSocket>['sendNotebookTaskList'];
   sendNotebookTaskRetry: ReturnType<typeof useDaemonSocket>['sendNotebookTaskRetry'];
+  sendNotificationList: ReturnType<typeof useDaemonSocket>['sendNotificationList'];
+  sendNotificationMarkRead: ReturnType<typeof useDaemonSocket>['sendNotificationMarkRead'];
+  notificationsUnread: number;
+  notificationsChangeSignal: number;
   sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
   sendNotebookToChief: ReturnType<typeof useDaemonSocket>['sendNotebookToChief'];
   sendNotebookList: ReturnType<typeof useDaemonSocket>['sendNotebookList'];
@@ -861,6 +916,10 @@ function AppContent({
   sendFsExists,
   sendNotebookTaskList,
   sendNotebookTaskRetry,
+  sendNotificationList,
+  sendNotificationMarkRead,
+  notificationsUnread,
+  notificationsChangeSignal,
   sendNotebookBacklinks,
   sendNotebookToChief,
   sendNotebookList,
@@ -1061,6 +1120,7 @@ sendFetchPRDetails,
   const [workspaceContextsOpen, setWorkspaceContextsOpen] = useState(false);
   const [notebookOpen, setNotebookOpen] = useState(false);
   const [boardSurfaceOpen, setBoardSurfaceOpen] = useState(false);
+  const [notificationsPanelOpen, setNotificationsPanelOpen] = useState(false);
   const [workspaceContextsLoading, setWorkspaceContextsLoading] = useState(false);
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
@@ -1762,6 +1822,12 @@ sendFetchPRDetails,
   }, []);
   const closeBoardSurface = useCallback(() => {
     setBoardSurfaceOpen(false);
+  }, []);
+  const toggleNotificationsPanel = useCallback(() => {
+    setNotificationsPanelOpen((open) => !open);
+  }, []);
+  const closeNotificationsPanel = useCallback(() => {
+    setNotificationsPanelOpen(false);
   }, []);
 
   // Holds the active workspace id for callbacks that must read it without
@@ -3302,6 +3368,14 @@ sendFetchPRDetails,
       active: boardSurfaceOpen,
       onClick: openBoardSurface,
     },
+    {
+      id: 'notifications',
+      title: notificationsPanelOpen ? 'Hide Notifications' : 'Show Notifications',
+      icon: <NotificationsBellIcon />,
+      active: notificationsPanelOpen,
+      badge: notificationsUnread > 0 ? notificationsUnread : undefined,
+      onClick: toggleNotificationsPanel,
+    },
   ]), [
     activeSessionId,
     remoteEditorAvailable,
@@ -3315,6 +3389,9 @@ sendFetchPRDetails,
     openNotebookBrowser,
     boardSurfaceOpen,
     openBoardSurface,
+    notificationsPanelOpen,
+    notificationsUnread,
+    toggleNotificationsPanel,
   ]);
 
   const activeSessionZoomed = activeWorkspaceId ? Boolean(zoomModeBySessionId[activeWorkspaceId]) : false;
@@ -3435,12 +3512,9 @@ sendFetchPRDetails,
     existsFile: sendFsExists,
     backlinksNotebook: sendNotebookBacklinks,
     sendToChief: sendNotebookToChief,
-    listTasks: sendNotebookTaskList,
-    retryTask: sendNotebookTaskRetry,
     // Argless walk = empty prefix = the whole vault, for the in-tile finder index.
     listFiles: sendNotebookList,
     changeSignal: fsChangeSignal,
-    taskChangeSignal: notebookTaskChangeSignal,
   }), [
     sendFsList,
     sendFsRead,
@@ -3448,11 +3522,8 @@ sendFetchPRDetails,
     sendFsExists,
     sendNotebookBacklinks,
     sendNotebookToChief,
-    sendNotebookTaskList,
-    sendNotebookTaskRetry,
     sendNotebookList,
     fsChangeSignal,
-    notebookTaskChangeSignal,
   ]);
 
   return (
@@ -3900,9 +3971,6 @@ sendFetchPRDetails,
         sendToChief={sendNotebookToChief}
         listFiles={sendNotebookList}
         changeSignal={fsChangeSignal}
-        listTasks={sendNotebookTaskList}
-        retryTask={sendNotebookTaskRetry}
-        taskChangeSignal={notebookTaskChangeSignal}
         chiefActive={notebookChiefActive}
       />
       <TicketBoardSurface
@@ -3913,6 +3981,14 @@ sendFetchPRDetails,
           handleOpenTicketDetail(ticketId);
         }}
         onClose={closeBoardSurface}
+      />
+      <NotificationsPanel
+        open={notificationsPanelOpen}
+        onClose={closeNotificationsPanel}
+        listNotifications={sendNotificationList}
+        markRead={sendNotificationMarkRead}
+        retryTask={sendNotebookTaskRetry}
+        changeSignal={notificationsChangeSignal}
       />
       <ActionMenu
         isOpen={actionMenuOpen}
@@ -3971,6 +4047,9 @@ sendFetchPRDetails,
         onIncreaseTicketBoardScale={ticketBoardScale.increaseScale}
         onDecreaseTicketBoardScale={ticketBoardScale.decreaseScale}
         onMatchAppTicketBoardScale={ticketBoardScale.matchApp}
+        listTasks={sendNotebookTaskList}
+        retryTask={sendNotebookTaskRetry}
+        taskChangeSignal={notebookTaskChangeSignal}
       />
     </div>
     </NotebookSurfaceProvider>

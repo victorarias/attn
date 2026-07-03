@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "141"
+const ProtocolVersion = "142"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -70,6 +70,8 @@ const (
 	CmdNotebookSendToChief                   = "notebook_send_to_chief"
 	CmdNotebookTaskList                      = "notebook_task_list"
 	CmdNotebookTaskRetry                     = "notebook_task_retry"
+	CmdNotificationList                      = "notification_list"
+	CmdNotificationMarkRead                  = "notification_mark_read"
 	CmdFsList                                = "fs_list"
 	CmdFsRead                                = "fs_read"
 	CmdFsWrite                               = "fs_write"
@@ -204,6 +206,9 @@ const (
 	EventNotebookTaskListResult      = "notebook_task_list_result"
 	EventNotebookTaskRetryResult     = "notebook_task_retry_result"
 	EventNotebookTasksChanged        = "notebook_tasks_changed"
+	EventNotificationListResult      = "notification_list_result"
+	EventNotificationMarkReadResult  = "notification_mark_read_result"
+	EventNotificationsUpdated        = "notifications_updated"
 	EventFsListResult                = "fs_list_result"
 	EventFsReadResult                = "fs_read_result"
 	EventFsWriteResult               = "fs_write_result"
@@ -548,6 +553,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdNotebookTaskRetry:
 		var msg NotebookTaskRetryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotificationList:
+		var msg NotificationListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdNotificationMarkRead:
+		var msg NotificationMarkReadMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

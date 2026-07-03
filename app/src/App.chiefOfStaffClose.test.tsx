@@ -200,6 +200,8 @@ describe('chief-of-staff session is protected from close', () => {
       sendGetComments: vi.fn(async () => ({ success: true, comments: [] })),
       connectionError: null,
       hasReceivedInitialState: true,
+      sendNotificationList: vi.fn(async () => ({ notifications: [], unreadCount: 0 })),
+      sendNotificationMarkRead: vi.fn(async () => 0),
       rateLimit: null,
       warnings: [],
       clearWarnings: fn,
