@@ -544,14 +544,18 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		Model:                   strings.TrimSpace(protocol.Deref(msg.Model)),
 		Effort:                  strings.TrimSpace(protocol.Deref(msg.Effort)),
 	}
+	// The frontend sets chief_of_staff only on initial creation, not on
+	// reconnect/resume spawns after a daemon restart. Fall back to the
+	// persisted profile-roles table so chief settings survive respawns.
+	isChief := protocol.Deref(msg.ChiefOfStaff) || d.isChiefOfStaffSession(msg.ID)
 	if spawnOpts.Model == "" {
 		// No per-spawn pin (delegation); a chief launch falls back to the
 		// chief_model_<agent> setting.
-		spawnOpts.Model = d.chiefLaunchModel(agent, protocol.Deref(msg.ChiefOfStaff))
+		spawnOpts.Model = d.chiefLaunchModel(agent, isChief)
 	}
 	// A chief launch caps its context window (chief_context_window_cap); non-chief
 	// launches stay uncapped so delegated interactive agents are never affected.
-	spawnOpts.ChiefContextWindowCap = d.chiefContextWindowCap(protocol.Deref(msg.ChiefOfStaff))
+	spawnOpts.ChiefContextWindowCap = d.chiefContextWindowCap(isChief)
 	if existingSession != nil {
 		for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
 			if liveID != msg.ID {
