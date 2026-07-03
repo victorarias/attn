@@ -7,8 +7,10 @@ import {
   DaemonPlugin,
   DaemonPluginIssue,
   DaemonSettings,
+  NotebookTask,
   PluginListResult,
 } from '../hooks/useDaemonSocket';
+import { BackgroundTasksSettings } from './BackgroundTasksSettings';
 import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
 import type { ThemePreference } from '../hooks/useTheme';
 import {
@@ -72,9 +74,14 @@ interface SettingsModalProps {
   onIncreaseTicketBoardScale?: () => void;
   onDecreaseTicketBoardScale?: () => void;
   onMatchAppTicketBoardScale?: () => void;
+  /** Durable task-runner list for the Background Tasks section. Optional so tests
+      that don't exercise that section can omit them; App.tsx always provides them. */
+  listTasks?: () => Promise<NotebookTask[]>;
+  retryTask?: (taskId: string) => Promise<NotebookTask | null>;
+  taskChangeSignal?: number;
 }
 
-type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'review' | 'hygiene';
+type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'review' | 'hygiene' | 'backgroundTasks';
 
 // Fallback shown when the daemon has not yet sent a normalized value; the daemon
 // mirrors this default (agent.DefaultContextWindowCap) for both context-window caps.
@@ -152,6 +159,9 @@ export function SettingsModal({
   onIncreaseTicketBoardScale,
   onDecreaseTicketBoardScale,
   onMatchAppTicketBoardScale,
+  listTasks,
+  retryTask,
+  taskChangeSignal,
 }: SettingsModalProps) {
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [notebookRoot, setNotebookRoot] = useState(settings['notebook.root'] || '');
@@ -785,6 +795,19 @@ export function SettingsModal({
           description: 'Agent executable paths, defaults, context maintenance, capabilities, and PTY runtime mode.',
           count: orderedAgentList.length + 8,
           keywords: 'agents executables claude codex cursor default capabilities pty backend editor context keeper compact model workflows auto-approve unattended chief context window cap tokens compaction auto-compact headless',
+        },
+      ],
+    },
+    {
+      label: 'Background Tasks',
+      items: [
+        {
+          id: 'backgroundTasks',
+          label: 'Task runner',
+          title: 'Background tasks',
+          description: 'The durable task runner: compaction, summaries, narration, and reconciliation, with retry.',
+          count: 1,
+          keywords: 'background tasks runner durable compaction summarize narrate reconcile retry failed dead queue',
         },
       ],
     },
@@ -2090,6 +2113,26 @@ export function SettingsModal({
     </>
   );
 
+  const renderBackgroundTasksSettings = () => (
+    <>
+      {listTasks && retryTask ? (
+        <BackgroundTasksSettings
+          listTasks={listTasks}
+          retryTask={retryTask}
+          taskChangeSignal={taskChangeSignal ?? 0}
+        />
+      ) : (
+        <section className="settings-block">
+          <div className="settings-block-intro">
+            <div className="settings-kicker">Background Tasks</div>
+            <h3>Durable task runner</h3>
+            <p className="settings-description">Task runner is unavailable.</p>
+          </div>
+        </section>
+      )}
+    </>
+  );
+
   const renderSelectedSection = () => {
     switch (selectedSection) {
       case 'general':
@@ -2102,6 +2145,8 @@ export function SettingsModal({
         return renderReviewSettings();
       case 'hygiene':
         return renderHygieneSettings();
+      case 'backgroundTasks':
+        return renderBackgroundTasksSettings();
       case 'connectivity':
       default:
         return renderConnectivitySettings();

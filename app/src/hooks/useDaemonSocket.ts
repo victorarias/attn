@@ -19,6 +19,7 @@ import type {
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
   NotebookTask as GeneratedNotebookTask,
+  Notification as GeneratedNotification,
   Ticket as GeneratedTicket,
   PRRole,
   HeatState,
@@ -409,6 +410,7 @@ export interface NotebookReadResult {
 // Mirrors the daemon's protocol.NotebookTask (which deliberately omits the runner's
 // internal Meta/CommitGuard so transcript paths etc. never reach the UI).
 export type NotebookTask = GeneratedNotebookTask;
+export type DaemonNotification = GeneratedNotification;
 
 // The outcome of a Notebook hash-CAS save. conflict=true means the note changed
 // on disk since the editor loaded it, so the write did NOT apply; currentHash is
@@ -476,6 +478,10 @@ interface UseDaemonSocketOptions {
   // transition: queue/run/retry/fail/done). Carries no payload — an open Tasks
   // panel refetches via notebook_task_list to reflect truth.
   onNotebookTasksChanged?: () => void;
+  // Fired when the global notifications feed changes (a notification is added or
+  // one/all are marked read). Carries the authoritative post-change unread count
+  // so the sidebar badge updates without a re-list; an open panel re-lists.
+  onNotificationsUpdated?: (unreadCount: number) => void;
   // Fired when files under the root change (any client/agent/external write). paths
   // are root-relative; origin is agent|ui|external. Mirrors onNotebookChanged for
   // the generic filesystem surface (fs_changed).
@@ -763,6 +769,7 @@ export function useDaemonSocket({
   onSessionsUpdate,
   onNotebookChanged,
   onNotebookTasksChanged,
+  onNotificationsUpdated,
   onFsChanged,
   onTicketsUpdate,
   onWorkspacesUpdate,
@@ -793,6 +800,7 @@ export function useDaemonSocket({
     onSessionsUpdate,
     onNotebookChanged,
     onNotebookTasksChanged,
+    onNotificationsUpdated,
     onFsChanged,
     onTicketsUpdate,
     onWorkspacesUpdate,
@@ -812,6 +820,7 @@ export function useDaemonSocket({
     onSessionsUpdate,
     onNotebookChanged,
     onNotebookTasksChanged,
+    onNotificationsUpdated,
     onFsChanged,
     onTicketsUpdate,
     onWorkspacesUpdate,
@@ -1489,6 +1498,14 @@ export function useDaemonSocket({
             callbacksRef.current.onNotebookTasksChanged?.();
             break;
 
+          case 'notifications_updated':
+            // Carries the authoritative unread count so the sidebar badge updates
+            // immediately; an open notifications panel re-lists for the new row.
+            callbacksRef.current.onNotificationsUpdated?.(
+              typeof data.unread_count === 'number' ? data.unread_count : 0,
+            );
+            break;
+
           case 'fs_changed':
             callbacksRef.current.onFsChanged?.(
               typeof data.origin === 'string' ? data.origin : '',
@@ -1711,6 +1728,47 @@ export function useDaemonSocket({
               pending.resolve(data.task ?? null);
             } else {
               pending.reject(new Error(data.error || 'Notebook task retry failed'));
+            }
+            break;
+          }
+
+          case 'notification_list_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `notification_list:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve({
+                notifications: (data.notifications || []) as DaemonNotification[],
+                unreadCount: typeof data.unread_count === 'number' ? data.unread_count : 0,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Notification list failed'));
+            }
+            break;
+          }
+
+          case 'notification_mark_read_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `notification_mark_read:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve(typeof data.unread_count === 'number' ? data.unread_count : 0);
+            } else {
+              pending.reject(new Error(data.error || 'Notification mark-read failed'));
             }
             break;
           }
@@ -4041,6 +4099,61 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // List the global notification feed (newest first) with the current unread
+  // count. The notifications_updated broadcast drives live refreshes; this is the
+  // on-open/authoritative read.
+  const sendNotificationList = useCallback((): Promise<{
+    notifications: DaemonNotification[];
+    unreadCount: number;
+  }> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('notification_list');
+      const key = `notification_list:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'notification_list', request_id: requestId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Notification list timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  // Mark a notification read (notificationId set) or every unread one (undefined).
+  // Resolves with the post-mark unread count; the notifications_updated broadcast
+  // then refreshes any open panel.
+  const sendNotificationMarkRead = useCallback((notificationId?: string): Promise<number> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('notification_mark_read');
+      const key = `notification_mark_read:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(
+        JSON.stringify({
+          cmd: 'notification_mark_read',
+          request_id: requestId,
+          ...(notificationId ? { notification_id: notificationId } : {}),
+        }),
+      );
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Notification mark-read timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // List the notes whose body links to `path` (root-absolute markdown links).
   const sendNotebookBacklinks = useCallback((path: string): Promise<NotebookEntry[]> => {
     return new Promise((resolve, reject) => {
@@ -4819,6 +4932,8 @@ export function useDaemonSocket({
     sendTicketEditDescription,
     sendNotebookTaskList,
     sendNotebookTaskRetry,
+    sendNotificationList,
+    sendNotificationMarkRead,
     sendNotebookBacklinks,
     sendNotebookWrite,
     sendNotebookToChief,

@@ -6,7 +6,6 @@ import type {
   FsWriteResult,
   NotebookEntry,
   NotebookSendToChiefResult,
-  NotebookTask,
 } from '../hooks/useDaemonSocket';
 
 // The daemon surface a NotebookSurface needs. The fullscreen modal already gets
@@ -20,14 +19,10 @@ export interface NotebookSurfaceDaemon {
   existsFile: (path: string) => Promise<FsExistsResult>;
   backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
   sendToChief: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
-  listTasks: () => Promise<NotebookTask[]>;
-  retryTask: (taskId: string) => Promise<NotebookTask | null>;
   // Walk the whole vault (flat list of notes, with titles) for a tile's fuzzy finder.
   listFiles: () => Promise<NotebookEntry[]>;
-  // Bumps when an fs_changed / notebook_tasks_changed broadcast arrives, so an open
-  // tile reloads its file / refetches its task list.
+  // Bumps when an fs_changed broadcast arrives, so an open tile reloads its file.
   changeSignal: number;
-  taskChangeSignal: number;
 }
 
 const NotebookSurfaceContext = createContext<NotebookSurfaceDaemon | null>(null);

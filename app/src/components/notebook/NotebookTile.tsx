@@ -26,9 +26,6 @@ export function NotebookTile({
       backlinksNotebook={daemon.backlinksNotebook}
       sendToChief={daemon.sendToChief}
       changeSignal={daemon.changeSignal}
-      listTasks={daemon.listTasks}
-      retryTask={daemon.retryTask}
-      taskChangeSignal={daemon.taskChangeSignal}
       listFiles={daemon.listFiles}
     />
   );

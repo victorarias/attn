@@ -6,6 +6,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-03]
+
+### Added
+- **Notifications when background work fails.** attn now has a notifications feed — the bell in the sidebar, with an unread count — that tells you when a background task gives up after exhausting its retries (context compaction, session summaries, workspace narration, or ticket reconciliation). Open a notification to read what was running and the underlying error, and retry it right there. Notifications persist across restarts and are marked read as you view them (with a "Mark all read").
+- **Background tasks moved to Settings.** The durable task runner's list — every queued, running, failed, or dead background task with its attempt count, next attempt, last error, and a Retry — now lives in its own **Settings → Background Tasks** section. It used to hang off the Notebook's sidebar, but these tasks are a global concern, not a notebook one, so the Notebook's Tasks section is gone.
+
 ## [2026-07-02]
 
 ### Added
