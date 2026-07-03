@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "142"
+const ProtocolVersion = "143"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -68,8 +68,8 @@ const (
 	CmdNotebookGuide                         = "notebook_guide"
 	CmdNotebookBacklinks                     = "notebook_backlinks"
 	CmdNotebookSendToChief                   = "notebook_send_to_chief"
-	CmdNotebookTaskList                      = "notebook_task_list"
-	CmdNotebookTaskRetry                     = "notebook_task_retry"
+	CmdTaskList                              = "task_list"
+	CmdTaskRetry                             = "task_retry"
 	CmdNotificationList                      = "notification_list"
 	CmdNotificationMarkRead                  = "notification_mark_read"
 	CmdFsList                                = "fs_list"
@@ -203,9 +203,9 @@ const (
 	EventNotebookBacklinksResult     = "notebook_backlinks_result"
 	EventNotebookWriteResult         = "notebook_write_result"
 	EventNotebookSendToChiefResult   = "notebook_send_to_chief_result"
-	EventNotebookTaskListResult      = "notebook_task_list_result"
-	EventNotebookTaskRetryResult     = "notebook_task_retry_result"
-	EventNotebookTasksChanged        = "notebook_tasks_changed"
+	EventTaskListResult              = "task_list_result"
+	EventTaskRetryResult             = "task_retry_result"
+	EventTasksChanged                = "tasks_changed"
 	EventNotificationListResult      = "notification_list_result"
 	EventNotificationMarkReadResult  = "notification_mark_read_result"
 	EventNotificationsUpdated        = "notifications_updated"
@@ -544,15 +544,15 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdNotebookTaskList:
-		var msg NotebookTaskListMessage
+	case CmdTaskList:
+		var msg TaskListMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdNotebookTaskRetry:
-		var msg NotebookTaskRetryMessage
+	case CmdTaskRetry:
+		var msg TaskRetryMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

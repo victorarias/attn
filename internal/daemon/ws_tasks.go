@@ -7,15 +7,15 @@ import (
 	"github.com/victorarias/attn/internal/tasks"
 )
 
-// notebookTaskToProtocol converts one durable task-runner record into the
+// taskToProtocol converts one durable task-runner record into the
 // user-facing protocol type. Timestamps are emitted as RFC3339 (UTC); LastError
 // becomes a pointer only when non-empty.
 //
 // SECURITY: Task.Meta carries internal inputs (e.g. transcript filesystem paths)
 // and Task.CommitGuard is a live run latch — neither has a field on
-// protocol.NotebookTask, so neither can leak to a client. Do not add them.
-func notebookTaskToProtocol(t *tasks.Task) protocol.NotebookTask {
-	pt := protocol.NotebookTask{
+// protocol.Task, so neither can leak to a client. Do not add them.
+func taskToProtocol(t *tasks.Task) protocol.Task {
+	pt := protocol.Task{
 		ID:            t.ID,
 		Kind:          t.Kind,
 		Subject:       t.Subject,
@@ -31,40 +31,40 @@ func notebookTaskToProtocol(t *tasks.Task) protocol.NotebookTask {
 	return pt
 }
 
-// notebookTasksToProtocol converts a slice of runner records, skipping nil
+// tasksToProtocol converts a slice of runner records, skipping nil
 // entries.
-func notebookTasksToProtocol(ts []*tasks.Task) []protocol.NotebookTask {
-	out := make([]protocol.NotebookTask, 0, len(ts))
+func tasksToProtocol(ts []*tasks.Task) []protocol.Task {
+	out := make([]protocol.Task, 0, len(ts))
 	for _, t := range ts {
 		if t == nil {
 			continue
 		}
-		out = append(out, notebookTaskToProtocol(t))
+		out = append(out, taskToProtocol(t))
 	}
 	return out
 }
 
-// sendNotebookTaskListWSResult lists the durable runner's records and replies to
-// a websocket client with a notebook_task_list_result event correlated by
+// sendTaskListWSResult lists the durable runner's records and replies to
+// a websocket client with a task_list_result event correlated by
 // requestID. A nil runner (disabled / not yet built) is a successful empty list,
 // not an error. This WS path is the only task-list path; the former unix-socket
 // CLI task-list command was removed.
-func (d *Daemon) sendNotebookTaskListWSResult(client *wsClient, requestID string) {
+func (d *Daemon) sendTaskListWSResult(client *wsClient, requestID string) {
 	runner := d.compactRunnerRef()
 	if runner == nil {
-		d.sendToClient(client, protocol.NotebookTaskListResultMessage{
-			Event:     protocol.EventNotebookTaskListResult,
+		d.sendToClient(client, protocol.TaskListResultMessage{
+			Event:     protocol.EventTaskListResult,
 			RequestID: requestID,
 			Success:   true,
 		})
 		return
 	}
 	list, err := runner.List()
-	msg := protocol.NotebookTaskListResultMessage{
-		Event:     protocol.EventNotebookTaskListResult,
+	msg := protocol.TaskListResultMessage{
+		Event:     protocol.EventTaskListResult,
 		RequestID: requestID,
 		Success:   err == nil,
-		Tasks:     notebookTasksToProtocol(list),
+		Tasks:     tasksToProtocol(list),
 	}
 	if err != nil {
 		msg.Error = protocol.Ptr(err.Error())
@@ -72,15 +72,15 @@ func (d *Daemon) sendNotebookTaskListWSResult(client *wsClient, requestID string
 	d.sendToClient(client, msg)
 }
 
-// sendNotebookTaskRetryWSResult forces a failed/dead task back to queued and
-// replies with a notebook_task_retry_result event correlated by requestID. The
-// runner's OnChange callback fires broadcastNotebookTasksChanged automatically on
+// sendTaskRetryWSResult forces a failed/dead task back to queued and
+// replies with a task_retry_result event correlated by requestID. The
+// runner's OnChange callback fires broadcastTasksChanged automatically on
 // a successful retry transition, so this handler does NOT broadcast itself.
-func (d *Daemon) sendNotebookTaskRetryWSResult(client *wsClient, requestID, taskID string) {
+func (d *Daemon) sendTaskRetryWSResult(client *wsClient, requestID, taskID string) {
 	runner := d.compactRunnerRef()
 	if runner == nil {
-		d.sendToClient(client, protocol.NotebookTaskRetryResultMessage{
-			Event:     protocol.EventNotebookTaskRetryResult,
+		d.sendToClient(client, protocol.TaskRetryResultMessage{
+			Event:     protocol.EventTaskRetryResult,
 			RequestID: requestID,
 			Success:   false,
 			Error:     protocol.Ptr("task runner unavailable"),
@@ -88,28 +88,28 @@ func (d *Daemon) sendNotebookTaskRetryWSResult(client *wsClient, requestID, task
 		return
 	}
 	task, err := runner.Retry(taskID)
-	msg := protocol.NotebookTaskRetryResultMessage{
-		Event:     protocol.EventNotebookTaskRetryResult,
+	msg := protocol.TaskRetryResultMessage{
+		Event:     protocol.EventTaskRetryResult,
 		RequestID: requestID,
 		Success:   err == nil,
 	}
 	if err != nil {
 		msg.Error = protocol.Ptr(err.Error())
 	} else if task != nil {
-		pt := notebookTaskToProtocol(task)
+		pt := taskToProtocol(task)
 		msg.Task = &pt
 	}
 	d.sendToClient(client, msg)
 }
 
-// broadcastNotebookTasksChanged announces that a task lifecycle transition
+// broadcastTasksChanged announces that a task lifecycle transition
 // occurred so an open task panel re-lists. It is wired to the runner's OnChange
 // callback (see startCompactRunner). It builds a fresh message and does a
 // non-blocking broadcastMessage -> wsHub.BroadcastValue (a full broadcast channel
 // drops the message), holding no shared state, so it is safe to invoke
 // CONCURRENTLY from the runner's dispatch goroutine and its in-flight runs.
-func (d *Daemon) broadcastNotebookTasksChanged() {
-	d.broadcastMessage(protocol.NotebookTasksChangedMessage{
-		Event: protocol.EventNotebookTasksChanged,
+func (d *Daemon) broadcastTasksChanged() {
+	d.broadcastMessage(protocol.TasksChangedMessage{
+		Event: protocol.EventTasksChanged,
 	})
 }

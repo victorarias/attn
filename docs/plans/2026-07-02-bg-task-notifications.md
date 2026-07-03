@@ -60,9 +60,9 @@ prerequisite for the reconcile convergence, not independent cleanup.
 Current:
   keeper/narration enqueue ─┐
                             ├─> compactRunner (tasks.Runner, single worker)
-  notebook_task_list  ──────┘     └─> internal/tasks/store.go  (JSON files under
+  task_list  ──────┘     └─> internal/tasks/store.go  (JSON files under
                                         <notebookRoot>/.attn/tasks/*.json)
-                                  └─> LastError/state=dead ──> NotebookTask proto
+                                  └─> LastError/state=dead ──> Task proto
                                         └─> NotebookSurface Tasks panel (notebook screen)
 
   reconcileTicketsOnSessionEnd / sweep (5-min ticker)
@@ -116,7 +116,7 @@ notifications( id TEXT PK, kind TEXT, title TEXT, body TEXT, detail TEXT,
 
 ```ts
 // Protocol (TypeSpec main.tsp → generate-types → constants.go; bump ProtocolVersion).
-// Rename NotebookTask* -> Task* (the "notebook" prefix is a lie once tasks live in
+// Rename Task* -> Task* (the "notebook" prefix is a lie once tasks live in
 // Settings and include reconcile).
 task_list            -> task_list_result { tasks: Task[] }
 task_retry {id}      -> task_retry_result { task? }
@@ -274,7 +274,7 @@ Isolate this in its own PR so the invariant change is reviewed alone.
 - [ ] **PR4 — Notifications + Tasks-in-Settings (backend + frontend).** One PR:
       - *Backend:* `notifications` table (migration {62}) + store methods;
         protocol (`notification_list` / `notification_mark_read` /
-        `notifications_updated` + unread count; rename `NotebookTask*` → `Task*`;
+        `notifications_updated` + unread count; rename `Task*` → `Task*`;
         bump version); daemon `OnTerminalFailure` → `renderTaskDescription` →
         `AddNotification` → broadcast.
       - *Frontend:* sidebar tool button reusing `SidebarAction.badge`
