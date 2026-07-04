@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { presentationNeedsNotice, seedPresentationNotices, upsertPresentationNotice } from './App';
+import {
+  latestPresentationBySessionId,
+  presentationNeedsNotice,
+  seedPresentationNotices,
+  upsertPresentationNotice,
+} from './App';
 import type { Presentation } from './types/generated';
 
-// Pure-logic coverage for the main-window presentation banner's notice list.
-// App.tsx itself has no dedicated render-level test suite for its banner
-// stack (see App.sessionlessWorkspace.test.tsx / App.worktreeCleanup.test.tsx
-// for the render-level tests that do exist, none of which touch banners), so
-// this exercises the extracted reducer functions directly rather than
+// Pure-logic coverage for the presentation-notice list that feeds the pane
+// header chip (HeaderPresentationChip in components/PresentationChip.tsx).
+// App.tsx has no dedicated render-level test suite for this (see
+// App.sessionlessWorkspace.test.tsx / App.worktreeCleanup.test.tsx for the
+// render-level tests that do exist, none of which touch it), so this
+// exercises the extracted reducer/lookup functions directly rather than
 // standing up a full App render + mocked WebSocket.
 
 function makePresentation(overrides: Partial<Presentation> = {}): Presentation {
@@ -90,5 +96,35 @@ describe('upsertPresentationNotice', () => {
 
     expect(notices).toHaveLength(2);
     expect(notices.map((n) => n.id).sort()).toEqual(['other', 'p1']);
+  });
+});
+
+describe('latestPresentationBySessionId', () => {
+  it('maps each session to its presentation', () => {
+    const a = makePresentation({ id: 'p-a', session_id: 'session-a' });
+    const b = makePresentation({ id: 'p-b', session_id: 'session-b' });
+
+    const bySessionId = latestPresentationBySessionId([a, b]);
+
+    expect(bySessionId.get('session-a')).toBe(a);
+    expect(bySessionId.get('session-b')).toBe(b);
+    expect(bySessionId.get('session-c')).toBeUndefined();
+  });
+
+  it('keeps only the newest presentation when a session has more than one', () => {
+    const older = makePresentation({ id: 'p-old', session_id: 'session-a', created_at: '2026-07-01T00:00:00Z' });
+    const newer = makePresentation({ id: 'p-new', session_id: 'session-a', created_at: '2026-07-02T00:00:00Z' });
+
+    const bySessionId = latestPresentationBySessionId([older, newer]);
+
+    expect(bySessionId.size).toBe(1);
+    expect(bySessionId.get('session-a')?.id).toBe('p-new');
+  });
+
+  it('is order-independent', () => {
+    const older = makePresentation({ id: 'p-old', session_id: 'session-a', created_at: '2026-07-01T00:00:00Z' });
+    const newer = makePresentation({ id: 'p-new', session_id: 'session-a', created_at: '2026-07-02T00:00:00Z' });
+
+    expect(latestPresentationBySessionId([newer, older]).get('session-a')?.id).toBe('p-new');
   });
 });

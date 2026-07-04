@@ -100,16 +100,17 @@ const DOCK_PANEL_EXIT_MS = 260;
 // user how to close it deliberately (demote it first).
 const CHIEF_OF_STAFF_CLOSE_HINT = 'Chief of staff is protected — unset the chief role to close it.';
 
-// A presentation is worth a top-banner notice while its latest round is open
-// for review (status "open") and hasn't been submitted yet.
+// A presentation is worth a notice (surfaced as a chip in its triggering
+// session's pane header) while its latest round is open for review (status
+// "open") and hasn't been submitted yet.
 export function presentationNeedsNotice(presentation: Presentation): boolean {
   return presentation.status === 'open' && !presentation.latest_round_submitted;
 }
 
-// Pure reducer for the main-window presentation-notice list, shared by the
-// initial getPresentations() seed and the presentation_added/updated
-// broadcasts. Keeps at most one entry per presentation id; a presentation
-// that stops needing a notice (submitted or closed) is dropped.
+// Pure reducer for the presentation-notice list, shared by the initial
+// getPresentations() seed and the presentation_added/updated broadcasts.
+// Keeps at most one entry per presentation id; a presentation that stops
+// needing a notice (submitted or closed) is dropped.
 export function upsertPresentationNotice(notices: Presentation[], updated: Presentation): Presentation[] {
   const withoutExisting = notices.filter((n) => n.id !== updated.id);
   return presentationNeedsNotice(updated) ? [...withoutExisting, updated] : withoutExisting;
@@ -117,6 +118,19 @@ export function upsertPresentationNotice(notices: Presentation[], updated: Prese
 
 export function seedPresentationNotices(all: Presentation[]): Presentation[] {
   return all.filter(presentationNeedsNotice);
+}
+
+// A session can trigger more than one presentation over time; the pane
+// header chip only ever shows the newest one that still needs review.
+export function latestPresentationBySessionId(notices: Presentation[]): Map<string, Presentation> {
+  const bySessionId = new Map<string, Presentation>();
+  for (const p of notices) {
+    const existing = bySessionId.get(p.session_id);
+    if (!existing || p.created_at > existing.created_at) {
+      bySessionId.set(p.session_id, p);
+    }
+  }
+  return bySessionId;
 }
 const CHANGES_BRANCH_DIFF_INTERVAL_MS = 30_000;
 const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
@@ -653,7 +667,7 @@ function App() {
     };
   }, [hasReceivedInitialState, sendNotificationList]);
 
-  // Seed the presentation-notice banner once the socket is up. The
+  // Seed the presentation-notice list once the socket is up. The
   // presentation_added/updated broadcasts keep it live thereafter.
   useEffect(() => {
     if (!hasReceivedInitialState) return;
@@ -1014,27 +1028,17 @@ sendFetchPRDetails,
   clearGitStatus,
   registerSessionExitHandler,
 }: AppContentProps) {
-  // Locally dismissed presentation notices. Not persisted — a dismissed
-  // notice may reappear on next app start, which is acceptable since it
-  // reflects genuinely open work.
-  const [dismissedPresentationIds, setDismissedPresentationIds] = useState<Set<string>>(new Set());
-  const visiblePresentationNotices = useMemo(
-    () => presentationNotices.filter((p) => !dismissedPresentationIds.has(p.id)),
-    [presentationNotices, dismissedPresentationIds],
-  );
-  const newestPresentationNotice = useMemo(
-    () => visiblePresentationNotices.reduce<Presentation | null>((newest, p) => (
-      !newest || p.created_at > newest.created_at ? p : newest
-    ), null),
-    [visiblePresentationNotices],
+  // The presentation notice lives in the triggering session's pane header
+  // (HeaderPresentationChip), not a window-wide banner — look it up per
+  // session id, newest first.
+  const presentationBySessionId = useMemo(
+    () => latestPresentationBySessionId(presentationNotices),
+    [presentationNotices],
   );
   const handleOpenPresentationWindow = useCallback((presentationId: string) => {
     void invoke('open_presentation_window', { presentationId }).catch((err) => {
       console.error('[App] Failed to open presentation window:', err);
     });
-  }, []);
-  const handleDismissPresentationNotice = useCallback((presentationId: string) => {
-    setDismissedPresentationIds((prev) => new Set(prev).add(presentationId));
   }, []);
 
   const [openPRLauncherJob, setOpenPRLauncherJob] = useState<OpenPRLauncherJob | null>(null);
@@ -3631,35 +3635,6 @@ sendFetchPRDetails,
           </button>
         </div>
       )}
-      {/* Open presentations awaiting review */}
-      {newestPresentationNotice && (
-        <div
-          className="presentation-banner"
-          style={{
-            top: (connectionError ? 48 : 0) + (warnings.length > 0 ? 44 : 0) + (updateAvailableVersion ? 44 : 0),
-          }}
-        >
-          <span
-            className="presentation-banner-label"
-            onClick={() => handleOpenPresentationWindow(newestPresentationNotice.id)}
-          >
-            ▶ {newestPresentationNotice.title} — review ready
-          </span>
-          {visiblePresentationNotices.length > 1 && (
-            <span className="presentation-banner-count">
-              +{visiblePresentationNotices.length - 1} more
-            </span>
-          )}
-          <button
-            className="presentation-banner-dismiss"
-            onClick={() => handleDismissPresentationNotice(newestPresentationNotice.id)}
-            title="Dismiss"
-            aria-label="Dismiss presentation banner"
-          >
-            ×
-          </button>
-        </div>
-      )}
       {openPRLauncherJob && (
         <OpenPRLauncherProgress
           repo={openPRLauncherJob.pr.repo}
@@ -3787,8 +3762,10 @@ sendFetchPRDetails,
                       ticketUnread: entry.ticketUnread,
                       nudgeFiresAt: entry.nudgeFiresAt,
                       isActive: entry.id === activeSessionId,
+                      presentation: presentationBySessionId.get(entry.id),
                     }))}
                     onTriggerNudge={sendTriggerNudge}
+                    onOpenPresentation={handleOpenPresentationWindow}
                     workspace={workspaceState}
                     activePaneId={activePaneId}
                     fontSize={terminalFontSize}
