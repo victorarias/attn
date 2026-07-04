@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Pin the chief-of-staff's reasoning effort, per agent.** Settings → Agents → "Chief-of-staff model & effort" now has an effort selector next to each agent's model override (Claude: low, medium, high, xhigh, max; Codex: minimal, low, medium, high, xhigh). Leave it on "Agent default" to use the agent's own default. Only chief-of-staff launches are affected — regular sessions are unaffected.
 
+### Fixed
+- **Changing font size no longer risks blank or misrendered terminals when many panes are open.** Adjusting the terminal font size used to rebuild every open pane's terminal (visible and backgrounded), which under enough open panes could exhaust the app's GPU rendering resources and leave a pane permanently blank or garbled until reopened. Terminals now update in place to the new font size instead of being rebuilt.
+
 ## [2026-07-03]
 
 ### Added
