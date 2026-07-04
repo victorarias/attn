@@ -165,6 +165,12 @@ export interface GhosttyTerminalHandle {
   // (a fit() that did not bail). Until then getSize() reports the provisional
   // construction default, which must never claim PTY geometry authority.
   hasMeasuredSize: () => boolean;
+  // True when the model grid is taller or wider than the container it is
+  // rendering into (see geometryOverflowsContainer). A pane can land in this
+  // state on reveal after the window shrank while it was hidden; a caller
+  // that catches it can force a refit rather than leaving the clip in place
+  // indefinitely.
+  overflowsContainer: () => boolean;
   getVisibleContent: () => TerminalVisibleContentSnapshot;
   getVisibleStyleSummary: () => TerminalVisibleStyleSnapshot;
   getBlockState: () => BlockStateSnapshot;
@@ -1641,6 +1647,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getText,
       getSize: () => terminalRef.current ? { cols: terminalRef.current.cols, rows: terminalRef.current.rows } : null,
       hasMeasuredSize: () => hasMeasuredSizeRef.current,
+      overflowsContainer: () => {
+        const model = terminalRef.current;
+        const renderer = rendererRef.current;
+        const container = containerRef.current;
+        if (!model || !renderer || !container) return false;
+        return geometryOverflowsContainer(model.rows, renderer.cellHeight, container.clientHeight)
+          || geometryOverflowsContainer(model.cols, renderer.cellWidth, container.clientWidth);
+      },
       getVisibleContent,
       getVisibleStyleSummary,
       getBlockState,
@@ -1831,6 +1845,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
           hasMeasuredSize: () => hasMeasuredSizeRef.current,
+          overflowsContainer: () => geometryOverflowsContainer(terminal.rows, renderer.cellHeight, container.clientHeight)
+            || geometryOverflowsContainer(terminal.cols, renderer.cellWidth, container.clientWidth),
           getVisibleContent,
           getVisibleStyleSummary,
           getBlockState,

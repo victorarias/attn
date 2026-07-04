@@ -62,6 +62,10 @@ const { mockTerminalFit } = vi.hoisted(() => ({
   mockTerminalFit: vi.fn(),
 }));
 
+const { mockTerminalOverflowsContainer } = vi.hoisted(() => ({
+  mockTerminalOverflowsContainer: vi.fn(() => false),
+}));
+
 const { renderedTerminalProps } = vi.hoisted(() => ({
   renderedTerminalProps: new Map<string, any>(),
 }));
@@ -99,6 +103,7 @@ vi.mock('./GhosttyTerminal', () => ({
       getText: vi.fn(() => ''),
       getSize: vi.fn(() => ({ cols: 80, rows: 24 })),
       hasMeasuredSize: vi.fn(() => true),
+      overflowsContainer: mockTerminalOverflowsContainer,
       getVisibleContent: vi.fn(),
       getVisibleStyleSummary: vi.fn(),
       drain: vi.fn(() => Promise.resolve()),
@@ -137,6 +142,7 @@ function createMockTerminal() {
     getText: vi.fn(() => ''),
     getSize: vi.fn(() => ({ cols: 80, rows: 24 })),
     hasMeasuredSize: vi.fn(() => true),
+    overflowsContainer: vi.fn(() => false),
     getVisibleContent: vi.fn(),
     getVisibleStyleSummary: vi.fn(),
     drain: vi.fn(() => Promise.resolve()),
@@ -150,6 +156,7 @@ describe('SessionTerminalWorkspace', () => {
     terminalLifecycleCounts.clear();
     vi.mocked(mockEventRouter.registerBinding).mockClear();
     mockTerminalFit.mockReset();
+    mockTerminalOverflowsContainer.mockReset().mockReturnValue(false);
     mockPtyAttach.mockReset();
     mockPtyDetach.mockReset();
     mockPtyResize.mockReset();
@@ -1202,6 +1209,76 @@ describe('SessionTerminalWorkspace', () => {
 
     expect(mockTerminalFit).toHaveBeenCalledTimes(2);
     expect(mockTerminalFocus).toHaveBeenCalled();
+  });
+
+  it('retries the reveal refit (at both late ticks) while the pane still overflows its container', () => {
+    // Reproduces the reveal-time bug: the window shrank while this pane was
+    // hidden, so on reveal its grid is taller/wider than the container. Unlike
+    // the suspicious-size case, this pane's cols/rows are unremarkable — only
+    // overflowsContainer() reports the problem — so the late retries must
+    // consult it, not just isSuspiciousTerminalSize.
+    vi.useFakeTimers();
+    mockTerminalFit.mockReset();
+    mockTerminalOverflowsContainer.mockReset().mockReturnValue(true);
+
+    render(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
+        workspace={createSingleAgentWorkspace()}
+        activePaneId={SESSION_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(mockTerminalFit).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(75);
+    });
+    expect(mockTerminalFit).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      vi.advanceTimersByTime(325);
+    });
+    expect(mockTerminalFit).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not schedule extra reveal refits once the pane fits its container', () => {
+    vi.useFakeTimers();
+    mockTerminalFit.mockReset();
+    mockTerminalOverflowsContainer.mockReset().mockReturnValue(false);
+
+    render(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-session-1"
+        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
+        workspace={createSingleAgentWorkspace()}
+        activePaneId={SESSION_PANE_ID}
+        fontSize={14}
+        enabled
+        isActiveSession
+        eventRouter={mockEventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />
+    );
+
+    expect(mockTerminalFit).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(mockTerminalFit).toHaveBeenCalledTimes(1);
   });
 
   it('attaches the selected session pane runtime on terminal ready', async () => {

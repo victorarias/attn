@@ -49,6 +49,7 @@ export interface GhosttyPaneRuntime {
   scrollPaneToTop: (paneId: string) => boolean;
   getPaneText: (paneId: string) => string;
   getPaneSize: (paneId: string) => { cols: number; rows: number } | null;
+  paneOverflowsContainer: (paneId: string) => boolean;
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
   getPaneVisibleStyleSummary: (paneId: string) => TerminalVisibleStyleSnapshot;
   getPaneBlockState: (paneId: string) => BlockStateSnapshot | null;
@@ -383,6 +384,7 @@ export function useGhosttyPaneRuntime(
     scrollPaneToTop: (paneId: string) => get(paneId)?.scrollToTop() ?? false,
     getPaneText: (paneId: string) => get(paneId)?.getText() ?? '',
     getPaneSize: (paneId: string) => get(paneId)?.getSize() ?? null,
+    paneOverflowsContainer: (paneId: string) => get(paneId)?.overflowsContainer() ?? false,
     getPaneVisibleContent: (paneId: string) => get(paneId)?.getVisibleContent() ?? emptyContent(),
     getPaneVisibleStyleSummary: (paneId: string) => get(paneId)?.getVisibleStyleSummary() ?? emptyStyle(),
     getPaneBlockState: (paneId: string) => get(paneId)?.getBlockState() ?? null,
