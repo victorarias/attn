@@ -54,6 +54,16 @@ without spelunking through step logs or JSON summaries.
 - If these scenarios pass while users can reproduce workspace/session errors in the packaged app, treat that as a test design bug.
 - Real-app commands target the dev sibling (or the active `ATTN_PROFILE`) by default. Production runs must pass `--run-against-prod`; never bypass the shared production-target guard.
 
+## Screenshot Crop / Scale
+
+`captureFrontWindowScreenshot` (and `capture-app-screenshot.mjs`'s `--crop`/`--max-dim`
+flags) can crop to a window-relative region and downscale the PNG at capture time via
+`sips -Z`, so an agent that actually looks at the image pays far fewer tokens. `--crop`
+accepts `x,y,WxH` (e.g. `0,0,800x600`) or the all-comma `x,y,w,h` form; a crop is clamped
+to the window's bounds and only throws if it does not overlap the window at all. Prefer
+these over capturing full-resolution, full-window screenshots when only a sub-region
+matters for the assertion.
+
 ## Workspace Sessions
 
 - A visible pane is a session pane. Do not model durable non-session terminals.
