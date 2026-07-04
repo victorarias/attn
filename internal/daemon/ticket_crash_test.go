@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -97,6 +98,78 @@ func TestCaptureTicketCrashStateNoopAfterTerminalReport(t *testing.T) {
 	}
 	if ticket.Status != store.TicketStatusDone {
 		t.Fatalf("status = %q, want done (report wins over crash)", ticket.Status)
+	}
+}
+
+// A user reload (kill_session reload:true + respawn of the same id) is a
+// lifecycle transition, not a death: exactly the reload-killed exit skips the
+// crash/reconcile seam, and a later real exit of the respawned worker is judged
+// normally again (the mark is one-shot).
+func TestHandlePTYExitReloadKillSkipsTicketSeam(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	sessionID := delegateBoundSession(t, d)
+	ticketID := boundTicketID(t, d, sessionID)
+	d.store.UpdateState(sessionID, protocol.StateWorking)
+
+	d.markReloadKill(sessionID)
+	d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 0})
+
+	ticket, err := d.store.GetTicket(ticketID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if ticket.Status != store.TicketStatusWorking {
+		t.Fatalf("status after reload exit = %q, want unchanged working", ticket.Status)
+	}
+
+	// The respawned worker dying for real must still crash the ticket.
+	d.store.UpdateState(sessionID, protocol.StateWorking)
+	d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 1})
+
+	ticket, err = d.store.GetTicket(ticketID)
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if ticket.Status != store.TicketStatusCrashed {
+		t.Fatalf("status after real exit = %q, want crashed", ticket.Status)
+	}
+}
+
+// An expired reload mark must not swallow a real crash: consume reports false
+// past the TTL, and the mark is cleared either way.
+func TestConsumeReloadKillExpiresAndIsOneShot(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	d.markReloadKill("fresh")
+	if !d.consumeReloadKill("fresh") {
+		t.Fatal("fresh mark not consumable")
+	}
+	if d.consumeReloadKill("fresh") {
+		t.Fatal("mark consumable twice, want one-shot")
+	}
+
+	d.markReloadKill("stale")
+	d.reloadingMu.Lock()
+	d.reloadKills["stale"] = time.Now().Add(-reloadKillMarkTTL - time.Second)
+	d.reloadingMu.Unlock()
+	if d.consumeReloadKill("stale") {
+		t.Fatal("expired mark consumed as valid")
+	}
+}
+
+// The reload flag survives the wire: a kill_session JSON payload with
+// reload:true decodes into KillSessionMessage.Reload.
+func TestKillSessionMessageDecodesReloadFlag(t *testing.T) {
+	_, msg, err := protocol.ParseMessage([]byte(`{"cmd":"kill_session","id":"s1","reload":true}`))
+	if err != nil {
+		t.Fatalf("ParseMessage: %v", err)
+	}
+	kill, ok := msg.(*protocol.KillSessionMessage)
+	if !ok {
+		t.Fatalf("parsed type = %T, want *KillSessionMessage", msg)
+	}
+	if !protocol.Deref(kill.Reload) {
+		t.Fatal("reload flag lost in decode")
 	}
 }
 
