@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/tasks"
@@ -451,6 +452,20 @@ func (d *Daemon) reconcileTaskExecutor(ctx context.Context, task *tasks.Task) er
 	}
 
 	comment := renderTicketReconcileComment(in, verdict, failReason)
+	if verdict != nil {
+		// Deterministic, annotate-only ground-truth cross-check: never mutate
+		// the verdict, never fail the reconcile because of this — any problem
+		// here (no cwd, no origin, no tracked PRs) just degrades to no
+		// annotation.
+		repoSlug := git.OriginOwnerRepo(ticket.Cwd)
+		if repoSlug != "" {
+			refs := extractPRRefs(verdict.WhatsLeft + "\n" + verdict.Evidence)
+			lines := reconcileGroundTruthLines(refs, repoSlug, d.store.ListPRsByRepo(repoSlug))
+			if len(lines) > 0 {
+				comment += "\n" + strings.Join(lines, "\n")
+			}
+		}
+	}
 	if _, err := d.store.AddTicketComment(in.TicketID, store.TicketAuthorAttn, comment, time.Now()); err != nil {
 		// The only retryable path: the verdict must land, so ask the runner to back
 		// off and re-run rather than silently dropping the reconciliation.
