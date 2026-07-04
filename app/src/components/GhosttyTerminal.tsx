@@ -1465,18 +1465,31 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const applyFitDimensions = useCallback((dims: TerminalDimensions) => {
       const terminal = terminalRef.current;
       const renderer = rendererRef.current;
-      if (!terminal || !renderer) return;
+      if (!terminal || !renderer) {
+        // A dead model/renderer left this bail silent before, which is exactly
+        // when the trace matters most — log it defensively (meta may not exist yet).
+        noteResize(diagKeyRef.current, {
+          session: runtimeMetaRef.current?.sessionId ?? undefined,
+          paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+          source: 'fit',
+          bail: renderer ? 'noModel' : 'noRenderer',
+        });
+        return;
+      }
       // Inactive session wrappers use display:none. Resizing the Ghostty
       // model from that hidden geometry discards an idle alternate-screen
       // frame before the session becomes visible again.
       const paneKind = runtimeMetaRef.current?.paneKind ?? undefined;
       const session = runtimeMetaRef.current?.sessionId ?? undefined;
+      const fitContainer = containerRef.current;
+      const cw = fitContainer?.clientWidth;
+      const ch = fitContainer?.clientHeight;
       if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) {
-        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'inactiveSession' });
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'inactiveSession', cw, ch });
         return;
       }
       if (!fitRequiresTerminalResize({ cols: terminal.cols, rows: terminal.rows }, dims)) {
-        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'sameSize', toCols: dims.cols, toRows: dims.rows });
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'sameSize', toCols: dims.cols, toRows: dims.rows, cw, ch, fromCols: terminal.cols, fromRows: terminal.rows });
         renderSurface(false);
         return;
       }
@@ -1485,7 +1498,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       // is not a conflict — skip it and let the replay land there (the PTY
       // is already that size, so there is nothing to notify either).
       if (liveResizeConflictsWithQueuedReplay(pendingReplayGeometryRef.current, dims) === 'skip') {
-        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'replayPending', toCols: dims.cols, toRows: dims.rows });
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'replayPending', toCols: dims.cols, toRows: dims.rows, cw, ch, fromCols: terminal.cols, fromRows: terminal.rows });
         renderSurface(false);
         return;
       }
@@ -1518,11 +1531,22 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const fit = useCallback(() => {
       const container = containerRef.current;
       const renderer = rendererRef.current;
-      if (!container || !renderer) return;
+      if (!container || !renderer) {
+        // A dead renderer/unmounted container left this bail silent before,
+        // which is exactly when the trace matters most — log it defensively
+        // (meta may not exist yet).
+        noteResize(diagKeyRef.current, {
+          session: runtimeMetaRef.current?.sessionId ?? undefined,
+          paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+          source: 'fit',
+          bail: renderer ? 'noContainer' : 'noRenderer',
+        });
+        return;
+      }
       const paneKind = runtimeMetaRef.current?.paneKind ?? undefined;
       const session = runtimeMetaRef.current?.sessionId ?? undefined;
       if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) {
-        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'inactiveSession' });
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'inactiveSession', cw: container.clientWidth, ch: container.clientHeight });
         return;
       }
       const dims = renderer.fitDimensions(container.clientWidth, container.clientHeight);
@@ -1536,7 +1560,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         container.clientWidth,
         container.clientHeight,
       )) {
-        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'suspiciousSize', toCols: dims.cols, toRows: dims.rows });
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'suspiciousSize', toCols: dims.cols, toRows: dims.rows, cw: container.clientWidth, ch: container.clientHeight });
         return;
       }
       // The size is now backed by a real container measurement: attaches may
@@ -1663,6 +1687,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (!model) return null;
           const activeRenderer = rendererRef.current;
           const activeContainer = containerRef.current;
+          const activeCanvas = canvasRef.current;
+          const containerRect = activeContainer?.getBoundingClientRect() ?? null;
+          const canvasRect = activeCanvas?.getBoundingClientRect() ?? null;
           return {
             cols: model.cols,
             rows: model.rows,
@@ -1673,8 +1700,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             // not allowed to paint must not be judged blank by the watchdog.
             active: runtimeMetaRef.current ? runtimeMetaRef.current.isActiveSession : true,
             // Geometry for the bottom-clip detector / on-demand dump. Reads the
-            // container live (forces a layout), so only the low-frequency sweep
-            // and the manual dump call this — never the per-frame paint path.
+            // container/canvas live (forces a layout via getBoundingClientRect),
+            // so only the low-frequency sweep and the manual dump call this —
+            // never the per-frame paint path. The rects are DOM truth: they
+            // catch a canvas offset or mis-sized within its container even
+            // when the model's own row*cellHeight arithmetic looks clean.
             session: runtimeMetaRef.current?.sessionId ?? undefined,
             isActivePane: runtimeMetaRef.current?.isActivePane ?? null,
             hasMeasuredSize: hasMeasuredSizeRef.current,
@@ -1682,6 +1712,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             cellHeight: activeRenderer?.cellHeight ?? null,
             clientWidth: activeContainer?.clientWidth ?? null,
             clientHeight: activeContainer?.clientHeight ?? null,
+            containerTop: containerRect?.top ?? null,
+            containerBottom: containerRect?.bottom ?? null,
+            containerLeft: containerRect?.left ?? null,
+            containerRight: containerRect?.right ?? null,
+            canvasTop: canvasRect?.top ?? null,
+            canvasBottom: canvasRect?.bottom ?? null,
+            canvasLeft: canvasRect?.left ?? null,
+            canvasRight: canvasRect?.right ?? null,
+            canvasCssHeight: canvasRect?.height ?? null,
+            canvasPixelWidth: activeCanvas?.width ?? null,
+            canvasPixelHeight: activeCanvas?.height ?? null,
           };
         });
         inputRef.current = new InputHandler(

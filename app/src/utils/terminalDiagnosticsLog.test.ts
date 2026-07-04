@@ -232,4 +232,97 @@ describe('bottom-clip detector', () => {
       rows: 26, flooredRows: 25, flooredCols: 80, overflowPx: 6, clipping: true,
     });
   });
+
+  it('flags DOM-truth bottom overflow even when the model math is clean', () => {
+    const pane = 'pane-clip-dom-overflow';
+    // Model math is clean (rows*cellHeight == clientHeight), but the real
+    // canvas rect spills 5px past the container's bottom edge.
+    const unregister = registerRenderProbe(pane, () => probeWith({
+      rows: 25, cellHeight: 21, clientHeight: 525,
+      containerTop: 0, containerBottom: 525, canvasTop: 0, canvasBottom: 530,
+    }));
+    vi.advanceTimersByTime(1600);
+    unregister();
+
+    const incidents = ringEventsFor(pane).filter((event) => event.kind === 'incident');
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]?.reason).toBe('bottom_clip');
+    expect(incidents[0]?.trigger).toEqual(['dom_overflow']);
+    expect(incidents[0]?.domOverflowPx).toBe(5);
+    expect(incidents[0]?.domOffsetTopPx).toBe(0);
+  });
+
+  it('flags a DOM-truth top offset even when the model math is clean', () => {
+    const pane = 'pane-clip-dom-offset';
+    const unregister = registerRenderProbe(pane, () => probeWith({
+      rows: 25, cellHeight: 21, clientHeight: 525,
+      containerTop: 0, containerBottom: 525, canvasTop: 4, canvasBottom: 525,
+    }));
+    vi.advanceTimersByTime(1600);
+    unregister();
+
+    const incidents = ringEventsFor(pane).filter((event) => event.kind === 'incident');
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]?.reason).toBe('bottom_clip');
+    expect(incidents[0]?.trigger).toEqual(['dom_offset']);
+    expect(incidents[0]?.domOffsetTopPx).toBe(4);
+    expect(incidents[0]?.domOverflowPx).toBe(0);
+  });
+
+  it('stays clean and resolves a previously-clipping pane when all three signals agree', () => {
+    const pane = 'pane-clip-all-clean-then-resolve';
+    let clipping = true;
+    const unregister = registerRenderProbe(pane, () => (clipping
+      ? probeWith({
+        rows: 26, cellHeight: 21, clientHeight: 540,
+        containerTop: 0, containerBottom: 540, canvasTop: 0, canvasBottom: 546,
+      })
+      : probeWith({
+        rows: 25, cellHeight: 21, clientHeight: 525,
+        containerTop: 0, containerBottom: 525, canvasTop: 0, canvasBottom: 525,
+      })));
+    vi.advanceTimersByTime(1600); // onset (model + dom overflow agree)
+    clipping = false;
+    vi.advanceTimersByTime(1600); // all three signals clean → resolution
+    unregister();
+
+    const reasons = ringEventsFor(pane)
+      .filter((event) => event.kind === 'incident')
+      .map((event) => event.reason);
+    expect(reasons).toEqual(['bottom_clip', 'bottom_clip_resolved']);
+  });
+
+  it('flags a right-edge-only overflow that the bottom-only signals miss', () => {
+    const pane = 'pane-clip-right-overflow';
+    // Bottom is clean (even slightly under, i.e. negative overflow), but the
+    // canvas spills 7px past the container's right edge — the field repro
+    // this detector was blind to before the right/left signals were added.
+    const unregister = registerRenderProbe(pane, () => probeWith({
+      rows: 25, cellHeight: 21, clientHeight: 525,
+      containerTop: 0, containerBottom: 525, canvasTop: 0, canvasBottom: 525,
+      containerLeft: 0, containerRight: 720, canvasLeft: 0, canvasRight: 727,
+    }));
+    vi.advanceTimersByTime(1600);
+    unregister();
+
+    const incidents = ringEventsFor(pane).filter((event) => event.kind === 'incident');
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]?.reason).toBe('bottom_clip');
+    expect(incidents[0]?.trigger).toEqual(['dom_overflow_right']);
+    expect(incidents[0]?.domOverflowRightPx).toBe(7);
+    expect(incidents[0]?.domOffsetLeftPx).toBe(0);
+  });
+
+  it('stays clean when left/right rects agree with the container', () => {
+    const pane = 'pane-clip-lr-clean';
+    const unregister = registerRenderProbe(pane, () => probeWith({
+      rows: 25, cellHeight: 21, clientHeight: 525,
+      containerTop: 0, containerBottom: 525, canvasTop: 0, canvasBottom: 525,
+      containerLeft: 0, containerRight: 720, canvasLeft: 0, canvasRight: 720,
+    }));
+    vi.advanceTimersByTime(1600);
+    unregister();
+
+    expect(ringEventsFor(pane).filter((event) => event.kind === 'incident')).toHaveLength(0);
+  });
 });
