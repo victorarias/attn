@@ -66,6 +66,34 @@ func (d *Daemon) handleTicketList(conn net.Conn, msg *protocol.TicketListMessage
 	})
 }
 
+// handleTicketShow is the agent's non-consuming full-record read: one ticket's
+// metadata, description, and complete activity thread (full bodies) plus
+// attachments, the same shape sendGetTicketWSResult serves the app. Unlike
+// ticket_inbox, it never advances the calling session's unread cursor, so an
+// agent can re-read it at will. Like ticket_list it is NOT identity-scoped, so
+// source_session_id is accepted but unused.
+func (d *Daemon) handleTicketShow(conn net.Conn, msg *protocol.TicketShowMessage) {
+	ticketID := strings.TrimSpace(msg.TicketID)
+	if ticketID == "" {
+		d.sendError(conn, "ticket show: ticket_id is required")
+		return
+	}
+	ticket, err := d.store.GetTicket(ticketID)
+	if err != nil {
+		d.sendError(conn, "ticket show: "+err.Error())
+		return
+	}
+	if ticket == nil {
+		d.sendError(conn, "ticket show: ticket not found: "+ticketID)
+		return
+	}
+	full := ticketToProtocol(ticket)
+	_ = json.NewEncoder(conn).Encode(protocol.Response{
+		Ok:               true,
+		TicketShowResult: &protocol.TicketShowResult{Ticket: full},
+	})
+}
+
 // broadcastTicketsUpdated re-pushes the whole non-archived board to every client.
 // Run it after any producer that mutates a ticket (create, status, crash, and the
 // chief edits to come).

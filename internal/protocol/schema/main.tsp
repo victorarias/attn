@@ -702,6 +702,25 @@ model TicketListResult {
   tickets: Ticket[];
 }
 
+// TicketShowMessage reads one ticket's full record — metadata, description, and the
+// complete activity thread (with full bodies) plus attachments — pulled over the
+// agent socket instead of pushed as a tickets_updated broadcast. Unlike ticket_inbox
+// this is non-consuming: it never advances the calling session's unread cursor, so
+// it can be re-read at will. Like ticket_list it is NOT identity-scoped — a global
+// read of a ticket by id, so source_session_id is optional and unused, present only
+// for command-shape uniformity.
+model TicketShowMessage {
+  cmd: "ticket_show";
+  source_session_id?: string;
+  ticket_id: string;
+}
+
+// TicketShowResult is the full ticket record — the same shape the app's get_ticket
+// serves, with Activity and Attachments populated.
+model TicketShowResult {
+  ticket: Ticket;
+}
+
 // TicketSubscribeMessage opts the calling session into a ticket's notifications —
 // an explicit, opt-in standing interest in a ticket it is not assigned to. The
 // daemon records the subscription authored by the session (identity = session), so
@@ -2376,6 +2395,7 @@ model Response {
   ticket_status_result?: TicketStatusResult;
   ticket_inbox_result?: TicketInboxResult;
   ticket_list_result?: TicketListResult;
+  ticket_show_result?: TicketShowResult;
   ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
   ticket_comment_result?: TicketCommentResult;
