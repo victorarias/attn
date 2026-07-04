@@ -23,6 +23,8 @@ import {
 import type { SessionAgent } from '../../types/sessionAgent';
 import type { UISessionState } from '../../types/sessionState';
 import { HeaderNudgeIndicator, deriveNudgeMode } from '../NudgeIndicator';
+import { HeaderPresentationChip } from '../PresentationChip';
+import type { Presentation } from '../../types/generated';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
@@ -108,6 +110,7 @@ interface SessionTerminalWorkspaceProps {
     ticketUnread?: boolean;
     nudgeFiresAt?: string;
     isActive?: boolean;
+    presentation?: Presentation;
   }>;
   workspace: TerminalWorkspaceState;
   activePaneId: string;
@@ -127,6 +130,7 @@ interface SessionTerminalWorkspaceProps {
   onFocusPane: (paneId: string) => void;
   onRenameSession?: (sessionId: string, label: string) => Promise<void>;
   onTriggerNudge?: (sessionId: string) => void;
+  onOpenPresentation?: (presentationId: string) => void;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
   onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
@@ -170,6 +174,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onFocusPane,
     onRenameSession,
     onTriggerNudge,
+    onOpenPresentation,
     onZoomModeChange,
     onNavigateOutOfSession,
     onResizeSplit,
@@ -319,6 +324,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       });
     }, [fitPane, runtimePanes]);
     const getPaneSize = runtime.getPaneSize;
+    const paneOverflowsContainer = runtime.paneOverflowsContainer;
     const splitLayoutActive = workspace.layoutTree?.type === 'split';
     // Show the pane header (which doubles as the drag-to-move handle) whenever the
     // workspace holds more than one leaf — including tiles, so a lone pane sharing
@@ -488,8 +494,11 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
 
     // After relaunch, first-show, or split topology changes, the terminal can briefly keep
     // stale narrow geometry from the previous layout. Re-fitting immediately and then
-    // once more after layout settles preserves restored headers/content width.
-    const refitPanesNowAndIfStillTiny = useCallback((targetPaneIds: string[]) => {
+    // once (or twice) more after layout settles preserves restored headers/content width —
+    // and catches a pane whose grid overflows its container (e.g. the window shrank while
+    // the pane was hidden), which fit()'s reveal path does not retry on its own and would
+    // otherwise stay clipped until something unrelated re-triggers a fit.
+    const refitPanesNowAndIfStillWrong = useCallback((targetPaneIds: string[]) => {
       const paneIdsToFit = Array.from(new Set(targetPaneIds));
       if (paneIdsToFit.length === 0) {
         return undefined;
@@ -499,19 +508,34 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         fitPane(paneId);
       }
 
+      const stillWrong = (paneId: string) => {
+        const size = getPaneSize(paneId);
+        return (size != null && isSuspiciousTerminalSize(size.cols, size.rows)) || paneOverflowsContainer(paneId);
+      };
+
       const lateRefitTimeout = window.setTimeout(() => {
         for (const paneId of paneIdsToFit) {
-          const size = getPaneSize(paneId);
-          if (size && isSuspiciousTerminalSize(size.cols, size.rows)) {
+          if (stillWrong(paneId)) {
             fitPane(paneId);
           }
         }
       }, 75);
 
+      // A second, later check covers slower layout settles the 75ms tick can
+      // miss — cheap insurance for a bug that otherwise persists indefinitely.
+      const secondLateRefitTimeout = window.setTimeout(() => {
+        for (const paneId of paneIdsToFit) {
+          if (stillWrong(paneId)) {
+            fitPane(paneId);
+          }
+        }
+      }, 400);
+
       return () => {
         window.clearTimeout(lateRefitTimeout);
+        window.clearTimeout(secondLateRefitTimeout);
       };
-    }, [fitPane, getPaneSize]);
+    }, [fitPane, getPaneSize, paneOverflowsContainer]);
 
     useLayoutEffect(() => {
       if (!sessionVisible) {
@@ -522,8 +546,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         return;
       }
       sessionVisibleRef.current = true;
-      return refitPanesNowAndIfStillTiny(renderedPaneIds);
-    }, [refitPanesNowAndIfStillTiny, renderedPaneIds, renderedPaneIdsKey, sessionVisible]);
+      return refitPanesNowAndIfStillWrong(renderedPaneIds);
+    }, [refitPanesNowAndIfStillWrong, renderedPaneIds, renderedPaneIdsKey, sessionVisible]);
 
     useLayoutEffect(() => {
       if (!sessionVisible) {
@@ -543,8 +567,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       if (movedPanes.length === 0) {
         return;
       }
-      return refitPanesNowAndIfStillTiny(movedPanes);
-    }, [panePaths, refitPanesNowAndIfStillTiny, sessionVisible, workspaceTopologyKey]);
+      return refitPanesNowAndIfStillWrong(movedPanes);
+    }, [panePaths, refitPanesNowAndIfStillWrong, sessionVisible, workspaceTopologyKey]);
 
     const handleSplit = useCallback((direction: TerminalSplitDirection) => {
       onSplitPane(activePaneId, direction);
@@ -707,11 +731,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               isActive: Boolean(paneSession.isActive),
             })
           : null;
-        // The pane header is the home for the nudge indicator. It is normally shown
-        // only when the workspace is split; surface it on a lone tile too whenever the
-        // session has a nudge to show, so the indicator has its rectangle. Drag/rename
-        // stay split-only — a nudge-only header is a status bar, not a move handle.
-        const headerVisible = showPaneHeader || nudgeMode != null;
+        // The pane header is the home for the nudge indicator and the presentation
+        // chip. It is normally shown only when the workspace is split; surface it on
+        // a lone tile too whenever the session has either to show, so they have their
+        // rectangle. Drag/rename stay split-only — a nudge/presentation-only header
+        // is a status bar, not a move handle.
+        const headerVisible = showPaneHeader || nudgeMode != null || paneSession?.presentation != null;
         return (
           <div
             key={agentPane.id}
@@ -757,6 +782,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 >
                   ✎
                 </button>
+              ) : null}
+              {paneSession?.presentation ? (
+                <HeaderPresentationChip
+                  presentation={paneSession.presentation}
+                  onOpen={(presentationId) => onOpenPresentation?.(presentationId)}
+                />
               ) : null}
               {nudgeMode ? (
                 <HeaderNudgeIndicator

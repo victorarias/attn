@@ -1082,6 +1082,12 @@ func parseSignal(name string) syscall.Signal {
 func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMessage) {
 	d.detachSession(client, msg.ID)
 	sig := parseSignal(protocol.Deref(msg.Signal))
+	if protocol.Deref(msg.Reload) {
+		// This kill is the first half of a client reload (same id respawns right
+		// after). Mark before Kill so the exit event — which can fire the instant
+		// Kill returns — reads as a lifecycle transition, not a crash.
+		d.markReloadKill(msg.ID)
+	}
 	err := d.ptyBackend.Kill(context.Background(), msg.ID, sig)
 	if err == nil || errors.Is(err, pty.ErrSessionNotFound) {
 		// Production backends return from Kill only once the child has exited.

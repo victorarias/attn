@@ -1526,6 +1526,31 @@ mod tests {
     }
 
     #[test]
+    fn present_capability_has_a_minimal_permission_surface() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/present.json"))
+                .expect("parse present capability");
+        assert_eq!(capability["windows"], json!(["present"]));
+        assert_eq!(capability["webviews"], json!(["present"]));
+
+        let permissions = capability["permissions"]
+            .as_array()
+            .expect("present capability permissions is an array");
+        for permission in permissions {
+            let identifier = permission
+                .as_str()
+                .or_else(|| permission["identifier"].as_str())
+                .expect("permission entry has a string or identifier field");
+            assert!(
+                !identifier.starts_with("fs:")
+                    && !identifier.starts_with("shell:")
+                    && !identifier.starts_with("dialog:"),
+                "present capability must not grant fs/shell/dialog permissions, found {identifier}"
+            );
+        }
+    }
+
+    #[test]
     fn browser_initialization_reports_pointer_focus() {
         assert!(!single_tab_script().contains("attnBrowserFocus"));
         assert!(isolated_initialization_script().contains("attnBrowserFocus"));

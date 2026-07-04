@@ -21,6 +21,9 @@ import type {
   Task as GeneratedTask,
   Notification as GeneratedNotification,
   Ticket as GeneratedTicket,
+  Presentation,
+  PresentationRound,
+  PresentationComment,
   PRRole,
   HeatState,
 } from '../types/generated';
@@ -489,6 +492,9 @@ interface UseDaemonSocketOptions {
   // Fired with the non-archived ticket board (bare rows) on initial_state and on
   // every tickets_updated broadcast. The detail view fetches full records itself.
   onTicketsUpdate?: (tickets: Ticket[]) => void;
+  // Fired when a presentation is created or its status/latest-round state changes.
+  onPresentationAdded?: (presentation: Presentation) => void;
+  onPresentationUpdated?: (presentation: Presentation) => void;
   onWorkspacesUpdate: (workspaces: DaemonWorkspace[]) => void;
   onPRsUpdate: (prs: DaemonPR[]) => void;
   onEndpointsUpdate?: (endpoints: DaemonEndpoint[]) => void;
@@ -772,6 +778,8 @@ export function useDaemonSocket({
   onNotificationsUpdated,
   onFsChanged,
   onTicketsUpdate,
+  onPresentationAdded,
+  onPresentationUpdated,
   onWorkspacesUpdate,
   onPRsUpdate,
   onEndpointsUpdate,
@@ -803,6 +811,8 @@ export function useDaemonSocket({
     onNotificationsUpdated,
     onFsChanged,
     onTicketsUpdate,
+    onPresentationAdded,
+    onPresentationUpdated,
     onWorkspacesUpdate,
     onPRsUpdate,
     onEndpointsUpdate,
@@ -823,6 +833,8 @@ export function useDaemonSocket({
     onNotificationsUpdated,
     onFsChanged,
     onTicketsUpdate,
+    onPresentationAdded,
+    onPresentationUpdated,
     onWorkspacesUpdate,
     onPRsUpdate,
     onEndpointsUpdate,
@@ -1382,6 +1394,18 @@ export function useDaemonSocket({
 
           case 'tickets_updated':
             callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
+            break;
+
+          case 'presentation_added':
+            if (data.presentation) {
+              callbacksRef.current.onPresentationAdded?.(data.presentation);
+            }
+            break;
+
+          case 'presentation_updated':
+            if (data.presentation) {
+              callbacksRef.current.onPresentationUpdated?.(data.presentation);
+            }
             break;
 
           case 'workspace_tile_content': {
@@ -2280,6 +2304,32 @@ export function useDaemonSocket({
             }
             break;
 
+          case 'get_presentations_result': {
+            const pending = pendingActionsRef.current.get('get_presentations');
+            if (pending) {
+              pendingActionsRef.current.delete('get_presentations');
+              if (data.success) {
+                pending.resolve(data.presentations || []);
+              } else {
+                pending.reject(new Error(data.error || 'Failed to load presentations'));
+              }
+            }
+            break;
+          }
+
+          case 'get_presentation_round_result': {
+            const pending = pendingActionsRef.current.get('get_presentation_round');
+            if (pending) {
+              pendingActionsRef.current.delete('get_presentation_round');
+              if (data.success) {
+                pending.resolve({ presentation: data.presentation, round: data.round, comments: data.comments || [] });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to load presentation round'));
+              }
+            }
+            break;
+          }
+
           case 'refresh_prs_result': {
             const pending = pendingActionsRef.current.get('refresh_prs');
             if (pending) {
@@ -2921,7 +2971,7 @@ export function useDaemonSocket({
     });
   }, [reconcileAttachedRuntimeGeometry, sendAttachSessionWithRetry, sendPtyResize]);
 
-  const sendKillSession = useCallback((id: string, signal?: string): Promise<void> => {
+  const sendKillSession = useCallback((id: string, signal?: string, options?: { reload?: boolean }): Promise<void> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -2935,7 +2985,14 @@ export function useDaemonSocket({
         reject,
       });
 
-      ws.send(JSON.stringify({ cmd: 'kill_session', id, ...(signal && { signal }) }));
+      ws.send(JSON.stringify({
+        cmd: 'kill_session',
+        id,
+        ...(signal && { signal }),
+        // Tells the daemon this kill is the first half of a reload (the same id
+        // respawns right after), so the exit is not treated as a crash.
+        ...(options?.reload && { reload: true }),
+      }));
 
       // Wait for session_exited to avoid kill/spawn races during reload.
       setTimeout(() => {
@@ -3267,9 +3324,9 @@ export function useDaemonSocket({
       detach: async (id: string) => {
         sendDetachSession(id);
       },
-      kill: async (id: string) => {
+      kill: async (id: string, options?: { reload?: boolean }) => {
         sendDetachSession(id);
-        await sendKillSession(id);
+        await sendKillSession(id, undefined, options);
       },
     });
 
@@ -4873,6 +4930,59 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Fetch the current open/closed presentations (for the main-window banner).
+  const getPresentations = useCallback((): Promise<Presentation[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'get_presentations';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({ cmd: 'get_presentations' }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get presentations timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  // Fetch a presentation's round (defaults to latest) for the PresentRoot window.
+  const getPresentationRound = useCallback((
+    presentationId: string,
+    seq?: number,
+  ): Promise<{ presentation: Presentation; round: PresentationRound; comments: PresentationComment[] }> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'get_presentation_round';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({
+        cmd: 'get_presentation_round',
+        presentation_id: presentationId,
+        ...(seq !== undefined && { seq }),
+      }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Get presentation round timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
   const clearWarnings = useCallback(() => {
     setWarnings([]);
     const ws = wsRef.current;
@@ -4982,5 +5092,7 @@ export function useDaemonSocket({
     sendResolveComment,
     sendDeleteComment,
     sendGetComments,
+    getPresentations,
+    getPresentationRound,
   };
 }

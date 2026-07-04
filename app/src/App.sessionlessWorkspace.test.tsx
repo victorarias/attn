@@ -260,6 +260,7 @@ describe('tile-only (sessionless) workspace selection and render', () => {
       sendResolveComment: vi.fn(async () => ({ success: true })),
       sendDeleteComment: vi.fn(async () => ({ success: true })),
       sendGetComments: vi.fn(async () => ({ success: true, comments: [] })),
+      getPresentations: vi.fn(async () => []),
       connectionError: null,
       hasReceivedInitialState: true,
       sendNotificationList: vi.fn(async () => ({ notifications: [], unreadCount: 0 })),
