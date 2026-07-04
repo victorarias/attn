@@ -214,6 +214,32 @@ func TestPresentGetPresentationRoundLatestVsExplicit(t *testing.T) {
 	}
 }
 
+func TestPresentGetPresentationRoundByID(t *testing.T) {
+	s := newPresentTestStore(t)
+	now := time.Now()
+
+	p, err := s.CreatePresentation("session-1", nil, "Title", "pr", "/repo", now)
+	if err != nil {
+		t.Fatalf("CreatePresentation: %v", err)
+	}
+	round, err := s.CreatePresentationRound(p.ID, "manifest: v1", "base1", "head1", now)
+	if err != nil {
+		t.Fatalf("CreatePresentationRound: %v", err)
+	}
+
+	got, err := s.GetPresentationRoundByID(round.ID)
+	if err != nil {
+		t.Fatalf("GetPresentationRoundByID: %v", err)
+	}
+	if got.PresentationID != p.ID || got.Seq != round.Seq {
+		t.Errorf("GetPresentationRoundByID() = %+v, want presentation_id=%s seq=%d", got, p.ID, round.Seq)
+	}
+
+	if _, err := s.GetPresentationRoundByID("no-such-round"); err == nil {
+		t.Error("expected error for nonexistent round id")
+	}
+}
+
 func TestPresentSubmitRoundStoresCommentsAndSetsSubmittedAt(t *testing.T) {
 	s := newPresentTestStore(t)
 	now := time.Now()

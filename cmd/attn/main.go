@@ -27,6 +27,7 @@ import (
 	"github.com/victorarias/attn/internal/daemonctl"
 	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/pathutil"
+	"github.com/victorarias/attn/internal/present"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
 	"github.com/victorarias/attn/internal/workflowresult"
@@ -251,6 +252,9 @@ func main() {
 	case "ticket":
 		maybePrintProfileBanner()
 		runTicket()
+	case "present":
+		maybePrintProfileBanner()
+		runPresent()
 	case "workspace":
 		maybePrintProfileBanner()
 		runWorkspace()
@@ -561,6 +565,7 @@ commands:
   browser <command>                 open and control the in-app browser
   workflow <command>                run, inspect, and resume durable workflows
   list                              list sessions and workspaces
+  present <command>                 open a review presentation and read feedback
   daemon <command>                  manage the daemon
   profile <status|resolve|list>     show / resolve the active profile's resources
   profile-env <profile|--unset>     print shell commands for selecting a profile
@@ -1394,6 +1399,211 @@ work states:
   failed            failed
 
 The session defaults to ATTN_SESSION_ID.
+`)
+}
+
+// runPresent dispatches the `attn present` surface: opening a presentation (the
+// default form, no subcommand), validating a manifest locally, and reading back
+// reviewer feedback.
+func runPresent() {
+	if len(os.Args) >= 3 {
+		switch os.Args[2] {
+		case "-h", "--help":
+			writePresentHelp(os.Stdout)
+			return
+		case "validate":
+			if hasHelpFlag(os.Args[3:]) {
+				writePresentHelp(os.Stdout)
+				return
+			}
+			runPresentValidate(os.Args[3:])
+			return
+		case "feedback":
+			if hasHelpFlag(os.Args[3:]) {
+				writePresentHelp(os.Stdout)
+				return
+			}
+			runPresentFeedback(os.Args[3:])
+			return
+		}
+	}
+	warnIfDaemonVersionMismatch()
+	runPresentOpen(os.Args[2:])
+}
+
+type presentOpenArgs struct {
+	Manifest       string
+	PresentationID string
+	Session        string
+	JSON           bool
+}
+
+func parsePresentOpenArgs(args []string) (presentOpenArgs, error) {
+	var result presentOpenArgs
+	fs := flag.NewFlagSet("present", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	manifest := fs.String("manifest", ".present.yml", "path to the present manifest")
+	presentationID := fs.String("presentation", "", "existing presentation id to add a new round to")
+	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+	if err := fs.Parse(args); err != nil {
+		return result, err
+	}
+	if rest := fs.Args(); len(rest) > 0 {
+		return result, fmt.Errorf("unexpected argument %q", rest[0])
+	}
+	result.Manifest = *manifest
+	result.PresentationID = *presentationID
+	result.Session = *session
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+// runPresentOpen parses and validates the manifest locally first, for a fast and
+// friendly error, then hands the raw YAML to the daemon — the daemon re-parses
+// and pins it, since it is the single authority over what a presentation actually
+// reviewed.
+func runPresentOpen(args []string) {
+	parsed, err := parsePresentOpenArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
+		writePresentHelp(os.Stderr)
+		os.Exit(2)
+	}
+	if _, err := present.ParseManifestFile(parsed.Manifest); err != nil {
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
+		os.Exit(1)
+	}
+	manifestYAML, err := os.ReadFile(parsed.Manifest)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
+		os.Exit(1)
+	}
+	source, err := resolveDispatchSession(parsed.Session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").PresentOpen(source, string(manifestYAML), parsed.PresentationID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "present: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("presentation %s round %d pinned %s..%s\n",
+		shortenID(result.PresentationID), result.Seq, shortenID(result.BaseSHA), shortenID(result.HeadSHA))
+	fmt.Printf("feedback will arrive via: attn present feedback %s\n", result.PresentationID)
+}
+
+// runPresentValidate parses and validates a manifest locally, with no daemon
+// call — a fast loop for an agent iterating on a manifest before opening it.
+func runPresentValidate(args []string) {
+	fs := flag.NewFlagSet("present validate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	manifest := fs.String("manifest", ".present.yml", "path to the present manifest")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "present validate: %v\n", err)
+		os.Exit(2)
+	}
+	m, err := present.ParseManifestFile(*manifest)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "present validate: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("manifest ok: %s\n", m.Title)
+}
+
+type presentFeedbackArgs struct {
+	PresentationID string
+	Round          int
+	JSON           bool
+}
+
+// parsePresentFeedbackArgs reads `present feedback <presentation-id> [--round
+// <n>] [--json]`, interleaving flag and positional parsing like `ticket
+// comment` so flags may sit on either side of the id.
+func parsePresentFeedbackArgs(args []string) (presentFeedbackArgs, error) {
+	var result presentFeedbackArgs
+	fs := flag.NewFlagSet("present feedback", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	round := fs.Int("round", 0, "round seq (defaults to the latest round)")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+
+	var positionals []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return result, err
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		positionals = append(positionals, rest[0])
+		rest = rest[1:]
+	}
+	if len(positionals) != 1 {
+		return result, fmt.Errorf("expected exactly one presentation id argument, got %d", len(positionals))
+	}
+	result.PresentationID = positionals[0]
+	result.Round = *round
+	result.JSON = *jsonOutput
+	return result, nil
+}
+
+func runPresentFeedback(args []string) {
+	parsed, err := parsePresentFeedbackArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "present feedback: %v\n", err)
+		writePresentHelp(os.Stderr)
+		os.Exit(2)
+	}
+	result, err := client.New("").PresentFeedback(parsed.PresentationID, parsed.Round)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "present feedback: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(result)
+		return
+	}
+	fmt.Print(result.Markdown)
+}
+
+// shortenID renders the first 7 characters of an id or SHA for compact display
+// (the CLI's actionable hints always echo the full id, never this form).
+func shortenID(id string) string {
+	if len(id) > 7 {
+		return id[:7]
+	}
+	return id
+}
+
+func writePresentHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn present [command] [flags]
+
+commands:
+  (none)                            open a presentation (or a new round) from a
+                                     manifest and pin it to its current git refs
+  validate                          parse and validate a manifest locally, with
+                                     no daemon call
+  feedback <presentation-id>        print a round's reviewer feedback as markdown
+
+flags for the default (open) form:
+  --manifest <path>                 manifest path (default .present.yml)
+  --presentation <id>               add a new round to an existing presentation
+  --session <id>                    session id (defaults to ATTN_SESSION_ID)
+  --json                            print the result as JSON
+
+flags for validate:
+  --manifest <path>                 manifest path (default .present.yml)
+
+flags for feedback:
+  --round <n>                       round seq (defaults to the latest round)
+  --json                            print the result as JSON
 `)
 }
 

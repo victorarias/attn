@@ -261,6 +261,33 @@ func (s *Store) GetPresentationRound(presentationID string, seq int) (*Presentat
 	return &r, nil
 }
 
+// GetPresentationRoundByID returns a round by its own id, for callers that
+// only have the round id (e.g. a present_submit_round WS command, which names
+// only the round) and need to resolve which presentation it belongs to.
+func (s *Store) GetPresentationRoundByID(roundID string) (*PresentationRound, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var r PresentationRound
+	var submittedAt sql.NullString
+	err := s.db.QueryRow(`
+		SELECT id, presentation_id, seq, manifest_yaml, base_sha, head_sha, created_at, submitted_at
+		FROM presentation_rounds WHERE id = ?
+	`, roundID).Scan(&r.ID, &r.PresentationID, &r.Seq, &r.ManifestYAML, &r.BaseSHA, &r.HeadSHA, &r.CreatedAt, &submittedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to get presentation round by id: %w", err)
+	}
+	if submittedAt.Valid {
+		v := submittedAt.String
+		r.SubmittedAt = &v
+	}
+
+	return &r, nil
+}
+
 // SubmitPresentationRound records comments for a round and marks it
 // submitted. It errors if the round doesn't exist or is already submitted.
 func (s *Store) SubmitPresentationRound(roundID string, comments []PresentationComment, now time.Time) error {

@@ -1018,6 +1018,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleGetRepoInfoWS(client, msg.(*protocol.GetRepoInfoMessage))
 	case protocol.CmdGetReviewState:
 		d.handleGetReviewState(client, msg.(*protocol.GetReviewStateMessage))
+	case protocol.CmdGetPresentations:
+		d.handleGetPresentations(client, msg.(*protocol.GetPresentationsMessage))
+	case protocol.CmdGetPresentationRound:
+		d.handleGetPresentationRound(client, msg.(*protocol.GetPresentationRoundMessage))
+	case protocol.CmdPresentSubmitRound:
+		d.handlePresentSubmitRound(client, msg.(*protocol.PresentSubmitRoundMessage))
 	case protocol.CmdWorkflowRunGet:
 		d.handleWorkflowRunGetWS(client, msg.(*protocol.WorkflowRunGetMessage))
 	case protocol.CmdWorkflowRunList:
