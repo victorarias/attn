@@ -2463,6 +2463,7 @@ sendFetchPRDetails,
       setSelectedTicketId(null);
     },
     tickets,
+    presentationNotices,
     resetSessionPaneTerminal,
     injectSessionPaneBytes,
     injectSessionPaneBase64,

@@ -3,6 +3,7 @@ import { emit, listen } from '@tauri-apps/api/event';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Session } from '../store/sessions';
+import type { Presentation } from '../types/generated';
 import type { Ticket } from './useDaemonSocket';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
@@ -97,6 +98,9 @@ interface UseUiAutomationBridgeArgs {
   openTicketDetail?: (ticketId: string) => void;
   closeTicketDetail?: () => void;
   tickets?: Ticket[];
+  // Presentation notices (pane-header review chips). Read-only for the
+  // bridge: the chip DOM is the source of truth for what's actually rendered.
+  presentationNotices?: Presentation[];
   resetSessionPaneTerminal: (sessionId: string, paneId: string) => boolean;
   injectSessionPaneBytes: (sessionId: string, paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectSessionPaneBase64: (sessionId: string, paneId: string, payload: string) => Promise<boolean>;
@@ -1575,6 +1579,7 @@ export function useUiAutomationBridge({
   openTicketDetail,
   closeTicketDetail,
   tickets,
+  presentationNotices,
   resetSessionPaneTerminal,
   injectSessionPaneBytes,
   injectSessionPaneBase64,
@@ -2811,6 +2816,38 @@ export function useUiAutomationBridge({
           },
         };
       }
+      case 'present_get_state': {
+        const notices = (presentationNotices || []).map((presentation) => ({
+          id: presentation.id,
+          sessionId: presentation.session_id,
+          title: presentation.title,
+          status: presentation.status,
+          latestRoundSeq: presentation.latest_round_seq,
+          latestRoundSubmitted: presentation.latest_round_submitted,
+        }));
+        const chips = Array.from(document.querySelectorAll('.presentation-chip')).map((element) => ({
+          presentationId: element.getAttribute('data-presentation-id') || '',
+          sessionId: element.getAttribute('data-session-id') || '',
+          title: element.getAttribute('title') || '',
+        }));
+        return { notices, chips };
+      }
+      case 'present_click_chip': {
+        const presentationId = typeof payload.presentationId === 'string' ? payload.presentationId : '';
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        if (!presentationId && !sessionId) {
+          throw new Error('present_click_chip requires presentationId or sessionId');
+        }
+        const selector = presentationId
+          ? `.presentation-chip[data-presentation-id="${presentationId}"]`
+          : `.presentation-chip[data-session-id="${sessionId}"]`;
+        const chip = document.querySelector<HTMLElement>(selector);
+        if (!chip) {
+          throw new Error(`present_click_chip: no chip found for ${selector}`);
+        }
+        chip.click();
+        return { clicked: true, presentationId: chip.getAttribute('data-presentation-id') || '' };
+      }
       default:
         throw new Error(`Unknown automation action: ${request.action}`);
     }
@@ -2831,6 +2868,7 @@ export function useUiAutomationBridge({
     getPaneBlockState,
     openDockPanel,
     openShortcutEditor,
+    presentationNotices,
     resetSessionPaneTerminal,
     drainSessionPaneTerminal,
     selectSession,

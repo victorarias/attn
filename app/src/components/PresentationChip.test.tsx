@@ -27,6 +27,14 @@ describe('HeaderPresentationChip', () => {
     expect(button).toHaveAttribute('title', 'My presentation title');
   });
 
+  it('exposes presentation and session ids for automation', () => {
+    render(<HeaderPresentationChip presentation={makePresentation({ id: 'pres-7', session_id: 'session-7' })} onOpen={vi.fn()} />);
+
+    const button = screen.getByRole('button');
+    expect(button).toHaveAttribute('data-presentation-id', 'pres-7');
+    expect(button).toHaveAttribute('data-session-id', 'session-7');
+  });
+
   it('opens the presentation on click and does not bubble to the pane', () => {
     const onOpen = vi.fn();
     const onPaneClick = vi.fn();

@@ -17,6 +17,8 @@ export function HeaderPresentationChip({
     <button
       type="button"
       className="presentation-chip"
+      data-presentation-id={presentation.id}
+      data-session-id={presentation.session_id}
       // Stop the pane header's pointerdown drag from starting on this button. In a
       // split the header is a leaf-drag handle (beginLeafDrag), so without this a
       // sloppy click that drifts >=4px would relocate the pane instead of opening
