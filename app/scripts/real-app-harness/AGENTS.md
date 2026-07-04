@@ -22,6 +22,31 @@ re-derive them. dev/prod are fast-path literals that a drift guard in
 needs `./attn` built (`make dev` / `go build -o ./attn ./cmd/attn`); override the
 binary with `ATTN_HARNESS_BIN`.
 
+## Verdict Line
+
+Every scenario built on `createScenarioRunner` (`scenarioRunner.mjs`), and
+`run-serial-matrix.mjs`, print a single machine-parseable verdict line as the
+last thing they emit on that path, so a driving agent can learn pass/fail
+without spelunking through step logs or JSON summaries.
+
+- Format: `ATTN_VERDICT ` followed by compact (non-pretty-printed) JSON, all on
+  one line. `formatVerdictLine`/`emitVerdict` in `common.mjs` are the only
+  producers — use them instead of hand-rolling the line.
+- Shape: `{ ok, scenarioId, runId, failureCount, firstFailure, artifactsDir, summaryPath, durationMs }`.
+  - `firstFailure` is `null` on success, otherwise the first line of the error
+    message, capped at 300 characters (never multi-line, so it cannot break
+    the one-line contract).
+  - `run-serial-matrix.mjs` emits the same shape with `scenarioId: 'serial-matrix'`,
+    `runId: ''`, `artifactsDir: ''`, and `summaryPath: ''` (it aggregates many
+    runs, each of which already printed its own verdict line).
+- Consumers must take the **last** line starting with `ATTN_VERDICT `, not the
+  first — a scenario's own trace/log output can print other lines afterward
+  in rare cases, but the verdict line itself is written right after the
+  summary/failure JSON file, so it stays reliably last among `ATTN_VERDICT`
+  lines.
+- Out of scope: the older ad-hoc scenarios with hand-rolled `main()` that do
+  not use `createScenarioRunner` do not emit a verdict line.
+
 ## Real-App Parity
 
 - Scenarios must match real app usage. Do not invent command sequences that the app cannot perform.

@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
+import { emitVerdict } from './common.mjs';
 import {
   assertProductionRunAllowed,
   defaultAppPathForProfile,
@@ -324,6 +325,7 @@ function runScenario(scenario, timeoutMs, runAgainstProd) {
 }
 
 async function main() {
+  const matrixStartedAt = Date.now();
   const { help, selected, failFast, timeoutMs, runAgainstProd } = parseArgs(process.argv.slice(2));
   if (help) {
     printHelp();
@@ -372,6 +374,16 @@ async function main() {
     results,
   };
   console.log(`\nSerial matrix summary:\n${JSON.stringify(summary, null, 2)}`);
+  emitVerdict({
+    ok: failed.length === 0,
+    scenarioId: 'serial-matrix',
+    runId: '',
+    failureCount: failed.length,
+    firstFailure: failed.length ? `${failed[0].id} exit ${failed[0].code}` : null,
+    artifactsDir: '',
+    summaryPath: '',
+    durationMs: Date.now() - matrixStartedAt,
+  });
   if (failed.length > 0) {
     process.exitCode = 1;
   }
