@@ -1149,6 +1149,12 @@ Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
             }
             // Show window as soon as page content is loaded (loading screen visible)
             let _ = webview.window().show();
+            // The present window opens from an explicit user action (chip click) and
+            // must take focus: an unfocused, hidden-at-creation WKWebView can leave
+            // requestAnimationFrame parked (blank diff pane) until first focus.
+            if webview.window().label() == PRESENT_WINDOW_LABEL {
+                let _ = webview.window().set_focus();
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
