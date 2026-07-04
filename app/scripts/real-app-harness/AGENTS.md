@@ -47,6 +47,19 @@ without spelunking through step logs or JSON summaries.
 - Out of scope: the older ad-hoc scenarios with hand-rolled `main()` that do
   not use `createScenarioRunner` do not emit a verdict line.
 
+## Soak Runs
+
+`run-soak.mjs` (`pnpm run real-app:soak -- --scenario <id> --repeat 30`) runs a
+single catalog scenario repeatedly and strictly serially — never in
+parallel, since the packaged app is single-tenant. It parses each iteration's
+`ATTN_VERDICT` line (a run counts as failed if the exit code is non-zero, the
+child timed out, no verdict line was found, or `verdict.ok === false`), writes
+a `soak-report.json` under the usual artifacts root, and emits its own
+aggregate verdict line (`scenarioId: 'soak:<id>'`) once all iterations (or,
+with `--until-violation`, the first failing iteration) have run. Use it
+instead of a hand-driven loop when you need to soak one flaky-prone scenario
+for confidence rather than sweep the whole catalog.
+
 ## Real-App Parity
 
 - Scenarios must match real app usage. Do not invent command sequences that the app cannot perform.
