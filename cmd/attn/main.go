@@ -608,7 +608,8 @@ placement:
   --worktree <branch>        create a worktree for the delegated session
 
 worktree options:
-  combine with any placement (current, --workspace, or --new-workspace)
+  combine with any placement (current, --workspace, or --new-workspace);
+  combining with --cwd creates a worktree of the repo at that directory
   --repo <path>              main repository (defaults to the workspace repository)
   --from <ref>               branch or ref to start from
   --worktree-path <path>     override the generated sibling path
@@ -1820,9 +1821,6 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	customWorktreePath := strings.TrimSpace(*worktreePath)
 	if explicitWorkspace != "" && (*newWorkspace || customCWD != "") {
 		return delegateCLIArgs{}, errors.New("--workspace cannot be combined with --new-workspace or --cwd")
-	}
-	if customCWD != "" && branch != "" {
-		return delegateCLIArgs{}, errors.New("--cwd cannot be combined with --worktree")
 	}
 	if branch == "" && (repo != "" || startingFrom != "" || customWorktreePath != "") {
 		return delegateCLIArgs{}, errors.New("--repo, --from, and --worktree-path require --worktree")

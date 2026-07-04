@@ -851,7 +851,7 @@ func TestDelegateRejectsDuplicateSessionNameInWorkspace(t *testing.T) {
 	}
 }
 
-func TestDelegateRejectsLongWorktreeDefaultNameAndRollsBack(t *testing.T) {
+func TestDelegateTruncatesLongWorktreeDefaultName(t *testing.T) {
 	root := t.TempDir()
 	mainRepo := filepath.Join(root, "repo")
 	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
@@ -866,7 +866,10 @@ func TestDelegateRejectsLongWorktreeDefaultNameAndRollsBack(t *testing.T) {
 	consumeDelegatedPrompt(t, backend)
 	worktreePath := filepath.Join(root, "repo--feat-delegated-long")
 
-	_, err := d.delegate(&protocol.DelegateMessage{
+	// No --name; the worktree folder basename ("repo--feat-delegated-long", 26
+	// runes) exceeds maxDelegationNameRunes. A derived name is truncated instead
+	// of rejected, so the delegation succeeds with a shortened, clean name.
+	result, err := d.delegate(&protocol.DelegateMessage{
 		Cmd:             protocol.CmdDelegate,
 		SourceSessionID: sourceSessionID,
 		Brief:           "No --name; the worktree folder is too long.",
@@ -877,14 +880,46 @@ func TestDelegateRejectsLongWorktreeDefaultNameAndRollsBack(t *testing.T) {
 			Path:   protocol.Ptr(worktreePath),
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "too long") {
-		t.Fatalf("delegate() error = %v, want a name-too-long error", err)
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
 	}
-	if _, statErr := os.Stat(worktreePath); !os.IsNotExist(statErr) {
-		t.Fatalf("worktree still exists after rollback: %v", statErr)
+	wantName := "repo--feat-deleg"
+	if len([]rune(wantName)) > maxDelegationNameRunes {
+		t.Fatalf("test setup bug: wantName %q exceeds max", wantName)
 	}
-	if workspaces := d.store.ListWorkspaces(); len(workspaces) != 1 {
-		t.Fatalf("workspaces = %+v, want only the source workspace", workspaces)
+	workspace := d.store.GetWorkspace(result.WorkspaceID)
+	if workspace == nil || workspace.Title != wantName {
+		t.Fatalf("delegated workspace = %+v, want title %q", workspace, wantName)
+	}
+	session := d.store.Get(result.SessionID)
+	if session == nil || session.Label != wantName {
+		t.Fatalf("delegated session = %+v, want label %q", session, wantName)
+	}
+}
+
+func TestTruncateDelegationName(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"within limit is unchanged", "myproj", "myproj"},
+		{"exactly at limit is unchanged", strings.Repeat("a", 16), strings.Repeat("a", 16)},
+		{"cuts to the rune limit", "attn--feat-agent-cost-tooling", "attn--feat-agent"},
+		{"trims a trailing dash after the cut", strings.Repeat("a", 15) + "-more-stuff", strings.Repeat("a", 15)},
+		{"trims trailing punctuation and whitespace", "twelve chars.   more", "twelve chars"},
+		{"multi-byte runes counted as one", strings.Repeat("é", 20), strings.Repeat("é", 16)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateDelegationName(tc.input)
+			if got != tc.want {
+				t.Fatalf("truncateDelegationName(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+			if len([]rune(got)) > maxDelegationNameRunes {
+				t.Fatalf("truncateDelegationName(%q) = %q exceeds max runes", tc.input, got)
+			}
+		})
 	}
 }
 
@@ -1336,5 +1371,126 @@ func TestDelegateRollsBackNewWorkspaceAndWorktreeWhenSpawnFails(t *testing.T) {
 		if workspace != nil && workspace.Directory == worktreePath {
 			t.Fatalf("delegated workspace still exists after rollback: %+v", workspace)
 		}
+	}
+}
+
+// TestDelegateComposesCwdAndWorktree covers the new_workspace placement with
+// both --cwd and --worktree set: the worktree's repo and starting ref are
+// inferred from the cwd (not the source session's directory), and the new
+// workspace ends up placed at the created worktree path, not the cwd itself.
+func TestDelegateComposesCwdAndWorktree(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	// Source session lives elsewhere so a correct implementation must infer
+	// the worktree's repo/starting-ref from --cwd, not from the source.
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	worktreePath := filepath.Join(root, "repo--feat-cwd-compose")
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Compose --cwd with --worktree.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Label:           protocol.Ptr("composed"),
+		Cwd:             protocol.Ptr(mainRepo),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Branch: "feat/cwd-compose",
+			Path:   protocol.Ptr(worktreePath),
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	worktreePath = git.CanonicalizePath(worktreePath)
+	if result.Placement != delegationPlacementNew ||
+		result.Directory != worktreePath ||
+		!protocol.Deref(result.WorktreeCreated) {
+		t.Fatalf("result = %+v, want directory %q", result, worktreePath)
+	}
+	workspace := d.store.GetWorkspace(result.WorkspaceID)
+	if workspace == nil || workspace.Directory != worktreePath {
+		t.Fatalf("delegated workspace = %+v, want directory %q", workspace, worktreePath)
+	}
+	session := d.store.Get(result.SessionID)
+	if session == nil ||
+		session.Directory != worktreePath ||
+		protocol.Deref(session.Branch) != "feat/cwd-compose" {
+		t.Fatalf("delegated session = %+v", session)
+	}
+	if info, err := os.Stat(worktreePath); err != nil || !info.IsDir() {
+		t.Fatalf("worktree path stat = %v, info = %+v", err, info)
+	}
+}
+
+// TestDelegateComposedCwdWorktreeRequiresRepoWhenNotAGitRepo covers the
+// failure mode: a --cwd that is not itself a git repository, combined with
+// --worktree and no --repo, must still surface the existing "pass --repo"
+// error rather than silently falling back to the source session's repo.
+func TestDelegateComposedCwdWorktreeRequiresRepoWhenNotAGitRepo(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	notARepo := t.TempDir()
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "cwd is not a git repo and no --repo is given.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Cwd:             protocol.Ptr(notARepo),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Branch: "feat/no-repo",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not in a git repository; pass --repo") {
+		t.Fatalf("delegate() error = %v, want a not-a-git-repository error", err)
+	}
+}
+
+// TestDelegateTruncatesLongDirectoryDefaultName covers the plain (no
+// worktree) new_workspace case: a directory whose basename exceeds
+// maxDelegationNameRunes, with no explicit --name, gets a truncated name
+// instead of a rejected delegation.
+func TestDelegateTruncatesLongDirectoryDefaultName(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+	targetDir := filepath.Join(t.TempDir(), "a-very-long-directory-name-indeed")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "No --name; the directory basename is too long.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Cwd:             protocol.Ptr(targetDir),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	wantName := "a-very-long-dire"
+	if len([]rune(wantName)) > maxDelegationNameRunes {
+		t.Fatalf("test setup bug: wantName %q exceeds max", wantName)
+	}
+	workspace := d.store.GetWorkspace(result.WorkspaceID)
+	if workspace == nil || workspace.Title != wantName {
+		t.Fatalf("delegated workspace = %+v, want title %q", workspace, wantName)
+	}
+	session := d.store.Get(result.SessionID)
+	if session == nil || session.Label != wantName {
+		t.Fatalf("delegated session = %+v, want label %q", session, wantName)
 	}
 }
