@@ -546,6 +546,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const filterQueryRef = useRef('');
     const filterInputRef = useRef<HTMLInputElement>(null);
     const filterRescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Read by the mount effect at construction time without being a dependency
+    // of it — see the font-size effect below for why font changes must not
+    // rebuild the model/renderer.
+    const fontSizeRef = useRef(fontSize);
 
     onInputRef.current = onInput;
     onReadyRef.current = onReady;
@@ -554,6 +558,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     runtimeMetaRef.current = runtimeLogMeta;
     debugNameRef.current = debugName;
     cwdRef.current = cwd;
+    fontSizeRef.current = fontSize;
     // Stable diagnostics key for the per-pane watchdog/probe registries. paneId
     // is stable for a pane's life and correlates with daemon/workspace logs;
     // debugName can change (its agent/title segment is reassigned on relabel).
@@ -1665,7 +1670,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           cols: initialSize.cols,
           rows: initialSize.rows,
         });
-        const renderer = new WebGlTerminalRenderer(canvas, fontSize, FONT_FAMILY, {
+        const renderer = new WebGlTerminalRenderer(canvas, fontSizeRef.current, FONT_FAMILY, {
           background: theme.background,
           foreground: theme.foreground,
           cursor: theme.cursor,
@@ -1675,7 +1680,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // The bundled Nerd Font may not be loaded yet, so the first glyphs that
         // need it rasterize blank. Once it loads, drop the stale glyph cache and
         // repaint so terminal icons (eza --icons, powerline, devicons) appear.
-        void ensureTerminalIconFont(fontSize).then(() => {
+        void ensureTerminalIconFont(fontSizeRef.current).then(() => {
           if (!active || rendererRef.current !== renderer) return;
           renderer.invalidateGlyphCache();
           renderSurface(true);
@@ -1845,7 +1850,35 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Ghostty cells contain their resolved default RGB values, so theme
     // changes require a fresh model. The pane runtime rehydrates this model
     // from verified replay without sending historical replies to the live PTY.
-    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, resolvedTheme, write]);
+    // fontSize is intentionally NOT a dependency: see the font-size effect
+    // below for why a size change must re-metric the existing renderer in
+    // place instead of rebuilding the model/renderer for every mounted pane.
+    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, resolvedTheme, write]);
+
+    // React to a font-size change without tearing down the WASM model or the
+    // WebGL renderer. Rebuilding on every font-size change (the previous
+    // behavior, when fontSize was in the mount effect's deps) tears down and
+    // reconstructs EVERY mounted pane (active + warm hidden), pressuring
+    // WKWebView's small live-WebGL-context pool badly enough to lose/fail
+    // contexts and permanently break panes — and it left hidden panes' canvases
+    // sized for the old font, since a hidden pane's fit() bails and never
+    // re-measures until revealed. Re-metricing in place avoids both: it costs
+    // one glyph-atlas invalidation instead of a full rebuild, and resize()
+    // re-asserts canvas geometry immediately even for panes that won't fit()
+    // again until they're shown.
+    useEffect(() => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      renderer.setFontSize(fontSize);
+      renderer.resize(modelSizeRef.current.cols, modelSizeRef.current.rows);
+      void ensureTerminalIconFont(fontSize).then(() => {
+        if (rendererRef.current !== renderer) return;
+        renderer.invalidateGlyphCache();
+        renderSurface(true);
+      });
+      fit();
+      renderSurface(true);
+    }, [fontSize]);
 
     // Release this pane's WebGL2 context when the pane unmounts. Browsers cap the
     // number of simultaneously-live WebGL contexts (WKWebView's cap is low), and

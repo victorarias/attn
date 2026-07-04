@@ -109,7 +109,12 @@ function makeRecordingContext() {
     // simulate a color-font raster (e.g. emoji) vs the default transparent one.
     nextPixel: null as null | { r: number; g: number; b: number; a: number },
     measureText(text: string) {
-      return { width: text.length * 8 };
+      // Scale with the current font's px size (default 14) so tests can exercise
+      // cellWidth recomputation on a font-size change; existing 14px-fixture
+      // tests are unaffected since the factor is 1 at the default size.
+      const sizeMatch = /^(\d+(?:\.\d+)?)px/.exec(this.font);
+      const size = sizeMatch ? Number.parseFloat(sizeMatch[1]) : 14;
+      return { width: text.length * 8 * (size / 14) };
     },
     clearRect() {},
     fillRect() {},
@@ -325,6 +330,63 @@ describe('WebGlTerminalRenderer glyph cache invalidation', () => {
     renderer.invalidateGlyphCache();
     renderer.getGlyph('', 0);
     expect(atlasContext.fillTextCalls.length).toBe(afterFirst + 1);
+  });
+});
+
+// setFontSize() must re-metric an existing renderer in place (no rebuild) so a
+// font-size change doesn't tear down every mounted pane's WASM model/WebGL
+// context. document.createElement is re-mocked around the call because
+// setFontSize creates its own metrics canvas, just like the constructor does.
+describe('WebGlTerminalRenderer.setFontSize', () => {
+  function withMockedCanvas<T>(fn: () => T): T {
+    const realCreate = document.createElement.bind(document);
+    const spy = vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      if (tag === 'canvas') return makeFakeCanvas();
+      return realCreate(tag);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any);
+    try {
+      return fn();
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it('grows cell metrics for a larger font size and invalidates the glyph cache', () => {
+    const { renderer, atlasContext } = makeRenderer(14, 'monospace');
+    const smallWidth = renderer.cellWidth;
+    const smallHeight = renderer.cellHeight;
+    const smallBaseline = renderer.baseline;
+
+    renderer.getGlyph('A', 0);
+    const rasterizedBeforeResize = atlasContext.fillTextCalls.length;
+    renderer.getGlyph('A', 0);
+    expect(atlasContext.fillTextCalls.length).toBe(rasterizedBeforeResize); // served from cache
+
+    withMockedCanvas(() => renderer.setFontSize(28));
+
+    expect(renderer.cellWidth).toBeGreaterThan(smallWidth);
+    expect(renderer.cellHeight).toBeGreaterThan(smallHeight);
+    expect(renderer.baseline).toBeGreaterThan(smallBaseline);
+
+    // The pre-resize glyph must not be served from a stale cache at the new size.
+    renderer.getGlyph('A', 0);
+    expect(atlasContext.fillTextCalls.length).toBe(rasterizedBeforeResize + 1);
+  });
+
+  it('resizes the canvas to the new cell metrics even when cols/rows are unchanged', () => {
+    const { renderer } = makeRenderer(14, 'monospace');
+    const canvas = renderer.canvas as ReturnType<typeof makeFakeCanvas>;
+    renderer.resize(80, 24);
+    const widthBefore = canvas.width;
+    const heightBefore = canvas.height;
+
+    withMockedCanvas(() => renderer.setFontSize(28));
+    // Same grid dimensions as before the font-size change.
+    renderer.resize(80, 24);
+
+    expect(canvas.width).toBeGreaterThan(widthBefore);
+    expect(canvas.height).toBeGreaterThan(heightBefore);
   });
 });
 
