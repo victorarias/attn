@@ -384,6 +384,25 @@ func StatePath() string {
 	return filepath.Join(home, "."+binaryName+"-state"+suffix+".json")
 }
 
+// AppSupportDirForProfile returns the macOS app-support directory a profile's
+// frontend writes into: ~/Library/Application Support/<bundle identifier>.
+// This mirrors Tauri's BaseDirectory.AppLocalData resolution on macOS, so it
+// is the same directory the frontend's disk-based debug logs (see
+// app/src/utils/terminalDiagnosticsLog.ts) land in. macOS only, matching the
+// rest of this package's platform scope.
+func AppSupportDirForProfile(profile string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "/tmp"
+	}
+	return filepath.Join(home, "Library", "Application Support", BundleIdentifierForProfile(profile))
+}
+
+// AppSupportDir returns the app-support directory for the active profile.
+func AppSupportDir() string {
+	return AppSupportDirForProfile(Profile())
+}
+
 // LogPath returns the log file path
 func LogPath() string {
 	return filepath.Join(attnDir(), "daemon.log")

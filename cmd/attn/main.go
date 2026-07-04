@@ -252,6 +252,9 @@ func main() {
 	case "ticket":
 		maybePrintProfileBanner()
 		runTicket()
+	case "debug":
+		maybePrintProfileBanner()
+		runDebug()
 	case "present":
 		maybePrintProfileBanner()
 		runPresent()
@@ -566,6 +569,7 @@ commands:
   workflow <command>                run, inspect, and resume durable workflows
   list                              list sessions and workspaces
   present <command>                 open a review presentation and read feedback
+  debug <command>                   probe debug artifacts (incidents, logs)
   daemon <command>                  manage the daemon
   profile <status|resolve|list>     show / resolve the active profile's resources
   profile-env <profile|--unset>     print shell commands for selecting a profile
