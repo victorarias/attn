@@ -41,7 +41,7 @@ import { DaemonProvider } from './contexts/DaemonContext';
 import { NotebookSurfaceProvider } from './contexts/NotebookSurfaceContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { KeybindingsProvider, useKeybindings } from './contexts/KeybindingsContext';
-import { useSessionStore, type Session, type TerminalWorkspaceState } from './store/sessions';
+import { useSessionStore, isSessionReloading, type Session, type TerminalWorkspaceState } from './store/sessions';
 import {
   computeWarmWorkspaceIds,
   DEFAULT_WARM_WORKSPACE_LIMIT,
@@ -49,6 +49,7 @@ import {
   writeWarmWorkspaceLimit,
 } from './utils/terminalVirtualization';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, SessionExitInfo } from './hooks/useDaemonSocket';
+import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { GridView, type GridSessionTile } from './components/grid/GridView';
@@ -86,6 +87,7 @@ import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/i
 import { executeTicketResumePlan, planTicketResume } from './utils/ticketResume';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
+import { hideBootSplash } from './utils/bootSplash';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -97,6 +99,39 @@ const DOCK_PANEL_EXIT_MS = 260;
 // from accidental close. ⌘W and the close action no-op on it; this hint tells the
 // user how to close it deliberately (demote it first).
 const CHIEF_OF_STAFF_CLOSE_HINT = 'Chief of staff is protected — unset the chief role to close it.';
+
+// A presentation is worth a notice (surfaced as a chip in its triggering
+// session's pane header) while its latest round is open for review (status
+// "open") and hasn't been submitted yet.
+export function presentationNeedsNotice(presentation: Presentation): boolean {
+  return presentation.status === 'open' && !presentation.latest_round_submitted;
+}
+
+// Pure reducer for the presentation-notice list, shared by the initial
+// getPresentations() seed and the presentation_added/updated broadcasts.
+// Keeps at most one entry per presentation id; a presentation that stops
+// needing a notice (submitted or closed) is dropped.
+export function upsertPresentationNotice(notices: Presentation[], updated: Presentation): Presentation[] {
+  const withoutExisting = notices.filter((n) => n.id !== updated.id);
+  return presentationNeedsNotice(updated) ? [...withoutExisting, updated] : withoutExisting;
+}
+
+export function seedPresentationNotices(all: Presentation[]): Presentation[] {
+  return all.filter(presentationNeedsNotice);
+}
+
+// A session can trigger more than one presentation over time; the pane
+// header chip only ever shows the newest one that still needs review.
+export function latestPresentationBySessionId(notices: Presentation[]): Map<string, Presentation> {
+  const bySessionId = new Map<string, Presentation>();
+  for (const p of notices) {
+    const existing = bySessionId.get(p.session_id);
+    if (!existing || p.created_at > existing.created_at) {
+      bySessionId.set(p.session_id, p);
+    }
+  }
+  return bySessionId;
+}
 const CHANGES_BRANCH_DIFF_INTERVAL_MS = 30_000;
 const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
 const CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS = 5_000;
@@ -350,6 +385,10 @@ function App() {
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() => getDismissedUpdateVersion());
   const installChannel = normalizeInstallChannel(import.meta.env.VITE_INSTALL_CHANNEL);
 
+  // Open presentations whose latest round still needs review. Seeded once the
+  // socket connects and kept live via presentation_added/updated broadcasts.
+  const [presentationNotices, setPresentationNotices] = useState<Presentation[]>([]);
+
   const {
     daemonSessions,
     setDaemonSessions,
@@ -362,12 +401,7 @@ function App() {
 
   // Hide loading screen on mount
   useEffect(() => {
-    const loadingScreen = document.getElementById('loading-screen');
-    if (loadingScreen) {
-      loadingScreen.classList.add('hidden');
-      // Remove from DOM after transition completes
-      setTimeout(() => loadingScreen.remove(), 300);
-    }
+    hideBootSplash();
   }, []);
 
   // Ensure daemon is running before connecting
@@ -574,6 +608,7 @@ function App() {
     sendResolveComment,
     sendDeleteComment,
     sendGetComments,
+    getPresentations,
     connectionError,
     hasReceivedInitialState,
     rateLimit,
@@ -581,6 +616,8 @@ function App() {
     clearWarnings,
   } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
+    onPresentationAdded: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
+    onPresentationUpdated: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
     // The daemon tags each fs_changed with an origin ("ui"/"agent"/"external"), but
     // every origin is treated the same here: bump a signal so an open browser
     // re-lists its tree and reloads the open file. Covers any file under the root.
@@ -630,6 +667,23 @@ function App() {
     };
   }, [hasReceivedInitialState, sendNotificationList]);
 
+  // Seed the presentation-notice list once the socket is up. The
+  // presentation_added/updated broadcasts keep it live thereafter.
+  useEffect(() => {
+    if (!hasReceivedInitialState) return;
+    let cancelled = false;
+    getPresentations()
+      .then((all) => {
+        if (!cancelled) setPresentationNotices(seedPresentationNotices(all));
+      })
+      .catch(() => {
+        /* transient (not connected / timeout); the next broadcast reseeds */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasReceivedInitialState, getPresentations]);
+
   // Wrap the app content with SettingsProvider so useUIScale can access settings.
   // KeybindingsProvider (inside it) syncs shortcut overrides into the resolver.
   return (
@@ -653,6 +707,7 @@ function App() {
         updateAvailableVersion={updateAvailableVersion}
         onOpenLatestRelease={handleOpenLatestRelease}
         onDismissLatestRelease={handleDismissLatestRelease}
+        presentationNotices={presentationNotices}
         settingError={settingError}
         clearSettingError={() => setSettingError(null)}
         // Daemon socket functions
@@ -769,6 +824,7 @@ interface AppContentProps {
   updateAvailableVersion: string | null;
   onOpenLatestRelease: () => Promise<void>;
   onDismissLatestRelease: () => void;
+  presentationNotices: Presentation[];
   settingError: string | null;
   clearSettingError: () => void;
   // All the daemon socket functions
@@ -880,6 +936,7 @@ function AppContent({
   updateAvailableVersion,
   onOpenLatestRelease,
   onDismissLatestRelease,
+  presentationNotices,
   settingError,
   clearSettingError,
   sendPRAction,
@@ -971,6 +1028,19 @@ sendFetchPRDetails,
   clearGitStatus,
   registerSessionExitHandler,
 }: AppContentProps) {
+  // The presentation notice lives in the triggering session's pane header
+  // (HeaderPresentationChip), not a window-wide banner — look it up per
+  // session id, newest first.
+  const presentationBySessionId = useMemo(
+    () => latestPresentationBySessionId(presentationNotices),
+    [presentationNotices],
+  );
+  const handleOpenPresentationWindow = useCallback((presentationId: string) => {
+    void invoke('open_presentation_window', { presentationId }).catch((err) => {
+      console.error('[App] Failed to open presentation window:', err);
+    });
+  }, []);
+
   const [openPRLauncherJob, setOpenPRLauncherJob] = useState<OpenPRLauncherJob | null>(null);
   const openPRLauncherIdRef = useRef(0);
   const [sessionCreationJob, setSessionCreationJob] = useState<SessionCreationJob | null>(null);
@@ -2303,6 +2373,12 @@ sendFetchPRDetails,
     if (info.exitCode !== 0 || info.signal) {
       return;
     }
+    // A reload's kill can surface as a clean exit (code 0, no signal); the same
+    // id is about to respawn in place, so closing the pane here would tear the
+    // workspace down under the pending spawn ("unknown workspace").
+    if (isSessionReloading(info.id)) {
+      return;
+    }
     handleRequestCloseSession(info.id);
   }, [handleRequestCloseSession]);
 
@@ -2393,6 +2469,7 @@ sendFetchPRDetails,
       setSelectedTicketId(null);
     },
     tickets,
+    presentationNotices,
     resetSessionPaneTerminal,
     injectSessionPaneBytes,
     injectSessionPaneBase64,
@@ -3692,8 +3769,10 @@ sendFetchPRDetails,
                       ticketUnread: entry.ticketUnread,
                       nudgeFiresAt: entry.nudgeFiresAt,
                       isActive: entry.id === activeSessionId,
+                      presentation: presentationBySessionId.get(entry.id),
                     }))}
                     onTriggerNudge={sendTriggerNudge}
+                    onOpenPresentation={handleOpenPresentationWindow}
                     workspace={workspaceState}
                     activePaneId={activePaneId}
                     fontSize={terminalFontSize}

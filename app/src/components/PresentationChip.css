@@ -1,0 +1,54 @@
+/* Presentation-ready indicator, rendered inline inside .workspace-pane-header
+   (see NudgeIndicator.css's ".nudge-header" family, which this mirrors). A
+   distinct violet accent so it never reads as a nudge/ticket signal. Literal
+   rgba (not theme tokens) so it renders identically in the packaged app
+   regardless of which token blocks are defined. */
+
+.presentation-chip {
+  --presentation-accent: 124, 58, 237; /* #7c3aed */
+  --presentation-accent-solid: #7c3aed;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  margin: 0;
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 2px 9px;
+  border: 1px solid rgba(var(--presentation-accent), 0.55);
+  border-radius: 5px;
+  background: rgba(var(--presentation-accent), 0.16);
+  color: #e4d4fb;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.presentation-chip:hover {
+  background: rgba(var(--presentation-accent), 0.28);
+  border-color: rgba(var(--presentation-accent), 0.9);
+}
+
+.presentation-chip:active {
+  transform: translateY(0.5px);
+}
+
+.presentation-chip-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--presentation-accent-solid);
+  box-shadow: 0 0 8px 1px rgba(var(--presentation-accent), 0.85);
+}
+
+.presentation-chip-label {
+  white-space: nowrap;
+}

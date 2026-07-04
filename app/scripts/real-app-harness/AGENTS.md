@@ -22,12 +22,66 @@ re-derive them. dev/prod are fast-path literals that a drift guard in
 needs `./attn` built (`make dev` / `go build -o ./attn ./cmd/attn`); override the
 binary with `ATTN_HARNESS_BIN`.
 
+## Verdict Line
+
+Every scenario built on `createScenarioRunner` (`scenarioRunner.mjs`), and
+`run-serial-matrix.mjs`, print a single machine-parseable verdict line as the
+last thing they emit on that path, so a driving agent can learn pass/fail
+without spelunking through step logs or JSON summaries.
+
+- Format: `ATTN_VERDICT ` followed by compact (non-pretty-printed) JSON, all on
+  one line. `formatVerdictLine`/`emitVerdict` in `common.mjs` are the only
+  producers — use them instead of hand-rolling the line.
+- Shape: `{ ok, scenarioId, runId, failureCount, firstFailure, artifactsDir, summaryPath, durationMs }`.
+  - `firstFailure` is `null` on success, otherwise the first line of the error
+    message, capped at 300 characters (never multi-line, so it cannot break
+    the one-line contract).
+  - `run-serial-matrix.mjs` emits the same shape with `scenarioId: 'serial-matrix'`,
+    `runId: ''`, `artifactsDir: ''`, and `summaryPath: ''` (it aggregates many
+    runs, each of which already printed its own verdict line).
+- Consumers must take the **last** line starting with `ATTN_VERDICT `, not the
+  first — a scenario's own trace/log output can print other lines afterward
+  in rare cases, but the verdict line itself is written right after the
+  summary/failure JSON file, so it stays reliably last among `ATTN_VERDICT`
+  lines.
+- Out of scope: the older ad-hoc scenarios with hand-rolled `main()` that do
+  not use `createScenarioRunner` do not emit a verdict line.
+
+## Soak Runs
+
+`run-soak.mjs` (`pnpm run real-app:soak -- --scenario <id> --repeat 30`) runs a
+single catalog scenario repeatedly and strictly serially — never in
+parallel, since the packaged app is single-tenant. It parses each iteration's
+`ATTN_VERDICT` line (a run counts as failed if the exit code is non-zero, the
+child timed out, or a verdict line is present with `verdict.ok === false`; a
+missing verdict line on a clean exit is a pass, since most catalog scenarios
+predate the verdict contract — it's recorded as `verdictMissing` per run plus
+a top-level `verdictMissingCount` in the report), writes a `soak-report.json`
+under the usual artifacts root, and emits its own aggregate verdict line
+(`scenarioId: 'soak:<id>'`) once all iterations (or, with `--until-violation`,
+the first failing iteration) have run. Use it instead of a hand-driven loop
+when you need to soak one flaky-prone scenario for confidence rather than
+sweep the whole catalog. Catalog entries marked `soakOnly: true` (e.g.
+`focus-probe`) are resolvable by the soak runner but excluded from
+`run-serial-matrix.mjs` entirely, so matrix behavior never changes when a
+soak-only probe is added.
+
 ## Real-App Parity
 
 - Scenarios must match real app usage. Do not invent command sequences that the app cannot perform.
 - If workspace/session product behavior changes, update these scenarios in the same PR.
 - If these scenarios pass while users can reproduce workspace/session errors in the packaged app, treat that as a test design bug.
 - Real-app commands target the dev sibling (or the active `ATTN_PROFILE`) by default. Production runs must pass `--run-against-prod`; never bypass the shared production-target guard.
+
+## Screenshot Crop / Scale
+
+`captureFrontWindowScreenshot` (and `capture-app-screenshot.mjs`'s `--crop`/`--max-dim`
+flags) can crop to a window-relative region and downscale the PNG at capture time via
+`sips -Z`, so an agent that actually looks at the image pays far fewer tokens. `--crop`
+accepts `x,y,WxH` (e.g. `0,0,800x600`) or the all-comma `x,y,w,h` form; a crop is clamped
+to the window's bounds and only throws if it does not overlap the window at all. Prefer
+these over capturing full-resolution, full-window screenshots when only a sub-region
+matters for the assertion.
 
 ## Workspace Sessions
 

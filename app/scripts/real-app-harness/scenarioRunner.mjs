@@ -2,7 +2,25 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
-import { createRunContext } from './common.mjs';
+import { createRunContext, emitVerdict } from './common.mjs';
+
+const FIRST_FAILURE_MAX_LENGTH = 300;
+
+// Collapse to a single line and cap length so the verdict's firstFailure field
+// can never break the one-line ATTN_VERDICT contract regardless of what the
+// underlying error message contains. Exported for direct unit testing (see
+// verdict.test.mjs) — createScenarioRunner itself has filesystem/lock side
+// effects that make it a poor unit-test surface.
+export function summarizeFirstFailure(error) {
+  // Use the raw message (not normalizeError's stack trace) so firstFailure is
+  // the human-readable "what failed", not file/line noise from the stack.
+  const message = error instanceof Error ? error.message : String(error);
+  const firstLine = message.split(/\r?\n/, 1)[0];
+  if (firstLine.length <= FIRST_FAILURE_MAX_LENGTH) {
+    return firstLine;
+  }
+  return firstLine.slice(0, FIRST_FAILURE_MAX_LENGTH);
+}
 
 function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -117,6 +135,7 @@ export function createScenarioRunner(options, {
   metadata = {},
   preflightLaunchEnv = null,
 } = {}) {
+  const runnerCreatedAt = Date.now();
   assertPackagedAppBuildMatchesCurrentSource({
     appPath: options?.appPath,
     launchEnv: preflightLaunchEnv,
@@ -313,7 +332,18 @@ export function createScenarioRunner(options, {
         assertions,
         ...summary,
       };
-      writeJson(path.join(runDir, 'summary.json'), finalSummary);
+      const summaryPath = path.join(runDir, 'summary.json');
+      writeJson(summaryPath, finalSummary);
+      emitVerdict({
+        ok: true,
+        scenarioId,
+        runId,
+        failureCount: 0,
+        firstFailure: null,
+        artifactsDir: runDir,
+        summaryPath,
+        durationMs: Date.now() - runnerCreatedAt,
+      });
       finalizeRunner();
       return finalSummary;
     },
@@ -331,7 +361,18 @@ export function createScenarioRunner(options, {
         error: normalizeError(error),
         ...summary,
       };
-      writeJson(path.join(runDir, 'failure.json'), finalSummary);
+      const summaryPath = path.join(runDir, 'failure.json');
+      writeJson(summaryPath, finalSummary);
+      emitVerdict({
+        ok: false,
+        scenarioId,
+        runId,
+        failureCount: 1,
+        firstFailure: summarizeFirstFailure(error),
+        artifactsDir: runDir,
+        summaryPath,
+        durationMs: Date.now() - runnerCreatedAt,
+      });
       finalizeRunner();
       return finalSummary;
     },

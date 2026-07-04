@@ -6,11 +6,23 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-05]
+
+### Fixed
+- **Reloading an agent no longer crashes its ticket.** Reloading a delegated agent's session (session actions → Reload) used to look like a process death to the daemon: the bound ticket was stamped Crashed and a pointless reconciliation verdict was posted against a perfectly healthy session. A reload is now a recognized lifecycle transition — the ticket stays in its column and no reconciliation runs. Real crashes are still detected exactly as before.
+- **Reload no longer races the pane teardown.** The reload's own kill could be mistaken for the agent quitting cleanly, closing the pane (and its workspace) out from under the respawn and failing the reload with "unknown workspace". The session now stays put for the whole kill → respawn window.
+
 ## [2026-07-04]
 
 ### Added
 - **`attn debug` CLI.** New `attn debug ls|incidents|diagnostics|daemon-log` subcommands read the frontend's disk-based debug logs and the daemon log for the active profile, with `--tail`, `--grep`, and (for `daemon-log`) `--since` filters — no more hand-rolled `cd`+`tail`+`jq` into `~/Library/Application Support/com.attn.manager*/debug` and `daemon.log`.
+- **`attn vision-check <image> <question>` CLI command.** Answers a question about a screenshot or image with a single, tool-less LLM call, so an agent can ask about an image without pulling it into its own context.
 - **Pin the chief-of-staff's reasoning effort, per agent.** Settings → Agents → "Chief-of-staff model & effort" now has an effort selector next to each agent's model override (Claude: low, medium, high, xhigh, max; Codex: minimal, low, medium, high, xhigh). Leave it on "Agent default" to use the agent's own default. Only chief-of-staff launches are affected — regular sessions are unaffected.
+
+### Fixed
+- **Changing font size no longer risks blank or misrendered terminals when many panes are open.** Adjusting the terminal font size used to rebuild every open pane's terminal (visible and backgrounded), which under enough open panes could exhaust the app's GPU rendering resources and leave a pane permanently blank or garbled until reopened. Terminals now update in place to the new font size instead of being rebuilt.
+- **Terminals now recover automatically if the app's GPU rendering context is lost.** Previously a pane hit by a GPU context loss showed a permanent error asking you to reopen it; it now rebuilds its renderer in place within a fraction of a second, keeping the session's content and scrollback.
+- **Switching back to a workspace after resizing the window no longer leaves the terminal cut off at the bottom.** If the window shrank while a workspace was in the background, revealing it could land an oversized terminal grid that never corrected itself; the app now detects and fixes this right after the workspace becomes visible.
 
 ## [2026-07-03]
 

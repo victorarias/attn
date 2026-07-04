@@ -3,6 +3,7 @@ import { emit, listen } from '@tauri-apps/api/event';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Session } from '../store/sessions';
+import type { Presentation } from '../types/generated';
 import type { Ticket } from './useDaemonSocket';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
@@ -11,6 +12,7 @@ import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid
 import { getSettingsAutomationHandle, INACTIVE_SETTINGS_STATE } from '../components/settingsAutomation';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
+import { dumpTerminalGeometry } from '../utils/terminalDiagnosticsLog';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 import { buildSessionRenderHealth } from '../utils/renderHealth';
@@ -97,6 +99,9 @@ interface UseUiAutomationBridgeArgs {
   openTicketDetail?: (ticketId: string) => void;
   closeTicketDetail?: () => void;
   tickets?: Ticket[];
+  // Presentation notices (pane-header review chips). Read-only for the
+  // bridge: the chip DOM is the source of truth for what's actually rendered.
+  presentationNotices?: Presentation[];
   resetSessionPaneTerminal: (sessionId: string, paneId: string) => boolean;
   injectSessionPaneBytes: (sessionId: string, paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectSessionPaneBase64: (sessionId: string, paneId: string, payload: string) => Promise<boolean>;
@@ -341,6 +346,11 @@ function collectPaneDomMetrics(paneElement: Element | null) {
     terminalContainer: elementMetrics(terminalContainer),
     terminalSurface: elementMetrics(terminalSurface),
     canvas: elementMetrics(canvas),
+    // GhosttyTerminal renders this when it gives up rebuilding the renderer
+    // (see the WebGL context-loss recovery give-up path) — exposed so the
+    // packaged-app harness can assert recovery actually cleared it, not just
+    // that the diagnostics log said so.
+    errorVisible: paneElement.querySelector('.ghostty-terminal-error') != null,
   };
 }
 
@@ -787,6 +797,21 @@ function dispatchShortcutEvent(shortcutId: ShortcutId) {
     return;
   }
   dispatchCombo(binding);
+}
+
+// Finds the WebGL canvas of the pane currently visible on screen — the one
+// workspace root marked visible, and within it the pane its own
+// data-active-pane-id names. Used by the lose_webgl_context harness action to
+// verify context-loss recovery without needing a sessionId/paneId round trip.
+function findActivePaneCanvas(): HTMLCanvasElement | null {
+  const workspace = document.querySelector('[data-session-terminal-workspace][data-session-visible="1"]');
+  const activePaneId = workspace?.getAttribute('data-active-pane-id');
+  if (!workspace || !activePaneId) {
+    return null;
+  }
+  const paneElement = workspace.querySelector(`[data-pane-id="${activePaneId}"]`);
+  const canvas = paneElement?.querySelector('canvas');
+  return canvas instanceof HTMLCanvasElement ? canvas : null;
 }
 
 function clickPaneElement(sessionId: string, paneId: string) {
@@ -1575,6 +1600,7 @@ export function useUiAutomationBridge({
   openTicketDetail,
   closeTicketDetail,
   tickets,
+  presentationNotices,
   resetSessionPaneTerminal,
   injectSessionPaneBytes,
   injectSessionPaneBase64,
@@ -1806,6 +1832,30 @@ export function useUiAutomationBridge({
         const limit = readWarmWorkspaceLimit();
         const virtualizedPanes = document.querySelectorAll('[data-testid^="pane-virtualized-"]').length;
         return { limit, virtualizedPanes };
+      }
+      case 'dump_terminal_geometry': {
+        // Same-moment app-side read of every mounted pane's model grid, cell
+        // metrics, clientWidth/Height, and DOM-truth canvas rects — avoids the
+        // cross-clock ambiguity of comparing a harness screenshot's timestamp
+        // against a separately-read disk dump.
+        const snapshots = dumpTerminalGeometry();
+        return { snapshots };
+      }
+      case 'lose_webgl_context': {
+        // Deliberately kills the active pane's WebGL context so the packaged
+        // app harness can verify GhosttyTerminal's context-loss auto-recovery
+        // (epoch rebuild + backoff) end to end, without needing a real GPU
+        // fault to reproduce it.
+        const canvas = findActivePaneCanvas();
+        if (!canvas) {
+          throw new Error('No active pane canvas found');
+        }
+        const extension = canvas.getContext('webgl2')?.getExtension('WEBGL_lose_context');
+        if (!extension) {
+          throw new Error('WEBGL_lose_context extension is unavailable on the active pane canvas');
+        }
+        extension.loseContext();
+        return { ok: true };
       }
       case 'reload_session': {
         if (!reloadSession) {
@@ -2811,6 +2861,38 @@ export function useUiAutomationBridge({
           },
         };
       }
+      case 'present_get_state': {
+        const notices = (presentationNotices || []).map((presentation) => ({
+          id: presentation.id,
+          sessionId: presentation.session_id,
+          title: presentation.title,
+          status: presentation.status,
+          latestRoundSeq: presentation.latest_round_seq,
+          latestRoundSubmitted: presentation.latest_round_submitted,
+        }));
+        const chips = Array.from(document.querySelectorAll('.presentation-chip')).map((element) => ({
+          presentationId: element.getAttribute('data-presentation-id') || '',
+          sessionId: element.getAttribute('data-session-id') || '',
+          title: element.getAttribute('title') || '',
+        }));
+        return { notices, chips };
+      }
+      case 'present_click_chip': {
+        const presentationId = typeof payload.presentationId === 'string' ? payload.presentationId : '';
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        if (!presentationId && !sessionId) {
+          throw new Error('present_click_chip requires presentationId or sessionId');
+        }
+        const selector = presentationId
+          ? `.presentation-chip[data-presentation-id="${presentationId}"]`
+          : `.presentation-chip[data-session-id="${sessionId}"]`;
+        const chip = document.querySelector<HTMLElement>(selector);
+        if (!chip) {
+          throw new Error(`present_click_chip: no chip found for ${selector}`);
+        }
+        chip.click();
+        return { clicked: true, presentationId: chip.getAttribute('data-presentation-id') || '' };
+      }
       default:
         throw new Error(`Unknown automation action: ${request.action}`);
     }
@@ -2831,6 +2913,7 @@ export function useUiAutomationBridge({
     getPaneBlockState,
     openDockPanel,
     openShortcutEditor,
+    presentationNotices,
     resetSessionPaneTerminal,
     drainSessionPaneTerminal,
     selectSession,

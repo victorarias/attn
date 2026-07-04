@@ -71,7 +71,8 @@ export type DiagKind =
   | 'attach'
   | 'desync'
   | 'watchdog'
-  | 'incident';
+  | 'incident'
+  | 'recovery';
 
 export interface DiagEvent {
   at: number;
@@ -94,6 +95,7 @@ const LIFECYCLE_KINDS = new Set<DiagKind>([
   'desync',
   'watchdog',
   'incident',
+  'recovery',
 ]);
 
 export interface RenderProbe {
@@ -116,6 +118,20 @@ export interface RenderProbe {
   cellHeight?: number | null;
   clientWidth?: number | null;
   clientHeight?: number | null;
+  // DOM-truth rects, so the detector can also catch a canvas that disagrees
+  // with the model (offset within its container, or a size mismatch) rather
+  // than only judging the model's own arithmetic.
+  containerTop?: number | null;
+  containerBottom?: number | null;
+  containerLeft?: number | null;
+  containerRight?: number | null;
+  canvasTop?: number | null;
+  canvasBottom?: number | null;
+  canvasLeft?: number | null;
+  canvasRight?: number | null;
+  canvasCssHeight?: number | null;
+  canvasPixelWidth?: number | null;
+  canvasPixelHeight?: number | null;
 }
 
 export interface TerminalGeometrySnapshot {
@@ -133,6 +149,13 @@ export interface TerminalGeometrySnapshot {
   flooredCols: number | null;
   flooredRows: number | null;
   overflowPx: number | null;
+  domOverflowPx: number | null;
+  domOffsetTopPx: number | null;
+  domOverflowRightPx: number | null;
+  domOffsetLeftPx: number | null;
+  canvasCssHeight: number | null;
+  canvasPixelWidth: number | null;
+  canvasPixelHeight: number | null;
   clipping: boolean;
 }
 
@@ -427,7 +450,7 @@ export function registerRenderProbe(pane: string, probe: () => RenderProbe | nul
 
 export function noteResize(
   pane: string,
-  info: { session?: string; source: string; fromCols?: number; fromRows?: number; toCols?: number; toRows?: number; bail?: string; noop?: boolean; paneKind?: string; historicalReplay?: boolean },
+  info: { session?: string; source: string; fromCols?: number; fromRows?: number; toCols?: number; toRows?: number; bail?: string; noop?: boolean; paneKind?: string; historicalReplay?: boolean; cw?: number; ch?: number },
 ): void {
   recordDiag({ kind: 'resize', pane, ...info });
   // A WebGL canvas only clears its drawing buffer when its pixel dimensions
@@ -454,6 +477,24 @@ export function noteResize(
   if (info.paneKind === 'agent') {
     armWatchdog(pane, info.session);
   }
+}
+
+// WebGL context-loss recovery lifecycle: a lost context or a failed renderer
+// construction schedules an epoch-rebuild retry with backoff (see
+// GhosttyTerminal's rendererEpoch effect); this makes that retry sequence
+// traceable after the fact instead of only visible as a silently-fixed pane.
+export function noteRecovery(
+  pane: string,
+  info: {
+    session?: string;
+    paneKind?: string;
+    attempt: number;
+    outcome: 'contextLost' | 'constructFailed' | 'scheduled' | 'recovered' | 'giveUp';
+    delayMs?: number;
+    error?: string;
+  },
+): void {
+  recordDiag({ kind: 'recovery', pane, ...info });
 }
 
 function armWatchdog(pane: string, session?: string) {
@@ -553,6 +594,37 @@ function bottomClipOverflowPx(probe: RenderProbe): number | null {
   return probe.rows * cellHeight - clientHeight;
 }
 
+// DOM-truth signals: computed straight from getBoundingClientRect(), so they
+// catch a canvas that is offset or mis-sized within its container even when
+// the model's own row*cellHeight arithmetic looks clean.
+function domOverflowPx(probe: RenderProbe): number | null {
+  if (probe.canvasBottom == null || probe.containerBottom == null) {
+    return null;
+  }
+  return probe.canvasBottom - probe.containerBottom;
+}
+
+function domOffsetTopPx(probe: RenderProbe): number | null {
+  if (probe.canvasTop == null || probe.containerTop == null) {
+    return null;
+  }
+  return probe.canvasTop - probe.containerTop;
+}
+
+function domOverflowRightPx(probe: RenderProbe): number | null {
+  if (probe.canvasRight == null || probe.containerRight == null) {
+    return null;
+  }
+  return probe.canvasRight - probe.containerRight;
+}
+
+function domOffsetLeftPx(probe: RenderProbe): number | null {
+  if (probe.canvasLeft == null || probe.containerLeft == null) {
+    return null;
+  }
+  return probe.canvasLeft - probe.containerLeft;
+}
+
 function recordBottomClipIncident(pane: string, detail: Record<string, unknown>): void {
   const now = Date.now();
   const session = typeof detail.session === 'string' ? detail.session : undefined;
@@ -594,10 +666,23 @@ function sweepBottomClip(): void {
       continue;
     }
     const overflowPx = bottomClipOverflowPx(probe);
-    if (overflowPx == null) {
+    const domOverflow = domOverflowPx(probe);
+    const domOffset = domOffsetTopPx(probe);
+    const domOverflowRight = domOverflowRightPx(probe);
+    const domOffsetLeft = domOffsetLeftPx(probe);
+    if (
+      overflowPx == null && domOverflow == null && domOffset == null
+      && domOverflowRight == null && domOffsetLeft == null
+    ) {
       continue;
     }
-    const clipping = overflowPx > BOTTOM_CLIP_SLACK_PX;
+    const trigger: string[] = [];
+    if (overflowPx != null && overflowPx > BOTTOM_CLIP_SLACK_PX) trigger.push('model');
+    if (domOverflow != null && domOverflow > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_overflow');
+    if (domOffset != null && domOffset > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_offset');
+    if (domOverflowRight != null && domOverflowRight > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_overflow_right');
+    if (domOffsetLeft != null && domOffsetLeft > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_offset_left');
+    const clipping = trigger.length > 0;
     if (clipping === wasClipping) {
       continue;
     }
@@ -611,14 +696,22 @@ function sweepBottomClip(): void {
         cols: probe.cols,
         flooredRows,
         extraRows: probe.rows - flooredRows,
-        overflowPx: Math.round(overflowPx),
+        overflowPx: overflowPx == null ? null : Math.round(overflowPx),
+        domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
+        domOffsetTopPx: domOffset == null ? null : Math.round(domOffset),
+        domOverflowRightPx: domOverflowRight == null ? null : Math.round(domOverflowRight),
+        domOffsetLeftPx: domOffsetLeft == null ? null : Math.round(domOffsetLeft),
         cellHeight,
         cellWidth: probe.cellWidth ?? null,
         clientHeight,
         clientWidth: probe.clientWidth ?? null,
+        canvasCssHeight: probe.canvasCssHeight == null ? null : Math.round(probe.canvasCssHeight),
+        canvasPixelWidth: probe.canvasPixelWidth ?? null,
+        canvasPixelHeight: probe.canvasPixelHeight ?? null,
         hasMeasuredSize: probe.hasMeasuredSize ?? null,
         isActivePane: probe.isActivePane ?? null,
         session: probe.session,
+        trigger,
         dpr: window.devicePixelRatio,
         winInnerWidth: window.innerWidth,
         winInnerHeight: window.innerHeight,
@@ -634,7 +727,11 @@ function sweepBottomClip(): void {
         rows: probe.rows,
         cols: probe.cols,
         flooredRows,
-        overflowPx: Math.round(overflowPx),
+        overflowPx: overflowPx == null ? null : Math.round(overflowPx),
+        domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
+        domOffsetTopPx: domOffset == null ? null : Math.round(domOffset),
+        domOverflowRightPx: domOverflowRight == null ? null : Math.round(domOverflowRight),
+        domOffsetLeftPx: domOffsetLeft == null ? null : Math.round(domOffsetLeft),
         cellHeight,
         clientHeight,
       });
@@ -675,6 +772,10 @@ export function dumpTerminalGeometry(): TerminalGeometrySnapshot[] {
     const clientHeight = probe.clientHeight ?? null;
     const clientWidth = probe.clientWidth ?? null;
     const overflowPx = cellHeight && clientHeight ? probe.rows * cellHeight - clientHeight : null;
+    const domOverflow = domOverflowPx(probe);
+    const domOffset = domOffsetTopPx(probe);
+    const domOverflowRight = domOverflowRightPx(probe);
+    const domOffsetLeft = domOffsetLeftPx(probe);
     snapshots.push({
       pane,
       session: probe.session,
@@ -690,7 +791,18 @@ export function dumpTerminalGeometry(): TerminalGeometrySnapshot[] {
       flooredCols: cellWidth && clientWidth ? Math.floor(clientWidth / cellWidth) : null,
       flooredRows: cellHeight && clientHeight ? Math.floor(clientHeight / cellHeight) : null,
       overflowPx: overflowPx == null ? null : Math.round(overflowPx),
-      clipping: overflowPx != null && overflowPx > BOTTOM_CLIP_SLACK_PX,
+      domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
+      domOffsetTopPx: domOffset == null ? null : Math.round(domOffset),
+      domOverflowRightPx: domOverflowRight == null ? null : Math.round(domOverflowRight),
+      domOffsetLeftPx: domOffsetLeft == null ? null : Math.round(domOffsetLeft),
+      canvasCssHeight: probe.canvasCssHeight == null ? null : Math.round(probe.canvasCssHeight),
+      canvasPixelWidth: probe.canvasPixelWidth ?? null,
+      canvasPixelHeight: probe.canvasPixelHeight ?? null,
+      clipping: (overflowPx != null && overflowPx > BOTTOM_CLIP_SLACK_PX)
+        || (domOverflow != null && domOverflow > BOTTOM_CLIP_SLACK_PX)
+        || (domOffset != null && domOffset > BOTTOM_CLIP_SLACK_PX)
+        || (domOverflowRight != null && domOverflowRight > BOTTOM_CLIP_SLACK_PX)
+        || (domOffsetLeft != null && domOffsetLeft > BOTTOM_CLIP_SLACK_PX),
     });
   }
   enqueueWrite('incident', `${JSON.stringify({ at: Date.now(), kind: 'geometry_dump', snapshots })}\n`);

@@ -255,6 +255,10 @@ func main() {
 	case "debug":
 		maybePrintProfileBanner()
 		runDebug()
+	case "vision-check":
+		// No banner: output must stay pure (stdout = answer only, or a single
+		// --json line) for machine consumption by the calling agent.
+		runVisionCheck()
 	case "present":
 		maybePrintProfileBanner()
 		runPresent()
@@ -570,6 +574,7 @@ commands:
   list                              list sessions and workspaces
   present <command>                 open a review presentation and read feedback
   debug <command>                   probe debug artifacts (incidents, logs)
+  vision-check <image> <question>   answer a question about an image (single LLM call)
   daemon <command>                  manage the daemon
   profile <status|resolve|list>     show / resolve the active profile's resources
   profile-env <profile|--unset>     print shell commands for selecting a profile
