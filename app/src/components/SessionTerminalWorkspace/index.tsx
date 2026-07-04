@@ -23,6 +23,8 @@ import {
 import type { SessionAgent } from '../../types/sessionAgent';
 import type { UISessionState } from '../../types/sessionState';
 import { HeaderNudgeIndicator, deriveNudgeMode } from '../NudgeIndicator';
+import { HeaderPresentationChip } from '../PresentationChip';
+import type { Presentation } from '../../types/generated';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
@@ -108,6 +110,7 @@ interface SessionTerminalWorkspaceProps {
     ticketUnread?: boolean;
     nudgeFiresAt?: string;
     isActive?: boolean;
+    presentation?: Presentation;
   }>;
   workspace: TerminalWorkspaceState;
   activePaneId: string;
@@ -127,6 +130,7 @@ interface SessionTerminalWorkspaceProps {
   onFocusPane: (paneId: string) => void;
   onRenameSession?: (sessionId: string, label: string) => Promise<void>;
   onTriggerNudge?: (sessionId: string) => void;
+  onOpenPresentation?: (presentationId: string) => void;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
   onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
@@ -170,6 +174,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onFocusPane,
     onRenameSession,
     onTriggerNudge,
+    onOpenPresentation,
     onZoomModeChange,
     onNavigateOutOfSession,
     onResizeSplit,
@@ -707,11 +712,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               isActive: Boolean(paneSession.isActive),
             })
           : null;
-        // The pane header is the home for the nudge indicator. It is normally shown
-        // only when the workspace is split; surface it on a lone tile too whenever the
-        // session has a nudge to show, so the indicator has its rectangle. Drag/rename
-        // stay split-only — a nudge-only header is a status bar, not a move handle.
-        const headerVisible = showPaneHeader || nudgeMode != null;
+        // The pane header is the home for the nudge indicator and the presentation
+        // chip. It is normally shown only when the workspace is split; surface it on
+        // a lone tile too whenever the session has either to show, so they have their
+        // rectangle. Drag/rename stay split-only — a nudge/presentation-only header
+        // is a status bar, not a move handle.
+        const headerVisible = showPaneHeader || nudgeMode != null || paneSession?.presentation != null;
         return (
           <div
             key={agentPane.id}
@@ -757,6 +763,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 >
                   ✎
                 </button>
+              ) : null}
+              {paneSession?.presentation ? (
+                <HeaderPresentationChip
+                  presentation={paneSession.presentation}
+                  onOpen={(presentationId) => onOpenPresentation?.(presentationId)}
+                />
               ) : null}
               {nudgeMode ? (
                 <HeaderNudgeIndicator

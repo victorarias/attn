@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "present",
+  "description": "Capability for the presentation window",
+  "windows": [
+    "present"
+  ],
+  "webviews": [
+    "present"
+  ],
+  "permissions": [
+    "core:default",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text"
+  ]
+}

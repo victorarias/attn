@@ -1,0 +1,105 @@
+.present-root {
+  height: 100vh;
+  overflow-y: auto;
+  padding: 32px 40px;
+  background: var(--color-bg-app);
+  color: var(--color-text-primary);
+}
+
+.present-root-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.present-root-header h1 {
+  margin: 0 0 8px 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.present-root-meta {
+  display: flex;
+  gap: 12px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size);
+}
+
+.present-root-kind {
+  text-transform: capitalize;
+}
+
+.present-root-round {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: var(--font-size);
+}
+
+.present-root-shas {
+  font-family: monospace;
+  color: var(--color-text-secondary);
+}
+
+.present-root-status {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.present-root-status.submitted {
+  background: #16a34a33;
+  color: #16a34a;
+}
+
+.present-root-status.draft {
+  background: #d9770633;
+  color: #d97706;
+}
+
+.present-root-summary {
+  margin-top: 16px;
+  color: var(--color-text-secondary);
+}
+
+.present-root-files {
+  margin-top: 16px;
+  padding-left: 20px;
+}
+
+.present-root-file {
+  margin-bottom: 10px;
+}
+
+.present-root-file code {
+  font-family: monospace;
+  font-size: var(--font-size);
+}
+
+.present-root-file-note {
+  margin: 4px 0 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size);
+}
+
+.present-root-comment-count {
+  margin-top: 16px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size);
+}
+
+.present-root-footer {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size);
+  font-style: italic;
+}
