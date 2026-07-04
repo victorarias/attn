@@ -311,7 +311,8 @@ async function main() {
   let maxOverflowSeen = 0;
   let transientCount = 0;
   const transientSteps = [];
-  const TRANSIENT_RECHECK_DELAY_MS = 1_500;
+  const TRANSIENT_RECHECK_POLL_MS = 750;
+  const TRANSIENT_RECHECK_DEADLINE_MS = 4_500;
 
   console.log(`[RealAppHarness] runDir=${runDir}`);
   console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
@@ -543,22 +544,37 @@ async function main() {
       );
 
       if (violations.length > 0) {
-        // Production incidents show transient clips that self-heal within
-        // ~1s (a RAF self-heal path exists). Don't fail on the first sighting
-        // — wait and re-measure the same workspace before deciding whether
-        // this is the persistent bug (survives until remount) or a transient
-        // one we should log and keep soaking past.
-        console.warn(`[RealAppHarness] suspect clip at step ${step}, rechecking after ${TRANSIENT_RECHECK_DELAY_MS}ms...`);
-        await delay(TRANSIENT_RECHECK_DELAY_MS);
-        const confirm = await measureActiveWorkspacePanes(client, activeWorkspace.sessionId);
+        // Production incidents show transient clips that self-heal, but the
+        // attach-replay storm on a cold workspace reactivation can run ~1s
+        // BEFORE the self-heal even starts, so a single fixed-delay recheck
+        // can land mid-churn and misclassify a transient as persistent. Poll
+        // every 750ms up to a 4.5s deadline; the first clean re-measure wins
+        // (record how long healing took), and only fail if every poll through
+        // the deadline stays dirty.
+        console.warn(`[RealAppHarness] suspect clip at step ${step}, polling every ${TRANSIENT_RECHECK_POLL_MS}ms up to ${TRANSIENT_RECHECK_DEADLINE_MS}ms...`);
+        const suspectAt = Date.now();
+        const rechecks = [];
+        let healed = null;
+        let elapsedMs = 0;
+        while (elapsedMs < TRANSIENT_RECHECK_DEADLINE_MS) {
+          await delay(TRANSIENT_RECHECK_POLL_MS);
+          elapsedMs = Date.now() - suspectAt;
+          const recheck = await measureActiveWorkspacePanes(client, activeWorkspace.sessionId);
+          rechecks.push({ elapsedMs, violations: recheck.violations, measurements: recheck.measurements });
+          if (recheck.violations.length === 0) {
+            healed = { elapsedMs, measurements: recheck.measurements };
+            break;
+          }
+        }
 
-        if (confirm.violations.length === 0) {
+        if (healed) {
           transientCount += 1;
           transientSteps.push(step);
           traceEntry.transient = true;
+          traceEntry.healMs = healed.elapsedMs;
           traceEntry.firstMeasurements = measurements;
-          traceEntry.confirmMeasurements = confirm.measurements;
-          console.warn(`[RealAppHarness] TRANSIENT clip at step ${step}, self-healed`);
+          traceEntry.confirmMeasurements = healed.measurements;
+          console.warn(`[RealAppHarness] TRANSIENT clip at step ${step}, self-healed after ${healed.elapsedMs}ms`);
           continue;
         }
 
@@ -573,7 +589,7 @@ async function main() {
               params,
               activeWorkspaceIndex: activeIndex,
               first: { violations, measurements },
-              confirm: { violations: confirm.violations, measurements: confirm.measurements },
+              rechecks,
             },
             null,
             2,
@@ -593,7 +609,8 @@ async function main() {
           'utf8',
         );
         await captureSessionArtifacts(client, runDir, 'violation', activeWorkspace.sessionId).catch(() => {});
-        for (const violation of confirm.violations) {
+        const lastRecheck = rechecks[rechecks.length - 1];
+        for (const violation of lastRecheck.violations) {
           const paneText = await client.request('read_pane_text', {
             sessionId: activeWorkspace.sessionId,
             paneId: violation.paneId,
