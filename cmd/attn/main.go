@@ -1354,16 +1354,16 @@ func runTicketInbox(args []string) {
 		runTicketInboxWatch(source, *interval, *jsonOutput)
 		return
 	}
-	bundles, err := client.New("").TicketInbox(source)
+	result, err := client.New("").TicketInbox(source)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
 		os.Exit(1)
 	}
 	if *jsonOutput {
-		printJSON(bundles)
+		printJSON(result)
 		return
 	}
-	printTicketInbox(bundles)
+	printTicketInbox(result)
 }
 
 // ticketWatchInterval is how often `attn ticket inbox --watch` polls the consuming
@@ -1390,7 +1390,7 @@ func runTicketInboxWatch(source string, interval time.Duration, jsonOutput bool)
 	c := client.New("")
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	watchTicketInbox(ctx, ticker.C, func() ([]protocol.TicketEventBundle, error) {
+	watchTicketInbox(ctx, ticker.C, func() (*protocol.TicketInboxResult, error) {
 		return c.TicketInbox(source)
 	}, os.Stdout, os.Stderr, jsonOutput)
 }
@@ -1404,13 +1404,13 @@ func runTicketInboxWatch(source string, interval time.Duration, jsonOutput bool)
 func watchTicketInbox(
 	ctx context.Context,
 	tick <-chan time.Time,
-	fetch func() ([]protocol.TicketEventBundle, error),
+	fetch func() (*protocol.TicketInboxResult, error),
 	out, errOut io.Writer,
 	jsonOutput bool,
 ) {
 	var lastErr string
 	for {
-		bundles, err := fetch()
+		result, err := fetch()
 		if err != nil {
 			if msg := err.Error(); msg != lastErr {
 				fmt.Fprintf(errOut, "ticket inbox --watch: %s\n", msg)
@@ -1418,13 +1418,13 @@ func watchTicketInbox(
 			}
 		} else {
 			lastErr = ""
-			if len(bundles) > 0 {
+			if result != nil && len(result.Bundles) > 0 {
 				if jsonOutput {
-					if encErr := fprintJSON(out, bundles); encErr != nil {
+					if encErr := fprintJSON(out, result); encErr != nil {
 						fmt.Fprintf(errOut, "ticket inbox --watch: %v\n", encErr)
 					}
 				} else {
-					fprintTicketInbox(out, bundles)
+					fprintTicketInbox(out, result)
 				}
 			}
 		}
@@ -1436,11 +1436,25 @@ func watchTicketInbox(
 	}
 }
 
-func printTicketInbox(bundles []protocol.TicketEventBundle) {
-	fprintTicketInbox(os.Stdout, bundles)
+func printTicketInbox(result *protocol.TicketInboxResult) {
+	fprintTicketInbox(os.Stdout, result)
 }
 
-func fprintTicketInbox(w io.Writer, bundles []protocol.TicketEventBundle) {
+// fprintTicketInbox prints the unread bundles, with a leading user-presence
+// header line when the daemon has observed the user at the app recently: a
+// watching agent can eyeball this without --json, and it's the same signal
+// carried on the struct for --json callers.
+func fprintTicketInbox(w io.Writer, result *protocol.TicketInboxResult) {
+	if result == nil {
+		fmt.Fprintln(w, "no unread ticket activity")
+		return
+	}
+	if result.LastUserActivityAt != nil {
+		if lastActive, err := time.Parse(time.RFC3339, *result.LastUserActivityAt); err == nil {
+			fmt.Fprintf(w, "user: active %s ago\n", humanizeDuration(time.Since(lastActive)))
+		}
+	}
+	bundles := result.Bundles
 	if len(bundles) == 0 {
 		fmt.Fprintln(w, "no unread ticket activity")
 		return
@@ -1457,6 +1471,22 @@ func fprintTicketInbox(w io.Writer, bundles []protocol.TicketEventBundle) {
 				fmt.Fprintf(w, "    %s\n", *e.Comment)
 			}
 		}
+	}
+}
+
+// humanizeDuration renders d as a coarse s/m/h age, rounding down to the
+// largest whole unit (e.g. "42s", "5m", "3h") for a one-line presence header.
+func humanizeDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d/time.Second))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	default:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
 	}
 }
 

@@ -852,6 +852,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	if cmd == protocol.CmdWorkspaceSelected {
 		d.setSelectedWorkspace(msg.(*protocol.WorkspaceSelectedMessage).WorkspaceID)
 	}
+	// Websocket commands are UI-origin (unlike unix-socket CLI/agent commands),
+	// so a UI-presence allowlist here is a proxy for "the user is at the app
+	// right now" — surfaced on the ticket inbox result for watching agents.
+	if isUserPresenceCommand(cmd) {
+		d.recordUserActivity(time.Now())
+	}
 	if d.tryHandleRemoteWSCommand(client, cmd, msg, data) {
 		return
 	}

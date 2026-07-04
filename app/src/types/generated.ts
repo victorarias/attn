@@ -3099,7 +3099,8 @@ export interface TicketCreateResultObject {
 }
 
 export interface TicketInboxResultObject {
-    bundles: BundleElement[];
+    bundles:                BundleElement[];
+    last_user_activity_at?: string;
     [property: string]: any;
 }
 
@@ -3767,7 +3768,8 @@ export enum TicketInboxMessageCmd {
 }
 
 export interface TicketInboxResult {
-    bundles: BundleElement[];
+    bundles:                BundleElement[];
+    last_user_activity_at?: string;
     [property: string]: any;
 }
 
@@ -9084,6 +9086,7 @@ const typeMap: any = {
     ], "any"),
     "TicketInboxResultObject": o([
         { json: "bundles", js: "bundles", typ: a(r("BundleElement")) },
+        { json: "last_user_activity_at", js: "last_user_activity_at", typ: u(undefined, "") },
     ], "any"),
     "BundleElement": o([
         { json: "events", js: "events", typ: a(r("EventElement")) },
@@ -9470,6 +9473,7 @@ const typeMap: any = {
     ], "any"),
     "TicketInboxResult": o([
         { json: "bundles", js: "bundles", typ: a(r("BundleElement")) },
+        { json: "last_user_activity_at", js: "last_user_activity_at", typ: u(undefined, "") },
     ], "any"),
     "TicketListMessage": o([
         { json: "cmd", js: "cmd", typ: r("TicketListMessageCmd") },

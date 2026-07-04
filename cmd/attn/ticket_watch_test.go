@@ -19,13 +19,13 @@ import (
 // poll is controlled — no daemon, signals, or wall-clock timer.
 func TestWatchTicketInboxDedupesErrorsAndPrintsBundles(t *testing.T) {
 	type step struct {
-		bundles []protocol.TicketEventBundle
-		err     error
+		result *protocol.TicketInboxResult
+		err    error
 	}
 	down := errors.New("daemon down")
 	steps := []step{
 		{nil, nil}, // poll 0: silent
-		{[]protocol.TicketEventBundle{{TicketID: "tkt-1"}}, nil}, // poll 1: prints the bundle
+		{&protocol.TicketInboxResult{Bundles: []protocol.TicketEventBundle{{TicketID: "tkt-1"}}}, nil}, // poll 1: prints the bundle
 		{nil, down}, // poll 2: reports the outage
 		{nil, down}, // poll 3: same error, suppressed
 		{nil, nil},  // poll 4: recovered, silent, clears suppression
@@ -37,9 +37,9 @@ func TestWatchTicketInboxDedupesErrorsAndPrintsBundles(t *testing.T) {
 	for _, s := range steps {
 		fetchCh <- s
 	}
-	fetch := func() ([]protocol.TicketEventBundle, error) {
+	fetch := func() (*protocol.TicketInboxResult, error) {
 		s := <-fetchCh
-		return s.bundles, s.err
+		return s.result, s.err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

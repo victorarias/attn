@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -227,6 +228,15 @@ type Daemon struct {
 	selectedSessionMu   sync.RWMutex
 	selectedSessionID   string
 	selectedWorkspaceID string
+
+	// lastUserActivityAtNano is the UnixNano timestamp of the most recent
+	// UI-origin websocket command the daemon observed (see
+	// isUserPresenceCommand), a proxy for "the user is at the app right now".
+	// Surfaced on the ticket inbox result so a watching agent can decide
+	// whether to push a notification or hold it. Zero means no user activity
+	// has been observed since the daemon started. atomic because it is a
+	// single independent value with no compound invariant to guard.
+	lastUserActivityAtNano atomic.Int64
 
 	// markdownSeen fingerprints open markdown files so the content watcher only
 	// broadcasts when a file actually changes on disk.

@@ -3687,6 +3687,10 @@ type TicketInboxMessage struct {
 type TicketInboxResult struct {
 	// Bundles corresponds to the JSON schema field "bundles".
 	Bundles []TicketEventBundle `json:"bundles"`
+
+	// LastUserActivityAt corresponds to the JSON schema field
+	// "last_user_activity_at".
+	LastUserActivityAt *string `json:"last_user_activity_at,omitempty,omitzero"`
 }
 
 type TicketListMessage struct {
