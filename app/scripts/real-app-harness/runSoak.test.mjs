@@ -74,8 +74,12 @@ describe('isRunFailure', () => {
     expect(isRunFailure({ exitCode: 0, timedOut: true, verdict: okVerdict })).toBe(true);
   });
 
-  it('is true when no verdict was parsed', () => {
-    expect(isRunFailure({ exitCode: 0, timedOut: false, verdict: null })).toBe(true);
+  it('passes a run that exits 0 with no verdict line (pre-verdict-contract scenario)', () => {
+    expect(isRunFailure({ exitCode: 0, timedOut: false, verdict: null })).toBe(false);
+  });
+
+  it('fails a run that exits non-zero with no verdict line', () => {
+    expect(isRunFailure({ exitCode: 1, timedOut: false, verdict: null })).toBe(true);
   });
 
   it('is true when the parsed verdict says ok: false', () => {
@@ -141,6 +145,24 @@ describe('summarizeSoak', () => {
     });
 
     expect(summary.firstFailure).toBe('iteration 1 exit 1');
+  });
+
+  it('reports ok for exit-0 runs that never emitted a verdict line', () => {
+    const records = [
+      { iteration: 1, exitCode: 0, timedOut: false, verdict: null, verdictMissing: true, durationMs: 5 },
+      { iteration: 2, exitCode: 0, timedOut: false, verdict: null, verdictMissing: true, durationMs: 5 },
+    ];
+
+    const summary = summarizeSoak(records, {
+      scenarioId: 'demo-scenario',
+      runDir: '/tmp/run',
+      summaryPath: '/tmp/run/soak-report.json',
+      durationMs: 10,
+    });
+
+    expect(summary.ok).toBe(true);
+    expect(summary.failureCount).toBe(0);
+    expect(summary.firstFailure).toBeNull();
   });
 
   it('treats a timed-out run with exit code 0 as a failure', () => {

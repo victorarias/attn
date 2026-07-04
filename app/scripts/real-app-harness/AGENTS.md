@@ -53,12 +53,18 @@ without spelunking through step logs or JSON summaries.
 single catalog scenario repeatedly and strictly serially — never in
 parallel, since the packaged app is single-tenant. It parses each iteration's
 `ATTN_VERDICT` line (a run counts as failed if the exit code is non-zero, the
-child timed out, no verdict line was found, or `verdict.ok === false`), writes
-a `soak-report.json` under the usual artifacts root, and emits its own
-aggregate verdict line (`scenarioId: 'soak:<id>'`) once all iterations (or,
-with `--until-violation`, the first failing iteration) have run. Use it
-instead of a hand-driven loop when you need to soak one flaky-prone scenario
-for confidence rather than sweep the whole catalog.
+child timed out, or a verdict line is present with `verdict.ok === false`; a
+missing verdict line on a clean exit is a pass, since most catalog scenarios
+predate the verdict contract — it's recorded as `verdictMissing` per run plus
+a top-level `verdictMissingCount` in the report), writes a `soak-report.json`
+under the usual artifacts root, and emits its own aggregate verdict line
+(`scenarioId: 'soak:<id>'`) once all iterations (or, with `--until-violation`,
+the first failing iteration) have run. Use it instead of a hand-driven loop
+when you need to soak one flaky-prone scenario for confidence rather than
+sweep the whole catalog. Catalog entries marked `soakOnly: true` (e.g.
+`focus-probe`) are resolvable by the soak runner but excluded from
+`run-serial-matrix.mjs` entirely, so matrix behavior never changes when a
+soak-only probe is added.
 
 ## Real-App Parity
 

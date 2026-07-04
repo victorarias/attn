@@ -49,13 +49,15 @@ export function parseVerdictFromOutput(stdoutText) {
   return null;
 }
 
+// A missing verdict line is NOT a failure by itself: most catalog scenarios
+// are the older ad-hoc kind that predate the verdict contract and never emit
+// one. Exit code / timeout stay authoritative; a verdict only adds signal
+// when it is present and says ok: false.
 export function isRunFailure(record) {
   return (
     record.exitCode !== 0 ||
     record.timedOut === true ||
-    record.verdict === null ||
-    record.verdict === undefined ||
-    record.verdict.ok === false
+    (record.verdict != null && record.verdict.ok === false)
   );
 }
 
@@ -223,13 +225,15 @@ function runIteration(scenario, iteration, timeoutMs, runAgainstProd) {
         activeChild = null;
       }
       const exitCode = timedOut ? 124 : (code ?? (signal ? 1 : 0));
+      const verdict = parseVerdictFromOutput(stdoutBuffer);
       resolve({
         iteration,
         exitCode,
         signal: signal || null,
         timedOut,
         durationMs: Date.now() - startedAt,
-        verdict: parseVerdictFromOutput(stdoutBuffer),
+        verdict,
+        verdictMissing: verdict === null,
       });
     });
   });
@@ -272,14 +276,19 @@ async function main() {
   }
 
   const summaryPath = path.join(runDir, 'soak-report.json');
+  const verdictMissingCount = records.filter((record) => record.verdictMissing).length;
   const report = {
     scenarioId,
     repeatRequested: repeat,
     untilViolation,
+    verdictMissingCount,
     runs: records,
   };
   fs.writeFileSync(summaryPath, JSON.stringify(report, null, 2));
   console.log(`\nSoak report:\n${JSON.stringify(report, null, 2)}`);
+  if (records.length > 0 && verdictMissingCount === records.length) {
+    console.warn(`[run-soak] warning: no iteration of '${scenarioId}' emitted an ATTN_VERDICT line — this scenario predates the verdict contract; pass/fail is based on exit codes only.`);
+  }
 
   const verdict = summarizeSoak(records, {
     scenarioId,

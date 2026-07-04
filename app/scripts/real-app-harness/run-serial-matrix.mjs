@@ -71,7 +71,7 @@ Target: defaults to the dev install (~/Applications/attn-dev.app, port 29849)
   --run-against-prod acknowledgement.
 
 Available scenarios:
-${scenarioCatalog.map((scenario) => `  - ${scenario.id}: ${scenario.label}`).join('\n')}
+${resolveScenariosFromCatalog([], scenarioCatalog).map((scenario) => `  - ${scenario.id}: ${scenario.label}`).join('\n')}
 `);
 }
 

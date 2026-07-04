@@ -156,13 +156,24 @@ export const scenarioCatalog = [
     label: 'Ghostty scrollback anchoring while output streams',
     command: ['pnpm', 'run', 'real-app:scenario-ghostty-scroll'],
   },
+  {
+    id: 'focus-probe',
+    label: 'Focus probe (no focus steal on background session create)',
+    command: ['pnpm', 'run', 'real-app:focus-probe'],
+    // Not part of the serial matrix sweep — only runnable directly (run-soak).
+    soakOnly: true,
+  },
 ];
 
+// Matrix-facing resolution: soakOnly entries are excluded entirely (both from
+// the full-sweep default and from explicit --scenario selection) so adding a
+// soak-only probe never changes run-serial-matrix behavior.
 export function resolveScenarios(selected, catalog = scenarioCatalog) {
+  const matrixCatalog = catalog.filter((scenario) => !scenario.soakOnly);
   if (!selected.length) {
-    return catalog;
+    return matrixCatalog;
   }
-  const byId = new Map(catalog.map((scenario) => [scenario.id, scenario]));
+  const byId = new Map(matrixCatalog.map((scenario) => [scenario.id, scenario]));
   return selected.map((id) => {
     const scenario = byId.get(id);
     if (!scenario) {
@@ -172,6 +183,11 @@ export function resolveScenarios(selected, catalog = scenarioCatalog) {
   });
 }
 
+// Direct single-scenario resolution (run-soak): soakOnly entries resolve fine.
 export function resolveScenario(id, catalog = scenarioCatalog) {
-  return resolveScenarios([id], catalog)[0];
+  const scenario = catalog.find((entry) => entry.id === id);
+  if (!scenario) {
+    throw new Error(`Unknown scenario id: ${id}`);
+  }
+  return scenario;
 }
