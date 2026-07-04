@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDaemonSocket } from '../../hooks/useDaemonSocket';
 import type { Presentation, PresentationRound, PresentationComment } from '../../types/generated';
+import { hideBootSplash } from '../../utils/bootSplash';
 import '../../App.css';
 import './PresentRoot.css';
 
@@ -39,6 +40,13 @@ export function PresentRoot() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [daemonSettings, setDaemonSettings] = useState<Record<string, string>>({});
   const [refreshSignal, setRefreshSignal] = useState(0);
+
+  // Fires once, unconditionally, regardless of load/error state below — the
+  // splash must come down even if the presentation id is missing or the
+  // fetch fails.
+  useEffect(() => {
+    hideBootSplash();
+  }, []);
 
   const { hasReceivedInitialState, connectionError, getPresentationRound } = useDaemonSocket({
     onSessionsUpdate: noop,

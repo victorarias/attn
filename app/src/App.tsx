@@ -87,6 +87,7 @@ import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/i
 import { executeTicketResumePlan, planTicketResume } from './utils/ticketResume';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
+import { hideBootSplash } from './utils/bootSplash';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -386,12 +387,7 @@ function App() {
 
   // Hide loading screen on mount
   useEffect(() => {
-    const loadingScreen = document.getElementById('loading-screen');
-    if (loadingScreen) {
-      loadingScreen.classList.add('hidden');
-      // Remove from DOM after transition completes
-      setTimeout(() => loadingScreen.remove(), 300);
-    }
+    hideBootSplash();
   }, []);
 
   // Ensure daemon is running before connecting

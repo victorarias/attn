@@ -100,11 +100,27 @@ describe('PresentRoot', () => {
     FakeWebSocket.instances = [];
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
     vi.mocked(isTauri).mockReturnValue(true);
+
+    // Mirrors the static #loading-screen div in index.html that every window
+    // boots behind until React takes over.
+    const loadingScreen = document.createElement('div');
+    loadingScreen.id = 'loading-screen';
+    document.body.appendChild(loadingScreen);
   });
 
   afterEach(() => {
     globalThis.WebSocket = originalWebSocket;
+    document.getElementById('loading-screen')?.remove();
     vi.clearAllMocks();
+  });
+
+  it('hides the boot splash on mount, even before any data has loaded', async () => {
+    setSearch('window=present&presentation=pres-1');
+    render(<PresentRoot />);
+
+    await waitFor(() => {
+      expect(document.getElementById('loading-screen')).toHaveClass('hidden');
+    });
   });
 
   it('renders round info from a get_presentation_round result', async () => {
