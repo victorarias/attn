@@ -32,6 +32,7 @@ function createTerminal(): GhosttyTerminalHandle {
     getText: vi.fn(() => ''),
     getSize: vi.fn(() => ({ cols: 120, rows: 40 })),
     hasMeasuredSize: vi.fn(() => true),
+    overflowsContainer: vi.fn(() => false),
     getVisibleContent: vi.fn() as never,
     getVisibleStyleSummary: vi.fn() as never,
     getBlockState: vi.fn() as never,
