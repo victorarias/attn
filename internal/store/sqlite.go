@@ -578,6 +578,42 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		read_at TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at)`},
+	{63, "create presentation tables", `
+		CREATE TABLE IF NOT EXISTS presentations (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			ticket_id TEXT,
+			title TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			repo_path TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'open',
+			created_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_presentations_session ON presentations(session_id);
+		CREATE TABLE IF NOT EXISTS presentation_rounds (
+			id TEXT PRIMARY KEY,
+			presentation_id TEXT NOT NULL REFERENCES presentations(id) ON DELETE CASCADE,
+			seq INTEGER NOT NULL,
+			manifest_yaml TEXT NOT NULL,
+			base_sha TEXT NOT NULL,
+			head_sha TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			submitted_at TEXT,
+			UNIQUE(presentation_id, seq)
+		);
+		CREATE TABLE IF NOT EXISTS presentation_comments (
+			id TEXT PRIMARY KEY,
+			round_id TEXT NOT NULL REFERENCES presentation_rounds(id) ON DELETE CASCADE,
+			filepath TEXT NOT NULL,
+			line_start INTEGER NOT NULL,
+			line_end INTEGER NOT NULL,
+			side TEXT NOT NULL,
+			content TEXT NOT NULL,
+			author TEXT NOT NULL DEFAULT 'user',
+			created_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_presentation_comments_round ON presentation_comments(round_id);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

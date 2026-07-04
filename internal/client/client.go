@@ -304,6 +304,49 @@ func (c *Client) CommentTicket(sourceSessionID, ticketID, comment string) (*prot
 	return resp.TicketCommentResult, nil
 }
 
+// PresentOpen opens a new presentation (presentationID == "") or a new round on
+// an existing one (presentationID set) from a raw manifest YAML. The daemon is
+// the sole authority for parsing and pinning it — this call sends the manifest
+// bytes verbatim, never a locally-parsed shape.
+func (c *Client) PresentOpen(sourceSessionID, manifestYAML, presentationID string) (*protocol.PresentOpenResult, error) {
+	msg := protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: sourceSessionID,
+		ManifestYaml:    manifestYAML,
+	}
+	if value := strings.TrimSpace(presentationID); value != "" {
+		msg.PresentationID = protocol.Ptr(value)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.PresentOpenResult == nil {
+		return nil, errors.New("daemon returned no present open result")
+	}
+	return resp.PresentOpenResult, nil
+}
+
+// PresentFeedback reads a round's reviewer feedback back as markdown. seq <= 0
+// means the latest round.
+func (c *Client) PresentFeedback(presentationID string, seq int) (*protocol.PresentFeedbackResult, error) {
+	msg := protocol.PresentFeedbackMessage{
+		Cmd:            protocol.CmdPresentFeedback,
+		PresentationID: presentationID,
+	}
+	if seq > 0 {
+		msg.Seq = protocol.Ptr(seq)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.PresentFeedbackResult == nil {
+		return nil, errors.New("daemon returned no present feedback result")
+	}
+	return resp.PresentFeedbackResult, nil
+}
+
 // TicketInbox reads and consumes the calling session's unread ticket events,
 // bundled by ticket. Reading advances the session's per-ticket cursors, so a
 // second call returns only what landed since.

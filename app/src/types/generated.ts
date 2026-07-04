@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewState, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewState, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addCommentMessage = Convert.toAddCommentMessage(json);
 //   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
@@ -75,6 +75,10 @@
 //   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
 //   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
 //   const getFileDiffMessage = Convert.toGetFileDiffMessage(json);
+//   const getPresentationRoundMessage = Convert.toGetPresentationRoundMessage(json);
+//   const getPresentationRoundResultMessage = Convert.toGetPresentationRoundResultMessage(json);
+//   const getPresentationsMessage = Convert.toGetPresentationsMessage(json);
+//   const getPresentationsResultMessage = Convert.toGetPresentationsResultMessage(json);
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getRepoInfoMessage = Convert.toGetRepoInfoMessage(json);
 //   const getRepoInfoResultMessage = Convert.toGetRepoInfoResultMessage(json);
@@ -147,6 +151,20 @@
 //   const pluginsUpdatedMessage = Convert.toPluginsUpdatedMessage(json);
 //   const pR = Convert.toPR(json);
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
+//   const presentation = Convert.toPresentation(json);
+//   const presentationAddedMessage = Convert.toPresentationAddedMessage(json);
+//   const presentationComment = Convert.toPresentationComment(json);
+//   const presentationRound = Convert.toPresentationRound(json);
+//   const presentationUpdatedMessage = Convert.toPresentationUpdatedMessage(json);
+//   const presentCommentInput = Convert.toPresentCommentInput(json);
+//   const presentFeedbackMessage = Convert.toPresentFeedbackMessage(json);
+//   const presentFeedbackResult = Convert.toPresentFeedbackResult(json);
+//   const presentFile = Convert.toPresentFile(json);
+//   const presentManifestView = Convert.toPresentManifestView(json);
+//   const presentOpenMessage = Convert.toPresentOpenMessage(json);
+//   const presentOpenResult = Convert.toPresentOpenResult(json);
+//   const presentSubmitRoundMessage = Convert.toPresentSubmitRoundMessage(json);
+//   const presentSubmitRoundResultMessage = Convert.toPresentSubmitRoundResultMessage(json);
 //   const pRRole = Convert.toPRRole(json);
 //   const pRsUpdatedMessage = Convert.toPRsUpdatedMessage(json);
 //   const pRVisitedMessage = Convert.toPRVisitedMessage(json);
@@ -1359,6 +1377,105 @@ export enum GetFileDiffMessageCmd {
     GetFileDiff = "get_file_diff",
 }
 
+export interface GetPresentationRoundMessage {
+    cmd:             GetPresentationRoundMessageCmd;
+    presentation_id: string;
+    seq?:            number;
+    [property: string]: any;
+}
+
+export enum GetPresentationRoundMessageCmd {
+    GetPresentationRound = "get_presentation_round",
+}
+
+export interface GetPresentationRoundResultMessage {
+    comments?:     CommentElement[];
+    error?:        string;
+    event:         GetPresentationRoundResultMessageEvent;
+    presentation?: PresentationElement;
+    round?:        Round;
+    success:       boolean;
+    [property: string]: any;
+}
+
+export interface CommentElement {
+    author:     string;
+    content:    string;
+    created_at: string;
+    filepath:   string;
+    id:         string;
+    line_end:   number;
+    line_start: number;
+    round_id:   string;
+    side:       string;
+    [property: string]: any;
+}
+
+export enum GetPresentationRoundResultMessageEvent {
+    GetPresentationRoundResult = "get_presentation_round_result",
+}
+
+export interface PresentationElement {
+    created_at:             string;
+    id:                     string;
+    kind:                   string;
+    latest_round_seq:       number;
+    latest_round_submitted: boolean;
+    repo_path:              string;
+    session_id:             string;
+    status:                 string;
+    ticket_id?:             string;
+    title:                  string;
+    [property: string]: any;
+}
+
+export interface Round {
+    base_sha:        string;
+    created_at:      string;
+    head_sha:        string;
+    id:              string;
+    manifest:        Manifest;
+    presentation_id: string;
+    seq:             number;
+    submitted_at?:   string;
+    [property: string]: any;
+}
+
+export interface Manifest {
+    files:    FileObject[];
+    skip:     string[];
+    summary?: string;
+    title:    string;
+    [property: string]: any;
+}
+
+export interface FileObject {
+    note?: string;
+    path:  string;
+    [property: string]: any;
+}
+
+export interface GetPresentationsMessage {
+    cmd: GetPresentationsMessageCmd;
+    [property: string]: any;
+}
+
+export enum GetPresentationsMessageCmd {
+    GetPresentations = "get_presentations",
+}
+
+export interface GetPresentationsResultMessage {
+    error?:        string;
+    event:         GetPresentationsResultMessageEvent;
+    presentations: PresentationElement[];
+    success:       boolean;
+    [property: string]: any;
+}
+
+export enum GetPresentationsResultMessageEvent {
+    GetPresentationsResult = "get_presentations_result",
+}
+
 export interface GetRecentLocationsMessage {
     cmd:          GetRecentLocationsMessageCmd;
     endpoint_id?: string;
@@ -2401,6 +2518,162 @@ export enum PRActionResultMessageEvent {
     PRActionResult = "pr_action_result",
 }
 
+export interface Presentation {
+    created_at:             string;
+    id:                     string;
+    kind:                   string;
+    latest_round_seq:       number;
+    latest_round_submitted: boolean;
+    repo_path:              string;
+    session_id:             string;
+    status:                 string;
+    ticket_id?:             string;
+    title:                  string;
+    [property: string]: any;
+}
+
+export interface PresentationAddedMessage {
+    event:        PresentationAddedMessageEvent;
+    presentation: PresentationElement;
+    [property: string]: any;
+}
+
+export enum PresentationAddedMessageEvent {
+    PresentationAdded = "presentation_added",
+}
+
+export interface PresentationComment {
+    author:     string;
+    content:    string;
+    created_at: string;
+    filepath:   string;
+    id:         string;
+    line_end:   number;
+    line_start: number;
+    round_id:   string;
+    side:       string;
+    [property: string]: any;
+}
+
+export interface PresentationRound {
+    base_sha:        string;
+    created_at:      string;
+    head_sha:        string;
+    id:              string;
+    manifest:        Manifest;
+    presentation_id: string;
+    seq:             number;
+    submitted_at?:   string;
+    [property: string]: any;
+}
+
+export interface PresentationUpdatedMessage {
+    event:        PresentationUpdatedMessageEvent;
+    presentation: PresentationElement;
+    [property: string]: any;
+}
+
+export enum PresentationUpdatedMessageEvent {
+    PresentationUpdated = "presentation_updated",
+}
+
+export interface PresentCommentInput {
+    content:    string;
+    filepath:   string;
+    line_end:   number;
+    line_start: number;
+    side:       string;
+    [property: string]: any;
+}
+
+export interface PresentFeedbackMessage {
+    cmd:             PresentFeedbackMessageCmd;
+    presentation_id: string;
+    seq?:            number;
+    [property: string]: any;
+}
+
+export enum PresentFeedbackMessageCmd {
+    PresentFeedback = "present_feedback",
+}
+
+export interface PresentFeedbackResult {
+    markdown:  string;
+    seq:       number;
+    submitted: boolean;
+    [property: string]: any;
+}
+
+export interface PresentFile {
+    note?: string;
+    path:  string;
+    [property: string]: any;
+}
+
+export interface PresentManifestView {
+    files:    FileObject[];
+    skip:     string[];
+    summary?: string;
+    title:    string;
+    [property: string]: any;
+}
+
+export interface PresentOpenMessage {
+    cmd:               PresentOpenMessageCmd;
+    manifest_yaml:     string;
+    presentation_id?:  string;
+    source_session_id: string;
+    ticket_id?:        string;
+    [property: string]: any;
+}
+
+export enum PresentOpenMessageCmd {
+    PresentOpen = "present_open",
+}
+
+export interface PresentOpenResult {
+    base_sha:        string;
+    head_sha:        string;
+    presentation_id: string;
+    round_id:        string;
+    seq:             number;
+    title:           string;
+    [property: string]: any;
+}
+
+export interface PresentSubmitRoundMessage {
+    cmd:      PresentSubmitRoundMessageCmd;
+    comments: CommentObject[];
+    handback: boolean;
+    round_id: string;
+    [property: string]: any;
+}
+
+export enum PresentSubmitRoundMessageCmd {
+    PresentSubmitRound = "present_submit_round",
+}
+
+export interface CommentObject {
+    content:    string;
+    filepath:   string;
+    line_end:   number;
+    line_start: number;
+    side:       string;
+    [property: string]: any;
+}
+
+export interface PresentSubmitRoundResultMessage {
+    error?:   string;
+    event:    PresentSubmitRoundResultMessageEvent;
+    round_id: string;
+    success:  boolean;
+    [property: string]: any;
+}
+
+export enum PresentSubmitRoundResultMessageEvent {
+    PresentSubmitRoundResult = "present_submit_round_result",
+}
+
 export interface PRsUpdatedMessage {
     event: PRsUpdatedMessageEvent;
     prs?:  PRElement[];
@@ -2729,6 +3002,8 @@ export interface Response {
     notebook_read?:                        NotebookReadObject;
     notebook_write?:                       NotebookWriteObject;
     ok:                                    boolean;
+    present_feedback_result?:              PresentFeedbackResultObject;
+    present_open_result?:                  PresentOpenResultObject;
     prs?:                                  PRElement[];
     repos?:                                RepoElement[];
     sessions?:                             SessionElement[];
@@ -2752,6 +3027,23 @@ export interface NotebookGuide {
     guidance:         string;
     root:             string;
     session_is_chief: boolean;
+    [property: string]: any;
+}
+
+export interface PresentFeedbackResultObject {
+    markdown:  string;
+    seq:       number;
+    submitted: boolean;
+    [property: string]: any;
+}
+
+export interface PresentOpenResultObject {
+    base_sha:        string;
+    head_sha:        string;
+    presentation_id: string;
+    round_id:        string;
+    seq:             number;
+    title:           string;
     [property: string]: any;
 }
 
@@ -4936,6 +5228,38 @@ export class Convert {
         return JSON.stringify(uncast(value, r("GetFileDiffMessage")), null, 2);
     }
 
+    public static toGetPresentationRoundMessage(json: string): GetPresentationRoundMessage {
+        return cast(JSON.parse(json), r("GetPresentationRoundMessage"));
+    }
+
+    public static getPresentationRoundMessageToJson(value: GetPresentationRoundMessage): string {
+        return JSON.stringify(uncast(value, r("GetPresentationRoundMessage")), null, 2);
+    }
+
+    public static toGetPresentationRoundResultMessage(json: string): GetPresentationRoundResultMessage {
+        return cast(JSON.parse(json), r("GetPresentationRoundResultMessage"));
+    }
+
+    public static getPresentationRoundResultMessageToJson(value: GetPresentationRoundResultMessage): string {
+        return JSON.stringify(uncast(value, r("GetPresentationRoundResultMessage")), null, 2);
+    }
+
+    public static toGetPresentationsMessage(json: string): GetPresentationsMessage {
+        return cast(JSON.parse(json), r("GetPresentationsMessage"));
+    }
+
+    public static getPresentationsMessageToJson(value: GetPresentationsMessage): string {
+        return JSON.stringify(uncast(value, r("GetPresentationsMessage")), null, 2);
+    }
+
+    public static toGetPresentationsResultMessage(json: string): GetPresentationsResultMessage {
+        return cast(JSON.parse(json), r("GetPresentationsResultMessage"));
+    }
+
+    public static getPresentationsResultMessageToJson(value: GetPresentationsResultMessage): string {
+        return JSON.stringify(uncast(value, r("GetPresentationsResultMessage")), null, 2);
+    }
+
     public static toGetRecentLocationsMessage(json: string): GetRecentLocationsMessage {
         return cast(JSON.parse(json), r("GetRecentLocationsMessage"));
     }
@@ -5510,6 +5834,118 @@ export class Convert {
 
     public static pRActionResultMessageToJson(value: PRActionResultMessage): string {
         return JSON.stringify(uncast(value, r("PRActionResultMessage")), null, 2);
+    }
+
+    public static toPresentation(json: string): Presentation {
+        return cast(JSON.parse(json), r("Presentation"));
+    }
+
+    public static presentationToJson(value: Presentation): string {
+        return JSON.stringify(uncast(value, r("Presentation")), null, 2);
+    }
+
+    public static toPresentationAddedMessage(json: string): PresentationAddedMessage {
+        return cast(JSON.parse(json), r("PresentationAddedMessage"));
+    }
+
+    public static presentationAddedMessageToJson(value: PresentationAddedMessage): string {
+        return JSON.stringify(uncast(value, r("PresentationAddedMessage")), null, 2);
+    }
+
+    public static toPresentationComment(json: string): PresentationComment {
+        return cast(JSON.parse(json), r("PresentationComment"));
+    }
+
+    public static presentationCommentToJson(value: PresentationComment): string {
+        return JSON.stringify(uncast(value, r("PresentationComment")), null, 2);
+    }
+
+    public static toPresentationRound(json: string): PresentationRound {
+        return cast(JSON.parse(json), r("PresentationRound"));
+    }
+
+    public static presentationRoundToJson(value: PresentationRound): string {
+        return JSON.stringify(uncast(value, r("PresentationRound")), null, 2);
+    }
+
+    public static toPresentationUpdatedMessage(json: string): PresentationUpdatedMessage {
+        return cast(JSON.parse(json), r("PresentationUpdatedMessage"));
+    }
+
+    public static presentationUpdatedMessageToJson(value: PresentationUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("PresentationUpdatedMessage")), null, 2);
+    }
+
+    public static toPresentCommentInput(json: string): PresentCommentInput {
+        return cast(JSON.parse(json), r("PresentCommentInput"));
+    }
+
+    public static presentCommentInputToJson(value: PresentCommentInput): string {
+        return JSON.stringify(uncast(value, r("PresentCommentInput")), null, 2);
+    }
+
+    public static toPresentFeedbackMessage(json: string): PresentFeedbackMessage {
+        return cast(JSON.parse(json), r("PresentFeedbackMessage"));
+    }
+
+    public static presentFeedbackMessageToJson(value: PresentFeedbackMessage): string {
+        return JSON.stringify(uncast(value, r("PresentFeedbackMessage")), null, 2);
+    }
+
+    public static toPresentFeedbackResult(json: string): PresentFeedbackResult {
+        return cast(JSON.parse(json), r("PresentFeedbackResult"));
+    }
+
+    public static presentFeedbackResultToJson(value: PresentFeedbackResult): string {
+        return JSON.stringify(uncast(value, r("PresentFeedbackResult")), null, 2);
+    }
+
+    public static toPresentFile(json: string): PresentFile {
+        return cast(JSON.parse(json), r("PresentFile"));
+    }
+
+    public static presentFileToJson(value: PresentFile): string {
+        return JSON.stringify(uncast(value, r("PresentFile")), null, 2);
+    }
+
+    public static toPresentManifestView(json: string): PresentManifestView {
+        return cast(JSON.parse(json), r("PresentManifestView"));
+    }
+
+    public static presentManifestViewToJson(value: PresentManifestView): string {
+        return JSON.stringify(uncast(value, r("PresentManifestView")), null, 2);
+    }
+
+    public static toPresentOpenMessage(json: string): PresentOpenMessage {
+        return cast(JSON.parse(json), r("PresentOpenMessage"));
+    }
+
+    public static presentOpenMessageToJson(value: PresentOpenMessage): string {
+        return JSON.stringify(uncast(value, r("PresentOpenMessage")), null, 2);
+    }
+
+    public static toPresentOpenResult(json: string): PresentOpenResult {
+        return cast(JSON.parse(json), r("PresentOpenResult"));
+    }
+
+    public static presentOpenResultToJson(value: PresentOpenResult): string {
+        return JSON.stringify(uncast(value, r("PresentOpenResult")), null, 2);
+    }
+
+    public static toPresentSubmitRoundMessage(json: string): PresentSubmitRoundMessage {
+        return cast(JSON.parse(json), r("PresentSubmitRoundMessage"));
+    }
+
+    public static presentSubmitRoundMessageToJson(value: PresentSubmitRoundMessage): string {
+        return JSON.stringify(uncast(value, r("PresentSubmitRoundMessage")), null, 2);
+    }
+
+    public static toPresentSubmitRoundResultMessage(json: string): PresentSubmitRoundResultMessage {
+        return cast(JSON.parse(json), r("PresentSubmitRoundResultMessage"));
+    }
+
+    public static presentSubmitRoundResultMessageToJson(value: PresentSubmitRoundResultMessage): string {
+        return JSON.stringify(uncast(value, r("PresentSubmitRoundResultMessage")), null, 2);
     }
 
     public static toPRRole(json: string): PRRole {
@@ -7554,6 +7990,71 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
         { json: "staged", js: "staged", typ: u(undefined, true) },
     ], "any"),
+    "GetPresentationRoundMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetPresentationRoundMessageCmd") },
+        { json: "presentation_id", js: "presentation_id", typ: "" },
+        { json: "seq", js: "seq", typ: u(undefined, 0) },
+    ], "any"),
+    "GetPresentationRoundResultMessage": o([
+        { json: "comments", js: "comments", typ: u(undefined, a(r("CommentElement"))) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("GetPresentationRoundResultMessageEvent") },
+        { json: "presentation", js: "presentation", typ: u(undefined, r("PresentationElement")) },
+        { json: "round", js: "round", typ: u(undefined, r("Round")) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "CommentElement": o([
+        { json: "author", js: "author", typ: "" },
+        { json: "content", js: "content", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+        { json: "round_id", js: "round_id", typ: "" },
+        { json: "side", js: "side", typ: "" },
+    ], "any"),
+    "PresentationElement": o([
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "latest_round_seq", js: "latest_round_seq", typ: 0 },
+        { json: "latest_round_submitted", js: "latest_round_submitted", typ: true },
+        { json: "repo_path", js: "repo_path", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "ticket_id", js: "ticket_id", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "Round": o([
+        { json: "base_sha", js: "base_sha", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "head_sha", js: "head_sha", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "manifest", js: "manifest", typ: r("Manifest") },
+        { json: "presentation_id", js: "presentation_id", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
+        { json: "submitted_at", js: "submitted_at", typ: u(undefined, "") },
+    ], "any"),
+    "Manifest": o([
+        { json: "files", js: "files", typ: a(r("FileObject")) },
+        { json: "skip", js: "skip", typ: a("") },
+        { json: "summary", js: "summary", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "FileObject": o([
+        { json: "note", js: "note", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "GetPresentationsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetPresentationsMessageCmd") },
+    ], "any"),
+    "GetPresentationsResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("GetPresentationsResultMessageEvent") },
+        { json: "presentations", js: "presentations", typ: a(r("PresentationElement")) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "GetRecentLocationsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetRecentLocationsMessageCmd") },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
@@ -8157,6 +8658,108 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "Presentation": o([
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "latest_round_seq", js: "latest_round_seq", typ: 0 },
+        { json: "latest_round_submitted", js: "latest_round_submitted", typ: true },
+        { json: "repo_path", js: "repo_path", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "ticket_id", js: "ticket_id", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "PresentationAddedMessage": o([
+        { json: "event", js: "event", typ: r("PresentationAddedMessageEvent") },
+        { json: "presentation", js: "presentation", typ: r("PresentationElement") },
+    ], "any"),
+    "PresentationComment": o([
+        { json: "author", js: "author", typ: "" },
+        { json: "content", js: "content", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+        { json: "round_id", js: "round_id", typ: "" },
+        { json: "side", js: "side", typ: "" },
+    ], "any"),
+    "PresentationRound": o([
+        { json: "base_sha", js: "base_sha", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "head_sha", js: "head_sha", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "manifest", js: "manifest", typ: r("Manifest") },
+        { json: "presentation_id", js: "presentation_id", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
+        { json: "submitted_at", js: "submitted_at", typ: u(undefined, "") },
+    ], "any"),
+    "PresentationUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("PresentationUpdatedMessageEvent") },
+        { json: "presentation", js: "presentation", typ: r("PresentationElement") },
+    ], "any"),
+    "PresentCommentInput": o([
+        { json: "content", js: "content", typ: "" },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+        { json: "side", js: "side", typ: "" },
+    ], "any"),
+    "PresentFeedbackMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PresentFeedbackMessageCmd") },
+        { json: "presentation_id", js: "presentation_id", typ: "" },
+        { json: "seq", js: "seq", typ: u(undefined, 0) },
+    ], "any"),
+    "PresentFeedbackResult": o([
+        { json: "markdown", js: "markdown", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
+        { json: "submitted", js: "submitted", typ: true },
+    ], "any"),
+    "PresentFile": o([
+        { json: "note", js: "note", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "PresentManifestView": o([
+        { json: "files", js: "files", typ: a(r("FileObject")) },
+        { json: "skip", js: "skip", typ: a("") },
+        { json: "summary", js: "summary", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "PresentOpenMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PresentOpenMessageCmd") },
+        { json: "manifest_yaml", js: "manifest_yaml", typ: "" },
+        { json: "presentation_id", js: "presentation_id", typ: u(undefined, "") },
+        { json: "source_session_id", js: "source_session_id", typ: "" },
+        { json: "ticket_id", js: "ticket_id", typ: u(undefined, "") },
+    ], "any"),
+    "PresentOpenResult": o([
+        { json: "base_sha", js: "base_sha", typ: "" },
+        { json: "head_sha", js: "head_sha", typ: "" },
+        { json: "presentation_id", js: "presentation_id", typ: "" },
+        { json: "round_id", js: "round_id", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "PresentSubmitRoundMessage": o([
+        { json: "cmd", js: "cmd", typ: r("PresentSubmitRoundMessageCmd") },
+        { json: "comments", js: "comments", typ: a(r("CommentObject")) },
+        { json: "handback", js: "handback", typ: true },
+        { json: "round_id", js: "round_id", typ: "" },
+    ], "any"),
+    "CommentObject": o([
+        { json: "content", js: "content", typ: "" },
+        { json: "filepath", js: "filepath", typ: "" },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+        { json: "side", js: "side", typ: "" },
+    ], "any"),
+    "PresentSubmitRoundResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("PresentSubmitRoundResultMessageEvent") },
+        { json: "round_id", js: "round_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
     "PRsUpdatedMessage": o([
         { json: "event", js: "event", typ: r("PRsUpdatedMessageEvent") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
@@ -8325,6 +8928,8 @@ const typeMap: any = {
         { json: "notebook_read", js: "notebook_read", typ: u(undefined, r("NotebookReadObject")) },
         { json: "notebook_write", js: "notebook_write", typ: u(undefined, r("NotebookWriteObject")) },
         { json: "ok", js: "ok", typ: true },
+        { json: "present_feedback_result", js: "present_feedback_result", typ: u(undefined, r("PresentFeedbackResultObject")) },
+        { json: "present_open_result", js: "present_open_result", typ: u(undefined, r("PresentOpenResultObject")) },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
@@ -8346,6 +8951,19 @@ const typeMap: any = {
         { json: "guidance", js: "guidance", typ: "" },
         { json: "root", js: "root", typ: "" },
         { json: "session_is_chief", js: "session_is_chief", typ: true },
+    ], "any"),
+    "PresentFeedbackResultObject": o([
+        { json: "markdown", js: "markdown", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
+        { json: "submitted", js: "submitted", typ: true },
+    ], "any"),
+    "PresentOpenResultObject": o([
+        { json: "base_sha", js: "base_sha", typ: "" },
+        { json: "head_sha", js: "head_sha", typ: "" },
+        { json: "presentation_id", js: "presentation_id", typ: "" },
+        { json: "round_id", js: "round_id", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
+        { json: "title", js: "title", typ: "" },
     ], "any"),
     "TicketAttachResultObject": o([
         { json: "filename", js: "filename", typ: "" },
@@ -9472,6 +10090,18 @@ const typeMap: any = {
     "GetFileDiffMessageCmd": [
         "get_file_diff",
     ],
+    "GetPresentationRoundMessageCmd": [
+        "get_presentation_round",
+    ],
+    "GetPresentationRoundResultMessageEvent": [
+        "get_presentation_round_result",
+    ],
+    "GetPresentationsMessageCmd": [
+        "get_presentations",
+    ],
+    "GetPresentationsResultMessageEvent": [
+        "get_presentations_result",
+    ],
     "GetRecentLocationsMessageCmd": [
         "get_recent_locations",
     ],
@@ -9668,6 +10298,24 @@ const typeMap: any = {
     ],
     "PRActionResultMessageEvent": [
         "pr_action_result",
+    ],
+    "PresentationAddedMessageEvent": [
+        "presentation_added",
+    ],
+    "PresentationUpdatedMessageEvent": [
+        "presentation_updated",
+    ],
+    "PresentFeedbackMessageCmd": [
+        "present_feedback",
+    ],
+    "PresentOpenMessageCmd": [
+        "present_open",
+    ],
+    "PresentSubmitRoundMessageCmd": [
+        "present_submit_round",
+    ],
+    "PresentSubmitRoundResultMessageEvent": [
+        "present_submit_round_result",
     ],
     "PRsUpdatedMessageEvent": [
         "prs_updated",

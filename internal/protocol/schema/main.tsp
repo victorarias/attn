@@ -159,6 +159,65 @@ model WorkspaceContext {
   updated_at: string;
 }
 
+// PresentFile is one file entry in a present manifest, as authored by the agent.
+model PresentFile {
+  path: string;
+  note?: string;
+}
+
+// PresentManifestView is the parsed, daemon-pinned view of a present manifest —
+// the title/summary/file list an agent wrote, plus the skip list it declined to
+// walk through.
+model PresentManifestView {
+  title: string;
+  summary?: string;
+  files: PresentFile[];
+  skip: string[];
+}
+
+// Presentation is a review session an agent opened over a set of changes.
+// kind is "changes" for now (reserved for future presentation kinds).
+model Presentation {
+  id: string;
+  session_id: string;
+  ticket_id?: string;
+  title: string;
+  kind: string;
+  repo_path: string;
+  status: string;
+  created_at: string;
+  latest_round_seq: int32;
+  latest_round_submitted: boolean;
+}
+
+// PresentationRound is one iteration of a presentation, pinned to a base/head
+// SHA pair at the moment it was opened.
+model PresentationRound {
+  id: string;
+  presentation_id: string;
+  seq: int32;
+  base_sha: string;
+  head_sha: string;
+  created_at: string;
+  submitted_at?: string;
+  manifest: PresentManifestView;
+}
+
+// PresentationComment is a reviewer note anchored to a line range within one
+// round's diff. side is "new" | "old" — plain string, not an enum, to avoid the
+// quicktype identical-enum merge trap.
+model PresentationComment {
+  id: string;
+  round_id: string;
+  filepath: string;
+  line_start: int32;
+  line_end: int32;
+  side: string;
+  content: string;
+  author: string;
+  created_at: string;
+}
+
 // DispatchWorkState is the agent-reported work state carried on a set_ticket_status
 // command (and mapped onto a TicketStatus). It is the one Dispatch-named symbol
 // retained after the chief-of-staff dispatch namespace was retired.
@@ -575,6 +634,44 @@ model TicketCommentMessage {
 // confirm which ticket it posted to.
 model TicketCommentResult {
   ticket_id: string;
+}
+
+// PresentOpenMessage opens a new presentation (or a new round on an existing
+// one, when presentation_id is set) from a raw manifest YAML the agent wrote.
+// The daemon parses and pins the manifest and the base/head SHAs at open time.
+model PresentOpenMessage {
+  cmd: "present_open";
+  source_session_id: string;
+  manifest_yaml: string;
+  presentation_id?: string;
+  ticket_id?: string;
+}
+
+// PresentOpenResult echoes the round the daemon created, so the caller can
+// report where the presentation now lives.
+model PresentOpenResult {
+  presentation_id: string;
+  round_id: string;
+  seq: int32;
+  base_sha: string;
+  head_sha: string;
+  title: string;
+}
+
+// PresentFeedbackMessage reads reviewer feedback for a round back to the
+// authoring agent as markdown. seq omitted/0 means the latest round.
+model PresentFeedbackMessage {
+  cmd: "present_feedback";
+  presentation_id: string;
+  seq?: int32;
+}
+
+// PresentFeedbackResult carries the rendered feedback markdown for the
+// resolved round, plus whether that round has been submitted yet.
+model PresentFeedbackResult {
+  markdown: string;
+  seq: int32;
+  submitted: boolean;
 }
 
 // TicketInboxMessage reads (and consumes) the calling session's unread ticket
@@ -1700,6 +1797,73 @@ model TicketResultMessage {
   error?: string;
 }
 
+// GetPresentationsMessage reads the full list of presentations, the way the
+// app renders the present surface.
+model GetPresentationsMessage {
+  cmd: "get_presentations";
+}
+
+model GetPresentationsResultMessage {
+  event: "get_presentations_result";
+  success: boolean;
+  error?: string;
+  presentations: Presentation[];
+}
+
+// GetPresentationRoundMessage fetches one round of a presentation — the round
+// record plus its comments — for the detail view. seq omitted/0 means the
+// latest round.
+model GetPresentationRoundMessage {
+  cmd: "get_presentation_round";
+  presentation_id: string;
+  seq?: int32;
+}
+
+model GetPresentationRoundResultMessage {
+  event: "get_presentation_round_result";
+  success: boolean;
+  error?: string;
+  presentation?: Presentation;
+  round?: PresentationRound;
+  comments?: PresentationComment[];
+}
+
+// PresentCommentInput is a reviewer comment as submitted from the app, before
+// the daemon assigns it an id and author.
+model PresentCommentInput {
+  filepath: string;
+  line_start: int32;
+  line_end: int32;
+  side: string;
+  content: string;
+}
+
+// PresentSubmitRoundMessage hands a round's review back to the authoring
+// agent. handback marks the round submitted, closing the loop for that round.
+model PresentSubmitRoundMessage {
+  cmd: "present_submit_round";
+  round_id: string;
+  comments: PresentCommentInput[];
+  handback: boolean;
+}
+
+model PresentSubmitRoundResultMessage {
+  event: "present_submit_round_result";
+  success: boolean;
+  error?: string;
+  round_id: string;
+}
+
+model PresentationAddedMessage {
+  event: "presentation_added";
+  presentation: Presentation;
+}
+
+model PresentationUpdatedMessage {
+  event: "presentation_updated";
+  presentation: Presentation;
+}
+
 model WorkspaceLayoutActionResultMessage {
   event: "workspace_layout_action_result";
   action: string;
@@ -2218,6 +2382,8 @@ model Response {
   ticket_subscribe_result?: TicketSubscribeResult;
   ticket_unsubscribe_result?: TicketUnsubscribeResult;
   ticket_take_result?: TicketTakeResult;
+  present_open_result?: PresentOpenResult;
+  present_feedback_result?: PresentFeedbackResult;
 }
 
 model DelegateResult {
@@ -2715,4 +2881,9 @@ alias DaemonEvent =
   | RuntimeRespawnedMessage
   | PtyResizedMessage
   | BrowserControlRequestMessage
-  | CommandErrorMessage;
+  | CommandErrorMessage
+  | GetPresentationsResultMessage
+  | GetPresentationRoundResultMessage
+  | PresentSubmitRoundResultMessage
+  | PresentationAddedMessage
+  | PresentationUpdatedMessage;
