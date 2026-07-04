@@ -10,6 +10,7 @@ import { SHORTCUTS, type ShortcutId, type Combo, isChord, resolveBinding } from 
 import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid/gridAutomation';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
+import { dumpTerminalGeometry } from '../utils/terminalDiagnosticsLog';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 import { buildSessionRenderHealth } from '../utils/renderHealth';
@@ -1790,6 +1791,14 @@ export function useUiAutomationBridge({
         const limit = readWarmWorkspaceLimit();
         const virtualizedPanes = document.querySelectorAll('[data-testid^="pane-virtualized-"]').length;
         return { limit, virtualizedPanes };
+      }
+      case 'dump_terminal_geometry': {
+        // Same-moment app-side read of every mounted pane's model grid, cell
+        // metrics, clientWidth/Height, and DOM-truth canvas rects — avoids the
+        // cross-clock ambiguity of comparing a harness screenshot's timestamp
+        // against a separately-read disk dump.
+        const snapshots = dumpTerminalGeometry();
+        return { snapshots };
       }
       case 'reload_session': {
         if (!reloadSession) {
