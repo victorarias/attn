@@ -24,6 +24,7 @@ import type {
   Presentation,
   PresentationRound,
   PresentationComment,
+  PresentCommentInput,
   PRRole,
   HeatState,
 } from '../types/generated';
@@ -169,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '144';
+export const PROTOCOL_VERSION = '145';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2322,9 +2323,27 @@ export function useDaemonSocket({
             if (pending) {
               pendingActionsRef.current.delete('get_presentation_round');
               if (data.success) {
-                pending.resolve({ presentation: data.presentation, round: data.round, comments: data.comments || [] });
+                pending.resolve({
+                  presentation: data.presentation,
+                  round: data.round,
+                  comments: data.comments || [],
+                  repoHeadSha: data.repo_head_sha,
+                });
               } else {
                 pending.reject(new Error(data.error || 'Failed to load presentation round'));
+              }
+            }
+            break;
+          }
+
+          case 'present_submit_round_result': {
+            const pending = pendingActionsRef.current.get('present_submit_round');
+            if (pending) {
+              pendingActionsRef.current.delete('present_submit_round');
+              if (data.success) {
+                pending.resolve({ roundId: data.round_id });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to submit presentation round'));
               }
             }
             break;
@@ -4591,11 +4610,13 @@ export function useDaemonSocket({
   }, []);
 
   // Get file diff
-  // Options: staged (deprecated), baseRef (for PR-like branch diffs)
+  // Options: staged (deprecated), baseRef (for PR-like branch diffs), headRef
+  // (pins the modified side to a commit instead of the working tree — used by
+  // the presentation reader for base_sha->head_sha diffs)
   const sendGetFileDiff = useCallback((
     directory: string,
     path: string,
-    options?: { staged?: boolean; baseRef?: string }
+    options?: { staged?: boolean; baseRef?: string; headRef?: string }
   ): Promise<FileDiffResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -4614,6 +4635,7 @@ export function useDaemonSocket({
         path,
         ...(options?.staged !== undefined && { staged: options.staged }),
         ...(options?.baseRef && { base_ref: options.baseRef }),
+        ...(options?.headRef && { head_ref: options.headRef }),
       }));
 
       setTimeout(() => {
@@ -4950,7 +4972,7 @@ export function useDaemonSocket({
   const getPresentationRound = useCallback((
     presentationId: string,
     seq?: number,
-  ): Promise<{ presentation: Presentation; round: PresentationRound; comments: PresentationComment[] }> => {
+  ): Promise<{ presentation: Presentation; round: PresentationRound; comments: PresentationComment[]; repoHeadSha?: string }> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4971,6 +4993,38 @@ export function useDaemonSocket({
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           reject(new Error('Get presentation round timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  // Hand a round's review back to the authoring agent (presentation reader).
+  const submitPresentationRound = useCallback((input: {
+    roundId: string;
+    comments: PresentCommentInput[];
+    handback: boolean;
+  }): Promise<{ roundId: string }> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'present_submit_round';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({
+        cmd: 'present_submit_round',
+        round_id: input.roundId,
+        comments: input.comments,
+        handback: input.handback,
+      }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Submit presentation round timed out'));
         }
       }, 30000);
     });
@@ -5087,5 +5141,6 @@ export function useDaemonSocket({
     sendGetComments,
     getPresentations,
     getPresentationRound,
+    submitPresentationRound,
   };
 }

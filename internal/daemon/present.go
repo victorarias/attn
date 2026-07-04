@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/present"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
@@ -319,6 +320,14 @@ func (d *Daemon) handleGetPresentationRound(client *wsClient, msg *protocol.GetP
 	for i, c := range comments {
 		result.Comments[i] = commentToProto(c)
 	}
+
+	// Best-effort drift signal: the repo may have moved on since the round
+	// was pinned. A rev-parse failure (repo gone, etc.) is non-fatal — just
+	// omit the field.
+	if headSHA, err := attngit.Output(attngit.OpMetadata, pres.RepoPath, "rev-parse", "HEAD"); err == nil {
+		result.RepoHeadSHA = protocol.Ptr(strings.TrimSpace(string(headSHA)))
+	}
+
 	result.Success = true
 	d.sendToClient(client, result)
 }

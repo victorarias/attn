@@ -61,6 +61,7 @@ type fileDiffCacheKey struct {
 	directory string
 	path      string
 	baseRef   string
+	headRef   string
 	staged    bool
 }
 
@@ -218,8 +219,8 @@ func (c *gitCoordinator) finishBranchDiffRefresh(key branchDiffCacheKey, refresh
 	close(refresh.done)
 }
 
-func (c *gitCoordinator) FileDiff(directory, path, baseRef string, staged bool) (fileDiffContent, error) {
-	key := fileDiffCacheKey{directory: directory, path: path, baseRef: baseRef, staged: staged}
+func (c *gitCoordinator) FileDiff(directory, path, baseRef, headRef string, staged bool) (fileDiffContent, error) {
+	key := fileDiffCacheKey{directory: directory, path: path, baseRef: baseRef, headRef: headRef, staged: staged}
 
 	c.mu.Lock()
 	if refresh, ok := c.fileDiffActive[key]; ok {
@@ -233,7 +234,7 @@ func (c *gitCoordinator) FileDiff(directory, path, baseRef string, staged bool) 
 	c.fileDiffActive[key] = refresh
 	c.mu.Unlock()
 
-	refresh.content, refresh.err = readFileDiffForDaemon(directory, path, baseRef, staged)
+	refresh.content, refresh.err = readFileDiffForDaemon(directory, path, baseRef, headRef, staged)
 
 	c.mu.Lock()
 	if c.fileDiffActive[key] == refresh {
@@ -245,12 +246,24 @@ func (c *gitCoordinator) FileDiff(directory, path, baseRef string, staged bool) 
 	return refresh.content, refresh.err
 }
 
-func readFileDiff(directory, path, baseRef string, staged bool) (fileDiffContent, error) {
+func readFileDiff(directory, path, baseRef, headRef string, staged bool) (fileDiffContent, error) {
 	content := fileDiffContent{}
 
 	origOutput, origErr := attngit.Output(attngit.OpDiff, directory, "show", baseRef+":"+path)
 	if origErr == nil {
 		content.original = string(origOutput)
+	}
+
+	// When head_ref is set (presentation reader diffs), the modified side is
+	// pinned to that ref instead of the working tree, and staged is ignored.
+	if headRef != "" {
+		headOutput, err := attngit.Output(attngit.OpDiff, directory, "show", headRef+":"+path)
+		if err != nil {
+			content.modified = ""
+			return content, nil
+		}
+		content.modified = string(headOutput)
+		return content, nil
 	}
 
 	if staged {
