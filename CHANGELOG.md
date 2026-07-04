@@ -15,6 +15,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-04]
 
 ### Added
+- **`attn debug` CLI.** New `attn debug ls|incidents|diagnostics|daemon-log` subcommands read the frontend's disk-based debug logs and the daemon log for the active profile, with `--tail`, `--grep`, and (for `daemon-log`) `--since` filters — no more hand-rolled `cd`+`tail`+`jq` into `~/Library/Application Support/com.attn.manager*/debug` and `daemon.log`.
 - **`attn vision-check <image> <question>` CLI command.** Answers a question about a screenshot or image with a single, tool-less LLM call, so an agent can ask about an image without pulling it into its own context.
 - **Pin the chief-of-staff's reasoning effort, per agent.** Settings → Agents → "Chief-of-staff model & effort" now has an effort selector next to each agent's model override (Claude: low, medium, high, xhigh, max; Codex: minimal, low, medium, high, xhigh). Leave it on "Agent default" to use the agent's own default. Only chief-of-staff launches are affected — regular sessions are unaffected.
 
