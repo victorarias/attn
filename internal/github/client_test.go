@@ -431,3 +431,41 @@ func TestClient_MergePR_InvalidMethod(t *testing.T) {
 		t.Errorf("Error message = %q, should mention invalid merge method", err.Error())
 	}
 }
+
+func TestClient_FetchPRState(t *testing.T) {
+	var capturedPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"state":  "closed",
+			"merged": true,
+			"title":  "Fix the thing",
+		})
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token")
+	state, merged, title, err := client.FetchPRState("owner/repo", 462)
+	if err != nil {
+		t.Fatalf("FetchPRState error: %v", err)
+	}
+	if capturedPath != "/repos/owner/repo/pulls/462" {
+		t.Errorf("Path = %q, want /repos/owner/repo/pulls/462", capturedPath)
+	}
+	if state != "closed" || !merged || title != "Fix the thing" {
+		t.Errorf("FetchPRState = (%q, %v, %q), want (closed, true, Fix the thing)", state, merged, title)
+	}
+}
+
+func TestClient_FetchPRState_HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token")
+	if _, _, _, err := client.FetchPRState("owner/repo", 462); err == nil {
+		t.Fatal("FetchPRState should return error on 404")
+	}
+}

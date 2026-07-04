@@ -479,6 +479,26 @@ type PRDetails struct {
 	HeadBranch     string // Branch name (for worktree creation)
 }
 
+// FetchPRState fetches a PR's definitive lifecycle state in a single GET to
+// /repos/{repo}/pulls/{number}: state ("open"/"closed"), whether it was
+// merged, and its title. Deliberately not built on FetchPRDetails, which
+// makes extra review-related calls — this is one targeted request.
+func (c *Client) FetchPRState(repo string, number int) (state string, merged bool, title string, err error) {
+	body, err := c.doRequest("GET", fmt.Sprintf("/repos/%s/pulls/%d", repo, number), nil)
+	if err != nil {
+		return "", false, "", fmt.Errorf("fetch PR state: %w", err)
+	}
+	var prData struct {
+		State  string `json:"state"`
+		Merged bool   `json:"merged"`
+		Title  string `json:"title"`
+	}
+	if err := json.Unmarshal(body, &prData); err != nil {
+		return "", false, "", fmt.Errorf("parse PR state: %w", err)
+	}
+	return prData.State, prData.Merged, prData.Title, nil
+}
+
 // FetchPRDetails fetches detailed status for a PR
 func (c *Client) FetchPRDetails(repo string, number int) (*PRDetails, error) {
 	// Fetch PR details

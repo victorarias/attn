@@ -82,44 +82,63 @@ func originRepoName(path string) string {
 // git@github.com:owner/name.git, ssh://git@github.com/owner/name.git,
 // https://github.com/owner/name.git, and trailing-.git-less variants.
 func OriginOwnerRepo(path string) string {
-	out, err := runGitOutput(OpMetadata, path, "remote", "get-url", "origin")
-	if err != nil {
-		return ""
-	}
-	return ownerRepoFromRemote(strings.TrimSpace(string(out)))
+	_, slug := OriginHostOwnerRepo(path)
+	return slug
 }
 
-// ownerRepoFromRemote parses a git remote URL into an "owner/name" slug.
-func ownerRepoFromRemote(remote string) string {
+// OriginHostOwnerRepo returns the remote host (e.g. "github.com") and the
+// "owner/name" slug for path's origin remote. Both are "" if path is not a
+// git repo, has no origin, or the remote URL cannot be parsed.
+func OriginHostOwnerRepo(path string) (host, ownerRepo string) {
+	out, err := runGitOutput(OpMetadata, path, "remote", "get-url", "origin")
+	if err != nil {
+		return "", ""
+	}
+	return hostOwnerRepoFromRemote(strings.TrimSpace(string(out)))
+}
+
+// hostOwnerRepoFromRemote parses a git remote URL into a host and an
+// "owner/name" slug.
+func hostOwnerRepoFromRemote(remote string) (host, ownerRepo string) {
 	if remote == "" {
-		return ""
+		return "", ""
 	}
 	remote = strings.TrimSuffix(remote, ".git")
 
 	if idx := strings.Index(remote, "://"); idx >= 0 {
-		// URL form (ssh://, https://, git://, ...): strip scheme + host.
+		// URL form (ssh://, https://, git://, ...): authority is up to the
+		// first "/"; strip any user@ prefix and :port suffix from it below.
 		rest := remote[idx+3:]
 		slashIdx := strings.Index(rest, "/")
 		if slashIdx < 0 {
-			return ""
+			return "", ""
 		}
+		host = rest[:slashIdx]
 		remote = rest[slashIdx+1:]
 	} else if colonIdx := strings.Index(remote, ":"); colonIdx > 0 {
-		// scp-like form: git@github.com:owner/name
+		// scp-like form: [user@]host:owner/name
+		host = remote[:colonIdx]
 		remote = remote[colonIdx+1:]
+	}
+
+	if atIdx := strings.LastIndex(host, "@"); atIdx >= 0 {
+		host = host[atIdx+1:]
+	}
+	if portIdx := strings.Index(host, ":"); portIdx >= 0 {
+		host = host[:portIdx]
 	}
 
 	remote = strings.Trim(remote, "/")
 	parts := strings.Split(remote, "/")
 	if len(parts) < 2 {
-		return ""
+		return "", ""
 	}
 	owner := parts[len(parts)-2]
 	name := parts[len(parts)-1]
-	if owner == "" || name == "" {
-		return ""
+	if owner == "" || name == "" || host == "" {
+		return "", ""
 	}
-	return owner + "/" + name
+	return host, owner + "/" + name
 }
 
 func repoNameFromRemote(remote string) string {

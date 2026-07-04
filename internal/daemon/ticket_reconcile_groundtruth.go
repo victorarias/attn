@@ -1,28 +1,56 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// Deterministic, annotate-only ground-truth cross-check for reconciliation
-// verdicts. The classifier's verdict is produced from a stale, pre-sliced
-// transcript and can contradict state attn already tracks (e.g. it can say a
-// PR merge is "pending" hours after the PR actually merged). This never
-// mutates the verdict itself: it only extracts PR references from the
-// verdict's free text and, when the daemon's own tracked-PR store positively
-// confirms one of those PRs is no longer open, appends a "Ground-truth check"
-// line to the posted comment. It makes no network calls and degrades to
-// silence on any ambiguity (untracked PR number, unresolved repo, etc.).
+// Annotate-only ground-truth cross-check for reconciliation verdicts. The
+// classifier's verdict is produced from a stale, pre-sliced transcript and
+// can contradict reality (e.g. it can say a PR merge is "pending" hours
+// after the PR actually merged). This never mutates the verdict itself: it
+// extracts PR references from the verdict's free text and appends
+// "Ground-truth check" lines to the posted comment when a referenced PR is
+// positively known to be merged or closed. Two sources feed that knowledge:
+//
+//  1. The daemon's own tracked-PR rows (deterministic, no network). Note the
+//     store only tracks OPEN PRs today (see groundTruthTerminalStates), so
+//     this leg is forward-compatible rather than load-bearing.
+//  2. For referenced PRs ABSENT from the tracked open set — the common shape
+//     of the real bug, since merged/closed PRs vanish from the poller's
+//     `is:open` sweep — up to groundTruthMaxLookups targeted single-request
+//     GitHub lookups resolve the definitive state.
+//
+// Everything degrades to silence: no cwd, no origin remote, no GitHub client
+// for the host, lookup errors, or a still-open PR all produce no annotation,
+// and nothing here can fail the reconcile.
 
 // groundTruthMaxLines caps how many Ground-truth check lines can be appended
 // to a single reconciliation comment.
 const groundTruthMaxLines = 5
+
+// groundTruthMaxLookups caps the targeted GitHub lookups per reconcile: a
+// verdict is short free text, so more than a few PR references is noise, and
+// each lookup is a real API request.
+const groundTruthMaxLookups = 3
+
+// groundTruthLookupTimeout bounds the TOTAL added latency of the lookup leg;
+// the executor's context is wrapped with it so a slow or wedged GitHub call
+// cannot stall the verdict comment.
+const groundTruthLookupTimeout = 10 * time.Second
+
+// prStateFetcher resolves a PR's definitive lifecycle state. Production wires
+// github.Client.FetchPRState for the repo's host; tests substitute a fake via
+// the Daemon.ticketReconcilePRFetch seam.
+type prStateFetcher func(repo string, number int) (state string, merged bool, title string, err error)
 
 // groundTruthMaxPRNumber is a garbage guard: PR numbers extracted from free
 // text above this are treated as noise (e.g. a misparsed line number or hash)
@@ -88,12 +116,10 @@ func extractPRRefs(text string) []int {
 // attn's own workflow annotation (today, only protocol.PRStateWaiting =
 // "waiting", meaning "needs attention"). A "not open" blacklist would treat
 // every tracked (i.e. actually still-open) PR as finished and misfire on
-// every verdict that references one. An allowlist stays silent unless a PR
-// row explicitly says "merged" or "closed" — which nothing in this codebase
-// writes today, so in practice this cross-check does not yet fire against
-// live data. It is forward-compatible: if the poller is ever extended to
-// persist terminal GitHub states, this starts firing correctly with no
-// further changes here.
+// every verdict that references one. Nothing writes "merged"/"closed" rows
+// today — the production path for finished PRs is the untracked-ref GitHub
+// lookup (groundTruthUntrackedLines) — but this leg starts firing with no
+// further changes if the poller is ever extended to persist terminal states.
 var groundTruthTerminalStates = map[string]bool{
 	"merged": true,
 	"closed": true,
@@ -131,9 +157,120 @@ func reconcileGroundTruthLines(refs []int, repoSlug string, prs []*protocol.PR) 
 		if !groundTruthTerminalStates[strings.ToLower(pr.State)] {
 			continue // not a confirmed-terminal state: silent
 		}
-		lines = append(lines, fmt.Sprintf(
-			"Ground-truth check: PR #%d is %s (%q) — the verdict text may be stale on this point.",
-			n, pr.State, pr.Title))
+		lines = append(lines, groundTruthLine(n, pr.State, pr.Title))
+	}
+	return lines
+}
+
+func groundTruthLine(number int, state, title string) string {
+	return fmt.Sprintf(
+		"Ground-truth check: PR #%d is %s (%q) — the verdict text may be stale on this point.",
+		number, state, title)
+}
+
+// groundTruthUntrackedLines resolves referenced PRs that are ABSENT from the
+// tracked open set via targeted GitHub lookups. Because the store only tracks
+// open PRs, absence is the expected signature of a merged/closed PR — but it
+// can also mean "never tracked", so each candidate gets one definitive
+// lookup, capped at groundTruthMaxLookups. Merged or closed results produce a
+// line; open results, lookup errors, or a nil fetcher produce silence.
+func groundTruthUntrackedLines(ctx context.Context, refs []int, tracked map[int]bool, repoSlug string, fetch prStateFetcher) []string {
+	if fetch == nil || repoSlug == "" || len(refs) == 0 {
+		return nil
+	}
+
+	var lines []string
+	lookups := 0
+	for _, n := range refs {
+		if tracked[n] {
+			continue // tracked rows are the deterministic leg's business
+		}
+		if lookups >= groundTruthMaxLookups || len(lines) >= groundTruthMaxLines {
+			break
+		}
+		if ctx.Err() != nil {
+			break // overall lookup budget spent
+		}
+		lookups++
+		state, merged, title, err := fetchPRStateCtx(ctx, fetch, repoSlug, n)
+		if err != nil {
+			continue // silent: no positive knowledge
+		}
+		switch {
+		case merged:
+			lines = append(lines, groundTruthLine(n, "merged", title))
+		case strings.EqualFold(state, "closed"):
+			lines = append(lines, groundTruthLine(n, "closed", title))
+		}
+	}
+	return lines
+}
+
+// fetchPRStateCtx runs fetch under ctx: github.Client has no context plumbing
+// (its HTTP client owns a 30s per-request timeout), so the call runs in a
+// goroutine and the result is abandoned if ctx expires first — the goroutine
+// then finishes harmlessly against its own HTTP timeout.
+func fetchPRStateCtx(ctx context.Context, fetch prStateFetcher, repo string, number int) (state string, merged bool, title string, err error) {
+	type result struct {
+		state  string
+		merged bool
+		title  string
+		err    error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		s, m, t, e := fetch(repo, number)
+		ch <- result{s, m, t, e}
+	}()
+	select {
+	case r := <-ch:
+		return r.state, r.merged, r.title, r.err
+	case <-ctx.Done():
+		return "", false, "", ctx.Err()
+	}
+}
+
+// reconcileGroundTruth assembles the full cross-check for a verdict: resolve
+// the ticket cwd's origin into host + owner/name slug, extract PR references
+// from the verdict's free text, annotate from tracked rows (deterministic),
+// then resolve untracked references through the host's GitHub client (capped,
+// time-bounded). Returns the lines to append to the comment; empty on any
+// missing prerequisite.
+func (d *Daemon) reconcileGroundTruth(ctx context.Context, verdict *ticketReconcileVerdict, cwd string) []string {
+	if verdict == nil {
+		return nil
+	}
+	host, repoSlug := git.OriginHostOwnerRepo(cwd)
+	if repoSlug == "" {
+		return nil
+	}
+	refs := extractPRRefs(verdict.WhatsLeft + "\n" + verdict.Evidence)
+	if len(refs) == 0 {
+		return nil
+	}
+
+	prs := d.store.ListPRsByRepo(repoSlug)
+	lines := reconcileGroundTruthLines(refs, repoSlug, prs)
+
+	tracked := make(map[int]bool, len(prs))
+	for _, pr := range prs {
+		if pr != nil {
+			tracked[pr.Number] = true
+		}
+	}
+
+	fetch := d.ticketReconcilePRFetch
+	if fetch == nil && d.githubAvailable() {
+		if client, ok := d.ghRegistry.Get(host); ok {
+			fetch = client.FetchPRState
+		}
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, groundTruthLookupTimeout)
+	defer cancel()
+	lines = append(lines, groundTruthUntrackedLines(lookupCtx, refs, tracked, repoSlug, fetch)...)
+
+	if len(lines) > groundTruthMaxLines {
+		lines = lines[:groundTruthMaxLines]
 	}
 	return lines
 }
