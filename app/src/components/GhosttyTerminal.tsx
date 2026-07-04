@@ -82,6 +82,7 @@ import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog'
 import {
   recordDiag,
   recordPaint,
+  noteRecovery,
   noteResize,
   registerRenderProbe,
   disposePaneDiagnostics,
@@ -164,6 +165,12 @@ export interface GhosttyTerminalHandle {
   // (a fit() that did not bail). Until then getSize() reports the provisional
   // construction default, which must never claim PTY geometry authority.
   hasMeasuredSize: () => boolean;
+  // True when the model grid is taller or wider than the container it is
+  // rendering into (see geometryOverflowsContainer). A pane can land in this
+  // state on reveal after the window shrank while it was hidden; a caller
+  // that catches it can force a refit rather than leaving the clip in place
+  // indefinitely.
+  overflowsContainer: () => boolean;
   getVisibleContent: () => TerminalVisibleContentSnapshot;
   getVisibleStyleSummary: () => TerminalVisibleStyleSnapshot;
   getBlockState: () => BlockStateSnapshot;
@@ -344,6 +351,17 @@ export function liveResizeConflictsWithQueuedReplay(
   return fitRequiresTerminalResize(pendingReplay, target) ? 'cancel' : 'skip';
 }
 
+// Backoff schedule for WebGL renderer-recovery retries (context loss or a
+// failed construction): `attempt` is 1-indexed (the first retry is attempt 1).
+// Returns the delay before that attempt, or null once attempts are exhausted
+// and the pane should fall back to the "reopen the pane" error state — PR B
+// already removed most of the context-pool pressure that caused losses, so a
+// handful of short, escalating retries covers the rare remaining cases
+// without spinning forever on a genuinely dead GPU/context.
+export function recoveryDelayMs(attempt: number): number | null {
+  const schedule = [250, 1500, 5000];
+  return schedule[attempt - 1] ?? null;
+}
 
 function wordRangeAtColumn(line: string, col: number): { startCol: number; endCol: number } | null {
   const isWordCharacter = (character: string | undefined) => Boolean(character && /[\w-]/.test(character));
@@ -537,6 +555,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const runtimeMetaRef = useRef(runtimeLogMeta);
     const debugNameRef = useRef(debugName);
     const diagKeyRef = useRef<string>(runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName);
+    // Bumping this remounts the <canvas> (keyed by it below), forcing a fresh
+    // getContext('webgl2') — the only way off a lost context, since a canvas
+    // keeps returning the same (dead) context object from getContext() for
+    // its own lifetime. See the recovery effect for why this beats setError.
+    const [rendererEpoch, setRendererEpoch] = useState(0);
+    // Recovery attempt counter (reset to 0 once a construction succeeds) and
+    // the pending retry timer, if any. Refs, not state: they must be readable
+    // synchronously inside the mount effect's own cleanup/scheduling without
+    // triggering a render.
+    const recoveryAttemptRef = useRef(0);
+    const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [linkCursorActive, setLinkCursorActive] = useState(false);
     const [findUi, setFindUi] = useState({ open: false, matchCount: 0, focusedIndex: -1, scanning: false, caseSensitive: false });
@@ -546,6 +575,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const filterQueryRef = useRef('');
     const filterInputRef = useRef<HTMLInputElement>(null);
     const filterRescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Read by the mount effect at construction time without being a dependency
+    // of it — see the font-size effect below for why font changes must not
+    // rebuild the model/renderer.
+    const fontSizeRef = useRef(fontSize);
 
     onInputRef.current = onInput;
     onReadyRef.current = onReady;
@@ -554,6 +587,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     runtimeMetaRef.current = runtimeLogMeta;
     debugNameRef.current = debugName;
     cwdRef.current = cwd;
+    fontSizeRef.current = fontSize;
     // Stable diagnostics key for the per-pane watchdog/probe registries. paneId
     // is stable for a pane's life and correlates with daemon/workspace logs;
     // debugName can change (its agent/title segment is reassigned on relabel).
@@ -1613,6 +1647,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getText,
       getSize: () => terminalRef.current ? { cols: terminalRef.current.cols, rows: terminalRef.current.rows } : null,
       hasMeasuredSize: () => hasMeasuredSizeRef.current,
+      overflowsContainer: () => {
+        const model = terminalRef.current;
+        const renderer = rendererRef.current;
+        const container = containerRef.current;
+        if (!model || !renderer || !container) return false;
+        return geometryOverflowsContainer(model.rows, renderer.cellHeight, container.clientHeight)
+          || geometryOverflowsContainer(model.cols, renderer.cellWidth, container.clientWidth);
+      },
       getVisibleContent,
       getVisibleStyleSummary,
       getBlockState,
@@ -1626,6 +1668,33 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const canvas = canvasRef.current;
       if (!container || !canvas) return;
       const perfId = `ghostty-${debugNameRef.current}`;
+      // Schedules the next WebGL-recovery attempt (a lost context or a failed
+      // renderer construction land here) with escalating backoff. A pending
+      // timer is never doubled: a context-lost event and a construction
+      // failure could otherwise both fire for the same dead renderer.
+      const scheduleRecovery = () => {
+        if (recoveryTimerRef.current !== null) return;
+        recoveryAttemptRef.current += 1;
+        const attempt = recoveryAttemptRef.current;
+        const delay = recoveryDelayMs(attempt);
+        const session = runtimeMetaRef.current?.sessionId ?? undefined;
+        const paneKind = runtimeMetaRef.current?.paneKind ?? undefined;
+        if (delay === null) {
+          noteRecovery(diagKeyRef.current, { session, paneKind, attempt, outcome: 'giveUp' });
+          setError('Ghostty WebGL context lost. Reopen the pane to rebuild the renderer.');
+          return;
+        }
+        noteRecovery(diagKeyRef.current, { session, paneKind, attempt, outcome: 'scheduled', delayMs: delay });
+        recoveryTimerRef.current = setTimeout(() => {
+          recoveryTimerRef.current = null;
+          // A stale timer must not resurrect a pane that has since unmounted
+          // (or been torn down for an unrelated reason, e.g. this same effect
+          // already cleaned up) — cleanup below also cancels this outright,
+          // this is a second line of defense.
+          if (!active) return;
+          setRendererEpoch((value) => value + 1);
+        }, delay);
+      };
       void Ghostty.load(ghosttyWasmUrl).then((ghostty) => {
         if (!active) return;
         const theme = getTerminalTheme(resolvedTheme);
@@ -1665,17 +1734,27 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           cols: initialSize.cols,
           rows: initialSize.rows,
         });
-        const renderer = new WebGlTerminalRenderer(canvas, fontSize, FONT_FAMILY, {
+        const renderer = new WebGlTerminalRenderer(canvas, fontSizeRef.current, FONT_FAMILY, {
           background: theme.background,
           foreground: theme.foreground,
           cursor: theme.cursor,
         });
         terminalRef.current = terminal;
         rendererRef.current = renderer;
+        if (recoveryAttemptRef.current > 0) {
+          noteRecovery(diagKeyRef.current, {
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+            attempt: recoveryAttemptRef.current,
+            outcome: 'recovered',
+          });
+        }
+        recoveryAttemptRef.current = 0;
+        setError(null);
         // The bundled Nerd Font may not be loaded yet, so the first glyphs that
         // need it rasterize blank. Once it loads, drop the stale glyph cache and
         // repaint so terminal icons (eza --icons, powerline, devicons) appear.
-        void ensureTerminalIconFont(fontSize).then(() => {
+        void ensureTerminalIconFont(fontSizeRef.current).then(() => {
           if (!active || rendererRef.current !== renderer) return;
           renderer.invalidateGlyphCache();
           renderSurface(true);
@@ -1766,17 +1845,35 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
           hasMeasuredSize: () => hasMeasuredSizeRef.current,
+          overflowsContainer: () => geometryOverflowsContainer(terminal.rows, renderer.cellHeight, container.clientHeight)
+            || geometryOverflowsContainer(terminal.cols, renderer.cellWidth, container.clientWidth),
           getVisibleContent,
           getVisibleStyleSummary,
           getBlockState,
           drain: () => writeChainRef.current,
         });
       }).catch((reason) => {
-        if (active) setError(String(reason));
+        if (!active) return;
+        noteRecovery(diagKeyRef.current, {
+          session: runtimeMetaRef.current?.sessionId ?? undefined,
+          paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+          attempt: recoveryAttemptRef.current,
+          outcome: 'constructFailed',
+          error: String(reason),
+        });
+        scheduleRecovery();
       });
       const handleContextLost = (event: Event) => {
         event.preventDefault();
-        setError('Ghostty WebGL context lost. Reopen the pane to rebuild the renderer.');
+        if (!active) return;
+        noteRecovery(diagKeyRef.current, {
+          session: runtimeMetaRef.current?.sessionId ?? undefined,
+          paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+          attempt: recoveryAttemptRef.current,
+          outcome: 'contextLost',
+        });
+        setError(null);
+        scheduleRecovery();
       };
       canvas.addEventListener('webglcontextlost', handleContextLost);
       const unregister = registerTerminalPerfGetter(perfId, () => {
@@ -1816,6 +1913,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
       return () => {
         active = false;
+        if (recoveryTimerRef.current !== null) {
+          clearTimeout(recoveryTimerRef.current);
+          recoveryTimerRef.current = null;
+        }
         recordDiag({
           kind: 'pane_unmount',
           pane: diagKeyRef.current,
@@ -1841,32 +1942,61 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         inputRef.current = null;
         rendererRef.current = null;
         terminalRef.current = null;
+        // Release THIS canvas's GL context deterministically the moment it is
+        // discarded for good, instead of waiting on non-deterministic GC —
+        // browsers cap the number of simultaneously-live WebGL contexts
+        // (WKWebView's cap is low), and a lingering lost/dead context can
+        // starve new panes until the engine forcibly evicts the oldest one
+        // (a frozen pane or a hard UI freeze elsewhere). "Discarded for good"
+        // means canvasRef.current no longer points at this exact node: either
+        // the whole pane is unmounting (canvasRef.current is now null) or a
+        // rendererEpoch bump just replaced it with a fresh keyed <canvas>
+        // (context-loss recovery). A same-canvas rebuild (theme change reuses
+        // this node) must NOT hit this branch — losing it there would hand
+        // the very renderer just constructed a dead context, since a canvas
+        // keeps returning the same context object from getContext() for its
+        // own lifetime. This is the single owner of canvas-context release;
+        // there is no separate unmount-only effect for it.
+        if (canvasRef.current !== canvas) {
+          canvas.getContext('webgl2')?.getExtension('WEBGL_lose_context')?.loseContext();
+        }
       };
     // Ghostty cells contain their resolved default RGB values, so theme
     // changes require a fresh model. The pane runtime rehydrates this model
     // from verified replay without sending historical replies to the live PTY.
-    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, fontSize, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, resolvedTheme, write]);
+    // rendererEpoch is a dependency for the same reason: a bump (scheduled by
+    // scheduleRecovery above after a lost context or a failed construction)
+    // must rebuild the model/renderer, and keying the <canvas> on it (see the
+    // JSX below) forces a fresh element and therefore a fresh getContext().
+    // fontSize is intentionally NOT a dependency: see the font-size effect
+    // below for why a size change must re-metric the existing renderer in
+    // place instead of rebuilding the model/renderer for every mounted pane.
+    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, rendererEpoch, resizeLocal, resolvedTheme, write]);
 
-    // Release this pane's WebGL2 context when the pane unmounts. Browsers cap the
-    // number of simultaneously-live WebGL contexts (WKWebView's cap is low), and
-    // attn keeps every workspace's panes mounted, so a closed or remounted pane
-    // whose context lingers until non-deterministic GC can starve new panes — the
-    // engine then forcibly loses the oldest context, which surfaces as a frozen
-    // pane or a hard UI freeze when opening a new agent/terminal. loseContext()
-    // reclaims the context deterministically at unmount.
-    //
-    // This lives in its own unmount-only effect (empty deps) on purpose: the init
-    // effect above reuses this same <canvas> when fontSize/theme change, and a
-    // canvas keeps returning the *same* context object from getContext() even
-    // after it is lost. Losing it in the per-init cleanup would hand the rebuilt
-    // renderer a dead context. Capturing the canvas here closes over the element
-    // so the cleanup is order-independent of the init effect's teardown.
+    // React to a font-size change without tearing down the WASM model or the
+    // WebGL renderer. Rebuilding on every font-size change (the previous
+    // behavior, when fontSize was in the mount effect's deps) tears down and
+    // reconstructs EVERY mounted pane (active + warm hidden), pressuring
+    // WKWebView's small live-WebGL-context pool badly enough to lose/fail
+    // contexts and permanently break panes — and it left hidden panes' canvases
+    // sized for the old font, since a hidden pane's fit() bails and never
+    // re-measures until revealed. Re-metricing in place avoids both: it costs
+    // one glyph-atlas invalidation instead of a full rebuild, and resize()
+    // re-asserts canvas geometry immediately even for panes that won't fit()
+    // again until they're shown.
     useEffect(() => {
-      const canvas = canvasRef.current;
-      return () => {
-        canvas?.getContext('webgl2')?.getExtension('WEBGL_lose_context')?.loseContext();
-      };
-    }, []);
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      renderer.setFontSize(fontSize);
+      renderer.resize(modelSizeRef.current.cols, modelSizeRef.current.rows);
+      void ensureTerminalIconFont(fontSize).then(() => {
+        if (rendererRef.current !== renderer) return;
+        renderer.invalidateGlyphCache();
+        renderSurface(true);
+      });
+      fit();
+      renderSurface(true);
+    }, [fontSize]);
 
     const cellFromPointer = (event: React.MouseEvent | React.WheelEvent | MouseEvent) => {
       const renderer = rendererRef.current;
@@ -2674,7 +2804,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           }
         }}
       >
-        <canvas ref={canvasRef} />
+        {/* Keyed on rendererEpoch: a context-loss recovery bumps the epoch to force
+            a fresh DOM node (and therefore a fresh getContext('webgl2')) — a canvas
+            keeps returning the same dead context object for its own lifetime. */}
+        <canvas ref={canvasRef} key={rendererEpoch} />
         {error && <div className="ghostty-terminal-error">{error}</div>}
       </div>
       {findUi.open && (

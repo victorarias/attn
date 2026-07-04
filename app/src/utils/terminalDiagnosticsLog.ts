@@ -71,7 +71,8 @@ export type DiagKind =
   | 'attach'
   | 'desync'
   | 'watchdog'
-  | 'incident';
+  | 'incident'
+  | 'recovery';
 
 export interface DiagEvent {
   at: number;
@@ -94,6 +95,7 @@ const LIFECYCLE_KINDS = new Set<DiagKind>([
   'desync',
   'watchdog',
   'incident',
+  'recovery',
 ]);
 
 export interface RenderProbe {
@@ -475,6 +477,24 @@ export function noteResize(
   if (info.paneKind === 'agent') {
     armWatchdog(pane, info.session);
   }
+}
+
+// WebGL context-loss recovery lifecycle: a lost context or a failed renderer
+// construction schedules an epoch-rebuild retry with backoff (see
+// GhosttyTerminal's rendererEpoch effect); this makes that retry sequence
+// traceable after the fact instead of only visible as a silently-fixed pane.
+export function noteRecovery(
+  pane: string,
+  info: {
+    session?: string;
+    paneKind?: string;
+    attempt: number;
+    outcome: 'contextLost' | 'constructFailed' | 'scheduled' | 'recovered' | 'giveUp';
+    delayMs?: number;
+    error?: string;
+  },
+): void {
+  recordDiag({ kind: 'recovery', pane, ...info });
 }
 
 function armWatchdog(pane: string, session?: string) {

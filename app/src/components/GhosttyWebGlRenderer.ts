@@ -226,8 +226,8 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
 }
 
 export class WebGlTerminalRenderer {
-  readonly cellWidth: number;
-  readonly cellHeight: number;
+  cellWidth: number;
+  cellHeight: number;
 
   private readonly canvas: HTMLCanvasElement;
   private readonly gl: WebGL2RenderingContext;
@@ -238,8 +238,8 @@ export class WebGlTerminalRenderer {
   private readonly atlasContext: CanvasRenderingContext2D;
   private readonly glyphs = new Map<string, AtlasGlyph>();
   private readonly dpr: number;
-  private readonly baseline: number;
-  private readonly fontSize: number;
+  private baseline: number;
+  private fontSize: number;
   private readonly fontFamily: string;
   private readonly theme: RendererTheme;
   private atlasSize = INITIAL_ATLAS_SIZE;
@@ -256,6 +256,14 @@ export class WebGlTerminalRenderer {
   private retryingAtlasFrame = false;
   private cols = 0;
   private rows = 0;
+  // Set by setFontSize() so the next resize() call re-sizes the canvas even
+  // when cols/rows are unchanged. Cell metrics can change independently of
+  // grid dimensions (a font-size change with no container resize), and
+  // resize()'s cols/rows guard alone would otherwise skip it, leaving the
+  // canvas sized for the old font — invisible on the active pane (fit()
+  // recomputes cols/rows too, so it rarely hits this path) but permanent on
+  // hidden panes, which never fit() until revealed.
+  private metricsDirty = false;
 
   constructor(canvas: HTMLCanvasElement, fontSize: number, fontFamily: string, theme: RendererTheme) {
     this.canvas = canvas;
@@ -327,9 +335,10 @@ export class WebGlTerminalRenderer {
   }
 
   resize(cols: number, rows: number): void {
-    if (cols === this.cols && rows === this.rows) {
+    if (cols === this.cols && rows === this.rows && !this.metricsDirty) {
       return;
     }
+    this.metricsDirty = false;
     this.cols = cols;
     this.rows = rows;
     this.canvas.width = Math.ceil(cols * this.cellWidth * this.dpr);
@@ -519,6 +528,29 @@ export class WebGlTerminalRenderer {
   // caller is responsible for forcing a redraw afterwards.
   invalidateGlyphCache(): void {
     this.reseedAtlas();
+  }
+
+  // Re-metric this renderer for a new font size in place, instead of tearing
+  // down and reconstructing the WASM model + WebGL context on every font-size
+  // change. WKWebView has a small pool of live WebGL contexts; rebuilding every
+  // mounted pane (active + warm hidden) on a font change pressures that pool
+  // and can permanently break panes with a lost/failed context. This does not
+  // touch canvas sizing — the caller re-asserts cols/rows via resize() so
+  // hidden panes' canvases stay consistent with the model without needing a
+  // container measurement.
+  setFontSize(fontSize: number): void {
+    this.fontSize = fontSize;
+    const metricsCanvas = document.createElement('canvas');
+    const metricsContext = metricsCanvas.getContext('2d');
+    if (!metricsContext) {
+      throw new Error('Unable to measure terminal font');
+    }
+    metricsContext.font = `${fontSize}px ${this.fontFamily}`;
+    this.cellWidth = Math.max(1, Math.ceil(metricsContext.measureText('M').width));
+    this.cellHeight = Math.max(1, Math.ceil(fontSize * 1.45));
+    this.baseline = Math.ceil(fontSize * 1.1);
+    this.metricsDirty = true;
+    this.invalidateGlyphCache();
   }
 
   private configureAttribute(name: string, size: number, stride: number, offset: number): void {

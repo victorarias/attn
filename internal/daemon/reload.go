@@ -47,6 +47,39 @@ func (d *Daemon) clearReloading(sessionID string) {
 	delete(d.reloadingSessions, sessionID)
 }
 
+// reloadKillMarkTTL bounds how long a reload-kill mark stays consumable. The
+// backend's Kill returns only after the child exits, so the exit event lands
+// within moments of the mark; the TTL only exists so a mark whose exit never
+// arrived cannot suppress the crash seam for an unrelated death much later.
+const reloadKillMarkTTL = 15 * time.Second
+
+// markReloadKill records that sessionID's next exit is the kill half of a
+// client-initiated reload (kill_session with reload:true). Must be called
+// before the backend Kill so the mark beats the async exit event.
+func (d *Daemon) markReloadKill(sessionID string) {
+	d.reloadingMu.Lock()
+	defer d.reloadingMu.Unlock()
+	if d.reloadKills == nil {
+		d.reloadKills = make(map[string]time.Time)
+	}
+	d.reloadKills[sessionID] = time.Now()
+}
+
+// consumeReloadKill atomically reports whether sessionID's exit was caused by a
+// client reload and clears the mark. One-shot: exactly the reload-killed
+// worker's exit skips the ticket seam; any later exit of the respawned session
+// is judged normally.
+func (d *Daemon) consumeReloadKill(sessionID string) bool {
+	d.reloadingMu.Lock()
+	defer d.reloadingMu.Unlock()
+	markedAt, ok := d.reloadKills[sessionID]
+	if !ok {
+		return false
+	}
+	delete(d.reloadKills, sessionID)
+	return time.Since(markedAt) <= reloadKillMarkTTL
+}
+
 // reloadLockFor returns the per-session mutex that serializes reloadSessionAgent's
 // kill→remove→spawn composite. Without it, two concurrent reloads of the same
 // session (a double-toggle, or a role transfer reloading both chiefs) interleave

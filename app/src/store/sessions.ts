@@ -13,6 +13,17 @@ import {
 
 export type { TerminalWorkspaceState };
 
+// Sessions whose runtime is being reloaded in place (kill → respawn of the same
+// id). The kill's exit event can look like a clean voluntary quit (code 0, no
+// signal), which would trip the auto-close-on-clean-exit path in App.tsx and
+// tear down the pane/workspace out from under the pending respawn. Consumers
+// (the session-exit handler) check this before treating an exit as end-of-life.
+const reloadingSessionIds = new Set<string>();
+
+export function isSessionReloading(id: string): boolean {
+  return reloadingSessionIds.has(id);
+}
+
 export interface Session {
   id: string;
   label: string;
@@ -297,8 +308,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       rows = 24;
     }
 
+    reloadingSessionIds.add(id);
     try {
-      await ptyKill({ id });
+      // reload:true tells the daemon this kill is a lifecycle transition (the
+      // same id respawns just below), not a crash — bound tickets stay put.
+      await ptyKill({ id, reload: true });
     } catch (e) {
       console.warn('[Session] Reload kill failed, continuing to respawn:', e);
     }
@@ -334,6 +348,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     } catch (e) {
       console.error('[Session] Reload spawn failed:', e);
       throw e;
+    } finally {
+      reloadingSessionIds.delete(id);
     }
   },
 

@@ -41,7 +41,7 @@ import { DaemonProvider } from './contexts/DaemonContext';
 import { NotebookSurfaceProvider } from './contexts/NotebookSurfaceContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { KeybindingsProvider, useKeybindings } from './contexts/KeybindingsContext';
-import { useSessionStore, type Session, type TerminalWorkspaceState } from './store/sessions';
+import { useSessionStore, isSessionReloading, type Session, type TerminalWorkspaceState } from './store/sessions';
 import {
   computeWarmWorkspaceIds,
   DEFAULT_WARM_WORKSPACE_LIMIT,
@@ -2371,6 +2371,12 @@ sendFetchPRDetails,
   // explicit closes) keep the pane open so the error and exit code stay visible.
   const handleSessionProcessExit = useCallback((info: SessionExitInfo) => {
     if (info.exitCode !== 0 || info.signal) {
+      return;
+    }
+    // A reload's kill can surface as a clean exit (code 0, no signal); the same
+    // id is about to respawn in place, so closing the pane here would tear the
+    // workspace down under the pending spawn ("unknown workspace").
+    if (isSessionReloading(info.id)) {
       return;
     }
     handleRequestCloseSession(info.id);

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   dumpTerminalGeometry,
+  noteRecovery,
   noteResize,
   recordDiag,
   recordPaint,
@@ -66,6 +67,23 @@ describe('paint anomaly detection', () => {
     recordPaint({ ...baseSample, pane, modelPrintable: 500, quads: null });
 
     expect(ringEventsFor(pane).filter((event) => event.kind === 'incident')).toHaveLength(0);
+  });
+});
+
+describe('noteRecovery', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('attn:terminal-diagnostics', '1');
+  });
+
+  it('records the recovery lifecycle as lifecycle events, in order', () => {
+    const pane = 'pane-recovery';
+    noteRecovery(pane, { attempt: 1, outcome: 'contextLost' });
+    noteRecovery(pane, { attempt: 1, outcome: 'scheduled', delayMs: 250 });
+    noteRecovery(pane, { attempt: 1, outcome: 'recovered' });
+
+    const events = ringEventsFor(pane).filter((event) => event.kind === 'recovery');
+    expect(events.map((event) => event.outcome)).toEqual(['contextLost', 'scheduled', 'recovered']);
+    expect(events[1]?.delayMs).toBe(250);
   });
 });
 

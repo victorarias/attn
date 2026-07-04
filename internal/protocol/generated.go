@@ -1531,6 +1531,9 @@ type KillSessionMessage struct {
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
+	// Reload corresponds to the JSON schema field "reload".
+	Reload *bool `json:"reload,omitempty,omitzero"`
+
 	// Signal corresponds to the JSON schema field "signal".
 	Signal *string `json:"signal,omitempty,omitzero"`
 }

@@ -2,11 +2,13 @@
 
 import { spawn } from 'node:child_process';
 import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
+import { emitVerdict } from './common.mjs';
 import {
   assertProductionRunAllowed,
   defaultAppPathForProfile,
   defaultWSURLForProfile,
 } from './harnessProfile.mjs';
+import { resolveScenarios as resolveScenariosFromCatalog, scenarioCatalog } from './scenarioCatalog.mjs';
 
 // Matrix runs against the safe dev install by default — the whole point of the
 // profile feature is to iterate on attn-on-attn scenarios without ever taking
@@ -20,163 +22,6 @@ import {
 if (process.env.ATTN_HARNESS_PROFILE === undefined && !process.env.ATTN_PROFILE) {
   process.env.ATTN_HARNESS_PROFILE = 'dev';
 }
-
-const scenarioCatalog = [
-  {
-    id: 'workspace-shell-lifecycle',
-    label: 'Workspace shell lifecycle',
-    command: ['pnpm', 'run', 'real-app:scenario-workspace-shell-lifecycle'],
-  },
-  {
-    id: 'workspace-creation-shortcuts',
-    label: 'Workspace creation shortcuts',
-    command: ['pnpm', 'run', 'real-app:scenario-workspace-creation-shortcuts'],
-  },
-  {
-    id: 'workspace-switching',
-    label: 'Workspace switching',
-    command: ['pnpm', 'run', 'real-app:scenario-workspace-switching'],
-  },
-  {
-    id: 'workspace-move-leaf',
-    label: 'Workspace move pane between workspaces',
-    command: ['pnpm', 'run', 'real-app:scenario-workspace-move-leaf'],
-  },
-  {
-    id: 'workspace-close-last-session-switches-back',
-    label: 'Workspace close last session switches back',
-    command: ['pnpm', 'run', 'real-app:scenario-workspace-close-last-session-switches-back'],
-  },
-  {
-    id: 'workspace-close-one-session-keeps-selection',
-    label: 'Workspace close one session keeps selection',
-    command: ['pnpm', 'run', 'real-app:scenario-workspace-close-one-session-keeps-selection'],
-  },
-  {
-    id: 'tile-only-workspace-select',
-    label: 'Tile-only workspace select + render',
-    command: ['pnpm', 'run', 'real-app:scenario-tile-only-workspace-select'],
-  },
-  {
-    id: 'notebook-tile-finder',
-    label: 'Notebook tile finder (native Cmd+Opt+N dock, Cmd+P re-summon)',
-    command: ['pnpm', 'run', 'real-app:scenario-notebook-tile-finder'],
-  },
-  {
-    id: 'autoclose-on-exit',
-    label: 'Auto-close on clean exit, keep failed exits',
-    command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],
-  },
-  {
-    id: 'diff-review',
-    label: 'Diff review panel renders a real diff (@pierre/diffs)',
-    command: ['pnpm', 'run', 'real-app:scenario-diff-review'],
-  },
-  {
-    id: 'ticket-lifecycle',
-    label: 'Ticket lifecycle: chief delegates, worker reports, chief reviews in the panel',
-    command: ['pnpm', 'run', 'real-app:scenario-ticket-lifecycle'],
-    // Bootstraps a chief + a real codex delegation + the full worker→chief
-    // review loop in one app lifecycle; needs more than the default budget.
-    timeoutMs: 360_000,
-  },
-  {
-    id: 'nudge-trigger',
-    label: 'Ticket nudge: paused gate holds, then the real "deliver now" button doorbells the agent',
-    command: ['pnpm', 'run', 'real-app:scenario-nudge-trigger'],
-    // Boots a real codex agent, drives it idle, produces unread ticket activity,
-    // and clicks the live trigger button; needs more than the default budget.
-    timeoutMs: 360_000,
-  },
-  {
-    id: 'terminal-block-copy',
-    label: 'OSC 133 block copy via real fish + native Cmd+C',
-    command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],
-  },
-  {
-    id: 'terminal-context-menu',
-    label: 'Terminal context menu via native right-click + clipboard',
-    command: ['pnpm', 'run', 'real-app:scenario-terminal-context-menu'],
-  },
-  {
-    id: 'terminal-block-resize',
-    label: 'Block geometry across fish/bash/zsh through relaunch replay + split/close-split',
-    command: ['pnpm', 'run', 'real-app:scenario-terminal-block-resize'],
-    // Three shells share one launch + relaunch lifecycle; the default
-    // per-scenario budget is too tight for the full sweep.
-    timeoutMs: 360_000,
-  },
-  {
-    id: 'tr205-codex',
-    label: 'TR-205 remote codex',
-    command: ['pnpm', 'run', 'real-app:scenario-tr205'],
-  },
-  {
-    id: 'tr205-claude',
-    label: 'TR-205 remote claude',
-    command: ['pnpm', 'run', 'real-app:scenario-tr205', '--', '--remote-agent', 'claude'],
-  },
-  {
-    id: 'tr502',
-    label: 'TR-502 remote relaunch splits',
-    command: ['pnpm', 'run', 'real-app:scenario-tr502'],
-  },
-  {
-    id: 'tr504',
-    label: 'TR-504 remote cleanup',
-    command: ['pnpm', 'run', 'real-app:scenario-tr504'],
-  },
-  {
-    id: 'tr402-local-codex',
-    label: 'TR-402 local codex',
-    command: ['pnpm', 'run', 'real-app:scenario-tr402-local-codex'],
-  },
-  {
-    id: 'tr402-local-claude',
-    label: 'TR-402 local claude',
-    command: ['pnpm', 'run', 'real-app:scenario-tr402-local-claude'],
-  },
-  {
-    id: 'tr201-local-claude',
-    label: 'TR-201 local claude existing split relaunch',
-    command: ['pnpm', 'run', 'real-app:scenario-tr201'],
-  },
-  {
-    id: 'tr204-local-claude',
-    label: 'TR-204 local claude relaunch formatting',
-    command: ['pnpm', 'run', 'real-app:scenario-tr204'],
-  },
-  {
-    id: 'tr301-local-claude',
-    label: 'TR-301 local claude utility focus',
-    command: ['pnpm', 'run', 'real-app:scenario-tr301'],
-  },
-  {
-    id: 'tr401-local-claude',
-    label: 'TR-401 local claude resize',
-    command: ['pnpm', 'run', 'real-app:scenario-tr401'],
-  },
-  {
-    id: 'tr401-local-codex',
-    label: 'TR-401 local codex resize',
-    command: ['pnpm', 'run', 'real-app:scenario-tr401-local-codex'],
-  },
-  {
-    id: 'tr401-codex-initial-pane',
-    label: 'TR-401 Codex fresh initial-pane resize',
-    command: ['pnpm', 'run', 'real-app:scenario-tr401-codex-main'],
-  },
-  {
-    id: 'codex-resume',
-    label: 'Codex native resume id mapping',
-    command: ['pnpm', 'run', 'real-app:scenario-codex-resume'],
-  },
-  {
-    id: 'ghostty-scroll',
-    label: 'Ghostty scrollback anchoring while output streams',
-    command: ['pnpm', 'run', 'real-app:scenario-ghostty-scroll'],
-  },
-];
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -226,22 +71,12 @@ Target: defaults to the dev install (~/Applications/attn-dev.app, port 29849)
   --run-against-prod acknowledgement.
 
 Available scenarios:
-${scenarioCatalog.map((scenario) => `  - ${scenario.id}: ${scenario.label}`).join('\n')}
+${resolveScenariosFromCatalog([], scenarioCatalog).map((scenario) => `  - ${scenario.id}: ${scenario.label}`).join('\n')}
 `);
 }
 
 function resolveScenarios(selected) {
-  if (!selected.length) {
-    return scenarioCatalog;
-  }
-  const byId = new Map(scenarioCatalog.map((scenario) => [scenario.id, scenario]));
-  return selected.map((id) => {
-    const scenario = byId.get(id);
-    if (!scenario) {
-      throw new Error(`Unknown scenario id: ${id}`);
-    }
-    return scenario;
-  });
+  return resolveScenariosFromCatalog(selected, scenarioCatalog);
 }
 
 const signalExitCode = {
@@ -324,6 +159,7 @@ function runScenario(scenario, timeoutMs, runAgainstProd) {
 }
 
 async function main() {
+  const matrixStartedAt = Date.now();
   const { help, selected, failFast, timeoutMs, runAgainstProd } = parseArgs(process.argv.slice(2));
   if (help) {
     printHelp();
@@ -372,6 +208,16 @@ async function main() {
     results,
   };
   console.log(`\nSerial matrix summary:\n${JSON.stringify(summary, null, 2)}`);
+  emitVerdict({
+    ok: failed.length === 0,
+    scenarioId: 'serial-matrix',
+    runId: '',
+    failureCount: failed.length,
+    firstFailure: failed.length ? `${failed[0].id} exit ${failed[0].code}` : null,
+    artifactsDir: '',
+    summaryPath: '',
+    durationMs: Date.now() - matrixStartedAt,
+  });
   if (failed.length > 0) {
     process.exitCode = 1;
   }

@@ -1927,6 +1927,7 @@ export enum InstallPluginMessageCmd {
 export interface KillSessionMessage {
     cmd:     KillSessionMessageCmd;
     id:      string;
+    reload?: boolean;
     signal?: string;
     [property: string]: any;
 }
@@ -8361,6 +8362,7 @@ const typeMap: any = {
     "KillSessionMessage": o([
         { json: "cmd", js: "cmd", typ: r("KillSessionMessageCmd") },
         { json: "id", js: "id", typ: "" },
+        { json: "reload", js: "reload", typ: u(undefined, true) },
         { json: "signal", js: "signal", typ: u(undefined, "") },
     ], "any"),
     "ListBranchesMessage": o([
