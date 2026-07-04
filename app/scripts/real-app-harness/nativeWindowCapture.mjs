@@ -222,23 +222,90 @@ export async function setFrontWindowBounds(targetBounds, options = {}) {
   );
 }
 
+// Resolves the absolute screencapture rect for a window, optionally cropped
+// to a window-relative sub-rect. `crop` coordinates are relative to the
+// window's top-left corner. The crop is clamped to the window's bounds; a
+// crop rect that does not overlap the window at all throws.
+export function resolveCaptureRect(windowBounds, crop = null) {
+  if (!windowBounds) {
+    throw new Error('resolveCaptureRect requires windowBounds');
+  }
+  if (!crop) {
+    return {
+      x: windowBounds.x,
+      y: windowBounds.y,
+      width: windowBounds.width,
+      height: windowBounds.height,
+    };
+  }
+
+  const cropX = Number(crop.x);
+  const cropY = Number(crop.y);
+  const cropWidth = Number(crop.width);
+  const cropHeight = Number(crop.height);
+  if (![cropX, cropY, cropWidth, cropHeight].every(Number.isFinite) || cropWidth <= 0 || cropHeight <= 0) {
+    throw new Error(`Invalid crop rect: ${JSON.stringify(crop)}`);
+  }
+
+  const windowRight = windowBounds.width;
+  const windowBottom = windowBounds.height;
+  const cropRight = cropX + cropWidth;
+  const cropBottom = cropY + cropHeight;
+
+  const clampedLeft = Math.max(0, Math.min(cropX, windowRight));
+  const clampedTop = Math.max(0, Math.min(cropY, windowBottom));
+  const clampedRight = Math.max(0, Math.min(cropRight, windowRight));
+  const clampedBottom = Math.max(0, Math.min(cropBottom, windowBottom));
+
+  const clampedWidth = clampedRight - clampedLeft;
+  const clampedHeight = clampedBottom - clampedTop;
+
+  if (clampedWidth <= 0 || clampedHeight <= 0) {
+    throw new Error(
+      `Crop rect ${JSON.stringify(crop)} does not overlap window bounds ${JSON.stringify(windowBounds)}`,
+    );
+  }
+
+  return {
+    x: windowBounds.x + clampedLeft,
+    y: windowBounds.y + clampedTop,
+    width: clampedWidth,
+    height: clampedHeight,
+  };
+}
+
 export async function captureFrontWindowScreenshot(outputPath, options = {}) {
   const bundleId = options.bundleId || options.client?.bundleId || bundleIdentifierForProfile();
   assertProductionRunAllowed({ bundleId });
   const bounds = await getFrontWindowBounds(bundleId, options);
+  const captureRect = resolveCaptureRect(bounds, options.crop || null);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   await execFileAsync('/usr/sbin/screencapture', [
     '-x',
     '-R',
-    `${bounds.x},${bounds.y},${bounds.width},${bounds.height}`,
+    `${captureRect.x},${captureRect.y},${captureRect.width},${captureRect.height}`,
     outputPath,
   ], {
     timeout: 10_000,
   });
+
+  if (options.maxDim !== undefined && options.maxDim !== null) {
+    const maxDim = options.maxDim;
+    if (!Number.isInteger(maxDim) || maxDim <= 0) {
+      throw new Error(`Invalid maxDim: ${JSON.stringify(options.maxDim)}`);
+    }
+    if (Math.max(captureRect.width, captureRect.height) > maxDim) {
+      await execFileAsync('/usr/bin/sips', ['-Z', String(maxDim), outputPath], {
+        timeout: 10_000,
+      });
+    }
+  }
+
   return {
     source: 'native_window',
     bundleId,
     bounds,
+    captureRect,
     path: outputPath,
   };
 }
