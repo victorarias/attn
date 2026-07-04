@@ -49,6 +49,7 @@ import {
   writeWarmWorkspaceLimit,
 } from './utils/terminalVirtualization';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, SessionExitInfo } from './hooks/useDaemonSocket';
+import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
 import { GridView, type GridSessionTile } from './components/grid/GridView';
@@ -97,6 +98,25 @@ const DOCK_PANEL_EXIT_MS = 260;
 // from accidental close. ⌘W and the close action no-op on it; this hint tells the
 // user how to close it deliberately (demote it first).
 const CHIEF_OF_STAFF_CLOSE_HINT = 'Chief of staff is protected — unset the chief role to close it.';
+
+// A presentation is worth a top-banner notice while its latest round is open
+// for review (status "open") and hasn't been submitted yet.
+export function presentationNeedsNotice(presentation: Presentation): boolean {
+  return presentation.status === 'open' && !presentation.latest_round_submitted;
+}
+
+// Pure reducer for the main-window presentation-notice list, shared by the
+// initial getPresentations() seed and the presentation_added/updated
+// broadcasts. Keeps at most one entry per presentation id; a presentation
+// that stops needing a notice (submitted or closed) is dropped.
+export function upsertPresentationNotice(notices: Presentation[], updated: Presentation): Presentation[] {
+  const withoutExisting = notices.filter((n) => n.id !== updated.id);
+  return presentationNeedsNotice(updated) ? [...withoutExisting, updated] : withoutExisting;
+}
+
+export function seedPresentationNotices(all: Presentation[]): Presentation[] {
+  return all.filter(presentationNeedsNotice);
+}
 const CHANGES_BRANCH_DIFF_INTERVAL_MS = 30_000;
 const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
 const CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS = 5_000;
@@ -350,6 +370,10 @@ function App() {
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() => getDismissedUpdateVersion());
   const installChannel = normalizeInstallChannel(import.meta.env.VITE_INSTALL_CHANNEL);
 
+  // Open presentations whose latest round still needs review. Seeded once the
+  // socket connects and kept live via presentation_added/updated broadcasts.
+  const [presentationNotices, setPresentationNotices] = useState<Presentation[]>([]);
+
   const {
     daemonSessions,
     setDaemonSessions,
@@ -574,6 +598,7 @@ function App() {
     sendResolveComment,
     sendDeleteComment,
     sendGetComments,
+    getPresentations,
     connectionError,
     hasReceivedInitialState,
     rateLimit,
@@ -581,6 +606,8 @@ function App() {
     clearWarnings,
   } = useDaemonSocket({
     onSessionsUpdate: setDaemonSessions,
+    onPresentationAdded: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
+    onPresentationUpdated: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
     // The daemon tags each fs_changed with an origin ("ui"/"agent"/"external"), but
     // every origin is treated the same here: bump a signal so an open browser
     // re-lists its tree and reloads the open file. Covers any file under the root.
@@ -630,6 +657,23 @@ function App() {
     };
   }, [hasReceivedInitialState, sendNotificationList]);
 
+  // Seed the presentation-notice banner once the socket is up. The
+  // presentation_added/updated broadcasts keep it live thereafter.
+  useEffect(() => {
+    if (!hasReceivedInitialState) return;
+    let cancelled = false;
+    getPresentations()
+      .then((all) => {
+        if (!cancelled) setPresentationNotices(seedPresentationNotices(all));
+      })
+      .catch(() => {
+        /* transient (not connected / timeout); the next broadcast reseeds */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasReceivedInitialState, getPresentations]);
+
   // Wrap the app content with SettingsProvider so useUIScale can access settings.
   // KeybindingsProvider (inside it) syncs shortcut overrides into the resolver.
   return (
@@ -653,6 +697,7 @@ function App() {
         updateAvailableVersion={updateAvailableVersion}
         onOpenLatestRelease={handleOpenLatestRelease}
         onDismissLatestRelease={handleDismissLatestRelease}
+        presentationNotices={presentationNotices}
         settingError={settingError}
         clearSettingError={() => setSettingError(null)}
         // Daemon socket functions
@@ -769,6 +814,7 @@ interface AppContentProps {
   updateAvailableVersion: string | null;
   onOpenLatestRelease: () => Promise<void>;
   onDismissLatestRelease: () => void;
+  presentationNotices: Presentation[];
   settingError: string | null;
   clearSettingError: () => void;
   // All the daemon socket functions
@@ -880,6 +926,7 @@ function AppContent({
   updateAvailableVersion,
   onOpenLatestRelease,
   onDismissLatestRelease,
+  presentationNotices,
   settingError,
   clearSettingError,
   sendPRAction,
@@ -971,6 +1018,29 @@ sendFetchPRDetails,
   clearGitStatus,
   registerSessionExitHandler,
 }: AppContentProps) {
+  // Locally dismissed presentation notices. Not persisted — a dismissed
+  // notice may reappear on next app start, which is acceptable since it
+  // reflects genuinely open work.
+  const [dismissedPresentationIds, setDismissedPresentationIds] = useState<Set<string>>(new Set());
+  const visiblePresentationNotices = useMemo(
+    () => presentationNotices.filter((p) => !dismissedPresentationIds.has(p.id)),
+    [presentationNotices, dismissedPresentationIds],
+  );
+  const newestPresentationNotice = useMemo(
+    () => visiblePresentationNotices.reduce<Presentation | null>((newest, p) => (
+      !newest || p.created_at > newest.created_at ? p : newest
+    ), null),
+    [visiblePresentationNotices],
+  );
+  const handleOpenPresentationWindow = useCallback((presentationId: string) => {
+    void invoke('open_presentation_window', { presentationId }).catch((err) => {
+      console.error('[App] Failed to open presentation window:', err);
+    });
+  }, []);
+  const handleDismissPresentationNotice = useCallback((presentationId: string) => {
+    setDismissedPresentationIds((prev) => new Set(prev).add(presentationId));
+  }, []);
+
   const [openPRLauncherJob, setOpenPRLauncherJob] = useState<OpenPRLauncherJob | null>(null);
   const openPRLauncherIdRef = useRef(0);
   const [sessionCreationJob, setSessionCreationJob] = useState<SessionCreationJob | null>(null);
@@ -3560,6 +3630,35 @@ sendFetchPRDetails,
             onClick={onDismissLatestRelease}
             title="Dismiss"
             aria-label="Dismiss update banner"
+          >
+            ×
+          </button>
+        </div>
+      )}
+      {/* Open presentations awaiting review */}
+      {newestPresentationNotice && (
+        <div
+          className="presentation-banner"
+          style={{
+            top: (connectionError ? 48 : 0) + (warnings.length > 0 ? 44 : 0) + (updateAvailableVersion ? 44 : 0),
+          }}
+        >
+          <span
+            className="presentation-banner-label"
+            onClick={() => handleOpenPresentationWindow(newestPresentationNotice.id)}
+          >
+            ▶ {newestPresentationNotice.title} — review ready
+          </span>
+          {visiblePresentationNotices.length > 1 && (
+            <span className="presentation-banner-count">
+              +{visiblePresentationNotices.length - 1} more
+            </span>
+          )}
+          <button
+            className="presentation-banner-dismiss"
+            onClick={() => handleDismissPresentationNotice(newestPresentationNotice.id)}
+            title="Dismiss"
+            aria-label="Dismiss presentation banner"
           >
             ×
           </button>

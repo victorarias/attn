@@ -365,3 +365,51 @@ html, body, #root {
 .update-dismiss:hover {
   opacity: 1;
 }
+
+/* Presentation banner - open presentations awaiting review. Stacked below any
+   connection-error/warning/update banners via an inline top offset (App.tsx),
+   since the number of banners above it varies independently. */
+.presentation-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 9996;
+  background: #7c3aed;
+  color: white;
+  padding: 10px 16px;
+  font-size: var(--font-size);
+  font-weight: 500;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.presentation-banner-label {
+  cursor: pointer;
+}
+
+.presentation-banner-label:hover {
+  text-decoration: underline;
+}
+
+.presentation-banner-count {
+  opacity: 0.85;
+  font-weight: 400;
+}
+
+.presentation-banner-dismiss {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+.presentation-banner-dismiss:hover {
+  opacity: 1;
+}
