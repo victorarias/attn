@@ -57,6 +57,7 @@
     "real-app:scenario-terminal-context-menu": "node scripts/real-app-harness/scenario-terminal-context-menu.mjs",
     "real-app:scenario-terminal-block-resize": "node scripts/real-app-harness/scenario-terminal-block-resize.mjs",
     "real-app:scenario-offset-soak": "node scripts/real-app-harness/scenario-offset-soak.mjs",
+    "real-app:scenario-webgl-recovery": "node scripts/real-app-harness/scenario-webgl-recovery.mjs",
     "real-app:serial-matrix": "node scripts/real-app-harness/run-serial-matrix.mjs",
     "e2e": "playwright test",
     "e2e:settings-visual": "playwright test e2e/settings-visual.spec.ts",
