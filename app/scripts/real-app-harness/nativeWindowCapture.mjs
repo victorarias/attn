@@ -274,6 +274,31 @@ export function resolveCaptureRect(windowBounds, crop = null) {
   };
 }
 
+// Parses `sips -g pixelWidth -g pixelHeight <path>` output into pixel
+// dimensions. Sips prints the file path on the first line, then one
+// "  pixelWidth: N" / "  pixelHeight: N" line per queried property.
+export function parseSipsPixelDimensions(stdout) {
+  const text = String(stdout || '');
+  const widthMatch = /pixelWidth:\s*(\d+)/.exec(text);
+  const heightMatch = /pixelHeight:\s*(\d+)/.exec(text);
+  if (!widthMatch || !heightMatch) {
+    throw new Error(`Failed to parse sips pixel dimensions from output: ${stdout}`);
+  }
+  return {
+    width: Number.parseInt(widthMatch[1], 10),
+    height: Number.parseInt(heightMatch[1], 10),
+  };
+}
+
+async function readPngPixelDimensions(filePath) {
+  const { stdout } = await execFileAsync(
+    '/usr/bin/sips',
+    ['-g', 'pixelWidth', '-g', 'pixelHeight', filePath],
+    { timeout: 10_000 },
+  );
+  return parseSipsPixelDimensions(stdout);
+}
+
 export async function captureFrontWindowScreenshot(outputPath, options = {}) {
   const bundleId = options.bundleId || options.client?.bundleId || bundleIdentifierForProfile();
   assertProductionRunAllowed({ bundleId });
@@ -289,15 +314,20 @@ export async function captureFrontWindowScreenshot(outputPath, options = {}) {
     timeout: 10_000,
   });
 
+  let pixelDimensions = null;
   if (options.maxDim !== undefined && options.maxDim !== null) {
     const maxDim = options.maxDim;
     if (!Number.isInteger(maxDim) || maxDim <= 0) {
       throw new Error(`Invalid maxDim: ${JSON.stringify(options.maxDim)}`);
     }
-    if (Math.max(captureRect.width, captureRect.height) > maxDim) {
+    // captureRect is in logical points; on Retina displays screencapture
+    // writes the PNG at 2x pixels, so gate on the file's actual dimensions.
+    pixelDimensions = await readPngPixelDimensions(outputPath);
+    if (Math.max(pixelDimensions.width, pixelDimensions.height) > maxDim) {
       await execFileAsync('/usr/bin/sips', ['-Z', String(maxDim), outputPath], {
         timeout: 10_000,
       });
+      pixelDimensions = await readPngPixelDimensions(outputPath);
     }
   }
 
@@ -306,6 +336,7 @@ export async function captureFrontWindowScreenshot(outputPath, options = {}) {
     bundleId,
     bounds,
     captureRect,
+    ...(pixelDimensions ? { pixelDimensions } : {}),
     path: outputPath,
   };
 }

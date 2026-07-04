@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCaptureRect } from './nativeWindowCapture.mjs';
+import { parseSipsPixelDimensions, resolveCaptureRect } from './nativeWindowCapture.mjs';
 import { parseCropSpec } from './capture-app-screenshot.mjs';
 
 describe('resolveCaptureRect', () => {
@@ -80,5 +80,33 @@ describe('parseCropSpec', () => {
     expect(() => parseCropSpec('0,0,0x0')).toThrow(/Invalid --crop value/);
     expect(() => parseCropSpec('0,0,800xabc')).toThrow(/Invalid --crop value/);
     expect(() => parseCropSpec('')).toThrow(/Invalid --crop value/);
+  });
+});
+
+describe('parseSipsPixelDimensions', () => {
+  it('parses realistic sips -g pixelWidth -g pixelHeight output', () => {
+    const stdout = `/tmp/attn-app-window.png
+  pixelWidth: 3200
+  pixelHeight: 2400
+`;
+    expect(parseSipsPixelDimensions(stdout)).toEqual({ width: 3200, height: 2400 });
+  });
+
+  it('parses output regardless of property order', () => {
+    const stdout = `/tmp/shot.png
+  pixelHeight: 100
+  pixelWidth: 200
+`;
+    expect(parseSipsPixelDimensions(stdout)).toEqual({ width: 200, height: 100 });
+  });
+
+  it('throws on garbage output', () => {
+    expect(() => parseSipsPixelDimensions('sips: error')).toThrow(
+      /Failed to parse sips pixel dimensions/,
+    );
+    expect(() => parseSipsPixelDimensions('')).toThrow(/Failed to parse sips pixel dimensions/);
+    expect(() => parseSipsPixelDimensions('  pixelWidth: 3200\n')).toThrow(
+      /Failed to parse sips pixel dimensions/,
+    );
   });
 });
