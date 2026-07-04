@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useSessionStore } from './sessions';
+import { useSessionStore, isSessionReloading } from './sessions';
 import { WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceStatus } from '../types/generated';
 
 const { mockPtySpawn, mockPtyKill } = vi.hoisted(() => ({
@@ -491,7 +491,9 @@ describe('sessions store', () => {
 
     await useSessionStore.getState().reloadSession('sess-remote', { cols: 120, rows: 40 });
 
-    expect(mockPtyKill).toHaveBeenCalledWith({ id: 'sess-remote' });
+    // reload:true is the daemon's signal that this kill is a lifecycle
+    // transition, not a crash — bound tickets must stay put.
+    expect(mockPtyKill).toHaveBeenCalledWith({ id: 'sess-remote', reload: true });
     expect(mockPtySpawn).toHaveBeenCalledWith({
       args: expect.objectContaining({
         id: 'sess-remote',
@@ -503,5 +505,34 @@ describe('sessions store', () => {
         yolo_mode: true,
       }),
     });
+  });
+
+  it('marks the session as reloading for the whole kill→respawn window', async () => {
+    await useSessionStore.getState().createSession('Local', '/srv/repo', 'sess-reload', 'codex', undefined, false, 'workspace-sess-reload');
+
+    // The reload kill surfaces a session_exited that can look like a clean
+    // voluntary quit; the guard must be up while ptyKill resolves so the
+    // auto-close-on-clean-exit handler leaves the pane alone.
+    let duringKill = false;
+    mockPtyKill.mockImplementation(async () => {
+      duringKill = isSessionReloading('sess-reload');
+    });
+
+    expect(isSessionReloading('sess-reload')).toBe(false);
+    await useSessionStore.getState().reloadSession('sess-reload', { cols: 120, rows: 40 });
+
+    expect(duringKill).toBe(true);
+    expect(isSessionReloading('sess-reload')).toBe(false);
+  });
+
+  it('clears the reloading mark even when the respawn fails', async () => {
+    await useSessionStore.getState().createSession('Local', '/srv/repo', 'sess-reload-fail', 'codex', undefined, false, 'workspace-sess-reload-fail');
+    mockPtySpawn.mockRejectedValueOnce(new Error('spawn failed'));
+
+    await expect(
+      useSessionStore.getState().reloadSession('sess-reload-fail', { cols: 120, rows: 40 }),
+    ).rejects.toThrow('spawn failed');
+
+    expect(isSessionReloading('sess-reload-fail')).toBe(false);
   });
 });

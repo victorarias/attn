@@ -1332,6 +1332,11 @@ model KillSessionMessage {
   cmd: "kill_session";
   id: string;
   signal?: string; // "SIGTERM", "SIGINT", ...
+  // True when this kill is the first half of a user-initiated reload (the client
+  // respawns the same session id right after). The daemon then treats the
+  // resulting process exit as a lifecycle transition, not a death: bound tickets
+  // are not crash-stamped and no reconcile is enqueued.
+  reload?: boolean;
 }
 
 model WorkspaceLayoutGetMessage {

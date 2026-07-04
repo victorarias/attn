@@ -166,7 +166,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '143';
+export const PROTOCOL_VERSION = '144';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2921,7 +2921,7 @@ export function useDaemonSocket({
     });
   }, [reconcileAttachedRuntimeGeometry, sendAttachSessionWithRetry, sendPtyResize]);
 
-  const sendKillSession = useCallback((id: string, signal?: string): Promise<void> => {
+  const sendKillSession = useCallback((id: string, signal?: string, options?: { reload?: boolean }): Promise<void> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -2935,7 +2935,14 @@ export function useDaemonSocket({
         reject,
       });
 
-      ws.send(JSON.stringify({ cmd: 'kill_session', id, ...(signal && { signal }) }));
+      ws.send(JSON.stringify({
+        cmd: 'kill_session',
+        id,
+        ...(signal && { signal }),
+        // Tells the daemon this kill is the first half of a reload (the same id
+        // respawns right after), so the exit is not treated as a crash.
+        ...(options?.reload && { reload: true }),
+      }));
 
       // Wait for session_exited to avoid kill/spawn races during reload.
       setTimeout(() => {
@@ -3267,9 +3274,9 @@ export function useDaemonSocket({
       detach: async (id: string) => {
         sendDetachSession(id);
       },
-      kill: async (id: string) => {
+      kill: async (id: string, options?: { reload?: boolean }) => {
         sendDetachSession(id);
-        await sendKillSession(id);
+        await sendKillSession(id, undefined, options);
       },
     });
 

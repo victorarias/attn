@@ -152,6 +152,15 @@ type Daemon struct {
 	// cannot interleave and tear each other's respawn down. Lazily initialized.
 	reloadLocksMu sync.Mutex
 	reloadLocks   map[string]*sync.Mutex
+	// reloadKills marks sessions whose next process exit was caused by a
+	// client-initiated reload (kill_session with reload:true, followed by a
+	// spawn_session of the same id). Unlike reloadingSessions it suppresses ONLY
+	// the ticket crash/reconcile seam in handlePTYExit — the rest of exit
+	// processing (backend remove, idle clobber, session_exited broadcast) must
+	// still run because the client's reload flow depends on it. Timestamped so a
+	// stale mark (reload kill that never produced an exit) cannot swallow a real
+	// crash later. Lazily initialized under reloadingMu.
+	reloadKills map[string]time.Time
 	// ticketBackstop debounces the deferred self-monitor doorbell (see
 	// ticket_notify.go): an idle self-monitor with unread ticket activity is
 	// re-checked after a grace delay and doorbelled only if still unread, so a live
@@ -1422,7 +1431,14 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		// just below erases whether the agent was mid-flight (a crash or kill) or at
 		// a clean rest when its process exited — the signal that decides between the
 		// Crashed stamp and the orphaned-ticket classifier (ticket_reconcile.go).
-		d.reconcileTicketsOnSessionEnd(info.ID, string(session.State))
+		// A client-initiated reload (kill_session reload:true + respawn of the same
+		// id) is a lifecycle transition, not a death: skip ONLY the ticket seam and
+		// let the rest of exit processing run — the reload flow depends on it.
+		if d.consumeReloadKill(info.ID) {
+			d.logf("skipping ticket reconcile for %s: exit is a user reload, runtime respawns in place", info.ID)
+		} else {
+			d.reconcileTicketsOnSessionEnd(info.ID, string(session.State))
+		}
 		d.store.Touch(info.ID)
 		d.store.UpdateState(info.ID, protocol.StateIdle)
 		updated := d.sessionForBroadcast(d.store.Get(info.ID))

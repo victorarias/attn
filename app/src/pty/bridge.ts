@@ -67,7 +67,7 @@ export interface PtyBackend {
   write: (id: string, data: string, source?: string) => Promise<void>;
   resize: (id: string, cols: number, rows: number, reason?: string) => Promise<void>;
   detach: (id: string) => Promise<void>;
-  kill: (id: string) => Promise<void>;
+  kill: (id: string, options?: { reload?: boolean }) => Promise<void>;
 }
 
 const listeners = new Set<PtyEventHandler>();
@@ -203,7 +203,7 @@ export async function ptyDetach(request: { id: string }) {
   await backend.detach(request.id);
 }
 
-export async function ptyKill(request: { id: string }) {
+export async function ptyKill(request: { id: string; reload?: boolean }) {
   if (mockEnabled()) {
     if (!mockSessions.has(request.id)) {
       return;
@@ -215,5 +215,5 @@ export async function ptyKill(request: { id: string }) {
   if (!backend) {
     throw new Error('PTY backend is not configured');
   }
-  await backend.kill(request.id);
+  await backend.kill(request.id, request.reload ? { reload: true } : undefined);
 }
