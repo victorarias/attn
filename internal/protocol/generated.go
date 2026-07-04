@@ -1106,6 +1106,56 @@ type GetFileDiffMessage struct {
 	Staged *bool `json:"staged,omitempty,omitzero"`
 }
 
+type GetPresentationRoundMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// PresentationID corresponds to the JSON schema field "presentation_id".
+	PresentationID string `json:"presentation_id"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq *int `json:"seq,omitempty,omitzero"`
+}
+
+type GetPresentationRoundResultMessage struct {
+	// Comments corresponds to the JSON schema field "comments".
+	Comments []PresentationComment `json:"comments,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Presentation corresponds to the JSON schema field "presentation".
+	Presentation *Presentation `json:"presentation,omitempty,omitzero"`
+
+	// Round corresponds to the JSON schema field "round".
+	Round *PresentationRound `json:"round,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type GetPresentationsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type GetPresentationsResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Presentations corresponds to the JSON schema field "presentations".
+	Presentations []Presentation `json:"presentations"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type GetRecentLocationsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2178,6 +2228,236 @@ type PluginsUpdatedMessage struct {
 	Plugins []PluginInfo `json:"plugins"`
 }
 
+type PresentCommentInput struct {
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// Filepath corresponds to the JSON schema field "filepath".
+	Filepath string `json:"filepath"`
+
+	// LineEnd corresponds to the JSON schema field "line_end".
+	LineEnd int `json:"line_end"`
+
+	// LineStart corresponds to the JSON schema field "line_start".
+	LineStart int `json:"line_start"`
+
+	// Side corresponds to the JSON schema field "side".
+	Side string `json:"side"`
+}
+
+type PresentFeedbackMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// PresentationID corresponds to the JSON schema field "presentation_id".
+	PresentationID string `json:"presentation_id"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq *int `json:"seq,omitempty,omitzero"`
+}
+
+type PresentFeedbackResult struct {
+	// Markdown corresponds to the JSON schema field "markdown".
+	Markdown string `json:"markdown"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
+
+	// Submitted corresponds to the JSON schema field "submitted".
+	Submitted bool `json:"submitted"`
+}
+
+type PresentFile struct {
+	// Note corresponds to the JSON schema field "note".
+	Note *string `json:"note,omitempty,omitzero"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
+type PresentManifestView struct {
+	// Files corresponds to the JSON schema field "files".
+	Files []PresentFile `json:"files"`
+
+	// Skip corresponds to the JSON schema field "skip".
+	Skip []string `json:"skip"`
+
+	// Summary corresponds to the JSON schema field "summary".
+	Summary *string `json:"summary,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type PresentOpenMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ManifestYaml corresponds to the JSON schema field "manifest_yaml".
+	ManifestYaml string `json:"manifest_yaml"`
+
+	// PresentationID corresponds to the JSON schema field "presentation_id".
+	PresentationID *string `json:"presentation_id,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID *string `json:"ticket_id,omitempty,omitzero"`
+}
+
+type PresentOpenResult struct {
+	// BaseSHA corresponds to the JSON schema field "base_sha".
+	BaseSHA string `json:"base_sha"`
+
+	// HeadSHA corresponds to the JSON schema field "head_sha".
+	HeadSHA string `json:"head_sha"`
+
+	// PresentationID corresponds to the JSON schema field "presentation_id".
+	PresentationID string `json:"presentation_id"`
+
+	// RoundID corresponds to the JSON schema field "round_id".
+	RoundID string `json:"round_id"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type PresentSubmitRoundMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Comments corresponds to the JSON schema field "comments".
+	Comments []PresentCommentInput `json:"comments"`
+
+	// Handback corresponds to the JSON schema field "handback".
+	Handback bool `json:"handback"`
+
+	// RoundID corresponds to the JSON schema field "round_id".
+	RoundID string `json:"round_id"`
+}
+
+type PresentSubmitRoundResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RoundID corresponds to the JSON schema field "round_id".
+	RoundID string `json:"round_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type Presentation struct {
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// LatestRoundSeq corresponds to the JSON schema field "latest_round_seq".
+	LatestRoundSeq int `json:"latest_round_seq"`
+
+	// LatestRoundSubmitted corresponds to the JSON schema field
+	// "latest_round_submitted".
+	LatestRoundSubmitted bool `json:"latest_round_submitted"`
+
+	// RepoPath corresponds to the JSON schema field "repo_path".
+	RepoPath string `json:"repo_path"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID *string `json:"ticket_id,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type PresentationAddedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Presentation corresponds to the JSON schema field "presentation".
+	Presentation Presentation `json:"presentation"`
+}
+
+type PresentationComment struct {
+	// Author corresponds to the JSON schema field "author".
+	Author string `json:"author"`
+
+	// Content corresponds to the JSON schema field "content".
+	Content string `json:"content"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// Filepath corresponds to the JSON schema field "filepath".
+	Filepath string `json:"filepath"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// LineEnd corresponds to the JSON schema field "line_end".
+	LineEnd int `json:"line_end"`
+
+	// LineStart corresponds to the JSON schema field "line_start".
+	LineStart int `json:"line_start"`
+
+	// RoundID corresponds to the JSON schema field "round_id".
+	RoundID string `json:"round_id"`
+
+	// Side corresponds to the JSON schema field "side".
+	Side string `json:"side"`
+}
+
+type PresentationRound struct {
+	// BaseSHA corresponds to the JSON schema field "base_sha".
+	BaseSHA string `json:"base_sha"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// HeadSHA corresponds to the JSON schema field "head_sha".
+	HeadSHA string `json:"head_sha"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Manifest corresponds to the JSON schema field "manifest".
+	Manifest PresentManifestView `json:"manifest"`
+
+	// PresentationID corresponds to the JSON schema field "presentation_id".
+	PresentationID string `json:"presentation_id"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
+
+	// SubmittedAt corresponds to the JSON schema field "submitted_at".
+	SubmittedAt *string `json:"submitted_at,omitempty,omitzero"`
+}
+
+type PresentationUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Presentation corresponds to the JSON schema field "presentation".
+	Presentation Presentation `json:"presentation"`
+}
+
 type PtyDesyncMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -2534,6 +2814,13 @@ type Response struct {
 
 	// Ok corresponds to the JSON schema field "ok".
 	Ok bool `json:"ok"`
+
+	// PresentFeedbackResult corresponds to the JSON schema field
+	// "present_feedback_result".
+	PresentFeedbackResult *PresentFeedbackResult `json:"present_feedback_result,omitempty,omitzero"`
+
+	// PresentOpenResult corresponds to the JSON schema field "present_open_result".
+	PresentOpenResult *PresentOpenResult `json:"present_open_result,omitempty,omitzero"`
 
 	// Prs corresponds to the JSON schema field "prs".
 	Prs []PR `json:"prs,omitempty,omitzero"`
