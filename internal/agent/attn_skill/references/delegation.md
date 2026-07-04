@@ -118,6 +118,10 @@ with any placement:
     "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
       --new-workspace --worktree feat/delegated-task
 
+    # worktree of the repo at an existing directory
+    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
+      --cwd /path/to/project --worktree feat/delegated-task
+
 Worktree options:
 
 - `--repo <path>` chooses the main repository (defaults to the workspace's repo).

@@ -499,3 +499,35 @@ func TestE2EPorts_NeverCollideWithRealDaemon(t *testing.T) {
 		}
 	}
 }
+
+func TestAppSupportDirForProfile_MatchesBundleIdentifier(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	cases := []struct {
+		profile string
+		want    string
+	}{
+		{"", "com.attn.manager"},
+		{"default", "com.attn.manager"},
+		{"dev", "com.attn.manager.dev"},
+		{"agent7", "com.attn.manager.agent7"},
+	}
+	for _, c := range cases {
+		got := AppSupportDirForProfile(c.profile)
+		want := filepath.Join(home, "Library", "Application Support", c.want)
+		if got != want {
+			t.Errorf("AppSupportDirForProfile(%q) = %q, want %q", c.profile, got, want)
+		}
+	}
+}
+
+func TestAppSupportDir_UsesActiveProfile(t *testing.T) {
+	t.Setenv("ATTN_PROFILE", "dev")
+	got := AppSupportDir()
+	want := AppSupportDirForProfile("dev")
+	if got != want {
+		t.Errorf("AppSupportDir() = %q, want %q", got, want)
+	}
+}

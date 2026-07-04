@@ -252,6 +252,9 @@ func main() {
 	case "ticket":
 		maybePrintProfileBanner()
 		runTicket()
+	case "debug":
+		maybePrintProfileBanner()
+		runDebug()
 	case "vision-check":
 		// No banner: output must stay pure (stdout = answer only, or a single
 		// --json line) for machine consumption by the calling agent.
@@ -570,6 +573,7 @@ commands:
   workflow <command>                run, inspect, and resume durable workflows
   list                              list sessions and workspaces
   present <command>                 open a review presentation and read feedback
+  debug <command>                   probe debug artifacts (incidents, logs)
   vision-check <image> <question>   answer a question about an image (single LLM call)
   daemon <command>                  manage the daemon
   profile <status|resolve|list>     show / resolve the active profile's resources
@@ -608,7 +612,8 @@ placement:
   --worktree <branch>        create a worktree for the delegated session
 
 worktree options:
-  combine with any placement (current, --workspace, or --new-workspace)
+  combine with any placement (current, --workspace, or --new-workspace);
+  combining with --cwd creates a worktree of the repo at that directory
   --repo <path>              main repository (defaults to the workspace repository)
   --from <ref>               branch or ref to start from
   --worktree-path <path>     override the generated sibling path
@@ -1907,9 +1912,6 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	customWorktreePath := strings.TrimSpace(*worktreePath)
 	if explicitWorkspace != "" && (*newWorkspace || customCWD != "") {
 		return delegateCLIArgs{}, errors.New("--workspace cannot be combined with --new-workspace or --cwd")
-	}
-	if customCWD != "" && branch != "" {
-		return delegateCLIArgs{}, errors.New("--cwd cannot be combined with --worktree")
 	}
 	if branch == "" && (repo != "" || startingFrom != "" || customWorktreePath != "") {
 		return delegateCLIArgs{}, errors.New("--repo, --from, and --worktree-path require --worktree")
