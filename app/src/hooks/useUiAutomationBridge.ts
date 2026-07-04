@@ -794,6 +794,21 @@ function dispatchShortcutEvent(shortcutId: ShortcutId) {
   dispatchCombo(binding);
 }
 
+// Finds the WebGL canvas of the pane currently visible on screen — the one
+// workspace root marked visible, and within it the pane its own
+// data-active-pane-id names. Used by the lose_webgl_context harness action to
+// verify context-loss recovery without needing a sessionId/paneId round trip.
+function findActivePaneCanvas(): HTMLCanvasElement | null {
+  const workspace = document.querySelector('[data-session-terminal-workspace][data-session-visible="1"]');
+  const activePaneId = workspace?.getAttribute('data-active-pane-id');
+  if (!workspace || !activePaneId) {
+    return null;
+  }
+  const paneElement = workspace.querySelector(`[data-pane-id="${activePaneId}"]`);
+  const canvas = paneElement?.querySelector('canvas');
+  return canvas instanceof HTMLCanvasElement ? canvas : null;
+}
+
 function clickPaneElement(sessionId: string, paneId: string) {
   const element = document.querySelector(
     `[data-pane-session-id="${sessionId}"][data-pane-id="${paneId}"]`
@@ -1820,6 +1835,22 @@ export function useUiAutomationBridge({
         // against a separately-read disk dump.
         const snapshots = dumpTerminalGeometry();
         return { snapshots };
+      }
+      case 'lose_webgl_context': {
+        // Deliberately kills the active pane's WebGL context so the packaged
+        // app harness can verify GhosttyTerminal's context-loss auto-recovery
+        // (epoch rebuild + backoff) end to end, without needing a real GPU
+        // fault to reproduce it.
+        const canvas = findActivePaneCanvas();
+        if (!canvas) {
+          throw new Error('No active pane canvas found');
+        }
+        const extension = canvas.getContext('webgl2')?.getExtension('WEBGL_lose_context');
+        if (!extension) {
+          throw new Error('WEBGL_lose_context extension is unavailable on the active pane canvas');
+        }
+        extension.loseContext();
+        return { ok: true };
       }
       case 'reload_session': {
         if (!reloadSession) {
