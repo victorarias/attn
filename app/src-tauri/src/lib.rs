@@ -612,6 +612,61 @@ fn dispatch_native_browser_close(app: &tauri::AppHandle, label: &str) {
     let _ = main_webview.eval(script);
 }
 
+const PRESENT_WINDOW_LABEL: &str = "present";
+
+fn presentation_window_url(presentation_id: &str) -> String {
+    format!("index.html?window=present&presentation={presentation_id}")
+}
+
+#[tauri::command]
+fn open_presentation_window(
+    app: tauri::AppHandle,
+    _caller: browser_host::TrustedMainWebview,
+    presentation_id: String,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    if presentation_id.is_empty()
+        || !presentation_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err("presentation_id must be alphanumeric or hyphens".to_string());
+    }
+
+    let url = presentation_window_url(&presentation_id);
+
+    if let Some(window) = app.get_webview_window(PRESENT_WINDOW_LABEL) {
+        window
+            .show()
+            .map_err(|error| format!("show presentation window: {error}"))?;
+        window
+            .set_focus()
+            .map_err(|error| format!("focus presentation window: {error}"))?;
+        let Ok(url) = serde_json::to_string(&url) else {
+            return Err("failed to encode presentation URL".to_string());
+        };
+        window
+            .eval(format!("window.location.href = {url};"))
+            .map_err(|error| format!("navigate presentation window: {error}"))?;
+        return Ok(());
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        PRESENT_WINDOW_LABEL,
+        tauri::WebviewUrl::App(url.into()),
+    )
+    .title("attn — present")
+    .inner_size(1100.0, 800.0)
+    .min_inner_size(700.0, 500.0)
+    .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
+    .visible(false)
+    .build()
+    .map(|_| ())
+    .map_err(|error| format!("create presentation window: {error}"))
+}
+
 #[tauri::command]
 async fn list_directory(path: String, prefix: Option<String>) -> Result<Vec<String>, String> {
     use std::fs;
@@ -996,11 +1051,27 @@ Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
         .plugin(tauri_plugin_clipboard_manager::init())
         .menu(app_menu)
         .on_menu_event(|app, event| {
+            use tauri::Manager;
+
             if event.id() == CLOSE_ACTIVE_PANE_MENU_ID {
+                if let Some(present) = app.get_webview_window(PRESENT_WINDOW_LABEL) {
+                    if present.is_focused().unwrap_or(false) {
+                        let _ = present.hide();
+                        return;
+                    }
+                }
                 if let Some(label) = browser_host::focused_browser_label() {
                     dispatch_native_browser_close(app, &label);
                 } else {
                     dispatch_native_shortcut(app, "session.close");
+                }
+            }
+        })
+        .on_window_event(|window, event| {
+            if window.label() == PRESENT_WINDOW_LABEL {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
                 }
             }
         })
@@ -1012,6 +1083,7 @@ Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
             open_safe_markdown_target,
             get_build_profile,
             get_browser_host_token,
+            open_presentation_window,
             browser_host::browser_host_mount,
             browser_host::browser_host_update,
             browser_host::browser_host_unmount,
@@ -1048,7 +1120,7 @@ Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
             // by scale_factor to reason about logical coordinates and then use
             // LogicalPosition to set the window.
             #[cfg(target_os = "macos")]
-            {
+            if webview.label() == "main" {
                 if let Ok(px_str) = std::env::var("ATTN_HARNESS_PARK_VISIBLE_PX") {
                     if let Ok(visible_px) = px_str.parse::<f64>() {
                         if visible_px > 0.0 {
