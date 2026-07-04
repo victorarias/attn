@@ -49,6 +49,12 @@ const (
 	// chief-of-staff launch uses, passed through as --model. Empty/unset => the
 	// agent's own default model. Only consulted for chief launches.
 	SettingChiefModelPrefix = "chief_model_"
+	// SettingChiefEffortPrefix + agent (e.g. "chief_effort_claude") pins the
+	// reasoning effort a chief-of-staff launch uses, passed through as the
+	// agent's native effort mechanism (Claude --effort, Codex
+	// model_reasoning_effort). Empty/unset => the agent's own default. Only
+	// consulted for chief launches.
+	SettingChiefEffortPrefix = "chief_effort_"
 	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
 	// the profile-derived default (~/attn-notebook[-profile]).
 	SettingNotebookRoot = "notebook.root"
@@ -298,6 +304,17 @@ func (d *Daemon) chiefLaunchModel(agent string, chief bool) string {
 	return strings.TrimSpace(d.store.GetSetting(SettingChiefModelPrefix + strings.ToLower(strings.TrimSpace(agent))))
 }
 
+// chiefLaunchEffort returns the configured reasoning effort for a
+// chief-of-staff launch of the given agent (from chief_effort_<agent>), or
+// "" — the agent's own default — when this is not a chief launch or no
+// effort is configured.
+func (d *Daemon) chiefLaunchEffort(agent string, chief bool) string {
+	if !chief {
+		return ""
+	}
+	return strings.TrimSpace(d.store.GetSetting(SettingChiefEffortPrefix + strings.ToLower(strings.TrimSpace(agent))))
+}
+
 // chiefContextWindowCap returns the effective context-window token cap for a
 // chief-of-staff launch, or 0 (no cap) when this is not a chief launch. Mirrors
 // chiefLaunchModel: the policy (what the cap is, and that only the chief gets
@@ -365,6 +382,12 @@ func (d *Daemon) validateSetting(key, value string) error {
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingChiefModelPrefix) {
 			// Model names/aliases are free-form (like the reviewer_model
 			// setting); accept any value and let the agent reject bad ones.
+			return nil
+		}
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingChiefEffortPrefix) {
+			// Effort levels are agent-native (claude: low/medium/high/xhigh/max,
+			// codex: minimal/low/medium/high/xhigh); accept any value and let
+			// the agent reject bad ones. The UI constrains input.
 			return nil
 		}
 		if _, ok := isAgentExecutableSettingKey(key); ok {

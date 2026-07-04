@@ -1,5 +1,5 @@
 // app/src/components/SettingsModal.tsx
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { Fragment, useState, useCallback, useEffect, useMemo } from 'react';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
@@ -11,6 +11,10 @@ import {
   PluginListResult,
 } from '../hooks/useDaemonSocket';
 import { BackgroundTasksSettings } from './BackgroundTasksSettings';
+import {
+  assertValidSettingsSectionID,
+  setSettingsAutomationHandle,
+} from './settingsAutomation';
 import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
 import type { ThemePreference } from '../hooks/useTheme';
 import {
@@ -86,6 +90,13 @@ type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 're
 // Fallback shown when the daemon has not yet sent a normalized value; the daemon
 // mirrors this default (agent.DefaultContextWindowCap) for both context-window caps.
 const DEFAULT_CONTEXT_WINDOW_CAP = 128000;
+
+// Reasoning-effort levels the chief_effort_<agent> setting accepts, per agent. Blank
+// (agent default) is added separately as the select's first option.
+const CHIEF_EFFORT_LEVELS: Partial<Record<SessionAgent, string[]>> = {
+  claude: ['low', 'medium', 'high', 'xhigh', 'max'],
+  codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+};
 
 interface SettingsNavItem {
   id: SettingsSectionID;
@@ -169,6 +180,9 @@ export function SettingsModal({
   // Per-agent chief-of-staff model override (chief_model_<agent>), edited locally
   // and committed on blur like the executable paths. Blank => the agent default.
   const [chiefModels, setChiefModels] = useState<Record<SessionAgent, string>>({});
+  // Per-agent chief-of-staff reasoning-effort override (chief_effort_<agent>). A
+  // <select>, so it commits immediately on change rather than on blur.
+  const [chiefEfforts, setChiefEfforts] = useState<Record<SessionAgent, string>>({});
   const [editorExecutable, setEditorExecutable] = useState(settings.editor_executable || '');
   const [defaultAgent, setDefaultAgent] = useState<SessionAgent>('claude');
   const [reviewerModel, setReviewerModel] = useState(settings.reviewer_model || '');
@@ -255,15 +269,19 @@ export function SettingsModal({
     () => orderedAgentList.filter((agent) => ['codex', 'claude', 'copilot'].includes(agent)),
     [orderedAgentList],
   );
-  // Agents whose chief launch honors a --model override (claude, codex). Installed
-  // agents only, plus any agent that already has a saved override so its row stays
-  // visible even if it became unavailable — mirrors keeperAgents re-inclusion.
-  const chiefModelAgentList = useMemo(() => {
+  // Agents whose chief launch honors a --model/--effort override (claude, codex).
+  // Installed agents only, plus any agent that already has a saved model OR effort
+  // override so its row stays visible even if it became unavailable — mirrors
+  // keeperAgents re-inclusion.
+  const chiefOverrideAgentList = useMemo(() => {
     const list = orderedAgentList.filter((agent) => (
       ['codex', 'claude'].includes(agent) && isAgentAvailable(agentAvailability, agent)
     ));
     for (const agent of ['claude', 'codex'] as const) {
-      if (!list.includes(agent) && (settings[`chief_model_${agent}`] || '').trim() !== '') {
+      if (!list.includes(agent) && (
+        (settings[`chief_model_${agent}`] || '').trim() !== ''
+        || (settings[`chief_effort_${agent}`] || '').trim() !== ''
+      )) {
         list.push(agent);
       }
     }
@@ -271,11 +289,18 @@ export function SettingsModal({
   }, [orderedAgentList, agentAvailability, settings]);
   const actualChiefModels = useMemo(() => {
     const out = {} as Record<SessionAgent, string>;
-    for (const agent of chiefModelAgentList) {
+    for (const agent of chiefOverrideAgentList) {
       out[agent] = settings[`chief_model_${agent}`] || '';
     }
     return out;
-  }, [settings, chiefModelAgentList]);
+  }, [settings, chiefOverrideAgentList]);
+  const actualChiefEfforts = useMemo(() => {
+    const out = {} as Record<SessionAgent, string>;
+    for (const agent of chiefOverrideAgentList) {
+      out[agent] = settings[`chief_effort_${agent}`] || '';
+    }
+    return out;
+  }, [settings, chiefOverrideAgentList]);
   // Agents eligible to run any keeper duty: installed, headless-task capable, and one
   // of claude/codex. Any agent already configured on a duty is kept in the list even
   // if it has since become unavailable, so its row still shows the saved selection.
@@ -321,6 +346,7 @@ export function SettingsModal({
     setNotebookRoot(actualNotebookRoot);
     setAgentExecutables(actualAgentExecutables);
     setChiefModels(actualChiefModels);
+    setChiefEfforts(actualChiefEfforts);
     setEditorExecutable(actualEditorExecutable);
     setDefaultAgent(resolvedDefaultAgent);
     setReviewerModel(actualReviewerModel);
@@ -341,9 +367,28 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualKeeperConfigs, keeperAgents]);
+  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualKeeperConfigs, keeperAgents]);
 
   useEscapeStack(onClose, isOpen);
+
+  // Publish a read/select handle for the UI automation bridge (testing only).
+  // Registered for the component's whole lifetime (not just while open) so the
+  // bridge can always read `open: false` through it rather than falling back
+  // to the module's inactive-state default.
+  useEffect(() => {
+    setSettingsAutomationHandle({
+      getState: () => ({
+        open: isOpen,
+        activeSection: selectedSection,
+        search: settingsSearch,
+      }),
+      selectSection: (sectionId) => {
+        assertValidSettingsSectionID(sectionId);
+        setSelectedSection(sectionId);
+      },
+    });
+    return () => setSettingsAutomationHandle(null);
+  }, [isOpen, selectedSection, settingsSearch]);
 
   const handleBrowse = useCallback(async () => {
     const selected = await open({
@@ -436,6 +481,12 @@ export function SettingsModal({
       onSetSetting(`chief_model_${agent}`, nextValue);
     }
   }, [actualChiefModels, chiefModels, onSetSetting]);
+
+  // A <select>, so change commits immediately rather than waiting for blur.
+  const handleChiefEffortChange = useCallback((agent: SessionAgent, value: string) => {
+    setChiefEfforts((prev) => ({ ...prev, [agent]: value }));
+    onSetSetting(`chief_effort_${agent}`, value);
+  }, [onSetSetting]);
 
   const handleToggleAutoApprove = useCallback(() => {
     onSetSetting('auto_approve_enabled', autoApproveEnabled ? 'false' : 'true');
@@ -1843,43 +1894,63 @@ export function SettingsModal({
       <section className="settings-block">
         <div className="settings-block-intro">
           <div className="settings-kicker">Agents</div>
-          <h3>Chief-of-staff model</h3>
+          <h3>Chief-of-staff model &amp; effort</h3>
           <p className="settings-description">
-            Pins the model a chief-of-staff session launches with, per agent. Leave blank
-            to use the agent's own default. Only applies to chief launches — regular
-            sessions are unaffected.
+            Pins the model and reasoning effort a chief-of-staff session launches with,
+            per agent. Leave blank to use the agent's own default. Only applies to chief
+            launches — regular sessions are unaffected.
           </p>
         </div>
         <div className="settings-block-body">
-          {chiefModelAgentList.length === 0 ? (
-            <div className="settings-warning">No installed agent supports a model override.</div>
+          {chiefOverrideAgentList.length === 0 ? (
+            <div className="settings-warning">No installed agent supports a model or effort override.</div>
           ) : (
-            <div className="settings-field-grid">
-              {chiefModelAgentList.map((agent) => {
+            <div className="settings-field-grid two-column">
+              {chiefOverrideAgentList.map((agent) => {
                 const inputId = `settings-chief-model-${agent}`;
+                const effortId = `settings-chief-effort-${agent}`;
                 const value = chiefModels[agent] || '';
+                const effortValue = chiefEfforts[agent] || '';
+                const effortLevels = CHIEF_EFFORT_LEVELS[agent] || [];
                 return (
-                  <div className="settings-field" key={agent}>
-                    <label className="settings-label" htmlFor={inputId}>{agentLabel(agent)}</label>
-                    <input
-                      id={inputId}
-                      data-testid={inputId}
-                      type="text"
-                      value={value}
-                      onChange={(e) => handleChiefModelChange(agent, e.target.value)}
-                      onBlur={() => commitChiefModel(agent)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          commitChiefModel(agent);
-                        }
-                      }}
-                      placeholder={agent === 'claude' ? 'opus — blank for default' : 'gpt-5.4 — blank for default'}
-                      className="settings-input"
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                    />
-                  </div>
+                  <Fragment key={agent}>
+                    <div className="settings-field">
+                      <label className="settings-label" htmlFor={inputId}>{agentLabel(agent)}</label>
+                      <input
+                        id={inputId}
+                        data-testid={inputId}
+                        type="text"
+                        value={value}
+                        onChange={(e) => handleChiefModelChange(agent, e.target.value)}
+                        onBlur={() => commitChiefModel(agent)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            commitChiefModel(agent);
+                          }
+                        }}
+                        placeholder={agent === 'claude' ? 'opus — blank for default' : 'gpt-5.4 — blank for default'}
+                        className="settings-input"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                    <div className="settings-field">
+                      <label className="settings-label" htmlFor={effortId}>{agentLabel(agent)} effort</label>
+                      <select
+                        id={effortId}
+                        data-testid={effortId}
+                        className="settings-input"
+                        value={effortValue}
+                        onChange={(e) => handleChiefEffortChange(agent, e.target.value)}
+                      >
+                        <option value="">Agent default</option>
+                        {effortLevels.map((level) => (
+                          <option key={level} value={level}>{level}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </Fragment>
                 );
               })}
             </div>

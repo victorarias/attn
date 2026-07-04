@@ -4208,6 +4208,8 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"empty headless context cap uses default", "headless_context_window_cap", "", false},
 		{"valid headless context cap", "headless_context_window_cap", "200000", false},
 		{"headless context cap below min", "headless_context_window_cap", "1", true},
+		{"valid chief_effort_claude", "chief_effort_claude", "high", false},
+		{"empty chief_effort_claude", "chief_effort_claude", "", false},
 	}
 
 	for _, tt := range tests {
@@ -4244,6 +4246,28 @@ func TestDaemon_ContextWindowCapResolutionAndGating(t *testing.T) {
 	d.store.SetSetting(SettingChiefContextWindowCap, "160000")
 	if got := d.chiefContextWindowCap(true); got != 160000 {
 		t.Fatalf("chief cap = %d, want 160000", got)
+	}
+}
+
+func TestDaemon_ChiefLaunchEffort(t *testing.T) {
+	d := &Daemon{store: store.New()}
+
+	// chiefLaunchEffort: "" for non-chief regardless of setting; "" for a
+	// chief with no setting; the configured value for a chief that set one.
+	d.store.SetSetting(SettingChiefEffortPrefix+"claude", "high")
+	if got := d.chiefLaunchEffort("claude", false); got != "" {
+		t.Fatalf("non-chief effort = %q, want \"\"", got)
+	}
+	if got := d.chiefLaunchEffort("codex", true); got != "" {
+		t.Fatalf("chief effort with no setting = %q, want \"\"", got)
+	}
+	if got := d.chiefLaunchEffort("claude", true); got != "high" {
+		t.Fatalf("chief effort = %q, want %q", got, "high")
+	}
+
+	// Agent name is normalized (trimmed and lowercased) before the setting lookup.
+	if got := d.chiefLaunchEffort(" Claude ", true); got != "high" {
+		t.Fatalf("chief effort with unnormalized agent = %q, want %q", got, "high")
 	}
 }
 

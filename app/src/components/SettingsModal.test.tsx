@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '../test/utils';
+import { act, fireEvent, render, screen, waitFor } from '../test/utils';
 import { SettingsModal } from './SettingsModal';
+import { getSettingsAutomationHandle } from './settingsAutomation';
 
 describe('SettingsModal', () => {
   it('closes on escape', async () => {
@@ -899,6 +900,35 @@ describe('SettingsModal chief settings', () => {
     expect(onSetSetting).toHaveBeenCalledWith('chief_model_codex', '');
   });
 
+  it('renders a chief-effort select per supported agent and commits on change', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const claudeEffort = await screen.findByTestId('settings-chief-effort-claude');
+    expect(screen.getByTestId('settings-chief-effort-codex')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-chief-effort-copilot')).toBeNull();
+
+    fireEvent.change(claudeEffort, { target: { value: 'high' } });
+    expect(onSetSetting).toHaveBeenCalledWith('chief_effort_claude', 'high');
+  });
+
+  it('shows a saved chief-effort override', async () => {
+    renderModal({ chief_effort_codex: 'xhigh' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const codexEffort = await screen.findByTestId('settings-chief-effort-codex');
+    expect(codexEffort).toHaveValue('xhigh');
+  });
+
+  it('keeps an agent visible when only its chief-effort override is saved', async () => {
+    // codex is unavailable but has a saved effort override, so it should still show
+    // (mirrors the chief-model re-inclusion rule).
+    renderModal({ codex_available: 'false', chief_effort_codex: 'low' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    expect(await screen.findByTestId('settings-chief-effort-codex')).toHaveValue('low');
+  });
+
   it('shows the effective context-window caps and defaults to 128000 when unset', async () => {
     renderModal({ chief_context_window_cap: '120000', headless_context_window_cap: '90000' });
     fireEvent.click(screen.getByTestId('settings-nav-agents'));
@@ -1034,5 +1064,118 @@ describe('SettingsModal font size', () => {
 
     fireEvent.click(screen.getByText('Match app', { selector: 'button' }));
     expect(onMatchApp).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SettingsModal automation handle', () => {
+  function renderModal(overrides: Record<string, unknown> = {}) {
+    return render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{}}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={vi.fn()}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+        {...overrides}
+      />,
+    );
+  }
+
+  it('registers the handle while mounted and clears it on unmount', async () => {
+    const { unmount } = renderModal();
+    await screen.findByText('Mobile Web Client');
+
+    expect(getSettingsAutomationHandle()).not.toBeNull();
+
+    unmount();
+    expect(getSettingsAutomationHandle()).toBeNull();
+  });
+
+  it('reports open state, active section, and search text through getState', async () => {
+    renderModal();
+    await screen.findByText('Mobile Web Client');
+
+    expect(getSettingsAutomationHandle()?.getState()).toEqual({
+      open: true,
+      activeSection: 'connectivity',
+      search: '',
+    });
+
+    fireEvent.change(screen.getByLabelText('Search settings'), { target: { value: 'theme' } });
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+
+    expect(getSettingsAutomationHandle()?.getState()).toEqual({
+      open: true,
+      activeSection: 'general',
+      search: 'theme',
+    });
+  });
+
+  it('reports open: false when the modal is closed', async () => {
+    renderModal({ isOpen: false });
+
+    expect(getSettingsAutomationHandle()?.getState()).toEqual({
+      open: false,
+      activeSection: 'connectivity',
+      search: '',
+    });
+  });
+
+  it('selectSection switches the rendered section the same way a nav click does', async () => {
+    renderModal();
+    await screen.findByText('Mobile Web Client');
+
+    act(() => {
+      getSettingsAutomationHandle()?.selectSection('agents');
+    });
+
+    expect(await screen.findByTestId('settings-section-agents')).toBeInTheDocument();
+    expect(getSettingsAutomationHandle()?.getState().activeSection).toBe('agents');
+  });
+
+  // Regression test: SettingsModal re-registers a fresh handle on every render
+  // (its registration effect depends on selectedSection), so a handle
+  // reference captured *before* calling selectSection closes over the
+  // pre-selection state. A caller (like the bridge's settings_select_section
+  // case) must re-read through getSettingsAutomationHandle() after the
+  // section switch settles, not reuse the handle it already had.
+  it('a handle captured before selectSection reports stale state; re-reading the module getter reports fresh state', async () => {
+    renderModal();
+    await screen.findByText('Mobile Web Client');
+
+    const capturedHandle = getSettingsAutomationHandle();
+    act(() => {
+      capturedHandle?.selectSection('agents');
+    });
+    await screen.findByTestId('settings-section-agents');
+
+    expect(capturedHandle?.getState().activeSection).toBe('connectivity');
+    expect(getSettingsAutomationHandle()?.getState().activeSection).toBe('agents');
+  });
+
+  it('selectSection throws a clear error for an unknown section id', async () => {
+    renderModal();
+    await screen.findByText('Mobile Web Client');
+
+    expect(() => getSettingsAutomationHandle()?.selectSection('nonexistent')).toThrow(
+      /unknown settings section "nonexistent"/,
+    );
   });
 });

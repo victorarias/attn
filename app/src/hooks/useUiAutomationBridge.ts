@@ -8,6 +8,7 @@ import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId, type Combo, isChord, resolveBinding } from '../shortcuts';
 import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid/gridAutomation';
+import { getSettingsAutomationHandle, INACTIVE_SETTINGS_STATE } from '../components/settingsAutomation';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
@@ -1620,6 +1621,21 @@ export function useUiAutomationBridge({
         const sent = handle.sendText(text);
         await settleUi();
         return { sent, zoomedId: handle.getState().zoomedId };
+      }
+      case 'settings_get_state':
+        return getSettingsAutomationHandle()?.getState() ?? INACTIVE_SETTINGS_STATE;
+      case 'settings_select_section': {
+        const sectionId = typeof payload.sectionId === 'string' ? payload.sectionId : null;
+        if (!sectionId) throw new Error('settings_select_section requires sectionId');
+        const handle = getSettingsAutomationHandle();
+        if (!handle || !handle.getState().open) throw new Error('settings modal is not open');
+        handle.selectSection(sectionId);
+        await settleUi(2);
+        // Re-read through the module getter rather than the captured handle:
+        // SettingsModal re-registers a fresh handle on each render (its
+        // useEffect depends on selectedSection), so the captured handle's
+        // getState still closes over the pre-selection section.
+        return getSettingsAutomationHandle()?.getState() ?? INACTIVE_SETTINGS_STATE;
       }
       case 'capture_screenshot_data':
         return captureDomScreenshotData(

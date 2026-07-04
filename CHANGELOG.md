@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-04]
+
+### Added
+- **Pin the chief-of-staff's reasoning effort, per agent.** Settings → Agents → "Chief-of-staff model & effort" now has an effort selector next to each agent's model override (Claude: low, medium, high, xhigh, max; Codex: minimal, low, medium, high, xhigh). Leave it on "Agent default" to use the agent's own default. Only chief-of-staff launches are affected — regular sessions are unaffected.
+
 ## [2026-07-03]
 
 ### Added
