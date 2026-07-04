@@ -66,6 +66,89 @@
   color: #d97706;
 }
 
+.present-root-submit-button {
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: var(--font-size);
+  cursor: pointer;
+}
+
+.present-root-submit-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.present-root-submit-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+}
+
+.present-root-submit-dialog {
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  min-width: 320px;
+  max-width: 420px;
+}
+
+.present-root-submit-dialog h2 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.present-root-submit-dialog p {
+  margin: 0 0 12px 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size);
+}
+
+.present-root-submit-handback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size);
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+
+.present-root-submit-error {
+  color: var(--color-error, #dc2626);
+  font-size: var(--font-size);
+  margin-bottom: 12px;
+}
+
+.present-root-submit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.present-root-submit-actions button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-app);
+  color: var(--color-text-primary);
+  font-size: var(--font-size);
+  cursor: pointer;
+}
+
+.present-root-submit-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .present-root-drift {
   display: flex;
   align-items: flex-start;

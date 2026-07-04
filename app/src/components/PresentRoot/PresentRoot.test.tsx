@@ -1,12 +1,16 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isTauri } from '@tauri-apps/api/core';
 import { PresentRoot } from './index';
+import { DiffView } from '../DiffView';
+import type { DiffViewProps } from '../DiffView';
 
 // DiffView renders the @pierre/diffs custom element (shadow DOM + Shiki),
 // which jsdom cannot exercise. These tests cover the reader's data flow
-// (file selection, fetching pinned diffs, keyboard nav), not diff rendering
-// internals — mirrors the DiffDetailPanel.test.tsx idiom.
+// (file selection, fetching pinned diffs, keyboard nav, comment drafts), not
+// diff rendering internals — mirrors the DiffDetailPanel.test.tsx idiom. The
+// mock captures its full props so tests can invoke onAddComment etc.
+// directly and assert on the comments PresentRoot passes down.
 vi.mock('../DiffView', () => ({
   DiffView: vi.fn(({ original, modified }) => (
     <div data-testid="diff-view">
@@ -15,6 +19,13 @@ vi.mock('../DiffView', () => ({
     </div>
   )),
 }));
+
+function latestDiffViewProps(): DiffViewProps {
+  const calls = vi.mocked(DiffView).mock.calls;
+  const props = calls[calls.length - 1]?.[0];
+  if (!props) throw new Error('DiffView has not been rendered yet');
+  return props as unknown as DiffViewProps;
+}
 
 // PresentRoot owns its own useDaemonSocket connection (it is a standalone
 // Tauri window, not a component fed daemon functions via props), so
@@ -64,6 +75,12 @@ class FakeWebSocket {
 // waits can be slower than testing-library's 1000ms default, independent of
 // this component's own logic.
 const WAIT_OPTS = { timeout: 5000 };
+
+// Tests that chain several sequential waitFor calls can, in aggregate, exceed
+// vitest's 5000ms default per-test timeout under full-suite contention even
+// though each individual waitFor stays within WAIT_OPTS. Applied as the third
+// `it(...)` argument on those multi-step tests.
+const TEST_TIMEOUT = 15000;
 
 async function waitForOpenSocket(): Promise<FakeWebSocket> {
   await waitFor(() => {
@@ -195,6 +212,13 @@ describe('PresentRoot', () => {
   });
 
   afterEach(() => {
+    // Unmount explicitly, while setTimeout is still our tracked wrapper: the
+    // socket's onclose-triggered reconnect scheduling runs during unmount, and
+    // needs to land in pendingTimeouts below rather than escape as a real,
+    // untracked 1000ms timer that later fires mid a subsequent test and
+    // injects a stray FakeWebSocket instance (this is what made "moves the
+    // selection..."/other later tests intermittently see the wrong socket).
+    cleanup();
     for (const timeoutId of pendingTimeouts) {
       originalClearTimeout(timeoutId);
     }
@@ -366,7 +390,7 @@ describe('PresentRoot', () => {
     await waitFor(() => {
       expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
     }, WAIT_OPTS);
-  });
+  }, TEST_TIMEOUT);
 
   it('shows a drift banner iff repoHeadSha differs from the pinned round head', async () => {
     await loadRound({ repoHeadSha: 'deadbeef000000' });
@@ -412,4 +436,175 @@ describe('PresentRoot', () => {
     expect(screen.getByText('src/vendor.ts')).toBeInTheDocument();
     expect(screen.getByText('src/generated.ts').closest('li')).toHaveClass('present-root-file-skipped');
   });
+
+  async function loadRoundWithDiff(): Promise<FakeWebSocket> {
+    const ws = await loadRound();
+    act(() => {
+      ws.emit({
+        event: 'file_diff_result',
+        success: true,
+        path: 'src/foo.ts',
+        original: 'old content',
+        modified: 'new content',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('diff-view')).toBeInTheDocument();
+    }, WAIT_OPTS);
+    return ws;
+  }
+
+  it('surfaces a locally-added draft in the comments passed to DiffView', async () => {
+    await loadRoundWithDiff();
+
+    await act(async () => {
+      await latestDiffViewProps().onAddComment(3, 5, 'looks off');
+    });
+
+    await waitFor(() => {
+      const comments = latestDiffViewProps().comments;
+      expect(comments).toHaveLength(1);
+      expect(comments[0]).toMatchObject({ line_start: 3, line_end: 5, content: 'looks off' });
+    }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
+
+  it('round-trips an old-side (negative line_end) draft through the signed convention', async () => {
+    await loadRoundWithDiff();
+
+    await act(async () => {
+      await latestDiffViewProps().onAddComment(10, -12, 'stale comment');
+    });
+
+    await waitFor(() => {
+      const comments = latestDiffViewProps().comments;
+      const draft = comments.find((c) => c.content === 'stale comment');
+      expect(draft).toMatchObject({ line_start: 10, line_end: -12 });
+    }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
+
+  it('sends the correct wire shape when submitting drafts', async () => {
+    const ws = await loadRoundWithDiff();
+
+    await act(async () => {
+      await latestDiffViewProps().onAddComment(3, 5, 'new-side comment');
+    });
+    await act(async () => {
+      await latestDiffViewProps().onAddComment(10, -12, 'old-side comment');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      const req = sent.find((m) => m.cmd === 'present_submit_round');
+      expect(req).toBeDefined();
+      expect(req.round_id).toBe('round-1');
+      expect(req.handback).toBe(true);
+      expect(req.comments).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            filepath: 'src/foo.ts',
+            line_start: 3,
+            line_end: 5,
+            side: 'new',
+            content: 'new-side comment',
+          }),
+          expect.objectContaining({
+            filepath: 'src/foo.ts',
+            line_start: 10,
+            line_end: 12,
+            side: 'old',
+            content: 'old-side comment',
+          }),
+        ])
+      );
+    }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
+
+  it('clears drafts and refetches the round after a successful submit', async () => {
+    const ws = await loadRoundWithDiff();
+
+    await act(async () => {
+      await latestDiffViewProps().onAddComment(3, 5, 'looks off');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => {
+      expect(ws.sent.map((e) => JSON.parse(e)).some((m) => m.cmd === 'present_submit_round')).toBe(true);
+    }, WAIT_OPTS);
+
+    act(() => {
+      ws.emit({ event: 'present_submit_round_result', success: true, round_id: 'round-1' });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    }, WAIT_OPTS);
+    expect(screen.getByText('Submit review')).toBeInTheDocument();
+
+    // A successful submit bumps refreshSignal, which re-fetches the round.
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      const refetches = sent.filter((m) => m.cmd === 'get_presentation_round');
+      expect(refetches.length).toBeGreaterThanOrEqual(2);
+    }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
+
+  it('keeps drafts and shows an inline error when submit fails', async () => {
+    const ws = await loadRoundWithDiff();
+
+    await act(async () => {
+      await latestDiffViewProps().onAddComment(3, 5, 'looks off');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => {
+      expect(ws.sent.map((e) => JSON.parse(e)).some((m) => m.cmd === 'present_submit_round')).toBe(true);
+    }, WAIT_OPTS);
+
+    act(() => {
+      ws.emit({ event: 'present_submit_round_result', success: false, error: 'daemon unreachable' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('daemon unreachable')).toBeInTheDocument();
+    }, WAIT_OPTS);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(latestDiffViewProps().comments.some((c) => c.content === 'looks off')).toBe(true);
+  }, TEST_TIMEOUT);
+
+  it('keeps drafts made on one file when switching to another and back', async () => {
+    const ws = await loadRoundWithDiff();
+
+    await act(async () => {
+      await latestDiffViewProps().onAddComment(3, 5, 'on foo.ts');
+    });
+    await waitFor(() => {
+      expect(latestDiffViewProps().comments.some((c) => c.content === 'on foo.ts')).toBe(true);
+    }, WAIT_OPTS);
+
+    fireEvent.click(screen.getByText('src/foo.test.ts'));
+    act(() => {
+      ws.emit({
+        event: 'file_diff_result',
+        success: true,
+        path: 'src/foo.test.ts',
+        original: 'test old',
+        modified: 'test new',
+      });
+    });
+    await waitFor(() => {
+      expect(latestDiffViewProps().comments.some((c) => c.content === 'on foo.ts')).toBe(false);
+    }, WAIT_OPTS);
+
+    fireEvent.click(screen.getByText('src/foo.ts'));
+    await waitFor(() => {
+      expect(latestDiffViewProps().comments.some((c) => c.content === 'on foo.ts')).toBe(true);
+    }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
 });
