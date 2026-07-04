@@ -553,6 +553,11 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		// chief_model_<agent> setting.
 		spawnOpts.Model = d.chiefLaunchModel(agent, isChief)
 	}
+	if spawnOpts.Effort == "" {
+		// No per-spawn pin (delegation); a chief launch falls back to the
+		// chief_effort_<agent> setting.
+		spawnOpts.Effort = d.chiefLaunchEffort(agent, isChief)
+	}
 	// A chief launch caps its context window (chief_context_window_cap); non-chief
 	// launches stay uncapped so delegated interactive agents are never affected.
 	spawnOpts.ChiefContextWindowCap = d.chiefContextWindowCap(isChief)
