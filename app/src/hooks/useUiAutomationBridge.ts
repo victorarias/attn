@@ -346,6 +346,11 @@ function collectPaneDomMetrics(paneElement: Element | null) {
     terminalContainer: elementMetrics(terminalContainer),
     terminalSurface: elementMetrics(terminalSurface),
     canvas: elementMetrics(canvas),
+    // GhosttyTerminal renders this when it gives up rebuilding the renderer
+    // (see the WebGL context-loss recovery give-up path) — exposed so the
+    // packaged-app harness can assert recovery actually cleared it, not just
+    // that the diagnostics log said so.
+    errorVisible: paneElement.querySelector('.ghostty-terminal-error') != null,
   };
 }
 
