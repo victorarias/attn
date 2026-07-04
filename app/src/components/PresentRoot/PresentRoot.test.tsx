@@ -1,6 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isTauri } from '@tauri-apps/api/core';
 import { PresentRoot } from './index';
 import { DiffView } from '../DiffView';
 import type { DiffViewProps } from '../DiffView';
@@ -101,6 +100,7 @@ function setSearch(search: string) {
 async function loadRound(options?: {
   round?: typeof round;
   repoHeadSha?: string;
+  comments?: Array<Record<string, unknown>>;
 }): Promise<FakeWebSocket> {
   setSearch('window=present&presentation=pres-1');
   render(<PresentRoot />);
@@ -121,7 +121,7 @@ async function loadRound(options?: {
       success: true,
       presentation,
       round: options?.round ?? round,
-      comments: [],
+      comments: options?.comments ?? [],
       ...(options?.repoHeadSha !== undefined && { repo_head_sha: options.repoHeadSha }),
     });
   });
@@ -181,7 +181,6 @@ describe('PresentRoot', () => {
     originalWebSocket = globalThis.WebSocket;
     FakeWebSocket.instances = [];
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
-    vi.mocked(isTauri).mockReturnValue(true);
 
     // Track every setTimeout (including useDaemonSocket's reconnect backoff)
     // so afterEach can kill stragglers before the next test's FakeWebSocket
@@ -437,8 +436,10 @@ describe('PresentRoot', () => {
     expect(screen.getByText('src/generated.ts').closest('li')).toHaveClass('present-root-file-skipped');
   });
 
-  async function loadRoundWithDiff(): Promise<FakeWebSocket> {
-    const ws = await loadRound();
+  async function loadRoundWithDiff(options?: {
+    comments?: Array<Record<string, unknown>>;
+  }): Promise<FakeWebSocket> {
+    const ws = await loadRound({ comments: options?.comments });
     act(() => {
       ws.emit({
         event: 'file_diff_result',
@@ -465,6 +466,40 @@ describe('PresentRoot', () => {
       const comments = latestDiffViewProps().comments;
       expect(comments).toHaveLength(1);
       expect(comments[0]).toMatchObject({ line_start: 3, line_end: 5, content: 'looks off' });
+    }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
+
+  it('marks submitted comments read-only in DiffView while leaving drafts editable', async () => {
+    await loadRoundWithDiff({
+      comments: [
+        {
+          id: 'submitted-1',
+          content: 'from a prior round',
+          filepath: 'src/foo.ts',
+          line_start: 2,
+          line_end: 2,
+          side: 'new',
+          author: 'user',
+          created_at: '2026-07-01T00:00:00Z',
+          round_id: 'round-0',
+        },
+      ],
+    });
+
+    await act(async () => {
+      await latestDiffViewProps().onAddComment(3, 5, 'looks off');
+    });
+
+    await waitFor(() => {
+      const props = latestDiffViewProps();
+      const comments = props.comments;
+      expect(comments.some((c) => c.id === 'submitted-1')).toBe(true);
+      expect(comments.some((c) => c.content === 'looks off')).toBe(true);
+
+      const readOnlyIds = props.readOnlyCommentIds;
+      expect(readOnlyIds?.has('submitted-1')).toBe(true);
+      const draftComment = comments.find((c) => c.content === 'looks off');
+      expect(readOnlyIds?.has(draftComment!.id)).toBe(false);
     }, WAIT_OPTS);
   }, TEST_TIMEOUT);
 

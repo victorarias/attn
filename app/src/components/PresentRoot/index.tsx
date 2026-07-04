@@ -385,6 +385,12 @@ export function PresentRoot() {
         ...drafts.filter((d) => d.filepath === selectedFile.path).map(draftToReviewComment),
       ]
     : [];
+  // Submitted comments (author is the round's owner or agent, not a local
+  // draft) render read-only in the reader — only the user's own in-progress
+  // drafts are editable/resolvable/deletable here.
+  const readOnlyCommentIds = new Set(
+    selectedFileComments.filter((c) => !draftIds.has(c.id)).map((c) => c.id)
+  );
 
   return (
     <div className="present-root">
@@ -527,6 +533,7 @@ export function PresentRoot() {
                   filePath={selectedFile.path}
                   comments={selectedFileComments}
                   editingCommentId={editingCommentId}
+                  readOnlyCommentIds={readOnlyCommentIds}
                   diffStyle="unified"
                   expandUnchanged={false}
                   onAddComment={handleAddComment}
