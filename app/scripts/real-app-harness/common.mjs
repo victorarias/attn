@@ -89,6 +89,20 @@ Options:
 `);
 }
 
+// Contract: a driving agent greps stdout for the LAST line starting with the
+// `ATTN_VERDICT ` prefix and JSON.parses the remainder. Keep the payload on a
+// single line (compact JSON; no pretty-print) and free of embedded newlines so
+// naive line-oriented parsing never splits it.
+export const ATTN_VERDICT_PREFIX = 'ATTN_VERDICT ';
+
+export function formatVerdictLine(verdict) {
+  return `${ATTN_VERDICT_PREFIX}${JSON.stringify(verdict)}`;
+}
+
+export function emitVerdict(verdict) {
+  console.log(formatVerdictLine(verdict));
+}
+
 export function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
 }
