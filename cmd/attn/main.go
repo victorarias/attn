@@ -255,6 +255,9 @@ func main() {
 	case "debug":
 		maybePrintProfileBanner()
 		runDebug()
+	case "journal":
+		maybePrintProfileBanner()
+		runJournal()
 	case "vision-check":
 		// No banner: output must stay pure (stdout = answer only, or a single
 		// --json line) for machine consumption by the calling agent.
@@ -567,6 +570,7 @@ func writeHelp(w io.Writer) {
 commands:
   presence                          check whether the current shell runs inside attn
   delegate --brief-file <path>      start another agent with a delegated brief
+  journal append --entry <text>     serialized append to the daily notebook journal
   workspace context <command>       edit shared workspace context
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
@@ -1494,6 +1498,117 @@ work states:
   ready_for_review  in review
   completed         done
   failed            failed
+
+The session defaults to ATTN_SESSION_ID.
+`)
+}
+
+// runJournal routes `attn journal <command>`. Today there is only one
+// subcommand, `append`, mirroring the shape of runTicket for future growth.
+func runJournal() {
+	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
+		writeJournalHelp(os.Stdout)
+		return
+	}
+	warnIfDaemonVersionMismatch()
+	switch os.Args[2] {
+	case "append":
+		if hasHelpFlag(os.Args[3:]) {
+			writeJournalHelp(os.Stdout)
+			return
+		}
+		runJournalAppend(os.Args[3:])
+	default:
+		fmt.Fprintf(os.Stderr, "journal: unknown command %q\n", os.Args[2])
+		writeJournalHelp(os.Stderr)
+		os.Exit(2)
+	}
+}
+
+type journalAppendArgs struct {
+	sessionID string
+	date      string
+	entry     string
+	jsonOut   bool
+}
+
+// parseJournalAppendArgs reads `attn journal append (--entry <text> | --entry-file
+// <path>) [--date YYYY-MM-DD] [--session <id>] [--json]`. --entry/--entry-file
+// are mutually exclusive and one is required, mirroring delegate's
+// --brief/--brief-file handling.
+func parseJournalAppendArgs(args []string) (journalAppendArgs, error) {
+	fs := flag.NewFlagSet("journal append", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	entryText := fs.String("entry", "", "journal entry markdown")
+	entryFile := fs.String("entry-file", "", "file containing the journal entry markdown")
+	date := fs.String("date", "", "journal date as YYYY-MM-DD (defaults to today)")
+	sessionID := fs.String("session", "", "session id (optional; defaults to ATTN_SESSION_ID)")
+	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+	if err := fs.Parse(args); err != nil {
+		return journalAppendArgs{}, err
+	}
+	if fs.NArg() != 0 {
+		return journalAppendArgs{}, fmt.Errorf("unexpected arguments: %v", fs.Args())
+	}
+	if strings.TrimSpace(*entryText) != "" && strings.TrimSpace(*entryFile) != "" {
+		return journalAppendArgs{}, errors.New("pass only one of --entry or --entry-file")
+	}
+	entry := strings.TrimSpace(*entryText)
+	if strings.TrimSpace(*entryFile) != "" {
+		content, err := os.ReadFile(*entryFile)
+		if err != nil {
+			return journalAppendArgs{}, fmt.Errorf("read entry file: %w", err)
+		}
+		entry = strings.TrimSpace(string(content))
+	}
+	if entry == "" {
+		return journalAppendArgs{}, errors.New("--entry or --entry-file is required")
+	}
+	source := strings.TrimSpace(*sessionID)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	return journalAppendArgs{
+		sessionID: source,
+		date:      strings.TrimSpace(*date),
+		entry:     entry,
+		jsonOut:   *jsonOutput,
+	}, nil
+}
+
+// runJournalAppend is the contention-safe way an agent writes the daily journal:
+// it appends through the daemon's single serialized notebook.Store writer instead
+// of editing journal/<date>.md directly, which races the daemon keeper's own
+// writes to the same file (nearly always hitting "file modified since read").
+func runJournalAppend(args []string) {
+	parsed, err := parseJournalAppendArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "journal append: %v\n", err)
+		writeJournalHelp(os.Stderr)
+		os.Exit(2)
+	}
+	result, err := client.New("").AppendJournal(parsed.sessionID, parsed.date, parsed.entry)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "journal append: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.jsonOut {
+		printJSON(result)
+		return
+	}
+	fmt.Printf("appended to %s\n", result.RelPath)
+}
+
+func writeJournalHelp(w io.Writer) {
+	fmt.Fprint(w, `usage: attn journal <command>
+
+commands:
+  append (--entry <text> | --entry-file <path>) [--date YYYY-MM-DD] [--session <id>] [--json]
+        serialized append to the notebook's daily journal (journal/<date>.md)
+        through the daemon — the contention-safe way an agent writes the
+        journal, instead of editing the file directly with its own file-edit
+        tools (which races the daemon's own keeper writes to the same file).
+        date defaults to today. --json prints rel_path and hash.
 
 The session defaults to ATTN_SESSION_ID.
 `)

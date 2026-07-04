@@ -548,6 +548,30 @@ func (c *Client) NotebookGuide(sessionID string) (*protocol.NotebookGuideResult,
 	return resp.NotebookGuide, nil
 }
 
+// AppendJournal appends entry to the notebook's dated daily journal
+// (journal/<date>.md) through the daemon's serialized notebook.Store writer —
+// the contention-safe alternative to an agent editing the journal file directly,
+// which races the daemon's own keeper writes. date defaults (daemon-side) to
+// today when empty; sourceSessionID is optional and unused, present only for
+// command-shape uniformity with the ticket verbs.
+func (c *Client) AppendJournal(sourceSessionID, date, entry string) (*protocol.JournalAppendResult, error) {
+	msg := protocol.JournalAppendMessage{Cmd: protocol.CmdJournalAppend, Entry: entry}
+	if sourceSessionID != "" {
+		msg.SourceSessionID = protocol.Ptr(sourceSessionID)
+	}
+	if date != "" {
+		msg.Date = protocol.Ptr(date)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.JournalAppendResult == nil {
+		return nil, errors.New("daemon returned no journal append result")
+	}
+	return resp.JournalAppendResult, nil
+}
+
 func (c *Client) queryResponse(filter string) (*protocol.Response, error) {
 	var filterPtr *string
 	if filter != "" {
