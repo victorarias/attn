@@ -20,11 +20,16 @@ Implementation is a separate PR.
 - **Starter set includes the leak soak.** The retained-RSS soak (the "noticed by
   feel" long-session memory creep) is in the first implementation batch, not
   deferred.
-- **Where the Go benches run:** the self-hosted savannah runners are *dedicated
-  and network-isolated* (one job at a time on an 8-vCPU VM), which makes even
-  **ns/op trends meaningful** there — unlike GitHub's shared runners. Preferred
-  home for the Go benchmark *trend* job, pending confirmation the `victorarias/
-  attn` repo can target the `solenesinc`-org runners (they're org-scoped today).
+- **Where the Go benches run → GitHub-hosted shared runners (for now).** The
+  self-hosted savannah runners are org-scoped to `solenesinc`; using them would
+  mean **moving `victorarias/attn` into that org**, which is out of scope for
+  now — **postponed.** So the Go benchmark job runs on the same shared
+  `ubuntu-latest` runners as the rest of CI. Consequence: those runners are
+  CPU-noisy, so **`allocs/op` (and `B/op`) is the only trustworthy CI signal**;
+  ns/op is captured best-effort as a coarse trend but must not be read as
+  precise. If we later move to solenesinc, the dedicated runners would make
+  ns/op meaningful and unlock a promote-to-gate story — tracked as a follow-up,
+  not a blocker.
 
 Scope: **performance = CPU (latency/throughput) AND memory** (resident
 footprint, allocation churn, long-session growth/leaks). Memory is first-class,
@@ -41,10 +46,10 @@ hot surfaces and the same measurement tooling.
 ## TL;DR — the plan
 
 1. **3 Go micro-benchmarks, recorded as trends.** PTY output datapath,
-   transcript parser, WS event marshal. Run them on the dedicated self-hosted
-   runner where numbers are stable; watch `allocs/op` (deterministic) as the
-   primary signal and ns/op as a secondary trend. No hard gate yet — promote
-   `allocs/op` to a gate later if watching proves too passive.
+   transcript parser, WS event marshal. Run on the GitHub-hosted shared runners
+   we already have; watch `allocs/op`/`B/op` (deterministic even on a noisy box)
+   as the primary signal and treat ns/op as a coarse, best-effort trend only. No
+   hard gate yet — `allocs/op` is the candidate to promote later.
 2. **Adopt the existing real-app harness as a Mac-only trend.**
    `scenario-perf-baseline.mjs` already measures RSS, the warm-set per-pane cost,
    and the streaming memory balloon. It cannot run on any runner we have (no
@@ -101,20 +106,22 @@ Victor asked for the honest craft, not a list. Here's what actually bites.
 
 ### 1. attn's CI reality decides everything
 
-Two runner realities, and they pull in different directions:
+The runner we have, and the one we don't:
 
 - **GitHub-hosted `ubuntu-latest` shared runners** run today's CI
   (`.github/workflows/ci.yml`) — plus one `macos-14` only in release-preflight.
-  Shared runners are **CPU-noisy**: ns/op swings run-to-run (neighbours on the
-  box, frequency scaling). A wall-clock threshold here is a coin-flip → flaky red
-  → ignored suite. This is *the* classic perf-CI trap.
+  This is where the Go benchmark job will live. Shared runners are **CPU-noisy**:
+  ns/op swings run-to-run (neighbours on the box, frequency scaling). A wall-clock
+  threshold here is a coin-flip → flaky red → ignored suite (*the* classic
+  perf-CI trap). So on these runners **only `allocs/op`/`B/op` are trustworthy**;
+  ns/op is a coarse trend at best.
 - **Self-hosted savannah runners** exist (`victor-cloud`:
   `savannah-github-runners-*`): 4 ephemeral **Linux x64** VMs, 8 vCPU / 32 GB,
-  dedicated and network-isolated, one job at a time. A dedicated box is *quiet* —
-  quiet enough that even **ns/op is a meaningful trend** there. That's where the
-  Go benchmark trend job should live. Caveat: they're registered to the
-  `solenesinc` org; confirm `victorarias/attn` can target org runners (or
-  register a repo-scoped runner) before relying on them.
+  dedicated and network-isolated — a *quiet* box where even ns/op would be a
+  meaningful trend. **But they're org-scoped to `solenesinc`, and using them
+  would require moving `victorarias/attn` into that org — postponed for now.**
+  Noted as the upgrade path that would later make ns/op reliable and unlock a
+  promote-to-gate story; not part of this plan.
 
 And the hard wall for the memory story:
 
@@ -131,9 +138,11 @@ adding a trend/gate job is a small, contained workflow addition — not new infr
 
 **Design rule that falls out of this:** the deterministic quantity
 (`allocs/op`, and weakly `B/op`) is trustworthy on *any* runner and is the
-primary signal; ns/op is only trustworthy on the *dedicated* savannah runner;
-RSS is Mac-only and always a trend. Match each metric to a runner that can read
-it honestly.
+primary signal; ns/op is not trustworthy on the shared runners we have (it would
+be on a dedicated box, if we ever move to one); RSS is Mac-only and always a
+trend. Match each metric to a runner that can read it honestly — and where a
+runner can't (ns/op on shared CI), keep the metric as background context, never
+a decision input.
 
 ### 2. Gates vs trends — pick per-metric, not per-test
 
@@ -227,13 +236,13 @@ promote-to-gate candidate). "Where" is the hard runner constraint from §1.
 
 | # | Test | Layer | Axis | Where it runs | Signal (trend) | Rank |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | PTY output datapath allocations | Go micro | CPU+mem | savannah runner | allocs/op (+ns/op) | ★★★★★ |
-| 2 | Transcript parser over a real-size fixture | Go micro | CPU+mem | savannah runner | allocs/op, B/op (+ns/op) | ★★★★★ |
+| 1 | PTY output datapath allocations | Go micro | CPU+mem | GitHub CI (shared) | allocs/op (ns/op coarse) | ★★★★★ |
+| 2 | Transcript parser over a real-size fixture | Go micro | CPU+mem | GitHub CI (shared) | allocs/op, B/op (ns/op coarse) | ★★★★★ |
 | 3 | Real-app RSS baseline (idle @ N sessions + per-pane) | Macro | Memory | Dev / nightly Mac | RSS, per-live-pane slope | ★★★★☆ |
 | 4 | Streaming/long-session leak soak (retained RSS) | Macro | Memory | Dev / nightly Mac | retained RSS slope | ★★★★☆ |
-| 5 | WS outbound event marshal allocations | Go micro | CPU+mem | savannah runner | allocs/op | ★★★☆☆ |
-| 6 | Store hot-path query benchmarks (List/Get) | Go micro | CPU+mem | savannah runner | allocs/op | ★★★☆☆ |
-| 7 | Classifier deterministic-slice extraction | Go micro | CPU+mem | savannah runner | allocs/op, B/op | ★★☆☆☆ |
+| 5 | WS outbound event marshal allocations | Go micro | CPU+mem | GitHub CI (shared) | allocs/op | ★★★☆☆ |
+| 6 | Store hot-path query benchmarks (List/Get) | Go micro | CPU+mem | GitHub CI (shared) | allocs/op | ★★★☆☆ |
+| 7 | Classifier deterministic-slice extraction | Go micro | CPU+mem | GitHub CI (shared) | allocs/op, B/op | ★★☆☆☆ |
 | 8 | Session spawn / reattach latency | Macro | CPU | Dev / nightly Mac | wall-clock | ★★☆☆☆ |
 | 9 | Frontend retained JS-heap after teardown | Macro | Memory | Dev / nightly Mac | JS heap | ★★☆☆☆ |
 
@@ -373,7 +382,7 @@ Tests #1, #2, #4 are the starter set (see below); #1–#2 gate-promotable later.
 **Starter set (first implementation batch — decided 2026-07-05):**
 
 - **#1 PTY datapath allocations** (extend the existing bench; record `allocs/op`
-  + ns/op as a trend on the savannah runner)
+  as the primary trend, ns/op coarse — on GitHub-hosted shared runners)
 - **#2 Transcript parser over a real fixture** (`allocs/op` + `B/op` + ns/op
   trend; one committed realistic transcript)
 - **#4 Streaming/long-session leak soak** on the #470 driver with a retained-RSS
@@ -386,11 +395,12 @@ That's the two hottest owned CPU/alloc paths, the dominant memory failure mode
 trend-only to start; `allocs/op` on #1/#2 is the promote-to-gate candidate.
 
 The enabling infra the starter set needs:
-- a small workflow job (targeting the savannah runner) that runs
-  `go test -run='^$' -bench=. -benchmem` on the perf packages and **records** the
-  numbers (artifact / `benchstat` vs a stored baseline). No failing threshold
-  yet — trend-only per the decision — but structured so an `allocs/op` ceiling
-  can be turned on later without reshaping the job;
+- a small workflow job (GitHub-hosted `ubuntu-latest`, same as the rest of CI)
+  that runs `go test -run='^$' -bench=. -benchmem` on the perf packages and
+  **records** the numbers (artifact / `benchstat` vs a stored baseline), watching
+  `allocs/op`/`B/op` and treating ns/op as coarse. No failing threshold yet —
+  trend-only per the decision — but structured so an `allocs/op` ceiling can be
+  turned on later without reshaping the job;
 - one committed realistic transcript fixture (stable, multi-MB);
 - a retained-RSS verdict added to the soak path (reuse `--reclaim-hold-ms` +
   `emitVerdict`) so `run-soak.mjs` self-reports a growth-slope violation;
@@ -418,12 +428,16 @@ render-timing, and any end-to-end classifier *timing* benchmark.
    packaged-app harness stays a developer/nightly-Mac artifact with a committed
    baseline. A self-hosted Mac + nightly cron remains a future option if
    trend-watching proves too manual.
-3. **Starter scope → 3 tests + adopted baseline, including the leak soak** (#1,
+3. **Go benchmark runner → GitHub-hosted shared runners.** The self-hosted
+   savannah runners would require moving `victorarias/attn` into the `solenesinc`
+   org; **postponed** — we roll with the shared runners we have. This is why
+   `allocs/op` is the only trustworthy CI signal and ns/op stays coarse. Revisit
+   if/when attn moves orgs.
+4. **Starter scope → 3 tests + adopted baseline, including the leak soak** (#1,
    #2, #4, plus #3 adopted). See the starter set above.
 
-Follow-up to confirm before implementation: whether `victorarias/attn` can
-target the `solenesinc`-org savannah runners, or a repo-scoped runner is needed
-for the Go benchmark trend job.
+**Postponed (not a blocker):** moving attn to `solenesinc` to use the dedicated
+savannah runners — would make ns/op reliable and unlock a promote-to-gate story.
 
 ---
 
