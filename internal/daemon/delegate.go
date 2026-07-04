@@ -94,6 +94,21 @@ func (d *Daemon) validateDelegationName(name string, creatingWorkspace bool, tar
 	return nil
 }
 
+// truncateDelegationName shortens a directory-basename-derived name to fit
+// maxDelegationNameRunes. Unlike an explicit --name (which must fail loudly so
+// the caller learns the limit), a derived default should just fit — a worktree
+// checkout like "attn--feat-some-long-branch" always exceeds 16 runes, and
+// erroring there would make --worktree unusable without also passing --name.
+// Trailing "-", "_", ".", and whitespace are trimmed off the cut so the result
+// reads cleanly (e.g. "attn--feat-agent" rather than "attn--feat-agent-").
+func truncateDelegationName(name string) string {
+	runes := []rune(name)
+	if len(runes) <= maxDelegationNameRunes {
+		return name
+	}
+	return strings.TrimRight(string(runes[:maxDelegationNameRunes]), "-_. \t")
+}
+
 func (d *Daemon) resolveDelegationAgent(sourceAgent string, requested *string) (string, error) {
 	agent := strings.TrimSpace(strings.ToLower(protocol.Deref(requested)))
 	if agent == "" {
@@ -292,10 +307,15 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 			return nil, fmt.Errorf("new_workspace placement does not accept workspace_id")
 		}
 		directory = strings.TrimSpace(protocol.Deref(msg.Cwd))
-		if msg.Worktree != nil {
-			if directory != "" {
-				return nil, fmt.Errorf("new_workspace placement cannot combine cwd and worktree")
+		if directory != "" && msg.Worktree != nil {
+			// --cwd + --worktree compose: the worktree's repo and starting ref are
+			// inferred from this base directory below (createDelegationWorktree),
+			// and the workspace ends up placed at the created worktree path.
+			validatedCwd, cwdErr := validateDelegationDirectory(directory)
+			if cwdErr != nil {
+				return nil, cwdErr
 			}
+			directory = validatedCwd
 		}
 		if directory == "" {
 			directory = source.Directory
@@ -346,7 +366,7 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	// validate the final name. Only a worktree may exist at this point, so a
 	// validation failure rolls it back (no workspace/pane/session yet).
 	if name == "" {
-		name = filepath.Base(directory)
+		name = truncateDelegationName(filepath.Base(directory))
 		if err := d.validateDelegationName(name, creatingWorkspace, sessionNameWorkspaceID); err != nil {
 			return nil, d.rollbackDelegation("", createdWorktreePath, err)
 		}

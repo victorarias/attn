@@ -604,6 +604,23 @@ func TestParseDelegateArgsAcceptsWorkspaceWithWorktree(t *testing.T) {
 	}
 }
 
+func TestParseDelegateArgsAcceptsCwdWithWorktree(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "Work in a worktree of the repo at this directory",
+		"--cwd", "/some/repo",
+		"--worktree", "feat/parser",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+	if parsed.options.Placement != "new_workspace" ||
+		parsed.options.CWD != "/some/repo" ||
+		parsed.options.Worktree != "feat/parser" {
+		t.Fatalf("options = %+v", parsed.options)
+	}
+}
+
 func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
 	var output bytes.Buffer
 	writeHelp(&output)
