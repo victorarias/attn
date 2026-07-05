@@ -303,6 +303,19 @@
   overflow: hidden;
 }
 
+/* The bound-ticket overlay: TicketDetailPanel laid over the terminal inside the
+   pane body (which is position:relative). Absolute inset:0 above the terminal
+   canvas; the header stays above it so the chip and drag handle remain clickable.
+   Pane-scoped and non-modal — no backdrop, no FocusTrap. */
+.workspace-pane-ticket-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: auto;
+  background: var(--color-bg-panel);
+  outline: none;
+}
+
 /* Placeholder for a virtualized (unmounted) terminal. Only ever shown inside a
    display:none workspace, so it is purely a layout stand-in until remount. */
 .workspace-pane-virtualized {

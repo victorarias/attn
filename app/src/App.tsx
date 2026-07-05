@@ -85,6 +85,7 @@ import {
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
 import { executeTicketResumePlan, planTicketResume } from './utils/ticketResume';
+import { boundTicketForSession } from './utils/tickets';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import { hideBootSplash } from './utils/bootSplash';
@@ -3322,6 +3323,19 @@ sendFetchPRDetails,
     });
   }, [tickets, sessions, handleSelectSession, createWorkspaceSession, handleCloseTicketDetail, showError]);
 
+  // The daemon-facing ticket actions the pane-header ticket overlay wires into
+  // its TicketDetailPanel. Memoized so the workspace's renderPaneSurface memo
+  // does not rebuild every render. Same senders the dock panel uses; resume is
+  // App's handleResumeTicket (opaque here — a daemon ticket_resume once the
+  // sibling ticket-resume-fix lands, frontend orchestration until then).
+  const ticketActions = useMemo(() => ({
+    fetchTicket,
+    onChangeStatus: sendTicketChangeStatus,
+    onAddComment: sendTicketAddComment,
+    onEditDescription: sendTicketEditDescription,
+    onResume: handleResumeTicket,
+  }), [fetchTicket, sendTicketChangeStatus, sendTicketAddComment, sendTicketEditDescription, handleResumeTicket]);
+
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;
     sendRuntimeInput(activeSessionId, reference, 'user');
@@ -3770,7 +3784,9 @@ sendFetchPRDetails,
                       nudgeFiresAt: entry.nudgeFiresAt,
                       isActive: entry.id === activeSessionId,
                       presentation: presentationBySessionId.get(entry.id),
+                      ticket: boundTicketForSession(tickets ?? [], entry.id),
                     }))}
+                    ticketActions={ticketActions}
                     onTriggerNudge={sendTriggerNudge}
                     onOpenPresentation={handleOpenPresentationWindow}
                     workspace={workspaceState}
