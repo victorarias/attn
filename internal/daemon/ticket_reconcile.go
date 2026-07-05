@@ -451,6 +451,13 @@ func (d *Daemon) reconcileTaskExecutor(ctx context.Context, task *tasks.Task) er
 	}
 
 	comment := renderTicketReconcileComment(in, verdict, failReason)
+	// Annotate-only ground-truth cross-check (ticket_reconcile_groundtruth.go):
+	// never mutates the verdict, never fails the reconcile — any problem (no
+	// cwd, no origin, no GitHub client, lookup errors) degrades to no
+	// annotation.
+	if lines := d.reconcileGroundTruth(ctx, verdict, ticket.Cwd); len(lines) > 0 {
+		comment += "\n" + strings.Join(lines, "\n")
+	}
 	if _, err := d.store.AddTicketComment(in.TicketID, store.TicketAuthorAttn, comment, time.Now()); err != nil {
 		// The only retryable path: the verdict must land, so ask the runner to back
 		// off and re-run rather than silently dropping the reconciliation.

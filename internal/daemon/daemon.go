@@ -142,6 +142,10 @@ type Daemon struct {
 	ticketReconcileExec   func(ctx context.Context, in ticketReconcileInputs) (agentdriver.HeadlessTaskResult, error)
 	ticketReconcileDone   func(ticketID string)
 	ticketOrphanFirstSeen map[string]time.Time
+	// ticketReconcilePRFetch is the verdict ground-truth check's PR-state
+	// lookup seam: nil in production (reconcileGroundTruth derives the fetcher
+	// from ghRegistry per-host); tests set it to a fake so no network runs.
+	ticketReconcilePRFetch prStateFetcher
 	// reloadingSessions marks sessions whose agent is being re-spawned in place
 	// (chief-of-staff assign/demote reload). handlePTYExit consumes the flag to
 	// suppress the killed worker's session_exited so the reload reads as a runtime
