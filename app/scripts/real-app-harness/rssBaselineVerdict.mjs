@@ -1,10 +1,5 @@
 import { compareToBaseline } from './machineRegistry.mjs';
-
-// Contract cap shared with scenarioRunner.mjs's summarizeFirstFailure — the
-// ATTN_VERDICT line is single-line and length-bounded, so firstFailure here
-// follows the same rule even though this scenario builds its own verdict by
-// hand instead of going through createScenarioRunner.
-const FIRST_FAILURE_MAX_LENGTH = 300;
+import { FIRST_FAILURE_MAX_LENGTH } from './common.mjs';
 
 function truncateFirstFailure(message) {
   return message.length <= FIRST_FAILURE_MAX_LENGTH ? message : message.slice(0, FIRST_FAILURE_MAX_LENGTH);
@@ -36,6 +31,15 @@ export function evaluateRssBaseline({ totalRssMb, fingerprint, baseline, toleran
   return { ok: comparison.ok, comparison, baselineToSave };
 }
 
+// Private: the 6-key envelope shared by every ATTN_VERDICT builder in this
+// file (buildBaselineVerdict / buildColdWarmVerdict / buildLeakSoakVerdict).
+// Each builder computes its own `ok`/`failureCount`/`firstFailure` (the
+// scenario-specific regression message differs per builder) and attaches its
+// own scenario-specific fields (`rss`/`metrics`) on top of this.
+function buildVerdictEnvelope({ ok, failureCount, firstFailure, scenarioId, runId, artifactsDir, summaryPath, durationMs }) {
+  return { ok, scenarioId, runId, failureCount, firstFailure, artifactsDir, summaryPath, durationMs };
+}
+
 // Pure: builds the ATTN_VERDICT payload for the RSS baseline scenario. Extends
 // the core verdict contract (see common.mjs) with two scenario-specific
 // fields, `rss` and `metrics` — existing verdict consumers only read the core
@@ -50,14 +54,7 @@ export function buildBaselineVerdict({ ok, comparison, scenarioId, runId, artifa
       );
 
   return {
-    ok,
-    scenarioId,
-    runId,
-    failureCount: ok ? 0 : 1,
-    firstFailure,
-    artifactsDir,
-    summaryPath,
-    durationMs,
+    ...buildVerdictEnvelope({ ok, failureCount: ok ? 0 : 1, firstFailure, scenarioId, runId, artifactsDir, summaryPath, durationMs }),
     rss: comparison,
     metrics: { totalRssMb: comparison.value, ...extraMetrics },
   };
@@ -80,14 +77,7 @@ export function buildColdWarmVerdict({ cold, warm, scenarioId, runId, artifactsD
   if (!cold.ok) firstFailure = truncateFirstFailure(regressionLine('Cold', cold));
   else if (!warm.ok) firstFailure = truncateFirstFailure(regressionLine('Warm', warm));
   return {
-    ok,
-    scenarioId,
-    runId,
-    failureCount,
-    firstFailure,
-    artifactsDir,
-    summaryPath,
-    durationMs,
+    ...buildVerdictEnvelope({ ok, failureCount, firstFailure, scenarioId, runId, artifactsDir, summaryPath, durationMs }),
     rss: { cold, warm },
     metrics: { coldRssMb: cold.value, warmRssMb: warm.value },
   };
@@ -150,14 +140,7 @@ export function buildLeakSoakVerdict({
     );
   }
   return {
-    ok,
-    scenarioId,
-    runId,
-    failureCount,
-    firstFailure,
-    artifactsDir,
-    summaryPath,
-    durationMs,
+    ...buildVerdictEnvelope({ ok, failureCount, firstFailure, scenarioId, runId, artifactsDir, summaryPath, durationMs }),
     rss: { retainedByCycle, warmupCycles, slope, slopeThresholdMb },
     metrics: {
       retainedRssSlopeMbPerCycle: slope,

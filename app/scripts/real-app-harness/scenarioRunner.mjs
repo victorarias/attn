@@ -2,9 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
-import { createRunContext, emitVerdict } from './common.mjs';
-
-const FIRST_FAILURE_MAX_LENGTH = 300;
+import { createRunContext, emitVerdict, FIRST_FAILURE_MAX_LENGTH } from './common.mjs';
 
 // Collapse to a single line and cap length so the verdict's firstFailure field
 // can never break the one-line ATTN_VERDICT contract regardless of what the

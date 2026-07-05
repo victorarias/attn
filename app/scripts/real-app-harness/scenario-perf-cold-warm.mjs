@@ -28,7 +28,7 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, createSessionAndWaitForInitialPane, emitVerdict, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { profileForAppPath, assertProductionRunAllowed } from './harnessProfile.mjs';
-import { getMachineFingerprint, loadBaseline, saveBaseline } from './machineRegistry.mjs';
+import { getMachineFingerprint, loadBaseline, recordOrCompareBaseline } from './machineRegistry.mjs';
 import { buildColdWarmVerdict, evaluateRssBaseline } from './rssBaselineVerdict.mjs';
 import { delay, captureWebKitPids, snapshot, classRssMb, readLiveDaemonPid, paneIdForSession, closeSessions, fillAllPanes, teardownProfileState } from './perfMeasure.mjs';
 
@@ -170,25 +170,8 @@ async function main() {
     record: options.recordBaseline,
     recordedAt,
   });
-  if (coldEval.baselineToSave) saveBaseline(coldKey, coldEval.baselineToSave);
-  if (warmEval.baselineToSave) saveBaseline(warmKey, warmEval.baselineToSave);
-
-  if (coldEval.baselineToSave) {
-    console.log(`[perf] recorded cold baseline for machine ${coldKey}: ${coldSnap.totalRssMb} MB`);
-  } else {
-    console.log(
-      `[perf] compared to cold baseline for machine ${coldKey}: ${coldEval.comparison.value} MB `
-      + `vs ${coldEval.comparison.baseline} MB (${coldEval.comparison.reason}, tolerance ${coldEval.comparison.tolerancePct}%)`,
-    );
-  }
-  if (warmEval.baselineToSave) {
-    console.log(`[perf] recorded warm baseline for machine ${warmKey}: ${warmSnap.totalRssMb} MB`);
-  } else {
-    console.log(
-      `[perf] compared to warm baseline for machine ${warmKey}: ${warmEval.comparison.value} MB `
-      + `vs ${warmEval.comparison.baseline} MB (${warmEval.comparison.reason}, tolerance ${warmEval.comparison.tolerancePct}%)`,
-    );
-  }
+  recordOrCompareBaseline({ evaluation: coldEval, key: coldKey, label: 'cold ' });
+  recordOrCompareBaseline({ evaluation: warmEval, key: warmKey, label: 'warm ' });
 
   const summary = {
     ok: coldEval.ok && warmEval.ok,

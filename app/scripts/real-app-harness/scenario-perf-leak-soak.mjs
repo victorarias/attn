@@ -29,7 +29,7 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, createSessionAndWaitForInitialPane, emitVerdict, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { profileForAppPath, assertProductionRunAllowed } from './harnessProfile.mjs';
-import { getMachineFingerprint, loadBaseline, saveBaseline } from './machineRegistry.mjs';
+import { getMachineFingerprint, loadBaseline, recordOrCompareBaseline } from './machineRegistry.mjs';
 import { buildLeakSoakVerdict, evaluateRssBaseline, fitSlope } from './rssBaselineVerdict.mjs';
 import { captureWebKitPids, readLiveDaemonPid, closeSessions, fillAllPanes, sampleWindow, teardownProfileState } from './perfMeasure.mjs';
 
@@ -174,16 +174,7 @@ async function main() {
     record: options.recordBaseline,
     recordedAt: new Date().toISOString(),
   });
-  if (floorEval.baselineToSave) saveBaseline(key, floorEval.baselineToSave);
-
-  if (floorEval.baselineToSave) {
-    console.log(`[perf] recorded leak-floor baseline for machine ${key}: ${post[0]} MB`);
-  } else {
-    console.log(
-      `[perf] compared to leak-floor baseline for machine ${key}: ${floorEval.comparison.value} MB `
-      + `vs ${floorEval.comparison.baseline} MB (${floorEval.comparison.reason}, tolerance ${floorEval.comparison.tolerancePct}%)`,
-    );
-  }
+  recordOrCompareBaseline({ evaluation: floorEval, key, label: 'leak-floor ' });
 
   const verdict = buildLeakSoakVerdict({
     retainedByCycle,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -151,22 +150,6 @@ func TestReconcileGroundTruthLines(t *testing.T) {
 	})
 }
 
-// runGitDaemonTest runs a git command in dir for setting up a test repo with
-// an origin remote — mirrors internal/git's own test helper since this test
-// lives in the daemon package and can't import unexported git test helpers.
-func runGitDaemonTest(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v failed: %v\n%s", args, err, out)
-	}
-}
-
 // The end-to-end wiring test: a verdict mentioning a PR that the store
 // already knows is merged gets a Ground-truth check line appended to the
 // posted reconciliation comment, without touching the verdict fields
@@ -176,8 +159,8 @@ func TestReconcileGroundTruthAnnotatesMergedPR(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 
 	repoDir := t.TempDir()
-	runGitDaemonTest(t, repoDir, "init")
-	runGitDaemonTest(t, repoDir, "remote", "add", "origin", "git@github.com:victorarias/attn.git")
+	runGitDaemon(t, repoDir, "init")
+	runGitDaemon(t, repoDir, "remote", "add", "origin", "git@github.com:victorarias/attn.git")
 
 	ticketID := "gt-ticket"
 	if _, err := d.store.CreateTicket(store.Ticket{
@@ -245,8 +228,8 @@ func TestReconcileGroundTruthSilentWhenPROpen(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 
 	repoDir := t.TempDir()
-	runGitDaemonTest(t, repoDir, "init")
-	runGitDaemonTest(t, repoDir, "remote", "add", "origin", "git@github.com:victorarias/attn.git")
+	runGitDaemon(t, repoDir, "init")
+	runGitDaemon(t, repoDir, "remote", "add", "origin", "git@github.com:victorarias/attn.git")
 
 	ticketID := "gt-ticket-open"
 	if _, err := d.store.CreateTicket(store.Ticket{
@@ -302,8 +285,8 @@ func runGroundTruthReconcile(t *testing.T, d *Daemon, ticketID, whatsLeft string
 	t.Helper()
 
 	repoDir := t.TempDir()
-	runGitDaemonTest(t, repoDir, "init")
-	runGitDaemonTest(t, repoDir, "remote", "add", "origin", "git@github.com:victorarias/attn.git")
+	runGitDaemon(t, repoDir, "init")
+	runGitDaemon(t, repoDir, "remote", "add", "origin", "git@github.com:victorarias/attn.git")
 
 	if _, err := d.store.CreateTicket(store.Ticket{
 		ID:       ticketID,

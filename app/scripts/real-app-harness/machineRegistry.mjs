@@ -79,6 +79,25 @@ export function saveBaseline(fingerprintKeyValue, baseline, { registryDir = DEFA
   fs.writeFileSync(localPath, `${JSON.stringify(baseline, null, 2)}\n`);
 }
 
+// Saves the baseline (when the evaluation asked for one) and logs the
+// resulting record-or-compare outcome, in the exact `[perf] recorded ...` /
+// `[perf] compared to ...` shape every perf scenario prints after calling
+// evaluateRssBaseline. `label` is an optional word (with its own trailing
+// space, e.g. 'cold ', 'warm ', 'leak-floor ') inserted between "recorded"/
+// "compared to" and "baseline" to distinguish per-phase keys; omit it for a
+// scenario with a single, unqualified baseline.
+export function recordOrCompareBaseline({ evaluation, key, label = '' }) {
+  if (evaluation.baselineToSave) {
+    saveBaseline(key, evaluation.baselineToSave);
+    console.log(`[perf] recorded ${label}baseline for machine ${key}: ${evaluation.comparison.value} MB`);
+  } else {
+    console.log(
+      `[perf] compared to ${label}baseline for machine ${key}: ${evaluation.comparison.value} MB `
+      + `vs ${evaluation.comparison.baseline} MB (${evaluation.comparison.reason}, tolerance ${evaluation.comparison.tolerancePct}%)`,
+    );
+  }
+}
+
 function readJsonIfExists(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
