@@ -239,6 +239,20 @@ export function DiffView({
     [name, shownOriginal, shownModified]
   );
 
+  // Controlled selection. Without this, the library runs uncontrolled and
+  // commits an internal selectedRange on the first gutter-"+" click or
+  // popup-driven draft; InteractionManager then keeps re-anchoring the hover
+  // "+" to that stale range on every pointer move instead of following the
+  // mouse (see InteractionManager.placeUtilityFromSelection). Reflecting our
+  // own popup/draft state here — and clearing to null once neither is open —
+  // keeps the library's selection in sync with ours and lets the "+" resume
+  // tracking the pointer as soon as there's nothing selected.
+  const selectedLines = useMemo<SelectedLineRange | null>(() => {
+    if (selectionPopup) return { side: selectionPopup.side, start: selectionPopup.start, end: selectionPopup.end };
+    if (draft) return { side: draft.side, start: draft.start, end: draft.end };
+    return null;
+  }, [selectionPopup, draft]);
+
   // The library forces a full re-render whenever the options object changes by
   // value (function identities included), so keep callbacks stable and memoize
   // the options object on the inputs that should actually retrigger a render.
@@ -514,6 +528,7 @@ export function DiffView({
           newFile={newFile}
           options={options}
           lineAnnotations={lineAnnotations}
+          selectedLines={selectedLines}
           renderAnnotation={renderAnnotation}
           disableWorkerPool
         />
