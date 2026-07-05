@@ -10,7 +10,7 @@ import (
 // that indicates the user is actively at the app right now (as opposed to an
 // agent driving the daemon over the unix socket, which never reaches this
 // path). Keep this list in sync with the design in the ticket-inbox presence
-// feature: session/workspace selection, PR/file views, and terminal
+// feature: session/workspace selection, PR views, and terminal
 // input/resize are the actions a human takes while looking at the app.
 func isUserPresenceCommand(cmd string) bool {
 	switch cmd {
@@ -18,7 +18,6 @@ func isUserPresenceCommand(cmd string) bool {
 		protocol.CmdWorkspaceSelected,
 		protocol.CmdSessionVisualized,
 		protocol.CmdPRVisited,
-		protocol.CmdMarkFileViewed,
 		protocol.CmdPtyInput,
 		protocol.CmdPtyResize:
 		return true

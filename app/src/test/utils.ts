@@ -3,8 +3,6 @@
 import {
   MockDaemon,
   createFileDiffResult,
-  createBranchDiffFilesResult,
-  createReviewState,
 } from './mocks/daemon';
 
 export interface RenderWithMockDaemonResult {
@@ -24,19 +22,8 @@ export function setupDefaultResponses(mockDaemon: MockDaemon): void {
     };
   });
 
-  // Default getBranchDiffFiles - returns files matching git status
-  mockDaemon.setResponse('getBranchDiffFiles', () =>
-    createBranchDiffFilesResult(['src/App.tsx'])
-  );
-
   // Default fetchRemotes - always succeeds
   mockDaemon.setResponse('fetchRemotes', () => ({ success: true }));
-
-  // Default getReviewState - returns empty viewed files
-  mockDaemon.setResponse('getReviewState', () => createReviewState([]));
-
-  // Default markFileViewed - always succeeds
-  mockDaemon.setResponse('markFileViewed', () => ({ success: true }));
 }
 
 // Sleep helper
@@ -54,10 +41,6 @@ export {
   createMockDaemon,
   createGitStatus,
   createFileDiffResult,
-  createBranchDiffFilesResult,
-  createReviewState,
-  createReviewComment,
-  createDeletedLineComment,
   waitForCalls,
   assertNoMoreCalls,
 } from './mocks/daemon';

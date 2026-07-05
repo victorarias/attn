@@ -14,7 +14,6 @@ import type {
   AuthorState as GeneratedAuthorState,
   WebSocketEvent as GeneratedWebSocketEvent,
   RecentLocation as GeneratedRecentLocation,
-  Comment as GeneratedComment,
   WorkflowRun as GeneratedWorkflowRun,
   WarningElement as GeneratedWarning,
   WorkspaceContext as GeneratedWorkspaceContext,
@@ -303,44 +302,6 @@ interface WorkspaceActionResult {
   final_leaf_id?: string;
 }
 
-export interface ReviewState {
-  review_id: string;
-  repo_path: string;
-  branch: string;
-  viewed_files: string[];
-}
-
-interface ReviewStateResult {
-  success: boolean;
-  state?: ReviewState;
-  error?: string;
-}
-
-// Re-export Comment type for consumers
-export type ReviewComment = GeneratedComment;
-
-interface AddCommentResult {
-  success: boolean;
-  comment?: ReviewComment;
-  error?: string;
-}
-
-interface CommentActionResult {
-  success: boolean;
-  error?: string;
-}
-
-interface GetCommentsResult {
-  success: boolean;
-  comments?: ReviewComment[];
-  error?: string;
-}
-
-interface MarkFileViewedResult {
-  success: boolean;
-  error?: string;
-}
-
 interface GitFileChange {
   path: string;
   status: string;
@@ -365,22 +326,6 @@ export interface FileDiffResult {
   success: boolean;
   original: string;
   modified: string;
-  error?: string;
-}
-
-export interface BranchDiffFile {
-  path: string;
-  status: string;
-  old_path?: string;
-  additions?: number;
-  deletions?: number;
-  has_uncommitted?: boolean;
-}
-
-export interface BranchDiffFilesResult {
-  success: boolean;
-  base_ref: string;
-  files: BranchDiffFile[];
   error?: string;
 }
 
@@ -856,10 +801,6 @@ export function useDaemonSocket({
   const pendingOutboundCommandsRef = useRef<string[]>([]);
   const recoveryNoticeTimeoutRef = useRef<number | null>(null);
   const gitStatusSubscriptionRef = useRef<string | null>(null);
-  // Branch diff result messages are keyed by directory, not request id. Keep a
-  // per-directory pending request so duplicate callers share the same result;
-  // the daemon coordinator owns the actual git/process coalescing and snapshot.
-  const branchDiffInFlightRef = useRef<Map<string, Promise<BranchDiffFilesResult>>>(new Map());
   const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
   const canceledAttachIdsRef = useRef(new Set<string>());
   // Per-session attach serialization chain — see sendAttachSession.
@@ -2582,24 +2523,6 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'branch_diff_files_result': {
-            const key = `get_branch_diff_files_${data.directory}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (pending) {
-              pendingActionsRef.current.delete(key);
-              if (data.success) {
-                pending.resolve({
-                  success: true,
-                  base_ref: data.base_ref || '',
-                  files: data.files || [],
-                });
-              } else {
-                pending.reject(new Error(data.error || 'Failed to get branch diff files'));
-              }
-            }
-            break;
-          }
-
           case 'get_repo_info_result': {
             // Extract repo from info to build key
             const repoPath = (data as any).info?.repo || '';
@@ -2611,19 +2534,6 @@ export function useDaemonSocket({
                 pending.resolve({ success: true, info: (data as any).info, endpoint_id: data.endpoint_id });
               } else {
                 pending.resolve({ success: false, error: (data as any).error, endpoint_id: data.endpoint_id });
-              }
-            }
-            break;
-          }
-
-          case 'get_review_state_result': {
-            const pending = pendingActionsRef.current.get('get_review_state');
-            if (pending) {
-              pendingActionsRef.current.delete('get_review_state');
-              if ((data as any).success) {
-                pending.resolve({ success: true, state: (data as any).state });
-              } else {
-                pending.reject(new Error((data as any).error || 'Failed to get review state'));
               }
             }
             break;
@@ -2656,84 +2566,6 @@ export function useDaemonSocket({
                 } else {
                   pending.reject(new Error((data as any).error || 'Workflow action failed'));
                 }
-              }
-            }
-            break;
-          }
-
-          case 'mark_file_viewed_result': {
-            const pending = pendingActionsRef.current.get('mark_file_viewed');
-            if (pending) {
-              pendingActionsRef.current.delete('mark_file_viewed');
-              if ((data as any).success) {
-                pending.resolve({ success: true });
-              } else {
-                pending.reject(new Error((data as any).error || 'Failed to mark file viewed'));
-              }
-            }
-            break;
-          }
-
-          case 'add_comment_result': {
-            const pending = pendingActionsRef.current.get('add_comment');
-            if (pending) {
-              pendingActionsRef.current.delete('add_comment');
-              if ((data as any).success) {
-                pending.resolve({ success: true, comment: (data as any).comment });
-              } else {
-                pending.reject(new Error((data as any).error || 'Failed to add comment'));
-              }
-            }
-            break;
-          }
-
-          case 'update_comment_result': {
-            const pending = pendingActionsRef.current.get('update_comment');
-            if (pending) {
-              pendingActionsRef.current.delete('update_comment');
-              if ((data as any).success) {
-                pending.resolve({ success: true });
-              } else {
-                pending.reject(new Error((data as any).error || 'Failed to update comment'));
-              }
-            }
-            break;
-          }
-
-          case 'resolve_comment_result': {
-            const pending = pendingActionsRef.current.get('resolve_comment');
-            if (pending) {
-              pendingActionsRef.current.delete('resolve_comment');
-              if ((data as any).success) {
-                pending.resolve({ success: true });
-              } else {
-                pending.reject(new Error((data as any).error || 'Failed to resolve comment'));
-              }
-            }
-            break;
-          }
-
-          case 'delete_comment_result': {
-            const pending = pendingActionsRef.current.get('delete_comment');
-            if (pending) {
-              pendingActionsRef.current.delete('delete_comment');
-              if ((data as any).success) {
-                pending.resolve({ success: true });
-              } else {
-                pending.reject(new Error((data as any).error || 'Failed to delete comment'));
-              }
-            }
-            break;
-          }
-
-          case 'get_comments_result': {
-            const pending = pendingActionsRef.current.get('get_comments');
-            if (pending) {
-              pendingActionsRef.current.delete('get_comments');
-              if ((data as any).success) {
-                pending.resolve({ success: true, comments: (data as any).comments || [] });
-              } else {
-                pending.reject(new Error((data as any).error || 'Failed to get comments'));
               }
             }
             break;
@@ -4705,53 +4537,6 @@ export function useDaemonSocket({
     });
   }, []);
 
-  // Get all files changed between base ref and current working state (PR-like diff)
-  const sendGetBranchDiffFiles = useCallback((
-    directory: string,
-    baseRef?: string
-  ): Promise<BranchDiffFilesResult> => {
-    const key = `get_branch_diff_files_${directory}`;
-    const inFlightRequest = branchDiffInFlightRef.current.get(key);
-    if (inFlightRequest) {
-      return inFlightRequest;
-    }
-
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error('WebSocket not connected'));
-    }
-
-    const request = new Promise<BranchDiffFilesResult>((resolve, reject) => {
-      pendingActionsRef.current.set(key, {
-        resolve: (result) => {
-          branchDiffInFlightRef.current.delete(key);
-          resolve(result as BranchDiffFilesResult);
-        },
-        reject: (error) => {
-          branchDiffInFlightRef.current.delete(key);
-          reject(error);
-        },
-      });
-
-      ws.send(JSON.stringify({
-        cmd: 'get_branch_diff_files',
-        directory,
-        ...(baseRef && { base_ref: baseRef }),
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          branchDiffInFlightRef.current.delete(key);
-          reject(new Error('Get branch diff files timed out'));
-        }
-      }, GIT_DIFF_TIMEOUT_MS);
-    });
-
-    branchDiffInFlightRef.current.set(key, request);
-    return request;
-  }, []);
-
   // Get repo info
   const getRepoInfo = useCallback((repo: string, endpointId?: string): Promise<RepoInfoResult> => {
     return new Promise((resolve, reject) => {
@@ -4772,29 +4557,6 @@ export function useDaemonSocket({
           reject(new Error('get_repo_info timeout'));
         }
       }, GIT_METADATA_TIMEOUT_MS);
-    });
-  }, []);
-
-  // Get review state for a repo/branch
-  const getReviewState = useCallback((repoPath: string, branch: string): Promise<ReviewStateResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'get_review_state';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({ cmd: 'get_review_state', repo_path: repoPath, branch }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Get review state timed out'));
-        }
-      }, 10000);
     });
   }, []);
 
@@ -4833,173 +4595,6 @@ export function useDaemonSocket({
           reject(new Error('List workflow runs timed out'));
         }
       }, 10000);
-    });
-  }, []);
-
-  // Mark a file as viewed/unviewed in a review
-  const markFileViewed = useCallback((reviewId: string, filepath: string, viewed: boolean): Promise<MarkFileViewedResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'mark_file_viewed';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({ cmd: 'mark_file_viewed', review_id: reviewId, filepath, viewed }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Mark file viewed timed out'));
-        }
-      }, 10000);
-    });
-  }, []);
-
-  // Add a comment to a review
-  const sendAddComment = useCallback((
-    reviewId: string,
-    filepath: string,
-    lineStart: number,
-    lineEnd: number,
-    content: string
-  ): Promise<AddCommentResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'add_comment';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'add_comment',
-        review_id: reviewId,
-        filepath,
-        line_start: lineStart,
-        line_end: lineEnd,
-        content,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Add comment timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
-
-  // Update a comment's content
-  const sendUpdateComment = useCallback((commentId: string, content: string): Promise<CommentActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'update_comment';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'update_comment',
-        comment_id: commentId,
-        content,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Update comment timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
-
-  // Resolve or unresolve a comment
-  const sendResolveComment = useCallback((commentId: string, resolved: boolean): Promise<CommentActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'resolve_comment';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'resolve_comment',
-        comment_id: commentId,
-        resolved,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Resolve comment timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
-
-
-  // Delete a comment
-  const sendDeleteComment = useCallback((commentId: string): Promise<CommentActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'delete_comment';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'delete_comment',
-        comment_id: commentId,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Delete comment timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
-
-  // Get comments for a review, optionally filtered by filepath
-  const sendGetComments = useCallback((reviewId: string, filepath?: string): Promise<GetCommentsResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'get_comments';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'get_comments',
-        review_id: reviewId,
-        ...(filepath && { filepath }),
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Get comments timed out'));
-        }
-      }, 30000);
     });
   }, []);
 
@@ -5187,17 +4782,9 @@ export function useDaemonSocket({
     sendRuntimeInput: sendPtyInput,
     isRuntimeAttached,
     sendGetFileDiff,
-    sendGetBranchDiffFiles,
     getRepoInfo,
-    getReviewState,
     getWorkflowRun,
     listWorkflowRuns,
-    markFileViewed,
-    sendAddComment,
-    sendUpdateComment,
-    sendResolveComment,
-    sendDeleteComment,
-    sendGetComments,
     getPresentations,
     getPresentationRound,
     submitPresentationRound,

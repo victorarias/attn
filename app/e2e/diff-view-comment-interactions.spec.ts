@@ -159,20 +159,21 @@ test.describe('DiffView scroll preservation', () => {
   });
 
   /**
-   * BUG REPRO (known RED), second trigger: same scenario but via the plain
-   * line-click -> action popup -> "Add comment" path, to learn whether the
-   * jump is specific to the gutter-utility trigger or common to both.
+   * BUG REPRO (known RED), second trigger: same scenario but via a
+   * line-number click opening the draft directly (no gutter "+" hover), to
+   * learn whether the jump is specific to the gutter-utility trigger or
+   * common to both.
    */
-  test('line-click popup "Add comment" on a scrolled-down visible line does not reset scroll position', async ({ page }) => {
+  test('line-number click on a scrolled-down visible line does not reset scroll position', async ({ page }) => {
     await openLargeDiff(page);
 
     await scrollDown(page, 800);
     const before = await realScrollTop(page);
-    console.log('[scroll-jump/popup] before =', before);
+    console.log('[scroll-jump/line-number] before =', before);
     expect(before, 'sanity: scrolling down must actually move .diff-view-scroller').toBeGreaterThan(0);
 
     const scrollerBox = await page.locator('.diff-view-scroller').boundingBox();
-    const lines = page.locator('diffs-container [data-line]');
+    const lines = page.locator('diffs-container [data-line-index][data-column-number]');
     const count = await lines.count();
     let visibleLine: Locator | null = null;
     for (let i = 0; i < count; i++) {
@@ -188,15 +189,13 @@ test.describe('DiffView scroll preservation', () => {
     expect(visibleLine, 'must find a line row visible within the scrolled viewport').not.toBeNull();
 
     await visibleLine!.click();
-    const popup = page.locator('.diff-selection-popup');
-    await expect(popup).toBeVisible();
-    await popup.locator('.diff-selection-popup-btn.comment').click();
-
     const form = page.getByTestId('diff-comment-form');
     await expect(form).toBeVisible();
+    // No popup exists anymore — the click opens the draft directly.
+    await expect(page.locator('.diff-selection-popup')).toHaveCount(0);
 
     const after = await realScrollTop(page);
-    console.log('[scroll-jump/popup] after opening draft via popup, scrollTop =', after, '(before was', before, ')');
+    console.log('[scroll-jump/line-number] after opening draft via line-number click, scrollTop =', after, '(before was', before, ')');
 
     expect(Math.abs(after - before)).toBeLessThanOrEqual(20);
   });

@@ -332,11 +332,6 @@ function formatCheckpointSummary(checkpoint) {
   const cpuPct = checkpoint.processTree.summary.totalCpuPctMax.toFixed(1);
   const terminalLines = checkpoint.frontend.terminals.reduce((sum, terminal) => sum + terminal.bufferLength, 0);
   const writeQueueBytes = checkpoint.frontend.terminals.reduce((sum, terminal) => sum + terminal.writeQueueBytes, 0);
-  // @pierre/diffs builds + highlights the diff internally, so there is no
-  // app-side document build to time anymore; report the diff payload size
-  // (original + modified chars) the panel exposes as the size signal instead.
-  const reviewPanel = checkpoint.frontend.review.panel;
-  const diffChars = (reviewPanel?.originalLength || 0) + (reviewPanel?.modifiedLength || 0);
   const pty = checkpoint.frontend.pty || {};
   const terminalLoad = checkpoint.terminalLoad || null;
   return {
@@ -345,7 +340,6 @@ function formatCheckpointSummary(checkpoint) {
     totalRssMbMax: Number(rssMb),
     terminalLines,
     writeQueueBytes,
-    diffChars,
     ptyJsonParseMs: Number((pty.ptyJsonParseMs || 0).toFixed(2)),
     ptyDecodeMs: Number((pty.decodeMs || 0).toFixed(2)),
     terminalWriteCallMs: Number((pty.terminalWriteCallMs || 0).toFixed(2)),
@@ -559,19 +553,6 @@ async function main() {
       steadyMs: options.terminalSteadyMs,
     };
     checkpoints.push(terminalOutputCheckpoint);
-
-    await client.request('clear_perf_counters');
-    await client.request('dispatch_shortcut', { shortcutId: 'dock.diffDetail' });
-    await waitForCondition(async () => {
-      const snapshot = await client.request('capture_perf_snapshot', {
-        settleFrames: 2,
-        includeMemory: false,
-      }, { timeoutMs: 60_000 });
-      return snapshot.review?.panel?.active ? snapshot : null;
-    }, 'diff detail panel to become active', 25_000);
-    checkpoints.push(await captureCheckpoint(client, manifest.pid, 'diff_detail_open', {
-      extraPids: sampledExtraPids,
-    }));
 
     const summary = {
       ok: true,

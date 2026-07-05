@@ -39,8 +39,6 @@ export interface KeybindingsConfig {
 // before the dock became config-driven (panel toggles, the common terminal
 // actions, then the sidebar toggle). Every entry must be a real ShortcutId.
 export const DEFAULT_DOCK_ITEMS: ShortcutId[] = [
-  'dock.diffDetail',
-  'dock.diff',
   'dock.attention',
   'terminal.splitVertical',
   'terminal.splitHorizontal',

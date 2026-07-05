@@ -86,8 +86,6 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'terminal.find': { label: 'Find in terminal', category: 'panes', requiresTerminal: true },
 
   // Review & Git
-  'dock.diff': { label: 'Diff panel', category: 'review', dockLabel: 'diff' },
-  'dock.diffDetail': { label: 'Diff detail', category: 'review', dockLabel: 'detail' },
   'dock.attention': { label: 'PRs drawer', category: 'review', dockLabel: 'PRs' },
   'session.refreshPRs': { label: 'Refresh PRs', category: 'review' },
 

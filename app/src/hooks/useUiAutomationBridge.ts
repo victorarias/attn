@@ -13,7 +13,6 @@ import { getSettingsAutomationHandle, INACTIVE_SETTINGS_STATE } from '../compone
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
 import { dumpTerminalGeometry } from '../utils/terminalDiagnosticsLog';
-import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 import { buildSessionRenderHealth } from '../utils/renderHealth';
 import { boundTicketForSession } from '../utils/tickets';
@@ -89,12 +88,6 @@ interface UseUiAutomationBridgeArgs {
   fitSessionActivePane: (sessionId: string) => void;
   sendRuntimeInput: (runtimeId: string, data: string, source?: string) => void;
   isRuntimeAttached: (runtimeId: string) => boolean;
-  getReviewState?: (repoPath: string, branch: string) => Promise<{ success: boolean; state?: unknown; error?: string }>;
-  addComment?: (reviewId: string, filepath: string, lineStart: number, lineEnd: number, content: string) => Promise<{ success: boolean; comment?: unknown }>;
-  updateComment?: (commentId: string, content: string) => Promise<{ success: boolean }>;
-  resolveComment?: (commentId: string, resolved: boolean) => Promise<{ success: boolean }>;
-  deleteComment?: (commentId: string) => Promise<{ success: boolean }>;
-  getComments?: (reviewId: string, filepath?: string) => Promise<{ success: boolean; comments?: unknown[] }>;
   // Ticket detail panel (work-tracker). The mutation actions drive the real
   // panel controls, so the bridge only needs to open/close the panel and read
   // the live ticket rows; openDockPanel above is reused to mount the dock.
@@ -1447,8 +1440,6 @@ async function capturePerfSnapshot(
       terminalSurfaceCount: document.querySelectorAll('.ghostty-terminal').length,
       terminalContainerCount: document.querySelectorAll('.terminal-container').length,
       diffViewCount: document.querySelectorAll('.diff-view').length,
-      diffDetailOpen: document.querySelectorAll('.dock-panel--diff-detail, .dock-panel--diffDetail').length > 0,
-      diffPanelOpen: document.querySelectorAll('.dock-panel--diff').length > 0,
     },
     sessions: {
       count: scopedSessions.length,
@@ -1466,7 +1457,6 @@ async function capturePerfSnapshot(
     },
     browserMemory,
     terminals,
-    review: getReviewPerfSnapshot(),
     pty: ptySnapshot,
     ptyFocus: summarizePtyRecentTraffic(
       ptySnapshot.recentEvents,
@@ -1516,54 +1506,6 @@ function concatByteChunks(chunks: Uint8Array[]): Uint8Array {
   return combined;
 }
 
-/**
- * DOM introspection for the diff-detail review panel (DiffView over
- * @pierre/diffs). Lets the real-app harness assert that a real diff actually
- * rendered without relying on pixels — the diff lines live inside the
- * `diffs-container` shadow DOM, which `document.querySelectorAll` cannot reach,
- * so we pierce the shadow root explicitly for the rendered line count.
- */
-function collectDiffReviewUiState() {
-  const panel = document.querySelector('.dock-panel--diff-detail, .dock-panel--diffDetail');
-  const fileItems = Array.from(document.querySelectorAll('.review-file-list .file-item')).map((el) => {
-    const statusEl = el.querySelector('.file-status');
-    return {
-      name: el.querySelector('.file-name')?.textContent?.trim() || '',
-      status: (statusEl?.className || '').replace('file-status', '').trim(),
-      statusLabel: statusEl?.textContent?.trim() || '',
-      selected: el.classList.contains('selected'),
-      viewed: el.classList.contains('viewed'),
-      changed: el.classList.contains('changed'),
-      commentCount: Number(el.querySelector('.file-comment-count')?.textContent?.trim() || '0'),
-    };
-  });
-  const activeLayoutButtons = Array.from(document.querySelectorAll('.diff-actions .expand-btn.active'))
-    .map((btn) => btn.textContent?.trim() || '')
-    .filter(Boolean);
-  const diffsContainer = document.querySelector('diffs-container');
-  const shadowRoot = diffsContainer
-    ? (diffsContainer as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot
-    : null;
-
-  return {
-    panelOpen: Boolean(panel),
-    fileCount: fileItems.length,
-    fileCountText: document.querySelector('.review-file-count')?.textContent?.trim() || '',
-    files: fileItems,
-    selectedFile: document.querySelector('.diff-filename')?.textContent?.trim() || '',
-    layout: activeLayoutButtons, // e.g. ['Unified', 'Hunks']
-    diffViewPresent: document.querySelectorAll('.diff-view').length > 0,
-    diffsContainerPresent: Boolean(diffsContainer),
-    renderedLineCount: shadowRoot ? shadowRoot.querySelectorAll('[data-line-number-content]').length : 0,
-    commentThreadCount: document.querySelectorAll('[data-testid="diff-comment-thread"]').length,
-    emptyMessage: document.querySelector('.file-list-empty')?.textContent?.trim() || '',
-    loadingText: document.querySelector('.diff-loading, .review-sync-status')?.textContent?.trim() || '',
-    errorText: document.querySelector('.diff-error')?.textContent?.trim() || '',
-    panelBounds: rectSnapshot(panel),
-    diffBounds: rectSnapshot(diffsContainer),
-  };
-}
-
 export function useUiAutomationBridge({
   sessions,
   activeSessionId,
@@ -1593,12 +1535,6 @@ export function useUiAutomationBridge({
   fitSessionActivePane,
   sendRuntimeInput,
   isRuntimeAttached,
-  getReviewState,
-  addComment,
-  updateComment,
-  resolveComment,
-  deleteComment,
-  getComments,
   openTicketDetail,
   closeTicketDetail,
   tickets,
@@ -2484,76 +2420,6 @@ export function useUiAutomationBridge({
           ).sessions[0]?.panes.find((pane) => pane.paneId === paneId) || null,
         };
       }
-      case 'review_get_state': {
-        if (!getReviewState) {
-          throw new Error('review_get_state is not configured');
-        }
-        const repoPath = typeof payload.repoPath === 'string' ? payload.repoPath : '';
-        const branch = typeof payload.branch === 'string' ? payload.branch : '';
-        if (!repoPath || !branch) {
-          throw new Error('review_get_state requires repoPath and branch');
-        }
-        return getReviewState(repoPath, branch);
-      }
-      case 'review_get_comments': {
-        if (!getComments) {
-          throw new Error('review_get_comments is not configured');
-        }
-        const reviewId = typeof payload.reviewId === 'string' ? payload.reviewId : '';
-        const filepath = typeof payload.filepath === 'string' && payload.filepath.length > 0
-          ? payload.filepath
-          : undefined;
-        if (!reviewId) {
-          throw new Error('review_get_comments requires reviewId');
-        }
-        return getComments(reviewId, filepath);
-      }
-      case 'review_add_comment': {
-        if (!addComment) {
-          throw new Error('review_add_comment is not configured');
-        }
-        const reviewId = typeof payload.reviewId === 'string' ? payload.reviewId : '';
-        const filepath = typeof payload.filepath === 'string' ? payload.filepath : '';
-        const lineStart = typeof payload.lineStart === 'number' ? payload.lineStart : NaN;
-        const lineEnd = typeof payload.lineEnd === 'number' ? payload.lineEnd : NaN;
-        const content = typeof payload.content === 'string' ? payload.content : '';
-        if (!reviewId || !filepath || !Number.isFinite(lineStart) || !Number.isFinite(lineEnd) || !content) {
-          throw new Error('review_add_comment requires reviewId, filepath, lineStart, lineEnd, and content');
-        }
-        return addComment(reviewId, filepath, lineStart, lineEnd, content);
-      }
-      case 'review_update_comment': {
-        if (!updateComment) {
-          throw new Error('review_update_comment is not configured');
-        }
-        const commentId = typeof payload.commentId === 'string' ? payload.commentId : '';
-        const content = typeof payload.content === 'string' ? payload.content : '';
-        if (!commentId || !content) {
-          throw new Error('review_update_comment requires commentId and content');
-        }
-        return updateComment(commentId, content);
-      }
-      case 'review_resolve_comment': {
-        if (!resolveComment) {
-          throw new Error('review_resolve_comment is not configured');
-        }
-        const commentId = typeof payload.commentId === 'string' ? payload.commentId : '';
-        const resolved = payload.resolved !== false;
-        if (!commentId) {
-          throw new Error('review_resolve_comment requires commentId');
-        }
-        return resolveComment(commentId, resolved);
-      }
-      case 'review_delete_comment': {
-        if (!deleteComment) {
-          throw new Error('review_delete_comment is not configured');
-        }
-        const commentId = typeof payload.commentId === 'string' ? payload.commentId : '';
-        if (!commentId) {
-          throw new Error('review_delete_comment requires commentId');
-        }
-        return deleteComment(commentId);
-      }
       // --- Ticket detail panel (work-tracker) ------------------------------
       // Read-only board snapshot (foundation for the slice-5 board scenario).
       case 'ticket_list':
@@ -2691,8 +2557,6 @@ export function useUiAutomationBridge({
         await settleUi(2);
         return { clicked: true, surface: target === header ? 'header' : 'sidebar' };
       }
-      case 'diff_get_state':
-        return collectDiffReviewUiState();
       case 'capture_structured_snapshot':
         return collectVisualSnapshot(
           sessions,

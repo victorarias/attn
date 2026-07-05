@@ -52,7 +52,6 @@
     "real-app:scenario-notebook-tile-finder": "node scripts/real-app-harness/scenario-notebook-tile-finder.mjs",
     "real-app:scenario-notebook-tile-close": "node scripts/real-app-harness/scenario-notebook-tile-close.mjs",
     "real-app:scenario-autoclose-on-exit": "node scripts/real-app-harness/scenario-autoclose-on-exit.mjs",
-    "real-app:scenario-diff-review": "node scripts/real-app-harness/scenario-diff-review.mjs",
     "real-app:scenario-ticket-lifecycle": "node scripts/real-app-harness/scenario-ticket-delegation-lifecycle.mjs",
     "real-app:scenario-ticket-resume": "node scripts/real-app-harness/scenario-ticket-resume.mjs",
     "real-app:scenario-nudge-trigger": "node scripts/real-app-harness/scenario-nudge-trigger.mjs",

@@ -554,62 +554,6 @@ func TestForwardsRawEventIncludesPickerResults(t *testing.T) {
 	}
 }
 
-func TestManagerObserveRemoteEventCachesReviewAndCommentOwnership(t *testing.T) {
-	endpointStore := store.New()
-	record, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
-	if err != nil {
-		t.Fatalf("AddEndpoint() error = %v", err)
-	}
-
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
-
-	reviewStatePayload, err := json.Marshal(protocol.GetReviewStateResultMessage{
-		Event:   protocol.EventGetReviewStateResult,
-		Success: true,
-		State: &protocol.ReviewState{
-			ReviewID: "review-1",
-			RepoPath: "/srv/repo",
-			Branch:   "pane-session",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Marshal(review state) error = %v", err)
-	}
-	manager.observeRemoteEvent(record.ID, protocol.EventGetReviewStateResult, reviewStatePayload)
-
-	commentPayload, err := json.Marshal(protocol.AddCommentResultMessage{
-		Event:   protocol.EventAddCommentResult,
-		Success: true,
-		Comment: &protocol.ReviewComment{
-			ID:       "comment-1",
-			ReviewID: "review-1",
-		},
-	})
-	if err != nil {
-		t.Fatalf("Marshal(add comment) error = %v", err)
-	}
-	manager.observeRemoteEvent(record.ID, protocol.EventAddCommentResult, commentPayload)
-
-	if endpointID, ok := manager.EndpointIDForReview("review-1"); !ok || endpointID != record.ID {
-		t.Fatalf("EndpointIDForReview(review-1) = (%q, %v), want (%q, true)", endpointID, ok, record.ID)
-	}
-	if endpointID, ok := manager.EndpointIDForComment("comment-1"); !ok || endpointID != record.ID {
-		t.Fatalf("EndpointIDForComment(comment-1) = (%q, %v), want (%q, true)", endpointID, ok, record.ID)
-	}
-
-	manager.mu.Lock()
-	runtime := manager.runtimes[record.ID]
-	manager.stopRuntimeLocked(runtime)
-	manager.mu.Unlock()
-
-	if endpointID, ok := manager.EndpointIDForReview("review-1"); ok || endpointID != "" {
-		t.Fatalf("EndpointIDForReview(after stop) = (%q, %v), want ('', false)", endpointID, ok)
-	}
-	if endpointID, ok := manager.EndpointIDForComment("comment-1"); ok || endpointID != "" {
-		t.Fatalf("EndpointIDForComment(after stop) = (%q, %v), want ('', false)", endpointID, ok)
-	}
-}
-
 func TestManagerForwardBrowserControlReturnsOwningEndpointResult(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)

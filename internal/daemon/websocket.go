@@ -1020,12 +1020,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleUnsubscribeGitStatusWS(client)
 	case protocol.CmdGetFileDiff:
 		d.handleGetFileDiffWS(client, msg.(*protocol.GetFileDiffMessage))
-	case protocol.CmdGetBranchDiffFiles:
-		d.handleGetBranchDiffFilesWS(client, msg.(*protocol.GetBranchDiffFilesMessage))
 	case protocol.CmdGetRepoInfo:
 		d.handleGetRepoInfoWS(client, msg.(*protocol.GetRepoInfoMessage))
-	case protocol.CmdGetReviewState:
-		d.handleGetReviewState(client, msg.(*protocol.GetReviewStateMessage))
 	case protocol.CmdGetPresentations:
 		d.handleGetPresentations(client, msg.(*protocol.GetPresentationsMessage))
 	case protocol.CmdGetPresentationRound:
@@ -1038,18 +1034,6 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkflowRunListWS(client, msg.(*protocol.WorkflowRunListMessage))
 	case protocol.CmdWorkflowRunCancel:
 		d.handleWorkflowRunCancelWS(client, msg.(*protocol.WorkflowRunCancelMessage))
-	case protocol.CmdMarkFileViewed:
-		d.handleMarkFileViewed(client, msg.(*protocol.MarkFileViewedMessage))
-	case protocol.CmdAddComment:
-		d.handleAddComment(client, msg.(*protocol.AddCommentMessage))
-	case protocol.CmdUpdateComment:
-		d.handleUpdateComment(client, msg.(*protocol.UpdateCommentMessage))
-	case protocol.CmdResolveComment:
-		d.handleResolveComment(client, msg.(*protocol.ResolveCommentMessage))
-	case protocol.CmdDeleteComment:
-		d.handleDeleteComment(client, msg.(*protocol.DeleteCommentMessage))
-	case protocol.CmdGetComments:
-		d.handleGetComments(client, msg.(*protocol.GetCommentsMessage))
 	case protocol.CmdSpawnSession:
 		d.handleSpawnSession(client, msg.(*protocol.SpawnSessionMessage))
 	case protocol.CmdAttachSession:
@@ -1377,24 +1361,12 @@ func remoteCommandPTYTargetID(cmd string, msg interface{}) string {
 
 func remoteCommandScopedEndpointID(msg interface{}, manager interface {
 	EndpointIDForPath(path string) (string, bool)
-	EndpointIDForReview(reviewID string) (string, bool)
-	EndpointIDForComment(commentID string) (string, bool)
 }) (string, bool) {
 	if manager == nil {
 		return "", false
 	}
 	if path := remoteCommandPath(msg); path != "" {
 		if endpointID, ok := manager.EndpointIDForPath(path); ok {
-			return endpointID, true
-		}
-	}
-	if reviewID := remoteCommandReviewID(msg); reviewID != "" {
-		if endpointID, ok := manager.EndpointIDForReview(reviewID); ok {
-			return endpointID, true
-		}
-	}
-	if commentID := remoteCommandCommentID(msg); commentID != "" {
-		if endpointID, ok := manager.EndpointIDForComment(commentID); ok {
 			return endpointID, true
 		}
 	}
@@ -1425,36 +1397,8 @@ func remoteCommandPath(msg interface{}) string {
 		return typed.Directory
 	case *protocol.GetFileDiffMessage:
 		return typed.Directory
-	case *protocol.GetBranchDiffFilesMessage:
-		return typed.Directory
 	case *protocol.GetRepoInfoMessage:
 		return typed.Repo
-	case *protocol.GetReviewStateMessage:
-		return typed.RepoPath
-	}
-	return ""
-}
-
-func remoteCommandReviewID(msg interface{}) string {
-	switch typed := msg.(type) {
-	case *protocol.MarkFileViewedMessage:
-		return typed.ReviewID
-	case *protocol.AddCommentMessage:
-		return typed.ReviewID
-	case *protocol.GetCommentsMessage:
-		return typed.ReviewID
-	}
-	return ""
-}
-
-func remoteCommandCommentID(msg interface{}) string {
-	switch typed := msg.(type) {
-	case *protocol.UpdateCommentMessage:
-		return typed.CommentID
-	case *protocol.ResolveCommentMessage:
-		return typed.CommentID
-	case *protocol.DeleteCommentMessage:
-		return typed.CommentID
 	}
 	return ""
 }

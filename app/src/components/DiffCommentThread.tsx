@@ -4,7 +4,7 @@
  *
  * The library renders whatever `renderAnnotation` returns as a slotted
  * (light-DOM) child of the diff custom element, so this component is styled by
- * the app's normal CSS (see DiffDetailPanel.css), not the diff's shadow styles.
+ * the app's normal CSS (see DiffView.css), not the diff's shadow styles.
  *
  * One thread groups every comment sharing the same (side, line) anchor, plus an
  * optional in-progress draft form for a brand new comment on that anchor.

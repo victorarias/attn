@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-05]
 
+### Removed
+- **Standalone diff-review panels and comment popups are gone — review now happens in the Present window.** The diff changes panel (⌘⇧G) and its detail panel (⌘⇧E), which held the inline review-comment UI (create, edit, resolve, delete), have been removed from the main window. The comment popup that appeared on diff clicks is gone too. Guided review already lives in the Present window (shipped earlier), so this is a cleanup of dead code — no loss of capability.
+
 ### Added
 - **Ticket chip on the agent pane.** A delegated agent's pane header now carries a chip for its bound ticket — the ticket title, a status-colored marker, and an unread-activity dot. Clicking it opens the full ticket over the terminal so you can change status, add a comment, edit the description, or resume the agent right there; clicking the chip again, pressing Escape, or closing the panel returns you to the terminal. Steering an agent by editing its ticket is now one click instead of a trip through the ticket board.
 - **`attn ticket show <ticket-id>` for agents.** Agents can now pull a ticket's full record over the socket — description, the complete activity thread (status changes, comments, verdicts) with full bodies, and attachments — the same detail the app's ticket panel shows, but non-consuming: unlike `ticket inbox`, it never advances any session's unread cursor, so it can be re-read any time.

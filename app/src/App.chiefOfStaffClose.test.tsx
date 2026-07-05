@@ -54,8 +54,6 @@ vi.mock('./components/Dashboard', () => ({ Dashboard: () => null }));
 vi.mock('./components/AttentionDrawer', () => ({ AttentionDrawer: () => null }));
 vi.mock('./components/LocationPicker', () => ({ LocationPicker: () => null }));
 vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
-vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
-vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
 vi.mock('./components/SessionTerminalWorkspace', () => ({ SessionTerminalWorkspace: () => null }));
 vi.mock('./components/ErrorToast', () => ({
   ErrorToast: () => null,
@@ -188,16 +186,8 @@ describe('chief-of-staff session is protected from close', () => {
       sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
       requestTileContent: fn,
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
-      sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
       listWorkflowRuns: vi.fn(async () => ({ success: true, runs: [] })),
-      getReviewState: vi.fn(async () => ({ success: true })),
-      markFileViewed: vi.fn(async () => ({ success: true })),
-      sendAddComment: vi.fn(async () => ({ success: true })),
-      sendUpdateComment: vi.fn(async () => ({ success: true })),
-      sendResolveComment: vi.fn(async () => ({ success: true })),
-      sendDeleteComment: vi.fn(async () => ({ success: true })),
-      sendGetComments: vi.fn(async () => ({ success: true, comments: [] })),
       getPresentations: vi.fn(async () => []),
       connectionError: null,
       hasReceivedInitialState: true,
