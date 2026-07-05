@@ -56,7 +56,7 @@ const benchAssistantText = "I've reviewed the change and it looks correct. The f
 	"path directly. One small note: consider extracting the retry helper if a third caller shows " +
 	"up, but that can wait for a follow-up PR. Ready to merge once CI is green."
 
-func marshalLine(tb testing.TB, v interface{}) []byte {
+func marshalLine(tb testing.TB, v any) []byte {
 	tb.Helper()
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -75,7 +75,7 @@ func assistantTextLine(tb testing.TB, index int, ts time.Time) []byte {
 	return marshalLine(tb, e)
 }
 
-func userLine(tb testing.TB, index int, ts time.Time) []byte {
+func userLine(tb testing.TB, index int) []byte {
 	var e benchUserEntry
 	e.Type = "user"
 	e.UUID = fmt.Sprintf("uuid-user-%d", index)
@@ -131,7 +131,7 @@ func writeSyntheticTranscript(tb testing.TB, dir string, numLines int) (path str
 		case 0:
 			line = assistantTextLine(tb, i, ts)
 		case 1:
-			line = userLine(tb, i, ts)
+			line = userLine(tb, i)
 		case 2:
 			line = assistantToolUseLine(tb, i, ts)
 		case 3:
