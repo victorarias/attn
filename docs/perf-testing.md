@@ -155,3 +155,57 @@ registry described above. Each compares within `--rss-tolerance-pct` (default
 15%) of its own baseline. As with the single-number baseline, a regression
 sets the verdict's `ok` to `false` but never sets a non-zero exit code — it's
 a trend signal for a human to look at, not a build break.
+
+## Leak soak (retained-RSS slope)
+
+Cold/warm's two snapshots are each taken from a freshly wiped data dir, so
+neither can see a leak that only accumulates *within* one continuous process
+— cycling sessions inside a single long-lived app instance is exactly what a
+real user session looks like over hours of use, and it's the case cold/warm
+cannot observe. `scenario-perf-leak-soak.mjs` runs many create → workload →
+close cycles inside **one** app instance with **no wipe between cycles**, then
+fits the trend across cycles:
+
+- climbing retained RSS across cycles (a "staircase") signals a leak —
+  something from each cycle's sessions/panes/PTYs is not being freed;
+- flat retained RSS across cycles is healthy — the process is reusing the
+  memory it frees each cycle, not accumulating it.
+
+Each cycle samples RSS over a decay-hold window after closing that cycle's
+sessions and keeps only the **last** sample (retained), never the peak —
+macOS scavenges freed pages lazily, so a sample taken right after close would
+still show the workload's transient spike rather than what the process
+actually holds onto afterward. The scenario then fits a least-squares slope
+(`fitSlope` in `rssBaselineVerdict.mjs`) of retained-RSS-vs-cycle-index over
+the post-warmup cycles.
+
+Like cold/warm, this needs the dedicated perf profile (one-time
+`make install PROFILE=perf`) and refuses to run against the dev sibling or
+prod — many cycles inside one instance would otherwise pollute the shared dev
+world.
+
+Run it:
+
+```bash
+ATTN_HARNESS_PROFILE=perf pnpm --dir app run real-app:scenario-perf-leak-soak -- --cycles 12
+```
+
+### Warmup cycles and the slope threshold
+
+The first `--warmup-cycles` (default 2) are dropped from the slope fit: the
+first cycle or two typically show one-time growth (Ghostty WASM heap/atlas
+allocation, lazy daemon/pty-worker initialization) that is not a leak, and
+would otherwise bias the fitted slope upward. `--slope-threshold-mb` (default
+5) is the max allowed MB/cycle growth over the remaining post-warmup cycles
+before the verdict fails; a slope exactly at the threshold passes.
+
+### Registry
+
+The first post-warmup retained-RSS value also self-baselines against this
+machine's own history, stored under `<fingerprint>-leak-floor` in the same
+per-machine registry described above (`--record-baseline` to
+overwrite it). This is an informational trend on the starting floor, not what
+gates the scenario — the slope-vs-threshold check is. As with the other
+scenarios, a slope regression sets the verdict's `ok` to `false` but never
+sets a non-zero exit code — it's a trend signal for a human to look at, not a
+build break.
