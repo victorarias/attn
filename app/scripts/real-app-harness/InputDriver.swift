@@ -51,7 +51,7 @@ func parseOptions() throws -> Options {
     while index < args.count {
         let arg = args[index]
         switch arg {
-        case "activate", "activate_background", "frontmost", "windowid", "text", "key", "keycode", "click", "right_click", "menu", "window_park", "scroll":
+        case "activate", "activate_background", "frontmost", "windowid", "windowlist", "text", "key", "keycode", "click", "right_click", "menu", "window_park", "scroll":
             options.command = arg
         case "--window-title":
             index += 1
@@ -146,6 +146,7 @@ func parseOptions() throws -> Options {
               InputDriver.swift activate_background [--bundle-id ...]
               InputDriver.swift frontmost
               InputDriver.swift windowid [--bundle-id ...] [--window-title <substring>]
+              InputDriver.swift windowlist [--bundle-id ...]
               InputDriver.swift text --text "hello" [--bundle-id ...] [--prompt-accessibility]
               InputDriver.swift key --key d [--modifiers command,option]
               InputDriver.swift keycode --key-code 36 [--modifiers command]
@@ -175,7 +176,7 @@ func parseOptions() throws -> Options {
     }
 
     guard options.command != nil else {
-        throw DriverError.usage("Missing command. Use activate, activate_background, frontmost, windowid, text, key, keycode, click, or menu.")
+        throw DriverError.usage("Missing command. Use activate, activate_background, frontmost, windowid, windowlist, text, key, keycode, click, or menu.")
     }
 
     return options
@@ -354,6 +355,43 @@ func mainWindowBounds(bundleId: String, titleSubstring: String? = nil) throws ->
 // instead.
 func mainWindowID(bundleId: String, titleSubstring: String? = nil) throws -> CGWindowID {
     try resolveWindow(bundleId: bundleId, titleSubstring: titleSubstring).0
+}
+
+// Enumerate every onscreen window owned by the bundle (not just the largest
+// layer-0 one, unlike mainWindowID). Used by callers that need to find a
+// specific window by title, such as attn's second "present" window.
+//
+// kCGWindowName is only populated when this process has Screen Recording
+// permission; without it the name is empty for every window. That is
+// acceptable here — callers tolerate empty names and fall back to matching by
+// other means (e.g. layer/size).
+func listWindows(bundleId: String) throws -> [[String: Any]] {
+    let pid = try runningPID(bundleId: bundleId)
+    let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+        throw DriverError.eventCreationFailed("Failed to read window list.")
+    }
+
+    return windows
+        .filter { (($0[kCGWindowOwnerPID as String] as? pid_t) ?? -1) == pid }
+        .compactMap { entry -> [String: Any]? in
+            guard let number = entry[kCGWindowNumber as String] as? CGWindowID else {
+                return nil
+            }
+            let name = (entry[kCGWindowName as String] as? String) ?? ""
+            let rect: CGRect = (entry[kCGWindowBounds as String] as? NSDictionary)
+                .flatMap { CGRect(dictionaryRepresentation: $0) } ?? .zero
+            let layer = (entry[kCGWindowLayer as String] as? Int) ?? 0
+            return [
+                "id": Int(number),
+                "name": name,
+                "x": Double(rect.origin.x),
+                "y": Double(rect.origin.y),
+                "width": Double(rect.width),
+                "height": Double(rect.height),
+                "layer": layer,
+            ]
+        }
 }
 
 func modifierFlags(_ modifiers: [String]) -> CGEventFlags {
@@ -730,6 +768,10 @@ do {
     case "windowid":
         let wid = try mainWindowID(bundleId: options.bundleId, titleSubstring: options.windowTitle)
         print(wid)
+    case "windowlist":
+        let windows = try listWindows(bundleId: options.bundleId)
+        let data = try JSONSerialization.data(withJSONObject: windows, options: [])
+        print(String(data: data, encoding: .utf8) ?? "[]")
     case "menu":
         try ensureAccessibility(prompt: options.promptAccessibility)
         try axPressMenuItem(bundleId: options.bundleId, path: options.menuPath)
