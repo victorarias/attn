@@ -62,11 +62,14 @@ describe('evaluateRssBaseline', () => {
     expect(result.baselineToSave).toBeNull();
   });
 
-  it('forces a re-record when record is true even with an existing baseline', () => {
+  it('forces a re-record when record is true even with an existing baseline, and passes by construction', () => {
+    // This is the figgyster-reproduced bug: an explicit re-record must never
+    // be evaluated against the baseline it is about to replace, even when the
+    // new value would have been a regression against the old one.
     const baseline = { fingerprint, metrics: { totalRssMb: 500 }, recordedAt: '2026-07-01T00:00:00.000Z' };
 
     const result = evaluateRssBaseline({
-      totalRssMb: 520,
+      totalRssMb: 700,
       fingerprint,
       baseline,
       record: true,
@@ -75,9 +78,12 @@ describe('evaluateRssBaseline', () => {
 
     expect(result.baselineToSave).toEqual({
       fingerprint,
-      metrics: { totalRssMb: 520 },
+      metrics: { totalRssMb: 700 },
       recordedAt: '2026-07-05T00:00:00.000Z',
     });
+    expect(result.ok).toBe(true);
+    expect(result.comparison.reason).toBe('recorded');
+    expect(result.comparison.baseline).toBeNull();
   });
 
   it('passes recordedAt through into baselineToSave unchanged', () => {

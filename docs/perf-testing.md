@@ -67,10 +67,13 @@ from someone else's laptop:
 - **Re-recording**: pass `--record-baseline` to overwrite the stored baseline
   with this run's number — use this after an intentional change to the memory
   footprint (a real fix or a deliberate trade-off), not to silence a
-  regression you haven't understood.
+  regression you haven't understood. This run's verdict always passes
+  (`ok:true`, `reason:'recorded'`): the run *defines* the new baseline, so it
+  is never evaluated against — and can never regress against — the number it
+  is replacing.
 
 Local per-machine baselines live in `~/.attn-perf-registry/<fingerprint>.json`
-(gitignored — every dev's cache is their own). A small set of known reference
+(outside the repo — every dev's cache is their own). A small set of known reference
 machines can also have a baseline **committed** to
 `app/scripts/real-app-harness/perf-baselines.json`; a committed entry for a
 given fingerprint always wins over the local cache, so it's the way to pin a
@@ -101,10 +104,11 @@ Shape:
 `scenarioId`, `runId`, `failureCount`, `firstFailure`, `artifactsDir`,
 `summaryPath`, `durationMs` — the same shape every `createScenarioRunner`
 scenario emits). `rss.reason` is one of `no-baseline` (first run on this
-machine), `within-band` (pass), or `regression` (fail). A regression **does
-not** set a non-zero process exit code by itself — only a genuine harness
-error does that — so treat `verdict.ok:false` here as a trend to investigate,
-not a build break.
+machine, pass), `within-band` (pass), `regression` (fail), or `recorded`
+(`--record-baseline` established/overwrote the baseline this run — always a
+pass). A regression **does not** set a non-zero process exit code by itself —
+only a genuine harness error does that — so treat `verdict.ok:false` here as a
+trend to investigate, not a build break.
 
 `summary.json` under the run's artifacts directory has the full detail behind
 the headline number (per-process-class RSS, worker count, optional warm-set

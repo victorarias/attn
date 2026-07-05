@@ -18,10 +18,17 @@ function truncateFirstFailure(message) {
 //
 // A baseline is (re)recorded when there isn't one yet (first run on a
 // machine always self-baselines) or when the caller explicitly asked to via
-// `record` (re-baselining after an intentional regression/improvement).
+// `record` (re-baselining after an intentional regression/improvement). An
+// explicit re-record is a pass by construction: this run DEFINES the new
+// baseline, so it can never be a regression against the value it replaces —
+// comparing it against the old baseline (and possibly failing) would defeat
+// the point of asking to re-baseline.
 export function evaluateRssBaseline({ totalRssMb, fingerprint, baseline, tolerancePct = 15, record = false, recordedAt }) {
-  const comparison = compareToBaseline(totalRssMb, baseline?.metrics?.totalRssMb ?? null, { tolerancePct });
-  const shouldRecord = record === true || baseline == null;
+  const hasBaseline = baseline?.metrics?.totalRssMb != null;
+  const comparison = record === true
+    ? { ok: true, value: totalRssMb, baseline: null, deltaPct: null, tolerancePct, reason: 'recorded' }
+    : compareToBaseline(totalRssMb, hasBaseline ? baseline.metrics.totalRssMb : null, { tolerancePct });
+  const shouldRecord = record === true || !hasBaseline;
   const baselineToSave = shouldRecord
     ? { fingerprint, metrics: { totalRssMb }, recordedAt }
     : null;
