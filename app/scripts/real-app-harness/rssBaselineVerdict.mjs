@@ -62,3 +62,33 @@ export function buildBaselineVerdict({ ok, comparison, scenarioId, runId, artifa
     metrics: { totalRssMb: comparison.value, ...extraMetrics },
   };
 }
+
+// Pure: builds the single ATTN_VERDICT payload for the cold/warm RSS scenario.
+// `cold` and `warm` are `comparison` objects (the shape evaluateRssBaseline /
+// compareToBaseline returns: { ok, value, baseline, deltaPct, tolerancePct, reason }).
+// ok is the AND of both phases; failureCount counts the regressing phases;
+// firstFailure names the first regressor (cold before warm), capped like the
+// core contract. Extends the core verdict with `rss: { cold, warm }` and
+// `metrics: { coldRssMb, warmRssMb }` (parity with buildBaselineVerdict's
+// extension, for the leak-soak consumer).
+export function buildColdWarmVerdict({ cold, warm, scenarioId, runId, artifactsDir, summaryPath, durationMs }) {
+  const ok = cold.ok && warm.ok;
+  const failureCount = (cold.ok ? 0 : 1) + (warm.ok ? 0 : 1);
+  const regressionLine = (label, c) =>
+    `${label} RSS regression: ${c.value}MB vs baseline ${c.baseline}MB (+${c.deltaPct}%, tolerance ${c.tolerancePct}%)`;
+  let firstFailure = null;
+  if (!cold.ok) firstFailure = truncateFirstFailure(regressionLine('Cold', cold));
+  else if (!warm.ok) firstFailure = truncateFirstFailure(regressionLine('Warm', warm));
+  return {
+    ok,
+    scenarioId,
+    runId,
+    failureCount,
+    firstFailure,
+    artifactsDir,
+    summaryPath,
+    durationMs,
+    rss: { cold, warm },
+    metrics: { coldRssMb: cold.value, warmRssMb: warm.value },
+  };
+}

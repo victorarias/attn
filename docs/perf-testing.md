@@ -114,3 +114,44 @@ trend to investigate, not a build break.
 the headline number (per-process-class RSS, worker count, optional warm-set
 sweep, optional real-output peak/retained RSS) plus `baselineComparison`, the
 same object as the verdict's `rss` field.
+
+## Cold vs warm RSS (dedicated perf profile)
+
+`scenario-perf-baseline.mjs`'s single RSS number depends on the app's own
+history: a freshly launched app and one that has cycled sessions for a while
+land at very different footprints, so that headline number isn't reproducible
+run-to-run on the same machine. `scenario-perf-cold-warm.mjs` instead captures
+two numbers, each measured from a wiped data dir, so both ARE reproducible:
+
+- **Cold**: fresh app + N sessions, measured immediately after settle (no
+  history).
+- **Warm**: fresh app + N sessions + a per-pane warmup burst (grows the
+  Ghostty WASM heaps/atlas), then settle — the worked-then-idle footprint.
+
+Each phase wipes the profile's data dir before it runs, so this scenario needs
+its own dedicated non-prod profile: run `make install PROFILE=perf` once to
+build `~/Applications/attn-perf.app` (its own bundle id, data dir, and port),
+then drive the scenario with `ATTN_HARNESS_PROFILE=perf`. Runs are sequential —
+the packaged app is single-tenant, same as every other real-app scenario.
+
+Run it:
+
+```bash
+ATTN_HARNESS_PROFILE=perf pnpm --dir app run real-app:scenario-perf-cold-warm -- --sessions 8
+```
+
+Record or update the machine baseline the same way as the single-number
+baseline:
+
+```bash
+ATTN_HARNESS_PROFILE=perf pnpm --dir app run real-app:scenario-perf-cold-warm -- --sessions 8 --record-baseline
+```
+
+### Registry
+
+Cold and warm each self-baseline independently, stored under separate keys
+(`<fingerprint>-cold` and `<fingerprint>-warm`) in the same per-machine
+registry described above. Each compares within `--rss-tolerance-pct` (default
+15%) of its own baseline. As with the single-number baseline, a regression
+sets the verdict's `ok` to `false` but never sets a non-zero exit code — it's
+a trend signal for a human to look at, not a build break.
