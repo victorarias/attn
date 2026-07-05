@@ -87,6 +87,8 @@ export interface DiffCommentThreadProps {
   draft: boolean;
   /** Id of the comment currently being edited, if any. */
   editingCommentId: string | null;
+  /** Comment ids to render without Edit/Resolve/Delete actions (e.g. already-submitted comments in a read-only view). */
+  readOnlyCommentIds?: Set<string>;
   /** Whether the per-comment "Send to CC" action is available. */
   showSendToClaude: boolean;
   draftContent?: string;
@@ -105,6 +107,7 @@ export function DiffCommentThread({
   comments,
   draft,
   editingCommentId,
+  readOnlyCommentIds,
   showSendToClaude,
   draftContent = '',
   onDraftContentChange,
@@ -122,6 +125,7 @@ export function DiffCommentThread({
       {comments.map((comment) => {
         const isEditing = editingCommentId === comment.id;
         const isAgent = comment.author === 'agent';
+        const isReadOnly = readOnlyCommentIds?.has(comment.id) ?? false;
         return (
           <div
             key={comment.id}
@@ -147,17 +151,23 @@ export function DiffCommentThread({
                     )}
                   </div>
                   <div className="diff-comment-actions">
-                    <button className="edit-btn" onClick={() => onStartEdit(comment.id)}>Edit</button>
+                    {!isReadOnly && (
+                      <button className="edit-btn" onClick={() => onStartEdit(comment.id)}>Edit</button>
+                    )}
                     {showSendToClaude && (
                       <button className="send-btn" onClick={() => onSendComment(comment)}>Send to CC</button>
                     )}
-                    <button
-                      className="resolve-btn"
-                      onClick={() => onResolveComment(comment.id, !comment.resolved)}
-                    >
-                      {comment.resolved ? 'Unresolve' : 'Resolve'}
-                    </button>
-                    <button className="delete-btn" onClick={() => onDeleteComment(comment.id)}>Delete</button>
+                    {!isReadOnly && (
+                      <button
+                        className="resolve-btn"
+                        onClick={() => onResolveComment(comment.id, !comment.resolved)}
+                      >
+                        {comment.resolved ? 'Unresolve' : 'Resolve'}
+                      </button>
+                    )}
+                    {!isReadOnly && (
+                      <button className="delete-btn" onClick={() => onDeleteComment(comment.id)}>Delete</button>
+                    )}
                   </div>
                 </div>
                 <CommentBody content={comment.content} />

@@ -190,8 +190,13 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 		baseRef = *msg.BaseRef
 	}
 
+	headRef := ""
+	if msg.HeadRef != nil {
+		headRef = *msg.HeadRef
+	}
+
 	staged := msg.Staged != nil && *msg.Staged
-	content, err := d.coordinator().FileDiff(msg.Directory, msg.Path, baseRef, staged)
+	content, err := d.coordinator().FileDiff(msg.Directory, msg.Path, baseRef, headRef, staged)
 	if err != nil {
 		result.Error = protocol.Ptr("Failed to read file diff: " + err.Error())
 		d.sendToClient(client, result)

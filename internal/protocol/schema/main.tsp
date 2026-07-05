@@ -1273,6 +1273,7 @@ model GetFileDiffMessage {
   path: string;
   staged?: boolean;  // DEPRECATED: If true, show staged diff instead of working tree
   base_ref?: string; // If provided, compare against this ref instead of HEAD (for PR-like diffs)
+  head_ref?: string; // If set, the modified side is pinned to `git show <head_ref>:<path>` instead of the working tree (used by the presentation reader for base_sha->head_sha diffs)
 }
 
 // Branch diff file info for PR-like review
@@ -1831,6 +1832,7 @@ model GetPresentationRoundResultMessage {
   presentation?: Presentation;
   round?: PresentationRound;
   comments?: PresentationComment[];
+  repo_head_sha?: string; // Current `git rev-parse HEAD` of the presentation's repo_path at query time, for drift detection; omitted if the rev-parse fails (e.g. repo gone)
 }
 
 // PresentCommentInput is a reviewer comment as submitted from the app, before

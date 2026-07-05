@@ -242,3 +242,31 @@ func TestHandlePresentSubmitRound_DoubleSubmitRejected(t *testing.T) {
 		t.Fatalf("second submit of an already-submitted round returned success: %+v", second)
 	}
 }
+
+func TestHandleGetPresentationRound_CarriesRepoHeadSHA(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, headSHA := presentTestRepo(t)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    presentManifestYAML("My Change", repoDir),
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleGetPresentationRound(client, &protocol.GetPresentationRoundMessage{
+		Cmd:            protocol.CmdGetPresentationRound,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	var res protocol.GetPresentationRoundResultMessage
+	readTicketResult(t, client.send, &res)
+	if !res.Success {
+		t.Fatalf("get_presentation_round = %+v, want success", res)
+	}
+	if res.RepoHeadSHA == nil || *res.RepoHeadSHA != headSHA {
+		t.Errorf("repo_head_sha = %v, want %q", res.RepoHeadSHA, headSHA)
+	}
+}
