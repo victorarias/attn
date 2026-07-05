@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useDaemonSocket } from '../../hooks/useDaemonSocket';
+import { usePresentAutomationBridge } from '../../hooks/usePresentAutomationBridge';
 import { DiffView } from '../DiffView';
 import type {
   Presentation,
@@ -112,6 +114,12 @@ function submittedToReviewComment(comment: PresentationComment): ReviewComment {
 }
 
 export function PresentRoot() {
+  // Self-gating (isTauri() + __ATTN_AUTOMATION_ENABLED) — a no-op outside a
+  // Tauri automation-enabled build. See usePresentAutomationBridge for the
+  // present_window_* action set and why this window needs its own bridge
+  // rather than sharing the main window's.
+  usePresentAutomationBridge();
+
   const presentationId = useMemo(
     () => new URLSearchParams(window.location.search).get('presentation'),
     [],
@@ -130,7 +138,6 @@ export function PresentRoot() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
-  const [handback, setHandback] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const draftIdCounterRef = useRef(0);
@@ -342,16 +349,21 @@ export function PresentRoot() {
         side: d.side,
         content: d.content,
       }));
-      await submitPresentationRound({ roundId: round.id, comments, handback });
+      await submitPresentationRound({ roundId: round.id, comments, handback: true });
       setDrafts([]);
       setShowSubmitDialog(false);
       setRefreshSignal((n) => n + 1);
+      try {
+        await getCurrentWindow().hide();
+      } catch (hideErr) {
+        console.warn('[PresentRoot] failed to hide presentation window after submit:', hideErr);
+      }
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to submit review.');
     } finally {
       setSubmitting(false);
     }
-  }, [round, drafts, handback, submitPresentationRound]);
+  }, [round, drafts, submitPresentationRound]);
 
   if (connectionError) {
     return (
@@ -430,14 +442,6 @@ export function PresentRoot() {
             <p>
               {drafts.length} comment{drafts.length === 1 ? '' : 's'}
             </p>
-            <label className="present-root-submit-handback">
-              <input
-                type="checkbox"
-                checked={handback}
-                onChange={(e) => setHandback(e.target.checked)}
-              />
-              Hand back to agent
-            </label>
             {submitError && <div className="present-root-submit-error">{submitError}</div>}
             <div className="present-root-submit-actions">
               <button type="button" onClick={() => setShowSubmitDialog(false)} disabled={submitting}>

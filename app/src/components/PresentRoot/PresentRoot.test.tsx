@@ -19,6 +19,14 @@ vi.mock('../DiffView', () => ({
   )),
 }));
 
+// PresentRoot hides the present window on a successful submit via
+// getCurrentWindow().hide() (mirrors the app's Tauri-window close-on-submit
+// convention). jsdom has no real Tauri window, so this stands in for it.
+const mockHide = vi.fn();
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({ hide: mockHide }),
+}));
+
 function latestDiffViewProps(): DiffViewProps {
   const calls = vi.mocked(DiffView).mock.calls;
   const props = calls[calls.length - 1]?.[0];
@@ -585,6 +593,25 @@ describe('PresentRoot', () => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
       const refetches = sent.filter((m) => m.cmd === 'get_presentation_round');
       expect(refetches.length).toBeGreaterThanOrEqual(2);
+    }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
+
+  it('hides the presentation window after a successful submit', async () => {
+    const ws = await loadRoundWithDiff();
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => {
+      expect(ws.sent.map((e) => JSON.parse(e)).some((m) => m.cmd === 'present_submit_round')).toBe(true);
+    }, WAIT_OPTS);
+
+    act(() => {
+      ws.emit({ event: 'present_submit_round_result', success: true, round_id: 'round-1' });
+    });
+
+    await waitFor(() => {
+      expect(mockHide).toHaveBeenCalledTimes(1);
     }, WAIT_OPTS);
   }, TEST_TIMEOUT);
 
