@@ -1,0 +1,110 @@
+name: Bench A/B
+
+# Runs the daemon/transcript Go benchmarks on the PR base and PR head,
+# back-to-back on the SAME runner, and diffs them with benchstat. The
+# same-machine delta cancels most shared-runner noise; allocs/op is
+# deterministic regardless. This job is TREND-ONLY: it publishes the delta
+# for a human to read in the run's step summary and does not gate the PR.
+
+on:
+  pull_request:
+    paths:
+      - "internal/daemon/**"
+      - "internal/transcript/**"
+      - "**/*_bench_test.go"
+      - ".github/workflows/bench-ab.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Defined once, reused verbatim for both the head and base runs so the
+  # comparison is apples-to-apples.
+  #   -run '^$'   : skip normal tests (also sidesteps the known pre-existing
+  #                 data race in internal/daemon tests)
+  #   -benchmem   : report B/op and allocs/op alongside ns/op
+  #   -count 6    : enough samples for benchstat to say something meaningful
+  #   no -race    : race instrumentation would distort the perf numbers
+  BENCH_CMD: "go test -run '^$' -bench . -benchmem -count 6 ./internal/daemon/ ./internal/transcript/"
+
+jobs:
+  bench-ab:
+    name: Bench A/B (base vs head)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Bench PR head
+        run: |
+          echo "Running: $BENCH_CMD"
+          eval "$BENCH_CMD" 2>&1 | tee head.txt || true
+          if [ ! -s head.txt ]; then
+            echo "::warning::head.txt is empty; the benchmark run on HEAD produced no output"
+          fi
+
+      - name: Checkout PR base
+        run: |
+          # Make sure a local origin/main ref exists as a fallback for
+          # workflow_dispatch runs, where there is no PR base SHA.
+          git fetch origin main --quiet || true
+
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -n "$BASE_SHA" ]; then
+            git checkout "$BASE_SHA"
+          else
+            git checkout origin/main
+          fi
+
+      - name: Bench PR base
+        run: |
+          echo "Running: $BENCH_CMD"
+          eval "$BENCH_CMD" 2>&1 | tee base.txt || true
+          if [ ! -s base.txt ]; then
+            echo "::warning::base.txt is empty; the benchmark run on BASE produced no output"
+          fi
+
+      - name: Compute benchstat delta
+        if: always()
+        run: |
+          benchstat base.txt head.txt | tee delta.txt || true
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Bench A/B (base → head, same runner)"
+            echo '```'
+            cat delta.txt 2>/dev/null || echo "(no delta produced)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-ab-results
+          path: |
+            base.txt
+            head.txt
+            delta.txt
+          if-no-files-found: warn
+
+      # Trend-only: this job never fails a PR on the benchmark delta. If a
+      # prior step recorded a warning (e.g. empty output), that is visible
+      # in the run's annotations and step summary, but does not flip the
+      # job red.
+      - name: Always succeed
+        if: always()
+        run: exit 0
