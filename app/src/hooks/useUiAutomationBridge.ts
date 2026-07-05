@@ -16,10 +16,12 @@ import { dumpTerminalGeometry } from '../utils/terminalDiagnosticsLog';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 import { buildSessionRenderHealth } from '../utils/renderHealth';
+import { boundTicketForSession } from '../utils/tickets';
 import { collectWorkspaceLayoutDiagnostics, projectWorkspaceBounds } from '../utils/workspaceDiagnostics';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
 import type { BlockStateSnapshot } from '../components/GhosttyTerminal';
+import { isPresentWindowAction } from './usePresentAutomationBridge';
 
 const UI_AUTOMATION_REQUEST_EVENT = 'attn://ui-automation/request';
 const UI_AUTOMATION_RESPONSE_EVENT = 'attn://ui-automation/response';
@@ -2575,7 +2577,7 @@ export function useUiAutomationBridge({
         if (!sessionId) {
           throw new Error('ticket_open_via_dashboard requires sessionId');
         }
-        const boundTicket = (tickets ?? []).find((ticket) => ticket.assignee === sessionId);
+        const boundTicket = boundTicketForSession(tickets ?? [], sessionId);
         if (!boundTicket) {
           throw new Error(`No ticket is bound to session ${sessionId}`);
         }
@@ -2941,6 +2943,15 @@ export function useUiAutomationBridge({
     void emit(UI_AUTOMATION_READY_EVENT, { ready: true });
     const unlistenPromise = listen<AutomationRequest>(UI_AUTOMATION_REQUEST_EVENT, async (event) => {
       const request = event.payload;
+      // The Rust automation server (ui_automation.rs) broadcasts every request
+      // to ALL webview windows and resolves on the FIRST response with a
+      // matching request_id — so exactly one listener must answer any given
+      // request. present_window_* actions belong to the present window's OWN
+      // bridge (usePresentAutomationBridge); ignore them here without
+      // emitting a response so that bridge's answer is the only one.
+      if (isPresentWindowAction(request.action)) {
+        return;
+      }
       let response: AutomationResponse;
       try {
         const result = await handleAutomationRequestRef.current(request);

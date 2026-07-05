@@ -113,15 +113,6 @@
   font-size: var(--font-size);
 }
 
-.present-root-submit-handback {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--font-size);
-  margin-bottom: 12px;
-  cursor: pointer;
-}
-
 .present-root-submit-error {
   color: var(--color-error, #dc2626);
   font-size: var(--font-size);

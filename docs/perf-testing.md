@@ -1,0 +1,211 @@
+# Performance testing
+
+This is the practical runbook for attn's performance-test suite. It covers how
+to run each layer and how to read the result. For the *why* behind this shape
+(trend-only, no hard gates, per-machine registry instead of a single "Victor's
+number"), see the strategy doc:
+[`docs/plans/2026-07-05-performance-test-strategy.md`](plans/2026-07-05-performance-test-strategy.md).
+
+## Philosophy: trend-only, no hard gates (for now)
+
+Nothing here fails a PR on a perf number. Every layer records a metric and
+prints a machine-parseable verdict; a human (or a future promote-to-gate PR)
+reads the trend. This sidesteps flaky-perf-CI at the cost of relying on
+someone actually looking. The one exception in spirit: `allocs/op` from the Go
+benchmarks is deterministic enough that it's the primary signal to watch, and
+the most likely candidate to graduate to a real gate later.
+
+## Go micro-benches (CPU/allocs)
+
+Targeted `go test -bench` benchmarks for hot paths — currently the PTY
+datapath (`internal/daemon`) and the transcript parser (`internal/transcript`).
+Run them locally:
+
+```bash
+go test -run '^$' -bench . -benchmem ./internal/daemon/ ./internal/transcript/
+```
+
+- `-run '^$'` skips regular tests so only benchmarks run.
+- `-benchmem` adds `allocs/op` and `B/op` alongside `ns/op`.
+- `allocs/op` is the primary trend: it's deterministic regardless of machine
+  noise, unlike `ns/op` on a shared runner.
+- `ns/op` is noisy cross-machine but consistent on the *same* machine, which is
+  why CI (forthcoming) runs `main` and the PR head back-to-back on the same
+  runner and diffs the two with `benchstat` instead of comparing against a
+  fixed number.
+
+A CI job that runs this same-machine A/B automatically is a later PR — not
+built yet.
+
+## Real-app RSS baseline (macro memory)
+
+`scenario-perf-baseline.mjs` drives a packaged dev-app install to a fixed
+number of shell sessions and measures the resident-memory footprint of the
+whole attn tree (app + WebKit + daemon + pty-workers). It requires a running
+dev install (`make dev`) since it's a packaged-app scenario — see
+[`app/scripts/real-app-harness/CLAUDE.md`](../app/scripts/real-app-harness/CLAUDE.md)
+for the harness's profile/single-tenant rules.
+
+Run it:
+
+```bash
+pnpm --dir app run real-app:scenario-perf-baseline -- --sessions 8 --stream 2
+```
+
+### Self-baselining per machine
+
+Every machine is fingerprinted (`hw.model` + CPU brand + core count + RAM +
+OS major + arch — see `app/scripts/real-app-harness/machineRegistry.mjs`) and
+compared against *that machine's own* recorded baseline, not a fixed number
+from someone else's laptop:
+
+- **First run on a machine**: there's no baseline yet, so the run always
+  passes and records one.
+- **Later runs**: the headline total RSS is compared to the stored baseline.
+  Growth beyond `--rss-tolerance-pct` (default 15%) fails the verdict; an
+  improvement (RSS below baseline) always passes.
+- **Re-recording**: pass `--record-baseline` to overwrite the stored baseline
+  with this run's number — use this after an intentional change to the memory
+  footprint (a real fix or a deliberate trade-off), not to silence a
+  regression you haven't understood. This run's verdict always passes
+  (`ok:true`, `reason:'recorded'`): the run *defines* the new baseline, so it
+  is never evaluated against — and can never regress against — the number it
+  is replacing.
+
+Local per-machine baselines live in `~/.attn-perf-registry/<fingerprint>.json`
+(outside the repo — every dev's cache is their own). A small set of known reference
+machines can also have a baseline **committed** to
+`app/scripts/real-app-harness/perf-baselines.json`; a committed entry for a
+given fingerprint always wins over the local cache, so it's the way to pin a
+canonical number for review.
+
+### Reading the verdict
+
+The scenario prints one `ATTN_VERDICT ` line (compact JSON) as the last thing
+it emits on success. Take the **last** such line if there's more than one.
+Shape:
+
+```json
+{
+  "ok": true,
+  "scenarioId": "perf-baseline",
+  "runId": "perf-baseline-...",
+  "failureCount": 0,
+  "firstFailure": null,
+  "artifactsDir": "...",
+  "summaryPath": ".../summary.json",
+  "durationMs": 12345,
+  "rss": { "ok": true, "value": 512.3, "baseline": 498.1, "deltaPct": 2.9, "tolerancePct": 15, "reason": "within-band" },
+  "metrics": { "totalRssMb": 512.3 }
+}
+```
+
+`rss` and `metrics` are extensions on top of the core verdict contract (`ok`,
+`scenarioId`, `runId`, `failureCount`, `firstFailure`, `artifactsDir`,
+`summaryPath`, `durationMs` — the same shape every `createScenarioRunner`
+scenario emits). `rss.reason` is one of `no-baseline` (first run on this
+machine, pass), `within-band` (pass), `regression` (fail), or `recorded`
+(`--record-baseline` established/overwrote the baseline this run — always a
+pass). A regression **does not** set a non-zero process exit code by itself —
+only a genuine harness error does that — so treat `verdict.ok:false` here as a
+trend to investigate, not a build break.
+
+`summary.json` under the run's artifacts directory has the full detail behind
+the headline number (per-process-class RSS, worker count, optional warm-set
+sweep, optional real-output peak/retained RSS) plus `baselineComparison`, the
+same object as the verdict's `rss` field.
+
+## Cold vs warm RSS (dedicated perf profile)
+
+`scenario-perf-baseline.mjs`'s single RSS number depends on the app's own
+history: a freshly launched app and one that has cycled sessions for a while
+land at very different footprints, so that headline number isn't reproducible
+run-to-run on the same machine. `scenario-perf-cold-warm.mjs` instead captures
+two numbers, each measured from a wiped data dir, so both ARE reproducible:
+
+- **Cold**: fresh app + N sessions, measured immediately after settle (no
+  history).
+- **Warm**: fresh app + N sessions + a per-pane warmup burst (grows the
+  Ghostty WASM heaps/atlas), then settle — the worked-then-idle footprint.
+
+Each phase wipes the profile's data dir before it runs, so this scenario needs
+its own dedicated non-prod profile: run `make install PROFILE=perf` once to
+build `~/Applications/attn-perf.app` (its own bundle id, data dir, and port),
+then drive the scenario with `ATTN_HARNESS_PROFILE=perf`. Runs are sequential —
+the packaged app is single-tenant, same as every other real-app scenario.
+
+Run it:
+
+```bash
+ATTN_HARNESS_PROFILE=perf pnpm --dir app run real-app:scenario-perf-cold-warm -- --sessions 8
+```
+
+Record or update the machine baseline the same way as the single-number
+baseline:
+
+```bash
+ATTN_HARNESS_PROFILE=perf pnpm --dir app run real-app:scenario-perf-cold-warm -- --sessions 8 --record-baseline
+```
+
+### Registry
+
+Cold and warm each self-baseline independently, stored under separate keys
+(`<fingerprint>-cold` and `<fingerprint>-warm`) in the same per-machine
+registry described above. Each compares within `--rss-tolerance-pct` (default
+15%) of its own baseline. As with the single-number baseline, a regression
+sets the verdict's `ok` to `false` but never sets a non-zero exit code — it's
+a trend signal for a human to look at, not a build break.
+
+## Leak soak (retained-RSS slope)
+
+Cold/warm's two snapshots are each taken from a freshly wiped data dir, so
+neither can see a leak that only accumulates *within* one continuous process
+— cycling sessions inside a single long-lived app instance is exactly what a
+real user session looks like over hours of use, and it's the case cold/warm
+cannot observe. `scenario-perf-leak-soak.mjs` runs many create → workload →
+close cycles inside **one** app instance with **no wipe between cycles**, then
+fits the trend across cycles:
+
+- climbing retained RSS across cycles (a "staircase") signals a leak —
+  something from each cycle's sessions/panes/PTYs is not being freed;
+- flat retained RSS across cycles is healthy — the process is reusing the
+  memory it frees each cycle, not accumulating it.
+
+Each cycle samples RSS over a decay-hold window after closing that cycle's
+sessions and keeps only the **last** sample (retained), never the peak —
+macOS scavenges freed pages lazily, so a sample taken right after close would
+still show the workload's transient spike rather than what the process
+actually holds onto afterward. The scenario then fits a least-squares slope
+(`fitSlope` in `rssBaselineVerdict.mjs`) of retained-RSS-vs-cycle-index over
+the post-warmup cycles.
+
+Like cold/warm, this needs the dedicated perf profile (one-time
+`make install PROFILE=perf`) and refuses to run against the dev sibling or
+prod — many cycles inside one instance would otherwise pollute the shared dev
+world.
+
+Run it:
+
+```bash
+ATTN_HARNESS_PROFILE=perf pnpm --dir app run real-app:scenario-perf-leak-soak -- --cycles 12
+```
+
+### Warmup cycles and the slope threshold
+
+The first `--warmup-cycles` (default 2) are dropped from the slope fit: the
+first cycle or two typically show one-time growth (Ghostty WASM heap/atlas
+allocation, lazy daemon/pty-worker initialization) that is not a leak, and
+would otherwise bias the fitted slope upward. `--slope-threshold-mb` (default
+5) is the max allowed MB/cycle growth over the remaining post-warmup cycles
+before the verdict fails; a slope exactly at the threshold passes.
+
+### Registry
+
+The first post-warmup retained-RSS value also self-baselines against this
+machine's own history, stored under `<fingerprint>-leak-floor` in the same
+per-machine registry described above (`--record-baseline` to
+overwrite it). This is an informational trend on the starting floor, not what
+gates the scenario — the slope-vs-threshold check is. As with the other
+scenarios, a slope regression sets the verdict's `ok` to `false` but never
+sets a non-zero exit code — it's a trend signal for a human to look at, not a
+build break.

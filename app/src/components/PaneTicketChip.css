@@ -1,0 +1,88 @@
+/* PaneTicketChip — the clickable ticket chip in the agent pane header. Status
+   colors reuse the board's [data-status] tint contract: only DEFINED tokens (or
+   the documented #ef4444 fallback for the undefined --color-error), never bare
+   --color-accent/--color-error. Each status sets a single --ptc-tint the chip's
+   rule/hover read. Status chrome, never text-selectable. */
+
+.pane-ticket-chip {
+  --ptc-tint: var(--color-border-hover);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 220px;
+  margin: 0;
+  padding: 2px 9px;
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--ptc-tint) 55%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--ptc-tint) 12%, transparent);
+  color: var(--color-text-secondary);
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.pane-ticket-chip:hover {
+  background: color-mix(in srgb, var(--ptc-tint) 22%, transparent);
+  border-color: color-mix(in srgb, var(--ptc-tint) 85%, transparent);
+}
+
+.pane-ticket-chip[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--ptc-tint) 26%, transparent);
+  border-color: color-mix(in srgb, var(--ptc-tint) 90%, transparent);
+  color: var(--color-text-primary);
+}
+
+.pane-ticket-chip-rule {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--ptc-tint);
+}
+
+.pane-ticket-chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-ticket-chip-unread {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-error, #ef4444);
+  box-shadow: 0 0 7px 1px color-mix(in srgb, var(--color-error, #ef4444) 70%, transparent);
+}
+
+/* Per-status tint, mirroring TicketBoardPanel.css [data-status]. */
+.pane-ticket-chip[data-status='todo'] {
+  --ptc-tint: var(--color-border-hover);
+}
+
+.pane-ticket-chip[data-status='working'] {
+  --ptc-tint: var(--accent);
+}
+
+.pane-ticket-chip[data-status='blocked'] {
+  --ptc-tint: color-mix(in srgb, var(--color-error, #ef4444) 70%, var(--accent) 30%);
+}
+
+.pane-ticket-chip[data-status='in_review'] {
+  --ptc-tint: color-mix(in srgb, var(--accent) 45%, var(--color-text-tertiary));
+}
+
+.pane-ticket-chip[data-status='done'] {
+  --ptc-tint: var(--color-text-muted);
+}
+
+.pane-ticket-chip[data-status='failed'],
+.pane-ticket-chip[data-status='crashed'] {
+  --ptc-tint: var(--color-error, #ef4444);
+}

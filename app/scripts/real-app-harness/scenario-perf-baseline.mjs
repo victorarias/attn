@@ -32,15 +32,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { DaemonObserver } from './daemonObserver.mjs';
-import { createRunContext, createSessionAndWaitForInitialPane, parseCommonArgs, printCommonHelp } from './common.mjs';
+import { createRunContext, createSessionAndWaitForInitialPane, emitVerdict, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
-import { daemonPidFilePathForProfile, profileForAppPath, socketPathForProfile } from './harnessProfile.mjs';
-
-const execFileAsync = promisify(execFile);
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+import { profileForAppPath, socketPathForProfile } from './harnessProfile.mjs';
+import { getMachineFingerprint, loadBaseline, recordOrCompareBaseline } from './machineRegistry.mjs';
+import { buildBaselineVerdict, evaluateRssBaseline } from './rssBaselineVerdict.mjs';
+import { delay, captureWebKitPids, snapshot, classRssMb, sampleWindow, readLiveDaemonPid, stopDaemon, paneIdForSession, closeSessions, fillAllPanes } from './perfMeasure.mjs';
 
 function parseArgs(argv) {
   const filtered = argv.filter((arg) => arg !== '--');
@@ -60,6 +59,8 @@ function parseArgs(argv) {
     fillSettleMs: 3000,
     reclaimHoldMs: 0,
     reclaimHoldIntervalMs: 15000,
+    rssTolerancePct: 15,
+    recordBaseline: false,
   };
   for (let index = 0; index < filtered.length; index += 1) {
     const arg = filtered[index];
@@ -77,6 +78,8 @@ function parseArgs(argv) {
     else if (arg === '--fill-settle-ms') extras.fillSettleMs = Number(filtered[++index]);
     else if (arg === '--reclaim-hold-ms') extras.reclaimHoldMs = Number(filtered[++index]);
     else if (arg === '--reclaim-hold-interval-ms') extras.reclaimHoldIntervalMs = Number(filtered[++index]);
+    else if (arg === '--rss-tolerance-pct') extras.rssTolerancePct = Number(filtered[++index]);
+    else if (arg === '--record-baseline') extras.recordBaseline = true;
     else passthrough.push(arg);
   }
   const options = parseCommonArgs(passthrough);
@@ -121,179 +124,6 @@ function httpGetToFile(port, urlPath, outPath, timeoutMs = 60_000) {
     req.on('error', reject);
     req.on('timeout', () => req.destroy(new Error('timeout')));
   });
-}
-
-async function readProcessTable() {
-  const { stdout } = await execFileAsync('ps', ['-axo', 'pid=,ppid=,%cpu=,rss=,comm=,command=']);
-  return stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const match = line.match(/^(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(\S+)\s+(.*)$/);
-      if (!match) return null;
-      return {
-        pid: Number(match[1]),
-        ppid: Number(match[2]),
-        cpuPct: Number(match[3]),
-        rssKb: Number(match[4]),
-        comm: match[5],
-        command: match[6],
-      };
-    })
-    .filter(Boolean);
-}
-
-function collectDescendantPids(processes, rootPid) {
-  const childrenByParent = new Map();
-  for (const proc of processes) {
-    const siblings = childrenByParent.get(proc.ppid) || [];
-    siblings.push(proc.pid);
-    childrenByParent.set(proc.ppid, siblings);
-  }
-  const visited = new Set([rootPid]);
-  const queue = [rootPid];
-  while (queue.length > 0) {
-    const pid = queue.shift();
-    for (const childPid of childrenByParent.get(pid) || []) {
-      if (visited.has(childPid)) continue;
-      visited.add(childPid);
-      queue.push(childPid);
-    }
-  }
-  return visited;
-}
-
-// WebKit content/GPU/networking processes are reparented to launchd, so they
-// are NOT descendants of the app pid and must be matched by command.
-function isRelevantWebKitProcess(proc) {
-  return proc.command.includes('com.apple.WebKit.WebContent')
-    || proc.command.includes('com.apple.WebKit.Networking')
-    || proc.command.includes('com.apple.WebKit.GPU');
-}
-
-async function captureWebKitPids() {
-  const table = await readProcessTable();
-  return new Set(table.filter(isRelevantWebKitProcess).map((proc) => proc.pid));
-}
-
-function classify(proc) {
-  const command = proc.command;
-  if (command.includes('pty-worker')) return 'pty_worker';
-  if (command.includes('attn daemon')) return 'daemon';
-  if (command.includes('/Contents/MacOS/app')) return 'app';
-  if (command.includes('com.apple.WebKit.WebContent')) return 'webkit_webcontent';
-  if (command.includes('com.apple.WebKit.Networking')) return 'webkit_networking';
-  if (command.includes('com.apple.WebKit.GPU')) return 'webkit_gpu';
-  // Login shell spawned inside each pty-worker (the session's own workload, not
-  // attn overhead). Track it separately so per-session attn cost stays clear.
-  if (/\/(fish|zsh|bash|dash|tcsh|ksh)( |$)|\/sh( |$)/.test(command)) return 'shell';
-  return proc.comm;
-}
-
-// Snapshot the RSS of the dev app tree: descendants of the app pid (WebKit) plus
-// descendants of the daemon pid (one pty-worker per session) plus any explicitly
-// known pids. Targeting these specific roots isolates the dev tree from a
-// possibly-running prod daemon (both share the `attn daemon` command string).
-async function snapshot(appPid, daemonPid, webkitBaseline = new Set(), extraPids = []) {
-  const table = await readProcessTable();
-  const pidSet = new Set();
-  for (const pid of collectDescendantPids(table, appPid)) pidSet.add(pid);
-  if (daemonPid) for (const pid of collectDescendantPids(table, daemonPid)) pidSet.add(pid);
-  // Attribute any WebKit process that appeared after the pre-launch baseline to
-  // this app (they reparent to launchd, so a tree walk misses them). This is
-  // where the WS-1 atlas canvas + GPU texture memory lives.
-  for (const proc of table) {
-    if (isRelevantWebKitProcess(proc) && !webkitBaseline.has(proc.pid)) pidSet.add(proc.pid);
-  }
-  for (const pid of extraPids) pidSet.add(pid);
-
-  const procs = table.filter((proc) => pidSet.has(proc.pid));
-  const byClass = {};
-  let totalRssKb = 0;
-  for (const proc of procs) {
-    const label = classify(proc);
-    const entry = byClass[label] || { count: 0, rssKb: 0, rssMaxKb: 0, pids: [] };
-    entry.count += 1;
-    entry.rssKb += proc.rssKb;
-    entry.rssMaxKb = Math.max(entry.rssMaxKb, proc.rssKb);
-    entry.pids.push({ pid: proc.pid, rssKb: proc.rssKb });
-    byClass[label] = entry;
-    totalRssKb += proc.rssKb;
-  }
-  return {
-    totalRssMb: Number((totalRssKb / 1024).toFixed(1)),
-    procCount: procs.length,
-    byClass: Object.fromEntries(
-      Object.entries(byClass).map(([label, entry]) => [label, {
-        count: entry.count,
-        rssMb: Number((entry.rssKb / 1024).toFixed(1)),
-        rssMaxMb: Number((entry.rssMaxKb / 1024).toFixed(1)),
-        pids: entry.pids,
-      }]),
-    ),
-  };
-}
-
-function classRssMb(snap, label) {
-  return snap?.byClass?.[label]?.rssMb ?? 0;
-}
-
-// Sample RSS repeatedly over a window and return the peak (by total RSS) and the
-// last sample. Used to catch the transient/retained spike from heavy output.
-async function sampleWindow(appPid, daemonPid, webkitBaseline, windowMs, intervalMs = 1000) {
-  const samples = [];
-  const deadline = Date.now() + windowMs;
-  while (Date.now() < deadline) {
-    samples.push(await snapshot(appPid, daemonPid, webkitBaseline));
-    await delay(intervalMs);
-  }
-  if (samples.length === 0) samples.push(await snapshot(appPid, daemonPid, webkitBaseline));
-  const peak = samples.reduce((best, current) => (current.totalRssMb > best.totalRssMb ? current : best), samples[0]);
-  return { peak, last: samples[samples.length - 1], count: samples.length };
-}
-
-// Read the authoritative daemon pid from the profile's pid file, returning it
-// only if that process is still alive. This is pprof-independent: it is how the
-// default (non-ATTN_PPROF) baseline still attributes daemon + pty-worker RSS,
-// since the detached daemon and its workers are not descendants of the app pid.
-function readLiveDaemonPid(profile) {
-  let pid = null;
-  try {
-    pid = Number(fs.readFileSync(daemonPidFilePathForProfile(profile), 'utf8').trim());
-  } catch {
-    return null;
-  }
-  if (!Number.isInteger(pid) || pid <= 0) return null;
-  try { process.kill(pid, 0); } catch { return null; } // stale pid file
-  return pid;
-}
-
-async function stopDevDaemon() {
-  // Only ever touches the dev profile pid file (~/.attn-dev), never prod (~/.attn).
-  const pid = readLiveDaemonPid('dev');
-  if (pid == null) return null;
-  try { process.kill(pid, 'SIGTERM'); } catch { return null; }
-  for (let i = 0; i < 50; i += 1) {
-    try { process.kill(pid, 0); } catch { return pid; }
-    await delay(200);
-  }
-  try { process.kill(pid, 'SIGKILL'); } catch {}
-  return pid;
-}
-
-async function paneIdForSession(client, sessionId) {
-  const ws = await client.request('get_workspace', { sessionId }, { timeoutMs: 10_000 });
-  return ws.activePaneId || ws.panes?.[0]?.paneId || null;
-}
-
-// Close sessions through the automation bridge (the daemon-level close). The
-// observer's WS `unregister` is rejected without the workspace_sessions
-// capability, so close_session is the supported cleanup path.
-async function closeSessions(client, ids) {
-  for (const sessionId of ids) {
-    await client.request('close_session', { sessionId }, { timeoutMs: 15_000 }).catch(() => {});
-  }
 }
 
 async function waitForSessionsGone(observer, predicate, timeoutMs) {
@@ -350,26 +180,6 @@ function reportSessionState(bin, socketPath, sessionId, state) {
   });
 }
 
-// Run `cmd` in every pane, one at a time, to grow each Ghostty WASM heap + atlas
-// so the warm-set sweep measures realistic (used) idle panes rather than the
-// empty floor. Sequential with a per-pane settle to avoid overrunning the
-// websocket's 256-message buffer (see AGENTS.md) by flooding all panes at once.
-async function fillAllPanes(client, sessionIds, cmd, perPaneSettleMs) {
-  let filled = 0;
-  for (const sessionId of sessionIds) {
-    const paneId = await paneIdForSession(client, sessionId);
-    if (!paneId) {
-      console.warn(`[perf] fill: no pane for session ${sessionId}`);
-      continue;
-    }
-    await client.request('write_pane', { sessionId, paneId, text: cmd }, { timeoutMs: 30_000 })
-      .catch((error) => console.warn(`[perf] fill write_pane ${sessionId} failed: ${error.message}`));
-    filled += 1;
-    await delay(perPaneSettleMs);
-  }
-  console.log(`[perf] filled ${filled}/${sessionIds.length} panes with \`${cmd}\``);
-}
-
 async function markSessionsIdle(client, options, sessionIds) {
   const profile = profileForAppPath(options.appPath);
   const bin = path.join(options.appPath, 'Contents', 'MacOS', 'attn');
@@ -420,11 +230,16 @@ async function main() {
     console.log('                      curve -- distinguishes soft-but-delayed from hard. Pair with');
     console.log('                      --fill-cmd + --warm <low>.');
     console.log('  --reclaim-hold-interval-ms <n>  Sample interval during the hold (default: 15000)');
+    console.log('  --rss-tolerance-pct <n>  Allowed growth over the per-machine baseline before the');
+    console.log('                      verdict fails (default: 15)');
+    console.log('  --record-baseline   Overwrite the per-machine baseline with this run\'s RSS instead');
+    console.log('                      of comparing against it');
     console.log('');
     console.log('Set ATTN_PPROF=<port> to also capture /debug/vars + heap/CPU pprof.');
     return;
   }
 
+  const startedAt = Date.now();
   const port = pprofPort();
   const { runId, runDir, sessionDir } = createRunContext(options, 'perf-baseline');
   const client = new UiAutomationClient({ appPath: options.appPath });
@@ -434,6 +249,9 @@ async function main() {
   // Warm-workspace limit captured before the sweep perturbs it, restored in the
   // finally so this run does not leak its last swept value into localStorage.
   let initialWarmLimit = null;
+  // Populated once the headline RSS is compared against the machine registry
+  // (below); read again after the finally block to emit the ATTN_VERDICT line.
+  let rssEvaluation = null;
 
   const summary = {
     ok: false,
@@ -457,7 +275,7 @@ async function main() {
 
   try {
     if (port && options.restartDaemon) {
-      const killed = await stopDevDaemon();
+      const killed = await stopDaemon('dev');
       console.log(`[perf] stopped dev daemon pid=${killed ?? 'none'} so a fresh one inherits ATTN_PPROF=${port}`);
     }
 
@@ -779,6 +597,24 @@ async function main() {
         perLivePaneWebContentMb: paneSpan > 0 ? Number(((most.webContentRssMb - least.webContentRssMb) / paneSpan).toFixed(1)) : null,
       };
     }
+
+    // Compare this run's headline RSS against the per-machine registry (see
+    // machineRegistry.mjs) and record what the verdict line below reports.
+    // This never affects summary.ok / the process exit code -- an RSS
+    // regression is a trend signal for a driving agent to notice, not a
+    // harness error.
+    const fingerprint = getMachineFingerprint();
+    const baseline = loadBaseline(fingerprint.key);
+    rssEvaluation = evaluateRssBaseline({
+      totalRssMb: summary.headline.totalRssMb,
+      fingerprint,
+      baseline,
+      tolerancePct: options.rssTolerancePct,
+      record: options.recordBaseline,
+      recordedAt: new Date().toISOString(),
+    });
+    recordOrCompareBaseline({ evaluation: rssEvaluation, key: fingerprint.key });
+    summary.baselineComparison = rssEvaluation.comparison;
   } finally {
     // Close every session we created so they don't persist into the next run.
     await closeSessions(client, sessionIds);
@@ -810,6 +646,25 @@ async function main() {
   }
 
   console.log(JSON.stringify({ headline: summary.headline, reclaimHold: summary.reclaimHold, idleByClass: summary.snapshots.idle?.byClass, profiles: summary.profiles, runDir }, null, 2));
+
+  // A regression against the machine baseline is a trend signal, not a
+  // harness error: it surfaces as verdict.ok:false but never sets a non-zero
+  // exit code (see the try/finally above -- only real errors do that, via
+  // main().catch below).
+  if (rssEvaluation) {
+    emitVerdict(buildBaselineVerdict({
+      ok: rssEvaluation.ok,
+      comparison: rssEvaluation.comparison,
+      scenarioId: 'perf-baseline',
+      runId,
+      artifactsDir: runDir,
+      summaryPath: path.join(runDir, 'summary.json'),
+      durationMs: Date.now() - startedAt,
+      extraMetrics: summary.headline?.realOutput?.retainedMb != null
+        ? { retainedMb: summary.headline.realOutput.retainedMb }
+        : {},
+    }));
+  }
 }
 
 main().catch((error) => {

@@ -157,6 +157,11 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-ghostty-scroll'],
   },
   {
+    id: 'present-submit-closes-window',
+    label: 'Present submit closes the real presentation window',
+    command: ['pnpm', 'run', 'real-app:scenario-present-submit-closes-window'],
+  },
+  {
     id: 'focus-probe',
     label: 'Focus probe (no focus steal on background session create)',
     command: ['pnpm', 'run', 'real-app:focus-probe'],
