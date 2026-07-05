@@ -35,9 +35,11 @@ import http from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DaemonObserver } from './daemonObserver.mjs';
-import { createRunContext, createSessionAndWaitForInitialPane, parseCommonArgs, printCommonHelp } from './common.mjs';
+import { createRunContext, createSessionAndWaitForInitialPane, emitVerdict, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { daemonPidFilePathForProfile, profileForAppPath, socketPathForProfile } from './harnessProfile.mjs';
+import { getMachineFingerprint, loadBaseline, saveBaseline } from './machineRegistry.mjs';
+import { buildBaselineVerdict, evaluateRssBaseline } from './rssBaselineVerdict.mjs';
 
 const execFileAsync = promisify(execFile);
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -60,6 +62,8 @@ function parseArgs(argv) {
     fillSettleMs: 3000,
     reclaimHoldMs: 0,
     reclaimHoldIntervalMs: 15000,
+    rssTolerancePct: 15,
+    recordBaseline: false,
   };
   for (let index = 0; index < filtered.length; index += 1) {
     const arg = filtered[index];
@@ -77,6 +81,8 @@ function parseArgs(argv) {
     else if (arg === '--fill-settle-ms') extras.fillSettleMs = Number(filtered[++index]);
     else if (arg === '--reclaim-hold-ms') extras.reclaimHoldMs = Number(filtered[++index]);
     else if (arg === '--reclaim-hold-interval-ms') extras.reclaimHoldIntervalMs = Number(filtered[++index]);
+    else if (arg === '--rss-tolerance-pct') extras.rssTolerancePct = Number(filtered[++index]);
+    else if (arg === '--record-baseline') extras.recordBaseline = true;
     else passthrough.push(arg);
   }
   const options = parseCommonArgs(passthrough);
@@ -420,11 +426,16 @@ async function main() {
     console.log('                      curve -- distinguishes soft-but-delayed from hard. Pair with');
     console.log('                      --fill-cmd + --warm <low>.');
     console.log('  --reclaim-hold-interval-ms <n>  Sample interval during the hold (default: 15000)');
+    console.log('  --rss-tolerance-pct <n>  Allowed growth over the per-machine baseline before the');
+    console.log('                      verdict fails (default: 15)');
+    console.log('  --record-baseline   Overwrite the per-machine baseline with this run\'s RSS instead');
+    console.log('                      of comparing against it');
     console.log('');
     console.log('Set ATTN_PPROF=<port> to also capture /debug/vars + heap/CPU pprof.');
     return;
   }
 
+  const startedAt = Date.now();
   const port = pprofPort();
   const { runId, runDir, sessionDir } = createRunContext(options, 'perf-baseline');
   const client = new UiAutomationClient({ appPath: options.appPath });
@@ -434,6 +445,9 @@ async function main() {
   // Warm-workspace limit captured before the sweep perturbs it, restored in the
   // finally so this run does not leak its last swept value into localStorage.
   let initialWarmLimit = null;
+  // Populated once the headline RSS is compared against the machine registry
+  // (below); read again after the finally block to emit the ATTN_VERDICT line.
+  let rssEvaluation = null;
 
   const summary = {
     ok: false,
@@ -779,6 +793,32 @@ async function main() {
         perLivePaneWebContentMb: paneSpan > 0 ? Number(((most.webContentRssMb - least.webContentRssMb) / paneSpan).toFixed(1)) : null,
       };
     }
+
+    // Compare this run's headline RSS against the per-machine registry (see
+    // machineRegistry.mjs) and record what the verdict line below reports.
+    // This never affects summary.ok / the process exit code -- an RSS
+    // regression is a trend signal for a driving agent to notice, not a
+    // harness error.
+    const fingerprint = getMachineFingerprint();
+    const baseline = loadBaseline(fingerprint.key);
+    rssEvaluation = evaluateRssBaseline({
+      totalRssMb: summary.headline.totalRssMb,
+      fingerprint,
+      baseline,
+      tolerancePct: options.rssTolerancePct,
+      record: options.recordBaseline,
+      recordedAt: new Date().toISOString(),
+    });
+    if (rssEvaluation.baselineToSave) {
+      saveBaseline(fingerprint.key, rssEvaluation.baselineToSave);
+      console.log(`[perf] recorded baseline for machine ${fingerprint.key}: ${summary.headline.totalRssMb} MB`);
+    } else {
+      console.log(
+        `[perf] compared to baseline for machine ${fingerprint.key}: ${rssEvaluation.comparison.value} MB `
+        + `vs ${rssEvaluation.comparison.baseline} MB (${rssEvaluation.comparison.reason}, tolerance ${rssEvaluation.comparison.tolerancePct}%)`,
+      );
+    }
+    summary.baselineComparison = rssEvaluation.comparison;
   } finally {
     // Close every session we created so they don't persist into the next run.
     await closeSessions(client, sessionIds);
@@ -810,6 +850,25 @@ async function main() {
   }
 
   console.log(JSON.stringify({ headline: summary.headline, reclaimHold: summary.reclaimHold, idleByClass: summary.snapshots.idle?.byClass, profiles: summary.profiles, runDir }, null, 2));
+
+  // A regression against the machine baseline is a trend signal, not a
+  // harness error: it surfaces as verdict.ok:false but never sets a non-zero
+  // exit code (see the try/finally above -- only real errors do that, via
+  // main().catch below).
+  if (rssEvaluation) {
+    emitVerdict(buildBaselineVerdict({
+      ok: rssEvaluation.ok,
+      comparison: rssEvaluation.comparison,
+      scenarioId: 'perf-baseline',
+      runId,
+      artifactsDir: runDir,
+      summaryPath: path.join(runDir, 'summary.json'),
+      durationMs: Date.now() - startedAt,
+      extraMetrics: summary.headline?.realOutput?.retainedMb != null
+        ? { retainedMb: summary.headline.realOutput.retainedMb }
+        : {},
+    }));
+  }
 }
 
 main().catch((error) => {
