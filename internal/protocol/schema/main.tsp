@@ -855,6 +855,32 @@ model TicketActionResultMessage {
   error?: string;
 }
 
+// ticket_resume reopens the agent session bound to a ticket: same session id
+// (the assignee), the ticket's cwd, resuming the mirrored conversation when
+// resumable. The daemon owns the whole composite (register workspace + add pane +
+// spawn, with rollback) so no racy frontend seeding is involved; the frontend just
+// sends this command and focuses the result. The session/pane reach the UI through
+// the normal session_registered / workspace_layout_updated broadcasts.
+model TicketResumeMessage {
+  cmd: "ticket_resume";
+  request_id?: string;
+  ticket_id: string;
+}
+
+// TicketResumeResultMessage replies to ticket_resume, correlated by request_id.
+// session_id is the (re)opened session the frontend focuses; already_running is
+// true when the assignee session was still registered, so the daemon spawned
+// nothing and the frontend just focuses the existing pane.
+model TicketResumeResultMessage {
+  event: "ticket_resume_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  session_id?: string;
+  workspace_id?: string;
+  already_running?: boolean;
+}
+
 model WorkspaceContextCheckoutMessage {
   cmd: "workspace_context_checkout";
   source_session_id: string;
@@ -2879,6 +2905,7 @@ alias DaemonEvent =
   | TicketsUpdatedMessage
   | TicketResultMessage
   | TicketActionResultMessage
+  | TicketResumeResultMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage
   | PRsUpdatedMessage

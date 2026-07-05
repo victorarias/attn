@@ -920,6 +920,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		go d.handleTicketAddComment(client, msg.(*protocol.TicketAddCommentMessage))
 	case protocol.CmdTicketEditDescription:
 		go d.handleTicketEditDescription(client, msg.(*protocol.TicketEditDescriptionMessage))
+	case protocol.CmdTicketResume:
+		go d.handleTicketResume(client, msg.(*protocol.TicketResumeMessage))
 	case protocol.CmdFsList:
 		fsList := msg.(*protocol.FsListMessage)
 		go d.sendFsListWSResult(client, protocol.Deref(fsList.RequestID), protocol.Deref(fsList.Path))

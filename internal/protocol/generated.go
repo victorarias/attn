@@ -3729,6 +3729,40 @@ type TicketResultMessage struct {
 	Ticket *Ticket `json:"ticket,omitempty,omitzero"`
 }
 
+type TicketResumeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID string `json:"ticket_id"`
+}
+
+type TicketResumeResultMessage struct {
+	// AlreadyRunning corresponds to the JSON schema field "already_running".
+	AlreadyRunning *bool `json:"already_running,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
 type TicketShowMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`

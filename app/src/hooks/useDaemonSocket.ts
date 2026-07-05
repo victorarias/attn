@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '148';
+export const PROTOCOL_VERSION = '149';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1714,6 +1714,29 @@ export function useDaemonSocket({
               pending.resolve(undefined);
             } else {
               pending.reject(new Error(data.error || 'Ticket action failed'));
+            }
+            break;
+          }
+
+          case 'ticket_resume_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `ticket_resume:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && typeof data.session_id === 'string') {
+              pending.resolve({
+                sessionId: data.session_id,
+                workspaceId: typeof data.workspace_id === 'string' ? data.workspace_id : undefined,
+                alreadyRunning: data.already_running === true,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Ticket resume failed'));
             }
             break;
           }
@@ -4130,6 +4153,34 @@ export function useDaemonSocket({
     [sendTicketAction],
   );
 
+  // Reopen the agent session bound to a ticket. The daemon owns the whole resume
+  // composite (register workspace + add pane + spawn, with rollback), so this just
+  // sends the command and resolves with the session to focus; the session and pane
+  // arrive over the normal broadcasts. Resolves on a successful ticket_resume_result
+  // and rejects on its error — the request/result pattern, like a delegated spawn.
+  const sendTicketResume = useCallback(
+    (ticketId: string): Promise<{ sessionId: string; workspaceId?: string; alreadyRunning?: boolean }> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        const requestId = nextRequestID('ticket_resume');
+        const key = `ticket_resume:${requestId}`;
+        pendingActionsRef.current.set(key, { resolve, reject });
+        ws.send(JSON.stringify({ cmd: 'ticket_resume', request_id: requestId, ticket_id: ticketId }));
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new Error('Ticket resume timed out'));
+          }
+        }, 10000);
+      });
+    },
+    [nextRequestID],
+  );
+
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
   const sendTaskList = useCallback((): Promise<Task[]> => {
@@ -5094,6 +5145,7 @@ export function useDaemonSocket({
     sendTicketChangeStatus,
     sendTicketAddComment,
     sendTicketEditDescription,
+    sendTicketResume,
     sendTaskList,
     sendTaskRetry,
     sendNotificationList,

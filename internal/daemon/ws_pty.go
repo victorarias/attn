@@ -497,7 +497,17 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		// user into the agent's resume picker. Falls back to the picker (resumeSessionID
 		// stays "") when no ticket resume key exists.
 		if ticketResumeID := d.store.GetTicketResumeSessionID(msg.ID); ticketResumeID != "" {
-			resumeSessionID = ticketResumeID
+			// Only adopt the mirrored id when it is actually resumable. Claude writes
+			// its transcript lazily, so a session closed before it ever took a turn has
+			// a mirrored id pointing at a transcript that does not exist; `claude -r
+			// <dead-id>` would exit non-zero. Leaving resumeSessionID empty falls the
+			// ResumePicker back to the cwd-scoped picker instead. Mirrors the
+			// fresh-spawn downgrade in buildReloadSpawnOptions (reload.go).
+			if agentdriver.ResumeAvailable(driver, ticketResumeID) {
+				resumeSessionID = ticketResumeID
+			} else {
+				d.logf("spawn: ticket resume target %s for session %s is not resumable (no transcript yet); using resume picker", ticketResumeID, msg.ID)
+			}
 		}
 	}
 
