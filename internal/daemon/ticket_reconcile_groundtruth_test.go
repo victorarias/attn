@@ -95,7 +95,7 @@ func TestReconcileGroundTruthLines(t *testing.T) {
 	}
 
 	t.Run("merged PR is annotated", func(t *testing.T) {
-		lines := reconcileGroundTruthLines([]int{462}, "victorarias/attn", prs)
+		lines, _ := reconcileGroundTruthLines([]int{462}, "victorarias/attn", prs)
 		if len(lines) != 1 {
 			t.Fatalf("lines = %v, want 1", lines)
 		}
@@ -105,34 +105,34 @@ func TestReconcileGroundTruthLines(t *testing.T) {
 	})
 
 	t.Run("closed PR is annotated", func(t *testing.T) {
-		lines := reconcileGroundTruthLines([]int{470}, "victorarias/attn", prs)
+		lines, _ := reconcileGroundTruthLines([]int{470}, "victorarias/attn", prs)
 		if len(lines) != 1 || !strings.Contains(lines[0], "PR #470 is closed") {
 			t.Fatalf("lines = %v, want one closed annotation", lines)
 		}
 	})
 
 	t.Run("open PR is silent", func(t *testing.T) {
-		lines := reconcileGroundTruthLines([]int{480}, "victorarias/attn", prs)
+		lines, _ := reconcileGroundTruthLines([]int{480}, "victorarias/attn", prs)
 		if len(lines) != 0 {
 			t.Fatalf("lines = %v, want none (open PR)", lines)
 		}
 	})
 
 	t.Run("untracked PR number is silent", func(t *testing.T) {
-		lines := reconcileGroundTruthLines([]int{999}, "victorarias/attn", prs)
+		lines, _ := reconcileGroundTruthLines([]int{999}, "victorarias/attn", prs)
 		if len(lines) != 0 {
 			t.Fatalf("lines = %v, want none (untracked)", lines)
 		}
 	})
 
 	t.Run("empty repo slug yields nil", func(t *testing.T) {
-		if lines := reconcileGroundTruthLines([]int{462}, "", prs); lines != nil {
+		if lines, _ := reconcileGroundTruthLines([]int{462}, "", prs); lines != nil {
 			t.Fatalf("lines = %v, want nil", lines)
 		}
 	})
 
 	t.Run("empty pr list yields nil", func(t *testing.T) {
-		if lines := reconcileGroundTruthLines([]int{462}, "victorarias/attn", nil); lines != nil {
+		if lines, _ := reconcileGroundTruthLines([]int{462}, "victorarias/attn", nil); lines != nil {
 			t.Fatalf("lines = %v, want nil", lines)
 		}
 	})
@@ -144,9 +144,12 @@ func TestReconcileGroundTruthLines(t *testing.T) {
 			manyPRs = append(manyPRs, groundTruthTestPR(i, "merged", "t"))
 			refs = append(refs, i)
 		}
-		lines := reconcileGroundTruthLines(refs, "victorarias/attn", manyPRs)
+		lines, lineCap := reconcileGroundTruthLines(refs, "victorarias/attn", manyPRs)
 		if len(lines) != groundTruthMaxLines {
 			t.Fatalf("lines = %d, want %d (cap)", len(lines), groundTruthMaxLines)
+		}
+		if !lineCap {
+			t.Fatalf("lineCap = false, want true when %d refs exceed the %d-line cap", len(refs), groundTruthMaxLines)
 		}
 	})
 }
@@ -430,12 +433,15 @@ func TestGroundTruthUntrackedLinesCapsLookups(t *testing.T) {
 	}
 
 	refs := []int{1, 2, 3, 4, 5, 6}
-	lines := groundTruthUntrackedLines(context.Background(), refs, nil, "victorarias/attn", fetch)
+	lines, caps := groundTruthUntrackedLines(context.Background(), refs, nil, "victorarias/attn", fetch)
 	if calls != groundTruthMaxLookups {
 		t.Fatalf("fetch calls = %d, want %d (cap)", calls, groundTruthMaxLookups)
 	}
 	if len(lines) != groundTruthMaxLookups {
 		t.Fatalf("lines = %d, want %d", len(lines), groundTruthMaxLookups)
+	}
+	if !caps.lookupCap {
+		t.Fatalf("caps.lookupCap = false, want true after hitting the lookup cap")
 	}
 }
 
@@ -447,7 +453,7 @@ func TestGroundTruthUntrackedLinesSkipsTrackedRefs(t *testing.T) {
 		return "closed", true, "t", nil
 	}
 
-	lines := groundTruthUntrackedLines(context.Background(), []int{1, 2, 3},
+	lines, _ := groundTruthUntrackedLines(context.Background(), []int{1, 2, 3},
 		map[int]bool{1: true, 2: true}, "victorarias/attn", fetch)
 	if calls != 1 {
 		t.Fatalf("fetch calls = %d, want 1 (only the untracked ref)", calls)
@@ -467,10 +473,14 @@ func TestGroundTruthUntrackedLinesRespectsContext(t *testing.T) {
 		calls++
 		return "closed", true, "t", nil
 	}
-	if lines := groundTruthUntrackedLines(ctx, []int{1, 2}, nil, "victorarias/attn", fetch); len(lines) != 0 {
+	lines, caps := groundTruthUntrackedLines(ctx, []int{1, 2}, nil, "victorarias/attn", fetch)
+	if len(lines) != 0 {
 		t.Fatalf("lines = %v, want none under cancelled ctx", lines)
 	}
 	if calls != 0 {
 		t.Fatalf("fetch calls = %d, want 0 under cancelled ctx", calls)
+	}
+	if !caps.timeout {
+		t.Fatalf("caps.timeout = false, want true under cancelled ctx")
 	}
 }

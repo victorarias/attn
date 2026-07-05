@@ -57,6 +57,17 @@ type prStateFetcher func(repo string, number int) (state string, merged bool, ti
 // rather than a real PR reference.
 const groundTruthMaxPRNumber = 100000
 
+// groundTruthCaps records which best-effort limits the ground-truth
+// cross-check hit while building annotation lines. It drives a single debug
+// log line in reconcileGroundTruth; it never changes what gets annotated.
+type groundTruthCaps struct {
+	lineCap   bool // groundTruthMaxLines reached
+	lookupCap bool // groundTruthMaxLookups reached
+	timeout   bool // lookup budget (ctx) expired
+}
+
+func (c groundTruthCaps) any() bool { return c.lineCap || c.lookupCap || c.timeout }
+
 var (
 	prHashRefPattern   = regexp.MustCompile(`#(\d+)`)
 	prWordRefPattern   = regexp.MustCompile(`(?i)\bPR\s+(\d+)\b`)
@@ -132,9 +143,9 @@ var groundTruthTerminalStates = map[string]bool{
 // isn't tracked at all, produce no line — silence is the default; this only
 // fires when attn positively knows the referenced PR is finished. Capped at
 // groundTruthMaxLines lines.
-func reconcileGroundTruthLines(refs []int, repoSlug string, prs []*protocol.PR) []string {
+func reconcileGroundTruthLines(refs []int, repoSlug string, prs []*protocol.PR) (lines []string, lineCap bool) {
 	if repoSlug == "" || len(prs) == 0 || len(refs) == 0 {
-		return nil
+		return nil, false
 	}
 
 	byNumber := make(map[int]*protocol.PR, len(prs))
@@ -145,9 +156,9 @@ func reconcileGroundTruthLines(refs []int, repoSlug string, prs []*protocol.PR) 
 		byNumber[pr.Number] = pr
 	}
 
-	var lines []string
 	for _, n := range refs {
 		if len(lines) >= groundTruthMaxLines {
+			lineCap = true
 			break
 		}
 		pr, ok := byNumber[n]
@@ -159,7 +170,7 @@ func reconcileGroundTruthLines(refs []int, repoSlug string, prs []*protocol.PR) 
 		}
 		lines = append(lines, groundTruthLine(n, pr.State, pr.Title))
 	}
-	return lines
+	return lines, lineCap
 }
 
 func groundTruthLine(number int, state, title string) string {
@@ -174,21 +185,26 @@ func groundTruthLine(number int, state, title string) string {
 // can also mean "never tracked", so each candidate gets one definitive
 // lookup, capped at groundTruthMaxLookups. Merged or closed results produce a
 // line; open results, lookup errors, or a nil fetcher produce silence.
-func groundTruthUntrackedLines(ctx context.Context, refs []int, tracked map[int]bool, repoSlug string, fetch prStateFetcher) []string {
+func groundTruthUntrackedLines(ctx context.Context, refs []int, tracked map[int]bool, repoSlug string, fetch prStateFetcher) (lines []string, caps groundTruthCaps) {
 	if fetch == nil || repoSlug == "" || len(refs) == 0 {
-		return nil
+		return nil, groundTruthCaps{}
 	}
 
-	var lines []string
 	lookups := 0
 	for _, n := range refs {
 		if tracked[n] {
 			continue // tracked rows are the deterministic leg's business
 		}
-		if lookups >= groundTruthMaxLookups || len(lines) >= groundTruthMaxLines {
+		if len(lines) >= groundTruthMaxLines {
+			caps.lineCap = true
+			break
+		}
+		if lookups >= groundTruthMaxLookups {
+			caps.lookupCap = true
 			break
 		}
 		if ctx.Err() != nil {
+			caps.timeout = true
 			break // overall lookup budget spent
 		}
 		lookups++
@@ -203,7 +219,7 @@ func groundTruthUntrackedLines(ctx context.Context, refs []int, tracked map[int]
 			lines = append(lines, groundTruthLine(n, "closed", title))
 		}
 	}
-	return lines
+	return lines, caps
 }
 
 // fetchPRStateCtx runs fetch under ctx: github.Client has no context plumbing
@@ -250,7 +266,7 @@ func (d *Daemon) reconcileGroundTruth(ctx context.Context, verdict *ticketReconc
 	}
 
 	prs := d.store.ListPRsByRepo(repoSlug)
-	lines := reconcileGroundTruthLines(refs, repoSlug, prs)
+	lines, trackedLineCap := reconcileGroundTruthLines(refs, repoSlug, prs)
 
 	tracked := make(map[int]bool, len(prs))
 	for _, pr := range prs {
@@ -267,10 +283,19 @@ func (d *Daemon) reconcileGroundTruth(ctx context.Context, verdict *ticketReconc
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, groundTruthLookupTimeout)
 	defer cancel()
-	lines = append(lines, groundTruthUntrackedLines(lookupCtx, refs, tracked, repoSlug, fetch)...)
+	untracked, caps := groundTruthUntrackedLines(lookupCtx, refs, tracked, repoSlug, fetch)
+	lines = append(lines, untracked...)
+	if trackedLineCap {
+		caps.lineCap = true
+	}
 
 	if len(lines) > groundTruthMaxLines {
 		lines = lines[:groundTruthMaxLines]
+		caps.lineCap = true
+	}
+	if caps.any() {
+		d.logf("ticket reconcile ground-truth %s: annotation cap reached (lineCap=%t lookupCap=%t timeout=%t; refs=%d lines=%d)",
+			repoSlug, caps.lineCap, caps.lookupCap, caps.timeout, len(refs), len(lines))
 	}
 	return lines
 }
