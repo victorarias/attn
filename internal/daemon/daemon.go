@@ -1978,6 +1978,12 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		// `attn notebook …` subcommands were removed; the frontend reads and writes
 		// the notebook over the WebSocket path instead.
 		d.handleNotebookGuide(conn, msg.(*protocol.NotebookGuideMessage))
+	case protocol.CmdJournalAppend:
+		// journal_append is the contention-safe way an agent writes the daily
+		// journal: it goes through the daemon's single serialized notebook.Store
+		// writer instead of the agent editing journal/<date>.md directly, which
+		// races the keeper's own writes to the same file.
+		d.handleJournalAppend(conn, msg.(*protocol.JournalAppendMessage))
 	case protocol.CmdUnregister:
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:

@@ -1298,3 +1298,56 @@ func TestParseTicketTakeArgsErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestParseJournalAppendArgsEntryAndFileMutuallyExclusive(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "entry.md")
+	if err := os.WriteFile(tmp, []byte("from file"), 0o644); err != nil {
+		t.Fatalf("write temp entry file: %v", err)
+	}
+	_, err := parseJournalAppendArgs([]string{"--entry", "inline", "--entry-file", tmp})
+	if err == nil || !strings.Contains(err.Error(), "only one of --entry or --entry-file") {
+		t.Fatalf("parseJournalAppendArgs() error = %v, want mutually-exclusive error", err)
+	}
+}
+
+func TestParseJournalAppendArgsMissingEntryErrors(t *testing.T) {
+	_, err := parseJournalAppendArgs(nil)
+	if err == nil || !strings.Contains(err.Error(), "--entry or --entry-file is required") {
+		t.Fatalf("parseJournalAppendArgs() error = %v, want missing-entry error", err)
+	}
+}
+
+func TestParseJournalAppendArgsEntryFileReadsAndTrims(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "entry.md")
+	if err := os.WriteFile(tmp, []byte("  from file  \n"), 0o644); err != nil {
+		t.Fatalf("write temp entry file: %v", err)
+	}
+	parsed, err := parseJournalAppendArgs([]string{"--entry-file", tmp})
+	if err != nil {
+		t.Fatalf("parseJournalAppendArgs() error = %v", err)
+	}
+	if parsed.entry != "from file" {
+		t.Fatalf("entry = %q, want %q", parsed.entry, "from file")
+	}
+}
+
+func TestParseJournalAppendArgsDatePassthrough(t *testing.T) {
+	parsed, err := parseJournalAppendArgs([]string{"--entry", "hi", "--date", "2026-07-05", "--session", "s1", "--json"})
+	if err != nil {
+		t.Fatalf("parseJournalAppendArgs() error = %v", err)
+	}
+	if parsed.date != "2026-07-05" || parsed.sessionID != "s1" || !parsed.jsonOut || parsed.entry != "hi" {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+}
+
+func TestParseJournalAppendArgsSessionDefaultsToEnv(t *testing.T) {
+	t.Setenv("ATTN_SESSION_ID", "env-session")
+	parsed, err := parseJournalAppendArgs([]string{"--entry", "hi"})
+	if err != nil {
+		t.Fatalf("parseJournalAppendArgs() error = %v", err)
+	}
+	if parsed.sessionID != "env-session" {
+		t.Fatalf("sessionID = %q, want env-session", parsed.sessionID)
+	}
+}

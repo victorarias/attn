@@ -1530,6 +1530,28 @@ type InstallPluginMessage struct {
 	Source string `json:"source"`
 }
 
+type JournalAppendMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Date corresponds to the JSON schema field "date".
+	Date *string `json:"date,omitempty,omitzero"`
+
+	// Entry corresponds to the JSON schema field "entry".
+	Entry string `json:"entry"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+}
+
+type JournalAppendResult struct {
+	// Hash corresponds to the JSON schema field "hash".
+	Hash string `json:"hash"`
+
+	// RelPath corresponds to the JSON schema field "rel_path".
+	RelPath string `json:"rel_path"`
+}
+
 type KillSessionMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2808,6 +2830,10 @@ type Response struct {
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
+
+	// JournalAppendResult corresponds to the JSON schema field
+	// "journal_append_result".
+	JournalAppendResult *JournalAppendResult `json:"journal_append_result,omitempty,omitzero"`
 
 	// NotebookEntries corresponds to the JSON schema field "notebook_entries".
 	NotebookEntries []NotebookEntry `json:"notebook_entries,omitempty,omitzero"`

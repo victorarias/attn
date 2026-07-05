@@ -934,6 +934,31 @@ model NotebookGuideMessage {
   session_id?: string; // when set, session_is_chief reflects this session's role
 }
 
+// JournalAppendMessage appends one markdown block to the notebook's dated daily
+// journal (journal/<date>.md) through the daemon's serialized notebook.Store
+// writer, instead of an agent editing the file directly with its own file-edit
+// tools. The chief of staff and the daemon's own keeper both write the same
+// journal file; a direct file edit races the keeper's writes and hits
+// "file modified since read" on nearly every append. Routing through the daemon's
+// single cached Store per root serializes all writers through one append, which
+// never conflicts (unlike a hash-CAS note edit). Not identity-scoped (like
+// notebook_guide); source_session_id is optional and unused, present only for
+// command-shape uniformity with the ticket verbs.
+model JournalAppendMessage {
+  cmd: "journal_append";
+  source_session_id?: string;
+  entry: string;
+  date?: string; // YYYY-MM-DD; defaults to today in the daemon's local timezone
+}
+
+// JournalAppendResult echoes where the entry landed: rel_path is the
+// notebook-relative path (journal/<date>.md) and hash is the file's content hash
+// after the append.
+model JournalAppendResult {
+  rel_path: string;
+  hash: string;
+}
+
 // Task status surface: list the durable task runner's records, and retry a
 // failed/dead one. state and kind are plain strings (not enums) so the on-disk
 // record stays self-describing and a new TypeSpec enum cannot trip the quicktype
@@ -2399,6 +2424,7 @@ model Response {
   notebook_read?: NotebookReadResult;
   notebook_write?: NotebookWriteResult;
   notebook_guide?: NotebookGuideResult;
+  journal_append_result?: JournalAppendResult;
   ticket_status_result?: TicketStatusResult;
   ticket_inbox_result?: TicketInboxResult;
   ticket_list_result?: TicketListResult;
