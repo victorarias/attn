@@ -2890,4 +2890,67 @@ describe('useDaemonSocket ticket request/result', () => {
     await expect(promise).resolves.toBeUndefined();
     unmount();
   });
+
+  it('resolves sendTicketResume with the session to focus on a successful result', async () => {
+    const { result, unmount } = renderTicketHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendTicketResume('tk-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent.cmd).toBe('ticket_resume');
+    expect(sent.ticket_id).toBe('tk-1');
+
+    ws.emit({
+      event: 'ticket_resume_result',
+      request_id: sent.request_id,
+      success: true,
+      session_id: 'sess-1',
+      workspace_id: 'workspace-sess-1',
+    });
+    await expect(promise).resolves.toEqual({
+      sessionId: 'sess-1',
+      workspaceId: 'workspace-sess-1',
+      alreadyRunning: false,
+    });
+    unmount();
+  });
+
+  it('resolves sendTicketResume with alreadyRunning when the session was still tracked', async () => {
+    const { result, unmount } = renderTicketHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendTicketResume('tk-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+
+    ws.emit({
+      event: 'ticket_resume_result',
+      request_id: sent.request_id,
+      success: true,
+      session_id: 'sess-1',
+      already_running: true,
+    });
+    await expect(promise).resolves.toMatchObject({ sessionId: 'sess-1', alreadyRunning: true });
+    unmount();
+  });
+
+  it('rejects sendTicketResume when ticket_resume_result reports failure', async () => {
+    const { result, unmount } = renderTicketHook();
+    const ws = await waitForOpenSocket();
+
+    const promise = result.current.sendTicketResume('missing');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent.cmd).toBe('ticket_resume');
+
+    ws.emit({
+      event: 'ticket_resume_result',
+      request_id: sent.request_id,
+      success: false,
+      error: 'ticket has no agent session to resume',
+    });
+    await expect(promise).rejects.toThrow('ticket has no agent session to resume');
+    unmount();
+  });
 });

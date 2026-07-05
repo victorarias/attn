@@ -84,7 +84,6 @@ import {
   resolvePreferredAgent,
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
-import { executeTicketResumePlan, planTicketResume } from './utils/ticketResume';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import { hideBootSplash } from './utils/bootSplash';
@@ -602,6 +601,7 @@ function App() {
     sendTicketChangeStatus,
     sendTicketAddComment,
     sendTicketEditDescription,
+    sendTicketResume,
     markFileViewed,
     sendAddComment,
     sendUpdateComment,
@@ -791,6 +791,7 @@ function App() {
         sendTicketChangeStatus={sendTicketChangeStatus}
         sendTicketAddComment={sendTicketAddComment}
         sendTicketEditDescription={sendTicketEditDescription}
+        sendTicketResume={sendTicketResume}
         markFileViewed={markFileViewed}
         sendAddComment={sendAddComment}
         sendUpdateComment={sendUpdateComment}
@@ -908,6 +909,7 @@ interface AppContentProps {
   sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
   sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
   sendTicketEditDescription: ReturnType<typeof useDaemonSocket>['sendTicketEditDescription'];
+  sendTicketResume: ReturnType<typeof useDaemonSocket>['sendTicketResume'];
   markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
   sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
   sendUpdateComment: ReturnType<typeof useDaemonSocket>['sendUpdateComment'];
@@ -1019,6 +1021,7 @@ sendFetchPRDetails,
   sendTicketChangeStatus,
   sendTicketAddComment,
   sendTicketEditDescription,
+  sendTicketResume,
   markFileViewed,
   sendAddComment,
   sendUpdateComment,
@@ -1104,7 +1107,7 @@ sendFetchPRDetails,
     agent?: SessionAgent,
     endpointId?: string,
     yoloMode = false,
-    options?: { resumePicker?: boolean; chiefOfStaff?: boolean },
+    options?: { chiefOfStaff?: boolean },
   ) => {
     const sessionId = providedSessionId || crypto.randomUUID();
     const workspaceId = `workspace-${sessionId}`;
@@ -1120,12 +1123,6 @@ sendFetchPRDetails,
       const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
       if (!spawnArgs) {
         throw new Error('Session spawn arguments were not prepared.');
-      }
-      if (options?.resumePicker) {
-        // Resume into the agent's own conversation picker, scoped to this cwd.
-        // When the daemon still holds the prior session's resume id it resolves
-        // that for a precise resume; otherwise the picker is the safe fallback.
-        spawnArgs.resume_picker = true;
       }
       await ptySpawn({ args: spawnArgs });
       return createdSessionId;
@@ -3292,35 +3289,22 @@ sendFetchPRDetails,
     setSelectedTicketId(null);
   }, [closeDockPanel]);
 
-  // Resume a ticket's agent session. If the bound session is still tracked locally,
-  // focus it — re-spawning its id would append a duplicate local session, and on
-  // re-mount the app's attach path revives the runtime only when it is recoverable
-  // (Claude, or explicitly marked recoverable); a dead non-recoverable pane surfaces
-  // its own close-and-restart prompt. Otherwise reopen the agent in the ticket's
-  // stored cwd, reusing the bound id so the daemon resolves the prior conversation's
-  // resume id (precise resume; the resume picker is the fallback once that id is
-  // gone). Then close the detail view — the resumed session takes focus.
+  // Resume a ticket's agent session. The daemon owns the whole resume composite
+  // (validate → register workspace → add pane → spawn, with rollback), so the
+  // frontend just sends one command and focuses the returned session; the session and
+  // pane arrive through the normal broadcasts (they are already in daemonSessions by
+  // the time the result lands). This replaces a racy frontend orchestration that
+  // seeded a local placeholder and lost it to a broadcast-driven store prune mid-
+  // flight ("Session spawn arguments were not prepared" + rollback). A still-running
+  // assignee is focused, not re-spawned (already_running, resolved daemon-side).
   const handleResumeTicket = useCallback((ticketId: string) => {
-    const ticket = tickets.find((entry) => entry.id === ticketId);
-    if (!ticket) {
-      showError('Ticket not found.');
-      return;
-    }
-    const plan = planTicketResume(ticket, new Set(sessions.map((session) => session.id)));
-    executeTicketResumePlan(plan, {
-      error: showError,
-      focus: (sessionId) => {
-        handleSelectSession(sessionId);
+    sendTicketResume(ticketId)
+      .then((result) => {
+        handleSelectSession(result.sessionId);
         handleCloseTicketDetail();
-      },
-      spawn: (spawnPlan) => {
-        const agent = normalizeSessionAgent(spawnPlan.agent, 'claude');
-        void createWorkspaceSession(spawnPlan.label, spawnPlan.cwd, spawnPlan.sessionId, agent, undefined, false, { resumePicker: true })
-          .then(() => handleCloseTicketDetail())
-          .catch((error) => showError(error instanceof Error ? error.message : 'Failed to resume ticket'));
-      },
-    });
-  }, [tickets, sessions, handleSelectSession, createWorkspaceSession, handleCloseTicketDetail, showError]);
+      })
+      .catch((error) => showError(error instanceof Error ? error.message : 'Failed to resume ticket'));
+  }, [sendTicketResume, handleSelectSession, handleCloseTicketDetail, showError]);
 
   const handleSendToClaude = useCallback((reference: string) => {
     if (!activeSessionId) return;

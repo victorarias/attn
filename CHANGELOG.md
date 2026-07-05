@@ -15,6 +15,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Ticket inbox now reports when the user was last active in the app**, so watching agents can decide whether to notify or hold.
 
 ### Fixed
+- **Resuming a ticket whose session was closed now reliably reopens the agent.** Pressing **Resume** on a ticket whose bound session had been closed (or after an app restart) could fail with "Session spawn arguments were not prepared." and roll the whole operation back — a race between the frontend seeding the new session and the daemon's own state broadcasts. The daemon now owns the entire resume, so Resume reliably reopens the agent in the ticket's directory with its prior conversation restored. If the session is still open, Resume just focuses it instead of opening a duplicate.
 - **Reloading an agent no longer crashes its ticket.** Reloading a delegated agent's session (session actions → Reload) used to look like a process death to the daemon: the bound ticket was stamped Crashed and a pointless reconciliation verdict was posted against a perfectly healthy session. A reload is now a recognized lifecycle transition — the ticket stays in its column and no reconciliation runs. Real crashes are still detected exactly as before.
 - **Reload no longer races the pane teardown.** The reload's own kill could be mistaken for the agent quitting cleanly, closing the pane (and its workspace) out from under the respawn and failing the reload with "unknown workspace". The session now stays put for the whole kill → respawn window.
 

@@ -59,7 +59,7 @@ interface UseUiAutomationBridgeArgs {
   daemonReady?: boolean;
   connectionError?: string | null;
   getActivePaneIdForSession: (session: Session | undefined | null) => string;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, options?: { resumePicker?: boolean; chiefOfStaff?: boolean }) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, options?: { chiefOfStaff?: boolean }) => Promise<string>;
   selectSession: (sessionId: string) => void;
   selectWorkspace: (workspaceId: string) => void;
   moveWorkspaceLeafToWorkspace: (
