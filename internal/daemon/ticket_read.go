@@ -51,9 +51,13 @@ func (d *Daemon) handleTicketInbox(conn net.Conn, msg *protocol.TicketInboxMessa
 	// Refresh the indicator (and cancel any pending countdown if fully drained) — this
 	// is the chokepoint a self-monitoring agent's own watch drains through.
 	d.refreshTicketUnread(sourceSessionID)
+	result := &protocol.TicketInboxResult{Bundles: ticketEventBundlesToProtocol(bundles)}
+	if lastActive := d.lastUserActivityAt(); !lastActive.IsZero() {
+		result.LastUserActivityAt = protocol.Ptr(lastActive.Format(time.RFC3339))
+	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
 		Ok:                true,
-		TicketInboxResult: &protocol.TicketInboxResult{Bundles: ticketEventBundlesToProtocol(bundles)},
+		TicketInboxResult: result,
 	})
 }
 

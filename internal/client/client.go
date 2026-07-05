@@ -349,8 +349,10 @@ func (c *Client) PresentFeedback(presentationID string, seq int) (*protocol.Pres
 
 // TicketInbox reads and consumes the calling session's unread ticket events,
 // bundled by ticket. Reading advances the session's per-ticket cursors, so a
-// second call returns only what landed since.
-func (c *Client) TicketInbox(sourceSessionID string) ([]protocol.TicketEventBundle, error) {
+// second call returns only what landed since. The result also carries
+// last_user_activity_at, the daemon's most recent observed user-presence
+// signal, so a watching agent can decide whether to push or hold.
+func (c *Client) TicketInbox(sourceSessionID string) (*protocol.TicketInboxResult, error) {
 	resp, err := c.send(protocol.TicketInboxMessage{
 		Cmd:             protocol.CmdTicketInbox,
 		SourceSessionID: sourceSessionID,
@@ -361,7 +363,7 @@ func (c *Client) TicketInbox(sourceSessionID string) ([]protocol.TicketEventBund
 	if resp.TicketInboxResult == nil {
 		return nil, errors.New("daemon returned no ticket inbox result")
 	}
-	return resp.TicketInboxResult.Bundles, nil
+	return resp.TicketInboxResult, nil
 }
 
 // TicketList reads the board — every non-archived ticket, newest first, optionally

@@ -280,6 +280,13 @@ model TicketEventBundle {
 // returned, so a second read is empty until new events land.
 model TicketInboxResult {
   bundles: TicketEventBundle[];
+  // last_user_activity_at is the RFC3339 timestamp of the most recent UI-origin
+  // websocket command the daemon observed (session/workspace selection, PR/file
+  // views, terminal input/resize) — a proxy for "the user is at the app right
+  // now". A watching agent can use it to decide whether to push a notification
+  // immediately or hold it until the user is away. Absent when the daemon has
+  // seen no user activity since it started.
+  last_user_activity_at?: string;
 }
 
 // TicketActivityKind is the type of a human-facing history entry in a ticket's
