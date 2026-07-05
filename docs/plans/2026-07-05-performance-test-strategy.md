@@ -24,12 +24,31 @@ Implementation is a separate PR.
   self-hosted savannah runners are org-scoped to `solenesinc`; using them would
   mean **moving `victorarias/attn` into that org**, which is out of scope for
   now — **postponed.** So the Go benchmark job runs on the same shared
-  `ubuntu-latest` runners as the rest of CI. Consequence: those runners are
-  CPU-noisy, so **`allocs/op` (and `B/op`) is the only trustworthy CI signal**;
-  ns/op is captured best-effort as a coarse trend but must not be read as
-  precise. If we later move to solenesinc, the dedicated runners would make
-  ns/op meaningful and unlock a promote-to-gate story — tracked as a follow-up,
-  not a blocker.
+  `ubuntu-latest` runners as the rest of CI. `allocs/op`/`B/op` are deterministic
+  regardless; see the next bullet for how we make ns/op honest on a noisy box.
+- **Beat cross-machine noise two ways, per layer.** The noise in ns/op and RSS is
+  *cross-machine* variance; a machine is consistent with itself. So:
+  - **Go micro-benches → same-machine A/B, no registry.** Run `main` and the PR
+    head back-to-back *in the same CI job on the same runner* and `benchstat` the
+    delta. Both revisions share the identical box, so absolute noise cancels and
+    the delta is meaningful — this makes even ns/op a usable signal on shared
+    runners. `allocs/op` stays the primary trend; ns/op-delta is now a real
+    secondary signal instead of noise.
+  - **Macro RSS/soak → a per-machine timings registry.** You can't clean-A/B a
+    slow, single-tenant macro run, and you want long-term *drift*, not just
+    PR-vs-base. Key baselines by a machine fingerprint (`hw.model` + CPU brand +
+    cores + RAM + OS + arch) and compare each run to *that machine's* stored
+    baseline within a band. Any dev self-baselines instead of chasing "Victor's
+    number."
+  - **Registry storage → local cache + committed canonical baselines.** Each
+    machine writes its own baseline to a gitignored local cache (no repo churn);
+    a small set of known reference machines have their baseline *committed* for
+    review. (Chosen over both all-in-repo JSON — merge/churn — and victor-cloud
+    object storage — infra to wire; the latter stays a later option if we want
+    central drift dashboards.)
+  - Moving attn to `solenesinc` (dedicated savannah runners) remains the
+    postponed upgrade that would make raw ns/op reliable and unlock a
+    promote-to-gate story — non-blocking.
 
 Scope: **performance = CPU (latency/throughput) AND memory** (resident
 footprint, allocation churn, long-session growth/leaks). Memory is first-class,
@@ -45,16 +64,18 @@ hot surfaces and the same measurement tooling.
 
 ## TL;DR — the plan
 
-1. **3 Go micro-benchmarks, recorded as trends.** PTY output datapath,
-   transcript parser, WS event marshal. Run on the GitHub-hosted shared runners
-   we already have; watch `allocs/op`/`B/op` (deterministic even on a noisy box)
-   as the primary signal and treat ns/op as a coarse, best-effort trend only. No
-   hard gate yet — `allocs/op` is the candidate to promote later.
-2. **Adopt the existing real-app harness as a Mac-only trend.**
-   `scenario-perf-baseline.mjs` already measures RSS, the warm-set per-pane cost,
-   and the streaming memory balloon. It cannot run on any runner we have (no
-   GPU/packaged app; the fleet is Linux) — so it's a developer-run/nightly-Mac
-   artifact with a committed baseline.
+1. **3 Go micro-benchmarks, run same-machine A/B.** PTY output datapath,
+   transcript parser, WS event marshal. In one CI job, benchmark `main` and the
+   PR head on the same runner and `benchstat` the delta — absolute noise cancels,
+   so `allocs/op`/`B/op` (deterministic) *and* the ns/op-delta are usable even on
+   shared runners. Trend-only to start; `allocs/op` is the promote-to-gate
+   candidate. No cross-machine registry needed here.
+2. **Adopt the existing real-app harness as a Mac-only trend, backed by a
+   per-machine registry.** `scenario-perf-baseline.mjs` already measures RSS, the
+   warm-set per-pane cost, and the streaming balloon. It can't run on any runner
+   we have (no GPU/packaged app; the fleet is Linux) — so it's a developer-run /
+   nightly-Mac artifact that compares each run to *that machine's* stored baseline
+   (fingerprint-keyed), not a single absolute number.
 3. **Add the leak soak** on top of the soak driver (#470) to catch long-session
    growth — the failure users actually hit — measuring *retained-after-teardown*,
    not peak.
@@ -111,10 +132,13 @@ The runner we have, and the one we don't:
 - **GitHub-hosted `ubuntu-latest` shared runners** run today's CI
   (`.github/workflows/ci.yml`) — plus one `macos-14` only in release-preflight.
   This is where the Go benchmark job will live. Shared runners are **CPU-noisy**:
-  ns/op swings run-to-run (neighbours on the box, frequency scaling). A wall-clock
-  threshold here is a coin-flip → flaky red → ignored suite (*the* classic
-  perf-CI trap). So on these runners **only `allocs/op`/`B/op` are trustworthy**;
-  ns/op is a coarse trend at best.
+  a given box's *absolute* ns/op swings run-to-run (neighbours, frequency
+  scaling), so an absolute wall-clock threshold is a coin-flip → flaky red →
+  ignored suite (*the* classic perf-CI trap). `allocs/op`/`B/op` are deterministic
+  and immune. **The fix for ns/op is same-machine A/B** (§2): benchmark base and
+  PR in the *same job on the same box* and compare the delta — absolute noise
+  cancels, so the delta is usable even here (next subsection). No absolute-timing
+  gate on a shared runner, ever.
 - **Self-hosted savannah runners** exist (`victor-cloud`:
   `savannah-github-runners-*`): 4 ephemeral **Linux x64** VMs, 8 vCPU / 32 GB,
   dedicated and network-isolated — a *quiet* box where even ns/op would be a
@@ -138,13 +162,57 @@ adding a trend/gate job is a small, contained workflow addition — not new infr
 
 **Design rule that falls out of this:** the deterministic quantity
 (`allocs/op`, and weakly `B/op`) is trustworthy on *any* runner and is the
-primary signal; ns/op is not trustworthy on the shared runners we have (it would
-be on a dedicated box, if we ever move to one); RSS is Mac-only and always a
-trend. Match each metric to a runner that can read it honestly — and where a
-runner can't (ns/op on shared CI), keep the metric as background context, never
-a decision input.
+primary signal. For the machine-dependent metrics, don't compare absolutes
+across machines — compare *deltas on the same machine*: same-job A/B for CI
+timing, a per-machine baseline for macro RSS. An absolute ns/op or RSS number
+from one box is never a decision input on another.
 
-### 2. Gates vs trends — pick per-metric, not per-test
+### 2. Killing cross-machine noise — same-machine A/B and a per-machine registry
+
+The noise in ns/op and RSS is almost entirely **cross-machine** variance; a
+given machine is fairly consistent with itself. That gives two clean fixes, one
+per layer — and note **`allocs/op` needs neither** (it's machine-independent, so
+a single committed baseline covers every box).
+
+**(a) Go micro-benches → same-machine A/B, no registry.** In one CI job, check
+out and benchmark `main`, then the PR head, on the *same* ephemeral runner, and
+`benchstat` the two. Because both revisions ran on the identical box in one
+session, the absolute noise cancels and the *delta* is meaningful — this makes
+even ns/op usable on a shared runner. It's the standard continuous-benchmark
+move: cheap (2× bench time), no fingerprinting, no persistence, no
+re-baselining. It answers "did *this PR* change it," which is exactly the
+per-PR question.
+
+**(b) Macro RSS/soak → a per-machine timings registry.** You can't clean-A/B a
+macro run — it's slow, single-tenant, and the question is long-term *drift*
+("has idle RSS crept up on this Mac over months"), not just PR-vs-base. So
+persist a baseline keyed by a **machine fingerprint** (`hw.model` + CPU brand +
+core count + RAM + OS version + arch) and compare each run to *that machine's*
+entry within a generous band. Every entry carries `{metric, value, band, commit,
+date}`. The win: any developer (or you on a second Mac) self-baselines instead
+of comparing against one person's absolute numbers.
+
+**Storage: local cache + committed canonical baselines.** Each machine writes
+its own entry to a **gitignored local cache** (zero repo churn, no merge
+conflicts when many machines write); a small set of **known reference machines**
+have their baseline **committed** to the repo for review and as the shared
+reference point. Rejected alternatives: all-baselines-in-repo JSON (commit churn
++ conflicts) and victor-cloud object storage (infra to wire) — the latter stays
+a later option if we ever want a central cross-machine drift dashboard.
+
+**Registry traps to design around:**
+- **First run is record-only.** A machine with no entry can't compare; it seeds
+  its baseline and compares on subsequent runs.
+- **Re-baseline on hardware/OS change.** A fingerprint change (new Mac, OS
+  upgrade) invalidates the old entry — needs an explicit `--rebaseline` path, not
+  a silent stale compare.
+- **Laptop thermal throttling is real within-machine noise.** Bands must absorb
+  it; a plugged-in, thermally-settled run is the honest baseline. Sample a window
+  (the harness already supports `--reclaim-hold-ms`) rather than one spot read.
+- **The registry is for *drift*, not a hard gate.** Same trend-only stance: it
+  flags "this machine drifted past its band," a human looks; it never auto-fails.
+
+### 3. Gates vs trends — pick per-metric, not per-test
 
 - A **gate** fails the build. It must be deterministic and have a *generous*
   threshold (catch a 2× regression, not a 5% wobble). Only `allocs/op` qualifies
@@ -162,7 +230,7 @@ gate first if passive trend-watching lets a regression slip through. Starting
 trend-only means the perf suite can never be the reason a good PR goes red —
 which is the right way to earn trust in it before giving it a veto.
 
-### 3. Allocations are the deterministic CPU-and-memory proxy
+### 4. Allocations are the deterministic CPU-and-memory proxy
 
 `-benchmem` reports `B/op` and `allocs/op`. `allocs/op` is essentially
 input-deterministic — it doesn't care how busy the runner is. It's a great proxy
@@ -177,7 +245,7 @@ delta with a confidence interval, so it separates signal from noise even on a
 shared runner — but it needs multiple runs and a baseline, which is more suited
 to a nightly/manual "did this PR change anything" check than a hard gate.
 
-### 4. Fixture realism or don't bother
+### 5. Fixture realism or don't bother
 
 A transcript-parser benchmark over a 3-line file proves nothing — the whole cost
 is the O(file-size) scan of real transcripts (~23 MiB Claude / ~6.8 MiB Codex
@@ -188,7 +256,7 @@ but-large) fixture, or the benchmark is theater. Corollary: keep the fixture
 *stable* — regenerating it every run reintroduces noise and destroys
 comparability.
 
-### 5. Memory tests measure the RIGHT number, and it's usually "retained"
+### 6. Memory tests measure the RIGHT number, and it's usually "retained"
 
 The roadmap already learned this the hard way: streaming output balloons
 WebContent 250 MB → 1148 MB **and does not recover** because WASM linear memory
@@ -206,7 +274,7 @@ retained memory**, not a single before/after. That's what the soak driver
 (#470) enables at the macro layer, and what a Go heap-growth test does at the
 micro layer.
 
-### 6. What is NOT worth measuring (so we don't waste maintenance)
+### 7. What is NOT worth measuring (so we don't waste maintenance)
 
 - **ns/op as a CI gate.** Noise. Trend only.
 - **Daemon steady-state heap.** Measured at 27 MB RSS / ~6 MB heap — there's
@@ -236,10 +304,10 @@ promote-to-gate candidate). "Where" is the hard runner constraint from §1.
 
 | # | Test | Layer | Axis | Where it runs | Signal (trend) | Rank |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | PTY output datapath allocations | Go micro | CPU+mem | GitHub CI (shared) | allocs/op (ns/op coarse) | ★★★★★ |
-| 2 | Transcript parser over a real-size fixture | Go micro | CPU+mem | GitHub CI (shared) | allocs/op, B/op (ns/op coarse) | ★★★★★ |
-| 3 | Real-app RSS baseline (idle @ N sessions + per-pane) | Macro | Memory | Dev / nightly Mac | RSS, per-live-pane slope | ★★★★☆ |
-| 4 | Streaming/long-session leak soak (retained RSS) | Macro | Memory | Dev / nightly Mac | retained RSS slope | ★★★★☆ |
+| 1 | PTY output datapath allocations | Go micro | CPU+mem | GitHub CI (shared, A/B) | allocs/op + ns/op-delta | ★★★★★ |
+| 2 | Transcript parser over a real-size fixture | Go micro | CPU+mem | GitHub CI (shared, A/B) | allocs/op, B/op + ns/op-delta | ★★★★★ |
+| 3 | Real-app RSS baseline (idle @ N sessions + per-pane) | Macro | Memory | Dev / nightly Mac (registry) | RSS, per-live-pane slope | ★★★★☆ |
+| 4 | Streaming/long-session leak soak (retained RSS) | Macro | Memory | Dev / nightly Mac (registry) | retained RSS slope | ★★★★☆ |
 | 5 | WS outbound event marshal allocations | Go micro | CPU+mem | GitHub CI (shared) | allocs/op | ★★★☆☆ |
 | 6 | Store hot-path query benchmarks (List/Get) | Go micro | CPU+mem | GitHub CI (shared) | allocs/op | ★★★☆☆ |
 | 7 | Classifier deterministic-slice extraction | Go micro | CPU+mem | GitHub CI (shared) | allocs/op, B/op | ★★☆☆☆ |
@@ -255,11 +323,12 @@ Tests #1, #2, #4 are the starter set (see below); #1–#2 gate-promotable later.
   here taxes *every* streaming session continuously.
 - **What "good" looks like:** with debug logging off, forwarding a chunk costs a
   small, fixed `allocs/op` (ideally the base64 wire payload and little else). The
-  trend watches `allocs/op` against a committed baseline (and is the first
-  candidate to promote to a hard ceiling).
+  primary trend watches `allocs/op` against a committed baseline (and is the first
+  candidate to promote to a hard ceiling); the same-machine A/B (§2) also yields a
+  usable ns/op-delta as a secondary signal.
 - **The trap it avoids:** exactly the WS-4 regression — an un-gated `logf`
   silently reintroduced, doing `string(data)` + preview + a mutex-held disk
-  write per chunk. Invisible in ns/op noise; obvious in `allocs/op`.
+  write per chunk. Invisible in raw cross-machine ns/op; obvious in `allocs/op`.
 - **Starting point already exists:** `internal/daemon/ws_pty_logging_bench_test.go`
   benchmarks the log line. Extend it (or add a sibling) to cover the *forward*
   path end-to-end (marshal + gate), and wire an `allocs/op` assertion.
@@ -274,10 +343,11 @@ Tests #1, #2, #4 are the starter set (see below); #1–#2 gate-promotable later.
 - **What "good" looks like:** parsing a large fixture allocates roughly in
   proportion to *what it returns* (last assistant/user turn), not to whole-file
   size — i.e. it proves the tail-read win (WS-6) if/when we do it, and guards it
-  after. Track `allocs/op` and `B/op` (deterministic); trend ns/op via benchstat.
+  after. Track `allocs/op` and `B/op` (deterministic) as the primary signal; the
+  same-machine A/B (§2) makes the ns/op-delta trustworthy too.
 - **The trap it avoids:** (a) a toy fixture that hides the O(file-size) cost —
-  commit a realistic multi-MB transcript; (b) gating ns/op and getting flaky red
-  on shared CI.
+  commit a realistic multi-MB transcript; (b) reading *raw cross-machine* ns/op as
+  signal — always compare the A/B delta, never one runner's absolute number.
 - **Cost/upkeep:** low-medium. One committed fixture (keep it stable), one
   benchmark. High leverage because this path is on every turn.
 
@@ -291,8 +361,10 @@ Tests #1, #2, #4 are the starter set (see below); #1–#2 gate-promotable later.
   climb. The harness already computes all of this
   (`scenario-perf-baseline.mjs`: `headline.totalRssMb`, `warmSweep.perLivePane*`).
 - **The trap it avoids:** treating a noisy, single-tenant macro number as a
-  per-PR gate. It's a **trend**: run it on a Mac (dev or a self-hosted runner),
-  record the headline JSON, alert only on a large delta. Also: it must sum the
+  per-PR gate, *and* comparing across machines. It's a **per-machine trend**: run
+  it on a Mac (there is no Mac runner in the fleet — this is a dev/nightly-Mac
+  artifact), compare against *that machine's* fingerprint-keyed baseline in the
+  registry (§2), alert only on a large same-machine delta. Also: it must sum the
   *whole process tree* (daemon + one worker per session + reparented WebKit
   PIDs) or the frontend win/regression is invisible — the harness already does
   this correctly.
@@ -312,8 +384,9 @@ Tests #1, #2, #4 are the starter set (see below); #1–#2 gate-promotable later.
 - **How:** build on the soak driver (`run-soak.mjs`, #470) + the baseline
   scenario's `--real-cmd` / `--reclaim-hold-ms` decay sampler. Emit an
   `ATTN_VERDICT` with `ok: false` when the retained-RSS slope exceeds a
-  threshold, so the soak run self-reports. Measure retained-after-teardown and a
-  decay window — never peak (§5).
+  threshold, so the soak run self-reports. Compare the retained baseline against
+  *that machine's* registry entry (§2). Measure retained-after-teardown and a
+  decay window — never peak (§6).
 - **The trap it avoids:** (a) asserting on peak RSS (transient, one-way
   allocator makes it meaningless); (b) too-tight a threshold on a lazily-
   scavenged OS → false leak. Use a generous band + a decay hold.
@@ -349,7 +422,7 @@ Tests #1, #2, #4 are the starter set (see below); #1–#2 gate-promotable later.
 - **What it protects:** the just-landed reconcile change (deterministic
   transcript slice fed to one cheap model call). Protects the *slice extraction*
   we own — **not** the LLM call (that cost is `claude -p`, untestable as a
-  benchmark, §6).
+  benchmark, §7).
 - **What "good" looks like:** slice extraction over a large transcript is cheap
   and bounded; it's essentially a specialized case of test #2.
 - **Cost/upkeep:** low, but overlaps test #2's fixture and coverage — build only
@@ -382,13 +455,16 @@ Tests #1, #2, #4 are the starter set (see below); #1–#2 gate-promotable later.
 **Starter set (first implementation batch — decided 2026-07-05):**
 
 - **#1 PTY datapath allocations** (extend the existing bench; record `allocs/op`
-  as the primary trend, ns/op coarse — on GitHub-hosted shared runners)
-- **#2 Transcript parser over a real fixture** (`allocs/op` + `B/op` + ns/op
-  trend; one committed realistic transcript)
+  as the primary trend + a same-machine A/B ns/op-delta — on GitHub-hosted shared
+  runners)
+- **#2 Transcript parser over a real fixture** (`allocs/op` + `B/op` primary +
+  same-machine A/B ns/op-delta; one committed realistic transcript)
 - **#4 Streaming/long-session leak soak** on the #470 driver with a retained-RSS
-  soft verdict — the "noticed by feel" memory-creep guard (dev/nightly Mac)
+  soft verdict compared to the machine's registry entry — the "noticed by feel"
+  memory-creep guard (dev/nightly Mac)
 - **#3 Real-app RSS baseline** adopted as a *documented dev-run/nightly trend*
-  (the scenario already exists — this is mostly "record a baseline + a runbook")
+  keyed to the per-machine registry (the scenario already exists — this is mostly
+  "record a fingerprint-keyed baseline + a runbook")
 
 That's the two hottest owned CPU/alloc paths, the dominant memory failure mode
 (long-session retained growth), and the per-session/idle RSS baseline. All
@@ -396,17 +472,21 @@ trend-only to start; `allocs/op` on #1/#2 is the promote-to-gate candidate.
 
 The enabling infra the starter set needs:
 - a small workflow job (GitHub-hosted `ubuntu-latest`, same as the rest of CI)
-  that runs `go test -run='^$' -bench=. -benchmem` on the perf packages and
-  **records** the numbers (artifact / `benchstat` vs a stored baseline), watching
-  `allocs/op`/`B/op` and treating ns/op as coarse. No failing threshold yet —
-  trend-only per the decision — but structured so an `allocs/op` ceiling can be
-  turned on later without reshaping the job;
+  that runs the perf benchmarks **twice on the one runner — `main` then the PR
+  head — and `benchstat`s the delta** (same-machine A/B). This makes `allocs/op`/
+  `B/op` *and* the ns/op-delta usable despite shared-runner noise. No failing
+  threshold yet — trend-only per the decision — but structured so an `allocs/op`
+  ceiling can be turned on later without reshaping the job;
 - one committed realistic transcript fixture (stable, multi-MB);
+- a per-machine timings registry: a fingerprint helper (`hw.model` + CPU + cores
+  + RAM + OS + arch) and a gitignored local baseline cache, with a committed
+  canonical baseline for a small set of reference machines;
 - a retained-RSS verdict added to the soak path (reuse `--reclaim-hold-ms` +
-  `emitVerdict`) so `run-soak.mjs` self-reports a growth-slope violation;
+  `emitVerdict`) so `run-soak.mjs` self-reports a growth-slope violation against
+  the machine's registry entry;
 - a short runbook: "before merging a memory-risky PR, run
   `pnpm run real-app:scenario-perf-baseline` on dev and compare the headline to
-  the recorded baseline; for long-session risk, run the leak soak."
+  *this machine's* recorded baseline; for long-session risk, run the leak soak."
 
 **Fuller tier (add as the surfaces prove worth guarding):** #5 WS marshal, #6
 store queries, #7 classifier slice, #8 spawn latency, #9 JS-heap. Each is a
@@ -423,17 +503,24 @@ render-timing, and any end-to-end classifier *timing* benchmark.
 1. **Gate strictness → trend-only.** Nothing fails a PR on a perf number to
    start. `allocs/op` (deterministic on any runner) is the candidate to promote
    to a hard gate later if passive trend-watching lets a regression slip.
-2. **Macro RSS/soak home → dev-run + recorded baseline.** No Mac exists in the
-   runner fleet (savannah is Linux) and GitHub CI has no GPU/packaged app, so the
-   packaged-app harness stays a developer/nightly-Mac artifact with a committed
-   baseline. A self-hosted Mac + nightly cron remains a future option if
-   trend-watching proves too manual.
-3. **Go benchmark runner → GitHub-hosted shared runners.** The self-hosted
-   savannah runners would require moving `victorarias/attn` into the `solenesinc`
-   org; **postponed** — we roll with the shared runners we have. This is why
-   `allocs/op` is the only trustworthy CI signal and ns/op stays coarse. Revisit
-   if/when attn moves orgs.
-4. **Starter scope → 3 tests + adopted baseline, including the leak soak** (#1,
+2. **Macro RSS/soak home → dev-run + per-machine registry baseline.** No Mac
+   exists in the runner fleet (savannah is Linux) and GitHub CI has no GPU/
+   packaged app, so the packaged-app harness stays a developer/nightly-Mac
+   artifact whose runs compare against *that machine's* fingerprint-keyed baseline
+   (registry: local cache + committed canonical). A self-hosted Mac + nightly cron
+   remains a future option if trend-watching proves too manual.
+3. **Go benchmark runner → GitHub-hosted shared runners, same-machine A/B.** The
+   self-hosted savannah runners would require moving `victorarias/attn` into the
+   `solenesinc` org; **postponed** — we roll with the shared runners we have.
+   `allocs/op`/`B/op` are deterministic there, and running `main` vs the PR head
+   back-to-back on the same runner (`benchstat` the delta) rescues ns/op as a real
+   secondary signal despite cross-machine noise. Revisit if/when attn moves orgs.
+4. **Beat noise per-layer → A/B for micro, registry for macro.** Go micro-benches
+   use same-machine A/B (no registry needed — the machine is consistent with
+   itself); macro RSS/soak use a per-machine fingerprint-keyed registry, stored as
+   a gitignored local cache plus committed canonical baselines for reference
+   machines. (Chosen over all-in-repo JSON and victor-cloud object storage.)
+5. **Starter scope → 3 tests + adopted baseline, including the leak soak** (#1,
    #2, #4, plus #3 adopted). See the starter set above.
 
 **Postponed (not a blocker):** moving attn to `solenesinc` to use the dedicated
