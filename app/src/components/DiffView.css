@@ -1,0 +1,321 @@
+/* app/src/components/DiffView.css
+   Styles for DiffView (@pierre/diffs) and its comment-thread/draft-form
+   children (DiffCommentThread). Co-located with the component (imported by
+   DiffView.tsx) so any host that renders DiffView — DiffDetailPanel, the
+   Present reader window, etc. — gets these styles, rather than relying on
+   a host to separately import them.
+
+   The diff renders inside a shadow-DOM custom element that ships its own
+   styles. Comment threads and the draft form are slotted (light-DOM)
+   children, so they are styled here with the app's theme variables.
+*/
+
+.diff-view {
+  /* Drives the diff code font size; inherits across the shadow boundary.
+     Tied to the global UI scale; the explicit fontSize prop overrides it. */
+  --diffs-font-size: calc(13px * var(--ui-scale));
+}
+
+.diff-view-scroller {
+  min-height: 0;
+}
+
+/* --- Comment thread (one anchor = one thread) --- */
+.diff-comment-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.diff-comment {
+  background: var(--color-bg-button);
+  border-left: 3px solid #3b82f6;
+  border-radius: 0 4px 4px 0;
+  padding: 6px 10px;
+}
+
+.diff-comment.resolved {
+  border-left-color: #22c55e;
+  background: var(--color-bg-elevated);
+}
+
+.diff-comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.diff-comment-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diff-comment-author {
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.diff-comment-resolved {
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.diff-comment-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.diff-comment-actions button {
+  background: transparent;
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-text-secondary);
+  font-size: calc(11px * var(--ui-scale));
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.diff-comment-actions button:hover {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+/* Colored action buttons share one border/color/hover pattern; only the accent
+   color varies, carried by --action-color. (edit-btn keeps the neutral base.) */
+.diff-comment-actions .resolve-btn { --action-color: #22c55e; }
+.diff-comment-actions .delete-btn { --action-color: #ef4444; }
+.diff-comment-actions .send-btn { --action-color: #d97706; }
+
+.diff-comment-actions .resolve-btn,
+.diff-comment-actions .delete-btn,
+.diff-comment-actions .send-btn {
+  border-color: var(--action-color);
+  color: var(--action-color);
+}
+
+.diff-comment-actions .resolve-btn:hover,
+.diff-comment-actions .delete-btn:hover,
+.diff-comment-actions .send-btn:hover {
+  background: var(--action-color);
+  color: #ffffff;
+}
+
+.diff-comment-content {
+  color: var(--color-text-primary);
+  font-size: calc(13px * var(--ui-scale));
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.diff-comment-content p {
+  margin: 0 0 8px 0;
+  white-space: pre-wrap;
+}
+
+.diff-comment-content p:last-child {
+  margin-bottom: 0;
+}
+
+.diff-comment-content code {
+  background: var(--color-border);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+  font-size: calc(12px * var(--ui-scale));
+}
+
+.diff-comment-content pre {
+  background: var(--color-border);
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.diff-comment-content pre code {
+  background: none;
+  padding: 0;
+}
+
+.diff-comment-content ul,
+.diff-comment-content ol {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.diff-comment-content li {
+  margin: 4px 0;
+}
+
+.diff-comment-content a {
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.diff-comment-content a:hover {
+  text-decoration: underline;
+}
+
+.diff-comment-content blockquote {
+  border-left: 3px solid var(--color-border-hover);
+  margin: 8px 0;
+  padding-left: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.diff-comment-content strong {
+  font-weight: 600;
+}
+
+/* --- New comment / edit form --- */
+.diff-comment-form {
+  background: var(--color-bg-button);
+  border-left: 3px solid #6366f1;
+  border-radius: 0 4px 4px 0;
+  padding: 6px 10px;
+}
+
+.diff-comment-textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 8px;
+  background: var(--color-bg-editor);
+  border: 1px solid var(--color-border-hover);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: calc(13px * var(--ui-scale));
+  line-height: 1.4;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.diff-comment-textarea:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.diff-comment-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.diff-comment-form-actions button {
+  background: transparent;
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-text-secondary);
+  font-size: calc(11px * var(--ui-scale));
+  padding: 2px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.diff-comment-form-actions button:hover {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.diff-comment-form-actions .save-btn {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+.diff-comment-form-actions .save-btn:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+/* --- Selection action popup (Send to Claude / Add comment) --- */
+.diff-selection-popup {
+  position: absolute;
+  z-index: 100;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-hover);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.diff-selection-popup-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.diff-selection-popup-btn:hover {
+  background: var(--color-border);
+}
+
+.diff-selection-popup-btn.send {
+  color: #d4a27f;
+}
+
+.diff-selection-popup-btn.comment {
+  color: #60a5fa;
+}
+
+/* Comments that cannot render inline, either because their anchor no longer
+   exists or Hunks mode collapsed it. Keep them collapsed at the top so they are
+   never silently lost; click to expand. */
+.diff-stale-comments {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow-y: auto;
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.diff-stale-comments-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: #d9a441;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.diff-stale-comments-toggle:hover {
+  background: var(--color-bg-button);
+}
+
+.diff-stale-caret {
+  display: inline-block;
+  width: 10px;
+  color: var(--color-text-secondary);
+}
+
+.diff-stale-comments-body {
+  border-top: 1px solid var(--color-border);
+}

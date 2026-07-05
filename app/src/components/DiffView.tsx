@@ -37,6 +37,7 @@ import { buildLineRef, commentLineRef, isOriginalSideComment } from '../utils/re
 import { hashContent } from '../utils/reviewHash';
 import { ClaudeIcon } from './icons/ClaudeIcon';
 import { DiffCommentThread } from './DiffCommentThread';
+import './DiffView.css';
 
 // Metadata carried on each native line annotation: every saved comment sharing
 // the same (side, anchor line) is grouped into one thread, plus an optional
