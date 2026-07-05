@@ -20,6 +20,7 @@ import { collectWorkspaceLayoutDiagnostics, projectWorkspaceBounds } from '../ut
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
 import type { BlockStateSnapshot } from '../components/GhosttyTerminal';
+import { isPresentWindowAction } from './usePresentAutomationBridge';
 
 const UI_AUTOMATION_REQUEST_EVENT = 'attn://ui-automation/request';
 const UI_AUTOMATION_RESPONSE_EVENT = 'attn://ui-automation/response';
@@ -2941,6 +2942,15 @@ export function useUiAutomationBridge({
     void emit(UI_AUTOMATION_READY_EVENT, { ready: true });
     const unlistenPromise = listen<AutomationRequest>(UI_AUTOMATION_REQUEST_EVENT, async (event) => {
       const request = event.payload;
+      // The Rust automation server (ui_automation.rs) broadcasts every request
+      // to ALL webview windows and resolves on the FIRST response with a
+      // matching request_id — so exactly one listener must answer any given
+      // request. present_window_* actions belong to the present window's OWN
+      // bridge (usePresentAutomationBridge); ignore them here without
+      // emitting a response so that bridge's answer is the only one.
+      if (isPresentWindowAction(request.action)) {
+        return;
+      }
       let response: AutomationResponse;
       try {
         const result = await handleAutomationRequestRef.current(request);

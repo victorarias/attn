@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useDaemonSocket } from '../../hooks/useDaemonSocket';
+import { usePresentAutomationBridge } from '../../hooks/usePresentAutomationBridge';
 import { DiffView } from '../DiffView';
 import type {
   Presentation,
@@ -113,6 +114,12 @@ function submittedToReviewComment(comment: PresentationComment): ReviewComment {
 }
 
 export function PresentRoot() {
+  // Self-gating (isTauri() + __ATTN_AUTOMATION_ENABLED) — a no-op outside a
+  // Tauri automation-enabled build. See usePresentAutomationBridge for the
+  // present_window_* action set and why this window needs its own bridge
+  // rather than sharing the main window's.
+  usePresentAutomationBridge();
+
   const presentationId = useMemo(
     () => new URLSearchParams(window.location.search).get('presentation'),
     [],

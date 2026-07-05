@@ -18,6 +18,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Fixed
 - **Reloading an agent no longer crashes its ticket.** Reloading a delegated agent's session (session actions → Reload) used to look like a process death to the daemon: the bound ticket was stamped Crashed and a pointless reconciliation verdict was posted against a perfectly healthy session. A reload is now a recognized lifecycle transition — the ticket stays in its column and no reconciliation runs. Real crashes are still detected exactly as before.
 - **Reload no longer races the pane teardown.** The reload's own kill could be mistaken for the agent quitting cleanly, closing the pane (and its workspace) out from under the respawn and failing the reload with "unknown workspace". The session now stays put for the whole kill → respawn window.
+- **The presentation review window now closes when you submit.** Submitting a review left the window open; it now closes automatically once your review is handed back.
 
 ## [2026-07-04]
 
