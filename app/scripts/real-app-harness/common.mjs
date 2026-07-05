@@ -95,6 +95,12 @@ Options:
 // naive line-oriented parsing never splits it.
 export const ATTN_VERDICT_PREFIX = 'ATTN_VERDICT ';
 
+// Contract: verdict.firstFailure is capped at this length (see ATTN_VERDICT_PREFIX
+// above) so it can never contain a newline or otherwise break the one-line
+// contract. Shared by every producer of a firstFailure field (scenarioRunner.mjs,
+// rssBaselineVerdict.mjs).
+export const FIRST_FAILURE_MAX_LENGTH = 300;
+
 export function formatVerdictLine(verdict) {
   return `${ATTN_VERDICT_PREFIX}${JSON.stringify(verdict)}`;
 }

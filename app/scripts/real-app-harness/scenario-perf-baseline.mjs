@@ -37,7 +37,7 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, createSessionAndWaitForInitialPane, emitVerdict, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { profileForAppPath, socketPathForProfile } from './harnessProfile.mjs';
-import { getMachineFingerprint, loadBaseline, saveBaseline } from './machineRegistry.mjs';
+import { getMachineFingerprint, loadBaseline, recordOrCompareBaseline } from './machineRegistry.mjs';
 import { buildBaselineVerdict, evaluateRssBaseline } from './rssBaselineVerdict.mjs';
 import { delay, captureWebKitPids, snapshot, classRssMb, sampleWindow, readLiveDaemonPid, stopDaemon, paneIdForSession, closeSessions, fillAllPanes } from './perfMeasure.mjs';
 
@@ -613,15 +613,7 @@ async function main() {
       record: options.recordBaseline,
       recordedAt: new Date().toISOString(),
     });
-    if (rssEvaluation.baselineToSave) {
-      saveBaseline(fingerprint.key, rssEvaluation.baselineToSave);
-      console.log(`[perf] recorded baseline for machine ${fingerprint.key}: ${summary.headline.totalRssMb} MB`);
-    } else {
-      console.log(
-        `[perf] compared to baseline for machine ${fingerprint.key}: ${rssEvaluation.comparison.value} MB `
-        + `vs ${rssEvaluation.comparison.baseline} MB (${rssEvaluation.comparison.reason}, tolerance ${rssEvaluation.comparison.tolerancePct}%)`,
-      );
-    }
+    recordOrCompareBaseline({ evaluation: rssEvaluation, key: fingerprint.key });
     summary.baselineComparison = rssEvaluation.comparison;
   } finally {
     // Close every session we created so they don't persist into the next run.
