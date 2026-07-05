@@ -66,8 +66,6 @@ export function buildCheatsheet(): CheatsheetCategory[] {
     {
       title: 'Review & Git',
       rows: [
-        { label: 'Diff panel', combos: [fromId('dock.diff')] },
-        { label: 'Diff detail', combos: [fromId('dock.diffDetail')] },
         { label: 'PRs drawer', combos: [fromId('dock.attention')] },
         { label: 'Refresh PRs', combos: [fromId('session.refreshPRs')] },
       ],

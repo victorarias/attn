@@ -53,15 +53,7 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdSubscribeGitStatus,
 		protocol.CmdUnsubscribeGitStatus,
 		protocol.CmdGetFileDiff,
-		protocol.CmdGetBranchDiffFiles,
 		protocol.CmdGetRepoInfo,
-		protocol.CmdGetReviewState,
-		protocol.CmdMarkFileViewed,
-		protocol.CmdAddComment,
-		protocol.CmdUpdateComment,
-		protocol.CmdResolveComment,
-		protocol.CmdDeleteComment,
-		protocol.CmdGetComments,
 		protocol.CmdSpawnSession,
 		protocol.CmdAttachSession,
 		protocol.CmdDetachSession,
@@ -112,23 +104,11 @@ func TestCommandMetaExamples(t *testing.T) {
 }
 
 type stubRemoteCommandResolver struct {
-	path    map[string]string
-	review  map[string]string
-	comment map[string]string
+	path map[string]string
 }
 
 func (s stubRemoteCommandResolver) EndpointIDForPath(path string) (string, bool) {
 	endpointID, ok := s.path[path]
-	return endpointID, ok
-}
-
-func (s stubRemoteCommandResolver) EndpointIDForReview(reviewID string) (string, bool) {
-	endpointID, ok := s.review[reviewID]
-	return endpointID, ok
-}
-
-func (s stubRemoteCommandResolver) EndpointIDForComment(commentID string) (string, bool) {
-	endpointID, ok := s.comment[commentID]
 	return endpointID, ok
 }
 
@@ -137,22 +117,10 @@ func TestRemoteCommandScopedEndpointID(t *testing.T) {
 		path: map[string]string{
 			"/srv/repo": "endpoint-path",
 		},
-		review: map[string]string{
-			"review-1": "endpoint-review",
-		},
-		comment: map[string]string{
-			"comment-1": "endpoint-comment",
-		},
 	}
 
 	if endpointID, ok := remoteCommandScopedEndpointID(&protocol.GetFileDiffMessage{Directory: "/srv/repo"}, resolver); !ok || endpointID != "endpoint-path" {
 		t.Fatalf("remoteCommandScopedEndpointID(path) = (%q, %v), want (%q, true)", endpointID, ok, "endpoint-path")
-	}
-	if endpointID, ok := remoteCommandScopedEndpointID(&protocol.AddCommentMessage{ReviewID: "review-1"}, resolver); !ok || endpointID != "endpoint-review" {
-		t.Fatalf("remoteCommandScopedEndpointID(review) = (%q, %v), want (%q, true)", endpointID, ok, "endpoint-review")
-	}
-	if endpointID, ok := remoteCommandScopedEndpointID(&protocol.ResolveCommentMessage{CommentID: "comment-1"}, resolver); !ok || endpointID != "endpoint-comment" {
-		t.Fatalf("remoteCommandScopedEndpointID(comment) = (%q, %v), want (%q, true)", endpointID, ok, "endpoint-comment")
 	}
 }
 

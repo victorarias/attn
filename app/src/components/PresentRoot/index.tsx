@@ -9,7 +9,6 @@ import type {
   Presentation,
   PresentationRound,
   PresentationComment,
-  FileObject,
   ReviewComment,
   PresentCommentInput,
 } from '../../types/generated';
@@ -267,7 +266,7 @@ export function PresentRoot() {
     // presentation.repo_path likewise. sendGetFileDiff is a stable callback.
   }, [presentation, round, selectedPath, sendGetFileDiff]);
 
-  const files: FileObject[] = round?.manifest.files ?? [];
+  const files = round?.manifest.files ?? [];
 
   const moveSelection = useCallback((delta: number) => {
     setSelectedPath((current) => {

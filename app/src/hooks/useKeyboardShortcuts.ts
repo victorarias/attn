@@ -17,8 +17,6 @@ interface KeyboardShortcutsConfig {
   onNextSession: () => void;
   onToggleSidebar?: () => void;
   onRefreshPRs?: () => void;
-  onToggleDiffPanel?: () => void;
-  onToggleDiffDetailPanel?: () => void;
   onToggleAttentionPanel?: () => void;
   onOpenSettings?: () => void;
   onShowShortcuts?: () => void;
@@ -46,8 +44,6 @@ export function useKeyboardShortcuts({
   onNextSession,
   onToggleSidebar,
   onRefreshPRs,
-  onToggleDiffPanel,
-  onToggleDiffDetailPanel,
   onToggleAttentionPanel,
   onOpenSettings,
   onShowShortcuts,
@@ -83,8 +79,6 @@ export function useKeyboardShortcuts({
   useShortcut('workspace.select7', () => onSelectWorkspaceByIndex(6), enabled);
   useShortcut('workspace.select8', () => onSelectWorkspaceByIndex(7), enabled);
   useShortcut('workspace.select9', () => onSelectWorkspaceByIndex(8), enabled);
-  useShortcut('dock.diff', onToggleDiffPanel ?? (() => {}), enabled && !!onToggleDiffPanel);
-  useShortcut('dock.diffDetail', onToggleDiffDetailPanel ?? (() => {}), enabled && !!onToggleDiffDetailPanel);
   useShortcut('dock.attention', onToggleAttentionPanel ?? (() => {}), enabled && !!onToggleAttentionPanel);
 
   // Action menu remains available while its own input is focused.

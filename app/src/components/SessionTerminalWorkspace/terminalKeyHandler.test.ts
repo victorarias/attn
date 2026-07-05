@@ -162,7 +162,7 @@ describe('installTerminalKeyHandler', () => {
     const CHORD = { leader: { key: 'k', meta: true }, then: { key: 'd' } };
 
     it('arms the leader and consumes it without leaking to the PTY', () => {
-      setShortcutOverrides({ 'dock.diff': CHORD });
+      setShortcutOverrides({ 'dock.attention': CHORD });
       const sendToPty = vi.fn();
       const handler = installTerminalKeyHandler(sendToPty);
 
@@ -175,20 +175,20 @@ describe('installTerminalKeyHandler', () => {
 
     it('fires the bound action on the follow key, still consuming it', () => {
       vi.mocked(triggerShortcut).mockReturnValue(true);
-      setShortcutOverrides({ 'dock.diff': CHORD });
+      setShortcutOverrides({ 'dock.attention': CHORD });
       const sendToPty = vi.fn();
       const handler = installTerminalKeyHandler(sendToPty);
 
       handler(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
       const follow = new KeyboardEvent('keydown', { key: 'd' });
       expect(handler(follow)).toBe(false);
-      expect(triggerShortcut).toHaveBeenCalledWith('dock.diff');
+      expect(triggerShortcut).toHaveBeenCalledWith('dock.attention');
       expect(sendToPty).not.toHaveBeenCalled();
       expect(isLeaderPending()).toBe(false);
     });
 
     it('consumes a non-matching follow key as a cancel, never reaching the PTY', () => {
-      setShortcutOverrides({ 'dock.diff': CHORD });
+      setShortcutOverrides({ 'dock.attention': CHORD });
       const sendToPty = vi.fn();
       const handler = installTerminalKeyHandler(sendToPty);
 
@@ -202,7 +202,7 @@ describe('installTerminalKeyHandler', () => {
 
     it('consumes a bound leader even when no follow action has a handler (no arm, no PTY leak)', () => {
       vi.mocked(hasHandler).mockReturnValue(false);
-      setShortcutOverrides({ 'dock.diff': CHORD });
+      setShortcutOverrides({ 'dock.attention': CHORD });
       const sendToPty = vi.fn();
       const handler = installTerminalKeyHandler(sendToPty);
 

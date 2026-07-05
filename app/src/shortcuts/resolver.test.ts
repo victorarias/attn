@@ -65,12 +65,12 @@ describe('resolvedShortcutEntries', () => {
 
 describe('findConflict', () => {
   it('finds a different shortcut using the same combo', () => {
-    // dock.diff is ⌘⇧G by default.
-    expect(findConflict({ key: 'g', meta: true, shift: true }, 'session.new')).toBe('dock.diff');
+    // dock.attention is ⌘⇧P by default.
+    expect(findConflict({ key: 'p', meta: true, shift: true }, 'session.new')).toBe('dock.attention');
   });
 
   it('ignores the excluded id itself', () => {
-    expect(findConflict({ key: 'g', meta: true, shift: true }, 'dock.diff')).toBeNull();
+    expect(findConflict({ key: 'p', meta: true, shift: true }, 'dock.attention')).toBeNull();
   });
 
   it('respects allowed-conflict pairs (session.close vs terminal.close on ⌘W)', () => {
@@ -137,30 +137,30 @@ describe('chord overrides', () => {
     const chord = { leader: { key: 'k', meta: true }, then: { key: 'd' } };
     const cfg = {
       version: 1 as const,
-      overrides: { 'dock.diff': chord },
+      overrides: { 'dock.attention': chord },
       dock: DEFAULT_DOCK,
     };
     const parsed = parseKeybindingsConfig(serializeKeybindingsConfig(cfg));
-    expect(parsed.overrides['dock.diff']).toEqual(chord);
+    expect(parsed.overrides['dock.attention']).toEqual(chord);
   });
 
   it('drops a malformed chord (missing follow step) so the id keeps its default', () => {
     const raw = JSON.stringify({
-      overrides: { 'dock.diff': { leader: { key: 'k', meta: true } } },
+      overrides: { 'dock.attention': { leader: { key: 'k', meta: true } } },
     });
-    expect('dock.diff' in parseKeybindingsConfig(raw).overrides).toBe(false);
+    expect('dock.attention' in parseKeybindingsConfig(raw).overrides).toBe(false);
   });
 
   it('finds a conflict for a chord whose leader equals an existing combo', () => {
     // ⌘G is view.toggleGrid. A chord with leader ⌘G conflicts with it.
-    expect(findConflict({ leader: { key: 'g', meta: true }, then: { key: 'x' } }, 'dock.diff'))
+    expect(findConflict({ leader: { key: 'g', meta: true }, then: { key: 'x' } }, 'dock.attention'))
       .toBe('view.toggleGrid');
   });
 
   it('lets a chord leader coexist with a different existing combo', () => {
     // ⌘K is ui.actionMenu (combo). A chord leader of ⌘J (jumpToWaiting) would
     // conflict; a leader on an unused accel like ⌘⌥J does not.
-    expect(findConflict({ leader: { key: 'j', meta: true, alt: true }, then: { key: 'x' } }, 'dock.diff'))
+    expect(findConflict({ leader: { key: 'j', meta: true, alt: true }, then: { key: 'x' } }, 'dock.attention'))
       .toBeNull();
   });
 });
@@ -197,7 +197,7 @@ describe('parseKeybindingsConfig', () => {
     const cfg = {
       version: 1 as const,
       overrides: { 'session.new': { key: 'm', meta: true } },
-      dock: { collapsed: true, items: ['dock.diff', 'session.toggleSidebar'] as ShortcutId[] },
+      dock: { collapsed: true, items: ['dock.attention', 'session.toggleSidebar'] as ShortcutId[] },
     };
     expect(parseKeybindingsConfig(serializeKeybindingsConfig(cfg))).toEqual(cfg);
   });
@@ -214,11 +214,11 @@ describe('dock config', () => {
 
   it('keeps known ids in order, drops unknown ids, and dedups', () => {
     const raw = JSON.stringify({
-      dock: { collapsed: true, items: ['dock.diff', 'bogus.id', 'dock.diff', 'session.new'] },
+      dock: { collapsed: true, items: ['dock.attention', 'bogus.id', 'dock.attention', 'session.new'] },
     });
     expect(parseKeybindingsConfig(raw).dock).toEqual({
       collapsed: true,
-      items: ['dock.diff', 'session.new'],
+      items: ['dock.attention', 'session.new'],
     });
   });
 

@@ -10,9 +10,13 @@
  *     `renderAnnotation` slots,
  *   - the gutter hover "+" opens a comment draft directly on that line
  *     (`onGutterUtilityClick`),
- *   - clicking anywhere on a line — or selecting a range of line numbers —
- *     opens an action popup (Add comment / Send to Claude) via `onLineClick`
- *     and `enableLineSelection` + `onLineSelectionEnd`.
+ *   - clicking a line-number cell, or dragging across several, opens a
+ *     comment draft directly on that line/range (`enableLineSelection` +
+ *     `onLineSelectionEnd`) — a bare click on the number column is a
+ *     zero-length selection as far as the library is concerned, so it reports
+ *     through the same callback as a drag; we treat that as intentional (one
+ *     fewer click than a popup) rather than something to filter out. Clicking
+ *     the code area of a line, outside the number column, does nothing.
  *
  * Comment <-> annotation convention (unchanged protocol): a comment's
  * `line_end < 0` encodes the original/deleted side; `line_start` is the anchor
@@ -28,14 +32,13 @@ import {
   type FileContents,
   type SelectedLineRange,
 } from '@pierre/diffs/react';
-// FileDiffOptions / OnDiffLineClickProps are exported from the package root, not the /react entry.
-import { parseDiffFromFile, type FileDiffOptions, type OnDiffLineClickProps } from '@pierre/diffs';
+// FileDiffOptions is exported from the package root, not the /react entry.
+import { parseDiffFromFile, type FileDiffOptions } from '@pierre/diffs';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import type { ResolvedTheme } from '../hooks/useTheme';
 import type { ReviewComment } from '../types/generated';
-import { buildLineRef, commentLineRef, isOriginalSideComment } from '../utils/reviewComment';
+import { commentLineRef, isOriginalSideComment } from '../utils/reviewComment';
 import { hashContent } from '../utils/reviewHash';
-import { ClaudeIcon } from './icons/ClaudeIcon';
 import { DiffCommentThread } from './DiffCommentThread';
 import './DiffView.css';
 
@@ -54,14 +57,6 @@ type DraftState = {
   start: number;
   end: number;
   content: string;
-};
-
-type SelectionPopupState = {
-  side: AnnotationSide;
-  start: number;
-  end: number;
-  x: number;
-  y: number;
 };
 
 export interface DiffViewProps {
@@ -146,14 +141,12 @@ export function DiffView({
   onSendToClaude,
 }: DiffViewProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const pointerRef = useRef({ x: 0, y: 0 });
   // The library commits a trailing line-selection on the same pointerup that
   // fires onGutterUtilityClick. The "+" should open only the draft, so swallow
-  // that one selection-end instead of letting it pop the action menu too.
+  // that one selection-end instead of letting it also open a second draft.
   const suppressSelectionEndRef = useRef(false);
 
   const [draftsByFile, setDraftsByFile] = useState<Record<string, DraftState>>({});
-  const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null);
   // Comments that cannot render inline are collapsed by default.
   const [staleExpanded, setStaleExpanded] = useState(false);
 
@@ -198,7 +191,6 @@ export function DiffView({
   // Selection/frozen content belong to one file; draft anchors and text are keyed
   // by file so navigating away and back does not destroy an unsaved comment.
   useEffect(() => {
-    setSelectionPopup(null);
     setFrozen(null);
     setStaleExpanded(false);
   }, [filePath]);
@@ -241,17 +233,16 @@ export function DiffView({
 
   // Controlled selection. Without this, the library runs uncontrolled and
   // commits an internal selectedRange on the first gutter-"+" click or
-  // popup-driven draft; InteractionManager then keeps re-anchoring the hover
+  // drag-driven draft; InteractionManager then keeps re-anchoring the hover
   // "+" to that stale range on every pointer move instead of following the
   // mouse (see InteractionManager.placeUtilityFromSelection). Reflecting our
-  // own popup/draft state here — and clearing to null once neither is open —
-  // keeps the library's selection in sync with ours and lets the "+" resume
-  // tracking the pointer as soon as there's nothing selected.
+  // own draft state here — and clearing to null once it's closed — keeps the
+  // library's selection in sync with ours and lets the "+" resume tracking
+  // the pointer as soon as there's nothing selected.
   const selectedLines = useMemo<SelectedLineRange | null>(() => {
-    if (selectionPopup) return { side: selectionPopup.side, start: selectionPopup.start, end: selectionPopup.end };
     if (draft) return { side: draft.side, start: draft.start, end: draft.end };
     return null;
-  }, [selectionPopup, draft]);
+  }, [draft]);
 
   // The library forces a full re-render whenever the options object changes by
   // value (function identities included), so keep callbacks stable and memoize
@@ -261,36 +252,27 @@ export function DiffView({
     if (!normalized) return;
     const { side, start, end } = normalized;
     suppressSelectionEndRef.current = true;
-    setSelectionPopup(null);
     setDraftForCurrentFile({ side, start, end, content: '' });
   });
 
+  // `enableLineSelection` requires a click to land on the number column to
+  // start a selection (InteractionManager's `requireNumberColumn`), and its
+  // pointerup handler reports a selection end unconditionally — there's no
+  // movement/distance threshold distinguishing a drag from a bare click. So a
+  // single click on a line number arrives here as a zero-length (start ===
+  // end) range, same callback as an actual drag. We open the draft directly
+  // either way: this is the intended affordance (a line-number click creates
+  // a single-line comment, same as GitHub), not something to filter out.
   const handleLineSelectionEnd = useStableCallback((range: SelectedLineRange | null) => {
     if (suppressSelectionEndRef.current) {
       suppressSelectionEndRef.current = false;
       return;
     }
-    if (!range) {
-      setSelectionPopup(null);
-      return;
-    }
+    if (!range) return;
     const normalized = normalizeRange(range);
-    if (!normalized) {
-      setSelectionPopup(null);
-      return;
-    }
+    if (!normalized) return;
     const { side, start, end } = normalized;
-    setSelectionPopup({ side, start, end, x: pointerRef.current.x, y: pointerRef.current.y });
-  });
-
-  // A plain click anywhere on a line opens the action popup on that single line.
-  // (Clicks on the gutter "+" are filtered out by the library before this fires;
-  // clicks inside a comment thread don't resolve to a line target.)
-  const handleLineClick = useStableCallback((props: OnDiffLineClickProps) => {
-    const rect = wrapperRef.current?.getBoundingClientRect();
-    const x = rect ? props.event.clientX - rect.left : 0;
-    const y = rect ? props.event.clientY - rect.top : 0;
-    setSelectionPopup({ side: props.annotationSide, start: props.lineNumber, end: props.lineNumber, x, y });
+    setDraftForCurrentFile({ side, start, end, content: '' });
   });
 
   const options = useMemo<FileDiffOptions<AnnotationMeta>>(() => ({
@@ -302,17 +284,17 @@ export function DiffView({
     // Use the pure-JS Shiki engine: avoids loading a WASM binary inside the
     // Tauri webview (custom protocol + CSP make WASM fetching unreliable).
     preferredHighlighter: 'shiki-js',
-    // Dragging across line numbers selects a range; a plain click on a line
-    // opens the action popup on that single line (onLineClick).
+    // Clicking a line-number cell, or dragging across several, opens a
+    // comment draft directly on that line/range; clicking the code area does
+    // nothing (see handleLineSelectionEnd for why a click counts here).
     enableLineSelection: true,
     onLineSelectionEnd: handleLineSelectionEnd,
-    onLineClick: handleLineClick,
     // Render the native hover "+" in the line-number gutter; clicking it opens a
     // draft on that line. Without this the onGutterUtilityClick handler is dead
     // (the library gates the button behind enableGutterUtility, default false).
     enableGutterUtility: true,
     onGutterUtilityClick: handleGutterUtilityClick,
-  }), [diffStyle, expandUnchanged, resolvedTheme, handleLineSelectionEnd, handleLineClick, handleGutterUtilityClick]);
+  }), [diffStyle, expandUnchanged, resolvedTheme, handleLineSelectionEnd, handleGutterUtilityClick]);
 
   // Group saved comments + the optional draft into one annotation per
   // (side, anchor line). The library slots annotations by `side`+`lineNumber`,
@@ -436,41 +418,9 @@ export function DiffView({
     ]
   );
 
-  // Selection popup actions
-  const addCommentFromSelection = useCallback(() => {
-    if (!selectionPopup) return;
-    const { side, start, end } = selectionPopup;
-    setDraftForCurrentFile({ side, start, end, content: '' });
-    setSelectionPopup(null);
-  }, [selectionPopup, setDraftForCurrentFile]);
-
-  const sendSelectionToClaude = useCallback(() => {
-    if (!selectionPopup || !onSendToClaude || !filePath) return;
-    const { start, end } = selectionPopup;
-    onSendToClaude(`@${filePath}:${buildLineRef(start, end)}`);
-    setSelectionPopup(null);
-  }, [selectionPopup, onSendToClaude, filePath]);
-
-  // Escape closes the draft form / selection popup before the panel (LIFO).
+  // Escape closes the draft form before the panel (LIFO).
   useEscapeStack(handleCancelDraft, draft !== null);
   useEscapeStack(onCancelEdit, editingCommentId !== null);
-  useEscapeStack(() => setSelectionPopup(null), selectionPopup !== null);
-
-  const capturePointer = useCallback((e: React.PointerEvent) => {
-    const rect = wrapperRef.current?.getBoundingClientRect();
-    if (rect) {
-      pointerRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    }
-  }, []);
-
-  // A pointerdown anywhere dismisses a stale selection popup — except when it
-  // lands on the popup itself, otherwise this capture-phase handler would clear
-  // the popup before its own buttons' click handlers run (the popup is a child
-  // of this wrapper, so capture reaches here first).
-  const dismissPopupOnPointerDown = useCallback((e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest('.diff-selection-popup')) return;
-    setSelectionPopup(null);
-  }, []);
 
   return (
     <div
@@ -485,8 +435,6 @@ export function DiffView({
         width: '100%',
         ...(fontSize ? { '--diffs-font-size': `${fontSize}px` } : {}),
       } as React.CSSProperties}
-      onPointerUpCapture={capturePointer}
-      onPointerDownCapture={dismissPopupOnPointerDown}
     >
       {staleComments.length > 0 && (
         <div className="diff-stale-comments">
@@ -533,32 +481,6 @@ export function DiffView({
           disableWorkerPool
         />
       </Virtualizer>
-
-      {selectionPopup && (
-        <div
-          className="diff-selection-popup"
-          style={{ top: Math.max(0, selectionPopup.y - 40), left: selectionPopup.x }}
-        >
-          {onSendToClaude && filePath && (
-            <button
-              className="diff-selection-popup-btn send"
-              title="Send to Claude Code"
-              onClick={sendSelectionToClaude}
-            >
-              <ClaudeIcon size={16} />
-            </button>
-          )}
-          <button
-            className="diff-selection-popup-btn comment"
-            title="Add comment"
-            onClick={addCommentFromSelection}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-          </button>
-        </div>
-      )}
     </div>
   );
 }

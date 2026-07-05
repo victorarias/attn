@@ -20,7 +20,7 @@ function Consumer() {
       <button onClick={() => kb.setDockCollapsed(true)}>collapse</button>
       <button onClick={() => kb.setDockCollapsed(false)}>expand</button>
       <button onClick={() => kb.setInDock('session.new', true)}>add-new</button>
-      <button onClick={() => kb.moveDockItem('dock.diff', 1)}>move-diff-down</button>
+      <button onClick={() => kb.moveDockItem('dock.attention', 1)}>move-attention-down</button>
     </div>
   );
 }
@@ -60,35 +60,35 @@ describe('KeybindingsContext dock', () => {
   });
 
   it('persists collapse without disturbing membership', () => {
-    const { setSetting } = renderConsumer(dockSetting({ items: ['dock.diff'] }));
+    const { setSetting } = renderConsumer(dockSetting({ items: ['dock.attention'] }));
     fireEvent.click(screen.getByText('collapse'));
 
     const cfg = lastConfig(setSetting);
     expect(cfg.dock.collapsed).toBe(true);
-    expect(cfg.dock.items).toEqual(['dock.diff']);
+    expect(cfg.dock.items).toEqual(['dock.attention']);
     expect(screen.getByTestId('collapsed').textContent).toBe('true');
   });
 
   it('does not write when collapse state is unchanged', () => {
-    const { setSetting } = renderConsumer(dockSetting({ collapsed: false, items: ['dock.diff'] }));
+    const { setSetting } = renderConsumer(dockSetting({ collapsed: false, items: ['dock.attention'] }));
     fireEvent.click(screen.getByText('expand')); // already expanded
     expect(setSetting.mock.calls.filter(([k]) => k === KEYBINDINGS_SETTING_KEY)).toHaveLength(0);
   });
 
   it('adds a shortcut to the dock and reflects membership', () => {
-    const { setSetting } = renderConsumer(dockSetting({ items: ['dock.diff'] }));
+    const { setSetting } = renderConsumer(dockSetting({ items: ['dock.attention'] }));
     expect(screen.getByTestId('indock-new').textContent).toBe('false');
 
     fireEvent.click(screen.getByText('add-new'));
 
-    expect(lastConfig(setSetting).dock.items).toEqual(['dock.diff', 'session.new']);
+    expect(lastConfig(setSetting).dock.items).toEqual(['dock.attention', 'session.new']);
     expect(screen.getByTestId('indock-new').textContent).toBe('true');
   });
 
   it('reorders dock items and persists the new order', () => {
-    const { setSetting } = renderConsumer(dockSetting({ items: ['dock.diff', 'dock.attention'] }));
-    fireEvent.click(screen.getByText('move-diff-down'));
-    expect(lastConfig(setSetting).dock.items).toEqual(['dock.attention', 'dock.diff']);
+    const { setSetting } = renderConsumer(dockSetting({ items: ['dock.attention', 'terminal.splitVertical'] }));
+    fireEvent.click(screen.getByText('move-attention-down'));
+    expect(lastConfig(setSetting).dock.items).toEqual(['terminal.splitVertical', 'dock.attention']);
   });
 
   it('preserves the dock when only overrides change (restoreDefaults aside)', () => {

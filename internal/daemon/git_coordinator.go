@@ -15,17 +15,13 @@ type gitCoordinator struct {
 
 	statusActive map[gitStatusCacheKey]*gitStatusRefresh
 
-	branchDiffCache  map[branchDiffCacheKey]branchDiffSnapshot
-	branchDiffActive map[branchDiffCacheKey]*branchDiffRefresh
-
 	fileDiffActive map[fileDiffCacheKey]*fileDiffRefresh
 }
 
 var (
-	getGitStatusForDaemon       = getGitStatusForSubscription
-	getDefaultBranchForDaemon   = attngit.GetDefaultBranch
-	getBranchDiffFilesForDaemon = attngit.GetBranchDiffFiles
-	readFileDiffForDaemon       = readFileDiff
+	getGitStatusForDaemon     = getGitStatusForSubscription
+	getDefaultBranchForDaemon = attngit.GetDefaultBranch
+	readFileDiffForDaemon     = readFileDiff
 )
 
 type gitStatusCacheKey struct {
@@ -38,23 +34,6 @@ type gitStatusRefresh struct {
 	status   *protocol.GitStatusUpdateMessage
 	err      error
 	duration time.Duration
-}
-
-type branchDiffCacheKey struct {
-	directory string
-	baseRef   string
-}
-
-type branchDiffSnapshot struct {
-	baseRef string
-	raw     []attngit.DiffFileInfo
-	files   []protocol.BranchDiffFile
-}
-
-type branchDiffRefresh struct {
-	done     chan struct{}
-	snapshot branchDiffSnapshot
-	err      error
 }
 
 type fileDiffCacheKey struct {
@@ -78,10 +57,8 @@ type fileDiffRefresh struct {
 
 func newGitCoordinator() *gitCoordinator {
 	return &gitCoordinator{
-		statusActive:     make(map[gitStatusCacheKey]*gitStatusRefresh),
-		branchDiffCache:  make(map[branchDiffCacheKey]branchDiffSnapshot),
-		branchDiffActive: make(map[branchDiffCacheKey]*branchDiffRefresh),
-		fileDiffActive:   make(map[fileDiffCacheKey]*fileDiffRefresh),
+		statusActive:   make(map[gitStatusCacheKey]*gitStatusRefresh),
+		fileDiffActive: make(map[fileDiffCacheKey]*fileDiffRefresh),
 	}
 }
 
@@ -127,96 +104,6 @@ func (c *gitCoordinator) Status(directory string, mode gitStatusMode) (*protocol
 
 func (c *gitCoordinator) DefaultBranch(directory string) (string, error) {
 	return getDefaultBranchForDaemon(directory)
-}
-
-func (c *gitCoordinator) BranchDiffSnapshot(directory, baseRef string) (branchDiffSnapshot, error) {
-	key := branchDiffCacheKey{directory: directory, baseRef: baseRef}
-
-	c.mu.Lock()
-	if cached, ok := c.branchDiffCache[key]; ok {
-		if _, running := c.branchDiffActive[key]; !running {
-			refresh := &branchDiffRefresh{done: make(chan struct{})}
-			c.branchDiffActive[key] = refresh
-			go c.finishBranchDiffRefresh(key, refresh)
-		}
-		c.mu.Unlock()
-		return cloneBranchDiffSnapshot(cached), nil
-	}
-
-	if refresh, ok := c.branchDiffActive[key]; ok {
-		done := refresh.done
-		c.mu.Unlock()
-		<-done
-		if refresh.err != nil {
-			return branchDiffSnapshot{}, refresh.err
-		}
-		return cloneBranchDiffSnapshot(refresh.snapshot), nil
-	}
-
-	refresh := &branchDiffRefresh{done: make(chan struct{})}
-	c.branchDiffActive[key] = refresh
-	c.mu.Unlock()
-
-	c.finishBranchDiffRefresh(key, refresh)
-	if refresh.err != nil {
-		return branchDiffSnapshot{}, refresh.err
-	}
-	return cloneBranchDiffSnapshot(refresh.snapshot), nil
-}
-
-func (c *gitCoordinator) RefreshBranchDiffFiles(directory, baseRef string) ([]attngit.DiffFileInfo, error) {
-	key := branchDiffCacheKey{directory: directory, baseRef: baseRef}
-
-	c.mu.Lock()
-	if refresh, ok := c.branchDiffActive[key]; ok {
-		done := refresh.done
-		c.mu.Unlock()
-		<-done
-		if refresh.err != nil {
-			return nil, refresh.err
-		}
-		return cloneDiffFileInfos(refresh.snapshot.raw), nil
-	}
-
-	refresh := &branchDiffRefresh{done: make(chan struct{})}
-	c.branchDiffActive[key] = refresh
-	c.mu.Unlock()
-
-	c.finishBranchDiffRefresh(key, refresh)
-	if refresh.err != nil {
-		return nil, refresh.err
-	}
-	return cloneDiffFileInfos(refresh.snapshot.raw), nil
-}
-
-func (c *gitCoordinator) finishBranchDiffRefresh(key branchDiffCacheKey, refresh *branchDiffRefresh) {
-	files, err := getBranchDiffFilesForDaemon(key.directory, key.baseRef)
-	if err != nil {
-		refresh.err = err
-		c.mu.Lock()
-		delete(c.branchDiffCache, key)
-		if c.branchDiffActive[key] == refresh {
-			delete(c.branchDiffActive, key)
-		}
-		c.mu.Unlock()
-		close(refresh.done)
-		return
-	}
-
-	snapshot := branchDiffSnapshot{
-		baseRef: key.baseRef,
-		raw:     cloneDiffFileInfos(files),
-		files:   gitDiffFilesToProtocol(files),
-	}
-	refresh.snapshot = snapshot
-
-	c.mu.Lock()
-	c.branchDiffCache[key] = cloneBranchDiffSnapshot(snapshot)
-	if c.branchDiffActive[key] == refresh {
-		delete(c.branchDiffActive, key)
-	}
-	c.mu.Unlock()
-	close(refresh.done)
 }
 
 func (c *gitCoordinator) FileDiff(directory, path, baseRef, headRef string, staged bool) (fileDiffContent, error) {
@@ -288,29 +175,6 @@ func readFileDiff(directory, path, baseRef, headRef string, staged bool) (fileDi
 	return content, nil
 }
 
-func gitDiffFilesToProtocol(files []attngit.DiffFileInfo) []protocol.BranchDiffFile {
-	protoFiles := make([]protocol.BranchDiffFile, len(files))
-	for i, f := range files {
-		protoFiles[i] = protocol.BranchDiffFile{
-			Path:   f.Path,
-			Status: f.Status,
-		}
-		if f.OldPath != "" {
-			protoFiles[i].OldPath = &f.OldPath
-		}
-		if f.Additions > 0 {
-			protoFiles[i].Additions = &f.Additions
-		}
-		if f.Deletions > 0 {
-			protoFiles[i].Deletions = &f.Deletions
-		}
-		if f.HasUncommitted {
-			protoFiles[i].HasUncommitted = &f.HasUncommitted
-		}
-	}
-	return protoFiles
-}
-
 func cloneGitStatusUpdate(status *protocol.GitStatusUpdateMessage) *protocol.GitStatusUpdateMessage {
 	if status == nil {
 		return nil
@@ -331,26 +195,3 @@ func cloneGitFileChanges(files []protocol.GitFileChange) []protocol.GitFileChang
 	return cloned
 }
 
-func cloneBranchDiffSnapshot(snapshot branchDiffSnapshot) branchDiffSnapshot {
-	snapshot.raw = cloneDiffFileInfos(snapshot.raw)
-	snapshot.files = cloneBranchDiffFiles(snapshot.files)
-	return snapshot
-}
-
-func cloneDiffFileInfos(files []attngit.DiffFileInfo) []attngit.DiffFileInfo {
-	if files == nil {
-		return nil
-	}
-	cloned := make([]attngit.DiffFileInfo, len(files))
-	copy(cloned, files)
-	return cloned
-}
-
-func cloneBranchDiffFiles(files []protocol.BranchDiffFile) []protocol.BranchDiffFile {
-	if files == nil {
-		return nil
-	}
-	cloned := make([]protocol.BranchDiffFile, len(files))
-	copy(cloned, files)
-	return cloned
-}

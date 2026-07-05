@@ -182,8 +182,6 @@ vi.mock('./components/LocationPicker', () => ({
   ),
 }));
 vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
-vi.mock('./components/ChangesPanel', () => ({ ChangesPanel: () => null }));
-vi.mock('./components/DiffDetailPanel', () => ({ DiffDetailPanel: () => null }));
 vi.mock('./components/SessionTerminalWorkspace', () => ({ SessionTerminalWorkspace: () => null }));
 
 vi.mock('./components/ErrorToast', () => ({
@@ -341,16 +339,8 @@ describe('worktree cleanup prompt', () => {
       sendWorkspaceClosePane: mockSendWorkspaceClosePane,
       sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
-      sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
       listWorkflowRuns: vi.fn(async () => ({ success: true, runs: [] })),
-      getReviewState: vi.fn(async () => ({ success: true })),
-      markFileViewed: vi.fn(async () => ({ success: true })),
-      sendAddComment: vi.fn(async () => ({ success: true })),
-      sendUpdateComment: vi.fn(async () => ({ success: true })),
-      sendResolveComment: vi.fn(async () => ({ success: true })),
-      sendDeleteComment: vi.fn(async () => ({ success: true })),
-      sendGetComments: vi.fn(async () => ({ success: true, comments: [] })),
       getPresentations: vi.fn(async () => []),
       connectionError: null,
       hasReceivedInitialState: true,
@@ -515,86 +505,6 @@ describe('worktree cleanup prompt', () => {
         enabled?: boolean;
       };
       expect(keyboardArgs.enabled).toBe(false);
-    });
-  });
-
-  it('does not refresh Changes branch diff while the Changes panel is closed', async () => {
-    const sendGetBranchDiffFiles = vi.fn(async () => ({ success: true, base_ref: 'main', files: [] }));
-    mockDaemonSocketReturn.sendGetBranchDiffFiles = sendGetBranchDiffFiles;
-
-    render(<App />);
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(sendGetBranchDiffFiles).not.toHaveBeenCalled();
-
-    const daemonSocketArgs = mockUseDaemonSocket.mock.calls[mockUseDaemonSocket.mock.calls.length - 1]?.[0] as {
-      onGitStatusUpdate?: (status: { directory: string; staged: unknown[]; unstaged: unknown[]; untracked: unknown[] }) => void;
-    };
-    act(() => {
-      daemonSocketArgs.onGitStatusUpdate?.({
-        directory: '/tmp/repo/.worktrees/feature-a',
-        staged: [],
-        unstaged: [],
-        untracked: [],
-      });
-    });
-
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(sendGetBranchDiffFiles).not.toHaveBeenCalled();
-  });
-
-  it('refreshes Changes branch diff on open and coalesces status updates while in flight', async () => {
-    const firstBranchDiff = deferred<{ success: true; base_ref: string; files: [] }>();
-    const sendGetBranchDiffFiles = vi.fn()
-      .mockReturnValueOnce(firstBranchDiff.promise)
-      .mockResolvedValue({ success: true, base_ref: 'main', files: [] });
-    mockDaemonSocketReturn.sendGetBranchDiffFiles = sendGetBranchDiffFiles;
-
-    render(<App />);
-
-    const keyboardArgs = mockUseKeyboardShortcuts.mock.calls[mockUseKeyboardShortcuts.mock.calls.length - 1]?.[0] as {
-      onToggleDiffPanel?: () => void;
-    };
-    act(() => {
-      keyboardArgs.onToggleDiffPanel?.();
-    });
-
-    await waitFor(() => {
-      expect(sendGetBranchDiffFiles).toHaveBeenCalledTimes(1);
-    });
-
-    const daemonSocketArgs = mockUseDaemonSocket.mock.calls[mockUseDaemonSocket.mock.calls.length - 1]?.[0] as {
-      onGitStatusUpdate?: (status: { directory: string; staged: unknown[]; unstaged: unknown[]; untracked: unknown[] }) => void;
-    };
-    act(() => {
-      daemonSocketArgs.onGitStatusUpdate?.({
-        directory: '/tmp/repo/.worktrees/feature-a',
-        staged: [],
-        unstaged: [{ path: 'app/src/App.tsx' }],
-        untracked: [],
-      });
-      daemonSocketArgs.onGitStatusUpdate?.({
-        directory: '/tmp/repo/.worktrees/feature-a',
-        staged: [],
-        unstaged: [{ path: 'app/src/App.tsx' }, { path: 'internal/git/command.go' }],
-        untracked: [],
-      });
-    });
-
-    expect(sendGetBranchDiffFiles).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      firstBranchDiff.resolve({ success: true, base_ref: 'main', files: [] });
-      await firstBranchDiff.promise;
-    });
-
-    await waitFor(() => {
-      expect(sendGetBranchDiffFiles).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -785,16 +695,8 @@ describe('worktree cleanup prompt', () => {
       sendWorkspaceClosePane: mockSendWorkspaceClosePane,
       sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
-      sendGetBranchDiffFiles: vi.fn(async () => ({ success: true, base_ref: 'main', files: [] })),
       getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
       listWorkflowRuns: vi.fn(async () => ({ success: true, runs: [] })),
-      getReviewState: vi.fn(async () => ({ success: true })),
-      markFileViewed: vi.fn(async () => ({ success: true })),
-      sendAddComment: vi.fn(async () => ({ success: true })),
-      sendUpdateComment: vi.fn(async () => ({ success: true })),
-      sendResolveComment: vi.fn(async () => ({ success: true })),
-      sendDeleteComment: vi.fn(async () => ({ success: true })),
-      sendGetComments: vi.fn(async () => ({ success: true, comments: [] })),
       getPresentations: vi.fn(async () => []),
       connectionError: null,
       hasReceivedInitialState: true,

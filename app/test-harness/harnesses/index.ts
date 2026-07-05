@@ -6,7 +6,6 @@
 import type { HarnessProps } from '../types';
 import { BrokenLinksHarness } from './BrokenLinksHarness';
 import { DashboardPRsHarness } from './DashboardPRsHarness';
-import { DiffDetailPanelHarness } from './DiffDetailPanelHarness';
 import { DiffViewHarness } from './DiffViewHarness';
 import { FileTreeHarness } from './FileTreeHarness';
 import { FrontmatterCardHarness } from './FrontmatterCardHarness';
@@ -19,7 +18,6 @@ import { NotebookTileHarness } from './NotebookTileHarness';
 export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   BrokenLinks: BrokenLinksHarness,
   DashboardPRs: DashboardPRsHarness,
-  DiffDetailPanel: DiffDetailPanelHarness,
   DiffView: DiffViewHarness,
   FileTree: FileTreeHarness,
   FrontmatterCard: FrontmatterCardHarness,

@@ -100,8 +100,6 @@ type Manager struct {
 	mu              sync.RWMutex
 	runtimes        map[string]*endpointRuntime
 	pending         map[string]pendingSessionRoute
-	reviews         map[string]string
-	comments        map[string]string
 	browserControls map[string]pendingBrowserControl
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -127,8 +125,6 @@ func NewManager(
 		logf:            logf,
 		runtimes:        make(map[string]*endpointRuntime),
 		pending:         make(map[string]pendingSessionRoute),
-		reviews:         make(map[string]string),
-		comments:        make(map[string]string),
 		browserControls: make(map[string]pendingBrowserControl),
 	}
 	for _, record := range endpointStore.ListEndpoints() {
@@ -428,7 +424,6 @@ func (m *Manager) stopRuntimeLocked(runtime *endpointRuntime) {
 	runtime.sessions = make(map[string]protocol.Session)
 	runtime.workspaces = make(map[string]protocol.Workspace)
 	m.clearPendingRoutesLocked(runtime.record.ID)
-	m.clearRouteCachesLocked(runtime.record.ID)
 	zero := 0
 	runtime.info.SessionCount = protocol.Ptr(zero)
 }
@@ -680,7 +675,6 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			m.resolveBrowserControl(id, data)
 		default:
 			if forwardsRawEvent(peek.Event) {
-				m.observeRemoteEvent(id, peek.Event, data)
 				m.logRemoteRawEvent(id, peek.Event, data)
 				m.publishRawEvent(data)
 			}
@@ -751,15 +745,7 @@ func forwardsRawEvent(event string) bool {
 		protocol.EventEnsureRepoResult,
 		protocol.EventGitStatusUpdate,
 		protocol.EventFileDiffResult,
-		protocol.EventBranchDiffFilesResult,
 		protocol.EventGetRepoInfoResult,
-		protocol.EventGetReviewStateResult,
-		protocol.EventMarkFileViewedResult,
-		protocol.EventAddCommentResult,
-		protocol.EventUpdateCommentResult,
-		protocol.EventResolveCommentResult,
-		protocol.EventDeleteCommentResult,
-		protocol.EventGetCommentsResult,
 		protocol.EventSpawnResult,
 		protocol.EventAttachResult,
 		protocol.EventPtyOutput,
@@ -956,28 +942,6 @@ func (m *Manager) EndpointIDForPath(targetPath string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func (m *Manager) EndpointIDForReview(reviewID string) (string, bool) {
-	reviewID = strings.TrimSpace(reviewID)
-	if reviewID == "" {
-		return "", false
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	endpointID, ok := m.reviews[reviewID]
-	return endpointID, ok
-}
-
-func (m *Manager) EndpointIDForComment(commentID string) (string, bool) {
-	commentID = strings.TrimSpace(commentID)
-	if commentID == "" {
-		return "", false
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	endpointID, ok := m.comments[commentID]
-	return endpointID, ok
 }
 
 func (m *Manager) ReservePendingSessionRoute(endpointID, sessionID string) {
@@ -1199,75 +1163,6 @@ func (m *Manager) clearPendingRoutesLocked(endpointID string) {
 			delete(m.pending, sessionID)
 		}
 	}
-}
-
-func (m *Manager) clearRouteCachesLocked(endpointID string) {
-	if endpointID == "" {
-		return
-	}
-	for reviewID, current := range m.reviews {
-		if current == endpointID {
-			delete(m.reviews, reviewID)
-		}
-	}
-	for commentID, current := range m.comments {
-		if current == endpointID {
-			delete(m.comments, commentID)
-		}
-	}
-}
-
-func (m *Manager) observeRemoteEvent(endpointID, event string, data []byte) {
-	switch event {
-	case protocol.EventGetReviewStateResult:
-		var msg protocol.GetReviewStateResultMessage
-		if err := json.Unmarshal(data, &msg); err != nil || !msg.Success || msg.State == nil {
-			return
-		}
-		m.recordReviewRoute(endpointID, msg.State.ReviewID)
-	case protocol.EventMarkFileViewedResult:
-		var msg protocol.MarkFileViewedResultMessage
-		if err := json.Unmarshal(data, &msg); err != nil || !msg.Success {
-			return
-		}
-		m.recordReviewRoute(endpointID, msg.ReviewID)
-	case protocol.EventAddCommentResult:
-		var msg protocol.AddCommentResultMessage
-		if err := json.Unmarshal(data, &msg); err != nil || !msg.Success || msg.Comment == nil {
-			return
-		}
-		m.recordReviewRoute(endpointID, msg.Comment.ReviewID)
-		m.recordCommentRoute(endpointID, msg.Comment.ID)
-	case protocol.EventGetCommentsResult:
-		var msg protocol.GetCommentsResultMessage
-		if err := json.Unmarshal(data, &msg); err != nil || !msg.Success {
-			return
-		}
-		for _, comment := range msg.Comments {
-			m.recordReviewRoute(endpointID, comment.ReviewID)
-			m.recordCommentRoute(endpointID, comment.ID)
-		}
-	}
-}
-
-func (m *Manager) recordReviewRoute(endpointID, reviewID string) {
-	reviewID = strings.TrimSpace(reviewID)
-	if endpointID == "" || reviewID == "" {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.reviews[reviewID] = endpointID
-}
-
-func (m *Manager) recordCommentRoute(endpointID, commentID string) {
-	commentID = strings.TrimSpace(commentID)
-	if endpointID == "" || commentID == "" {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.comments[commentID] = endpointID
 }
 
 func (m *Manager) replaceRemoteWorkspaces(id string, workspaces []protocol.Workspace) bool {

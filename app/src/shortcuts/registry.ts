@@ -82,8 +82,6 @@ export const SHORTCUTS = {
   'workspace.select9': { key: '9', code: 'Digit9', meta: true },
 
   // Dock panels
-  'dock.diff': { key: 'g', meta: true, shift: true },
-  'dock.diffDetail': { key: 'e', meta: true, shift: true },
   'dock.attention': { key: 'p', meta: true, shift: true },
 
   // Action menu

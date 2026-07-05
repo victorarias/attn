@@ -66,43 +66,43 @@ describe('ShortcutEditorModal', () => {
 
     const newSession = row('New session in this workspace');
     fireEvent.click(newSession.querySelector('.key-capture-button')!);
-    // ⌘⇧G already belongs to "Diff panel" (dock.diff).
-    fireEvent.keyDown(window, { key: 'g', code: 'KeyG', metaKey: true, shiftKey: true });
+    // ⌘⇧D already belongs to "Split pane sideways" (terminal.splitHorizontal).
+    fireEvent.keyDown(window, { key: 'd', code: 'KeyD', metaKey: true, shiftKey: true });
 
     // The reassign prompt appears inline on this row, naming the current holder.
     const reassignBtn = screen.getByText('Reassign');
-    expect(within(newSession).getByText(/Diff panel/)).toBeInTheDocument();
+    expect(within(newSession).getByText(/Split pane sideways/)).toBeInTheDocument();
     fireEvent.click(reassignBtn);
 
     const cfg = lastConfig(setSetting);
-    expect(cfg.overrides['session.new']).toEqual({ key: 'g', meta: true, shift: true });
-    expect(cfg.overrides['dock.diff']).toBeNull();
+    expect(cfg.overrides['session.new']).toEqual({ key: 'd', meta: true, shift: true });
+    expect(cfg.overrides['terminal.splitHorizontal']).toBeNull();
   });
 
   it('runs conflict detection when resetting a shortcut whose default is now claimed', () => {
-    // session.new rebound off ⌘N; dock.diff has taken ⌘N. Resetting session.new
-    // to its default (⌘N) must not silently duplicate — it should offer reassign.
+    // session.new rebound off ⌘N; terminal.splitHorizontal has taken ⌘N. Resetting
+    // session.new to its default (⌘N) must not silently duplicate — it should offer reassign.
     const { setSetting } = renderEditor({
       [KEYBINDINGS_SETTING_KEY]: JSON.stringify({
         version: 1,
         overrides: {
           'session.new': { key: 'j', meta: true },
-          'dock.diff': { key: 'n', meta: true },
+          'terminal.splitHorizontal': { key: 'n', meta: true },
         },
       }),
     });
 
     fireEvent.click(within(row('New session in this workspace')).getByTitle('Reset to ⌘N'));
 
-    // Reassign prompt appears naming the current ⌘N holder (Diff panel).
+    // Reassign prompt appears naming the current ⌘N holder (Split pane sideways).
     const reassignBtn = screen.getByText('Reassign');
-    expect(within(row('New session in this workspace')).getByText(/Diff panel/)).toBeInTheDocument();
+    expect(within(row('New session in this workspace')).getByText(/Split pane sideways/)).toBeInTheDocument();
     fireEvent.click(reassignBtn);
 
     const cfg = lastConfig(setSetting);
-    // session.new back to default (override dropped), dock.diff freed.
+    // session.new back to default (override dropped), terminal.splitHorizontal freed.
     expect('session.new' in cfg.overrides).toBe(false);
-    expect(cfg.overrides['dock.diff']).toBeNull();
+    expect(cfg.overrides['terminal.splitHorizontal']).toBeNull();
   });
 
   it('pins a shortcut to the dock from its row star', () => {
@@ -121,14 +121,14 @@ describe('ShortcutEditorModal', () => {
       [KEYBINDINGS_SETTING_KEY]: JSON.stringify({
         version: 1,
         overrides: {},
-        dock: { collapsed: false, items: ['dock.diff', 'dock.attention'] },
+        dock: { collapsed: false, items: ['terminal.toggleZoom', 'dock.attention'] },
       }),
     });
 
     // First item can't move up; move it down instead.
-    fireEvent.click(screen.getByLabelText('Move Diff panel down'));
+    fireEvent.click(screen.getByLabelText('Move Zoom active pane down'));
 
-    expect(lastConfig(setSetting).dock.items).toEqual(['dock.attention', 'dock.diff']);
+    expect(lastConfig(setSetting).dock.items).toEqual(['dock.attention', 'terminal.toggleZoom']);
   });
 
   it('removes a dock item from the dock section', () => {
@@ -136,11 +136,11 @@ describe('ShortcutEditorModal', () => {
       [KEYBINDINGS_SETTING_KEY]: JSON.stringify({
         version: 1,
         overrides: {},
-        dock: { collapsed: false, items: ['dock.diff', 'dock.attention'] },
+        dock: { collapsed: false, items: ['terminal.toggleZoom', 'dock.attention'] },
       }),
     });
 
-    fireEvent.click(screen.getByLabelText('Remove Diff panel from dock'));
+    fireEvent.click(screen.getByLabelText('Remove Zoom active pane from dock'));
 
     expect(lastConfig(setSetting).dock.items).toEqual(['dock.attention']);
   });
@@ -226,10 +226,10 @@ describe('ShortcutEditorModal', () => {
 
   it('clears a stranded reassign prompt when the user starts filtering', () => {
     renderEditor();
-    // Capture a taken combo (⌘⇧G belongs to Diff panel) to raise the inline
-    // Reassign prompt on this row.
+    // Capture a taken combo (⌘⇧D belongs to Split pane sideways) to raise the
+    // inline Reassign prompt on this row.
     fireEvent.click(row('New session in this workspace').querySelector('.key-capture-button')!);
-    fireEvent.keyDown(window, { key: 'g', code: 'KeyG', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: 'd', code: 'KeyD', metaKey: true, shiftKey: true });
     expect(screen.getByText('Reassign')).toBeInTheDocument();
 
     // Typing in the filter must not leave the prompt stranded on a hidden row.

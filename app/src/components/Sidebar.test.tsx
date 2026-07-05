@@ -548,12 +548,12 @@ describe('Sidebar', () => {
   });
 
   it('renders config-driven dock items, marks active ones, and fires actions on click', () => {
-    const onDiff = vi.fn();
+    const onAttention = vi.fn();
     render(
       <Sidebar
         {...baseProps}
         dockItems={[
-          { id: 'dock.diff', label: 'diff', keys: '⌘⇧G', onClick: onDiff },
+          { id: 'dock.attention', label: 'attention', keys: '⌘⇧P', onClick: onAttention },
           { id: 'terminal.toggleZoom', label: 'zoom', keys: '⌘⇧Z', active: true },
           { id: 'session.toggleSidebar', label: 'sidebar', keys: '⌘⇧B' },
         ]}
@@ -562,10 +562,10 @@ describe('Sidebar', () => {
     );
 
     // Actionable item is a button and fires its handler.
-    const diff = screen.getByRole('button', { name: /diff/ });
-    expect(diff).toBeInTheDocument();
-    fireEvent.click(diff);
-    expect(onDiff).toHaveBeenCalledTimes(1);
+    const attention = screen.getByRole('button', { name: /attention/ });
+    expect(attention).toBeInTheDocument();
+    fireEvent.click(attention);
+    expect(onAttention).toHaveBeenCalledTimes(1);
 
     // Informational items render their keys + label.
     expect(screen.getByText('zoom')).toBeInTheDocument();
@@ -579,13 +579,13 @@ describe('Sidebar', () => {
     const { rerender } = render(
       <Sidebar
         {...baseProps}
-        dockItems={[{ id: 'dock.diff', label: 'diff', keys: '⌘⇧G' }]}
+        dockItems={[{ id: 'dock.attention', label: 'attention', keys: '⌘⇧P' }]}
         dockCollapsed={false}
         onToggleDockCollapsed={onToggle}
         {...buildSidebarData([])}
       />
     );
-    expect(screen.getByText('diff')).toBeInTheDocument();
+    expect(screen.getByText('attention')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Hide dock' }));
     expect(onToggle).toHaveBeenCalledTimes(1);
@@ -593,13 +593,13 @@ describe('Sidebar', () => {
     rerender(
       <Sidebar
         {...baseProps}
-        dockItems={[{ id: 'dock.diff', label: 'diff', keys: '⌘⇧G' }]}
+        dockItems={[{ id: 'dock.attention', label: 'attention', keys: '⌘⇧P' }]}
         dockCollapsed={true}
         onToggleDockCollapsed={onToggle}
         {...buildSidebarData([])}
       />
     );
-    expect(screen.queryByText('diff')).not.toBeInTheDocument();
+    expect(screen.queryByText('attention')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show dock' })).toBeInTheDocument();
   });
 

@@ -1353,32 +1353,10 @@ model GetFileDiffMessage {
   head_ref?: string; // If set, the modified side is pinned to `git show <head_ref>:<path>` instead of the working tree (used by the presentation reader for base_sha->head_sha diffs)
 }
 
-// Branch diff file info for PR-like review
-model BranchDiffFile {
-  path: string;
-  status: string;           // "added", "modified", "deleted", "renamed"
-  old_path?: string;        // For renames
-  additions?: int32;
-  deletions?: int32;
-  has_uncommitted?: boolean; // True if file also has uncommitted changes
-}
-
-model GetBranchDiffFilesMessage {
-  cmd: "get_branch_diff_files";
-  directory: string;
-  base_ref?: string;  // Defaults to origin/<default-branch>
-}
-
 model GetRepoInfoMessage {
   cmd: "get_repo_info";
   repo: string;
   endpoint_id?: string;
-}
-
-model GetReviewStateMessage {
-  cmd: "get_review_state";
-  repo_path: string;
-  branch: string;
 }
 
 model WorkflowRunUpsertMessage {
@@ -1406,45 +1384,6 @@ model WorkflowRunListMessage {
 model WorkflowRunCancelMessage {
   cmd: "workflow_run_cancel";
   run_id: string;
-}
-
-model MarkFileViewedMessage {
-  cmd: "mark_file_viewed";
-  review_id: string;
-  filepath: string;
-  viewed: boolean;  // true to mark viewed, false to unmark
-}
-
-model AddCommentMessage {
-  cmd: "add_comment";
-  review_id: string;
-  filepath: string;
-  line_start: int32;
-  line_end: int32;
-  content: string;
-}
-
-model UpdateCommentMessage {
-  cmd: "update_comment";
-  comment_id: string;
-  content: string;
-}
-
-model ResolveCommentMessage {
-  cmd: "resolve_comment";
-  comment_id: string;
-  resolved: boolean;
-}
-
-model DeleteCommentMessage {
-  cmd: "delete_comment";
-  comment_id: string;
-}
-
-model GetCommentsMessage {
-  cmd: "get_comments";
-  review_id: string;
-  filepath?: string;  // Optional: filter by file
 }
 
 model SpawnSessionMessage {
@@ -2184,15 +2123,6 @@ model FileDiffResultMessage {
   error?: string;
 }
 
-model BranchDiffFilesResultMessage {
-  event: "branch_diff_files_result";
-  directory: string;
-  base_ref: string;           // Actual base ref used
-  files: BranchDiffFile[];
-  success: boolean;
-  error?: string;
-}
-
 model RepoInfo {
   repo: string;
   current_branch: string;
@@ -2210,13 +2140,6 @@ model GetRepoInfoResultMessage {
   endpoint_id?: string;
   success: boolean;
   error?: string;
-}
-
-model ReviewState {
-  review_id: string;
-  repo_path: string;
-  branch: string;
-  viewed_files: string[];  // List of filepath strings
 }
 
 model WorkflowAgentCall {
@@ -2270,13 +2193,6 @@ model ReviewComment {
   created_at: string;    // ISO timestamp
 }
 
-model GetReviewStateResultMessage {
-  event: "get_review_state_result";
-  state?: ReviewState;
-  success: boolean;
-  error?: string;
-}
-
 model WorkflowRunUpdatedMessage {
   event: "workflow_run_updated";
   run: WorkflowRun;
@@ -2289,47 +2205,6 @@ model WorkflowActionResultMessage {
   run?: WorkflowRun;
   runs?: WorkflowRun[];
   success: boolean;
-  error?: string;
-}
-
-model MarkFileViewedResultMessage {
-  event: "mark_file_viewed_result";
-  review_id: string;
-  filepath: string;
-  viewed: boolean;
-  success: boolean;
-  error?: string;
-}
-
-model AddCommentResultMessage {
-  event: "add_comment_result";
-  success: boolean;
-  comment?: ReviewComment;
-  error?: string;
-}
-
-model UpdateCommentResultMessage {
-  event: "update_comment_result";
-  success: boolean;
-  error?: string;
-}
-
-model ResolveCommentResultMessage {
-  event: "resolve_comment_result";
-  success: boolean;
-  error?: string;
-}
-
-model DeleteCommentResultMessage {
-  event: "delete_comment_result";
-  success: boolean;
-  error?: string;
-}
-
-model GetCommentsResultMessage {
-  event: "get_comments_result";
-  success: boolean;
-  comments?: ReviewComment[];
   error?: string;
 }
 
@@ -2852,7 +2727,6 @@ model WebSocketEvent {
   directory?: string;
   original?: string;
   modified?: string;
-  files?: BranchDiffFile[];
   base_ref?: string;
   staged?: GitFileChange[];
   unstaged?: GitFileChange[];
@@ -2935,9 +2809,7 @@ alias DaemonEvent =
   | EnsureRepoResultMessage
   | GitStatusUpdateMessage
   | FileDiffResultMessage
-  | BranchDiffFilesResultMessage
   | GetRepoInfoResultMessage
-  | GetReviewStateResultMessage
   | WorkflowRunUpdatedMessage
   | WorkflowActionResultMessage
   | WorkspaceContextResultMessage
@@ -2953,12 +2825,6 @@ alias DaemonEvent =
   | NotificationListResultMessage
   | NotificationMarkReadResultMessage
   | NotificationsUpdatedMessage
-  | MarkFileViewedResultMessage
-  | AddCommentResultMessage
-  | UpdateCommentResultMessage
-  | ResolveCommentResultMessage
-  | DeleteCommentResultMessage
-  | GetCommentsResultMessage
   | SpawnResultMessage
   | AttachResultMessage
   | GetScreenSnapshotResultMessage
