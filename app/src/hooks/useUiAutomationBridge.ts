@@ -16,6 +16,7 @@ import { dumpTerminalGeometry } from '../utils/terminalDiagnosticsLog';
 import { getReviewPerfSnapshot } from '../utils/reviewPerf';
 import { clearPtyPerfSnapshot, getPtyPerfSnapshot, recordPtyDecode, recordWsJsonParse } from '../utils/ptyPerf';
 import { buildSessionRenderHealth } from '../utils/renderHealth';
+import { boundTicketForSession } from '../utils/tickets';
 import { collectWorkspaceLayoutDiagnostics, projectWorkspaceBounds } from '../utils/workspaceDiagnostics';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
@@ -2575,7 +2576,7 @@ export function useUiAutomationBridge({
         if (!sessionId) {
           throw new Error('ticket_open_via_dashboard requires sessionId');
         }
-        const boundTicket = (tickets ?? []).find((ticket) => ticket.assignee === sessionId);
+        const boundTicket = boundTicketForSession(tickets ?? [], sessionId);
         if (!boundTicket) {
           throw new Error(`No ticket is bound to session ${sessionId}`);
         }
