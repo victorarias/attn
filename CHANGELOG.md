@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-05]
 
 ### Added
+- **`attn ticket show <ticket-id>` for agents.** Agents can now pull a ticket's full record over the socket — description, the complete activity thread (status changes, comments, verdicts) with full bodies, and attachments — the same detail the app's ticket panel shows, but non-consuming: unlike `ticket inbox`, it never advances any session's unread cursor, so it can be re-read any time.
 - **Delegate: `--cwd` and `--worktree` now compose.** `attn delegate --cwd <dir> --worktree <branch>` creates a worktree of the repo at `<dir>` and places the new workspace there, instead of being rejected. Over-long auto-derived names (e.g. from a worktree folder like `attn--feat-some-long-branch`) are now truncated instead of failing the delegation; an explicit `--name` that is too long still errors as before.
 
 ### Fixed

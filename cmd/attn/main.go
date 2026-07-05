@@ -672,6 +672,12 @@ func runTicket() {
 			return
 		}
 		runTicketList(os.Args[3:])
+	case "show":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketShow(os.Args[3:])
 	case "attach":
 		if hasHelpFlag(os.Args[3:]) {
 			writeTicketHelp(os.Stdout)
@@ -1043,6 +1049,83 @@ func printTicketBoard(tickets []protocol.Ticket) {
 	}
 }
 
+// runTicketShow prints one ticket's full record — metadata, description, and the
+// complete activity thread with full bodies (comments, status changes, verdicts)
+// plus attachments. It is a non-consuming read: it never touches any session's
+// inbox cursor, so unlike `ticket inbox` it can be re-read at will. Like `ticket
+// list` it works without a session (a global read by id), so the session is
+// resolved best-effort — flag then ATTN_SESSION_ID — and passed along even if
+// empty rather than erroring via resolveDispatchSession.
+func runTicketShow(args []string) {
+	parsed, err := parseTicketIDArgs("ticket show", args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket show: %v\n", err)
+		writeTicketHelp(os.Stderr)
+		os.Exit(2)
+	}
+	source := strings.TrimSpace(parsed.Session)
+	if source == "" {
+		source = strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+	}
+	ticket, err := client.New("").ShowTicket(source, parsed.TicketID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ticket show: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.JSON {
+		printJSON(ticket)
+		return
+	}
+	fprintTicketShow(os.Stdout, ticket)
+}
+
+// fprintTicketShow renders one ticket's full record in the same visual style as
+// fprintTicketInbox's activity lines — header block, full description, complete
+// activity thread with full bodies (no truncation), then attachments.
+func fprintTicketShow(w io.Writer, t *protocol.Ticket) {
+	if t == nil {
+		fmt.Fprintln(w, "ticket not found")
+		return
+	}
+	assignee := t.Assignee
+	if strings.TrimSpace(assignee) == "" {
+		assignee = "-"
+	}
+	fmt.Fprintf(w, "%s\t%s\t%s\t%s → %s\n", t.ID, t.Status, assignee, t.CreatedAt, t.UpdatedAt)
+	fmt.Fprintln(w, t.Title)
+	if strings.TrimSpace(t.Description) != "" {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, t.Description)
+	}
+	fmt.Fprintln(w)
+	if len(t.Activity) == 0 {
+		fmt.Fprintln(w, "no activity")
+	} else {
+		fmt.Fprintln(w, "activity:")
+		for _, e := range t.Activity {
+			line := fmt.Sprintf("  [%s] %s by %s", e.CreatedAt, e.Kind, e.Author)
+			if e.FromStatus != nil && e.ToStatus != nil {
+				line += fmt.Sprintf(" (%s → %s)", *e.FromStatus, *e.ToStatus)
+			}
+			fmt.Fprintln(w, line)
+			if e.Comment != nil && *e.Comment != "" {
+				fmt.Fprintf(w, "    %s\n", *e.Comment)
+			}
+		}
+	}
+	if len(t.Attachments) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "attachments:")
+		for _, a := range t.Attachments {
+			line := fmt.Sprintf("  %s (%s)", a.Filename, a.Path)
+			if a.Note != nil && *a.Note != "" {
+				line += fmt.Sprintf(" — %s", *a.Note)
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
+}
+
 // runTicketComment posts a one-shot comment from the calling session onto any
 // ticket by id — the agent-to-agent note channel. Commenting informs the ticket's
 // participants but does not subscribe the caller, so it is a way to chime in
@@ -1385,6 +1468,10 @@ commands:
   list [--status <col>] [--all] [--json]
         read the board: every ticket (id, column, assignee, title), newest first;
         --json includes each ticket's description. No session required.
+  show <ticket-id> [--session <id>] [--json]
+        print one ticket's full record — description, complete activity thread
+        with full bodies, attachments; non-consuming, does not touch your inbox
+        cursor
   attach --file <path> [--note <text>] [--session <id>] [--json]
         copy a file onto this session's bound ticket as an attachment
   new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]

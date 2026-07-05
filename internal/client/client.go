@@ -390,6 +390,26 @@ func (c *Client) TicketList(sourceSessionID, status string, includeArchived bool
 	return resp.TicketListResult.Tickets, nil
 }
 
+// ShowTicket reads one ticket's full record — metadata, description, and the
+// complete activity thread (full bodies) plus attachments. It is a non-consuming
+// read (unlike TicketInbox, it never advances the calling session's unread
+// cursor) and, like TicketList, a global read: sourceSessionID is passed for
+// command-shape uniformity but the daemon does not use it.
+func (c *Client) ShowTicket(sourceSessionID, ticketID string) (*protocol.Ticket, error) {
+	msg := protocol.TicketShowMessage{Cmd: protocol.CmdTicketShow, TicketID: ticketID}
+	if sourceSessionID != "" {
+		msg.SourceSessionID = &sourceSessionID
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.TicketShowResult == nil {
+		return nil, errors.New("daemon returned no ticket show result")
+	}
+	return &resp.TicketShowResult.Ticket, nil
+}
+
 // SubscribeTicket opts the calling session into a ticket's notifications. The
 // session becomes a participant (nudged about activity, the ticket delivered in its
 // inbox) without advancing its cursor, so its first inbox after this delivers the
