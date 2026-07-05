@@ -26,6 +26,7 @@
     "real-app:bridge-pty-bench": "node scripts/real-app-harness/bridge-pty-bench.mjs",
     "real-app:scenario-perf-baseline": "node scripts/real-app-harness/scenario-perf-baseline.mjs",
     "real-app:scenario-perf-cold-warm": "node scripts/real-app-harness/scenario-perf-cold-warm.mjs",
+    "real-app:scenario-perf-leak-soak": "node scripts/real-app-harness/scenario-perf-leak-soak.mjs",
     "real-app:bridge-cli": "node scripts/real-app-harness/ui-automation-cli.mjs",
     "real-app:scenario-tr201": "node scripts/real-app-harness/scenario-tr201-local-relaunch-existing-split.mjs",
     "real-app:scenario-tr204": "node scripts/real-app-harness/scenario-tr204-local-relaunch-formatting.mjs",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBaselineVerdict, buildColdWarmVerdict, evaluateRssBaseline } from './rssBaselineVerdict.mjs';
+import { buildBaselineVerdict, buildColdWarmVerdict, buildLeakSoakVerdict, evaluateRssBaseline, fitSlope } from './rssBaselineVerdict.mjs';
 
 const fingerprint = {
   key: 'abc123def456',
@@ -252,5 +252,106 @@ describe('buildColdWarmVerdict', () => {
     expect(verdict.failureCount).toBe(2);
     expect(verdict.firstFailure.startsWith('Cold RSS regression:')).toBe(true);
     expect(verdict.firstFailure).toContain('900MB');
+  });
+});
+
+describe('fitSlope', () => {
+  it('returns slope 0 for a flat series', () => {
+    const { slope, intercept } = fitSlope([100, 100, 100, 100]);
+
+    expect(slope).toBe(0);
+    expect(intercept).toBeCloseTo(100, 5);
+  });
+
+  it('returns the exact slope for a perfect staircase', () => {
+    const { slope, intercept } = fitSlope([100, 110, 120, 130]);
+
+    expect(slope).toBe(10);
+    expect(intercept).toBeCloseTo(100, 5);
+  });
+
+  it('returns a slope near 0 for a noisy-but-flat series', () => {
+    const { slope } = fitSlope([100, 102, 98, 101, 99, 100]);
+
+    expect(Math.abs(slope)).toBeLessThan(1);
+  });
+
+  it('throws when given fewer than 2 points', () => {
+    expect(() => fitSlope([100])).toThrow('fitSlope needs at least 2 points');
+    expect(() => fitSlope([])).toThrow('fitSlope needs at least 2 points');
+  });
+});
+
+describe('buildLeakSoakVerdict', () => {
+  it('builds a passing verdict when the slope is below the threshold', () => {
+    const retainedByCycle = [500, 501, 500, 500.5, 500.2, 500.8];
+
+    const verdict = buildLeakSoakVerdict({
+      retainedByCycle,
+      warmupCycles: 2,
+      slope: 0.1,
+      slopeThresholdMb: 5,
+      scenarioId: 'perf-leak-soak',
+      runId: 'perf-leak-soak-2026-07-05T00-00-00-000Z',
+      artifactsDir: '/tmp/attn-real-app-harness/perf-leak-soak-run',
+      summaryPath: '/tmp/attn-real-app-harness/perf-leak-soak-run/summary.json',
+      durationMs: 4321,
+    });
+
+    expect(verdict).toEqual({
+      ok: true,
+      scenarioId: 'perf-leak-soak',
+      runId: 'perf-leak-soak-2026-07-05T00-00-00-000Z',
+      failureCount: 0,
+      firstFailure: null,
+      artifactsDir: '/tmp/attn-real-app-harness/perf-leak-soak-run',
+      summaryPath: '/tmp/attn-real-app-harness/perf-leak-soak-run/summary.json',
+      durationMs: 4321,
+      rss: { retainedByCycle, warmupCycles: 2, slope: 0.1, slopeThresholdMb: 5 },
+      metrics: { retainedRssSlopeMbPerCycle: 0.1, firstRetainedMb: 500, lastRetainedMb: 500.8 },
+    });
+  });
+
+  it('builds a failing verdict with a one-line leak message and failureCount 1 when the slope exceeds the threshold', () => {
+    const retainedByCycle = [500, 520, 500, 510, 530, 550];
+
+    const verdict = buildLeakSoakVerdict({
+      retainedByCycle,
+      warmupCycles: 2,
+      slope: 15,
+      slopeThresholdMb: 5,
+      scenarioId: 'perf-leak-soak',
+      runId: 'run-1',
+      artifactsDir: '/tmp/run',
+      summaryPath: '/tmp/run/summary.json',
+      durationMs: 100,
+    });
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failureCount).toBe(1);
+    expect(verdict.firstFailure).toContain('Retained-RSS leak');
+    expect(verdict.firstFailure.length).toBeLessThanOrEqual(300);
+    expect(verdict.firstFailure).toContain('15MB/cycle');
+    expect(verdict.firstFailure).toContain('500->550MB');
+  });
+
+  it('passes when the slope is exactly equal to the threshold (boundary)', () => {
+    const retainedByCycle = [500, 505, 510, 515];
+
+    const verdict = buildLeakSoakVerdict({
+      retainedByCycle,
+      warmupCycles: 1,
+      slope: 5,
+      slopeThresholdMb: 5,
+      scenarioId: 'perf-leak-soak',
+      runId: 'run-1',
+      artifactsDir: '/tmp/run',
+      summaryPath: '/tmp/run/summary.json',
+      durationMs: 100,
+    });
+
+    expect(verdict.ok).toBe(true);
+    expect(verdict.failureCount).toBe(0);
+    expect(verdict.firstFailure).toBeNull();
   });
 });

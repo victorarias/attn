@@ -92,3 +92,77 @@ export function buildColdWarmVerdict({ cold, warm, scenarioId, runId, artifactsD
     metrics: { coldRssMb: cold.value, warmRssMb: warm.value },
   };
 }
+
+// Pure: least-squares linear regression of `points` (y) against x = 0..n-1.
+// Standard closed form: slope = (n*sum(x*y) - sum(x)*sum(y)) / (n*sum(x^2) -
+// sum(x)^2). `slope` is rounded to 2 decimals -- it is the leak-soak
+// scenario's headline number (MB of retained RSS growth per cycle).
+export function fitSlope(points) {
+  if (points.length < 2) {
+    throw new Error('fitSlope needs at least 2 points');
+  }
+  const n = points.length;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXY = 0;
+  let sumXX = 0;
+  for (let x = 0; x < n; x += 1) {
+    const y = points[x];
+    sumX += x;
+    sumY += y;
+    sumXY += x * y;
+    sumXX += x * x;
+  }
+  const denominator = n * sumXX - sumX * sumX;
+  const slope = (n * sumXY - sumX * sumY) / denominator;
+  const intercept = (sumY - slope * sumX) / n;
+  return { slope: Number(slope.toFixed(2)), intercept };
+}
+
+// Pure: builds the ATTN_VERDICT payload for the leak-soak scenario.
+// `retainedByCycle` is the full per-cycle retained-RSS series (including the
+// warmup cycles); `slope` is the pre-fitted (fitSlope) trend over the
+// post-warmup portion -- this function does not fit it itself so the caller
+// can log/record intermediate values (e.g. the machine registry comparison)
+// before building the verdict. Extends the core verdict with `rss` and
+// `metrics`, in parity with buildBaselineVerdict/buildColdWarmVerdict.
+export function buildLeakSoakVerdict({
+  retainedByCycle,
+  warmupCycles,
+  slope,
+  slopeThresholdMb,
+  scenarioId,
+  runId,
+  artifactsDir,
+  summaryPath,
+  durationMs,
+}) {
+  const ok = slope <= slopeThresholdMb;
+  const failureCount = ok ? 0 : 1;
+  let firstFailure = null;
+  if (!ok) {
+    const post = retainedByCycle.slice(warmupCycles);
+    const firstPost = post[0];
+    const lastPost = post[post.length - 1];
+    firstFailure = truncateFirstFailure(
+      `Retained-RSS leak: slope ${slope}MB/cycle over ${retainedByCycle.length - warmupCycles} post-warmup cycles `
+      + `exceeds ${slopeThresholdMb}MB/cycle (retained ${firstPost}->${lastPost}MB)`,
+    );
+  }
+  return {
+    ok,
+    scenarioId,
+    runId,
+    failureCount,
+    firstFailure,
+    artifactsDir,
+    summaryPath,
+    durationMs,
+    rss: { retainedByCycle, warmupCycles, slope, slopeThresholdMb },
+    metrics: {
+      retainedRssSlopeMbPerCycle: slope,
+      firstRetainedMb: retainedByCycle[0],
+      lastRetainedMb: retainedByCycle[retainedByCycle.length - 1],
+    },
+  };
+}
