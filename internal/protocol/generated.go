@@ -1099,6 +1099,9 @@ type GetFileDiffMessage struct {
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
 
+	// HeadRef corresponds to the JSON schema field "head_ref".
+	HeadRef *string `json:"head_ref,omitempty,omitzero"`
+
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
 
@@ -1129,6 +1132,9 @@ type GetPresentationRoundResultMessage struct {
 
 	// Presentation corresponds to the JSON schema field "presentation".
 	Presentation *Presentation `json:"presentation,omitempty,omitzero"`
+
+	// RepoHeadSHA corresponds to the JSON schema field "repo_head_sha".
+	RepoHeadSHA *string `json:"repo_head_sha,omitempty,omitzero"`
 
 	// Round corresponds to the JSON schema field "round".
 	Round *PresentationRound `json:"round,omitempty,omitzero"`

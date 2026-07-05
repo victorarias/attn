@@ -69,6 +69,8 @@ export interface DiffViewProps {
   filePath?: string;
   comments: ReviewComment[];
   editingCommentId: string | null;
+  /** Comment ids to render without Edit/Resolve/Delete actions (already-submitted, non-draft comments). */
+  readOnlyCommentIds?: Set<string>;
   resolvedTheme?: ResolvedTheme;
   diffStyle: 'unified' | 'split';
   /** false = hunks (collapse unchanged), true = full file. */
@@ -129,6 +131,7 @@ export function DiffView({
   filePath,
   comments,
   editingCommentId,
+  readOnlyCommentIds,
   resolvedTheme = 'dark',
   diffStyle,
   expandUnchanged,
@@ -386,6 +389,7 @@ export function DiffView({
           comments={meta.comments}
           draft={meta.draft}
           editingCommentId={editingCommentId}
+          readOnlyCommentIds={readOnlyCommentIds}
           showSendToClaude={!!onSendToClaude && !!filePath}
           draftContent={meta.draft ? draft?.content : undefined}
           onDraftContentChange={meta.draft ? handleDraftContentChange : undefined}
@@ -402,6 +406,7 @@ export function DiffView({
     },
     [
       editingCommentId,
+      readOnlyCommentIds,
       onSendToClaude,
       filePath,
       handleSaveDraft,
@@ -486,6 +491,7 @@ export function DiffView({
                 comments={staleComments}
                 draft={false}
                 editingCommentId={editingCommentId}
+                readOnlyCommentIds={readOnlyCommentIds}
                 showSendToClaude={!!onSendToClaude && !!filePath}
                 onSaveDraft={noop}
                 onCancelDraft={noop}

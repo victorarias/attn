@@ -1370,6 +1370,7 @@ export interface GetFileDiffMessage {
     base_ref?: string;
     cmd:       GetFileDiffMessageCmd;
     directory: string;
+    head_ref?: string;
     path:      string;
     staged?:   boolean;
     [property: string]: any;
@@ -1391,12 +1392,13 @@ export enum GetPresentationRoundMessageCmd {
 }
 
 export interface GetPresentationRoundResultMessage {
-    comments?:     CommentElement[];
-    error?:        string;
-    event:         GetPresentationRoundResultMessageEvent;
-    presentation?: PresentationElement;
-    round?:        Round;
-    success:       boolean;
+    comments?:      CommentElement[];
+    error?:         string;
+    event:          GetPresentationRoundResultMessageEvent;
+    presentation?:  PresentationElement;
+    repo_head_sha?: string;
+    round?:         Round;
+    success:        boolean;
     [property: string]: any;
 }
 
@@ -8028,6 +8030,7 @@ const typeMap: any = {
         { json: "base_ref", js: "base_ref", typ: u(undefined, "") },
         { json: "cmd", js: "cmd", typ: r("GetFileDiffMessageCmd") },
         { json: "directory", js: "directory", typ: "" },
+        { json: "head_ref", js: "head_ref", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
         { json: "staged", js: "staged", typ: u(undefined, true) },
     ], "any"),
@@ -8041,6 +8044,7 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("GetPresentationRoundResultMessageEvent") },
         { json: "presentation", js: "presentation", typ: u(undefined, r("PresentationElement")) },
+        { json: "repo_head_sha", js: "repo_head_sha", typ: u(undefined, "") },
         { json: "round", js: "round", typ: u(undefined, r("Round")) },
         { json: "success", js: "success", typ: true },
     ], "any"),

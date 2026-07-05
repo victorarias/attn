@@ -3,6 +3,10 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,6 +14,86 @@ import (
 	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 )
+
+// fileDiffTestRepo creates a real git repo with two commits touching path:
+// the first commit does not create path at all, the second adds it with
+// content v1, and a third commit updates it to v2 — so tests can pin a
+// base_ref/head_ref pair and a ref where the file doesn't exist yet.
+func fileDiffTestRepo(t *testing.T, path, v1, v2 string) (dir, shaEmpty, shaV1, shaV2 string) {
+	t.Helper()
+	dir = t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init")
+	run("commit", "--allow-empty", "-m", "init")
+	shaEmpty = run("rev-parse", "HEAD")
+
+	fullPath := filepath.Join(dir, path)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(fullPath, []byte(v1), 0o644); err != nil {
+		t.Fatalf("write v1: %v", err)
+	}
+	run("add", path)
+	run("commit", "-m", "add "+path)
+	shaV1 = run("rev-parse", "HEAD")
+
+	if err := os.WriteFile(fullPath, []byte(v2), 0o644); err != nil {
+		t.Fatalf("write v2: %v", err)
+	}
+	run("add", path)
+	run("commit", "-m", "update "+path)
+	shaV2 = run("rev-parse", "HEAD")
+
+	return dir, shaEmpty, shaV1, shaV2
+}
+
+func TestReadFileDiff_PinnedHeadRefIgnoresWorkingTree(t *testing.T) {
+	dir, _, shaV1, shaV2 := fileDiffTestRepo(t, "src/file.ts", "v1", "v2")
+
+	// Dirty the working tree; a pinned head_ref diff must ignore this.
+	if err := os.WriteFile(filepath.Join(dir, "src/file.ts"), []byte("dirty"), 0o644); err != nil {
+		t.Fatalf("dirty working tree: %v", err)
+	}
+
+	content, err := readFileDiff(dir, "src/file.ts", shaV1, shaV2, false)
+	if err != nil {
+		t.Fatalf("readFileDiff: %v", err)
+	}
+	if content.original != "v1" {
+		t.Errorf("original = %q, want %q", content.original, "v1")
+	}
+	if content.modified != "v2" {
+		t.Errorf("modified = %q, want %q (working tree should be ignored)", content.modified, "v2")
+	}
+}
+
+func TestReadFileDiff_HeadRefFileDoesNotExist(t *testing.T) {
+	dir, shaEmpty, _, _ := fileDiffTestRepo(t, "src/file.ts", "v1", "v2")
+
+	content, err := readFileDiff(dir, "src/file.ts", shaEmpty, shaEmpty, false)
+	if err != nil {
+		t.Fatalf("readFileDiff: %v", err)
+	}
+	if content.original != "" {
+		t.Errorf("original = %q, want empty (file absent at base_ref)", content.original)
+	}
+	if content.modified != "" {
+		t.Errorf("modified = %q, want empty (file absent at head_ref)", content.modified)
+	}
+}
 
 func TestParseGitStatusPorcelain(t *testing.T) {
 	// Porcelain v1 format: XY PATH or XY ORIG -> PATH for renames
@@ -500,7 +584,7 @@ func TestGitCoordinatorSharesInFlightFileDiff(t *testing.T) {
 	var calls atomic.Int32
 	started := make(chan struct{})
 	release := make(chan struct{})
-	readFileDiffForDaemon = func(_, _, _ string, _ bool) (fileDiffContent, error) {
+	readFileDiffForDaemon = func(_, _, _, _ string, _ bool) (fileDiffContent, error) {
 		call := calls.Add(1)
 		if call == 1 {
 			close(started)
@@ -516,7 +600,7 @@ func TestGitCoordinatorSharesInFlightFileDiff(t *testing.T) {
 	results := make(chan fileDiffContent, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			content, err := d.coordinator().FileDiff("/repo", "src/file.ts", "HEAD", false)
+			content, err := d.coordinator().FileDiff("/repo", "src/file.ts", "HEAD", "", false)
 			if err != nil {
 				t.Errorf("FileDiff failed: %v", err)
 			}
