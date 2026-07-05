@@ -194,4 +194,3 @@ func cloneGitFileChanges(files []protocol.GitFileChange) []protocol.GitFileChang
 	copy(cloned, files)
 	return cloned
 }
-
