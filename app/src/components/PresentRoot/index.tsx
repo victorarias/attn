@@ -151,6 +151,13 @@ export function PresentRoot() {
   // setState call inside a setSelectedPath updater (updaters must stay pure).
   const selectedPathRef = useRef<string | null>(null);
   selectedPathRef.current = selectedPath;
+  // Kept in sync with the loaded round's identity so the diff-fetch effect
+  // below can also reject a stale response from a PREVIOUS round: a
+  // presentation_updated refresh can reload the round (new round.id/base/head)
+  // while selectedPath stays the same string, so path equality alone is not
+  // enough to detect staleness.
+  const activeRoundKeyRef = useRef<string | null>(null);
+  activeRoundKeyRef.current = round ? round.id : null;
 
   // Fires once, unconditionally, regardless of load/error state below — the
   // splash must come down even if the presentation id is missing or the
@@ -248,7 +255,10 @@ export function PresentRoot() {
           ? { loading: false, original: result.original, modified: result.modified }
           : { loading: false, error: result.error || 'Failed to load diff.' };
         diffCacheRef.current.set(`${requestedRoundId}:${requestedPath}`, entry);
-        if (selectedPathRef.current === requestedPath) {
+        if (
+          selectedPathRef.current === requestedPath &&
+          activeRoundKeyRef.current === requestedRoundId
+        ) {
           setDiffState(entry);
         }
       })
@@ -258,7 +268,10 @@ export function PresentRoot() {
           error: err instanceof Error ? err.message : 'Failed to load diff.',
         };
         diffCacheRef.current.set(`${requestedRoundId}:${requestedPath}`, entry);
-        if (selectedPathRef.current === requestedPath) {
+        if (
+          selectedPathRef.current === requestedPath &&
+          activeRoundKeyRef.current === requestedRoundId
+        ) {
           setDiffState(entry);
         }
       });

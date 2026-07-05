@@ -48,11 +48,6 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],
   },
   {
-    id: 'diff-review',
-    label: 'Diff review panel renders a real diff (@pierre/diffs)',
-    command: ['pnpm', 'run', 'real-app:scenario-diff-review'],
-  },
-  {
     id: 'ticket-lifecycle',
     label: 'Ticket lifecycle: chief delegates, worker reports, chief reviews in the panel',
     command: ['pnpm', 'run', 'real-app:scenario-ticket-lifecycle'],
