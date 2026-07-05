@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBaselineVerdict, evaluateRssBaseline } from './rssBaselineVerdict.mjs';
+import { buildBaselineVerdict, buildColdWarmVerdict, evaluateRssBaseline } from './rssBaselineVerdict.mjs';
 
 const fingerprint = {
   key: 'abc123def456',
@@ -159,5 +159,98 @@ describe('buildBaselineVerdict', () => {
     });
 
     expect(verdict.metrics).toEqual({ totalRssMb: 500, retainedMb: 12.3 });
+  });
+});
+
+describe('buildColdWarmVerdict', () => {
+  const okComparison = (value) => ({ ok: true, value, baseline: value - 10, deltaPct: 1.4, tolerancePct: 15, reason: 'within-band' });
+  const regressingComparison = (value) => ({ ok: false, value, baseline: 700, deltaPct: 28.6, tolerancePct: 15, reason: 'regression' });
+
+  it('builds a passing verdict when both phases are within band', () => {
+    const cold = okComparison(720);
+    const warm = okComparison(910);
+
+    const verdict = buildColdWarmVerdict({
+      cold,
+      warm,
+      scenarioId: 'perf-cold-warm',
+      runId: 'perf-cold-warm-2026-07-05T00-00-00-000Z',
+      artifactsDir: '/tmp/attn-real-app-harness/perf-cold-warm-run',
+      summaryPath: '/tmp/attn-real-app-harness/perf-cold-warm-run/summary.json',
+      durationMs: 4321,
+    });
+
+    expect(verdict.ok).toBe(true);
+    expect(verdict.failureCount).toBe(0);
+    expect(verdict.firstFailure).toBeNull();
+    expect(verdict.metrics).toEqual({ coldRssMb: 720, warmRssMb: 910 });
+    expect(verdict.rss).toEqual({ cold, warm });
+    expect(verdict.scenarioId).toBe('perf-cold-warm');
+    expect(verdict.runId).toBe('perf-cold-warm-2026-07-05T00-00-00-000Z');
+    expect(verdict.artifactsDir).toBe('/tmp/attn-real-app-harness/perf-cold-warm-run');
+    expect(verdict.summaryPath).toBe('/tmp/attn-real-app-harness/perf-cold-warm-run/summary.json');
+    expect(verdict.durationMs).toBe(4321);
+  });
+
+  it('fails with the cold regression line when only cold regresses', () => {
+    const cold = regressingComparison(900);
+    const warm = okComparison(910);
+
+    const verdict = buildColdWarmVerdict({
+      cold,
+      warm,
+      scenarioId: 'perf-cold-warm',
+      runId: 'run-1',
+      artifactsDir: '/tmp/run',
+      summaryPath: '/tmp/run/summary.json',
+      durationMs: 100,
+    });
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failureCount).toBe(1);
+    expect(verdict.firstFailure.startsWith('Cold RSS regression:')).toBe(true);
+    expect(verdict.firstFailure).toContain('900MB');
+    expect(verdict.firstFailure).toContain('700MB');
+    expect(verdict.firstFailure).toContain('28.6%');
+    expect(verdict.firstFailure).toContain('tolerance 15%');
+  });
+
+  it('fails with the warm regression line when only warm regresses', () => {
+    const cold = okComparison(720);
+    const warm = regressingComparison(900);
+
+    const verdict = buildColdWarmVerdict({
+      cold,
+      warm,
+      scenarioId: 'perf-cold-warm',
+      runId: 'run-1',
+      artifactsDir: '/tmp/run',
+      summaryPath: '/tmp/run/summary.json',
+      durationMs: 100,
+    });
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failureCount).toBe(1);
+    expect(verdict.firstFailure.startsWith('Warm RSS regression:')).toBe(true);
+  });
+
+  it('reports both failures but names cold first when both regress', () => {
+    const cold = regressingComparison(900);
+    const warm = regressingComparison(950);
+
+    const verdict = buildColdWarmVerdict({
+      cold,
+      warm,
+      scenarioId: 'perf-cold-warm',
+      runId: 'run-1',
+      artifactsDir: '/tmp/run',
+      summaryPath: '/tmp/run/summary.json',
+      durationMs: 100,
+    });
+
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failureCount).toBe(2);
+    expect(verdict.firstFailure.startsWith('Cold RSS regression:')).toBe(true);
+    expect(verdict.firstFailure).toContain('900MB');
   });
 });
