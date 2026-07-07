@@ -252,6 +252,52 @@ func TestBuildSpawnEnv_StripsInheritedNoColorFromInteractiveSessions(t *testing.
 	}
 }
 
+func TestBuildSpawnEnv_PinsTermProgramToGhosttyAndScrubsVersion(t *testing.T) {
+	for _, agent := range []string{"shell", "codex"} {
+		t.Run(agent, func(t *testing.T) {
+			env := buildSpawnEnv(
+				"",
+				SpawnOptions{
+					ID: "session-1",
+					// Simulate an inherited TERM_PROGRAM and TERM_PROGRAM_VERSION
+					// that should be replaced and scrubbed.
+					LoginShellEnv: []string{
+						"TERM_PROGRAM=something-else",
+						"TERM_PROGRAM_VERSION=1.0.0",
+					},
+				},
+				agent,
+				"/tmp/attn-wrapper",
+				nil,
+			)
+
+			termProgramCount := 0
+			termProgramValue := ""
+			termProgramVersionFound := false
+
+			for _, entry := range env {
+				if strings.HasPrefix(entry, "TERM_PROGRAM=") {
+					termProgramCount++
+					termProgramValue = entry
+				}
+				if strings.HasPrefix(entry, "TERM_PROGRAM_VERSION=") {
+					termProgramVersionFound = true
+				}
+			}
+
+			if termProgramCount != 1 {
+				t.Fatalf("expected exactly 1 TERM_PROGRAM entry in %s PTY environment, got %d: %v", agent, termProgramCount, env)
+			}
+			if termProgramValue != "TERM_PROGRAM=ghostty" {
+				t.Fatalf("expected TERM_PROGRAM=ghostty in %s PTY environment, got %s", agent, termProgramValue)
+			}
+			if termProgramVersionFound {
+				t.Fatalf("did not expect TERM_PROGRAM_VERSION in %s PTY environment, got %v", agent, env)
+			}
+		})
+	}
+}
+
 // TestBuildSpawnEnv_OmitsScrubbedAgentSessionEnv ties the daemon/worker startup
 // scrub to the real spawn-env builder: once the process env has been scrubbed
 // (as runDaemon/runPTYWorker do before spawning), a per-session agent var that
