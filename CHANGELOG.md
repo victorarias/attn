@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-08]
+
+### Added
+- **Present now tracks your review progress and gives you a fuller keyboard model.** Mark a file reviewed with `R`, or just keep moving with `J`/`K` — leaving a file with `J` marks it reviewed automatically, jaunt-style. Progress shows in the file rail (a header count and thin progress bar, plus a checkmark and dimmed styling on reviewed rows) and in a new bottom drive bar with its own progress meter, keyboard hints, and the "Submit review" button (now bound to `S`). Each file's diff header also gets its own Reviewed toggle. The submit dialog lists any files you haven't walked yet as an advisory note — it never blocks submission. Marks are saved locally per round, so they survive a window reload but start fresh on a new round.
+
 ## [2026-07-07]
 
 ### Changed

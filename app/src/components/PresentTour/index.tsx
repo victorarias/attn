@@ -90,6 +90,9 @@ export interface PresentTourProps {
   scrollNonce?: number;
   /** Fires with the path nearest the top of the viewport as the user scrolls. */
   onActivePathChange?: (path: string) => void;
+  /** Paths the user has marked reviewed (jaunt-style per-file mark). */
+  reviewedPaths: ReadonlySet<string>;
+  onToggleReviewed: (path: string) => void;
 }
 
 // Metadata carried on each native line annotation, generalized from DiffView's
@@ -151,6 +154,8 @@ export function PresentTour({
   scrollToPath,
   scrollNonce,
   onActivePathChange,
+  reviewedPaths,
+  onToggleReviewed,
 }: PresentTourProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<CodeViewHandle<AnnotationMeta> | null>(null);
@@ -396,8 +401,13 @@ export function PresentTour({
     });
     // frozenRef is a ref (mutated in-place above); its contents are captured
     // deliberately as part of this computation and don't need to be a dep.
+    // reviewedPaths is included purely to force a `version` bump on every
+    // reviewed toggle — same reasoning as editingCommentId above: CodeView's
+    // controlled items only re-render on a version bump (see module doc), and
+    // the reviewed indicator is otherwise rendered through renderHeaderPrefix,
+    // which this codebase has not proven re-renders on its own without one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allSettled, files, commentsByFile, draftsByFile, drafts, formOpenByFile, editingCommentId]);
+  }, [allSettled, files, commentsByFile, draftsByFile, drafts, formOpenByFile, editingCommentId, reviewedPaths]);
 
   const handleGutterUtilityClick = useStableCallback(
     (range: SelectedLineRange, context: { item: CodeViewItem<AnnotationMeta> }) => {
@@ -436,6 +446,28 @@ export function PresentTour({
       );
     },
     [noteByPath]
+  );
+
+  const renderHeaderPrefix = useCallback(
+    (item: CodeViewItem<AnnotationMeta>) => {
+      const isReviewed = reviewedPaths.has(item.id);
+      return (
+        <button
+          type="button"
+          className={`present-tour-reviewed-toggle ${isReviewed ? 'is-reviewed' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleReviewed(item.id);
+          }}
+          title={isReviewed ? 'Mark as not reviewed' : 'Mark as reviewed'}
+        >
+          <span className="present-tour-reviewed-check">{isReviewed ? '✓' : '○'}</span>
+          <span className="present-tour-reviewed-label">{isReviewed ? 'Reviewed' : 'Mark reviewed'}</span>
+          <kbd>R</kbd>
+        </button>
+      );
+    },
+    [reviewedPaths, onToggleReviewed]
   );
 
   const options = useMemo<CodeViewOptions<AnnotationMeta>>(
@@ -605,6 +637,7 @@ export function PresentTour({
           selectedLines={selectedLines}
           renderAnnotation={renderAnnotation}
           renderHeaderMetadata={renderHeaderMetadata}
+          renderHeaderPrefix={renderHeaderPrefix}
           onScroll={handleScroll}
           disableWorkerPool
         />

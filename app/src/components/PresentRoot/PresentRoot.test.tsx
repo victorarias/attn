@@ -13,7 +13,7 @@ import type { PresentTourProps } from '../PresentTour';
 // mock captures its full props so tests can invoke onAddComment etc. directly
 // and assert on what PresentRoot passes down.
 vi.mock('../PresentTour', () => ({
-  PresentTour: vi.fn(({ summary, files }: PresentTourProps) => (
+  PresentTour: vi.fn(({ summary, files, reviewedPaths, onToggleReviewed }: PresentTourProps) => (
     <div data-testid="present-tour">
       {summary && <div data-testid="present-tour-summary">{summary}</div>}
       {files.map((f) => (
@@ -23,6 +23,10 @@ vi.mock('../PresentTour', () => ({
           {f.diff.error && <span className="error">{f.diff.error}</span>}
           {f.diff.original !== undefined && <div className="original">{f.diff.original}</div>}
           {f.diff.modified !== undefined && <div className="modified">{f.diff.modified}</div>}
+          <span className="reviewed-state">{reviewedPaths.has(f.path) ? 'reviewed' : 'unreviewed'}</span>
+          <button type="button" onClick={() => onToggleReviewed(f.path)}>
+            toggle-reviewed-{f.path}
+          </button>
         </div>
       ))}
     </div>
@@ -247,6 +251,9 @@ describe('PresentRoot', () => {
     const loadingScreen = document.createElement('div');
     loadingScreen.id = 'loading-screen';
     document.body.appendChild(loadingScreen);
+
+    // usePresentReviewedMarks persists to localStorage; isolate every test.
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -759,4 +766,130 @@ describe('PresentRoot', () => {
       expect(screen.getByTestId('tour-file-src/foo.ts').textContent).toContain('FRESH round-2 original');
     }, WAIT_OPTS);
   }, TEST_TIMEOUT);
+
+  describe('review progress + keyboard model', () => {
+    it('toggling reviewed from the tour updates the rail count and row styling', async () => {
+      await loadRound();
+
+      expect(screen.getByTestId('present-root-rail-count').textContent).toBe('0/2');
+
+      fireEvent.click(screen.getByText('toggle-reviewed-src/foo.ts'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('present-root-rail-count').textContent).toBe('1/2');
+      }, WAIT_OPTS);
+      expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('reviewed');
+      expect(screen.getByTestId('tour-file-src/foo.ts').querySelector('.reviewed-state')?.textContent).toBe(
+        'reviewed'
+      );
+    });
+
+    it('r toggles reviewed on the active file', async () => {
+      await loadRound();
+
+      fireEvent.keyDown(window, { key: 'r' });
+      await waitFor(() => {
+        expect(screen.getByTestId('present-root-rail-count').textContent).toBe('1/2');
+      }, WAIT_OPTS);
+      expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('reviewed');
+
+      fireEvent.keyDown(window, { key: 'r' });
+      await waitFor(() => {
+        expect(screen.getByTestId('present-root-rail-count').textContent).toBe('0/2');
+      }, WAIT_OPTS);
+    });
+
+    it('j marks the file being left as reviewed (auto-mark-on-leave), k never marks', async () => {
+      await loadRound();
+
+      expect(screen.getByTestId('present-root-rail-count').textContent).toBe('0/2');
+
+      fireEvent.keyDown(window, { key: 'j' });
+      await waitFor(() => {
+        expect(screen.getByText('src/foo.test.ts').closest('li')).toHaveClass('selected');
+      }, WAIT_OPTS);
+      // Leaving src/foo.ts via j marks it reviewed; arriving at src/foo.test.ts does not.
+      expect(screen.getByTestId('present-root-rail-count').textContent).toBe('1/2');
+      expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('reviewed');
+      expect(screen.getByText('src/foo.test.ts').closest('li')).not.toHaveClass('reviewed');
+
+      fireEvent.keyDown(window, { key: 'k' });
+      await waitFor(() => {
+        expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+      }, WAIT_OPTS);
+      // k never marks anything, and the earlier j-mark on foo.ts persists.
+      expect(screen.getByTestId('present-root-rail-count').textContent).toBe('1/2');
+    });
+
+    it('does not intercept single-letter shortcuts while typing in a comment textarea', async () => {
+      await loadRound();
+
+      const input = document.createElement('textarea');
+      document.body.appendChild(input);
+      input.focus();
+
+      fireEvent.keyDown(input, { key: 'r' });
+      fireEvent.keyDown(input, { key: 'j' });
+      fireEvent.keyDown(input, { key: 's' });
+
+      // Nothing moved, nothing got marked, and the submit dialog never opened.
+      expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+      expect(screen.getByTestId('present-root-rail-count').textContent).toBe('0/2');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+      document.body.removeChild(input);
+    });
+
+    it('s opens the submit dialog', async () => {
+      await loadRound();
+
+      fireEvent.keyDown(window, { key: 's' });
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+      }, WAIT_OPTS);
+    });
+
+    it('shows an advisory, non-blocking coverage line in the submit dialog for unreviewed files', async () => {
+      await loadRound();
+
+      fireEvent.click(screen.getByText('toggle-reviewed-src/foo.ts'));
+      await waitFor(() => {
+        expect(screen.getByTestId('present-root-rail-count').textContent).toBe('1/2');
+      }, WAIT_OPTS);
+
+      fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('present-root-submit-coverage').textContent).toContain('src/foo.test.ts');
+      }, WAIT_OPTS);
+      // Submit stays enabled — coverage is advisory only, never a gate.
+      expect(screen.getByRole('button', { name: 'Submit' })).not.toBeDisabled();
+    });
+
+    it('shows no coverage line once every file is reviewed', async () => {
+      await loadRound();
+
+      fireEvent.click(screen.getByText('toggle-reviewed-src/foo.ts'));
+      fireEvent.click(screen.getByText('toggle-reviewed-src/foo.test.ts'));
+      await waitFor(() => {
+        expect(screen.getByTestId('present-root-rail-count').textContent).toBe('2/2');
+      }, WAIT_OPTS);
+
+      fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
+
+      expect(screen.queryByTestId('present-root-submit-coverage')).not.toBeInTheDocument();
+    });
+
+    it('persists reviewed marks in localStorage scoped to the presentation and round', async () => {
+      await loadRound();
+
+      fireEvent.click(screen.getByText('toggle-reviewed-src/foo.ts'));
+      await waitFor(() => {
+        expect(screen.getByTestId('present-root-rail-count').textContent).toBe('1/2');
+      }, WAIT_OPTS);
+
+      const raw = window.localStorage.getItem('attn.present.reviewed.pres-1.round-1');
+      expect(JSON.parse(raw!)).toEqual(['src/foo.ts']);
+    });
+  });
 });
