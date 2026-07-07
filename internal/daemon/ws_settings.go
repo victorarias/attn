@@ -210,6 +210,10 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 				if err := agentdriver.EnsureCodexSkillInstalled(); err != nil {
 					d.logf("failed to ensure Codex attn skill: %v", err)
 				}
+			case string(protocol.SessionAgentCopilot):
+				if err := agentdriver.EnsureCopilotSkillInstalled(); err != nil {
+					d.logf("failed to ensure Copilot attn skill: %v", err)
+				}
 			}
 		}
 

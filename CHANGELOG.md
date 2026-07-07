@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-07]
+
+### Fixed
+- **Copilot sessions now receive the attn skill.** The bundled attn skill (delegation, tickets, workspace context, notebook, workflow, chief-of-staff guidance) was only ever installed to `~/.claude/skills/attn` and `~/.agents/skills/attn`, so a Copilot-driven session had no way to learn what "chief of staff" or the rest of attn's vocabulary meant. It's now also installed to `~/.copilot/skills/attn`, kept identical to the Claude/Codex copies and pruned of stale files the same way.
+
 ## [2026-07-05]
 
 ### Removed
