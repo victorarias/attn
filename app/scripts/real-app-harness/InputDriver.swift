@@ -37,6 +37,10 @@ struct Options {
     var modifiers = [String]()
     var menuPath = [String]()
     var visiblePx: Int?
+    var windowTitle: String?
+    var deltaX: Double = 0
+    var deltaY: Double?
+    var steps: Int = 1
 }
 
 func parseOptions() throws -> Options {
@@ -47,8 +51,32 @@ func parseOptions() throws -> Options {
     while index < args.count {
         let arg = args[index]
         switch arg {
-        case "activate", "activate_background", "frontmost", "windowid", "text", "key", "keycode", "click", "right_click", "menu", "window_park":
+        case "activate", "activate_background", "frontmost", "windowid", "text", "key", "keycode", "click", "right_click", "menu", "window_park", "scroll":
             options.command = arg
+        case "--window-title":
+            index += 1
+            guard index < args.count else {
+                throw DriverError.invalidArgument("Missing value for --window-title")
+            }
+            options.windowTitle = args[index]
+        case "--delta-x":
+            index += 1
+            guard index < args.count, let value = Double(args[index]) else {
+                throw DriverError.invalidArgument("Missing or invalid value for --delta-x")
+            }
+            options.deltaX = value
+        case "--delta-y":
+            index += 1
+            guard index < args.count, let value = Double(args[index]) else {
+                throw DriverError.invalidArgument("Missing or invalid value for --delta-y")
+            }
+            options.deltaY = value
+        case "--steps":
+            index += 1
+            guard index < args.count, let value = Int(args[index]), value > 0 else {
+                throw DriverError.invalidArgument("Missing or invalid value for --steps")
+            }
+            options.steps = value
         case "--visible-px":
             index += 1
             guard index < args.count, let value = Int(args[index]), value > 0 else {
@@ -117,13 +145,28 @@ func parseOptions() throws -> Options {
               InputDriver.swift activate [--bundle-id com.attn.manager]
               InputDriver.swift activate_background [--bundle-id ...]
               InputDriver.swift frontmost
-              InputDriver.swift windowid [--bundle-id ...]
+              InputDriver.swift windowid [--bundle-id ...] [--window-title <substring>]
               InputDriver.swift text --text "hello" [--bundle-id ...] [--prompt-accessibility]
               InputDriver.swift key --key d [--modifiers command,option]
               InputDriver.swift keycode --key-code 36 [--modifiers command]
-              InputDriver.swift click --relative-x 0.75 --relative-y 0.5
+              InputDriver.swift click --relative-x 0.75 --relative-y 0.5 [--window-title <substring>]
               InputDriver.swift menu --path "File>New Session" [--bundle-id ...]
-              InputDriver.swift window_park --visible-px 200 [--bundle-id ...]
+              InputDriver.swift window_park --visible-px 200 [--bundle-id ...] [--window-title <substring>]
+              InputDriver.swift scroll --relative-x 0.5 --relative-y 0.5 --delta-y -240 \\
+                  [--delta-x 0] [--steps 4] [--window-title <substring>]
+
+            --window-title matches windows owned by --bundle-id whose title CONTAINS the given
+            substring (case-insensitive). It targets secondary Tauri windows (e.g. "attn — present")
+            that Accessibility never enumerates; without it, the largest layer-0 onscreen window is
+            used, as before.
+
+            scroll positions the cursor at (--relative-x, --relative-y) inside the resolved window
+            (same 0..1 window-relative semantics as click), then posts a pixel-unit scroll wheel
+            event split into --steps events (~16ms apart). Positive --delta-y scrolls content UP
+            (wheel up); negative --delta-y scrolls content DOWN, matching CGEvent conventions.
+            Example — scroll content down by 240px in 4 steps:
+              InputDriver.swift scroll --relative-x 0.5 --relative-y 0.5 --delta-y -240 --steps 4 \\
+                  --window-title "present"
             """)
         default:
             throw DriverError.invalidArgument("Unknown argument: \(arg)")
@@ -243,67 +286,74 @@ func ensureAccessibility(prompt: Bool) throws {
     }
 }
 
-func mainWindowBounds(bundleId: String) throws -> CGRect {
+// Resolves a single onscreen window owned by `bundleId`: filters by owner PID
+// then, if `titleSubstring` is given, narrows to windows whose kCGWindowName
+// contains it (case-insensitive). Among the remaining candidates, layer-0
+// windows are preferred, then the largest by area — same ordering the driver
+// has always used to pick "the" window when there is no title filter.
+//
+// AppleScript/Accessibility never enumerate attn's secondary Tauri windows
+// (e.g. the "attn — present" window) at all, even while they are visibly
+// onscreen, so CGWindowList plus a title filter is the only way to target
+// them.
+func resolveWindow(bundleId: String, titleSubstring: String? = nil) throws -> (CGWindowID, CGRect) {
     let pid = try runningPID(bundleId: bundleId)
     let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
     guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
         throw DriverError.eventCreationFailed("Failed to read window list.")
     }
 
-    let bounds = windows
+    let candidates = windows
         .filter { (($0[kCGWindowOwnerPID as String] as? pid_t) ?? -1) == pid }
-        .compactMap { entry -> (CGRect, Int)? in
-            guard let rawBounds = entry[kCGWindowBounds as String] as? NSDictionary else {
-                return nil
-            }
-            guard let rect = CGRect(dictionaryRepresentation: rawBounds) else {
-                return nil
-            }
-            return (rect, (entry[kCGWindowLayer as String] as? Int) ?? 0)
-        }
-        .sorted {
-            if $0.1 == 0 && $1.1 != 0 { return true }
-            if $0.1 != 0 && $1.1 == 0 { return false }
-            return ($0.0.width * $0.0.height) > ($1.0.width * $1.0.height)
-        }
-
-    guard let bounds = bounds.first else {
-        throw DriverError.eventCreationFailed("Failed to find an onscreen window for \(bundleId)")
-    }
-    return bounds.0
-}
-
-// Return the CGWindowID of the largest layer-0 onscreen window owned by the
-// bundle. AppleScript's `count of windows of application process ...` returns 0
-// for Tauri/wry apps even while a visible window exists, so callers needing a
-// reliable "window exists now" gate should use CGWindowList instead.
-func mainWindowID(bundleId: String) throws -> CGWindowID {
-    let pid = try runningPID(bundleId: bundleId)
-    let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-    guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-        throw DriverError.eventCreationFailed("Failed to read window list.")
-    }
-
-    let matches = windows
-        .filter { (($0[kCGWindowOwnerPID as String] as? pid_t) ?? -1) == pid }
-        .compactMap { entry -> (CGWindowID, CGFloat, Int)? in
+        .compactMap { entry -> (CGWindowID, CGRect, Int, String)? in
             guard let number = entry[kCGWindowNumber as String] as? CGWindowID else {
                 return nil
             }
             let rect: CGRect = (entry[kCGWindowBounds as String] as? NSDictionary)
                 .flatMap { CGRect(dictionaryRepresentation: $0) } ?? .zero
-            return (number, rect.width * rect.height, (entry[kCGWindowLayer as String] as? Int) ?? 0)
-        }
-        .sorted {
-            if $0.2 == 0 && $1.2 != 0 { return true }
-            if $0.2 != 0 && $1.2 == 0 { return false }
-            return $0.1 > $1.1
+            let layer = (entry[kCGWindowLayer as String] as? Int) ?? 0
+            let title = (entry[kCGWindowName as String] as? String) ?? ""
+            return (number, rect, layer, title)
         }
 
-    guard let first = matches.first else {
+    let filtered: [(CGWindowID, CGRect, Int, String)]
+    if let titleSubstring, !titleSubstring.isEmpty {
+        let needle = titleSubstring.lowercased()
+        filtered = candidates.filter { $0.3.lowercased().contains(needle) }
+    } else {
+        filtered = candidates
+    }
+
+    let best = filtered.sorted {
+        if $0.2 == 0 && $1.2 != 0 { return true }
+        if $0.2 != 0 && $1.2 == 0 { return false }
+        return ($0.1.width * $0.1.height) > ($1.1.width * $1.1.height)
+    }.first
+
+    guard let best else {
+        if let titleSubstring, !titleSubstring.isEmpty {
+            let seenTitles = candidates.map { $0.3.isEmpty ? "<untitled>" : $0.3 }
+            throw DriverError.eventCreationFailed(
+                "No onscreen window for \(bundleId) matching title \(titleSubstring.debugDescription); "
+                    + "found titles: [\(seenTitles.joined(separator: ", "))]"
+            )
+        }
         throw DriverError.eventCreationFailed("No onscreen window for \(bundleId)")
     }
-    return first.0
+    return (best.0, best.1)
+}
+
+func mainWindowBounds(bundleId: String, titleSubstring: String? = nil) throws -> CGRect {
+    try resolveWindow(bundleId: bundleId, titleSubstring: titleSubstring).1
+}
+
+// Return the CGWindowID of the resolved onscreen window owned by the bundle
+// (see resolveWindow). AppleScript's `count of windows of application process
+// ...` returns 0 for Tauri/wry apps even while a visible window exists, so
+// callers needing a reliable "window exists now" gate should use CGWindowList
+// instead.
+func mainWindowID(bundleId: String, titleSubstring: String? = nil) throws -> CGWindowID {
+    try resolveWindow(bundleId: bundleId, titleSubstring: titleSubstring).0
 }
 
 func modifierFlags(_ modifiers: [String]) -> CGEventFlags {
@@ -502,13 +552,33 @@ func postText(_ text: String) throws {
 // the right edge of the main display; the rest extends off the right side. Used
 // by the harness to keep attn "visible" (so WKWebView keeps ticking) while
 // occupying a narrow strip instead of the full display.
-func windowPark(bundleId: String, visiblePx: Int) throws {
+func windowPark(bundleId: String, visiblePx: Int, titleSubstring: String? = nil) throws {
     let (_, appElement) = try axApplication(bundleId: bundleId)
     guard let raw = axCopyAttribute(appElement, kAXWindowsAttribute as String),
           let windows = raw as? [AXUIElement],
-          let window = windows.first
+          !windows.isEmpty
     else {
         throw DriverError.eventCreationFailed("No AX windows for \(bundleId)")
+    }
+
+    // Accessibility only ever exposes attn's main window (it does not
+    // enumerate secondary Tauri windows at all), so a title filter here can
+    // only narrow among what AX already sees. It exists for interface
+    // symmetry with the other commands and to fail loudly on a typo rather
+    // than silently parking the wrong window.
+    let window: AXUIElement
+    if let titleSubstring, !titleSubstring.isEmpty {
+        let needle = titleSubstring.lowercased()
+        guard let match = windows.first(where: { (axTitle($0) ?? "").lowercased().contains(needle) }) else {
+            let seenTitles = windows.map { axTitle($0) ?? "<untitled>" }
+            throw DriverError.eventCreationFailed(
+                "No AX window for \(bundleId) matching title \(titleSubstring.debugDescription); "
+                    + "found titles: [\(seenTitles.joined(separator: ", "))]"
+            )
+        }
+        window = match
+    } else {
+        window = windows[0]
     }
 
     var size = CGSize(width: 0, height: 0)
@@ -545,8 +615,8 @@ func windowPark(bundleId: String, visiblePx: Int) throws {
     print("screen=\(Int(screenFrame.width))x\(Int(screenFrame.height)) win=\(Int(size.width))x\(Int(size.height)) from=\(Int(curPos.x)),\(Int(curPos.y)) to=\(Int(newX)),\(Int(newY))")
 }
 
-func clickWindow(bundleId: String, relativeX: Double, relativeY: Double, right: Bool = false) throws {
-    let bounds = try mainWindowBounds(bundleId: bundleId)
+func clickWindow(bundleId: String, relativeX: Double, relativeY: Double, right: Bool = false, titleSubstring: String? = nil) throws {
+    let bounds = try mainWindowBounds(bundleId: bundleId, titleSubstring: titleSubstring)
     let clampedX = min(max(relativeX, 0), 1)
     let clampedY = min(max(relativeY, 0), 1)
     let point = CGPoint(
@@ -570,13 +640,77 @@ func clickWindow(bundleId: String, relativeX: Double, relativeY: Double, right: 
     up.post(tap: .cghidEventTap)
 }
 
+// Warps the cursor into the resolved window at (relativeX, relativeY) — same
+// 0..1 window-relative semantics as clickWindow — then posts a pixel-unit
+// scroll wheel event, split into `steps` events ~16ms apart so content that
+// only reacts to a stream of small deltas (e.g. virtualized diff views)
+// scrolls the same way a real trackpad gesture would. Following CGEvent
+// convention, positive deltaY scrolls content UP (wheel up); negative deltaY
+// scrolls content DOWN.
+func scrollWindow(
+    bundleId: String,
+    relativeX: Double,
+    relativeY: Double,
+    deltaX: Double,
+    deltaY: Double,
+    steps: Int,
+    titleSubstring: String? = nil
+) throws {
+    let bounds = try mainWindowBounds(bundleId: bundleId, titleSubstring: titleSubstring)
+    let clampedX = min(max(relativeX, 0), 1)
+    let clampedY = min(max(relativeY, 0), 1)
+    let point = CGPoint(
+        x: bounds.origin.x + bounds.width * clampedX,
+        y: bounds.origin.y + bounds.height * clampedY
+    )
+
+    guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) else {
+        throw DriverError.eventCreationFailed("Failed to create mouse move event.")
+    }
+    move.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.02)
+
+    let stepCount = max(1, steps)
+    let totalDeltaY = Int32(deltaY.rounded())
+    let totalDeltaX = Int32(deltaX.rounded())
+    var appliedY: Int32 = 0
+    var appliedX: Int32 = 0
+
+    for step in 0..<stepCount {
+        let isLastStep = step == stepCount - 1
+        // Fold the rounding remainder into the last step so the cumulative
+        // scroll matches the requested total exactly even when the delta
+        // does not divide evenly by the step count.
+        let stepDeltaY = isLastStep ? totalDeltaY - appliedY : Int32((Double(totalDeltaY) / Double(stepCount)).rounded())
+        let stepDeltaX = isLastStep ? totalDeltaX - appliedX : Int32((Double(totalDeltaX) / Double(stepCount)).rounded())
+        appliedY += stepDeltaY
+        appliedX += stepDeltaX
+
+        guard let scroll = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 2,
+            wheel1: stepDeltaY,
+            wheel2: stepDeltaX,
+            wheel3: 0
+        ) else {
+            throw DriverError.eventCreationFailed("Failed to create scroll wheel event.")
+        }
+        scroll.location = point
+        scroll.post(tap: .cghidEventTap)
+        if !isLastStep {
+            Thread.sleep(forTimeInterval: 0.016)
+        }
+    }
+}
+
 do {
     let options = try parseOptions()
 
     // HID-based commands must run against a frontmost app; AX-based and
     // observation-only commands must NOT activate (that is the whole point).
     switch options.command {
-    case "activate", "text", "key", "keycode", "click", "right_click":
+    case "activate", "text", "key", "keycode", "click", "right_click", "scroll":
         try activateApp(bundleId: options.bundleId)
     default:
         break
@@ -592,7 +726,7 @@ do {
     case "frontmost":
         print(frontmostBundleIdentifier())
     case "windowid":
-        let wid = try mainWindowID(bundleId: options.bundleId)
+        let wid = try mainWindowID(bundleId: options.bundleId, titleSubstring: options.windowTitle)
         print(wid)
     case "menu":
         try ensureAccessibility(prompt: options.promptAccessibility)
@@ -620,19 +754,36 @@ do {
         guard let relativeX = options.relativeX, let relativeY = options.relativeY else {
             throw DriverError.invalidArgument("Missing --relative-x/--relative-y for click")
         }
-        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY)
+        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, titleSubstring: options.windowTitle)
     case "right_click":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let relativeX = options.relativeX, let relativeY = options.relativeY else {
             throw DriverError.invalidArgument("Missing --relative-x/--relative-y for right_click")
         }
-        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, right: true)
+        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, right: true, titleSubstring: options.windowTitle)
     case "window_park":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let visiblePx = options.visiblePx else {
             throw DriverError.invalidArgument("Missing --visible-px for window_park")
         }
-        try windowPark(bundleId: options.bundleId, visiblePx: visiblePx)
+        try windowPark(bundleId: options.bundleId, visiblePx: visiblePx, titleSubstring: options.windowTitle)
+    case "scroll":
+        try ensureAccessibility(prompt: options.promptAccessibility)
+        guard let relativeX = options.relativeX, let relativeY = options.relativeY else {
+            throw DriverError.invalidArgument("Missing --relative-x/--relative-y for scroll")
+        }
+        guard let deltaY = options.deltaY else {
+            throw DriverError.invalidArgument("Missing --delta-y for scroll")
+        }
+        try scrollWindow(
+            bundleId: options.bundleId,
+            relativeX: relativeX,
+            relativeY: relativeY,
+            deltaX: options.deltaX,
+            deltaY: deltaY,
+            steps: options.steps,
+            titleSubstring: options.windowTitle
+        )
     default:
         throw DriverError.invalidArgument("Unsupported command")
     }
