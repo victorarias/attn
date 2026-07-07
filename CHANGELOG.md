@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-07]
 
+### Changed
+- **Present is now a continuous tour, not a file-by-file viewer.** The Present window renders every file in the round as one scrollable sequence, in the presenter's reading order — scroll (or click a file in the rail) to move through the whole change set instead of clicking each file to swap the view. Per-file presenter notes appear as callouts above their file, the round summary stays pinned at the top, and an end-of-tour footer confirms how many files you've reviewed. Inline commenting works exactly as before, including multiple open comment boxes across different files at once.
+
 ### Added
 - **Comment boxes in Present are now GitHub-style.** Multiple comments can now be open at once: the hover "+" button keeps working while a draft is open, each comment saves or cancels independently, and Escape closes the most recently opened box first.
 

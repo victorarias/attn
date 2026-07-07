@@ -1,0 +1,72 @@
+/* app/src/components/PresentTour/PresentTour.css
+   Styles for PresentTour (@pierre/diffs CodeView) and the summary/footer
+   flex siblings around it. Comment threads reuse DiffCommentThread's classes
+   from DiffView.css (imported by index.tsx alongside this file).
+*/
+
+.present-tour {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  --diffs-font-size: calc(13px * var(--ui-scale));
+}
+
+.present-tour-summary {
+  flex: 0 0 auto;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+}
+
+.present-tour-summary :first-child {
+  margin-top: 0;
+}
+
+.present-tour-summary :last-child {
+  margin-bottom: 0;
+}
+
+.present-tour-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  padding: 24px;
+}
+
+.present-tour-scroller {
+  min-height: 0;
+}
+
+.present-tour-file-note {
+  padding: 8px 12px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size);
+  line-height: 1.6;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.present-tour-file-note :first-child {
+  margin-top: 0;
+}
+
+.present-tour-file-note :last-child {
+  margin-bottom: 0;
+}
+
+.present-tour-footer {
+  flex: 0 0 auto;
+  margin-top: 16px;
+  padding: 16px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size);
+  border-top: 1px solid var(--color-border);
+}
