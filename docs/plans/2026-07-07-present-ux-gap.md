@@ -79,6 +79,64 @@ Victor's priorities, verbatim buckets:
 - Collapse-on-review persistence across reload.
 - Deleted-line context in whole-file views (jaunt `lib/hunkOverlay.ts`).
 
+## Authoring guidance (the other half)
+
+The reader UX above is half the product; the other half is the discipline
+agents follow when authoring a presentation. Source: jaunt's authoring skill
+(`~/projects/victor/jaunt/skill/SKILL.md`, 418 lines) — the donor product's
+crown jewel. Captured here so the port doesn't get lost behind the reader work.
+
+**Ports nearly verbatim:**
+
+- The five voice rules, in order: teach don't list; be concise without
+  compressing meaning; assume a smart reader; carry the concept and let
+  plan-doc tags (`INV-5`, `DT-2`) trail as footnotes; sound like a friendly
+  engineer. "A good tour feels like a sharp colleague walking you through the
+  codebase at a whiteboard. A bad tour feels like a compliance checklist."
+- Reading-order doctrine: domain-outward default (plan doc → domain model →
+  ports → service → service tests → persistence → integration tests →
+  realtime/orchestration → wiring → e2e), adapted per PR shape; always-skip
+  discipline for generated files.
+- Annotation hygiene: an annotation is a pin, not a transcript — it adds the
+  *why* the line doesn't carry; 1–5 per consequential file; prefer distinctive
+  substring anchors over line numbers; **verify every anchor** (first-substring
+  match resolves silently to the wrong line if ambiguous); annotation bodies
+  stay 1–2 lines, longer context belongs in the file-level note.
+- `thread:` for contested decisions — first comment states the point,
+  follow-ups pre-empt the likely "why not X?" with the rejected alternative
+  and the constraint that forced the choice. Highest-leverage form for
+  same-session authors, who know which choices were contested.
+- Mermaid **by default** in the summary whenever the change touches how
+  components connect (flowchart/stateDiagram/sequenceDiagram/classDiagram by
+  change type); skip only when the change is small and linear or the diagram
+  would just relabel the file list.
+- Note length scales with the reader's conceptual lift, not a word count; a
+  note that restates the diff is padding, a note that teaches the constraint
+  or rejected alternative is the point.
+- Validate before handing to the reviewer — broken anchors/diagrams must not
+  reach the reviewer's screen.
+
+**Changes for attn:**
+
+- The artifact is the Present manifest with an explicit repo/base/head frame —
+  no GitHub PR resolution (jaunt's PR-ref section drops entirely).
+- jaunt's server/sentinel/launch machinery (its steps 9–11: `LISTENING`,
+  `FEEDBACK_READY`/`AGENT_ASK_READY` sentinels, hand-off vs wait-and-act,
+  re-launch loop) is replaced wholesale by `attn present` + the doorbell +
+  `attn present feedback` — attn's session model already covers the loop.
+- `jaunt validate`'s error classes (paths not in the diff, unresolvable or
+  ambiguous anchors, files∩skip overlap, mermaid syntax errors, per-field
+  reporting) become `attn present validate` (or validation inside
+  `attn present`) once anchors/annotations exist in the manifest.
+- Distribution: embed the skill in the daemon (like the delegation skill's
+  `//go:embed`) so agents get it without per-repo setup — merge ≠ shipped,
+  rebuild the daemon.
+
+**Sequencing:** an interim level-0/1 version (voice rules, reading order,
+notes, summary, skip) is useful immediately — manifest v0 already supports
+everything it prescribes. The full port (annotations, `thread:`, mermaid,
+validate) waits on slices 5–6.
+
 ## Architecture (slice 1 target)
 
 Key discovery: `@pierre/diffs` ships **CodeView**
@@ -127,8 +185,11 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
 - [ ] 5. **Annotations**: manifest schema + store/protocol + inline threads
       (expect multiple PRs).
 - [ ] 6. **Diagrams**: mermaid in the shared markdown path.
-- [ ] 7. **Submit**: approve / submit feedback / close (protocol + CLI).
-- [ ] 8. **Polish pass** + the minor items above.
+- [ ] 7. **Authoring skill**: interim level-0/1 version (voice, order, notes,
+      skip) can land any time; full port (annotations, `thread:`, mermaid,
+      `attn present validate`) after slices 5–6; ships via daemon embed.
+- [ ] 8. **Submit**: approve / submit feedback / close (protocol + CLI).
+- [ ] 9. **Polish pass** + the minor items above.
 
 ## Decisions
 
