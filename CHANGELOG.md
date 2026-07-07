@@ -8,7 +8,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-07]
 
+### Added
+- **Comment boxes in Present are now GitHub-style.** Multiple comments can now be open at once: the hover "+" button keeps working while a draft is open, each comment saves or cancels independently, and Escape closes the most recently opened box first.
+
 ### Fixed
+- **The Present window now opens scrolled to the top.** A freshly opened diff no longer arrives scrolled away from the beginning, and the first click won't jump and misplace a comment — the diff stays anchored until you scroll it.
 - **Copilot sessions now receive the attn skill.** The bundled attn skill (delegation, tickets, workspace context, notebook, workflow, chief-of-staff guidance) was only ever installed to `~/.claude/skills/attn` and `~/.agents/skills/attn`, so a Copilot-driven session had no way to learn what "chief of staff" or the rest of attn's vocabulary meant. It's now also installed to `~/.copilot/skills/attn`, kept identical to the Claude/Codex copies and pruned of stale files the same way.
 - **Selecting terminal text no longer occasionally gets stuck extending.** A drag-selection relied on the mouse button's release event reaching the terminal to stop, plus a `buttons`-bitmask check as a backstop. If the release happened outside the app's window (alt-tabbing away mid-drag, releasing over a native dialog, a context menu interrupting the gesture) that bitmask could go stale, so the selection kept growing on the next mouse movement even with no button held. Losing window focus or an interrupted pointer gesture now force-finalizes the selection immediately, matching the same safeguard already used for pane drag-and-drop.
 

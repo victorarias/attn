@@ -50,6 +50,8 @@ interface AnnotationMeta {
   lineNumber: number;
   comments: ReviewComment[];
   draft: boolean;
+  /** `${side}:${startLine}` — looks up this group's own draft in `draftsByFile`. */
+  anchorKey: string;
 }
 
 type DraftState = {
@@ -58,6 +60,15 @@ type DraftState = {
   end: number;
   content: string;
 };
+
+/** Draft anchor key: a (side, start line) pair identifies one open comment box. */
+function anchorKeyOf(side: AnnotationSide, start: number): string {
+  return `${side}:${start}`;
+}
+
+/** Stable empty-record reference so `draftsByFile[name] ?? EMPTY_DRAFTS` doesn't
+ * allocate a fresh object identity for files with no open drafts. */
+const EMPTY_DRAFTS: Record<string, DraftState> = {};
 
 export interface DiffViewProps {
   original: string;
@@ -146,19 +157,91 @@ export function DiffView({
   // that one selection-end instead of letting it also open a second draft.
   const suppressSelectionEndRef = useRef(false);
 
-  const [draftsByFile, setDraftsByFile] = useState<Record<string, DraftState>>({});
+  // On a cold present-window load, this diff can first render inside a hidden
+  // or throttled webview. @pierre/diffs' Virtualizer captures its scroll
+  // anchor against unmeasured row geometry during that throttled window, then
+  // autonomously scrolls `.diff-view-scroller` to garbage positions (observed
+  // in the wild: scrollTo 8792 -> clamp 8265 -> 5565) before the user has
+  // touched the page at all. The first real click then forces a re-measure
+  // that remaps content under that now-stale scrollTop, producing a visible
+  // jump and a click that resolves against the wrong row entirely. Warm loads
+  // never exhibit this — the library only mis-measures against a
+  // hidden/throttled layout.
+  //
+  // Pin the scroller to the top until the user deliberately scrolls it
+  // themselves; once real input arrives, get out of the way for good. Empty
+  // dep array: this arms once per DiffView mount and must NOT re-arm on file
+  // switch or diffKey change, or a mid-review file switch would yank the
+  // viewport back to the top.
+  useEffect(() => {
+    const scroller = wrapperRef.current?.querySelector<HTMLElement>('.diff-view-scroller');
+    if (!scroller) return;
+    let userTookOver = false;
+    const takeover = () => {
+      userTookOver = true;
+    };
+    const onScroll = () => {
+      if (!userTookOver && scroller.scrollTop !== 0) scroller.scrollTop = 0;
+    };
+    scroller.addEventListener('wheel', takeover, { passive: true });
+    scroller.addEventListener('touchstart', takeover, { passive: true });
+    scroller.addEventListener('pointerdown', takeover, { passive: true });
+    scroller.addEventListener('keydown', takeover);
+    scroller.addEventListener('scroll', onScroll);
+    return () => {
+      scroller.removeEventListener('wheel', takeover);
+      scroller.removeEventListener('touchstart', takeover);
+      scroller.removeEventListener('pointerdown', takeover);
+      scroller.removeEventListener('keydown', takeover);
+      scroller.removeEventListener('scroll', onScroll);
+    };
+  }, []);
+
+  // Per-anchor draft storage: multiple comment boxes can be open at once in the
+  // same file, each keyed by the (side, start line) it's anchored to. Object key
+  // insertion order is preserved for these string keys, which the escape-stack
+  // handler below relies on to find the most-recently-opened draft.
+  const [draftsByFile, setDraftsByFile] = useState<Record<string, Record<string, DraftState>>>({});
   // Comments that cannot render inline are collapsed by default.
   const [staleExpanded, setStaleExpanded] = useState(false);
 
   const name = filePath ?? 'file.txt';
-  const draft = draftsByFile[name] ?? null;
+  const draftsForFile = draftsByFile[name] ?? EMPTY_DRAFTS;
+  const draftKeys = useMemo(() => Object.keys(draftsForFile), [draftsForFile]);
 
-  const setDraftForCurrentFile = useCallback(
-    (next: DraftState | null) => {
+  // Opens a new draft box at (side, start..end). No-op if a draft is already
+  // open at that exact anchor — clicking an anchor that already has an open box
+  // should neither duplicate it nor wipe its typed text.
+  const openDraft = useCallback(
+    (side: AnnotationSide, start: number, end: number) => {
+      const key = anchorKeyOf(side, start);
       setDraftsByFile((current) => {
-        if (next) return { ...current, [name]: next };
-        const { [name]: _removed, ...rest } = current;
-        return rest;
+        const forFile = current[name] ?? EMPTY_DRAFTS;
+        if (forFile[key]) return current;
+        return { ...current, [name]: { ...forFile, [key]: { side, start, end, content: '' } } };
+      });
+    },
+    [name]
+  );
+
+  const updateDraftContent = useCallback(
+    (key: string, content: string) => {
+      setDraftsByFile((current) => {
+        const forFile = current[name];
+        if (!forFile?.[key]) return current;
+        return { ...current, [name]: { ...forFile, [key]: { ...forFile[key], content } } };
+      });
+    },
+    [name]
+  );
+
+  const closeDraft = useCallback(
+    (key: string) => {
+      setDraftsByFile((current) => {
+        const forFile = current[name];
+        if (!forFile || !(key in forFile)) return current;
+        const { [key]: _removed, ...rest } = forFile;
+        return { ...current, [name]: rest };
       });
     },
     [name]
@@ -170,7 +253,7 @@ export function DiffView({
     () => editingCommentId != null && comments.some((c) => c.id === editingCommentId),
     [editingCommentId, comments]
   );
-  const formOpen = draft !== null || editingHere;
+  const formOpen = draftKeys.length > 0 || editingHere;
 
   // Freeze the diff content while a comment form is open. @pierre/diffs binds a
   // rendered instance to its first file and won't swap the target in place
@@ -231,18 +314,22 @@ export function DiffView({
     [name, shownOriginal, shownModified]
   );
 
-  // Controlled selection. Without this, the library runs uncontrolled and
-  // commits an internal selectedRange on the first gutter-"+" click or
-  // drag-driven draft; InteractionManager then keeps re-anchoring the hover
-  // "+" to that stale range on every pointer move instead of following the
-  // mouse (see InteractionManager.placeUtilityFromSelection). Reflecting our
-  // own draft state here — and clearing to null once it's closed — keeps the
-  // library's selection in sync with ours and lets the "+" resume tracking
-  // the pointer as soon as there's nothing selected.
-  const selectedLines = useMemo<SelectedLineRange | null>(() => {
-    if (draft) return { side: draft.side, start: draft.start, end: draft.end };
-    return null;
-  }, [draft]);
+  // Controlled selection — ALWAYS null. Passing the `selectedLines` prop at all
+  // (rather than omitting it) is what keeps @pierre/diffs out of uncontrolled
+  // mode; if the prop is omitted the library commits its own internal
+  // selectedRange on the first gutter-"+" click or drag-driven draft, and
+  // InteractionManager then keeps re-anchoring the hover "+" to that stale
+  // range on every pointer move instead of following the mouse (see
+  // InteractionManager.placeUtilityFromSelection). This file used to reflect
+  // the single open draft's range back into this prop to keep the library's
+  // selection "in sync" with ours — but with multiple simultaneous drafts
+  // there is no longer one range to reflect, and pinning to any one of them
+  // would resume the hover-death bug on every OTHER draft's lines. A draft's
+  // anchor is fully communicated by the inline comment box rendered at that
+  // (side, line) via lineAnnotations/renderAnnotation, so this prop has
+  // nothing to carry — always-null keeps the library controlled while
+  // leaving its hover "+" free to follow the pointer everywhere.
+  const selectedLines: SelectedLineRange | null = null;
 
   // The library forces a full re-render whenever the options object changes by
   // value (function identities included), so keep callbacks stable and memoize
@@ -252,7 +339,7 @@ export function DiffView({
     if (!normalized) return;
     const { side, start, end } = normalized;
     suppressSelectionEndRef.current = true;
-    setDraftForCurrentFile({ side, start, end, content: '' });
+    openDraft(side, start, end);
   });
 
   // `enableLineSelection` requires a click to land on the number column to
@@ -272,7 +359,7 @@ export function DiffView({
     const normalized = normalizeRange(range);
     if (!normalized) return;
     const { side, start, end } = normalized;
-    setDraftForCurrentFile({ side, start, end, content: '' });
+    openDraft(side, start, end);
   });
 
   const options = useMemo<FileDiffOptions<AnnotationMeta>>(() => ({
@@ -296,30 +383,30 @@ export function DiffView({
     onGutterUtilityClick: handleGutterUtilityClick,
   }), [diffStyle, expandUnchanged, resolvedTheme, handleLineSelectionEnd, handleGutterUtilityClick]);
 
-  // Group saved comments + the optional draft into one annotation per
+  // Group saved comments + any open drafts into one annotation per
   // (side, anchor line). The library slots annotations by `side`+`lineNumber`,
-  // so collisions must be merged into a single thread.
+  // so collisions must be merged into a single thread — a draft can land on
+  // the same anchor as an existing comment thread, or on its own empty one.
   const lineAnnotations = useMemo<DiffLineAnnotation<AnnotationMeta>[]>(() => {
     const groups = new Map<string, AnnotationMeta>();
-    const keyOf = (side: AnnotationSide, line: number) => `${side}:${line}`;
 
     for (const comment of anchoredComments) {
       const side: AnnotationSide = isOriginalSideComment(comment) ? 'deletions' : 'additions';
       const line = comment.line_start;
-      const key = keyOf(side, line);
+      const key = anchorKeyOf(side, line);
       let group = groups.get(key);
       if (!group) {
-        group = { side, lineNumber: line, comments: [], draft: false };
+        group = { side, lineNumber: line, comments: [], draft: false, anchorKey: key };
         groups.set(key, group);
       }
       group.comments.push(comment);
     }
 
-    if (draft) {
-      const key = keyOf(draft.side, draft.start);
+    for (const key of draftKeys) {
+      const d = draftsForFile[key];
       let group = groups.get(key);
       if (!group) {
-        group = { side: draft.side, lineNumber: draft.start, comments: [], draft: true };
+        group = { side: d.side, lineNumber: d.start, comments: [], draft: true, anchorKey: key };
         groups.set(key, group);
       } else {
         group.draft = true;
@@ -329,46 +416,41 @@ export function DiffView({
     // The library keys annotation slots by array index (renderDiffChildren maps
     // with the index as the React key), so an annotation's index must stay stable
     // or React remounts its subtree — which would wipe an in-progress draft/edit
-    // form (its typed text and focus). Keep the annotation(s) with an open form at
-    // the front so that comments arriving or leaving in the background only ever
-    // shift the trailing, form-less threads. Visual placement is unaffected: the
-    // library positions each thread by its `slot` (side+line), not array order.
+    // form (its typed text and focus). Keep ALL annotations hosting an open form
+    // (any open draft, or the comment being edited) at the front, in a stable
+    // order among themselves (sorted by anchor key so their relative order never
+    // depends on Map iteration or comment arrival order), so that comments
+    // arriving or leaving in the background only ever shift the trailing,
+    // form-less threads. Visual placement is unaffected: the library positions
+    // each thread by its `slot` (side+line), not array order.
     const all = Array.from(groups.values());
     const hasOpenForm = (g: AnnotationMeta) =>
       g.draft || g.comments.some((c) => c.id === editingCommentId);
-    const active = all.filter(hasOpenForm);
+    const active = all.filter(hasOpenForm).sort((a, b) => a.anchorKey.localeCompare(b.anchorKey));
     const rest = all.filter((g) => !hasOpenForm(g));
     return [...active, ...rest].map((meta) => ({
       side: meta.side,
       lineNumber: meta.lineNumber,
       metadata: meta,
     }));
-  }, [anchoredComments, draft, editingCommentId]);
+  }, [anchoredComments, draftKeys, draftsForFile, editingCommentId]);
 
   const handleSaveDraft = useCallback(
-    async (content: string) => {
-      if (!draft) return;
-      const lineStart = draft.start;
-      const lineEnd = draft.side === 'deletions' ? -draft.end : draft.end;
+    async (key: string, content: string) => {
+      const d = draftsForFile[key];
+      if (!d) return;
+      const lineStart = d.start;
+      const lineEnd = d.side === 'deletions' ? -d.end : d.end;
       try {
         await onAddComment(lineStart, lineEnd, content);
-        setDraftForCurrentFile(null);
+        closeDraft(key);
       } catch {
         // The parent owns user-visible error reporting; keep the draft intact so
         // the user can retry without losing typed text.
       }
     },
-    [draft, onAddComment, setDraftForCurrentFile]
+    [draftsForFile, onAddComment, closeDraft]
   );
-
-  const handleDraftContentChange = useCallback(
-    (content: string) => {
-      setDraftForCurrentFile(draft ? { ...draft, content } : null);
-    },
-    [draft, setDraftForCurrentFile]
-  );
-
-  const handleCancelDraft = useCallback(() => setDraftForCurrentFile(null), [setDraftForCurrentFile]);
 
   const handleSendComment = useCallback(
     (comment: ReviewComment) => {
@@ -381,17 +463,29 @@ export function DiffView({
   const renderAnnotation = useCallback(
     (annotation: DiffLineAnnotation<AnnotationMeta>) => {
       const meta = annotation.metadata;
+      const key = meta.anchorKey;
       return (
         <DiffCommentThread
+          // Keyed by anchor, not just positioned by array index: the "front"
+          // slot a given index hosts can switch which anchor it represents
+          // between renders (e.g. draft A at index 0 closes, sliding draft B
+          // from index 1 into index 0). Without this key React reconciles
+          // that as "the same DiffCommentThread, new props" and reuses the
+          // mounted CommentForm instance — whose `value` state is seeded
+          // once from `initialValue` — leaving B's box showing A's stale
+          // typed text. The key forces a remount whenever the anchor at a
+          // slot actually changes, while leaving it stable (untouched
+          // state/focus) across renders where the same anchor stays put.
+          key={key}
           comments={meta.comments}
           draft={meta.draft}
           editingCommentId={editingCommentId}
           readOnlyCommentIds={readOnlyCommentIds}
           showSendToClaude={!!onSendToClaude && !!filePath}
-          draftContent={meta.draft ? draft?.content : undefined}
-          onDraftContentChange={meta.draft ? handleDraftContentChange : undefined}
-          onSaveDraft={handleSaveDraft}
-          onCancelDraft={handleCancelDraft}
+          draftContent={meta.draft ? draftsForFile[key]?.content : undefined}
+          onDraftContentChange={meta.draft ? (content) => updateDraftContent(key, content) : undefined}
+          onSaveDraft={(content) => handleSaveDraft(key, content)}
+          onCancelDraft={() => closeDraft(key)}
           onStartEdit={onStartEdit}
           onEditComment={onEditComment}
           onCancelEdit={onCancelEdit}
@@ -406,9 +500,10 @@ export function DiffView({
       readOnlyCommentIds,
       onSendToClaude,
       filePath,
+      draftsForFile,
+      updateDraftContent,
       handleSaveDraft,
-      handleDraftContentChange,
-      handleCancelDraft,
+      closeDraft,
       onStartEdit,
       onEditComment,
       onCancelEdit,
@@ -418,8 +513,15 @@ export function DiffView({
     ]
   );
 
-  // Escape closes the draft form before the panel (LIFO).
-  useEscapeStack(handleCancelDraft, draft !== null);
+  // Escape closes the most-recently-opened draft first (LIFO among drafts),
+  // before falling through to the panel's own escape handling. Object key
+  // insertion order (preserved for these string keys) doubles as open order,
+  // so the last key is the most recently opened still-open draft.
+  const handleEscapeDraft = useCallback(() => {
+    if (draftKeys.length === 0) return;
+    closeDraft(draftKeys[draftKeys.length - 1]);
+  }, [draftKeys, closeDraft]);
+  useEscapeStack(handleEscapeDraft, draftKeys.length > 0);
   useEscapeStack(onCancelEdit, editingCommentId !== null);
 
   return (
