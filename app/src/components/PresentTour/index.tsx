@@ -88,8 +88,10 @@ export interface PresentTourProps {
    * with `scrollNonce` so re-clicking the same file still re-scrolls. */
   scrollToPath?: string | null;
   scrollNonce?: number;
-  /** Fires with the path nearest the top of the viewport as the user scrolls. */
-  onActivePathChange?: (path: string) => void;
+  /** Fires with the path nearest the top of the viewport as the user scrolls,
+   * or null when the viewport is scrolled to the very top (the summary
+   * region, above the first file). */
+  onActivePathChange?: (path: string | null) => void;
   /** Paths the user has marked reviewed (jaunt-style per-file mark). */
   reviewedPaths: ReadonlySet<string>;
   onToggleReviewed: (path: string) => void;
@@ -523,7 +525,13 @@ export function PresentTour({
   }, []);
 
   // Rail-driven / j-k-driven scroll: nonce forces a re-scroll even to the
-  // same path (e.g. re-pressing j at the last file).
+  // same path (e.g. re-pressing j at the last file). A null scrollToPath
+  // paired with an advanced nonce means "scroll to the summary" (stop 0):
+  // the rail's pinned Summary row has no item id to scroll to, so this
+  // resets the scroller itself to the top instead of asking CodeView to
+  // resolve an item. `scrollNonce` (not scrollToPath) is what distinguishes
+  // "no request yet" (nonce still at its initial 0) from an explicit
+  // scroll-to-summary request, since scrollToPath is null in both cases.
   //
   // This request is itself deliberate user-driven navigation, but it does
   // not fire a native wheel/touch/pointerdown/keydown ON THE SCROLLER (the
@@ -559,18 +567,25 @@ export function PresentTour({
   useEffect(() => {
     const wasSettled = wasSettledRef.current;
     wasSettledRef.current = allSettled;
-    if (!scrollToPath || !allSettled) return;
+    const hasRequest = (scrollNonce ?? 0) > 0;
+    if (!hasRequest || !allSettled) return;
     const handle = handleRef.current;
     if (!handle) return;
     userTookOverRef.current = true;
-    if (!wasSettled) {
-      const raf = requestAnimationFrame(() => {
+    const performScroll = () => {
+      if (scrollToPath) {
         handle.scrollTo({ type: 'item', id: scrollToPath, align: 'start', behavior: 'smooth' });
-      });
+      } else {
+        containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    };
+    if (!wasSettled) {
+      const raf = requestAnimationFrame(performScroll);
       return () => cancelAnimationFrame(raf);
     }
-    handle.scrollTo({ type: 'item', id: scrollToPath, align: 'start', behavior: 'smooth' });
-    // scrollNonce intentionally included so repeat clicks on the same path re-fire.
+    performScroll();
+    // scrollNonce intentionally included so repeat clicks on the same path (or
+    // repeat clicks on Summary) re-fire.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollToPath, scrollNonce, allSettled]);
 
@@ -583,6 +598,12 @@ export function PresentTour({
   const handleScroll = useCallback(
     (scrollTop: number) => {
       if (!onActivePathChange || !containerRef.current) return;
+      // At the very top of the scroller there is nothing above the first
+      // file to have scrolled past — this is the summary region.
+      if (scrollTop <= 0) {
+        onActivePathChange(null);
+        return;
+      }
       const instance = handleRef.current?.getInstance();
       if (!instance) return;
       const containerTop = containerRef.current.getBoundingClientRect().top;
@@ -605,7 +626,6 @@ export function PresentTour({
       }
       const path = bestPath ?? nearestPath;
       if (path) onActivePathChange(path);
-      void scrollTop;
     },
     [onActivePathChange]
   );

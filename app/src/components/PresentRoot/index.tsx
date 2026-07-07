@@ -138,7 +138,7 @@ export function PresentRoot() {
   // passive activePath update from scrolling can never itself re-trigger a
   // programmatic scroll (which would fight the user's own scroll gesture).
   const [activePath, setActivePath] = useState<string | null>(null);
-  const [scrollRequest, setScrollRequest] = useState<{ path: string; nonce: number } | null>(null);
+  const [scrollRequest, setScrollRequest] = useState<{ path: string | null; nonce: number } | null>(null);
   const scrollNonceRef = useRef(0);
   const [fileDiffs, setFileDiffs] = useState<Record<string, DiffCacheEntry>>({});
   const [driftDismissed, setDriftDismissed] = useState(false);
@@ -156,7 +156,8 @@ export function PresentRoot() {
   const activeRoundKeyRef = useRef<string | null>(null);
   activeRoundKeyRef.current = round ? round.id : null;
 
-  const requestScroll = useCallback((path: string) => {
+  // path=null requests a scroll to the pinned Summary row (stop 0).
+  const requestScroll = useCallback((path: string | null) => {
     scrollNonceRef.current += 1;
     setActivePath(path);
     setScrollRequest({ path, nonce: scrollNonceRef.current });
@@ -356,6 +357,14 @@ export function PresentRoot() {
     () => new Set(allComments.filter((c) => !draftIds.has(c.id)).map((c) => c.id)),
     [allComments, draftIds]
   );
+  // Rail comment chip: submitted comments (unresolved and resolved alike)
+  // plus in-progress drafts, per file.
+  const commentCountByPath = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of comments) counts.set(c.filepath, (counts.get(c.filepath) ?? 0) + 1);
+    for (const d of drafts) counts.set(d.filepath, (counts.get(d.filepath) ?? 0) + 1);
+    return counts;
+  }, [comments, drafts]);
   const tourFiles = useMemo<PresentTourFile[]>(
     () =>
       files.map((file) => ({
@@ -541,8 +550,19 @@ export function PresentRoot() {
           </div>
 
           <ol className="present-root-files" ref={railRef}>
+            <li
+              key="__summary__"
+              data-testid="present-root-summary-row"
+              className={`present-root-summary-row ${activePath === null ? 'selected' : ''}`}
+              onClick={() => requestScroll(null)}
+            >
+              <span className="present-root-file-path">Summary</span>
+            </li>
+
             {files.map((file, index) => {
               const isReviewed = reviewed.has(file.path);
+              const commentCount = commentCountByPath.get(file.path) ?? 0;
+              const hasStats = file.additions !== undefined || file.deletions !== undefined;
               return (
                 <li
                   key={file.path}
@@ -553,6 +573,17 @@ export function PresentRoot() {
                   <span className="present-root-file-index">{isReviewed ? '✓' : index + 1}</span>
                   <code className="present-root-file-path">{file.path}</code>
                   {file.note && <span className="present-root-file-note-marker" title="Has a note">●</span>}
+                  {commentCount > 0 && (
+                    <span className="present-root-file-comment-chip" title={`${commentCount} comment${commentCount === 1 ? '' : 's'}`}>
+                      {commentCount}
+                    </span>
+                  )}
+                  {hasStats && (
+                    <span className="present-root-file-stats">
+                      {file.additions !== undefined && <span className="adds">+{file.additions}</span>}
+                      {file.deletions !== undefined && <span className="dels">−{file.deletions}</span>}
+                    </span>
+                  )}
                 </li>
               );
             })}

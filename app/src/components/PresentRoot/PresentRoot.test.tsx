@@ -202,6 +202,17 @@ const roundWithSkip = {
   },
 };
 
+const roundWithStats = {
+  ...round,
+  manifest: {
+    ...round.manifest,
+    files: [
+      { path: 'src/foo.ts', note: 'Core logic', additions: 12, deletions: 3 },
+      { path: 'src/foo.test.ts' },
+    ],
+  },
+};
+
 const presentation = {
   id: 'pres-1',
   created_at: '2026-07-01T00:00:00Z',
@@ -364,6 +375,93 @@ describe('PresentRoot', () => {
     const unnotedItem = screen.getByText('src/foo.test.ts').closest('li');
     expect(notedItem?.querySelector('.present-root-file-note-marker')).not.toBeNull();
     expect(unnotedItem?.querySelector('.present-root-file-note-marker')).toBeNull();
+  });
+
+  it('renders per-file ± stats when the round carries them, and omits them otherwise', async () => {
+    await loadRound({ round: roundWithStats });
+
+    const statted = screen.getByText('src/foo.ts').closest('li');
+    const statsEl = statted?.querySelector('.present-root-file-stats');
+    expect(statsEl).not.toBeNull();
+    expect(statsEl?.querySelector('.adds')?.textContent).toBe('+12');
+    expect(statsEl?.querySelector('.dels')?.textContent).toBe('−3');
+
+    const unstatted = screen.getByText('src/foo.test.ts').closest('li');
+    expect(unstatted?.querySelector('.present-root-file-stats')).toBeNull();
+  });
+
+  it('shows a comment-count chip on rows with submitted comments or drafts, sized to the count', async () => {
+    await loadRound({
+      comments: [
+        {
+          id: 'submitted-1',
+          content: 'from a prior round',
+          filepath: 'src/foo.ts',
+          line_start: 2,
+          line_end: 2,
+          side: 'new',
+          author: 'user',
+          created_at: '2026-07-01T00:00:00Z',
+          round_id: 'round-0',
+        },
+        {
+          id: 'submitted-2',
+          content: 'a second one',
+          filepath: 'src/foo.ts',
+          line_start: 4,
+          line_end: 4,
+          side: 'new',
+          author: 'user',
+          created_at: '2026-07-01T00:00:00Z',
+          round_id: 'round-0',
+        },
+      ],
+    });
+
+    const withComments = screen.getByText('src/foo.ts').closest('li');
+    expect(withComments?.querySelector('.present-root-file-comment-chip')?.textContent).toBe('2');
+
+    const noComments = screen.getByText('src/foo.test.ts').closest('li');
+    expect(noComments?.querySelector('.present-root-file-comment-chip')).toBeNull();
+
+    // A local, not-yet-submitted draft bumps the chip too.
+    await act(async () => {
+      latestTourProps().onAddComment('src/foo.test.ts', 1, 1, 'draft comment');
+    });
+    await waitFor(() => {
+      expect(screen.getByText('src/foo.test.ts').closest('li')?.querySelector('.present-root-file-comment-chip')?.textContent).toBe('1');
+    }, WAIT_OPTS);
+  });
+
+  it('the pinned Summary row scrolls to the top and a file row click still works afterward', async () => {
+    await loadRound();
+
+    await waitFor(() => {
+      expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+    }, WAIT_OPTS);
+
+    const summaryRow = screen.getByTestId('present-root-summary-row');
+    fireEvent.click(summaryRow);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('present-root-summary-row')).toHaveClass('selected');
+    }, WAIT_OPTS);
+    expect(screen.getByText('src/foo.ts').closest('li')).not.toHaveClass('selected');
+
+    const propsAfterSummaryClick = latestTourProps();
+    expect(propsAfterSummaryClick.scrollToPath).toBeNull();
+    expect(propsAfterSummaryClick.scrollNonce).toBeGreaterThan(0);
+    const nonceAfterSummary = propsAfterSummaryClick.scrollNonce;
+
+    fireEvent.click(screen.getByText('src/foo.test.ts'));
+    await waitFor(() => {
+      expect(screen.getByText('src/foo.test.ts').closest('li')).toHaveClass('selected');
+    }, WAIT_OPTS);
+    expect(screen.getByTestId('present-root-summary-row')).not.toHaveClass('selected');
+
+    const propsAfterFileClick = latestTourProps();
+    expect(propsAfterFileClick.scrollToPath).toBe('src/foo.test.ts');
+    expect(propsAfterFileClick.scrollNonce).toBeGreaterThan(nonceAfterSummary ?? 0);
   });
 
   it('fetches every manifest file’s diff up front, exactly once per round', async () => {

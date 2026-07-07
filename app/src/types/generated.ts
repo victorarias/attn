@@ -1312,8 +1312,10 @@ export interface Manifest {
 }
 
 export interface FileElement {
-    note?: string;
-    path:  string;
+    additions?: number;
+    deletions?: number;
+    note?:      string;
+    path:       string;
     [property: string]: any;
 }
 
@@ -2429,8 +2431,10 @@ export interface PresentFeedbackResult {
 }
 
 export interface PresentFile {
-    note?: string;
-    path:  string;
+    additions?: number;
+    deletions?: number;
+    note?:      string;
+    path:       string;
     [property: string]: any;
 }
 
@@ -7703,6 +7707,8 @@ const typeMap: any = {
         { json: "title", js: "title", typ: "" },
     ], "any"),
     "FileElement": o([
+        { json: "additions", js: "additions", typ: u(undefined, 0) },
+        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
         { json: "note", js: "note", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
     ], "any"),
@@ -8357,6 +8363,8 @@ const typeMap: any = {
         { json: "submitted", js: "submitted", typ: true },
     ], "any"),
     "PresentFile": o([
+        { json: "additions", js: "additions", typ: u(undefined, 0) },
+        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
         { json: "note", js: "note", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
     ], "any"),

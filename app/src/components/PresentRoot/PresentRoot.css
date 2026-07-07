@@ -231,6 +231,24 @@
   border-top: 1px solid var(--color-border-subtle);
 }
 
+.present-root-summary-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.present-root-summary-row:hover {
+  background: var(--color-border-subtle);
+}
+
+.present-root-summary-row.selected {
+  background: var(--color-accent);
+  color: #fff;
+}
+
 .present-root-file {
   display: flex;
   align-items: center;
@@ -280,6 +298,46 @@
 
 .present-root-file.selected .present-root-file-note-marker {
   color: #fff;
+}
+
+.present-root-file-comment-chip {
+  flex: 0 0 auto;
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--color-accent, #5b8cff);
+  color: #fff;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.present-root-file.selected .present-root-file-comment-chip {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.present-root-file-stats {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-family: monospace;
+}
+
+.present-root-file-stats .adds {
+  color: var(--color-diff-add, #3fb950);
+}
+
+.present-root-file-stats .dels {
+  color: var(--color-diff-del, #f85149);
+}
+
+.present-root-file.selected .present-root-file-stats .adds,
+.present-root-file.selected .present-root-file-stats .dels {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .present-root-file.reviewed:not(.selected) {
