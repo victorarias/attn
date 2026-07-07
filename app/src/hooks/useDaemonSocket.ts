@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '149';
+export const PROTOCOL_VERSION = '150';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2505,8 +2505,10 @@ export function useDaemonSocket({
             break;
 
           case 'file_diff_result': {
-            // Use path-based key to match the request
-            const key = `get_file_diff_${data.path}`;
+            // Resolve by request id only — a path-based key would let a stale
+            // round's late reply resolve a newer round's in-flight request for
+            // the same path with the wrong content.
+            const key = `get_file_diff_${data.request_id}`;
             const pending = pendingActionsRef.current.get(key);
             if (pending) {
               pendingActionsRef.current.delete(key);
@@ -4515,14 +4517,18 @@ export function useDaemonSocket({
         return;
       }
 
-      // Use unique key per file to avoid race conditions when multiple files are fetched
-      const key = `get_file_diff_${path}`;
+      // Key by request id, not path: two in-flight requests for the same path
+      // (e.g. a stale round's late reply racing a new round's request) must not
+      // clobber each other's pending promise.
+      const requestId = nextRequestID('get_file_diff');
+      const key = `get_file_diff_${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
 
       ws.send(JSON.stringify({
         cmd: 'get_file_diff',
         directory,
         path,
+        request_id: requestId,
         ...(options?.staged !== undefined && { staged: options.staged }),
         ...(options?.baseRef && { base_ref: options.baseRef }),
         ...(options?.headRef && { head_ref: options.headRef }),
@@ -4535,7 +4541,7 @@ export function useDaemonSocket({
         }
       }, GIT_DIFF_TIMEOUT_MS);
     });
-  }, []);
+  }, [nextRequestID]);
 
   // Get repo info
   const getRepoInfo = useCallback((repo: string, endpointId?: string): Promise<RepoInfoResult> => {

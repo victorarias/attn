@@ -327,3 +327,33 @@ test.describe('PresentTour draft and comment gutter interactions', () => {
     await expect(page.getByTestId('diff-comment-thread')).toHaveCount(0);
   });
 });
+
+test.describe('PresentTour deferred-load scroll replay', () => {
+  test('a scroll request issued while still loading is replayed once files settle', async ({ page }) => {
+    // `&deferred=1` starts every file `{loading: true}` (no `<diffs-container>`
+    // mounts at all yet) so this exercises the case the rail/j-k effect used
+    // to drop: a scroll request that arrives before CodeView exists.
+    await page.goto('/test-harness/?component=PresentTour&seed=0&deferred=1');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await expect(page.locator('.present-tour-loading')).toBeVisible();
+    expect(await fileContainers(page).count()).toBe(0);
+
+    await page.evaluate(() => window.__HARNESS__.scrollToFile('src/gamma.ts'));
+
+    await page.evaluate(() => (window.__HARNESS__ as unknown as { settleDiffs: () => void }).settleDiffs());
+    await page.waitForSelector('diffs-container');
+    await page.locator('diffs-container [data-line-number-content]').first().waitFor();
+    await waitForScrollSettle(page);
+
+    let gammaContainer: Locator | null = null;
+    await expect.poll(async () => {
+      gammaContainer = await findContainerByTitle(page, 'src/gamma.ts');
+      return gammaContainer !== null;
+    }).toBe(true);
+    expect(gammaContainer).not.toBeNull();
+
+    // A scroller pinned to the top would leave gamma (the last of 3 files)
+    // out of the virtualizer's mounted window; scrolled-to means it's visible.
+    await expect(gammaContainer!).toBeInViewport();
+  });
+});

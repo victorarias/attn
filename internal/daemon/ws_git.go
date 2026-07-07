@@ -183,6 +183,7 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 		Directory: msg.Directory,
 		Path:      msg.Path,
 		Success:   false,
+		RequestID: msg.RequestID,
 	}
 
 	baseRef := "HEAD"

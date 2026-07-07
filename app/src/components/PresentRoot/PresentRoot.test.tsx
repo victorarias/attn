@@ -151,10 +151,24 @@ async function loadRound(options?: {
   return ws;
 }
 
-/** Resolves a `get_file_diff` for `path` with the given content. */
+/** The `request_id` of the most recently sent `get_file_diff` for `path`. */
+function latestFileDiffRequestId(ws: FakeWebSocket, path: string): string {
+  const sent = ws.sent.map((entry) => JSON.parse(entry)).filter((m) => m.cmd === 'get_file_diff' && m.path === path);
+  const last = sent[sent.length - 1];
+  if (!last?.request_id) throw new Error(`no get_file_diff request_id found for ${path}`);
+  return last.request_id;
+}
+
+/**
+ * Resolves a `get_file_diff` for `path` with the given content, echoing the
+ * most recently sent request's id back — as the real daemon does. Results are
+ * correlated by request_id only (see `file_diff_result` in useDaemonSocket.ts),
+ * so this must echo a real id or the promise never resolves.
+ */
 function emitFileDiff(ws: FakeWebSocket, path: string, original: string, modified: string) {
+  const requestId = latestFileDiffRequestId(ws, path);
   act(() => {
-    ws.emit({ event: 'file_diff_result', success: true, path, original, modified });
+    ws.emit({ event: 'file_diff_result', success: true, path, request_id: requestId, original, modified });
   });
 }
 
@@ -441,6 +455,7 @@ describe('PresentRoot', () => {
         event: 'file_diff_result',
         success: false,
         path: 'src/foo.ts',
+        request_id: latestFileDiffRequestId(ws, 'src/foo.ts'),
         error: 'git show failed',
       });
     });
@@ -666,5 +681,82 @@ describe('PresentRoot', () => {
     // once — navigating the rail must not drop comments on other files.
     expect(latestTourProps().comments.some((c) => c.content === 'on foo.ts')).toBe(true);
     void ws;
+  }, TEST_TIMEOUT);
+
+  // Wire-level counterpart to PresentRoot.roundGuard.test.tsx's mocked-hook
+  // version: this drives the REAL useDaemonSocket against a FakeWebSocket, so
+  // it also covers the request_id correlation fix in useDaemonSocket.ts
+  // itself (get_file_diff/file_diff_result used to correlate by path alone,
+  // so a second in-flight request for the same path clobbered the first's
+  // pending promise, and a stale round's late reply could resolve the new
+  // round's promise with the wrong content).
+  it('does not apply a stale round’s late file_diff_result to a newer round for the same path', async () => {
+    const ws = await loadRound();
+
+    await waitFor(() => {
+      expect(ws.sent.map((e) => JSON.parse(e)).some((m) => m.cmd === 'get_file_diff' && m.path === 'src/foo.ts')).toBe(true);
+    }, WAIT_OPTS);
+    const round1RequestId = latestFileDiffRequestId(ws, 'src/foo.ts');
+
+    // Leave round-1's src/foo.ts request unresolved and transition to round-2
+    // via presentation_updated (same file path in both rounds).
+    act(() => {
+      ws.emit({ event: 'presentation_updated', presentation: { id: 'pres-1' } });
+    });
+
+    await waitFor(() => {
+      const refetches = ws.sent.map((e) => JSON.parse(e)).filter((m) => m.cmd === 'get_presentation_round');
+      expect(refetches.length).toBeGreaterThanOrEqual(2);
+    }, WAIT_OPTS);
+
+    const round2 = { ...round, id: 'round-2', seq: 2, base_sha: 'fedcba098765', head_sha: '998877665544' };
+    act(() => {
+      ws.emit({
+        event: 'get_presentation_round_result',
+        success: true,
+        presentation,
+        round: round2,
+        comments: [],
+      });
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((e) => JSON.parse(e)).filter((m) => m.cmd === 'get_file_diff' && m.path === 'src/foo.ts');
+      expect(sent).toHaveLength(2);
+    }, WAIT_OPTS);
+    const round2RequestId = latestFileDiffRequestId(ws, 'src/foo.ts');
+    expect(round2RequestId).not.toBe(round1RequestId);
+
+    // The stale round-1 reply arrives late, echoing round-1's own request id.
+    act(() => {
+      ws.emit({
+        event: 'file_diff_result',
+        success: true,
+        path: 'src/foo.ts',
+        request_id: round1RequestId,
+        original: 'STALE round-1 original',
+        modified: 'STALE round-1 modified',
+      });
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('tour-file-src/foo.ts').textContent).not.toContain('STALE round-1');
+
+    // Round-2's own reply, echoing round-2's request id, applies normally.
+    act(() => {
+      ws.emit({
+        event: 'file_diff_result',
+        success: true,
+        path: 'src/foo.ts',
+        request_id: round2RequestId,
+        original: 'FRESH round-2 original',
+        modified: 'FRESH round-2 modified',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('tour-file-src/foo.ts').textContent).toContain('FRESH round-2 original');
+    }, WAIT_OPTS);
   }, TEST_TIMEOUT);
 });

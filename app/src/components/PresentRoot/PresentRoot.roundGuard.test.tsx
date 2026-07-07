@@ -13,13 +13,14 @@ import type { PresentTourProps } from '../PresentTour';
 // spirit as part of the slice-1 fetch-all rework).
 //
 // This is exercised via a full useDaemonSocket mock (rather than the
-// FakeWebSocket harness in PresentRoot.test.tsx) because the real wire
-// protocol correlates `get_file_diff`/`file_diff_result` by path alone
-// (`get_file_diff_<path>` in useDaemonSocket.ts) — a second in-flight
-// request for the same path overwrites the first's promise handle, so a
-// black-box WS simulation can't independently resolve an "old round"
-// response after a "new round" request for the same path has already been
-// sent. Mocking sendGetFileDiff directly gives each call its own
+// FakeWebSocket harness in PresentRoot.test.tsx) to isolate exactly the
+// client-side `activeRoundKeyRef` guard this test protects, independent of
+// the wire protocol. (The wire protocol itself used to make this scenario
+// worse — `get_file_diff`/`file_diff_result` correlated by path alone, so a
+// second in-flight request for the same path clobbered the first's promise
+// handle — but that was fixed with request_id correlation; see
+// PresentRoot.test.tsx's stale-round wire-level test for that half.)
+// Mocking sendGetFileDiff directly gives each call its own
 // independently-controllable promise, isolating exactly the client-side
 // guard this test protects.
 vi.mock('../PresentTour', () => ({

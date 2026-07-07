@@ -462,6 +462,11 @@ export function PresentTour({
   // as a ref (not a closure-local variable) because the rail/j-k scrollTo
   // effect below also needs to arm it — see that effect's comment for why.
   const userTookOverRef = useRef(false);
+  // Tracks allSettled as of the previous run of the scroll-replay effect
+  // below, to detect the specific false->true transition (CodeView just
+  // mounted this commit) rather than "a scroll has ever fired". See that
+  // effect's comment.
+  const wasSettledRef = useRef(false);
   useEffect(() => {
     const scroller = containerRef.current;
     if (!scroller) return;
@@ -499,13 +504,43 @@ export function PresentTour({
   // events kept getting fought back to 0 mid-animation, so a rail click
   // issued before the user's first raw wheel/touch was silently swallowed.
   // Arm the same flag the pin checks so the pin treats this as real input.
+  //
+  // `allSettled` is in the deps so a request that arrives while CodeView isn't
+  // mounted yet (handleRef.current is null / rows aren't laid out) is not lost:
+  // this effect no-ops without touching userTookOverRef while loading, then
+  // re-runs and performs the still-pending scroll once allSettled flips true.
+  // The arming stays here (at actual scroll time), not in a separate
+  // loading-phase branch, so a request that never got to scroll never marks
+  // the pin as taken over.
+  //
+  // wasSettledRef tracks whether the PREVIOUS run of this same effect already
+  // saw allSettled=true. It updates on every run (even the early-return ones,
+  // so a settle that happens with no scroll pending is still recorded) and is
+  // read before that update — so it's true exactly when CodeView had a prior
+  // commit to lay itself out in before this scroll, and false the one time
+  // allSettled just flipped true THIS render (CodeView mounts and this effect
+  // fires in the same commit, before the browser has laid out the fresh
+  // container). CodeView.scrollTo silently no-ops if it can't resolve a
+  // destination against an unmeasured layout, so that one case gets a rAF to
+  // let layout settle first; every other scroll (rail/j-k on an
+  // already-mounted tour) stays perfectly synchronous, unchanged from before.
   useEffect(() => {
-    if (!scrollToPath) return;
+    const wasSettled = wasSettledRef.current;
+    wasSettledRef.current = allSettled;
+    if (!scrollToPath || !allSettled) return;
+    const handle = handleRef.current;
+    if (!handle) return;
     userTookOverRef.current = true;
-    handleRef.current?.scrollTo({ type: 'item', id: scrollToPath, align: 'start', behavior: 'smooth' });
+    if (!wasSettled) {
+      const raf = requestAnimationFrame(() => {
+        handle.scrollTo({ type: 'item', id: scrollToPath, align: 'start', behavior: 'smooth' });
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+    handle.scrollTo({ type: 'item', id: scrollToPath, align: 'start', behavior: 'smooth' });
     // scrollNonce intentionally included so repeat clicks on the same path re-fire.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollToPath, scrollNonce]);
+  }, [scrollToPath, scrollNonce, allSettled]);
 
   // Track the file nearest the top of the viewport so the rail can highlight
   // it. There is no `data-*` attribute on CodeView's rendered item roots to

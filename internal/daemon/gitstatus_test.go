@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ptybackend"
 )
 
 // fileDiffTestRepo creates a real git repo with two commits touching path:
@@ -90,6 +92,43 @@ func TestReadFileDiff_HeadRefFileDoesNotExist(t *testing.T) {
 	}
 	if content.modified != "" {
 		t.Errorf("modified = %q, want empty (file absent at head_ref)", content.modified)
+	}
+}
+
+func TestHandleGetFileDiff_EchoesRequestID(t *testing.T) {
+	dir, _, shaV1, shaV2 := fileDiffTestRepo(t, "src/file.ts", "v1", "v2")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	msg := &protocol.GetFileDiffMessage{
+		Cmd:       "get_file_diff",
+		Directory: dir,
+		Path:      "src/file.ts",
+		BaseRef:   protocol.Ptr(shaV1),
+		HeadRef:   protocol.Ptr(shaV2),
+		RequestID: protocol.Ptr("req-123"),
+	}
+
+	d.handleGetFileDiff(client, msg)
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.FileDiffResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode file_diff_result: %v", err)
+		}
+		if !result.Success {
+			t.Fatalf("file_diff_result success=false error=%q", protocol.Deref(result.Error))
+		}
+		if protocol.Deref(result.RequestID) != "req-123" {
+			t.Errorf("request_id = %q, want %q", protocol.Deref(result.RequestID), "req-123")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for file_diff_result")
 	}
 }
 

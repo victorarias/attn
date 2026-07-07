@@ -1351,6 +1351,7 @@ model GetFileDiffMessage {
   staged?: boolean;  // DEPRECATED: If true, show staged diff instead of working tree
   base_ref?: string; // If provided, compare against this ref instead of HEAD (for PR-like diffs)
   head_ref?: string; // If set, the modified side is pinned to `git show <head_ref>:<path>` instead of the working tree (used by the presentation reader for base_sha->head_sha diffs)
+  request_id?: string; // Client-chosen correlation id, echoed verbatim in the result
 }
 
 model GetRepoInfoMessage {
@@ -2121,6 +2122,7 @@ model FileDiffResultMessage {
   modified: string;
   success: boolean;
   error?: string;
+  request_id?: string; // Client-chosen correlation id, echoed verbatim from the request
 }
 
 model RepoInfo {

@@ -107,6 +107,7 @@ function makeComment(overrides: Partial<ReviewComment>): ReviewComment {
 export function PresentTourHarness({ onReady }: HarnessProps) {
   const params = new URLSearchParams(window.location.search);
   const seed = params.get('seed') !== '0';
+  const deferred = params.get('deferred') === '1';
 
   const [comments, setComments] = useState<ReviewComment[]>(
     seed ? [makeComment({ id: 'seeded-1', content: 'Seeded comment on alpha' })] : []
@@ -115,6 +116,10 @@ export function PresentTourHarness({ onReady }: HarnessProps) {
   const [scrollToPath, setScrollToPath] = useState<string | null>(null);
   const [scrollNonce, setScrollNonce] = useState(0);
   const [activePath, setActivePath] = useState<string | null>(null);
+  // When `deferred=1`, files start loading (mirroring PresentRoot's fetch pass)
+  // so tests can exercise scroll requests issued before CodeView mounts, then
+  // call `settleDiffs()` to supply content and let the tour finish loading.
+  const [diffsSettled, setDiffsSettled] = useState(!deferred);
   const failNextAddRef = useMemo(() => ({ current: false }), []);
 
   const onAddComment = useCallback((filepath: string, lineStart: number, lineEnd: number, content: string) => {
@@ -185,12 +190,13 @@ export function PresentTourHarness({ onReady }: HarnessProps) {
       failNextAddRef.current = true;
     };
     api.getActivePath = () => activePath;
+    api.settleDiffs = () => setDiffsSettled(true);
   }, [activePath, failNextAddRef]);
 
   const files = FILES.map((f) => ({
     path: f.path,
     note: f.note,
-    diff: { loading: false, original: f.original, modified: f.modified },
+    diff: diffsSettled ? { loading: false, original: f.original, modified: f.modified } : { loading: true },
   }));
 
   // All harness comments are the user's own in-progress draft-round comments
