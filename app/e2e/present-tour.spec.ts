@@ -128,6 +128,48 @@ test.describe('PresentTour rendering', () => {
   });
 });
 
+test.describe('PresentTour reviewed toggle', () => {
+  // Real-browser coverage for the slice-1 "controlled items only re-render on
+  // a version bump" trap (see the module doc), applied to the reviewed
+  // indicator: it's rendered via `renderHeaderPrefix`, a callback-based slot
+  // rather than a field baked into `items`, so this proves the indicator
+  // updates live without relying on jsdom (which can't mount the real
+  // `@pierre/diffs` CodeView at all — see PresentRoot.test.tsx's mock note).
+  test('clicking the header Reviewed toggle flips state and calls back to the parent', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const alpha = await findContainerByTitle(page, 'src/alpha.ts');
+    expect(alpha).not.toBeNull();
+    const toggle = alpha!.locator('.present-tour-reviewed-toggle');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).not.toHaveClass(/is-reviewed/);
+
+    await toggle.click();
+
+    await expect(toggle).toHaveClass(/is-reviewed/);
+    expect(await page.evaluate(() => window.__HARNESS__.getReviewedPaths())).toEqual(['src/alpha.ts']);
+
+    // Click again to un-mark, confirming the version-bump path handles both
+    // directions, not just the initial flip.
+    await toggle.click();
+    await expect(toggle).not.toHaveClass(/is-reviewed/);
+    expect(await page.evaluate(() => window.__HARNESS__.getReviewedPaths())).toEqual([]);
+  });
+
+  test('reviewed state is independent per file', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const alpha = await findContainerByTitle(page, 'src/alpha.ts');
+    await alpha!.locator('.present-tour-reviewed-toggle').click();
+
+    await page.evaluate(() => window.__HARNESS__.scrollToFile('src/beta.ts'));
+    const beta = await findContainerByTitle(page, 'src/beta.ts');
+    await expect(beta!.locator('.present-tour-reviewed-toggle')).not.toHaveClass(/is-reviewed/);
+
+    expect(await page.evaluate(() => window.__HARNESS__.getReviewedPaths())).toEqual(['src/alpha.ts']);
+  });
+});
+
 test.describe('PresentTour scroll pin', () => {
   test('a programmatic scroll before any user input snaps back to the top', async ({ page }) => {
     await openHarness(page, UNSEEDED);

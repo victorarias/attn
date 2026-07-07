@@ -116,6 +116,7 @@ export function PresentTourHarness({ onReady }: HarnessProps) {
   const [scrollToPath, setScrollToPath] = useState<string | null>(null);
   const [scrollNonce, setScrollNonce] = useState(0);
   const [activePath, setActivePath] = useState<string | null>(null);
+  const [reviewedPaths, setReviewedPaths] = useState<Set<string>>(new Set());
   // When `deferred=1`, files start loading (mirroring PresentRoot's fetch pass)
   // so tests can exercise scroll requests issued before CodeView mounts, then
   // call `settleDiffs()` to supply content and let the tour finish loading.
@@ -175,6 +176,16 @@ export function PresentTourHarness({ onReady }: HarnessProps) {
     setActivePath(path);
   }, []);
 
+  const onToggleReviewed = useCallback((path: string) => {
+    window.__HARNESS__.recordCall('toggleReviewed', [path]);
+    setReviewedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const timer = setTimeout(() => onReady(), 400);
     return () => clearTimeout(timer);
@@ -191,7 +202,8 @@ export function PresentTourHarness({ onReady }: HarnessProps) {
     };
     api.getActivePath = () => activePath;
     api.settleDiffs = () => setDiffsSettled(true);
-  }, [activePath, failNextAddRef]);
+    api.getReviewedPaths = () => Array.from(reviewedPaths);
+  }, [activePath, failNextAddRef, reviewedPaths]);
 
   const files = FILES.map((f) => ({
     path: f.path,
@@ -225,6 +237,8 @@ Three files, reading order alpha -> beta -> gamma.`}
           onSendToClaude={onSendToClaude}
           scrollToPath={scrollToPath}
           scrollNonce={scrollNonce}
+          reviewedPaths={reviewedPaths}
+          onToggleReviewed={onToggleReviewed}
           onActivePathChange={onActivePathChange}
         />
       </div>

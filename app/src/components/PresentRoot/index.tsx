@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useDaemonSocket } from '../../hooks/useDaemonSocket';
 import { usePresentAutomationBridge } from '../../hooks/usePresentAutomationBridge';
+import { usePresentReviewedMarks } from '../../hooks/usePresentReviewedMarks';
 import { PresentTour, type PresentTourFile } from '../PresentTour';
+import { DriveBar } from './DriveBar';
 import type {
   Presentation,
   PresentationRound,
@@ -283,6 +285,13 @@ export function PresentRoot() {
   }, [presentation, round, sendGetFileDiff]);
 
   const files = round?.manifest.files ?? [];
+  const filePaths = useMemo(() => files.map((f) => f.path), [files]);
+
+  const { reviewed, toggleReviewed, markReviewed } = usePresentReviewedMarks(
+    presentationId,
+    round?.id ?? null,
+    filePaths
+  );
 
   const moveSelection = useCallback((delta: number) => {
     if (files.length === 0) return;
@@ -295,17 +304,32 @@ export function PresentRoot() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (isTypingTarget(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault();
+        // Auto-mark-on-leave (jaunt semantics): advancing past a file marks
+        // the one being left as reviewed. Visiting a file alone (arriving,
+        // scrolling past it passively) never marks it.
+        if (activePath) markReviewed(activePath);
         moveSelection(1);
       } else if (e.key === 'k' || e.key === 'ArrowUp') {
         e.preventDefault();
         moveSelection(-1);
+      } else if (e.key === 'r') {
+        e.preventDefault();
+        if (activePath) toggleReviewed(activePath);
+      } else if (e.key === 's') {
+        e.preventDefault();
+        setShowSubmitDialog((current) => {
+          if (current) return current;
+          setSubmitError(null);
+          return true;
+        });
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [moveSelection]);
+  }, [moveSelection, activePath, markReviewed, toggleReviewed]);
 
   useEffect(() => {
     if (!activePath || !railRef.current) return;
@@ -424,6 +448,15 @@ export function PresentRoot() {
 
   const showDrift = !!repoHeadSha && repoHeadSha !== round.head_sha && !driftDismissed;
 
+  // Advisory-only coverage line for the submit dialog: never blocks
+  // submission, just tells the user what the tour didn't see them mark.
+  const unreviewedPaths = filePaths.filter((p) => !reviewed.has(p));
+  const COVERAGE_PREVIEW_COUNT = 5;
+  const unreviewedCoverageText =
+    unreviewedPaths.length > COVERAGE_PREVIEW_COUNT
+      ? `${unreviewedPaths.slice(0, COVERAGE_PREVIEW_COUNT).join(', ')}, and ${unreviewedPaths.length - COVERAGE_PREVIEW_COUNT} more`
+      : unreviewedPaths.join(', ');
+
   return (
     <div className="present-root">
       <header className="present-root-header">
@@ -442,17 +475,6 @@ export function PresentRoot() {
         <span className={`present-root-status ${round.submitted_at ? 'submitted' : 'draft'}`}>
           {round.submitted_at ? 'Submitted' : 'Draft'}
         </span>
-        <button
-          type="button"
-          className="present-root-submit-button"
-          onClick={() => {
-            setSubmitError(null);
-            setShowSubmitDialog(true);
-          }}
-          disabled={submitting}
-        >
-          {drafts.length > 0 ? `Submit review (${drafts.length})` : 'Submit review'}
-        </button>
       </section>
 
       {showSubmitDialog && (
@@ -462,6 +484,11 @@ export function PresentRoot() {
             <p>
               {drafts.length} comment{drafts.length === 1 ? '' : 's'}
             </p>
+            {unreviewedPaths.length > 0 && (
+              <p className="present-root-submit-coverage" data-testid="present-root-submit-coverage">
+                Not yet walked: {unreviewedCoverageText}
+              </p>
+            )}
             {submitError && <div className="present-root-submit-error">{submitError}</div>}
             <div className="present-root-submit-actions">
               <button type="button" onClick={() => setShowSubmitDialog(false)} disabled={submitting}>
@@ -499,31 +526,49 @@ export function PresentRoot() {
       )}
 
       <div className="present-root-body">
-        <ol className="present-root-files" ref={railRef}>
-          {files.map((file, index) => (
-            <li
-              key={file.path}
-              data-path={file.path}
-              className={`present-root-file ${file.path === activePath ? 'selected' : ''}`}
-              onClick={() => requestScroll(file.path)}
-            >
-              <span className="present-root-file-index">{index + 1}</span>
-              <code className="present-root-file-path">{file.path}</code>
-              {file.note && <span className="present-root-file-note-marker" title="Has a note">●</span>}
-            </li>
-          ))}
+        <div className="present-root-rail">
+          <div className="present-root-rail-header">
+            <span className="present-root-rail-title">Files</span>
+            <span className="present-root-rail-count" data-testid="present-root-rail-count">
+              {reviewed.size}/{files.length}
+            </span>
+          </div>
+          <div className="present-root-rail-progress-track">
+            <div
+              className="present-root-rail-progress-fill"
+              style={{ width: `${files.length > 0 ? (reviewed.size / files.length) * 100 : 0}%` }}
+            />
+          </div>
 
-          {round.manifest.skip.length > 0 && (
-            <>
-              <li className="present-root-skip-divider">Skipped</li>
-              {round.manifest.skip.map((path) => (
-                <li key={path} className="present-root-file present-root-file-skipped">
-                  <code className="present-root-file-path">{path}</code>
+          <ol className="present-root-files" ref={railRef}>
+            {files.map((file, index) => {
+              const isReviewed = reviewed.has(file.path);
+              return (
+                <li
+                  key={file.path}
+                  data-path={file.path}
+                  className={`present-root-file ${file.path === activePath ? 'selected' : ''} ${isReviewed ? 'reviewed' : ''}`}
+                  onClick={() => requestScroll(file.path)}
+                >
+                  <span className="present-root-file-index">{isReviewed ? '✓' : index + 1}</span>
+                  <code className="present-root-file-path">{file.path}</code>
+                  {file.note && <span className="present-root-file-note-marker" title="Has a note">●</span>}
                 </li>
-              ))}
-            </>
-          )}
-        </ol>
+              );
+            })}
+
+            {round.manifest.skip.length > 0 && (
+              <>
+                <li className="present-root-skip-divider">Skipped</li>
+                {round.manifest.skip.map((path) => (
+                  <li key={path} className="present-root-file present-root-file-skipped">
+                    <code className="present-root-file-path">{path}</code>
+                  </li>
+                ))}
+              </>
+            )}
+          </ol>
+        </div>
 
         <main className="present-root-diff-pane">
           {files.length === 0 ? (
@@ -544,10 +589,23 @@ export function PresentRoot() {
               scrollToPath={scrollRequest?.path ?? null}
               scrollNonce={scrollRequest?.nonce ?? 0}
               onActivePathChange={setActivePath}
+              reviewedPaths={reviewed}
+              onToggleReviewed={toggleReviewed}
             />
           )}
         </main>
       </div>
+
+      <DriveBar
+        reviewedCount={reviewed.size}
+        totalCount={files.length}
+        draftCount={drafts.length}
+        submitting={submitting}
+        onSubmit={() => {
+          setSubmitError(null);
+          setShowSubmitDialog(true);
+        }}
+      />
     </div>
   );
 }
