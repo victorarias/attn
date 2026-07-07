@@ -315,6 +315,33 @@ export function PresentRoot() {
 
   const draftIds = useMemo(() => new Set(drafts.map((d) => d.id)), [drafts]);
 
+  // All comments across all files: the tour renders every file's diff at
+  // once, unlike the old single-selection pane that only ever needed one
+  // file at a time. Memoized (and hoisted above the early-return branches
+  // below, since hooks must run unconditionally) so a passive activePath
+  // update from scrolling doesn't rebuild these on every render and bump
+  // every CodeView item's version.
+  const allComments = useMemo<ReviewComment[]>(
+    () => [...comments.map(submittedToReviewComment), ...drafts.map(draftToReviewComment)],
+    [comments, drafts]
+  );
+  // Submitted comments (author is the round's owner or agent, not a local
+  // draft) render read-only in the reader — only the user's own in-progress
+  // drafts are editable/resolvable/deletable here.
+  const readOnlyCommentIds = useMemo(
+    () => new Set(allComments.filter((c) => !draftIds.has(c.id)).map((c) => c.id)),
+    [allComments, draftIds]
+  );
+  const tourFiles = useMemo<PresentTourFile[]>(
+    () =>
+      files.map((file) => ({
+        path: file.path,
+        note: file.note,
+        diff: fileDiffs[file.path] ?? { loading: true },
+      })),
+    [files, fileDiffs]
+  );
+
   const handleAddComment = useCallback((filepath: string, lineStart: number, lineEnd: number, content: string) => {
     const id = `draft-${draftIdCounterRef.current++}`;
     setDrafts((prev) => [...prev, draftFromAddComment(filepath, lineStart, lineEnd, content, id)]);
@@ -396,23 +423,6 @@ export function PresentRoot() {
   }
 
   const showDrift = !!repoHeadSha && repoHeadSha !== round.head_sha && !driftDismissed;
-  // All comments across all files: the tour renders every file's diff at
-  // once, unlike the old single-selection pane.
-  const allComments: ReviewComment[] = [
-    ...comments.map(submittedToReviewComment),
-    ...drafts.map(draftToReviewComment),
-  ];
-  // Submitted comments (author is the round's owner or agent, not a local
-  // draft) render read-only in the reader — only the user's own in-progress
-  // drafts are editable/resolvable/deletable here.
-  const readOnlyCommentIds = new Set(
-    allComments.filter((c) => !draftIds.has(c.id)).map((c) => c.id)
-  );
-  const tourFiles: PresentTourFile[] = files.map((file) => ({
-    path: file.path,
-    note: file.note,
-    diff: fileDiffs[file.path] ?? { loading: true },
-  }));
 
   return (
     <div className="present-root">

@@ -122,20 +122,15 @@ function isLineInRanges(line: number, ranges: Array<[number, number]>): boolean 
   return ranges.some(([start, end]) => line >= start && line <= end);
 }
 
-function getVisibleLineRanges(oldFile: FileContents, newFile: FileContents): VisibleLineRanges | null {
-  try {
-    const diff = parseDiffFromFile(oldFile, newFile);
-    return diff.hunks.reduce<VisibleLineRanges>(
-      (ranges, hunk) => {
-        ranges.deletions.push([hunk.deletionStart, hunk.deletionStart + hunk.deletionCount - 1]);
-        ranges.additions.push([hunk.additionStart, hunk.additionStart + hunk.additionCount - 1]);
-        return ranges;
-      },
-      { additions: [], deletions: [] }
-    );
-  } catch {
-    return null;
-  }
+function getVisibleLineRangesFromDiff(diff: ReturnType<typeof parseDiffFromFile>): VisibleLineRanges {
+  return diff.hunks.reduce<VisibleLineRanges>(
+    (ranges, hunk) => {
+      ranges.deletions.push([hunk.deletionStart, hunk.deletionStart + hunk.deletionCount - 1]);
+      ranges.additions.push([hunk.additionStart, hunk.additionStart + hunk.additionCount - 1]);
+      return ranges;
+    },
+    { additions: [], deletions: [] }
+  );
 }
 
 export function PresentTour({
@@ -347,7 +342,7 @@ export function PresentTour({
       const oldFile: FileContents = { name: file.path, contents: shown.original };
       const newFile: FileContents = { name: file.path, contents: shown.modified };
       const fileDiff = parseDiffFromFile(oldFile, newFile);
-      const visibleLineRanges = getVisibleLineRanges(oldFile, newFile);
+      const visibleLineRanges = getVisibleLineRangesFromDiff(fileDiff);
       const lineCounts = {
         additions: shown.modified.split('\n').length,
         deletions: shown.original.split('\n').length,

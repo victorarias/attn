@@ -203,7 +203,9 @@ export function PresentTourHarness({ onReady }: HarnessProps) {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <PresentTour
-          summary="## Harness summary\n\nThree files, reading order alpha -> beta -> gamma."
+          summary={`## Harness summary
+
+Three files, reading order alpha -> beta -> gamma.`}
           files={files}
           comments={comments}
           editingCommentId={editingCommentId}
