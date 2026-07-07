@@ -755,6 +755,9 @@ type FileDiffResultMessage struct {
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
 
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
 }
@@ -975,6 +978,9 @@ type GetFileDiffMessage struct {
 
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
 
 	// Staged corresponds to the JSON schema field "staged".
 	Staged *bool `json:"staged,omitempty,omitzero"`

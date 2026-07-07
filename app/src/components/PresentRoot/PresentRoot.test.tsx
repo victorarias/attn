@@ -1,20 +1,30 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PresentRoot } from './index';
-import { DiffView } from '../DiffView';
-import type { DiffViewProps } from '../DiffView';
+import { PresentTour } from '../PresentTour';
+import type { PresentTourProps } from '../PresentTour';
 
-// DiffView renders the @pierre/diffs custom element (shadow DOM + Shiki),
-// which jsdom cannot exercise. These tests cover the reader's data flow
-// (file selection, fetching pinned diffs, keyboard nav, comment drafts), not
-// diff rendering internals — mirrors the DiffDetailPanel.test.tsx idiom. The
-// mock captures its full props so tests can invoke onAddComment etc.
-// directly and assert on the comments PresentRoot passes down.
-vi.mock('../DiffView', () => ({
-  DiffView: vi.fn(({ original, modified }) => (
-    <div data-testid="diff-view">
-      <div className="original">{original}</div>
-      <div className="modified">{modified}</div>
+// PresentTour renders the @pierre/diffs CodeView (shadow DOM + Shiki + a real
+// virtualized scroll container), which jsdom cannot exercise — real browser
+// coverage for the tour itself lives in the Playwright component harness
+// (see app/test-harness). These tests cover PresentRoot's data flow: fetching
+// every manifest file's diff up front, keyboard/rail navigation, and the
+// comment-draft lifecycle — mirrors the DiffDetailPanel.test.tsx idiom. The
+// mock captures its full props so tests can invoke onAddComment etc. directly
+// and assert on what PresentRoot passes down.
+vi.mock('../PresentTour', () => ({
+  PresentTour: vi.fn(({ summary, files }: PresentTourProps) => (
+    <div data-testid="present-tour">
+      {summary && <div data-testid="present-tour-summary">{summary}</div>}
+      {files.map((f) => (
+        <div key={f.path} data-testid={`tour-file-${f.path}`}>
+          {f.note && <div className="note">{f.note}</div>}
+          {f.diff.loading && <span className="loading">loading</span>}
+          {f.diff.error && <span className="error">{f.diff.error}</span>}
+          {f.diff.original !== undefined && <div className="original">{f.diff.original}</div>}
+          {f.diff.modified !== undefined && <div className="modified">{f.diff.modified}</div>}
+        </div>
+      ))}
     </div>
   )),
 }));
@@ -27,11 +37,11 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ hide: mockHide }),
 }));
 
-function latestDiffViewProps(): DiffViewProps {
-  const calls = vi.mocked(DiffView).mock.calls;
+function latestTourProps(): PresentTourProps {
+  const calls = vi.mocked(PresentTour).mock.calls;
   const props = calls[calls.length - 1]?.[0];
-  if (!props) throw new Error('DiffView has not been rendered yet');
-  return props as unknown as DiffViewProps;
+  if (!props) throw new Error('PresentTour has not been rendered yet');
+  return props as unknown as PresentTourProps;
 }
 
 // PresentRoot owns its own useDaemonSocket connection (it is a standalone
@@ -139,6 +149,27 @@ async function loadRound(options?: {
   }, WAIT_OPTS);
 
   return ws;
+}
+
+/** The `request_id` of the most recently sent `get_file_diff` for `path`. */
+function latestFileDiffRequestId(ws: FakeWebSocket, path: string): string {
+  const sent = ws.sent.map((entry) => JSON.parse(entry)).filter((m) => m.cmd === 'get_file_diff' && m.path === path);
+  const last = sent[sent.length - 1];
+  if (!last?.request_id) throw new Error(`no get_file_diff request_id found for ${path}`);
+  return last.request_id;
+}
+
+/**
+ * Resolves a `get_file_diff` for `path` with the given content, echoing the
+ * most recently sent request's id back — as the real daemon does. Results are
+ * correlated by request_id only (see `file_diff_result` in useDaemonSocket.ts),
+ * so this must echo a real id or the promise never resolves.
+ */
+function emitFileDiff(ws: FakeWebSocket, path: string, original: string, modified: string) {
+  const requestId = latestFileDiffRequestId(ws, path);
+  act(() => {
+    ws.emit({ event: 'file_diff_result', success: true, path, request_id: requestId, original, modified });
+  });
 }
 
 const round = {
@@ -328,57 +359,57 @@ describe('PresentRoot', () => {
     expect(unnotedItem?.querySelector('.present-root-file-note-marker')).toBeNull();
   });
 
-  it('fetches the pinned diff for the initially selected file and shows its note banner', async () => {
+  it('fetches every manifest file’s diff up front, exactly once per round', async () => {
     const ws = await loadRound();
 
     await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      const req = sent.find((m) => m.cmd === 'get_file_diff');
-      expect(req).toMatchObject({
-        directory: '/repo/path',
-        path: 'src/foo.ts',
-        base_ref: 'a1b2c3d4e5f6',
-        head_ref: '00112233445566',
-      });
+      const sent = ws.sent.map((entry) => JSON.parse(entry)).filter((m) => m.cmd === 'get_file_diff');
+      expect(sent.map((m) => m.path).sort()).toEqual(['src/foo.test.ts', 'src/foo.ts']);
+      for (const m of sent) {
+        expect(m).toMatchObject({
+          directory: '/repo/path',
+          base_ref: 'a1b2c3d4e5f6',
+          head_ref: '00112233445566',
+        });
+      }
     }, WAIT_OPTS);
 
-    expect(screen.getByText('Core logic')).toBeInTheDocument();
+    expect(latestTourProps().summary).toBe('Adds the thing.');
+    expect(screen.getByTestId('tour-file-src/foo.ts').textContent).toContain('Core logic');
 
-    act(() => {
-      ws.emit({
-        event: 'file_diff_result',
-        success: true,
-        path: 'src/foo.ts',
-        original: 'old content',
-        modified: 'new content',
-      });
-    });
+    emitFileDiff(ws, 'src/foo.ts', 'old content', 'new content');
+    emitFileDiff(ws, 'src/foo.test.ts', 'test old', 'test new');
 
     await waitFor(() => {
-      expect(screen.getByTestId('diff-view')).toBeInTheDocument();
+      expect(screen.getByTestId('tour-file-src/foo.ts').textContent).toContain('old content');
+      expect(screen.getByTestId('tour-file-src/foo.test.ts').textContent).toContain('test old');
     }, WAIT_OPTS);
-    expect(screen.getByText('old content')).toBeInTheDocument();
-    expect(screen.getByText('new content')).toBeInTheDocument();
+
+    // No further get_file_diff calls fire from re-renders (comment drafts,
+    // rail clicks, etc.) — the fetch-all effect must not loop.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const finalCount = ws.sent.filter((entry) => JSON.parse(entry).cmd === 'get_file_diff').length;
+    expect(finalCount).toBe(2);
   });
 
-  it('fetches the pinned diff for a clicked file', async () => {
+  it('clicking a rail file makes it the active/highlighted file without refetching', async () => {
     const ws = await loadRound();
 
     await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent.some((m) => m.cmd === 'get_file_diff' && m.path === 'src/foo.ts')).toBe(true);
+      const sent = ws.sent.map((entry) => JSON.parse(entry)).filter((m) => m.cmd === 'get_file_diff');
+      expect(sent).toHaveLength(2);
     }, WAIT_OPTS);
 
     fireEvent.click(screen.getByText('src/foo.test.ts'));
 
     await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      const req = sent.find((m) => m.cmd === 'get_file_diff' && m.path === 'src/foo.test.ts');
-      expect(req).toMatchObject({
-        base_ref: 'a1b2c3d4e5f6',
-        head_ref: '00112233445566',
-      });
+      expect(screen.getByText('src/foo.test.ts').closest('li')).toHaveClass('selected');
     }, WAIT_OPTS);
+
+    const sentAfter = ws.sent.map((entry) => JSON.parse(entry)).filter((m) => m.cmd === 'get_file_diff');
+    expect(sentAfter).toHaveLength(2);
   });
 
   it('moves the selection with j/k keyboard shortcuts', async () => {
@@ -411,12 +442,12 @@ describe('PresentRoot', () => {
     expect(screen.queryByText(/repo has moved on/)).not.toBeInTheDocument();
   });
 
-  it('shows an inline error when the diff fetch fails, without blanking the window', async () => {
+  it('shows an inline error when a diff fetch fails, without blanking the window', async () => {
     const ws = await loadRound();
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent.some((m) => m.cmd === 'get_file_diff')).toBe(true);
+      expect(sent.some((m) => m.cmd === 'get_file_diff' && m.path === 'src/foo.ts')).toBe(true);
     }, WAIT_OPTS);
 
     act(() => {
@@ -424,6 +455,7 @@ describe('PresentRoot', () => {
         event: 'file_diff_result',
         success: false,
         path: 'src/foo.ts',
+        request_id: latestFileDiffRequestId(ws, 'src/foo.ts'),
         error: 'git show failed',
       });
     });
@@ -448,36 +480,29 @@ describe('PresentRoot', () => {
     comments?: Array<Record<string, unknown>>;
   }): Promise<FakeWebSocket> {
     const ws = await loadRound({ comments: options?.comments });
-    act(() => {
-      ws.emit({
-        event: 'file_diff_result',
-        success: true,
-        path: 'src/foo.ts',
-        original: 'old content',
-        modified: 'new content',
-      });
-    });
+    emitFileDiff(ws, 'src/foo.ts', 'old content', 'new content');
+    emitFileDiff(ws, 'src/foo.test.ts', 'test old', 'test new');
     await waitFor(() => {
-      expect(screen.getByTestId('diff-view')).toBeInTheDocument();
+      expect(screen.getByTestId('tour-file-src/foo.ts').textContent).toContain('old content');
     }, WAIT_OPTS);
     return ws;
   }
 
-  it('surfaces a locally-added draft in the comments passed to DiffView', async () => {
+  it('surfaces a locally-added draft in the comments passed to the tour', async () => {
     await loadRoundWithDiff();
 
     await act(async () => {
-      await latestDiffViewProps().onAddComment(3, 5, 'looks off');
+      latestTourProps().onAddComment('src/foo.ts', 3, 5, 'looks off');
     });
 
     await waitFor(() => {
-      const comments = latestDiffViewProps().comments;
+      const comments = latestTourProps().comments;
       expect(comments).toHaveLength(1);
-      expect(comments[0]).toMatchObject({ line_start: 3, line_end: 5, content: 'looks off' });
+      expect(comments[0]).toMatchObject({ filepath: 'src/foo.ts', line_start: 3, line_end: 5, content: 'looks off' });
     }, WAIT_OPTS);
   }, TEST_TIMEOUT);
 
-  it('marks submitted comments read-only in DiffView while leaving drafts editable', async () => {
+  it('marks submitted comments read-only while leaving drafts editable', async () => {
     await loadRoundWithDiff({
       comments: [
         {
@@ -495,19 +520,19 @@ describe('PresentRoot', () => {
     });
 
     await act(async () => {
-      await latestDiffViewProps().onAddComment(3, 5, 'looks off');
+      latestTourProps().onAddComment('src/foo.ts', 3, 5, 'looks off');
     });
 
     await waitFor(() => {
-      const props = latestDiffViewProps();
+      const props = latestTourProps();
       const comments = props.comments;
       expect(comments.some((c) => c.id === 'submitted-1')).toBe(true);
       expect(comments.some((c) => c.content === 'looks off')).toBe(true);
 
       const readOnlyIds = props.readOnlyCommentIds;
-      expect(readOnlyIds?.has('submitted-1')).toBe(true);
+      expect(readOnlyIds.has('submitted-1')).toBe(true);
       const draftComment = comments.find((c) => c.content === 'looks off');
-      expect(readOnlyIds?.has(draftComment!.id)).toBe(false);
+      expect(readOnlyIds.has(draftComment!.id)).toBe(false);
     }, WAIT_OPTS);
   }, TEST_TIMEOUT);
 
@@ -515,13 +540,13 @@ describe('PresentRoot', () => {
     await loadRoundWithDiff();
 
     await act(async () => {
-      await latestDiffViewProps().onAddComment(10, -12, 'stale comment');
+      latestTourProps().onAddComment('src/foo.ts', 10, -12, 'stale comment');
     });
 
     await waitFor(() => {
-      const comments = latestDiffViewProps().comments;
+      const comments = latestTourProps().comments;
       const draft = comments.find((c) => c.content === 'stale comment');
-      expect(draft).toMatchObject({ line_start: 10, line_end: -12 });
+      expect(draft).toMatchObject({ filepath: 'src/foo.ts', line_start: 10, line_end: -12 });
     }, WAIT_OPTS);
   }, TEST_TIMEOUT);
 
@@ -529,10 +554,10 @@ describe('PresentRoot', () => {
     const ws = await loadRoundWithDiff();
 
     await act(async () => {
-      await latestDiffViewProps().onAddComment(3, 5, 'new-side comment');
+      latestTourProps().onAddComment('src/foo.ts', 3, 5, 'new-side comment');
     });
     await act(async () => {
-      await latestDiffViewProps().onAddComment(10, -12, 'old-side comment');
+      latestTourProps().onAddComment('src/foo.ts', 10, -12, 'old-side comment');
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
@@ -569,7 +594,7 @@ describe('PresentRoot', () => {
     const ws = await loadRoundWithDiff();
 
     await act(async () => {
-      await latestDiffViewProps().onAddComment(3, 5, 'looks off');
+      latestTourProps().onAddComment('src/foo.ts', 3, 5, 'looks off');
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
@@ -619,7 +644,7 @@ describe('PresentRoot', () => {
     const ws = await loadRoundWithDiff();
 
     await act(async () => {
-      await latestDiffViewProps().onAddComment(3, 5, 'looks off');
+      latestTourProps().onAddComment('src/foo.ts', 3, 5, 'looks off');
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
@@ -637,36 +662,101 @@ describe('PresentRoot', () => {
       expect(screen.getByText('daemon unreachable')).toBeInTheDocument();
     }, WAIT_OPTS);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(latestDiffViewProps().comments.some((c) => c.content === 'looks off')).toBe(true);
+    expect(latestTourProps().comments.some((c) => c.content === 'looks off')).toBe(true);
   }, TEST_TIMEOUT);
 
-  it('keeps drafts made on one file when switching to another and back', async () => {
+  it('keeps a draft on one file visible in the tour after navigating to another file', async () => {
     const ws = await loadRoundWithDiff();
 
     await act(async () => {
-      await latestDiffViewProps().onAddComment(3, 5, 'on foo.ts');
+      latestTourProps().onAddComment('src/foo.ts', 3, 5, 'on foo.ts');
     });
     await waitFor(() => {
-      expect(latestDiffViewProps().comments.some((c) => c.content === 'on foo.ts')).toBe(true);
+      expect(latestTourProps().comments.some((c) => c.content === 'on foo.ts')).toBe(true);
     }, WAIT_OPTS);
 
     fireEvent.click(screen.getByText('src/foo.test.ts'));
+
+    // Unlike the old single-selection pane, the tour renders every file at
+    // once — navigating the rail must not drop comments on other files.
+    expect(latestTourProps().comments.some((c) => c.content === 'on foo.ts')).toBe(true);
+    void ws;
+  }, TEST_TIMEOUT);
+
+  // Wire-level counterpart to PresentRoot.roundGuard.test.tsx's mocked-hook
+  // version: this drives the REAL useDaemonSocket against a FakeWebSocket, so
+  // it also covers the request_id correlation fix in useDaemonSocket.ts
+  // itself (get_file_diff/file_diff_result used to correlate by path alone,
+  // so a second in-flight request for the same path clobbered the first's
+  // pending promise, and a stale round's late reply could resolve the new
+  // round's promise with the wrong content).
+  it('does not apply a stale round’s late file_diff_result to a newer round for the same path', async () => {
+    const ws = await loadRound();
+
+    await waitFor(() => {
+      expect(ws.sent.map((e) => JSON.parse(e)).some((m) => m.cmd === 'get_file_diff' && m.path === 'src/foo.ts')).toBe(true);
+    }, WAIT_OPTS);
+    const round1RequestId = latestFileDiffRequestId(ws, 'src/foo.ts');
+
+    // Leave round-1's src/foo.ts request unresolved and transition to round-2
+    // via presentation_updated (same file path in both rounds).
+    act(() => {
+      ws.emit({ event: 'presentation_updated', presentation: { id: 'pres-1' } });
+    });
+
+    await waitFor(() => {
+      const refetches = ws.sent.map((e) => JSON.parse(e)).filter((m) => m.cmd === 'get_presentation_round');
+      expect(refetches.length).toBeGreaterThanOrEqual(2);
+    }, WAIT_OPTS);
+
+    const round2 = { ...round, id: 'round-2', seq: 2, base_sha: 'fedcba098765', head_sha: '998877665544' };
+    act(() => {
+      ws.emit({
+        event: 'get_presentation_round_result',
+        success: true,
+        presentation,
+        round: round2,
+        comments: [],
+      });
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((e) => JSON.parse(e)).filter((m) => m.cmd === 'get_file_diff' && m.path === 'src/foo.ts');
+      expect(sent).toHaveLength(2);
+    }, WAIT_OPTS);
+    const round2RequestId = latestFileDiffRequestId(ws, 'src/foo.ts');
+    expect(round2RequestId).not.toBe(round1RequestId);
+
+    // The stale round-1 reply arrives late, echoing round-1's own request id.
     act(() => {
       ws.emit({
         event: 'file_diff_result',
         success: true,
-        path: 'src/foo.test.ts',
-        original: 'test old',
-        modified: 'test new',
+        path: 'src/foo.ts',
+        request_id: round1RequestId,
+        original: 'STALE round-1 original',
+        modified: 'STALE round-1 modified',
+      });
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('tour-file-src/foo.ts').textContent).not.toContain('STALE round-1');
+
+    // Round-2's own reply, echoing round-2's request id, applies normally.
+    act(() => {
+      ws.emit({
+        event: 'file_diff_result',
+        success: true,
+        path: 'src/foo.ts',
+        request_id: round2RequestId,
+        original: 'FRESH round-2 original',
+        modified: 'FRESH round-2 modified',
       });
     });
     await waitFor(() => {
-      expect(latestDiffViewProps().comments.some((c) => c.content === 'on foo.ts')).toBe(false);
-    }, WAIT_OPTS);
-
-    fireEvent.click(screen.getByText('src/foo.ts'));
-    await waitFor(() => {
-      expect(latestDiffViewProps().comments.some((c) => c.content === 'on foo.ts')).toBe(true);
+      expect(screen.getByTestId('tour-file-src/foo.ts').textContent).toContain('FRESH round-2 original');
     }, WAIT_OPTS);
   }, TEST_TIMEOUT);
 });

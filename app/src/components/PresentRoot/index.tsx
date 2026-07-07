@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useDaemonSocket } from '../../hooks/useDaemonSocket';
 import { usePresentAutomationBridge } from '../../hooks/usePresentAutomationBridge';
-import { DiffView } from '../DiffView';
+import { PresentTour, type PresentTourFile } from '../PresentTour';
 import type {
   Presentation,
   PresentationRound,
@@ -131,8 +129,16 @@ export function PresentRoot() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [daemonSettings, setDaemonSettings] = useState<Record<string, string>>({});
   const [refreshSignal, setRefreshSignal] = useState(0);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [diffState, setDiffState] = useState<DiffCacheEntry | null>(null);
+  // `activePath` drives the rail's highlight; it's updated both by explicit
+  // navigation (rail click, j/k) and passively by the tour reporting which
+  // file scrolled nearest the top. `scrollRequest` is the tour's imperative
+  // "scroll to this file" instruction — kept separate from `activePath` so a
+  // passive activePath update from scrolling can never itself re-trigger a
+  // programmatic scroll (which would fight the user's own scroll gesture).
+  const [activePath, setActivePath] = useState<string | null>(null);
+  const [scrollRequest, setScrollRequest] = useState<{ path: string; nonce: number } | null>(null);
+  const scrollNonceRef = useRef(0);
+  const [fileDiffs, setFileDiffs] = useState<Record<string, DiffCacheEntry>>({});
   const [driftDismissed, setDriftDismissed] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -141,23 +147,18 @@ export function PresentRoot() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const draftIdCounterRef = useRef(0);
 
-  // Cache of fetched diffs, keyed by `${round.id}:${path}`, valid for the
-  // lifetime of the loaded round. A fresh round (new refreshSignal) gets a
-  // fresh cache automatically because the key includes round.id.
-  const diffCacheRef = useRef<Map<string, DiffCacheEntry>>(new Map());
   const railRef = useRef<HTMLOListElement>(null);
-  // Kept in sync with selectedPath so the diff-fetch effect below can check
-  // "is this response still for the current selection" without nesting a
-  // setState call inside a setSelectedPath updater (updaters must stay pure).
-  const selectedPathRef = useRef<string | null>(null);
-  selectedPathRef.current = selectedPath;
   // Kept in sync with the loaded round's identity so the diff-fetch effect
-  // below can also reject a stale response from a PREVIOUS round: a
-  // presentation_updated refresh can reload the round (new round.id/base/head)
-  // while selectedPath stays the same string, so path equality alone is not
-  // enough to detect staleness.
+  // below can reject stale responses from a PREVIOUS round after a
+  // presentation_updated refresh reloads the round (new round.id/base/head).
   const activeRoundKeyRef = useRef<string | null>(null);
   activeRoundKeyRef.current = round ? round.id : null;
+
+  const requestScroll = useCallback((path: string) => {
+    scrollNonceRef.current += 1;
+    setActivePath(path);
+    setScrollRequest({ path, nonce: scrollNonceRef.current });
+  }, []);
 
   // Fires once, unconditionally, regardless of load/error state below — the
   // splash must come down even if the presentation id is missing or the
@@ -207,8 +208,7 @@ export function PresentRoot() {
         setRepoHeadSha(h);
         setLoadError(null);
         setDriftDismissed(false);
-        diffCacheRef.current = new Map();
-        setSelectedPath((current) => {
+        setActivePath((current) => {
           if (current && r.manifest.files.some((f) => f.path === current)) return current;
           return r.manifest.files[0]?.path ?? null;
         });
@@ -224,71 +224,73 @@ export function PresentRoot() {
     };
   }, [presentationId, hasReceivedInitialState, getPresentationRound, refreshSignal]);
 
-  // Fetch (or serve from cache) the diff for the selected file, pinned to the
-  // round's base/head SHAs. Guards against a stale response for a
-  // previously-selected file clobbering the currently-selected one.
+  // Fetch every manifest file's diff, pinned to the round's base/head SHAs,
+  // with bounded concurrency — the tour renders all of them at once, unlike
+  // the old single-selection pane that only ever needed one file at a time.
+  // A fresh round (new refreshSignal / new round.id) always gets a fresh
+  // fetch pass: `fileDiffs` is reset to all-loading up front.
   useEffect(() => {
-    if (!presentation || !round || !selectedPath) {
-      setDiffState(null);
+    if (!presentation || !round) {
+      setFileDiffs({});
       return;
     }
 
-    const cacheKey = `${round.id}:${selectedPath}`;
-    const cached = diffCacheRef.current.get(cacheKey);
-    if (cached) {
-      setDiffState(cached);
-      return;
-    }
+    const paths = round.manifest.files.map((f) => f.path);
+    const initial: Record<string, DiffCacheEntry> = {};
+    for (const path of paths) initial[path] = { loading: true };
+    setFileDiffs(initial);
 
-    const loadingEntry: DiffCacheEntry = { loading: true };
-    diffCacheRef.current.set(cacheKey, loadingEntry);
-    setDiffState(loadingEntry);
-
-    const requestedPath = selectedPath;
+    let cancelled = false;
     const requestedRoundId = round.id;
-    sendGetFileDiff(presentation.repo_path, requestedPath, {
-      baseRef: round.base_sha,
-      headRef: round.head_sha,
-    })
-      .then((result) => {
-        const entry: DiffCacheEntry = result.success
-          ? { loading: false, original: result.original, modified: result.modified }
-          : { loading: false, error: result.error || 'Failed to load diff.' };
-        diffCacheRef.current.set(`${requestedRoundId}:${requestedPath}`, entry);
-        if (
-          selectedPathRef.current === requestedPath &&
-          activeRoundKeyRef.current === requestedRoundId
-        ) {
-          setDiffState(entry);
+    const repoPath = presentation.repo_path;
+    const baseRef = round.base_sha;
+    const headRef = round.head_sha;
+    const CONCURRENCY = 4;
+    let nextIndex = 0;
+
+    const isStale = () => cancelled || activeRoundKeyRef.current !== requestedRoundId;
+
+    async function worker() {
+      for (;;) {
+        const index = nextIndex++;
+        if (index >= paths.length) return;
+        const path = paths[index];
+        try {
+          const result = await sendGetFileDiff(repoPath, path, { baseRef, headRef });
+          if (isStale()) return;
+          const entry: DiffCacheEntry = result.success
+            ? { loading: false, original: result.original, modified: result.modified }
+            : { loading: false, error: result.error || 'Failed to load diff.' };
+          setFileDiffs((prev) => ({ ...prev, [path]: entry }));
+        } catch (err) {
+          if (isStale()) return;
+          setFileDiffs((prev) => ({
+            ...prev,
+            [path]: { loading: false, error: err instanceof Error ? err.message : 'Failed to load diff.' },
+          }));
         }
-      })
-      .catch((err) => {
-        const entry: DiffCacheEntry = {
-          loading: false,
-          error: err instanceof Error ? err.message : 'Failed to load diff.',
-        };
-        diffCacheRef.current.set(`${requestedRoundId}:${requestedPath}`, entry);
-        if (
-          selectedPathRef.current === requestedPath &&
-          activeRoundKeyRef.current === requestedRoundId
-        ) {
-          setDiffState(entry);
-        }
-      });
-    // round.id/base_sha/head_sha are stable for the loaded round's lifetime;
-    // presentation.repo_path likewise. sendGetFileDiff is a stable callback.
-  }, [presentation, round, selectedPath, sendGetFileDiff]);
+      }
+    }
+
+    const workerCount = Math.min(CONCURRENCY, paths.length);
+    for (let i = 0; i < workerCount; i++) void worker();
+
+    return () => {
+      cancelled = true;
+    };
+    // round.id/base_sha/head_sha/presentation.repo_path are stable for the
+    // loaded round's lifetime; sendGetFileDiff is a stable callback.
+  }, [presentation, round, sendGetFileDiff]);
 
   const files = round?.manifest.files ?? [];
 
   const moveSelection = useCallback((delta: number) => {
-    setSelectedPath((current) => {
-      if (files.length === 0) return current;
-      const index = current ? files.findIndex((f) => f.path === current) : -1;
-      const nextIndex = index === -1 ? 0 : Math.max(0, Math.min(files.length - 1, index + delta));
-      return files[nextIndex]?.path ?? current;
-    });
-  }, [files]);
+    if (files.length === 0) return;
+    const index = activePath ? files.findIndex((f) => f.path === activePath) : -1;
+    const nextIndex = index === -1 ? 0 : Math.max(0, Math.min(files.length - 1, index + delta));
+    const next = files[nextIndex]?.path;
+    if (next) requestScroll(next);
+  }, [files, activePath, requestScroll]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -306,25 +308,44 @@ export function PresentRoot() {
   }, [moveSelection]);
 
   useEffect(() => {
-    if (!selectedPath || !railRef.current) return;
-    const el = railRef.current.querySelector<HTMLElement>(`[data-path="${CSS.escape(selectedPath)}"]`);
+    if (!activePath || !railRef.current) return;
+    const el = railRef.current.querySelector<HTMLElement>(`[data-path="${CSS.escape(activePath)}"]`);
     el?.scrollIntoView({ block: 'nearest' });
-  }, [selectedPath]);
-
-  // An in-progress edit is scoped to whichever file's diff is showing it;
-  // switching files should not leave a stale editingCommentId pointing at a
-  // comment that's no longer rendered.
-  useEffect(() => {
-    setEditingCommentId(null);
-  }, [selectedPath]);
+  }, [activePath]);
 
   const draftIds = useMemo(() => new Set(drafts.map((d) => d.id)), [drafts]);
 
-  const handleAddComment = useCallback((lineStart: number, lineEnd: number, content: string) => {
-    if (!selectedPath) return;
+  // All comments across all files: the tour renders every file's diff at
+  // once, unlike the old single-selection pane that only ever needed one
+  // file at a time. Memoized (and hoisted above the early-return branches
+  // below, since hooks must run unconditionally) so a passive activePath
+  // update from scrolling doesn't rebuild these on every render and bump
+  // every CodeView item's version.
+  const allComments = useMemo<ReviewComment[]>(
+    () => [...comments.map(submittedToReviewComment), ...drafts.map(draftToReviewComment)],
+    [comments, drafts]
+  );
+  // Submitted comments (author is the round's owner or agent, not a local
+  // draft) render read-only in the reader — only the user's own in-progress
+  // drafts are editable/resolvable/deletable here.
+  const readOnlyCommentIds = useMemo(
+    () => new Set(allComments.filter((c) => !draftIds.has(c.id)).map((c) => c.id)),
+    [allComments, draftIds]
+  );
+  const tourFiles = useMemo<PresentTourFile[]>(
+    () =>
+      files.map((file) => ({
+        path: file.path,
+        note: file.note,
+        diff: fileDiffs[file.path] ?? { loading: true },
+      })),
+    [files, fileDiffs]
+  );
+
+  const handleAddComment = useCallback((filepath: string, lineStart: number, lineEnd: number, content: string) => {
     const id = `draft-${draftIdCounterRef.current++}`;
-    setDrafts((prev) => [...prev, draftFromAddComment(selectedPath, lineStart, lineEnd, content, id)]);
-  }, [selectedPath]);
+    setDrafts((prev) => [...prev, draftFromAddComment(filepath, lineStart, lineEnd, content, id)]);
+  }, []);
 
   const handleStartEdit = useCallback((id: string) => {
     if (draftIds.has(id)) setEditingCommentId(id);
@@ -401,20 +422,7 @@ export function PresentRoot() {
     );
   }
 
-  const selectedFile = files.find((f) => f.path === selectedPath) ?? null;
   const showDrift = !!repoHeadSha && repoHeadSha !== round.head_sha && !driftDismissed;
-  const selectedFileComments: ReviewComment[] = selectedFile
-    ? [
-        ...comments.filter((c) => c.filepath === selectedFile.path).map(submittedToReviewComment),
-        ...drafts.filter((d) => d.filepath === selectedFile.path).map(draftToReviewComment),
-      ]
-    : [];
-  // Submitted comments (author is the round's owner or agent, not a local
-  // draft) render read-only in the reader — only the user's own in-progress
-  // drafts are editable/resolvable/deletable here.
-  const readOnlyCommentIds = new Set(
-    selectedFileComments.filter((c) => !draftIds.has(c.id)).map((c) => c.id)
-  );
 
   return (
     <div className="present-root">
@@ -484,12 +492,6 @@ export function PresentRoot() {
         </div>
       )}
 
-      {round.manifest.summary && (
-        <div className="present-root-summary">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{round.manifest.summary}</ReactMarkdown>
-        </div>
-      )}
-
       {comments.length > 0 && (
         <p className="present-root-comment-count">
           {comments.length} comment{comments.length === 1 ? '' : 's'} on this round
@@ -502,8 +504,8 @@ export function PresentRoot() {
             <li
               key={file.path}
               data-path={file.path}
-              className={`present-root-file ${file.path === selectedPath ? 'selected' : ''}`}
-              onClick={() => setSelectedPath(file.path)}
+              className={`present-root-file ${file.path === activePath ? 'selected' : ''}`}
+              onClick={() => requestScroll(file.path)}
             >
               <span className="present-root-file-index">{index + 1}</span>
               <code className="present-root-file-path">{file.path}</code>
@@ -524,43 +526,25 @@ export function PresentRoot() {
         </ol>
 
         <main className="present-root-diff-pane">
-          {!selectedFile ? (
+          {files.length === 0 ? (
             <div className="present-root-diff-placeholder">No files in this round.</div>
           ) : (
-            <>
-              {selectedFile.note && (
-                <div className="present-root-file-note-banner">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedFile.note}</ReactMarkdown>
-                </div>
-              )}
-
-              {diffState?.loading && (
-                <div className="present-root-diff-placeholder">Loading diff…</div>
-              )}
-
-              {diffState?.error && (
-                <div className="present-root-diff-error">{diffState.error}</div>
-              )}
-
-              {!diffState?.loading && !diffState?.error && diffState?.original !== undefined && diffState?.modified !== undefined && (
-                <DiffView
-                  original={diffState.original}
-                  modified={diffState.modified}
-                  filePath={selectedFile.path}
-                  comments={selectedFileComments}
-                  editingCommentId={editingCommentId}
-                  readOnlyCommentIds={readOnlyCommentIds}
-                  diffStyle="unified"
-                  expandUnchanged={false}
-                  onAddComment={handleAddComment}
-                  onEditComment={handleEditComment}
-                  onStartEdit={handleStartEdit}
-                  onCancelEdit={handleCancelEdit}
-                  onResolveComment={handleResolveComment}
-                  onDeleteComment={handleDeleteComment}
-                />
-              )}
-            </>
+            <PresentTour
+              summary={round.manifest.summary}
+              files={tourFiles}
+              comments={allComments}
+              editingCommentId={editingCommentId}
+              readOnlyCommentIds={readOnlyCommentIds}
+              onAddComment={handleAddComment}
+              onEditComment={handleEditComment}
+              onStartEdit={handleStartEdit}
+              onCancelEdit={handleCancelEdit}
+              onResolveComment={handleResolveComment}
+              onDeleteComment={handleDeleteComment}
+              scrollToPath={scrollRequest?.path ?? null}
+              scrollNonce={scrollRequest?.nonce ?? 0}
+              onActivePathChange={setActivePath}
+            />
           )}
         </main>
       </div>

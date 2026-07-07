@@ -168,20 +168,6 @@
   color: var(--color-text-primary);
 }
 
-.present-root-summary {
-  margin-top: 16px;
-  color: var(--color-text-secondary);
-  line-height: 1.6;
-}
-
-.present-root-summary :first-child {
-  margin-top: 0;
-}
-
-.present-root-summary :last-child {
-  margin-bottom: 0;
-}
-
 .present-root-comment-count {
   margin-top: 16px;
   color: var(--color-text-secondary);
@@ -286,31 +272,7 @@
   overflow: hidden;
 }
 
-.present-root-file-note-banner {
-  margin-bottom: 12px;
-  padding: 10px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-bg-panel);
-  color: var(--color-text-primary);
-  line-height: 1.6;
-  font-size: var(--font-size);
-}
-
-.present-root-file-note-banner :first-child {
-  margin-top: 0;
-}
-
-.present-root-file-note-banner :last-child {
-  margin-bottom: 0;
-}
-
 .present-root-diff-placeholder {
   color: var(--color-text-secondary);
-  padding: 24px;
-}
-
-.present-root-diff-error {
-  color: var(--color-error, #dc2626);
   padding: 24px;
 }

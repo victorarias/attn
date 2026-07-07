@@ -1017,13 +1017,14 @@ export enum FetchRemotesResultMessageEvent {
 }
 
 export interface FileDiffResultMessage {
-    directory: string;
-    error?:    string;
-    event:     FileDiffResultMessageEvent;
-    modified:  string;
-    original:  string;
-    path:      string;
-    success:   boolean;
+    directory:   string;
+    error?:      string;
+    event:       FileDiffResultMessageEvent;
+    modified:    string;
+    original:    string;
+    path:        string;
+    request_id?: string;
+    success:     boolean;
     [property: string]: any;
 }
 
@@ -1223,12 +1224,13 @@ export enum GetDefaultBranchResultMessageEvent {
 }
 
 export interface GetFileDiffMessage {
-    base_ref?: string;
-    cmd:       GetFileDiffMessageCmd;
-    directory: string;
-    head_ref?: string;
-    path:      string;
-    staged?:   boolean;
+    base_ref?:   string;
+    cmd:         GetFileDiffMessageCmd;
+    directory:   string;
+    head_ref?:   string;
+    path:        string;
+    request_id?: string;
+    staged?:     boolean;
     [property: string]: any;
 }
 
@@ -7526,6 +7528,7 @@ const typeMap: any = {
         { json: "modified", js: "modified", typ: "" },
         { json: "original", js: "original", typ: "" },
         { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "FSChangedMessage": o([
@@ -7643,6 +7646,7 @@ const typeMap: any = {
         { json: "directory", js: "directory", typ: "" },
         { json: "head_ref", js: "head_ref", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "staged", js: "staged", typ: u(undefined, true) },
     ], "any"),
     "GetPresentationRoundMessage": o([

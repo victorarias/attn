@@ -14,6 +14,7 @@ import { GridViewHarness } from './GridViewHarness';
 import { LiveMarkdownEditorHarness } from './LiveMarkdownEditorHarness';
 import { NotebookBrowserHarness } from './NotebookBrowserHarness';
 import { NotebookTileHarness } from './NotebookTileHarness';
+import { PresentTourHarness } from './PresentTourHarness';
 
 export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   BrokenLinks: BrokenLinksHarness,
@@ -26,4 +27,5 @@ export const harnesses: Record<string, React.ComponentType<HarnessProps>> = {
   LiveMarkdownEditor: LiveMarkdownEditorHarness,
   NotebookBrowser: NotebookBrowserHarness,
   NotebookTile: NotebookTileHarness,
+  PresentTour: PresentTourHarness,
 };

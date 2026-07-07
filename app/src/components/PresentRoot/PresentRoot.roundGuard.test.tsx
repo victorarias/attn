@@ -1,31 +1,37 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DiffView } from '../DiffView';
-import type { DiffViewProps } from '../DiffView';
+import { PresentTour } from '../PresentTour';
+import type { PresentTourProps } from '../PresentTour';
 
 // Regression test for a figgyster review finding on PR #498: the diff-fetch
-// apply guard in PresentRoot checked only `selectedPathRef.current ===
-// requestedPath`. A late-arriving diff response for a path that stays
-// selected across a round transition (round-1 -> round-2 via
-// presentation_updated) could still get applied even though it belongs to
-// the STALE round, clobbering the freshly-loaded round's diff. The fix adds
-// a round-identity check (`activeRoundKeyRef`) alongside the path check.
+// apply guard in PresentRoot checked only path identity. A late-arriving diff
+// response belonging to a STALE round (round-1 -> round-2 via
+// presentation_updated, same file path in both) could still get applied even
+// though the active round has already moved on. The fix adds a round-identity
+// check (`activeRoundKeyRef`) alongside the path check, in the `isStale()`
+// guard inside PresentRoot's fetch-all-files effect (ported here unchanged in
+// spirit as part of the slice-1 fetch-all rework).
 //
 // This is exercised via a full useDaemonSocket mock (rather than the
-// FakeWebSocket harness in PresentRoot.test.tsx) because the real wire
-// protocol correlates `get_file_diff`/`file_diff_result` by path alone
-// (`get_file_diff_<path>` in useDaemonSocket.ts) — a second in-flight
-// request for the same path overwrites the first's promise handle, so a
-// black-box WS simulation can't independently resolve an "old round"
-// response after a "new round" request for the same path has already been
-// sent. Mocking sendGetFileDiff directly gives each call its own
+// FakeWebSocket harness in PresentRoot.test.tsx) to isolate exactly the
+// client-side `activeRoundKeyRef` guard this test protects, independent of
+// the wire protocol. (The wire protocol itself used to make this scenario
+// worse — `get_file_diff`/`file_diff_result` correlated by path alone, so a
+// second in-flight request for the same path clobbered the first's promise
+// handle — but that was fixed with request_id correlation; see
+// PresentRoot.test.tsx's stale-round wire-level test for that half.)
+// Mocking sendGetFileDiff directly gives each call its own
 // independently-controllable promise, isolating exactly the client-side
 // guard this test protects.
-vi.mock('../DiffView', () => ({
-  DiffView: vi.fn(({ original, modified }) => (
-    <div data-testid="diff-view">
-      <div className="original">{original}</div>
-      <div className="modified">{modified}</div>
+vi.mock('../PresentTour', () => ({
+  PresentTour: vi.fn(({ files }: PresentTourProps) => (
+    <div data-testid="present-tour">
+      {files.map((f) => (
+        <div key={f.path} data-testid={`tour-file-${f.path}`}>
+          {f.diff.original !== undefined && <div className="original">{f.diff.original}</div>}
+          {f.diff.modified !== undefined && <div className="modified">{f.diff.modified}</div>}
+        </div>
+      ))}
     </div>
   )),
 }));
@@ -110,9 +116,13 @@ vi.mock('../../hooks/useDaemonSocket', () => ({
   },
 }));
 
-function latestDiffViewProps(): DiffViewProps | undefined {
-  const calls = vi.mocked(DiffView).mock.calls;
-  return calls[calls.length - 1]?.[0] as unknown as DiffViewProps | undefined;
+function latestTourProps(): PresentTourProps | undefined {
+  const calls = vi.mocked(PresentTour).mock.calls;
+  return calls[calls.length - 1]?.[0] as unknown as PresentTourProps | undefined;
+}
+
+function foundFile(props: PresentTourProps | undefined) {
+  return props?.files.find((f) => f.path === 'src/foo.ts');
 }
 
 function setSearch(search: string) {
@@ -128,7 +138,7 @@ describe('PresentRoot diff-fetch round guard', () => {
     capturedOnPresentationUpdated = undefined;
   });
 
-  it('does not apply a stale round-1 diff response after a round-2 transition for the same selected path', async () => {
+  it('does not apply a stale round-1 diff response after a round-2 transition for the same file', async () => {
     getPresentationRoundCalls = [];
     sendGetFileDiffCalls = [];
 
@@ -149,12 +159,12 @@ describe('PresentRoot diff-fetch round guard', () => {
     });
     await waitFor(() => expect(screen.getByText('My presentation')).toBeInTheDocument());
 
-    // The diff-fetch effect fires for src/foo.ts under round-1 (call #1);
+    // The fetch-all effect fires for src/foo.ts under round-1 (call #1);
     // leave it unresolved to simulate a slow response.
     await waitFor(() => expect(sendGetFileDiffCalls).toHaveLength(1));
 
-    // Simulate presentation_updated -> round reloads to round-2, same
-    // selected path (src/foo.ts) stays selected.
+    // Simulate presentation_updated -> round reloads to round-2, same file
+    // path as round-1.
     expect(capturedOnPresentationUpdated).toBeDefined();
     act(() => {
       capturedOnPresentationUpdated!({ id: 'pres-1' });
@@ -188,9 +198,9 @@ describe('PresentRoot diff-fetch round guard', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const staleProps = latestDiffViewProps();
-    expect(staleProps?.original).not.toBe('STALE round-1 original');
-    expect(staleProps?.modified).not.toBe('STALE round-1 modified');
+    const staleFile = foundFile(latestTourProps());
+    expect(staleFile?.diff.original).not.toBe('STALE round-1 original');
+    expect(staleFile?.diff.modified).not.toBe('STALE round-1 modified');
 
     // The fresh round-2 fetch resolving still applies correctly.
     act(() => {
@@ -201,8 +211,8 @@ describe('PresentRoot diff-fetch round guard', () => {
       });
     });
     await waitFor(() => {
-      expect(latestDiffViewProps()?.original).toBe('FRESH round-2 original');
+      expect(foundFile(latestTourProps())?.diff.original).toBe('FRESH round-2 original');
     });
-    expect(latestDiffViewProps()?.modified).toBe('FRESH round-2 modified');
+    expect(foundFile(latestTourProps())?.diff.modified).toBe('FRESH round-2 modified');
   });
 });
