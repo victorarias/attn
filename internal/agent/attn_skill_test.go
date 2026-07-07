@@ -229,6 +229,44 @@ func TestEnsureAttnCodexSkillInstalled(t *testing.T) {
 	assertAttnSkillTree(t, filepath.Join(home, ".agents", "skills", "attn"))
 }
 
+func TestEnsureAttnCopilotSkillInstalled(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := ensureAttnCopilotSkillInstalled(); err != nil {
+		t.Fatalf("ensureAttnCopilotSkillInstalled() error = %v", err)
+	}
+
+	assertAttnSkillTree(t, filepath.Join(home, ".copilot", "skills", "attn"))
+}
+
+// TestEnsureAttnCopilotSkillInstalledPrunesOrphanedFiles mirrors the Claude
+// orphan-pruning guard: a stale reference retired from the bundle must not
+// survive on disk and keep teaching outdated guidance (e.g. a leftover
+// chief-of-staff.md telling a delegated leaf it can re-delegate).
+func TestEnsureAttnCopilotSkillInstalledPrunesOrphanedFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	skillDir := filepath.Join(home, ".copilot", "skills", "attn")
+	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
+		t.Fatalf("seed skill dir: %v", err)
+	}
+	orphanFile := filepath.Join(skillDir, "references", "chief-of-staff.md")
+	if err := os.WriteFile(orphanFile, []byte("stale, retired guidance"), 0o644); err != nil {
+		t.Fatalf("seed orphaned reference: %v", err)
+	}
+
+	if err := ensureAttnCopilotSkillInstalled(); err != nil {
+		t.Fatalf("ensureAttnCopilotSkillInstalled() error = %v", err)
+	}
+
+	if _, err := os.Stat(orphanFile); !os.IsNotExist(err) {
+		t.Fatalf("orphaned reference file was not pruned: stat err = %v", err)
+	}
+	assertAttnSkillTree(t, skillDir)
+}
+
 func TestAttnSkillInstallsAreIdentical(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -239,9 +277,13 @@ func TestAttnSkillInstallsAreIdentical(t *testing.T) {
 	if err := ensureAttnCodexSkillInstalled(); err != nil {
 		t.Fatalf("ensureAttnCodexSkillInstalled() error = %v", err)
 	}
+	if err := ensureAttnCopilotSkillInstalled(); err != nil {
+		t.Fatalf("ensureAttnCopilotSkillInstalled() error = %v", err)
+	}
 
 	claudeDir := filepath.Join(home, ".claude", "skills", "attn")
 	codexDir := filepath.Join(home, ".agents", "skills", "attn")
+	copilotDir := filepath.Join(home, ".copilot", "skills", "attn")
 	for _, relative := range []string{
 		"SKILL.md",
 		"references/delegation.md",
@@ -254,8 +296,12 @@ func TestAttnSkillInstallsAreIdentical(t *testing.T) {
 	} {
 		claudeContent := readSkillFile(t, claudeDir, relative)
 		codexContent := readSkillFile(t, codexDir, relative)
+		copilotContent := readSkillFile(t, copilotDir, relative)
 		if claudeContent != codexContent {
 			t.Fatalf("%s differs between Claude and Codex installs", relative)
+		}
+		if claudeContent != copilotContent {
+			t.Fatalf("%s differs between Claude and Copilot installs", relative)
 		}
 	}
 }

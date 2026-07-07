@@ -97,10 +97,22 @@ func ensureAttnCodexSkillInstalled() error {
 	return installAttnSkill(filepath.Join(homeDir, ".agents", "skills", "attn"))
 }
 
+func ensureAttnCopilotSkillInstalled() error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory for Copilot skills: %w", err)
+	}
+	return installAttnSkill(filepath.Join(homeDir, ".copilot", "skills", "attn"))
+}
+
 func EnsureClaudeSkillInstalled() error {
 	return ensureAttnClaudeSkillInstalled()
 }
 
 func EnsureCodexSkillInstalled() error {
 	return ensureAttnCodexSkillInstalled()
+}
+
+func EnsureCopilotSkillInstalled() error {
+	return ensureAttnCopilotSkillInstalled()
 }
