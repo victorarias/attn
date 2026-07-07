@@ -149,7 +149,7 @@ func parseOptions() throws -> Options {
               InputDriver.swift text --text "hello" [--bundle-id ...] [--prompt-accessibility]
               InputDriver.swift key --key d [--modifiers command,option]
               InputDriver.swift keycode --key-code 36 [--modifiers command]
-              InputDriver.swift click --relative-x 0.75 --relative-y 0.5 [--window-title <substring>]
+              InputDriver.swift click --relative-x 0.75 --relative-y 0.5 [--modifiers command] [--window-title <substring>]
               InputDriver.swift menu --path "File>New Session" [--bundle-id ...]
               InputDriver.swift window_park --visible-px 200 [--bundle-id ...] [--window-title <substring>]
               InputDriver.swift scroll --relative-x 0.5 --relative-y 0.5 --delta-y -240 \\
@@ -615,7 +615,7 @@ func windowPark(bundleId: String, visiblePx: Int, titleSubstring: String? = nil)
     print("screen=\(Int(screenFrame.width))x\(Int(screenFrame.height)) win=\(Int(size.width))x\(Int(size.height)) from=\(Int(curPos.x)),\(Int(curPos.y)) to=\(Int(newX)),\(Int(newY))")
 }
 
-func clickWindow(bundleId: String, relativeX: Double, relativeY: Double, right: Bool = false, titleSubstring: String? = nil) throws {
+func clickWindow(bundleId: String, relativeX: Double, relativeY: Double, right: Bool = false, titleSubstring: String? = nil, flags: CGEventFlags = []) throws {
     let bounds = try mainWindowBounds(bundleId: bundleId, titleSubstring: titleSubstring)
     let clampedX = min(max(relativeX, 0), 1)
     let clampedY = min(max(relativeY, 0), 1)
@@ -632,6 +632,8 @@ func clickWindow(bundleId: String, relativeX: Double, relativeY: Double, right: 
           let up = CGEvent(mouseEventSource: nil, mouseType: upType, mouseCursorPosition: point, mouseButton: button) else {
         throw DriverError.eventCreationFailed("Failed to create mouse events.")
     }
+    down.flags = flags
+    up.flags = flags
 
     move.post(tap: .cghidEventTap)
     Thread.sleep(forTimeInterval: 0.02)
@@ -754,13 +756,13 @@ do {
         guard let relativeX = options.relativeX, let relativeY = options.relativeY else {
             throw DriverError.invalidArgument("Missing --relative-x/--relative-y for click")
         }
-        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, titleSubstring: options.windowTitle)
+        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, titleSubstring: options.windowTitle, flags: modifierFlags(options.modifiers))
     case "right_click":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let relativeX = options.relativeX, let relativeY = options.relativeY else {
             throw DriverError.invalidArgument("Missing --relative-x/--relative-y for right_click")
         }
-        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, right: true, titleSubstring: options.windowTitle)
+        try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, right: true, titleSubstring: options.windowTitle, flags: modifierFlags(options.modifiers))
     case "window_park":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let visiblePx = options.visiblePx else {

@@ -74,6 +74,11 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-terminal-context-menu'],
   },
   {
+    id: 'terminal-osc8-link',
+    label: 'OSC 8 hyperlink Cmd+click via native click + local HTTP probe',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-osc8-link'],
+  },
+  {
     id: 'terminal-block-resize',
     label: 'Block geometry across fish/bash/zsh through relaunch replay + split/close-split',
     command: ['pnpm', 'run', 'real-app:scenario-terminal-block-resize'],
