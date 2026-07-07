@@ -2422,6 +2422,27 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       }
     };
 
+    // Finalize a drag that has no real release event to interpret (window
+    // lost focus, or the OS/browser canceled the implicit pointer capture,
+    // e.g. a context menu opening mid-drag). There is no cell to resolve a
+    // click, link, or command-block hit against here, so this only stops the
+    // drag and copies whatever was already selected — it must never leave
+    // selectingRef stuck true.
+    const cancelSelectionDrag = () => {
+      stopSelectionDrag();
+      if (!selectingRef.current) return;
+      selectingRef.current = false;
+      selectionPointerStartRef.current = null;
+      if (!selectionDragThresholdMetRef.current) {
+        selectionRef.current = null;
+        renderSurface(true);
+        return;
+      }
+      const text = textForSelectionRange(selectionRef.current);
+      selectedTextRef.current = text || null;
+      if (text) void writeClipboardText(text);
+    };
+
     // Track an in-progress selection on the document rather than the terminal
     // element. The drag must keep updating and finalize even when the pointer
     // crosses a sibling overlay (e.g. a split divider sitting above the pane
@@ -2433,6 +2454,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         if (!selectingRef.current || !selectionRef.current) return;
         // The button was released without a mouseup we observed (e.g. focus
         // loss while over another window): finalize so we never get stuck.
+        // `buttons` itself can go stale in WebKit (the engine Tauri uses on
+        // macOS) after a release outside the webview, which is exactly why
+        // the blur/pointercancel listeners below exist as a second net that
+        // doesn't depend on this bit being accurate.
         if ((event.buttons & 1) === 0) {
           void finishSelectionDrag(event);
           return;
@@ -2460,11 +2485,29 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const onUp = (event: MouseEvent) => {
         void finishSelectionDrag(event);
       };
+      // Belt-and-suspenders against a real mouseup never reaching this
+      // listener at all — e.g. the release happens outside the app's window
+      // entirely, or a descendant calls stopPropagation() on the native event
+      // before it bubbles to document. `blur` fires whenever the window loses
+      // focus mid-drag (alt-tab, clicking another app, a native dialog), and
+      // `pointercancel` fires when the browser/OS revokes the implicit
+      // pointer capture (e.g. a context menu opening mid-drag) — the same
+      // pattern already used for pane drags in SessionTerminalWorkspace's
+      // leafDrag.ts. Without this, a swallowed or missed release leaves
+      // selectingRef stuck true and the selection keeps growing on the next
+      // mouse movement, even with no button held.
+      const onCancel = () => {
+        cancelSelectionDrag();
+      };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
+      window.addEventListener('blur', onCancel);
+      window.addEventListener('pointercancel', onCancel);
       selectionDragCleanupRef.current = () => {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        window.removeEventListener('blur', onCancel);
+        window.removeEventListener('pointercancel', onCancel);
       };
     };
 
