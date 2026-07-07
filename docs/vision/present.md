@@ -83,12 +83,12 @@ mobile/remote rendering of the presentation window in v1.
 
 ## Big rocks (the arc)
 
-- [ ] **Spine** — presentation instance + rounds domain model, manifest schema,
+- [x] **Spine** — presentation instance + rounds domain model, manifest schema,
       protocol, store, `attn present` CLI, doorbell semantics. Retires the
       `(repo_path, branch)` review identity.
-- [ ] **Window shell** — banner notice → dedicated OS window, minimize back;
+- [x] **Window shell** — banner notice → dedicated OS window, minimize back;
       keyboard-first player chrome. (Tauri multi-window: ground pass first.)
-- [ ] **Change reader** — guided diff at levels 0–1 (explicit frame + reading
+- [~] **Change reader** — guided diff at levels 0–1 (explicit frame + reading
       order + skip), replaces ⌘⇧E for daily review; inline comments; handback.
 - [ ] **Full tour guidance** — per-file notes, line-pinned annotations and
       threads, summary card; authoring skill ported from jaunt.
