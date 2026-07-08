@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PresentRoot } from './index';
 import { PresentTour } from '../PresentTour';
 import type { PresentTourProps } from '../PresentTour';
+import type { PresentationRound } from '../../types/generated';
 
 // PresentTour renders the @pierre/diffs CodeView (shadow DOM + Shiki + a real
 // virtualized scroll container), which jsdom cannot exercise — real browser
@@ -201,7 +202,7 @@ function emitFileDiff(ws: FakeWebSocket, path: string, original: string, modifie
   });
 }
 
-const round = {
+const round: PresentationRound = {
   id: 'round-1',
   presentation_id: 'pres-1',
   seq: 1,
@@ -493,6 +494,10 @@ describe('PresentRoot', () => {
   it('the pinned Summary row scrolls to the top and a file row click still works afterward', async () => {
     await loadRound();
 
+    // The summary is the round's initial stop (see the on-load-default test
+    // below), so clicking a file first, then back to Summary, exercises the
+    // row's own click-to-scroll-to-top behavior independent of that default.
+    fireEvent.click(screen.getByText('src/foo.ts'));
     await waitFor(() => {
       expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
     }, WAIT_OPTS);
@@ -519,6 +524,26 @@ describe('PresentRoot', () => {
     const propsAfterFileClick = latestTourProps();
     expect(propsAfterFileClick.scrollToPath).toBe('src/foo.test.ts');
     expect(propsAfterFileClick.scrollNonce).toBeGreaterThan(nonceAfterSummary ?? 0);
+  });
+
+  it('defaults the active stop to the pinned Summary row when the round has a summary', async () => {
+    await loadRound();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('present-root-summary-row')).toHaveClass('selected');
+    }, WAIT_OPTS);
+    expect(screen.getByText('src/foo.ts').closest('li')).not.toHaveClass('selected');
+  });
+
+  it('defaults the active stop to the first file when the round has no summary', async () => {
+    const { summary: _summary, ...manifestWithoutSummary } = round.manifest;
+    const roundWithoutSummary = { ...round, manifest: manifestWithoutSummary };
+    await loadRound({ round: roundWithoutSummary });
+
+    await waitFor(() => {
+      expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+    }, WAIT_OPTS);
+    expect(screen.getByTestId('present-root-summary-row')).not.toHaveClass('selected');
   });
 
   it('fetches every manifest file’s diff up front, exactly once per round', async () => {
@@ -577,6 +602,13 @@ describe('PresentRoot', () => {
   it('moves the selection with j/k keyboard shortcuts', async () => {
     await loadRound();
 
+    // The round opens on the pinned Summary stop; j from there lands on the
+    // first file.
+    await waitFor(() => {
+      expect(screen.getByTestId('present-root-summary-row')).toHaveClass('selected');
+    }, WAIT_OPTS);
+
+    fireEvent.keyDown(window, { key: 'j' });
     await waitFor(() => {
       expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
     }, WAIT_OPTS);
@@ -590,6 +622,48 @@ describe('PresentRoot', () => {
     await waitFor(() => {
       expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
     }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
+
+  it('k from the first file reaches the pinned Summary stop when the round has a summary', async () => {
+    await loadRound();
+
+    fireEvent.click(screen.getByText('src/foo.ts'));
+    await waitFor(() => {
+      expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+    }, WAIT_OPTS);
+
+    fireEvent.keyDown(window, { key: 'k' });
+    await waitFor(() => {
+      expect(screen.getByTestId('present-root-summary-row')).toHaveClass('selected');
+    }, WAIT_OPTS);
+
+    // k while already on the summary is a no-op — there is nothing lower to
+    // reach.
+    const propsBeforeExtraK = latestTourProps();
+    const nonceBeforeExtraK = propsBeforeExtraK.scrollNonce;
+    fireEvent.keyDown(window, { key: 'k' });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('present-root-summary-row')).toHaveClass('selected');
+    expect(latestTourProps().scrollNonce).toBe(nonceBeforeExtraK);
+  }, TEST_TIMEOUT);
+
+  it('k from the first file is a no-op when the round has no summary', async () => {
+    const { summary: _summary, ...manifestWithoutSummary } = round.manifest;
+    const roundWithoutSummary = { ...round, manifest: manifestWithoutSummary };
+    await loadRound({ round: roundWithoutSummary });
+
+    await waitFor(() => {
+      expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+    }, WAIT_OPTS);
+
+    fireEvent.keyDown(window, { key: 'k' });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+    expect(screen.getByTestId('present-root-summary-row')).not.toHaveClass('selected');
   }, TEST_TIMEOUT);
 
   it('shows a drift banner iff repoHeadSha differs from the pinned round head', async () => {
@@ -721,8 +795,10 @@ describe('PresentRoot', () => {
       await loadRound({ round: roundWithChangedFiles });
 
       // Doc order: src/foo.ts, src/foo.test.ts, src/extra.ts, src/generated.ts (skip), src/vendor.ts (skip).
-      // Four j-presses land on src/vendor.ts, having left src/generated.ts along the way.
-      for (let i = 0; i < 4; i++) {
+      // The round opens on the Summary stop, so the first j only steps onto
+      // src/foo.ts; five j-presses in total land on src/vendor.ts, having
+      // left src/generated.ts along the way.
+      for (let i = 0; i < 5; i++) {
         fireEvent.keyDown(window, { key: 'j' });
       }
       await waitFor(() => {
@@ -1095,6 +1171,13 @@ describe('PresentRoot', () => {
     it('r toggles reviewed on the active file', async () => {
       await loadRound();
 
+      // The round opens on the Summary stop, where r is a no-op (no active
+      // file); step onto the first file first.
+      fireEvent.keyDown(window, { key: 'j' });
+      await waitFor(() => {
+        expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+      }, WAIT_OPTS);
+
       fireEvent.keyDown(window, { key: 'r' });
       await waitFor(() => {
         expect(screen.getByTestId('present-root-rail-count').textContent).toBe('1/2');
@@ -1110,6 +1193,14 @@ describe('PresentRoot', () => {
     it('j marks the file being left as reviewed (auto-mark-on-leave), k never marks', async () => {
       await loadRound();
 
+      expect(screen.getByTestId('present-root-rail-count').textContent).toBe('0/2');
+
+      // The round opens on the Summary stop; the first j only steps onto
+      // src/foo.ts (leaving the summary, which is never marked).
+      fireEvent.keyDown(window, { key: 'j' });
+      await waitFor(() => {
+        expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+      }, WAIT_OPTS);
       expect(screen.getByTestId('present-root-rail-count').textContent).toBe('0/2');
 
       fireEvent.keyDown(window, { key: 'j' });
@@ -1140,8 +1231,9 @@ describe('PresentRoot', () => {
       fireEvent.keyDown(input, { key: 'j' });
       fireEvent.keyDown(input, { key: 's' });
 
-      // Nothing moved, nothing got marked, and the submit dialog never opened.
-      expect(screen.getByText('src/foo.ts').closest('li')).toHaveClass('selected');
+      // Nothing moved (still the default Summary stop), nothing got marked,
+      // and the submit dialog never opened.
+      expect(screen.getByTestId('present-root-summary-row')).toHaveClass('selected');
       expect(screen.getByTestId('present-root-rail-count').textContent).toBe('0/2');
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 

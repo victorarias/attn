@@ -229,6 +229,10 @@ export function PresentRoot() {
         setDriftDismissed(false);
         setActivePath((current) => {
           if (current && r.manifest.files.some((f) => f.path === current)) return current;
+          // Default to the pinned Summary stop when the round has one — it
+          // matches the actual initial scroll position (top = summary)
+          // instead of jumping straight past it to the first file.
+          if (r.manifest.summary) return null;
           return r.manifest.files[0]?.path ?? null;
         });
       })
@@ -355,13 +359,31 @@ export function PresentRoot() {
 
   // J/K walk the full appended-tour document order (tour, other, skip cards
   // alike); mark/toggle below are what keep skipped files out of progress.
+  // K from the first file (index 0) steps past the clamp onto the pinned
+  // Summary stop (activePath null) when the round has a summary, driving the
+  // exact same path as a rail summary-row click — matching J's behavior of
+  // moving from the summary (activePath null, index -1) onto the first file.
+  // K while already on the summary (activePath null, no lower stop to reach)
+  // stays a no-op. Without a summary, the old clamp-at-0 behavior holds.
+  const hasSummary = !!round?.manifest.summary;
   const moveSelection = useCallback((delta: number) => {
     if (allDocFiles.length === 0) return;
     const index = activePath ? allDocFiles.findIndex((f) => f.path === activePath) : -1;
-    const nextIndex = index === -1 ? 0 : Math.max(0, Math.min(allDocFiles.length - 1, index + delta));
+    if (index === -1) {
+      // On the summary (or nothing selected yet): K has nowhere lower to go
+      // (no-op), J lands on the first file.
+      if (delta < 0) return;
+      requestScroll(allDocFiles[0]?.path ?? null);
+      return;
+    }
+    if (delta < 0 && index === 0 && hasSummary) {
+      requestScroll(null);
+      return;
+    }
+    const nextIndex = Math.max(0, Math.min(allDocFiles.length - 1, index + delta));
     const next = allDocFiles[nextIndex]?.path;
     if (next) requestScroll(next);
-  }, [allDocFiles, activePath, requestScroll]);
+  }, [allDocFiles, activePath, requestScroll, hasSummary]);
 
   // N/P hop across every annotation anchor in the round, in the document
   // order PresentTour reports (files in tour order, then by rendered line
