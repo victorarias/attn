@@ -729,6 +729,7 @@ type ticketStatusArgs struct {
 	WorkState string
 	Session   string
 	Comment   string
+	TicketID  string
 	JSON      bool
 }
 
@@ -743,6 +744,7 @@ func parseTicketStatusArgs(args []string) (ticketStatusArgs, error) {
 	fs.SetOutput(io.Discard)
 	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
 	comment := fs.String("comment", "", "optional note recorded with the status change")
+	ticketID := fs.String("ticket", "", "move this ticket by id instead of the session's bound ticket")
 	jsonOutput := fs.Bool("json", false, "print the result as JSON")
 
 	var positionals []string
@@ -764,14 +766,17 @@ func parseTicketStatusArgs(args []string) (ticketStatusArgs, error) {
 	result.WorkState = positionals[0]
 	result.Session = *session
 	result.Comment = *comment
+	result.TicketID = *ticketID
 	result.JSON = *jsonOutput
 	return result, nil
 }
 
-// runTicketStatus reports the calling agent's work state, moving its bound ticket
-// to the matching column. The work state is the same vocabulary the agent reports
-// to the chief (in_progress, needs_input, ready_for_review, completed, failed);
-// the daemon resolves which ticket from the session and maps the column.
+// runTicketStatus reports a work state, moving a ticket to the matching column.
+// The work state is the same vocabulary the agent reports to the chief
+// (in_progress, needs_input, ready_for_review, completed, failed). Without
+// --ticket, the daemon resolves which ticket from the calling session (the
+// agent's own bound ticket); with --ticket, it moves that ticket by id instead,
+// regardless of who is bound to it.
 func runTicketStatus(args []string) {
 	parsed, err := parseTicketStatusArgs(args)
 	if err != nil {
@@ -784,7 +789,7 @@ func runTicketStatus(args []string) {
 		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
 		os.Exit(2)
 	}
-	result, err := client.New("").SetTicketStatus(source, parsed.WorkState, parsed.Comment)
+	result, err := client.New("").SetTicketStatus(source, parsed.WorkState, parsed.Comment, parsed.TicketID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
 		os.Exit(1)
@@ -1494,8 +1499,9 @@ func writeTicketHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn ticket <command>
 
 commands:
-  status <work-state> [--session <id>] [--comment <text>] [--json]
-        move this session's bound ticket to the column for the reported state
+  status <work-state> [--session <id>] [--comment <text>] [--ticket <id>] [--json]
+        move this session's bound ticket to the column for the reported state;
+        --ticket <id> moves any ticket by id instead, not just the bound one
   inbox [--session <id>] [--json] [--watch [--interval <dur>]]
         read (and mark read) this session's unread ticket activity;
         --watch blocks and prints new activity as it lands (for a Monitor)

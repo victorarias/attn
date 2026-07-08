@@ -48,6 +48,9 @@ Reporting moves your bound ticket to the matching column so the chief sees your
 progress on the board. Keep the comment concrete: outcome, evidence, and next
 action.
 
+To move a ticket other than your own, add `--ticket <id>` (any ticket, no
+ownership gate) — same as `ticket comment <id>` reaching across tickets.
+
 A report is a small payload. When you build a large durable artifact — a report, a
 design doc, findings, often built with the user — write it into the Notebook and
 reference it from your status comment instead of inlining it. Write to the Notebook

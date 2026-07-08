@@ -33,12 +33,16 @@ func ticketStatusFromWorkState(ws protocol.DispatchWorkState) (store.TicketStatu
 	}
 }
 
-// handleSetTicketStatus moves the calling agent's bound ticket to the column
-// implied by the work state it reports. The session is the assignee, so the
-// daemon resolves the ticket from the session rather than trusting a
-// caller-supplied id — an agent can only move its own active ticket. The reported
-// status is recorded with the agent as author so the change reads as
-// self-reported on the activity thread.
+// handleSetTicketStatus moves a ticket to the column implied by the reported
+// work state. Two forms share this handler: without a ticket id, the session
+// is treated as the assignee and the daemon resolves its bound ticket — an
+// agent can only move its own active ticket this way. With a ticket id, the
+// daemon moves that ticket directly and skips session resolution entirely;
+// this form is deliberately permissive — any session may move any ticket on
+// the board, no ownership gate — because it is meant for awareness (the chief
+// or a peer nudging the board), not for granting autonomy over someone else's
+// work. Either way the acting session is recorded as the activity's author, so
+// the change reads as attributed to whoever actually moved it.
 func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketStatusMessage) {
 	sourceSessionID := strings.TrimSpace(msg.SourceSessionID)
 	if sourceSessionID == "" {
@@ -50,20 +54,24 @@ func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketSta
 		d.sendError(conn, fmt.Sprintf("ticket status: unknown work state %q", msg.WorkState))
 		return
 	}
-	ticket, err := d.store.ActiveTicketForSession(sourceSessionID)
-	if err != nil {
-		d.sendError(conn, "ticket status: "+err.Error())
-		return
-	}
-	if ticket == nil {
-		d.sendError(conn, "ticket status: no active ticket bound to this session")
-		return
+	ticketID := strings.TrimSpace(protocol.Deref(msg.TicketID))
+	if ticketID == "" {
+		ticket, err := d.store.ActiveTicketForSession(sourceSessionID)
+		if err != nil {
+			d.sendError(conn, "ticket status: "+err.Error())
+			return
+		}
+		if ticket == nil {
+			d.sendError(conn, "ticket status: no active ticket bound to this session")
+			return
+		}
+		ticketID = ticket.ID
 	}
 	comment := ""
 	if msg.Comment != nil {
 		comment = strings.TrimSpace(*msg.Comment)
 	}
-	updated, err := d.store.SetTicketStatus(ticket.ID, status, sourceSessionID, comment, time.Now())
+	updated, err := d.store.SetTicketStatus(ticketID, status, sourceSessionID, comment, time.Now())
 	if err != nil {
 		d.sendError(conn, "ticket status: "+err.Error())
 		return

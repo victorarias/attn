@@ -3225,6 +3225,7 @@ export interface SetTicketStatusMessage {
     cmd:               SetTicketStatusMessageCmd;
     comment?:          string;
     source_session_id: string;
+    ticket_id?:        string;
     work_state:        DispatchWorkState;
     [property: string]: any;
 }
@@ -8898,6 +8899,7 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("SetTicketStatusMessageCmd") },
         { json: "comment", js: "comment", typ: u(undefined, "") },
         { json: "source_session_id", js: "source_session_id", typ: "" },
+        { json: "ticket_id", js: "ticket_id", typ: u(undefined, "") },
         { json: "work_state", js: "work_state", typ: r("DispatchWorkState") },
     ], "any"),
     "SettingsUpdatedMessage": o([

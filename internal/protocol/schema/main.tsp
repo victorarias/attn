@@ -611,15 +611,17 @@ model DelegateMessage {
   effort?: string; // Pin the delegated agent's reasoning effort; empty = agent default
 }
 
-// SetTicketStatusMessage is an agent self-reporting the work state of its own
-// bound ticket. The daemon resolves the ticket from the calling session (the
-// assignee) — the agent does not name an id — and maps the reported work state
-// onto a ticket column. `comment` is an optional note recorded on the change.
+// SetTicketStatusMessage moves a ticket to the column for a reported work
+// state. Without ticket_id, the daemon resolves the ticket from the calling
+// session (the assignee) — an agent self-reporting its own bound ticket. With
+// ticket_id, it moves that ticket directly instead, regardless of who is bound
+// to it. `comment` is an optional note recorded on the change.
 model SetTicketStatusMessage {
   cmd: "set_ticket_status";
   source_session_id: string;
   work_state: DispatchWorkState;
   comment?: string;
+  ticket_id?: string; // moves this ticket by id instead of the session's bound ticket — any ticket, no ownership gate
 }
 
 // TicketStatusResult echoes the resolved ticket id and the column it now sits in
