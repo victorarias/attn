@@ -17,17 +17,31 @@ func writeCommit(t *testing.T, dir, path, content, message string) string {
 	return runGit(t, dir, "rev-parse", "HEAD")
 }
 
-func TestRenderFeedback_NoComments(t *testing.T) {
+func TestRenderFeedback_UnsubmittedNoComments(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	sha := writeCommit(t, dir, "a.txt", "one\ntwo\n", "init")
 
 	got := RenderFeedback(dir, "My Change", 1, sha, sha, "", "", nil)
+	if !strings.Contains(got, "Round not submitted yet.") {
+		t.Errorf("RenderFeedback() = %q, want the not-submitted line", got)
+	}
+	if strings.Contains(got, "handed back clean") {
+		t.Errorf("RenderFeedback() = %q, unsubmitted round should not contain handed back clean message", got)
+	}
+}
+
+func TestRenderFeedback_SubmittedNoComments(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	sha := writeCommit(t, dir, "a.txt", "one\ntwo\n", "init")
+
+	got := RenderFeedback(dir, "My Change", 1, sha, sha, "2026-07-01T00:00:00Z", "", nil)
 	if !strings.Contains(got, "No comments — round handed back clean.") {
 		t.Errorf("RenderFeedback() = %q, want the clean-handback line", got)
 	}
-	if !strings.Contains(got, "Round not submitted yet.") {
-		t.Errorf("RenderFeedback() = %q, want the not-submitted line", got)
+	if !strings.Contains(got, "Submitted: 2026-07-01T00:00:00Z") {
+		t.Errorf("RenderFeedback() = %q, want the submitted timestamp", got)
 	}
 }
 

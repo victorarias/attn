@@ -25,5 +25,5 @@ test-results
 *.sln
 *.sw?
 
-# real-app harness input-driver build fingerprint (content hash sidecar)
-scripts/real-app-harness/.build/*.fingerprint
+# real-app harness input-driver build artifacts
+scripts/real-app-harness/.build/

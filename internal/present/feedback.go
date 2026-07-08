@@ -33,11 +33,17 @@ func RenderFeedback(repoPath, title string, seq int, baseSHA, headSHA string, su
 
 	fmt.Fprintf(&b, "# %s — round %d\n\n", title, seq)
 	fmt.Fprintf(&b, "%s..%s\n\n", shortSHA(baseSHA), shortSHA(headSHA))
-	if strings.TrimSpace(submittedAt) == "" {
+
+	isSubmitted := strings.TrimSpace(submittedAt) != ""
+	if !isSubmitted {
 		b.WriteString("Round not submitted yet.\n")
+		if len(comments) == 0 {
+			return b.String()
+		}
 	} else {
 		fmt.Fprintf(&b, "Submitted: %s\n", submittedAt)
 	}
+
 	if verdict == "approved" {
 		b.WriteString("\n**Approved.**\n")
 	}
