@@ -643,27 +643,6 @@ async function waitForSessionUiState(client, sessionId, predicate, description, 
   );
 }
 
-async function waitForReviewPanelSnapshot(client, predicate, description, timeoutMs = 30_000) {
-  const startedAt = Date.now();
-  let lastSnapshot = null;
-  while (Date.now() - startedAt < timeoutMs) {
-    lastSnapshot = await client.request('capture_perf_snapshot', {
-      settleFrames: 2,
-      includeMemory: false,
-    }, {
-      timeoutMs: 15_000,
-    });
-    if (predicate(lastSnapshot)) {
-      return lastSnapshot;
-    }
-    await sleep(250);
-  }
-
-  throw new Error(
-    `Timed out waiting for ${description}. Last snapshot:\n${JSON.stringify(lastSnapshot, null, 2)}`
-  );
-}
-
 async function waitForPaneTextContains(client, sessionId, paneId, needle, timeoutMs = 20_000) {
   const startedAt = Date.now();
   let lastState = null;
@@ -1260,117 +1239,6 @@ Remote hub options:
     );
     saveJson(path.join(runDir, 'remote-main-reload-pane-text.json'), mainTextAfterReload);
 
-    if (preparedRepo) {
-      setStep('remote-review');
-      const diffMarker = `phase-d-${Date.now()}`;
-      await runSSH(extraOptions.sshTarget, `
-cd ${shellQuote(preparedRepo.repoDir)}
-printf '%s\\n' ${shellQuote(diffMarker)} >> ${shellQuote(preparedRepo.trackedFile)}
-`);
-
-      await client.request('dispatch_shortcut', { shortcutId: 'dock.diffDetail' });
-      const reviewSnapshot = await waitForReviewPanelSnapshot(
-        client,
-        (snapshot) => Boolean(
-          snapshot?.document?.diffDetailOpen &&
-          snapshot?.review?.panel?.active &&
-          snapshot?.review?.panel?.fileCount >= 1 &&
-          typeof snapshot?.review?.panel?.selectedFilePath === 'string' &&
-          snapshot.review.panel.selectedFilePath.includes(preparedRepo.trackedFile)
-        ),
-        'remote diff detail panel',
-        45_000,
-      );
-      saveJson(path.join(runDir, 'remote-review-panel.json'), {
-        diffMarker,
-        reviewSnapshot,
-      });
-
-      const reviewState = await client.request('review_get_state', {
-        repoPath: remoteDirectory,
-        branch: registered.branch || 'main',
-      }, {
-        timeoutMs: 20_000,
-      });
-      if (!reviewState?.success || !reviewState.state?.review_id) {
-        throw new Error(`Remote review state missing review_id: ${JSON.stringify(reviewState, null, 2)}`);
-      }
-      saveJson(path.join(runDir, 'remote-review-state.json'), reviewState);
-
-      const commentMarker = `remote-comment-${Date.now()}`;
-      const addComment = await client.request('review_add_comment', {
-        reviewId: reviewState.state.review_id,
-        filepath: preparedRepo.trackedFile,
-        lineStart: 1,
-        lineEnd: 1,
-        content: commentMarker,
-      }, {
-        timeoutMs: 20_000,
-      });
-      if (!addComment?.success || !addComment.comment?.id) {
-        throw new Error(`Remote add comment failed: ${JSON.stringify(addComment, null, 2)}`);
-      }
-
-      const updatedCommentMarker = `${commentMarker}-updated`;
-      const updateComment = await client.request('review_update_comment', {
-        commentId: addComment.comment.id,
-        content: updatedCommentMarker,
-      }, {
-        timeoutMs: 20_000,
-      });
-      if (!updateComment?.success) {
-        throw new Error(`Remote update comment failed: ${JSON.stringify(updateComment, null, 2)}`);
-      }
-
-      const resolveComment = await client.request('review_resolve_comment', {
-        commentId: addComment.comment.id,
-        resolved: true,
-      }, {
-        timeoutMs: 20_000,
-      });
-      if (!resolveComment?.success) {
-        throw new Error(`Remote resolve comment failed: ${JSON.stringify(resolveComment, null, 2)}`);
-      }
-
-      const commentsAfterMutation = await client.request('review_get_comments', {
-        reviewId: reviewState.state.review_id,
-        filepath: preparedRepo.trackedFile,
-      }, {
-        timeoutMs: 20_000,
-      });
-      const updatedComment = (commentsAfterMutation?.comments || []).find((comment) => comment.id === addComment.comment.id);
-      if (!commentsAfterMutation?.success || !updatedComment || updatedComment.content !== updatedCommentMarker) {
-        throw new Error(`Remote comments did not include updated comment: ${JSON.stringify(commentsAfterMutation, null, 2)}`);
-      }
-
-      const deleteComment = await client.request('review_delete_comment', {
-        commentId: addComment.comment.id,
-      }, {
-        timeoutMs: 20_000,
-      });
-      if (!deleteComment?.success) {
-        throw new Error(`Remote delete comment failed: ${JSON.stringify(deleteComment, null, 2)}`);
-      }
-
-      const commentsAfterDelete = await client.request('review_get_comments', {
-        reviewId: reviewState.state.review_id,
-        filepath: preparedRepo.trackedFile,
-      }, {
-        timeoutMs: 20_000,
-      });
-      if ((commentsAfterDelete?.comments || []).some((comment) => comment.id === addComment.comment.id)) {
-        throw new Error(`Remote delete comment did not remove comment: ${JSON.stringify(commentsAfterDelete, null, 2)}`);
-      }
-      saveJson(path.join(runDir, 'remote-comment-mutations.json'), {
-        addComment,
-        updateComment,
-        resolveComment,
-        commentsAfterMutation,
-        deleteComment,
-        commentsAfterDelete,
-      });
-    }
-
     for (const sessionId of createdRemoteSessionIds) {
       await sendRemoteSocketMessage(extraOptions.sshTarget, remoteSocketPath, {
         cmd: 'unregister',
@@ -1423,9 +1291,6 @@ printf '%s\\n' ${shellQuote(diffMarker)} >> ${shellQuote(preparedRepo.trackedFil
         paneTextState: 'remote-pane-text.json',
         paneTextSnapshot: 'session-ui-pane-text.json',
         mainReloadPaneText: 'remote-main-reload-pane-text.json',
-        reviewState: preparedRepo ? 'remote-review-state.json' : null,
-        reviewPanelSnapshot: preparedRepo ? 'remote-review-panel.json' : null,
-        commentMutations: preparedRepo ? 'remote-comment-mutations.json' : null,
         runtimeDebugConfig: 'runtime-debug-config.json',
         utilityPaneReady: 'remote-utility-pane-ready.json',
         finalSnapshot: 'structured-snapshot-final.json',

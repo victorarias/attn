@@ -12,7 +12,8 @@ import { test, expect, type Page } from '@playwright/test';
  *    framework (light-DOM `slot="annotation-<side>-<line>"`),
  *  - the thread's actions (resolve / edit / send / delete) fan out to our
  *    callbacks,
- *  - the line-selection -> popup -> draft -> save path creates a new comment,
+ *  - clicking a line number, or dragging across several, opens a draft
+ *    directly (no popup) and saving it creates a new comment,
  *  - the unified/split layout toggle re-renders the library.
  */
 
@@ -125,18 +126,15 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await expect(page.getByTestId('diff-comment-thread')).toHaveCount(0);
   });
 
-  test('adds a comment via line selection -> popup -> draft', async ({ page }) => {
+  test('adds a comment by clicking a line number', async ({ page }) => {
     await openHarness(page, UNSEEDED);
 
-    // Clicking a line-number cell starts a single-line selection, which surfaces
-    // our action popup.
+    // Clicking a line-number cell is a zero-length line selection as far as
+    // the library is concerned, and opens the draft directly — no popup.
     await page.locator('diffs-container [data-line-index][data-column-number]').nth(4).click();
-    const popup = page.locator('.diff-selection-popup');
-    await expect(popup).toBeVisible();
-
-    await popup.locator('.diff-selection-popup-btn.comment').click();
     const form = page.getByTestId('diff-comment-form');
     await expect(form).toBeVisible();
+    await expect(page.locator('.diff-selection-popup')).toHaveCount(0);
 
     await form.locator('textarea').fill('A brand new comment');
     await form.locator('.save-btn').click();
@@ -147,6 +145,39 @@ test.describe('DiffView (@pierre/diffs)', () => {
     // Single-line selection on the additions side: start === end, positive end.
     expect(added[0][0]).toBe(added[0][1]);
     expect(added[0][1]).toBeGreaterThan(0);
+  });
+
+  test('drag-selecting a range of line numbers opens a multi-line draft directly', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    // Pick two rows from the trailing run of additions-side numbers (after the
+    // hunk's deletions) so both ends resolve to the same AnnotationSide —
+    // dragging across a deletion/addition boundary is a mixed-side selection,
+    // which normalizeRange (correctly) rejects.
+    const lines = page.locator('diffs-container [data-line-index][data-column-number]');
+    const count = await lines.count();
+    const startBox = await lines.nth(count - 3).boundingBox();
+    const endBox = await lines.nth(count - 1).boundingBox();
+    expect(startBox).not.toBeNull();
+    expect(endBox).not.toBeNull();
+
+    await page.mouse.move(startBox!.x + startBox!.width / 2, startBox!.y + startBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(endBox!.x + endBox!.width / 2, endBox!.y + endBox!.height / 2, { steps: 5 });
+    await page.mouse.up();
+
+    const form = page.getByTestId('diff-comment-form');
+    await expect(form).toBeVisible();
+    await expect(page.locator('.diff-selection-popup')).toHaveCount(0);
+
+    await form.locator('textarea').fill('Comment on a dragged range');
+    await form.locator('.save-btn').click();
+
+    const added = (await calls(page, 'addComment')) as Array<[number, number, string]>;
+    expect(added).toHaveLength(1);
+    expect(added[0][2]).toBe('Comment on a dragged range');
+    // A real drag across two different lines: start !== end.
+    expect(added[0][0]).not.toBe(added[0][1]);
   });
 
   test('keeps draft text when saving a new comment fails', async ({ page }) => {
@@ -168,25 +199,16 @@ test.describe('DiffView (@pierre/diffs)', () => {
     await expect(textarea).toHaveValue('Retry this after failure');
   });
 
-  test('opens the action popup when clicking the code area of a line', async ({ page }) => {
+  test('clicking the code area of a line does nothing', async ({ page }) => {
     await openHarness(page, UNSEEDED);
 
-    // Clicking anywhere on a line — here the code cell, not the number gutter —
-    // surfaces the action popup on that single line.
+    // Clicking anywhere on a line — here the code cell, not the number gutter
+    // — must not open a draft or a popup; only the number column starts a
+    // line selection (see DiffView's handleLineSelectionEnd).
     await page.locator('diffs-container [data-line]').nth(4).click();
-    const popup = page.locator('.diff-selection-popup');
-    await expect(popup).toBeVisible();
-
-    await popup.locator('.diff-selection-popup-btn.comment').click();
-    const form = page.getByTestId('diff-comment-form');
-    await expect(form).toBeVisible();
-
-    await form.locator('textarea').fill('Comment from clicking the code');
-    await form.locator('.save-btn').click();
-
-    const added = (await calls(page, 'addComment')) as Array<[number, number, string]>;
-    expect(added).toHaveLength(1);
-    expect(added[0][2]).toBe('Comment from clicking the code');
+    await expect(page.getByTestId('diff-comment-form')).toHaveCount(0);
+    await expect(page.locator('.diff-selection-popup')).toHaveCount(0);
+    expect(await calls(page, 'addComment')).toHaveLength(0);
   });
 
   test('the gutter "+" opens the draft directly, without the action popup', async ({ page }) => {

@@ -48,11 +48,6 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],
   },
   {
-    id: 'diff-review',
-    label: 'Diff review panel renders a real diff (@pierre/diffs)',
-    command: ['pnpm', 'run', 'real-app:scenario-diff-review'],
-  },
-  {
     id: 'ticket-lifecycle',
     label: 'Ticket lifecycle: chief delegates, worker reports, chief reviews in the panel',
     command: ['pnpm', 'run', 'real-app:scenario-ticket-lifecycle'],
@@ -77,6 +72,11 @@ export const scenarioCatalog = [
     id: 'terminal-context-menu',
     label: 'Terminal context menu via native right-click + clipboard',
     command: ['pnpm', 'run', 'real-app:scenario-terminal-context-menu'],
+  },
+  {
+    id: 'terminal-osc8-link',
+    label: 'OSC 8 hyperlink Cmd+click via native click + local HTTP probe',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-osc8-link'],
   },
   {
     id: 'terminal-block-resize',

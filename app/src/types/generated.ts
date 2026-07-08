@@ -1,9 +1,7 @@
 // To parse this data:
 //
-//   import { Convert, AddCommentMessage, AddCommentResultMessage, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchDiffFile, BranchDiffFilesResultMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteCommentMessage, DeleteCommentResultMessage, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetBranchDiffFilesMessage, GetCommentsMessage, GetCommentsResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetReviewStateMessage, GetReviewStateResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkFileViewedMessage, MarkFileViewedResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, ResolveCommentMessage, ResolveCommentResultMessage, Response, ReviewComment, ReviewState, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateCommentMessage, UpdateCommentResultMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PresentAnnotation, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketAttachment, TicketAttachMessage, TicketAttachResult, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
-//   const addCommentMessage = Convert.toAddCommentMessage(json);
-//   const addCommentResultMessage = Convert.toAddCommentResultMessage(json);
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const attachPolicy = Convert.toAttachPolicy(json);
@@ -14,8 +12,6 @@
 //   const bootstrapEndpointMessage = Convert.toBootstrapEndpointMessage(json);
 //   const branch = Convert.toBranch(json);
 //   const branchChangedMessage = Convert.toBranchChangedMessage(json);
-//   const branchDiffFile = Convert.toBranchDiffFile(json);
-//   const branchDiffFilesResultMessage = Convert.toBranchDiffFilesResultMessage(json);
 //   const branchesResultMessage = Convert.toBranchesResultMessage(json);
 //   const browseDirectoryMessage = Convert.toBrowseDirectoryMessage(json);
 //   const browseDirectoryResultMessage = Convert.toBrowseDirectoryResultMessage(json);
@@ -37,8 +33,6 @@
 //   const delegateResult = Convert.toDelegateResult(json);
 //   const delegateResultMessage = Convert.toDelegateResultMessage(json);
 //   const delegateWorktreeRequest = Convert.toDelegateWorktreeRequest(json);
-//   const deleteCommentMessage = Convert.toDeleteCommentMessage(json);
-//   const deleteCommentResultMessage = Convert.toDeleteCommentResultMessage(json);
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const detachSessionMessage = Convert.toDetachSessionMessage(json);
@@ -69,9 +63,6 @@
 //   const fSWriteMessage = Convert.toFSWriteMessage(json);
 //   const fSWriteResult = Convert.toFSWriteResult(json);
 //   const fSWriteResultMessage = Convert.toFSWriteResultMessage(json);
-//   const getBranchDiffFilesMessage = Convert.toGetBranchDiffFilesMessage(json);
-//   const getCommentsMessage = Convert.toGetCommentsMessage(json);
-//   const getCommentsResultMessage = Convert.toGetCommentsResultMessage(json);
 //   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
 //   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
 //   const getFileDiffMessage = Convert.toGetFileDiffMessage(json);
@@ -82,8 +73,6 @@
 //   const getRecentLocationsMessage = Convert.toGetRecentLocationsMessage(json);
 //   const getRepoInfoMessage = Convert.toGetRepoInfoMessage(json);
 //   const getRepoInfoResultMessage = Convert.toGetRepoInfoResultMessage(json);
-//   const getReviewStateMessage = Convert.toGetReviewStateMessage(json);
-//   const getReviewStateResultMessage = Convert.toGetReviewStateResultMessage(json);
 //   const getScreenSnapshotMessage = Convert.toGetScreenSnapshotMessage(json);
 //   const getScreenSnapshotResultMessage = Convert.toGetScreenSnapshotResultMessage(json);
 //   const getSettingsMessage = Convert.toGetSettingsMessage(json);
@@ -113,8 +102,6 @@
 //   const listRemoteBranchesMessage = Convert.toListRemoteBranchesMessage(json);
 //   const listRemoteBranchesResultMessage = Convert.toListRemoteBranchesResultMessage(json);
 //   const listWorktreesMessage = Convert.toListWorktreesMessage(json);
-//   const markFileViewedMessage = Convert.toMarkFileViewedMessage(json);
-//   const markFileViewedResultMessage = Convert.toMarkFileViewedResultMessage(json);
 //   const mergePRMessage = Convert.toMergePRMessage(json);
 //   const muteAuthorMessage = Convert.toMuteAuthorMessage(json);
 //   const mutePRMessage = Convert.toMutePRMessage(json);
@@ -153,6 +140,7 @@
 //   const pluginsUpdatedMessage = Convert.toPluginsUpdatedMessage(json);
 //   const pR = Convert.toPR(json);
 //   const pRActionResultMessage = Convert.toPRActionResultMessage(json);
+//   const presentAnnotation = Convert.toPresentAnnotation(json);
 //   const presentation = Convert.toPresentation(json);
 //   const presentationAddedMessage = Convert.toPresentationAddedMessage(json);
 //   const presentationComment = Convert.toPresentationComment(json);
@@ -195,11 +183,8 @@
 //   const repoInfo = Convert.toRepoInfo(json);
 //   const repoState = Convert.toRepoState(json);
 //   const reposUpdatedMessage = Convert.toReposUpdatedMessage(json);
-//   const resolveCommentMessage = Convert.toResolveCommentMessage(json);
-//   const resolveCommentResultMessage = Convert.toResolveCommentResultMessage(json);
 //   const response = Convert.toResponse(json);
 //   const reviewComment = Convert.toReviewComment(json);
-//   const reviewState = Convert.toReviewState(json);
 //   const runtimeRespawnedMessage = Convert.toRuntimeRespawnedMessage(json);
 //   const session = Convert.toSession(json);
 //   const sessionExitedMessage = Convert.toSessionExitedMessage(json);
@@ -270,8 +255,6 @@
 //   const unregisterMessage = Convert.toUnregisterMessage(json);
 //   const unregisterWorkspaceMessage = Convert.toUnregisterWorkspaceMessage(json);
 //   const unsubscribeGitStatusMessage = Convert.toUnsubscribeGitStatusMessage(json);
-//   const updateCommentMessage = Convert.toUpdateCommentMessage(json);
-//   const updateCommentResultMessage = Convert.toUpdateCommentResultMessage(json);
 //   const updateEndpointMessage = Convert.toUpdateEndpointMessage(json);
 //   const webSocketEvent = Convert.toWebSocketEvent(json);
 //   const workflowActionResultMessage = Convert.toWorkflowActionResultMessage(json);
@@ -334,47 +317,6 @@
 //
 // These functions will throw an error if the JSON doesn't
 // match the expected interface, even if the JSON is valid.
-
-export interface AddCommentMessage {
-    cmd:        AddCommentMessageCmd;
-    content:    string;
-    filepath:   string;
-    line_end:   number;
-    line_start: number;
-    review_id:  string;
-    [property: string]: any;
-}
-
-export enum AddCommentMessageCmd {
-    AddComment = "add_comment",
-}
-
-export interface AddCommentResultMessage {
-    comment?: Comment;
-    error?:   string;
-    event:    AddCommentResultMessageEvent;
-    success:  boolean;
-    [property: string]: any;
-}
-
-export interface Comment {
-    author:       string;
-    content:      string;
-    created_at:   string;
-    filepath:     string;
-    id:           string;
-    line_end:     number;
-    line_start:   number;
-    resolved:     boolean;
-    resolved_at?: string;
-    resolved_by?: string;
-    review_id:    string;
-    [property: string]: any;
-}
-
-export enum AddCommentResultMessageEvent {
-    AddCommentResult = "add_comment_result",
-}
 
 export interface AddEndpointMessage {
     cmd:        AddEndpointMessageCmd;
@@ -532,40 +474,6 @@ export enum WorkspaceStatus {
     Unknown = "unknown",
     WaitingInput = "waiting_input",
     Working = "working",
-}
-
-export interface BranchDiffFile {
-    additions?:       number;
-    deletions?:       number;
-    has_uncommitted?: boolean;
-    old_path?:        string;
-    path:             string;
-    status:           string;
-    [property: string]: any;
-}
-
-export interface BranchDiffFilesResultMessage {
-    base_ref:  string;
-    directory: string;
-    error?:    string;
-    event:     BranchDiffFilesResultMessageEvent;
-    files:     FileElement[];
-    success:   boolean;
-    [property: string]: any;
-}
-
-export enum BranchDiffFilesResultMessageEvent {
-    BranchDiffFilesResult = "branch_diff_files_result",
-}
-
-export interface FileElement {
-    additions?:       number;
-    deletions?:       number;
-    has_uncommitted?: boolean;
-    old_path?:        string;
-    path:             string;
-    status:           string;
-    [property: string]: any;
 }
 
 export interface BranchesResultMessage {
@@ -862,27 +770,6 @@ export interface DelegateWorktreeRequest {
     [property: string]: any;
 }
 
-export interface DeleteCommentMessage {
-    cmd:        DeleteCommentMessageCmd;
-    comment_id: string;
-    [property: string]: any;
-}
-
-export enum DeleteCommentMessageCmd {
-    DeleteComment = "delete_comment",
-}
-
-export interface DeleteCommentResultMessage {
-    error?:  string;
-    event:   DeleteCommentResultMessageEvent;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum DeleteCommentResultMessageEvent {
-    DeleteCommentResult = "delete_comment_result",
-}
-
 export interface DeleteWorktreeMessage {
     cmd:          GitOperationKind;
     endpoint_id?: string;
@@ -1131,13 +1018,14 @@ export enum FetchRemotesResultMessageEvent {
 }
 
 export interface FileDiffResultMessage {
-    directory: string;
-    error?:    string;
-    event:     FileDiffResultMessageEvent;
-    modified:  string;
-    original:  string;
-    path:      string;
-    success:   boolean;
+    directory:   string;
+    error?:      string;
+    event:       FileDiffResultMessageEvent;
+    modified:    string;
+    original:    string;
+    path:        string;
+    request_id?: string;
+    success:     boolean;
     [property: string]: any;
 }
 
@@ -1314,40 +1202,6 @@ export interface FSWriteResultMessageResult {
     [property: string]: any;
 }
 
-export interface GetBranchDiffFilesMessage {
-    base_ref?: string;
-    cmd:       GetBranchDiffFilesMessageCmd;
-    directory: string;
-    [property: string]: any;
-}
-
-export enum GetBranchDiffFilesMessageCmd {
-    GetBranchDiffFiles = "get_branch_diff_files",
-}
-
-export interface GetCommentsMessage {
-    cmd:       GetCommentsMessageCmd;
-    filepath?: string;
-    review_id: string;
-    [property: string]: any;
-}
-
-export enum GetCommentsMessageCmd {
-    GetComments = "get_comments",
-}
-
-export interface GetCommentsResultMessage {
-    comments?: Comment[];
-    error?:    string;
-    event:     GetCommentsResultMessageEvent;
-    success:   boolean;
-    [property: string]: any;
-}
-
-export enum GetCommentsResultMessageEvent {
-    GetCommentsResult = "get_comments_result",
-}
-
 export interface GetDefaultBranchMessage {
     cmd:  GetDefaultBranchMessageCmd;
     repo: string;
@@ -1371,12 +1225,13 @@ export enum GetDefaultBranchResultMessageEvent {
 }
 
 export interface GetFileDiffMessage {
-    base_ref?: string;
-    cmd:       GetFileDiffMessageCmd;
-    directory: string;
-    head_ref?: string;
-    path:      string;
-    staged?:   boolean;
+    base_ref?:   string;
+    cmd:         GetFileDiffMessageCmd;
+    directory:   string;
+    head_ref?:   string;
+    path:        string;
+    request_id?: string;
+    staged?:     boolean;
     [property: string]: any;
 }
 
@@ -1439,6 +1294,7 @@ export interface PresentationElement {
 
 export interface Round {
     base_sha:        string;
+    changed_files?:  ChangedFileElement[];
     created_at:      string;
     head_sha:        string;
     id:              string;
@@ -1449,17 +1305,27 @@ export interface Round {
     [property: string]: any;
 }
 
-export interface Manifest {
-    files:    FileObject[];
-    skip:     string[];
-    summary?: string;
-    title:    string;
+export interface ChangedFileElement {
+    additions?:   number;
+    annotations?: AnnotationElement[];
+    deletions?:   number;
+    note?:        string;
+    path:         string;
     [property: string]: any;
 }
 
-export interface FileObject {
-    note?: string;
-    path:  string;
+export interface AnnotationElement {
+    comments:   string[];
+    line_end:   number;
+    line_start: number;
+    [property: string]: any;
+}
+
+export interface Manifest {
+    files:    ChangedFileElement[];
+    skip:     string[];
+    summary?: string;
+    title:    string;
     [property: string]: any;
 }
 
@@ -1537,37 +1403,6 @@ export interface WorktreeElement {
     created_at?: string;
     main_repo:   string;
     path:        string;
-    [property: string]: any;
-}
-
-export interface GetReviewStateMessage {
-    branch:    string;
-    cmd:       GetReviewStateMessageCmd;
-    repo_path: string;
-    [property: string]: any;
-}
-
-export enum GetReviewStateMessageCmd {
-    GetReviewState = "get_review_state",
-}
-
-export interface GetReviewStateResultMessage {
-    error?:  string;
-    event:   GetReviewStateResultMessageEvent;
-    state?:  State;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum GetReviewStateResultMessageEvent {
-    GetReviewStateResult = "get_review_state_result",
-}
-
-export interface State {
-    branch:       string;
-    repo_path:    string;
-    review_id:    string;
-    viewed_files: string[];
     [property: string]: any;
 }
 
@@ -2018,32 +1853,6 @@ export interface ListWorktreesMessage {
 
 export enum ListWorktreesMessageCmd {
     ListWorktrees = "list_worktrees",
-}
-
-export interface MarkFileViewedMessage {
-    cmd:       MarkFileViewedMessageCmd;
-    filepath:  string;
-    review_id: string;
-    viewed:    boolean;
-    [property: string]: any;
-}
-
-export enum MarkFileViewedMessageCmd {
-    MarkFileViewed = "mark_file_viewed",
-}
-
-export interface MarkFileViewedResultMessage {
-    error?:    string;
-    event:     MarkFileViewedResultMessageEvent;
-    filepath:  string;
-    review_id: string;
-    success:   boolean;
-    viewed:    boolean;
-    [property: string]: any;
-}
-
-export enum MarkFileViewedResultMessageEvent {
-    MarkFileViewedResult = "mark_file_viewed_result",
 }
 
 export interface MergePRMessage {
@@ -2545,6 +2354,13 @@ export enum PRActionResultMessageEvent {
     PRActionResult = "pr_action_result",
 }
 
+export interface PresentAnnotation {
+    comments:   string[];
+    line_end:   number;
+    line_start: number;
+    [property: string]: any;
+}
+
 export interface Presentation {
     created_at:             string;
     id:                     string;
@@ -2584,6 +2400,7 @@ export interface PresentationComment {
 
 export interface PresentationRound {
     base_sha:        string;
+    changed_files?:  ChangedFileElement[];
     created_at:      string;
     head_sha:        string;
     id:              string;
@@ -2632,13 +2449,16 @@ export interface PresentFeedbackResult {
 }
 
 export interface PresentFile {
-    note?: string;
-    path:  string;
+    additions?:   number;
+    annotations?: AnnotationElement[];
+    deletions?:   number;
+    note?:        string;
+    path:         string;
     [property: string]: any;
 }
 
 export interface PresentManifestView {
-    files:    FileObject[];
+    files:    ChangedFileElement[];
     skip:     string[];
     summary?: string;
     title:    string;
@@ -2665,6 +2485,7 @@ export interface PresentOpenResult {
     round_id:        string;
     seq:             number;
     title:           string;
+    warnings?:       string[];
     [property: string]: any;
 }
 
@@ -2997,28 +2818,6 @@ export enum ReposUpdatedMessageEvent {
     ReposUpdated = "repos_updated",
 }
 
-export interface ResolveCommentMessage {
-    cmd:        ResolveCommentMessageCmd;
-    comment_id: string;
-    resolved:   boolean;
-    [property: string]: any;
-}
-
-export enum ResolveCommentMessageCmd {
-    ResolveComment = "resolve_comment",
-}
-
-export interface ResolveCommentResultMessage {
-    error?:  string;
-    event:   ResolveCommentResultMessageEvent;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum ResolveCommentResultMessageEvent {
-    ResolveCommentResult = "resolve_comment_result",
-}
-
 export interface Response {
     authors?:                              AuthorElement[];
     data?:                                 string;
@@ -3079,6 +2878,7 @@ export interface PresentOpenResultObject {
     round_id:        string;
     seq:             number;
     title:           string;
+    warnings?:       string[];
     [property: string]: any;
 }
 
@@ -3215,14 +3015,6 @@ export interface ReviewComment {
     resolved_at?: string;
     resolved_by?: string;
     review_id:    string;
-    [property: string]: any;
-}
-
-export interface ReviewState {
-    branch:       string;
-    repo_path:    string;
-    review_id:    string;
-    viewed_files: string[];
     [property: string]: any;
 }
 
@@ -3963,28 +3755,6 @@ export enum UnsubscribeGitStatusMessageCmd {
     UnsubscribeGitStatus = "unsubscribe_git_status",
 }
 
-export interface UpdateCommentMessage {
-    cmd:        UpdateCommentMessageCmd;
-    comment_id: string;
-    content:    string;
-    [property: string]: any;
-}
-
-export enum UpdateCommentMessageCmd {
-    UpdateComment = "update_comment",
-}
-
-export interface UpdateCommentResultMessage {
-    error?:  string;
-    event:   UpdateCommentResultMessageEvent;
-    success: boolean;
-    [property: string]: any;
-}
-
-export enum UpdateCommentResultMessageEvent {
-    UpdateCommentResult = "update_comment_result",
-}
-
 export interface UpdateEndpointMessage {
     cmd:         UpdateEndpointMessageCmd;
     enabled?:    boolean;
@@ -4017,7 +3787,6 @@ export interface WebSocketEvent {
     error?:                    string;
     event:                     string;
     exit_code?:                number;
-    files?:                    FileElement[];
     found?:                    boolean;
     id?:                       string;
     last_seq?:                 number;
@@ -4728,22 +4497,6 @@ export enum WorktreesUpdatedMessageEvent {
 // Converts JSON strings to/from your types
 // and asserts the results of JSON.parse at runtime
 export class Convert {
-    public static toAddCommentMessage(json: string): AddCommentMessage {
-        return cast(JSON.parse(json), r("AddCommentMessage"));
-    }
-
-    public static addCommentMessageToJson(value: AddCommentMessage): string {
-        return JSON.stringify(uncast(value, r("AddCommentMessage")), null, 2);
-    }
-
-    public static toAddCommentResultMessage(json: string): AddCommentResultMessage {
-        return cast(JSON.parse(json), r("AddCommentResultMessage"));
-    }
-
-    public static addCommentResultMessageToJson(value: AddCommentResultMessage): string {
-        return JSON.stringify(uncast(value, r("AddCommentResultMessage")), null, 2);
-    }
-
     public static toAddEndpointMessage(json: string): AddEndpointMessage {
         return cast(JSON.parse(json), r("AddEndpointMessage"));
     }
@@ -4822,22 +4575,6 @@ export class Convert {
 
     public static branchChangedMessageToJson(value: BranchChangedMessage): string {
         return JSON.stringify(uncast(value, r("BranchChangedMessage")), null, 2);
-    }
-
-    public static toBranchDiffFile(json: string): BranchDiffFile {
-        return cast(JSON.parse(json), r("BranchDiffFile"));
-    }
-
-    public static branchDiffFileToJson(value: BranchDiffFile): string {
-        return JSON.stringify(uncast(value, r("BranchDiffFile")), null, 2);
-    }
-
-    public static toBranchDiffFilesResultMessage(json: string): BranchDiffFilesResultMessage {
-        return cast(JSON.parse(json), r("BranchDiffFilesResultMessage"));
-    }
-
-    public static branchDiffFilesResultMessageToJson(value: BranchDiffFilesResultMessage): string {
-        return JSON.stringify(uncast(value, r("BranchDiffFilesResultMessage")), null, 2);
     }
 
     public static toBranchesResultMessage(json: string): BranchesResultMessage {
@@ -5006,22 +4743,6 @@ export class Convert {
 
     public static delegateWorktreeRequestToJson(value: DelegateWorktreeRequest): string {
         return JSON.stringify(uncast(value, r("DelegateWorktreeRequest")), null, 2);
-    }
-
-    public static toDeleteCommentMessage(json: string): DeleteCommentMessage {
-        return cast(JSON.parse(json), r("DeleteCommentMessage"));
-    }
-
-    public static deleteCommentMessageToJson(value: DeleteCommentMessage): string {
-        return JSON.stringify(uncast(value, r("DeleteCommentMessage")), null, 2);
-    }
-
-    public static toDeleteCommentResultMessage(json: string): DeleteCommentResultMessage {
-        return cast(JSON.parse(json), r("DeleteCommentResultMessage"));
-    }
-
-    public static deleteCommentResultMessageToJson(value: DeleteCommentResultMessage): string {
-        return JSON.stringify(uncast(value, r("DeleteCommentResultMessage")), null, 2);
     }
 
     public static toDeleteWorktreeMessage(json: string): DeleteWorktreeMessage {
@@ -5264,30 +4985,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("FSWriteResultMessage")), null, 2);
     }
 
-    public static toGetBranchDiffFilesMessage(json: string): GetBranchDiffFilesMessage {
-        return cast(JSON.parse(json), r("GetBranchDiffFilesMessage"));
-    }
-
-    public static getBranchDiffFilesMessageToJson(value: GetBranchDiffFilesMessage): string {
-        return JSON.stringify(uncast(value, r("GetBranchDiffFilesMessage")), null, 2);
-    }
-
-    public static toGetCommentsMessage(json: string): GetCommentsMessage {
-        return cast(JSON.parse(json), r("GetCommentsMessage"));
-    }
-
-    public static getCommentsMessageToJson(value: GetCommentsMessage): string {
-        return JSON.stringify(uncast(value, r("GetCommentsMessage")), null, 2);
-    }
-
-    public static toGetCommentsResultMessage(json: string): GetCommentsResultMessage {
-        return cast(JSON.parse(json), r("GetCommentsResultMessage"));
-    }
-
-    public static getCommentsResultMessageToJson(value: GetCommentsResultMessage): string {
-        return JSON.stringify(uncast(value, r("GetCommentsResultMessage")), null, 2);
-    }
-
     public static toGetDefaultBranchMessage(json: string): GetDefaultBranchMessage {
         return cast(JSON.parse(json), r("GetDefaultBranchMessage"));
     }
@@ -5366,22 +5063,6 @@ export class Convert {
 
     public static getRepoInfoResultMessageToJson(value: GetRepoInfoResultMessage): string {
         return JSON.stringify(uncast(value, r("GetRepoInfoResultMessage")), null, 2);
-    }
-
-    public static toGetReviewStateMessage(json: string): GetReviewStateMessage {
-        return cast(JSON.parse(json), r("GetReviewStateMessage"));
-    }
-
-    public static getReviewStateMessageToJson(value: GetReviewStateMessage): string {
-        return JSON.stringify(uncast(value, r("GetReviewStateMessage")), null, 2);
-    }
-
-    public static toGetReviewStateResultMessage(json: string): GetReviewStateResultMessage {
-        return cast(JSON.parse(json), r("GetReviewStateResultMessage"));
-    }
-
-    public static getReviewStateResultMessageToJson(value: GetReviewStateResultMessage): string {
-        return JSON.stringify(uncast(value, r("GetReviewStateResultMessage")), null, 2);
     }
 
     public static toGetScreenSnapshotMessage(json: string): GetScreenSnapshotMessage {
@@ -5614,22 +5295,6 @@ export class Convert {
 
     public static listWorktreesMessageToJson(value: ListWorktreesMessage): string {
         return JSON.stringify(uncast(value, r("ListWorktreesMessage")), null, 2);
-    }
-
-    public static toMarkFileViewedMessage(json: string): MarkFileViewedMessage {
-        return cast(JSON.parse(json), r("MarkFileViewedMessage"));
-    }
-
-    public static markFileViewedMessageToJson(value: MarkFileViewedMessage): string {
-        return JSON.stringify(uncast(value, r("MarkFileViewedMessage")), null, 2);
-    }
-
-    public static toMarkFileViewedResultMessage(json: string): MarkFileViewedResultMessage {
-        return cast(JSON.parse(json), r("MarkFileViewedResultMessage"));
-    }
-
-    public static markFileViewedResultMessageToJson(value: MarkFileViewedResultMessage): string {
-        return JSON.stringify(uncast(value, r("MarkFileViewedResultMessage")), null, 2);
     }
 
     public static toMergePRMessage(json: string): MergePRMessage {
@@ -5934,6 +5599,14 @@ export class Convert {
 
     public static pRActionResultMessageToJson(value: PRActionResultMessage): string {
         return JSON.stringify(uncast(value, r("PRActionResultMessage")), null, 2);
+    }
+
+    public static toPresentAnnotation(json: string): PresentAnnotation {
+        return cast(JSON.parse(json), r("PresentAnnotation"));
+    }
+
+    public static presentAnnotationToJson(value: PresentAnnotation): string {
+        return JSON.stringify(uncast(value, r("PresentAnnotation")), null, 2);
     }
 
     public static toPresentation(json: string): Presentation {
@@ -6272,22 +5945,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ReposUpdatedMessage")), null, 2);
     }
 
-    public static toResolveCommentMessage(json: string): ResolveCommentMessage {
-        return cast(JSON.parse(json), r("ResolveCommentMessage"));
-    }
-
-    public static resolveCommentMessageToJson(value: ResolveCommentMessage): string {
-        return JSON.stringify(uncast(value, r("ResolveCommentMessage")), null, 2);
-    }
-
-    public static toResolveCommentResultMessage(json: string): ResolveCommentResultMessage {
-        return cast(JSON.parse(json), r("ResolveCommentResultMessage"));
-    }
-
-    public static resolveCommentResultMessageToJson(value: ResolveCommentResultMessage): string {
-        return JSON.stringify(uncast(value, r("ResolveCommentResultMessage")), null, 2);
-    }
-
     public static toResponse(json: string): Response {
         return cast(JSON.parse(json), r("Response"));
     }
@@ -6302,14 +5959,6 @@ export class Convert {
 
     public static reviewCommentToJson(value: ReviewComment): string {
         return JSON.stringify(uncast(value, r("ReviewComment")), null, 2);
-    }
-
-    public static toReviewState(json: string): ReviewState {
-        return cast(JSON.parse(json), r("ReviewState"));
-    }
-
-    public static reviewStateToJson(value: ReviewState): string {
-        return JSON.stringify(uncast(value, r("ReviewState")), null, 2);
     }
 
     public static toRuntimeRespawnedMessage(json: string): RuntimeRespawnedMessage {
@@ -6870,22 +6519,6 @@ export class Convert {
 
     public static unsubscribeGitStatusMessageToJson(value: UnsubscribeGitStatusMessage): string {
         return JSON.stringify(uncast(value, r("UnsubscribeGitStatusMessage")), null, 2);
-    }
-
-    public static toUpdateCommentMessage(json: string): UpdateCommentMessage {
-        return cast(JSON.parse(json), r("UpdateCommentMessage"));
-    }
-
-    public static updateCommentMessageToJson(value: UpdateCommentMessage): string {
-        return JSON.stringify(uncast(value, r("UpdateCommentMessage")), null, 2);
-    }
-
-    public static toUpdateCommentResultMessage(json: string): UpdateCommentResultMessage {
-        return cast(JSON.parse(json), r("UpdateCommentResultMessage"));
-    }
-
-    public static updateCommentResultMessageToJson(value: UpdateCommentResultMessage): string {
-        return JSON.stringify(uncast(value, r("UpdateCommentResultMessage")), null, 2);
     }
 
     public static toUpdateEndpointMessage(json: string): UpdateEndpointMessage {
@@ -7514,33 +7147,6 @@ function r(name: string) {
 }
 
 const typeMap: any = {
-    "AddCommentMessage": o([
-        { json: "cmd", js: "cmd", typ: r("AddCommentMessageCmd") },
-        { json: "content", js: "content", typ: "" },
-        { json: "filepath", js: "filepath", typ: "" },
-        { json: "line_end", js: "line_end", typ: 0 },
-        { json: "line_start", js: "line_start", typ: 0 },
-        { json: "review_id", js: "review_id", typ: "" },
-    ], "any"),
-    "AddCommentResultMessage": o([
-        { json: "comment", js: "comment", typ: u(undefined, r("Comment")) },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("AddCommentResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
-    "Comment": o([
-        { json: "author", js: "author", typ: "" },
-        { json: "content", js: "content", typ: "" },
-        { json: "created_at", js: "created_at", typ: "" },
-        { json: "filepath", js: "filepath", typ: "" },
-        { json: "id", js: "id", typ: "" },
-        { json: "line_end", js: "line_end", typ: 0 },
-        { json: "line_start", js: "line_start", typ: 0 },
-        { json: "resolved", js: "resolved", typ: true },
-        { json: "resolved_at", js: "resolved_at", typ: u(undefined, "") },
-        { json: "resolved_by", js: "resolved_by", typ: u(undefined, "") },
-        { json: "review_id", js: "review_id", typ: "" },
-    ], "any"),
     "AddEndpointMessage": o([
         { json: "cmd", js: "cmd", typ: r("AddEndpointMessageCmd") },
         { json: "name", js: "name", typ: "" },
@@ -7630,30 +7236,6 @@ const typeMap: any = {
         { json: "todos", js: "todos", typ: u(undefined, a("")) },
         { json: "workspace_id", js: "workspace_id", typ: "" },
         { json: "workspace_muted", js: "workspace_muted", typ: u(undefined, true) },
-    ], "any"),
-    "BranchDiffFile": o([
-        { json: "additions", js: "additions", typ: u(undefined, 0) },
-        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
-        { json: "has_uncommitted", js: "has_uncommitted", typ: u(undefined, true) },
-        { json: "old_path", js: "old_path", typ: u(undefined, "") },
-        { json: "path", js: "path", typ: "" },
-        { json: "status", js: "status", typ: "" },
-    ], "any"),
-    "BranchDiffFilesResultMessage": o([
-        { json: "base_ref", js: "base_ref", typ: "" },
-        { json: "directory", js: "directory", typ: "" },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("BranchDiffFilesResultMessageEvent") },
-        { json: "files", js: "files", typ: a(r("FileElement")) },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
-    "FileElement": o([
-        { json: "additions", js: "additions", typ: u(undefined, 0) },
-        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
-        { json: "has_uncommitted", js: "has_uncommitted", typ: u(undefined, true) },
-        { json: "old_path", js: "old_path", typ: u(undefined, "") },
-        { json: "path", js: "path", typ: "" },
-        { json: "status", js: "status", typ: "" },
     ], "any"),
     "BranchesResultMessage": o([
         { json: "branches", js: "branches", typ: a(r("BranchElement")) },
@@ -7827,15 +7409,6 @@ const typeMap: any = {
         { json: "repo", js: "repo", typ: u(undefined, "") },
         { json: "starting_from", js: "starting_from", typ: u(undefined, "") },
     ], "any"),
-    "DeleteCommentMessage": o([
-        { json: "cmd", js: "cmd", typ: r("DeleteCommentMessageCmd") },
-        { json: "comment_id", js: "comment_id", typ: "" },
-    ], "any"),
-    "DeleteCommentResultMessage": o([
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("DeleteCommentResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
     "DeleteWorktreeMessage": o([
         { json: "cmd", js: "cmd", typ: r("GitOperationKind") },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
@@ -7988,6 +7561,7 @@ const typeMap: any = {
         { json: "modified", js: "modified", typ: "" },
         { json: "original", js: "original", typ: "" },
         { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "FSChangedMessage": o([
@@ -8089,22 +7663,6 @@ const typeMap: any = {
         { json: "hash", js: "hash", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
     ], "any"),
-    "GetBranchDiffFilesMessage": o([
-        { json: "base_ref", js: "base_ref", typ: u(undefined, "") },
-        { json: "cmd", js: "cmd", typ: r("GetBranchDiffFilesMessageCmd") },
-        { json: "directory", js: "directory", typ: "" },
-    ], "any"),
-    "GetCommentsMessage": o([
-        { json: "cmd", js: "cmd", typ: r("GetCommentsMessageCmd") },
-        { json: "filepath", js: "filepath", typ: u(undefined, "") },
-        { json: "review_id", js: "review_id", typ: "" },
-    ], "any"),
-    "GetCommentsResultMessage": o([
-        { json: "comments", js: "comments", typ: u(undefined, a(r("Comment"))) },
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("GetCommentsResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
     "GetDefaultBranchMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetDefaultBranchMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
@@ -8121,6 +7679,7 @@ const typeMap: any = {
         { json: "directory", js: "directory", typ: "" },
         { json: "head_ref", js: "head_ref", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "staged", js: "staged", typ: u(undefined, true) },
     ], "any"),
     "GetPresentationRoundMessage": o([
@@ -8162,6 +7721,7 @@ const typeMap: any = {
     ], "any"),
     "Round": o([
         { json: "base_sha", js: "base_sha", typ: "" },
+        { json: "changed_files", js: "changed_files", typ: u(undefined, a(r("ChangedFileElement"))) },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "head_sha", js: "head_sha", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -8170,15 +7730,23 @@ const typeMap: any = {
         { json: "seq", js: "seq", typ: 0 },
         { json: "submitted_at", js: "submitted_at", typ: u(undefined, "") },
     ], "any"),
+    "ChangedFileElement": o([
+        { json: "additions", js: "additions", typ: u(undefined, 0) },
+        { json: "annotations", js: "annotations", typ: u(undefined, a(r("AnnotationElement"))) },
+        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
+        { json: "note", js: "note", typ: u(undefined, "") },
+        { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "AnnotationElement": o([
+        { json: "comments", js: "comments", typ: a("") },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+    ], "any"),
     "Manifest": o([
-        { json: "files", js: "files", typ: a(r("FileObject")) },
+        { json: "files", js: "files", typ: a(r("ChangedFileElement")) },
         { json: "skip", js: "skip", typ: a("") },
         { json: "summary", js: "summary", typ: u(undefined, "") },
         { json: "title", js: "title", typ: "" },
-    ], "any"),
-    "FileObject": o([
-        { json: "note", js: "note", typ: u(undefined, "") },
-        { json: "path", js: "path", typ: "" },
     ], "any"),
     "GetPresentationsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetPresentationsMessageCmd") },
@@ -8222,23 +7790,6 @@ const typeMap: any = {
         { json: "created_at", js: "created_at", typ: u(undefined, "") },
         { json: "main_repo", js: "main_repo", typ: "" },
         { json: "path", js: "path", typ: "" },
-    ], "any"),
-    "GetReviewStateMessage": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "cmd", js: "cmd", typ: r("GetReviewStateMessageCmd") },
-        { json: "repo_path", js: "repo_path", typ: "" },
-    ], "any"),
-    "GetReviewStateResultMessage": o([
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("GetReviewStateResultMessageEvent") },
-        { json: "state", js: "state", typ: u(undefined, r("State")) },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
-    "State": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "repo_path", js: "repo_path", typ: "" },
-        { json: "review_id", js: "review_id", typ: "" },
-        { json: "viewed_files", js: "viewed_files", typ: a("") },
     ], "any"),
     "GetScreenSnapshotMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetScreenSnapshotMessageCmd") },
@@ -8491,20 +8042,6 @@ const typeMap: any = {
     "ListWorktreesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListWorktreesMessageCmd") },
         { json: "main_repo", js: "main_repo", typ: "" },
-    ], "any"),
-    "MarkFileViewedMessage": o([
-        { json: "cmd", js: "cmd", typ: r("MarkFileViewedMessageCmd") },
-        { json: "filepath", js: "filepath", typ: "" },
-        { json: "review_id", js: "review_id", typ: "" },
-        { json: "viewed", js: "viewed", typ: true },
-    ], "any"),
-    "MarkFileViewedResultMessage": o([
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("MarkFileViewedResultMessageEvent") },
-        { json: "filepath", js: "filepath", typ: "" },
-        { json: "review_id", js: "review_id", typ: "" },
-        { json: "success", js: "success", typ: true },
-        { json: "viewed", js: "viewed", typ: true },
     ], "any"),
     "MergePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("MergePRMessageCmd") },
@@ -8803,6 +8340,11 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "PresentAnnotation": o([
+        { json: "comments", js: "comments", typ: a("") },
+        { json: "line_end", js: "line_end", typ: 0 },
+        { json: "line_start", js: "line_start", typ: 0 },
+    ], "any"),
     "Presentation": o([
         { json: "created_at", js: "created_at", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -8832,6 +8374,7 @@ const typeMap: any = {
     ], "any"),
     "PresentationRound": o([
         { json: "base_sha", js: "base_sha", typ: "" },
+        { json: "changed_files", js: "changed_files", typ: u(undefined, a(r("ChangedFileElement"))) },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "head_sha", js: "head_sha", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -8862,11 +8405,14 @@ const typeMap: any = {
         { json: "submitted", js: "submitted", typ: true },
     ], "any"),
     "PresentFile": o([
+        { json: "additions", js: "additions", typ: u(undefined, 0) },
+        { json: "annotations", js: "annotations", typ: u(undefined, a(r("AnnotationElement"))) },
+        { json: "deletions", js: "deletions", typ: u(undefined, 0) },
         { json: "note", js: "note", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
     ], "any"),
     "PresentManifestView": o([
-        { json: "files", js: "files", typ: a(r("FileObject")) },
+        { json: "files", js: "files", typ: a(r("ChangedFileElement")) },
         { json: "skip", js: "skip", typ: a("") },
         { json: "summary", js: "summary", typ: u(undefined, "") },
         { json: "title", js: "title", typ: "" },
@@ -8885,6 +8431,7 @@ const typeMap: any = {
         { json: "round_id", js: "round_id", typ: "" },
         { json: "seq", js: "seq", typ: 0 },
         { json: "title", js: "title", typ: "" },
+        { json: "warnings", js: "warnings", typ: u(undefined, a("")) },
     ], "any"),
     "PresentSubmitRoundMessage": o([
         { json: "cmd", js: "cmd", typ: r("PresentSubmitRoundMessageCmd") },
@@ -9053,16 +8600,6 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("ReposUpdatedMessageEvent") },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
     ], "any"),
-    "ResolveCommentMessage": o([
-        { json: "cmd", js: "cmd", typ: r("ResolveCommentMessageCmd") },
-        { json: "comment_id", js: "comment_id", typ: "" },
-        { json: "resolved", js: "resolved", typ: true },
-    ], "any"),
-    "ResolveCommentResultMessage": o([
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("ResolveCommentResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
     "Response": o([
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
         { json: "data", js: "data", typ: u(undefined, "") },
@@ -9115,6 +8652,7 @@ const typeMap: any = {
         { json: "round_id", js: "round_id", typ: "" },
         { json: "seq", js: "seq", typ: 0 },
         { json: "title", js: "title", typ: "" },
+        { json: "warnings", js: "warnings", typ: u(undefined, a("")) },
     ], "any"),
     "TicketAttachResultObject": o([
         { json: "filename", js: "filename", typ: "" },
@@ -9205,12 +8743,6 @@ const typeMap: any = {
         { json: "resolved_at", js: "resolved_at", typ: u(undefined, "") },
         { json: "resolved_by", js: "resolved_by", typ: u(undefined, "") },
         { json: "review_id", js: "review_id", typ: "" },
-    ], "any"),
-    "ReviewState": o([
-        { json: "branch", js: "branch", typ: "" },
-        { json: "repo_path", js: "repo_path", typ: "" },
-        { json: "review_id", js: "review_id", typ: "" },
-        { json: "viewed_files", js: "viewed_files", typ: a("") },
     ], "any"),
     "RuntimeRespawnedMessage": o([
         { json: "event", js: "event", typ: r("RuntimeRespawnedMessageEvent") },
@@ -9611,16 +9143,6 @@ const typeMap: any = {
     "UnsubscribeGitStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("UnsubscribeGitStatusMessageCmd") },
     ], "any"),
-    "UpdateCommentMessage": o([
-        { json: "cmd", js: "cmd", typ: r("UpdateCommentMessageCmd") },
-        { json: "comment_id", js: "comment_id", typ: "" },
-        { json: "content", js: "content", typ: "" },
-    ], "any"),
-    "UpdateCommentResultMessage": o([
-        { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("UpdateCommentResultMessageEvent") },
-        { json: "success", js: "success", typ: true },
-    ], "any"),
     "UpdateEndpointMessage": o([
         { json: "cmd", js: "cmd", typ: r("UpdateEndpointMessageCmd") },
         { json: "enabled", js: "enabled", typ: u(undefined, true) },
@@ -9647,7 +9169,6 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: "" },
         { json: "exit_code", js: "exit_code", typ: u(undefined, 0) },
-        { json: "files", js: "files", typ: u(undefined, a(r("FileElement"))) },
         { json: "found", js: "found", typ: u(undefined, true) },
         { json: "id", js: "id", typ: u(undefined, "") },
         { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
@@ -10065,12 +9586,6 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("WorktreesUpdatedMessageEvent") },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
     ], "any"),
-    "AddCommentMessageCmd": [
-        "add_comment",
-    ],
-    "AddCommentResultMessageEvent": [
-        "add_comment_result",
-    ],
     "AddEndpointMessageCmd": [
         "add_endpoint",
     ],
@@ -10105,9 +9620,6 @@ const typeMap: any = {
         "unknown",
         "waiting_input",
         "working",
-    ],
-    "BranchDiffFilesResultMessageEvent": [
-        "branch_diff_files_result",
     ],
     "BranchesResultMessageEvent": [
         "branches_result",
@@ -10162,12 +9674,6 @@ const typeMap: any = {
     ],
     "DelegateResultMessageEvent": [
         "delegate_result",
-    ],
-    "DeleteCommentMessageCmd": [
-        "delete_comment",
-    ],
-    "DeleteCommentResultMessageEvent": [
-        "delete_comment_result",
     ],
     "GitOperationKind": [
         "delete_worktree",
@@ -10250,15 +9756,6 @@ const typeMap: any = {
     "FSWriteResultMessageEvent": [
         "fs_write_result",
     ],
-    "GetBranchDiffFilesMessageCmd": [
-        "get_branch_diff_files",
-    ],
-    "GetCommentsMessageCmd": [
-        "get_comments",
-    ],
-    "GetCommentsResultMessageEvent": [
-        "get_comments_result",
-    ],
     "GetDefaultBranchMessageCmd": [
         "get_default_branch",
     ],
@@ -10288,12 +9785,6 @@ const typeMap: any = {
     ],
     "GetRepoInfoResultMessageEvent": [
         "get_repo_info_result",
-    ],
-    "GetReviewStateMessageCmd": [
-        "get_review_state",
-    ],
-    "GetReviewStateResultMessageEvent": [
-        "get_review_state_result",
     ],
     "GetScreenSnapshotMessageCmd": [
         "get_screen_snapshot",
@@ -10389,12 +9880,6 @@ const typeMap: any = {
     ],
     "ListWorktreesMessageCmd": [
         "list_worktrees",
-    ],
-    "MarkFileViewedMessageCmd": [
-        "mark_file_viewed",
-    ],
-    "MarkFileViewedResultMessageEvent": [
-        "mark_file_viewed_result",
     ],
     "MergePRMessageCmd": [
         "merge_pr",
@@ -10567,12 +10052,6 @@ const typeMap: any = {
     "ReposUpdatedMessageEvent": [
         "repos_updated",
     ],
-    "ResolveCommentMessageCmd": [
-        "resolve_comment",
-    ],
-    "ResolveCommentResultMessageEvent": [
-        "resolve_comment_result",
-    ],
     "TicketEventKind": [
         "assigned",
         "attachment_added",
@@ -10738,12 +10217,6 @@ const typeMap: any = {
     ],
     "UnsubscribeGitStatusMessageCmd": [
         "unsubscribe_git_status",
-    ],
-    "UpdateCommentMessageCmd": [
-        "update_comment",
-    ],
-    "UpdateCommentResultMessageEvent": [
-        "update_comment_result",
     ],
     "UpdateEndpointMessageCmd": [
         "update_endpoint",

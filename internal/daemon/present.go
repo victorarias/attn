@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,13 +52,25 @@ func commentToProto(c *store.PresentationComment) protocol.PresentationComment {
 
 // manifestToView converts a parsed manifest into the wire view sent to the
 // app — the same shape whether it comes from a fresh present_open or a
-// stored round's manifest_yaml.
-func manifestToView(m *present.Manifest) protocol.PresentManifestView {
+// stored round's manifest_yaml. annotations is the resolved-annotations map
+// (path -> resolved annotations); nil when resolution was not attempted or
+// failed, in which case every file's Annotations is simply omitted.
+func manifestToView(m *present.Manifest, annotations map[string][]present.ResolvedAnnotation) protocol.PresentManifestView {
 	files := make([]protocol.PresentFile, len(m.Files))
 	for i, f := range m.Files {
 		pf := protocol.PresentFile{Path: f.Path}
 		if f.Note != "" {
 			pf.Note = protocol.Ptr(f.Note)
+		}
+		if resolved, ok := annotations[f.Path]; ok {
+			pf.Annotations = make([]protocol.PresentAnnotation, len(resolved))
+			for j, r := range resolved {
+				pf.Annotations[j] = protocol.PresentAnnotation{
+					LineStart: r.LineStart,
+					LineEnd:   r.LineEnd,
+					Comments:  r.Comments,
+				}
+			}
 		}
 		files[i] = pf
 	}
@@ -79,12 +92,17 @@ func manifestToView(m *present.Manifest) protocol.PresentManifestView {
 // roundToProto converts a store round to protocol, reparsing its stored
 // manifest YAML to build the manifest view. The manifest was already
 // validated at open time, so a parse failure here means stored data is
-// corrupt, not a user input error.
-func roundToProto(r *store.PresentationRound) (*protocol.PresentationRound, error) {
+// corrupt, not a user input error. Annotations are re-resolved against the
+// round's pinned head SHA in repoDir — deterministic, same architecture as
+// the stats/changed-files progressive enhancements below. A resolution
+// problem (unreadable file, broken anchor) never fails the round: the
+// affected file's annotations are simply omitted from the view.
+func roundToProto(r *store.PresentationRound, repoDir string) (*protocol.PresentationRound, error) {
 	m, err := present.ParseManifest([]byte(r.ManifestYAML))
 	if err != nil {
 		return nil, fmt.Errorf("parse stored manifest for round %s: %w", r.ID, err)
 	}
+	annotations, _ := present.ResolveAnnotations(m, repoDir, r.HeadSHA)
 	out := &protocol.PresentationRound{
 		ID:             r.ID,
 		PresentationID: r.PresentationID,
@@ -92,12 +110,22 @@ func roundToProto(r *store.PresentationRound) (*protocol.PresentationRound, erro
 		BaseSHA:        r.BaseSHA,
 		HeadSHA:        r.HeadSHA,
 		CreatedAt:      r.CreatedAt,
-		Manifest:       manifestToView(m),
+		Manifest:       manifestToView(m, annotations),
 	}
 	if r.SubmittedAt != nil {
 		out.SubmittedAt = r.SubmittedAt
 	}
 	return out, nil
+}
+
+// formatAnchorIssue renders an annotation resolution issue for display to the
+// agent: "path[index]: message" for an issue tied to one annotation, or
+// "path: message" for a file-level issue (index -1, e.g. unreadable content).
+func formatAnchorIssue(issue present.AnchorIssue) string {
+	if issue.Index < 0 {
+		return fmt.Sprintf("%s: %s", issue.Path, issue.Message)
+	}
+	return fmt.Sprintf("%s[%d]: %s", issue.Path, issue.Index, issue.Message)
 }
 
 // handlePresentOpen opens a new presentation (or a new round on an existing
@@ -119,6 +147,21 @@ func (d *Daemon) handlePresentOpen(conn net.Conn, msg *protocol.PresentOpenMessa
 	baseSHA, headSHA, err := present.Pin(m)
 	if err != nil {
 		d.sendError(conn, "present open: "+err.Error())
+		return
+	}
+
+	_, issues := present.ResolveAnnotations(m, m.Frame.Repo, headSHA)
+	var warnings []string
+	var errMessages []string
+	for _, issue := range issues {
+		if issue.Warning {
+			warnings = append(warnings, formatAnchorIssue(issue))
+		} else {
+			errMessages = append(errMessages, formatAnchorIssue(issue))
+		}
+	}
+	if len(errMessages) > 0 {
+		d.sendError(conn, "present open: annotation errors:\n"+strings.Join(errMessages, "\n"))
 		return
 	}
 
@@ -161,16 +204,20 @@ func (d *Daemon) handlePresentOpen(conn net.Conn, msg *protocol.PresentOpenMessa
 		return
 	}
 
+	result := &protocol.PresentOpenResult{
+		PresentationID: pres.ID,
+		RoundID:        round.ID,
+		Seq:            round.Seq,
+		BaseSHA:        baseSHA,
+		HeadSHA:        headSHA,
+		Title:          m.Title,
+	}
+	if len(warnings) > 0 {
+		result.Warnings = warnings
+	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok: true,
-		PresentOpenResult: &protocol.PresentOpenResult{
-			PresentationID: pres.ID,
-			RoundID:        round.ID,
-			Seq:            round.Seq,
-			BaseSHA:        baseSHA,
-			HeadSHA:        headSHA,
-			Title:          m.Title,
-		},
+		Ok:                true,
+		PresentOpenResult: result,
 	})
 
 	// Re-fetch so the broadcast carries the fresh latest-round summary.
@@ -306,7 +353,7 @@ func (d *Daemon) handleGetPresentationRound(client *wsClient, msg *protocol.GetP
 		return
 	}
 
-	protoRound, err := roundToProto(round)
+	protoRound, err := roundToProto(round, pres.RepoPath)
 	if err != nil {
 		result.Error = protocol.Ptr(err.Error())
 		d.sendToClient(client, result)
@@ -328,8 +375,105 @@ func (d *Daemon) handleGetPresentationRound(client *wsClient, msg *protocol.GetP
 		result.RepoHeadSHA = protocol.Ptr(strings.TrimSpace(string(headSHA)))
 	}
 
+	// Per-file ± line stats are a progressive enhancement for the rail: a
+	// lookup failure or empty result must never fail the round fetch.
+	stats := d.presentFileStats(pres.RepoPath, round.BaseSHA, round.HeadSHA)
+	if len(stats) > 0 {
+		for i := range result.Round.Manifest.Files {
+			path := result.Round.Manifest.Files[i].Path
+			if s, ok := stats[path]; ok {
+				result.Round.Manifest.Files[i].Additions = protocol.Ptr(s[0])
+				result.Round.Manifest.Files[i].Deletions = protocol.Ptr(s[1])
+			}
+		}
+	}
+
+	// The full changed-file list (tour + other) is a progressive enhancement
+	// too: a git error leaves ChangedFiles nil and the round still loads.
+	if changed, err := d.presentChangedFiles(pres.RepoPath, round.BaseSHA, round.HeadSHA, stats); err == nil {
+		result.Round.ChangedFiles = changed
+	}
+
 	result.Success = true
 	d.sendToClient(client, result)
+}
+
+// presentFileStats returns path -> [additions, deletions] for the pinned
+// base..head diff, from `git diff --numstat`. Binary files (numstat "-") are
+// omitted. Rename lines are skipped — the numstat rename encoding
+// ("old => new" or "{old => new}/tail") doesn't cleanly resolve to a single
+// manifest path, and leaving those files stats-less is an accepted
+// limitation. Errors return nil; stats are a progressive enhancement and
+// must never fail a round fetch.
+func (d *Daemon) presentFileStats(repoDir, baseSHA, headSHA string) map[string][2]int {
+	out, err := attngit.Output(attngit.OpDiff, repoDir, "diff", "--numstat", baseSHA+".."+headSHA)
+	if err != nil {
+		return nil
+	}
+	return parsePresentNumstat(string(out))
+}
+
+// presentChangedFiles lists every path changed between the round's pinned
+// base..head SHAs, for the frontend to derive the Tour/Other/Skipped rail
+// groups from (paths already named in the manifest are included too — the
+// frontend does the set subtraction). stats is the same numstat map used for
+// manifest file stats, reused here so numstat only runs once per round fetch.
+func (d *Daemon) presentChangedFiles(repoDir, baseSHA, headSHA string, stats map[string][2]int) ([]protocol.PresentFile, error) {
+	out, err := attngit.Output(attngit.OpDiff, repoDir, "diff", "--name-only", "-z", baseSHA+".."+headSHA)
+	if err != nil {
+		return nil, err
+	}
+	var files []protocol.PresentFile
+	for _, path := range strings.Split(string(out), "\x00") {
+		if path == "" {
+			continue
+		}
+		pf := protocol.PresentFile{Path: path}
+		if s, ok := stats[path]; ok {
+			pf.Additions = protocol.Ptr(s[0])
+			pf.Deletions = protocol.Ptr(s[1])
+		}
+		files = append(files, pf)
+	}
+	return files, nil
+}
+
+// parsePresentNumstat parses `git diff --numstat` output into path ->
+// [additions, deletions]. Lines are tab-separated: additions, deletions,
+// path. Binary files report "-" for both counts and are omitted. Rename
+// lines carry a path field containing " => " (optionally with a "{old =>
+// new}" brace segment) and are skipped rather than guessed at.
+func parsePresentNumstat(output string) map[string][2]int {
+	result := make(map[string][2]int)
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if parts[0] == "-" || parts[1] == "-" {
+			// Binary file: no line stats available.
+			continue
+		}
+		additions, err := strconv.Atoi(parts[0])
+		if err != nil {
+			continue
+		}
+		deletions, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+		path := parts[2]
+		if strings.Contains(path, " => ") {
+			// Rename line — accepted limitation, see doc comment.
+			continue
+		}
+		result[path] = [2]int{additions, deletions}
+	}
+	return result
 }
 
 // handlePresentSubmitRound hands a round's review back to the authoring

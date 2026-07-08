@@ -4,23 +4,21 @@
  *
  * The library renders whatever `renderAnnotation` returns as a slotted
  * (light-DOM) child of the diff custom element, so this component is styled by
- * the app's normal CSS (see DiffDetailPanel.css), not the diff's shadow styles.
+ * the app's normal CSS (see DiffView.css), not the diff's shadow styles.
  *
  * One thread groups every comment sharing the same (side, line) anchor, plus an
  * optional in-progress draft form for a brand new comment on that anchor.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { useEffect, useRef, useState } from 'react';
+import { Markdown } from './Markdown';
 import type { ReviewComment } from '../types/generated';
 
 /** Rendered comment body; react-markdown escapes raw HTML by default. */
-function CommentBody({ content }: { content: string }) {
-  const remarkPlugins = useMemo(() => [remarkGfm], []);
+function CommentBody({ content, onDiagramLayoutChange }: { content: string; onDiagramLayoutChange?: () => void }) {
   return (
-    <div className="diff-comment-content">
-      <ReactMarkdown remarkPlugins={remarkPlugins}>{content}</ReactMarkdown>
-    </div>
+    <Markdown className="diff-comment-content" breaks onDiagramLayoutChange={onDiagramLayoutChange}>
+      {content}
+    </Markdown>
   );
 }
 
@@ -101,6 +99,16 @@ export interface DiffCommentThreadProps {
   onResolveComment: (id: string, resolved: boolean) => void;
   onDeleteComment: (id: string) => void;
   onSendComment: (comment: ReviewComment) => void;
+  /** Small muted note rendered above the thread (e.g. flagging that this
+   * anchor was re-positioned from a line outside the visible diff). */
+  caption?: string;
+  /** When present, renders a "Reply" affordance at the bottom of a read-only
+   * thread that has no draft or in-progress edit — lets a reader answer an
+   * author annotation without the gutter "+" control. */
+  onReply?: () => void;
+  /** Forwarded to every comment body's mermaid diagrams — see Markdown's
+   * onDiagramLayoutChange for why a CodeView host needs this. */
+  onDiagramLayoutChange?: () => void;
 }
 
 export function DiffCommentThread({
@@ -119,9 +127,17 @@ export function DiffCommentThread({
   onResolveComment,
   onDeleteComment,
   onSendComment,
+  caption,
+  onReply,
+  onDiagramLayoutChange,
 }: DiffCommentThreadProps) {
+  const hasReadOnlyComment = comments.some((c) => readOnlyCommentIds?.has(c.id));
+  const hasEditingComment = comments.some((c) => c.id === editingCommentId);
+  const showReply = !!onReply && hasReadOnlyComment && !draft && !hasEditingComment;
+
   return (
     <div className="diff-comment-thread" data-testid="diff-comment-thread">
+      {caption && <div className="diff-comment-caption">{caption}</div>}
       {comments.map((comment) => {
         const isEditing = editingCommentId === comment.id;
         const isAgent = comment.author === 'agent';
@@ -170,7 +186,7 @@ export function DiffCommentThread({
                     )}
                   </div>
                 </div>
-                <CommentBody content={comment.content} />
+                <CommentBody content={comment.content} onDiagramLayoutChange={onDiagramLayoutChange} />
               </>
             )}
           </div>
@@ -184,6 +200,11 @@ export function DiffCommentThread({
           onSave={onSaveDraft}
           onCancel={onCancelDraft}
         />
+      )}
+      {showReply && (
+        <button type="button" className="reply-btn" onClick={onReply}>
+          Reply
+        </button>
       )}
     </div>
   );

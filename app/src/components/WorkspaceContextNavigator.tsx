@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { Markdown } from './Markdown';
 import type { DaemonWorkspaceContext } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import './WorkspaceContextNavigator.css';
@@ -173,14 +172,13 @@ export function WorkspaceContextNavigator({
                     </dl>
                   </div>
                   <article className="workspace-context-markdown">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
+                    <Markdown
                       components={{
                         a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
                       }}
                     >
                       {selected.context.content || '_This workspace context is empty._'}
-                    </ReactMarkdown>
+                    </Markdown>
                   </article>
                 </>
               )}

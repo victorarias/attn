@@ -95,7 +95,6 @@ func TestIsUserPresenceCommandAllowlist(t *testing.T) {
 		protocol.CmdWorkspaceSelected,
 		protocol.CmdSessionVisualized,
 		protocol.CmdPRVisited,
-		protocol.CmdMarkFileViewed,
 		protocol.CmdPtyInput,
 		protocol.CmdPtyResize,
 	}

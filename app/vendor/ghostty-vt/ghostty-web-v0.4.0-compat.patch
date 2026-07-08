@@ -1,7 +1,48 @@
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index f07bbd7..0057430 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -160,6 +160,7 @@ comptime {
+         @export(&c.render_state_mark_clean, .{ .name = "ghostty_render_state_mark_clean" });
+         @export(&c.render_state_get_viewport, .{ .name = "ghostty_render_state_get_viewport" });
+         @export(&c.render_state_get_grapheme, .{ .name = "ghostty_render_state_get_grapheme" });
++        @export(&c.render_state_get_hyperlink_uri, .{ .name = "ghostty_render_state_get_hyperlink_uri" });
+ 
+         // Terminal modes
+         @export(&c.terminal_is_alternate_screen, .{ .name = "ghostty_terminal_is_alternate_screen" });
+@@ -170,6 +171,7 @@ comptime {
+         @export(&c.terminal_get_scrollback_length, .{ .name = "ghostty_terminal_get_scrollback_length" });
+         @export(&c.terminal_get_scrollback_line, .{ .name = "ghostty_terminal_get_scrollback_line" });
+         @export(&c.terminal_get_scrollback_grapheme, .{ .name = "ghostty_terminal_get_scrollback_grapheme" });
++        @export(&c.terminal_get_scrollback_hyperlink_uri, .{ .name = "ghostty_terminal_get_scrollback_hyperlink_uri" });
+         @export(&c.terminal_is_row_wrapped, .{ .name = "ghostty_terminal_is_row_wrapped" });
+ 
+         // Response API (for DSR and other queries)
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index 1850393..4a602ec 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -73,6 +73,7 @@ pub const render_state_is_row_dirty = terminal.renderStateIsRowDirty;
+ pub const render_state_mark_clean = terminal.renderStateMarkClean;
+ pub const render_state_get_viewport = terminal.renderStateGetViewport;
+ pub const render_state_get_grapheme = terminal.renderStateGetGrapheme;
++pub const render_state_get_hyperlink_uri = terminal.renderStateGetHyperlinkUri;
+ 
+ // Terminal modes
+ pub const terminal_is_alternate_screen = terminal.isAlternateScreen;
+@@ -83,6 +84,7 @@ pub const terminal_get_mode = terminal.getMode;
+ pub const terminal_get_scrollback_length = terminal.getScrollbackLength;
+ pub const terminal_get_scrollback_line = terminal.getScrollbackLine;
+ pub const terminal_get_scrollback_grapheme = terminal.getScrollbackGrapheme;
++pub const terminal_get_scrollback_hyperlink_uri = terminal.getScrollbackHyperlinkUri;
+ pub const terminal_is_row_wrapped = terminal.isRowWrapped;
+ 
+ // Response API (for DSR and other queries)
 diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
+index d57b4e4..278ba3c 100644
 --- a/src/terminal/c/terminal.zig
 +++ b/src/terminal/c/terminal.zig
-@@ -98,7 +98,7 @@ const ResponseHandler = struct {
+@@ -112,7 +112,7 @@ const ResponseHandler = struct {
              .insert_lines => self.terminal.insertLines(value),
              .insert_blanks => self.terminal.insertBlanks(value),
              .delete_lines => self.terminal.deleteLines(value),
@@ -10,3 +51,86 @@ diff --git a/src/terminal/c/terminal.zig b/src/terminal/c/terminal.zig
              .scroll_down => self.terminal.scrollDown(value),
              .horizontal_tab => try self.horizontalTab(value),
              .horizontal_tab_back => try self.horizontalTabBack(value),
+@@ -731,6 +731,42 @@ pub fn renderStateGetGrapheme(
+     return @intCast(count);
+ }
+ 
++/// Get the OSC 8 hyperlink URI for the cell at (row, col) in the active area.
++/// Writes up to buf_size UTF-8 bytes (no NUL terminator) to out.
++/// Returns the number of bytes written, 0 if the cell has no hyperlink,
++/// or -1 on invalid arguments. URIs longer than buf_size are truncated.
++pub fn renderStateGetHyperlinkUri(
++    ptr: ?*anyopaque,
++    row: c_int,
++    col: c_int,
++    out: [*]u8,
++    buf_size: usize,
++) callconv(.c) c_int {
++    const wrapper: *const TerminalWrapper = @ptrCast(@alignCast(ptr orelse return -1));
++    const rs = &wrapper.render_state;
++    const t = &wrapper.terminal;
++    const cols: usize = @intCast(rs.cols);
++
++    if (row < 0 or col < 0) return -1;
++    if (@as(usize, @intCast(row)) >= rs.rows) return -1;
++    if (@as(usize, @intCast(col)) >= cols) return -1;
++
++    const pages = &t.screens.active.pages;
++    const pin = pages.pin(.{ .active = .{ .y = @intCast(row) } }) orelse return -1;
++    const cells = pin.cells(.all);
++    const page = &pin.node.data;
++    const x: usize = @intCast(col);
++    if (x >= cells.len) return -1;
++    const cell = &cells[x];
++    if (!cell.hyperlink) return 0;
++    const link_id = page.lookupHyperlink(cell) orelse return 0;
++    const entry = page.hyperlink_set.get(page.memory, link_id);
++    const uri = entry.uri.slice(page.memory);
++    const n = @min(uri.len, buf_size);
++    @memcpy(out[0..n], uri[0..n]);
++    return @intCast(n);
++}
++
+ // ============================================================================
+ // Terminal Modes (minimal set for compatibility)
+ // ============================================================================
+@@ -921,6 +957,39 @@ pub fn getScrollbackGrapheme(
+     return @intCast(count);
+ }
+ 
++/// Get the OSC 8 hyperlink URI for a cell in the scrollback buffer.
++/// offset 0 = oldest scrollback line. Same return contract as
++/// renderStateGetHyperlinkUri.
++pub fn getScrollbackHyperlinkUri(
++    ptr: ?*anyopaque,
++    offset: c_int,
++    col: c_int,
++    out: [*]u8,
++    buf_size: usize,
++) callconv(.c) c_int {
++    const wrapper: *const TerminalWrapper = @ptrCast(@alignCast(ptr orelse return -1));
++    const rs = &wrapper.render_state;
++    const cols: usize = @intCast(rs.cols);
++    if (offset < 0 or col < 0) return -1;
++    if (@as(usize, @intCast(col)) >= cols) return -1;
++    const scrollback_len = getScrollbackLength(ptr);
++    if (offset >= scrollback_len) return -1;
++    const pages = &wrapper.terminal.screens.active.pages;
++    const pin = pages.pin(.{ .history = .{ .y = @intCast(offset) } }) orelse return -1;
++    const cells = pin.cells(.all);
++    const page = &pin.node.data;
++    const x: usize = @intCast(col);
++    if (x >= cells.len) return -1;
++    const cell = &cells[x];
++    if (!cell.hyperlink) return 0;
++    const link_id = page.lookupHyperlink(cell) orelse return 0;
++    const entry = page.hyperlink_set.get(page.memory, link_id);
++    const uri = entry.uri.slice(page.memory);
++    const n = @min(uri.len, buf_size);
++    @memcpy(out[0..n], uri[0..n]);
++    return @intCast(n);
++}
++
+ /// Check if a row is a continuation from the previous row (soft-wrapped)
+ /// This matches xterm.js semantics where isWrapped indicates the row continues
+ /// from the previous row, not that it wraps to the next row.

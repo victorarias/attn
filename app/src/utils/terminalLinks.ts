@@ -27,6 +27,25 @@ export function urlAtColumn(line: string, col: number): UrlAtColumn | null {
   return null;
 }
 
+// An OSC 8 hyperlink's visible label can contain spaces or arbitrary text, so
+// its range can't be derived from the line text (unlike urlAtColumn/fragmentAtColumn).
+// uriAtIndex resolves the hidden URI at a logical index; the range is the run
+// of indices around `index` that resolve to the SAME uri — this stops the
+// scan at a boundary between two adjacent but distinct links.
+export function hyperlinkRangeAt(
+  uriAtIndex: (index: number) => string | null,
+  index: number,
+  length: number,
+): UrlAtColumn | null {
+  const uri = uriAtIndex(index);
+  if (!uri) return null;
+  let startCol = index;
+  while (startCol > 0 && uriAtIndex(startCol - 1) === uri) startCol -= 1;
+  let endCol = index + 1;
+  while (endCol < length && uriAtIndex(endCol) === uri) endCol += 1;
+  return { uri, startCol, endCol };
+}
+
 // A fragment is the run of non-whitespace characters around a column — the
 // unit of hover caching. Pointer movement inside one fragment must cost
 // nothing, so the boundary must be derivable from the line text alone.

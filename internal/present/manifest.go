@@ -32,8 +32,22 @@ type Frame struct {
 
 // FileEntry is one file called out in the manifest's reading order.
 type FileEntry struct {
-	Path string `yaml:"path"`
-	Note string `yaml:"note,omitempty"`
+	Path        string            `yaml:"path"`
+	Note        string            `yaml:"note,omitempty"`
+	Annotations []AnnotationEntry `yaml:"annotations,omitempty"`
+}
+
+// AnnotationEntry pins a note or thread to a location in a file, as authored
+// in the manifest. Exactly one anchor form (anchor | line | start+end) and
+// exactly one body form (note xor thread) must be set; enforced in validate.
+type AnnotationEntry struct {
+	Anchor string `yaml:"anchor,omitempty"` // substring of a head-side line, min 3 chars
+	Line   int    `yaml:"line,omitempty"`   // 1-based head-side line
+	Start  int    `yaml:"start,omitempty"`  // 1-based inclusive range start; requires End
+	End    int    `yaml:"end,omitempty"`    // 1-based inclusive range end; requires Start
+
+	Note   string   `yaml:"note,omitempty"`   // single comment
+	Thread []string `yaml:"thread,omitempty"` // ordered multi-comment thread
 }
 
 // ParseManifest strictly decodes and validates a Present manifest from YAML
@@ -95,6 +109,15 @@ func validate(m *Manifest) error {
 			return fmt.Errorf("present: files[%d].path is a duplicate: %q", i, f.Path)
 		}
 		seenFiles[f.Path] = true
+
+		for j, a := range f.Annotations {
+			if err := validateAnnotation(a, fmt.Sprintf("files[%d].annotations[%d]", i, j)); err != nil {
+				return err
+			}
+		}
+		if err := validateNoStaticOverlap(f.Annotations, i); err != nil {
+			return err
+		}
 	}
 
 	seenSkip := make(map[string]bool, len(m.Skip))
@@ -111,6 +134,93 @@ func validate(m *Manifest) error {
 		}
 	}
 
+	return nil
+}
+
+// validateAnnotation checks that an annotation entry names exactly one
+// anchor form (anchor | line | start+end) and exactly one body form (note
+// xor a non-empty thread). Resolving the anchor against actual file content
+// happens later, in ResolveAnnotations — this only validates shape.
+func validateAnnotation(a AnnotationEntry, field string) error {
+	anchorForms := 0
+	if a.Anchor != "" {
+		anchorForms++
+	}
+	if a.Line != 0 {
+		anchorForms++
+	}
+	if a.Start != 0 || a.End != 0 {
+		anchorForms++
+	}
+	if anchorForms == 0 {
+		return fmt.Errorf("present: %s must set one of anchor, line, or start+end", field)
+	}
+	if anchorForms > 1 {
+		return fmt.Errorf("present: %s must set exactly one of anchor, line, or start+end", field)
+	}
+
+	if a.Anchor != "" && len(a.Anchor) < 3 {
+		return fmt.Errorf("present: %s.anchor must be at least 3 characters, got %q", field, a.Anchor)
+	}
+	if a.Line != 0 && a.Line < 1 {
+		return fmt.Errorf("present: %s.line must be >= 1, got %d", field, a.Line)
+	}
+	if a.Start != 0 || a.End != 0 {
+		if a.Start == 0 || a.End == 0 {
+			return fmt.Errorf("present: %s.start and %s.end must both be set", field, field)
+		}
+		if a.Start < 1 {
+			return fmt.Errorf("present: %s.start must be >= 1, got %d", field, a.Start)
+		}
+		if a.End < a.Start {
+			return fmt.Errorf("present: %s.end must be >= start, got %d < %d", field, a.End, a.Start)
+		}
+	}
+
+	hasNote := a.Note != ""
+	hasThread := len(a.Thread) > 0
+	if hasNote == hasThread {
+		if hasNote {
+			return fmt.Errorf("present: %s must set exactly one of note or thread", field)
+		}
+		return fmt.Errorf("present: %s must set one of note or thread", field)
+	}
+	for i, entry := range a.Thread {
+		if strings.TrimSpace(entry) == "" {
+			return fmt.Errorf("present: %s.thread[%d] must not be empty", field, i)
+		}
+	}
+
+	return nil
+}
+
+// validateNoStaticOverlap rejects line/start+end annotations within one file
+// entry whose ranges are known to overlap without resolving anything against
+// file content (anchor-derived overlaps can only be caught after resolution,
+// in ResolveAnnotations, once an anchor's matched line is known).
+func validateNoStaticOverlap(annotations []AnnotationEntry, fileIndex int) error {
+	type staticRange struct {
+		index      int
+		start, end int
+	}
+	var ranges []staticRange
+	for j, a := range annotations {
+		switch {
+		case a.Line != 0:
+			ranges = append(ranges, staticRange{index: j, start: a.Line, end: a.Line})
+		case a.Start != 0 || a.End != 0:
+			ranges = append(ranges, staticRange{index: j, start: a.Start, end: a.End})
+		}
+	}
+	for i := 0; i < len(ranges); i++ {
+		for j := i + 1; j < len(ranges); j++ {
+			a, b := ranges[i], ranges[j]
+			if a.start <= b.end && b.start <= a.end {
+				return fmt.Errorf("present: files[%d].annotations[%d] overlaps files[%d].annotations[%d] (lines %d-%d and %d-%d)",
+					fileIndex, b.index, fileIndex, a.index, b.start, b.end, a.start, a.end)
+			}
+		}
+	}
 	return nil
 }
 

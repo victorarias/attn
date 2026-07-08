@@ -159,10 +159,27 @@ model WorkspaceContext {
   updated_at: string;
 }
 
+// PresentAnnotation is an author-pinned note or thread, resolved at query
+// time by the daemon from the manifest's annotation entries against the
+// pinned head SHA. Comments are ordered; author is always the presenting
+// agent.
+model PresentAnnotation {
+  line_start: int32; // resolved head-side line range
+  line_end: int32;
+  comments: string[];
+}
+
 // PresentFile is one file entry in a present manifest, as authored by the agent.
 model PresentFile {
   path: string;
   note?: string;
+  // Line stats for this file across the round's pinned base..head diff,
+  // from git numstat. Absent when unknown (binary file, or stats lookup failed).
+  additions?: int32;
+  deletions?: int32;
+  // Author-pinned notes/threads, resolved against the pinned head SHA.
+  // Omitted when the file has none, or when resolution failed.
+  annotations?: PresentAnnotation[];
 }
 
 // PresentManifestView is the parsed, daemon-pinned view of a present manifest —
@@ -201,6 +218,12 @@ model PresentationRound {
   created_at: string;
   submitted_at?: string;
   manifest: PresentManifestView;
+  // All files changed between base_sha and head_sha, computed at query time
+  // by the daemon from `git diff` (destination path for renames);
+  // additions/deletions filled from numstat when available (binary/rename
+  // entries have them absent). Not persisted with the round — omitted
+  // entirely when the diff cannot be computed.
+  changed_files?: PresentFile[];
 }
 
 // PresentationComment is a reviewer note anchored to a line range within one
@@ -663,6 +686,10 @@ model PresentOpenResult {
   base_sha: string;
   head_sha: string;
   title: string;
+  // Anchor warnings from resolving the manifest's annotations (e.g. an
+  // ambiguous anchor), formatted "path[index]: message". Absent when there
+  // were none. An error-severity issue fails the open instead of appearing here.
+  warnings?: string[];
 }
 
 // PresentFeedbackMessage reads reviewer feedback for a round back to the
@@ -1351,34 +1378,13 @@ model GetFileDiffMessage {
   staged?: boolean;  // DEPRECATED: If true, show staged diff instead of working tree
   base_ref?: string; // If provided, compare against this ref instead of HEAD (for PR-like diffs)
   head_ref?: string; // If set, the modified side is pinned to `git show <head_ref>:<path>` instead of the working tree (used by the presentation reader for base_sha->head_sha diffs)
-}
-
-// Branch diff file info for PR-like review
-model BranchDiffFile {
-  path: string;
-  status: string;           // "added", "modified", "deleted", "renamed"
-  old_path?: string;        // For renames
-  additions?: int32;
-  deletions?: int32;
-  has_uncommitted?: boolean; // True if file also has uncommitted changes
-}
-
-model GetBranchDiffFilesMessage {
-  cmd: "get_branch_diff_files";
-  directory: string;
-  base_ref?: string;  // Defaults to origin/<default-branch>
+  request_id?: string; // Client-chosen correlation id, echoed verbatim in the result
 }
 
 model GetRepoInfoMessage {
   cmd: "get_repo_info";
   repo: string;
   endpoint_id?: string;
-}
-
-model GetReviewStateMessage {
-  cmd: "get_review_state";
-  repo_path: string;
-  branch: string;
 }
 
 model WorkflowRunUpsertMessage {
@@ -1406,45 +1412,6 @@ model WorkflowRunListMessage {
 model WorkflowRunCancelMessage {
   cmd: "workflow_run_cancel";
   run_id: string;
-}
-
-model MarkFileViewedMessage {
-  cmd: "mark_file_viewed";
-  review_id: string;
-  filepath: string;
-  viewed: boolean;  // true to mark viewed, false to unmark
-}
-
-model AddCommentMessage {
-  cmd: "add_comment";
-  review_id: string;
-  filepath: string;
-  line_start: int32;
-  line_end: int32;
-  content: string;
-}
-
-model UpdateCommentMessage {
-  cmd: "update_comment";
-  comment_id: string;
-  content: string;
-}
-
-model ResolveCommentMessage {
-  cmd: "resolve_comment";
-  comment_id: string;
-  resolved: boolean;
-}
-
-model DeleteCommentMessage {
-  cmd: "delete_comment";
-  comment_id: string;
-}
-
-model GetCommentsMessage {
-  cmd: "get_comments";
-  review_id: string;
-  filepath?: string;  // Optional: filter by file
 }
 
 model SpawnSessionMessage {
@@ -2182,15 +2149,7 @@ model FileDiffResultMessage {
   modified: string;
   success: boolean;
   error?: string;
-}
-
-model BranchDiffFilesResultMessage {
-  event: "branch_diff_files_result";
-  directory: string;
-  base_ref: string;           // Actual base ref used
-  files: BranchDiffFile[];
-  success: boolean;
-  error?: string;
+  request_id?: string; // Client-chosen correlation id, echoed verbatim from the request
 }
 
 model RepoInfo {
@@ -2210,13 +2169,6 @@ model GetRepoInfoResultMessage {
   endpoint_id?: string;
   success: boolean;
   error?: string;
-}
-
-model ReviewState {
-  review_id: string;
-  repo_path: string;
-  branch: string;
-  viewed_files: string[];  // List of filepath strings
 }
 
 model WorkflowAgentCall {
@@ -2270,13 +2222,6 @@ model ReviewComment {
   created_at: string;    // ISO timestamp
 }
 
-model GetReviewStateResultMessage {
-  event: "get_review_state_result";
-  state?: ReviewState;
-  success: boolean;
-  error?: string;
-}
-
 model WorkflowRunUpdatedMessage {
   event: "workflow_run_updated";
   run: WorkflowRun;
@@ -2289,47 +2234,6 @@ model WorkflowActionResultMessage {
   run?: WorkflowRun;
   runs?: WorkflowRun[];
   success: boolean;
-  error?: string;
-}
-
-model MarkFileViewedResultMessage {
-  event: "mark_file_viewed_result";
-  review_id: string;
-  filepath: string;
-  viewed: boolean;
-  success: boolean;
-  error?: string;
-}
-
-model AddCommentResultMessage {
-  event: "add_comment_result";
-  success: boolean;
-  comment?: ReviewComment;
-  error?: string;
-}
-
-model UpdateCommentResultMessage {
-  event: "update_comment_result";
-  success: boolean;
-  error?: string;
-}
-
-model ResolveCommentResultMessage {
-  event: "resolve_comment_result";
-  success: boolean;
-  error?: string;
-}
-
-model DeleteCommentResultMessage {
-  event: "delete_comment_result";
-  success: boolean;
-  error?: string;
-}
-
-model GetCommentsResultMessage {
-  event: "get_comments_result";
-  success: boolean;
-  comments?: ReviewComment[];
   error?: string;
 }
 
@@ -2852,7 +2756,6 @@ model WebSocketEvent {
   directory?: string;
   original?: string;
   modified?: string;
-  files?: BranchDiffFile[];
   base_ref?: string;
   staged?: GitFileChange[];
   unstaged?: GitFileChange[];
@@ -2935,9 +2838,7 @@ alias DaemonEvent =
   | EnsureRepoResultMessage
   | GitStatusUpdateMessage
   | FileDiffResultMessage
-  | BranchDiffFilesResultMessage
   | GetRepoInfoResultMessage
-  | GetReviewStateResultMessage
   | WorkflowRunUpdatedMessage
   | WorkflowActionResultMessage
   | WorkspaceContextResultMessage
@@ -2953,12 +2854,6 @@ alias DaemonEvent =
   | NotificationListResultMessage
   | NotificationMarkReadResultMessage
   | NotificationsUpdatedMessage
-  | MarkFileViewedResultMessage
-  | AddCommentResultMessage
-  | UpdateCommentResultMessage
-  | ResolveCommentResultMessage
-  | DeleteCommentResultMessage
-  | GetCommentsResultMessage
   | SpawnResultMessage
   | AttachResultMessage
   | GetScreenSnapshotResultMessage

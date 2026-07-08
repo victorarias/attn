@@ -84,13 +84,55 @@ async function realScrollTop(page: Page): Promise<number> {
   });
 }
 
+function calls(page: Page, name: string) {
+  return page.evaluate((n) => window.__HARNESS__.getCalls(n), name);
+}
+
+/**
+ * Scrolls the diff via a REAL wheel event, not a programmatic `scrollBy`.
+ * DiffView pins `.diff-view-scroller` to the top until real user input
+ * arrives (see the takeover-tracking effect in DiffView.tsx) — a JS-driven
+ * scroll here would be silently snapped back to 0 before any of these tests
+ * got to assert anything, since it doesn't count as "the user took over".
+ */
 async function scrollDown(page: Page, amount: number) {
-  await page.evaluate((amt) => {
-    const scroller = document.querySelector('.diff-view-scroller') as HTMLElement | null;
-    scroller?.scrollBy(0, amt);
-  }, amount);
+  const box = await page.locator('.diff-view-scroller').boundingBox();
+  if (box) {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  }
+  await page.mouse.wheel(0, amount);
   // Let the virtualizer's rAF-driven render loop settle before reading scrollTop.
   await page.waitForTimeout(150);
+}
+
+/**
+ * Returns the line number of the row currently hosting the gutter utility "+"
+ * (the `[data-gutter-utility-slot]` container the library appends into a
+ * line's number cell), or null if the "+" isn't shown anywhere.
+ *
+ * `[data-gutter-utility-slot]` lives inside `diffs-container`'s OPEN shadow
+ * root (appended by InteractionManager.showUtilityOnLine into the hovered
+ * line's number element). Playwright's locator engine pierces open shadow
+ * roots to FIND the node, but a plain `page.evaluate(() =>
+ * document.querySelector(...))` does not — that returned null. Locating via
+ * `page.locator` first, then running `.evaluate()` on the resolved handle
+ * (which operates on the real DOM node and can freely walk `parentElement`
+ * regardless of shadow boundaries), is the fix.
+ *
+ * Module-scoped (rather than local to one describe block) so both the
+ * single-draft hover-death regression test and the multi-draft tests below
+ * can share it.
+ */
+async function gutterUtilityLineNumber(page: Page): Promise<number | null> {
+  const slot = page.locator('diffs-container [data-gutter-utility-slot]');
+  if ((await slot.count()) === 0) return null;
+  return slot.first().evaluate((el) => {
+    const numberCell = el.parentElement;
+    const raw =
+      numberCell?.getAttribute('data-column-number') ??
+      numberCell?.closest('[data-column-number]')?.getAttribute('data-column-number');
+    return raw != null ? Number(raw) : null;
+  });
 }
 
 test.describe('DiffView scroll preservation', () => {
@@ -159,20 +201,21 @@ test.describe('DiffView scroll preservation', () => {
   });
 
   /**
-   * BUG REPRO (known RED), second trigger: same scenario but via the plain
-   * line-click -> action popup -> "Add comment" path, to learn whether the
-   * jump is specific to the gutter-utility trigger or common to both.
+   * BUG REPRO (known RED), second trigger: same scenario but via a
+   * line-number click opening the draft directly (no gutter "+" hover), to
+   * learn whether the jump is specific to the gutter-utility trigger or
+   * common to both.
    */
-  test('line-click popup "Add comment" on a scrolled-down visible line does not reset scroll position', async ({ page }) => {
+  test('line-number click on a scrolled-down visible line does not reset scroll position', async ({ page }) => {
     await openLargeDiff(page);
 
     await scrollDown(page, 800);
     const before = await realScrollTop(page);
-    console.log('[scroll-jump/popup] before =', before);
+    console.log('[scroll-jump/line-number] before =', before);
     expect(before, 'sanity: scrolling down must actually move .diff-view-scroller').toBeGreaterThan(0);
 
     const scrollerBox = await page.locator('.diff-view-scroller').boundingBox();
-    const lines = page.locator('diffs-container [data-line]');
+    const lines = page.locator('diffs-container [data-line-index][data-column-number]');
     const count = await lines.count();
     let visibleLine: Locator | null = null;
     for (let i = 0; i < count; i++) {
@@ -188,15 +231,13 @@ test.describe('DiffView scroll preservation', () => {
     expect(visibleLine, 'must find a line row visible within the scrolled viewport').not.toBeNull();
 
     await visibleLine!.click();
-    const popup = page.locator('.diff-selection-popup');
-    await expect(popup).toBeVisible();
-    await popup.locator('.diff-selection-popup-btn.comment').click();
-
     const form = page.getByTestId('diff-comment-form');
     await expect(form).toBeVisible();
+    // No popup exists anymore — the click opens the draft directly.
+    await expect(page.locator('.diff-selection-popup')).toHaveCount(0);
 
     const after = await realScrollTop(page);
-    console.log('[scroll-jump/popup] after opening draft via popup, scrollTop =', after, '(before was', before, ')');
+    console.log('[scroll-jump/line-number] after opening draft via line-number click, scrollTop =', after, '(before was', before, ')');
 
     expect(Math.abs(after - before)).toBeLessThanOrEqual(20);
   });
@@ -253,33 +294,53 @@ test.describe('DiffView scroll preservation', () => {
   });
 });
 
-test.describe('DiffView gutter hover follows pointer', () => {
+test.describe('DiffView pins scroll to the top until the user takes over', () => {
   /**
-   * Returns the line number of the row currently hosting the gutter utility
-   * "+" (the `[data-gutter-utility-slot]` container the library appends into
-   * a line's number cell), or null if the "+" isn't shown anywhere.
-   *
-   * `[data-gutter-utility-slot]` lives inside `diffs-container`'s OPEN shadow
-   * root (appended by InteractionManager.showUtilityOnLine into the hovered
-   * line's number element). Playwright's locator engine pierces open shadow
-   * roots to FIND the node, but a plain `page.evaluate(() =>
-   * document.querySelector(...))` does not — that returned null. Locating via
-   * `page.locator` first, then running `.evaluate()` on the resolved handle
-   * (which operates on the real DOM node and can freely walk `parentElement`
-   * regardless of shadow boundaries), is the fix.
+   * Root-cause fix for the scroll-jump bugs above: on a cold present-window
+   * load, @pierre/diffs' Virtualizer can scroll `.diff-view-scroller`
+   * autonomously from garbage geometry before the user ever touches the
+   * page. DiffView now pins the scroller to 0 until real user input (wheel,
+   * touch, pointerdown, or a key press) arrives on it. This test simulates
+   * the library's own autonomous scroll with a programmatic scrollTop write
+   * (indistinguishable, from DiffView's point of view, from the library
+   * fixing up its own anchor) and expects it snapped back to the top.
    */
-  async function gutterUtilityLineNumber(page: Page): Promise<number | null> {
-    const slot = page.locator('diffs-container [data-gutter-utility-slot]');
-    if ((await slot.count()) === 0) return null;
-    return slot.first().evaluate((el) => {
-      const numberCell = el.parentElement;
-      const raw =
-        numberCell?.getAttribute('data-column-number') ??
-        numberCell?.closest('[data-column-number]')?.getAttribute('data-column-number');
-      return raw != null ? Number(raw) : null;
-    });
-  }
+  test('a programmatic scroll before any user input snaps back to the top', async ({ page }) => {
+    await openLargeDiff(page);
 
+    await page.evaluate(() => {
+      const scroller = document.querySelector('.diff-view-scroller') as HTMLElement | null;
+      if (scroller) scroller.scrollTop = 500;
+    });
+
+    await expect.poll(() => realScrollTop(page)).toBe(0);
+  });
+
+  /**
+   * Once the user has scrolled for real, the pin must disarm permanently —
+   * including for later scroll changes that are themselves programmatic
+   * (e.g. the library's own virtualization bookkeeping), not just the wheel
+   * event that armed it.
+   */
+  test('a real wheel scroll arms takeover, and later scroll changes are no longer pinned', async ({ page }) => {
+    await openLargeDiff(page);
+
+    await scrollDown(page, 300);
+    const afterWheel = await realScrollTop(page);
+    expect(afterWheel, 'the real wheel scroll itself must not be pinned').toBeGreaterThan(0);
+
+    await page.evaluate(() => {
+      const scroller = document.querySelector('.diff-view-scroller') as HTMLElement | null;
+      if (scroller) scroller.scrollTop = 500;
+    });
+    await page.waitForTimeout(150);
+
+    const after = await realScrollTop(page);
+    expect(after, 'takeover must stick for later scroll changes too').toBe(500);
+  });
+});
+
+test.describe('DiffView gutter hover follows pointer', () => {
   /**
    * BUG REPRO (known RED): after adding a comment via the gutter "+" on line
    * A, hovering a different visible line B should move the "+" to B. Against
@@ -337,5 +398,154 @@ test.describe('DiffView gutter hover follows pointer', () => {
     // (or wherever the committed selection landed) instead of following the
     // pointer to line B.
     expect(pinnedLine).toBe(numberB);
+  });
+});
+
+test.describe('DiffView multiple simultaneous drafts', () => {
+  /** Opens a draft on the given line via the gutter "+" (hover then click). */
+  async function openDraftViaGutter(page: Page, line: Locator) {
+    await line.hover();
+    const plus = page.locator('diffs-container [data-utility-button]');
+    await plus.waitFor({ state: 'visible' });
+    await plus.click();
+  }
+
+  /**
+   * Two visible rows to anchor two independent drafts on, deliberately BOTH on
+   * the additions side (context rows nth(6)/nth(7), lines 5 and 6) rather than
+   * mixing in a change-deletion row like nth(3) (line 4, deletions side).
+   * DiffView's `lineAnnotations` sorts open-form groups by `${side}:${line}`
+   * anchor key, and string comparison puts "additions:5" before "deletions:4"
+   * (side prefix wins over the numeric line) — a deletions/additions pair
+   * would NOT sort in the ascending order these tests' `forms.nth(0)` /
+   * `forms.nth(1)` indexing assumes. Same-side, ascending lines keep anchor-key
+   * order and array order in step.
+   */
+  function twoSameSideLines(page: Page): [Locator, Locator] {
+    const lineLocators = page.locator('diffs-container [data-line-index][data-column-number]');
+    return [lineLocators.nth(6), lineLocators.nth(7)];
+  }
+
+  /**
+   * GitHub-style multi-comment authoring: with a draft box open on one line,
+   * the hover "+" must keep following the pointer to OTHER lines (not just
+   * after a draft closes, which is what the single-draft regression test
+   * above already covers), and clicking it there opens an independent second
+   * box rather than overwriting the first.
+   */
+  test('hover "+" keeps following the pointer while a draft is open on another line', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const [lineA, lineB] = twoSameSideLines(page);
+    const numberB = Number(await lineB.getAttribute('data-column-number'));
+
+    await openDraftViaGutter(page, lineA);
+    await expect(page.getByTestId('diff-comment-form')).toBeVisible(); // draft A open, not saved
+
+    await lineB.hover();
+    await page.waitForTimeout(150); // let InteractionManager's pointer handlers react
+    await expect.poll(() => gutterUtilityLineNumber(page)).toBe(numberB);
+  });
+
+  test('clicking "+" on another line while a draft is open opens a second, independent draft box', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const [lineA, lineB] = twoSameSideLines(page);
+    const forms = page.getByTestId('diff-comment-form');
+
+    await openDraftViaGutter(page, lineA);
+    await expect(forms).toHaveCount(1);
+    await forms.nth(0).locator('textarea').fill('Comment A');
+
+    await openDraftViaGutter(page, lineB);
+    await expect(forms).toHaveCount(2);
+
+    // Both boxes coexist, each keeping its own typed text.
+    await expect(forms.nth(0).locator('textarea')).toHaveValue('Comment A');
+    await forms.nth(1).locator('textarea').fill('Comment B');
+    await expect(forms.nth(0).locator('textarea')).toHaveValue('Comment A');
+    await expect(forms.nth(1).locator('textarea')).toHaveValue('Comment B');
+  });
+
+  test('clicking an anchor that already has an open draft is a no-op, not an overwrite', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const lineA = page.locator('diffs-container [data-line-index][data-column-number]').nth(3);
+    await openDraftViaGutter(page, lineA);
+    const forms = page.getByTestId('diff-comment-form');
+    await expect(forms).toHaveCount(1);
+    await forms.nth(0).locator('textarea').fill('Do not lose this');
+
+    // Re-click the number cell on the same line: same anchor, must not
+    // duplicate the box or wipe its text.
+    await lineA.click();
+    await expect(forms).toHaveCount(1);
+    await expect(forms.nth(0).locator('textarea')).toHaveValue('Do not lose this');
+  });
+
+  test('saves two open drafts independently, each with its own line args', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const [lineA, lineB] = twoSameSideLines(page);
+    const forms = page.getByTestId('diff-comment-form');
+
+    await openDraftViaGutter(page, lineA);
+    await forms.nth(0).locator('textarea').fill('Comment A');
+    await openDraftViaGutter(page, lineB);
+    await expect(forms).toHaveCount(2);
+    await forms.nth(1).locator('textarea').fill('Comment B');
+
+    await forms.nth(0).locator('.save-btn').click();
+    await expect.poll(() => calls(page, 'addComment')).toHaveLength(1);
+    // The other box survives, untouched, while the first is gone.
+    await expect(forms).toHaveCount(1);
+    await expect(forms.nth(0).locator('textarea')).toHaveValue('Comment B');
+
+    await forms.nth(0).locator('.save-btn').click();
+    await expect.poll(() => calls(page, 'addComment')).toHaveLength(2);
+    await expect(forms).toHaveCount(0);
+
+    const added = (await calls(page, 'addComment')) as Array<[number, number, string]>;
+    const byContent = Object.fromEntries(added.map(([start, end, content]) => [content, [start, end]]));
+    expect(byContent['Comment A'][0]).toBe(byContent['Comment A'][1]); // single-line, additions side
+    expect(byContent['Comment B'][0]).toBe(byContent['Comment B'][1]);
+    expect(byContent['Comment A'][0]).not.toBe(byContent['Comment B'][0]); // distinct anchors
+  });
+
+  test('canceling one draft box leaves the other intact', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const [lineA, lineB] = twoSameSideLines(page);
+    const forms = page.getByTestId('diff-comment-form');
+
+    await openDraftViaGutter(page, lineA);
+    await forms.nth(0).locator('textarea').fill('Keep me');
+    await openDraftViaGutter(page, lineB);
+    await forms.nth(1).locator('textarea').fill('Cancel me');
+
+    await forms.nth(1).locator('.cancel-btn').click();
+    await expect(forms).toHaveCount(1);
+    await expect(forms.nth(0).locator('textarea')).toHaveValue('Keep me');
+    expect(await calls(page, 'addComment')).toHaveLength(0);
+  });
+
+  test('Escape closes the most-recently-opened draft first', async ({ page }) => {
+    await openHarness(page, UNSEEDED);
+
+    const [lineA, lineB] = twoSameSideLines(page);
+    const forms = page.getByTestId('diff-comment-form');
+
+    await openDraftViaGutter(page, lineA);
+    await forms.nth(0).locator('textarea').fill('Opened first');
+    await openDraftViaGutter(page, lineB);
+    await forms.nth(1).locator('textarea').fill('Opened second');
+    await expect(forms).toHaveCount(2);
+
+    await page.keyboard.press('Escape');
+    await expect(forms).toHaveCount(1);
+    await expect(forms.nth(0).locator('textarea')).toHaveValue('Opened first');
+
+    await page.keyboard.press('Escape');
+    await expect(forms).toHaveCount(0);
   });
 });

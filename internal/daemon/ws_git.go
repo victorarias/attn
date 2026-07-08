@@ -183,6 +183,7 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 		Directory: msg.Directory,
 		Path:      msg.Path,
 		Success:   false,
+		RequestID: msg.RequestID,
 	}
 
 	baseRef := "HEAD"
@@ -205,44 +206,6 @@ func (d *Daemon) handleGetFileDiff(client *wsClient, msg *protocol.GetFileDiffMe
 
 	result.Original = content.original
 	result.Modified = content.modified
-	result.Success = true
-	d.sendToClient(client, result)
-}
-
-func (d *Daemon) handleGetBranchDiffFilesWS(client *wsClient, msg *protocol.GetBranchDiffFilesMessage) {
-	d.logf("Getting branch diff files for %s", msg.Directory)
-	go d.handleGetBranchDiffFiles(client, msg)
-}
-
-func (d *Daemon) handleGetBranchDiffFiles(client *wsClient, msg *protocol.GetBranchDiffFilesMessage) {
-	result := protocol.BranchDiffFilesResultMessage{
-		Event:     protocol.EventBranchDiffFilesResult,
-		Directory: msg.Directory,
-		Success:   false,
-	}
-
-	baseRef := ""
-	if msg.BaseRef != nil && *msg.BaseRef != "" {
-		baseRef = *msg.BaseRef
-	} else {
-		defaultBranch, err := d.coordinator().DefaultBranch(msg.Directory)
-		if err != nil {
-			result.Error = protocol.Ptr("Failed to get default branch: " + err.Error())
-			d.sendToClient(client, result)
-			return
-		}
-		baseRef = "origin/" + defaultBranch
-	}
-	result.BaseRef = baseRef
-
-	snapshot, err := d.coordinator().BranchDiffSnapshot(msg.Directory, baseRef)
-	if err != nil {
-		result.Error = protocol.Ptr("Failed to get branch diff: " + err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-
-	result.Files = snapshot.files
 	result.Success = true
 	d.sendToClient(client, result)
 }

@@ -4,7 +4,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// WS wrappers for the durable workflow engine, mirroring ws_review.go. The UI is
+// WS wrappers for the durable workflow engine. The UI is
 // read-only over the WebSocket: it reads (get/list) and cancels. Run/call mutation
 // is owned by the engine process over the unix socket (see workflow_run.go, which
 // also gates starts on the workflows_enabled master switch), so there is no WS

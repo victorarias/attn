@@ -21,6 +21,17 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Appends `--window-title <substring>` when opts.windowTitle is set, so
+// callers can target a secondary Tauri window (e.g. "attn — present") that
+// Accessibility never enumerates. Pure so it can be unit-tested without
+// spawning the compiled driver binary.
+export function withWindowTitleArgs(args, opts = {}) {
+  if (!opts.windowTitle) {
+    return args;
+  }
+  return [...args, '--window-title', opts.windowTitle];
+}
+
 export class MacOSDriver {
   constructor({
     bundleId = null,
@@ -78,9 +89,9 @@ export class MacOSDriver {
   // window, or null if no such window exists. Reliable gate for "attn's window
   // has been created": System Events returns 0 for Tauri/wry apps even when a
   // window is visible, so this path uses CGWindowListCopyWindowInfo instead.
-  async mainWindowId() {
+  async mainWindowId(opts = {}) {
     try {
-      const value = await this.runInputDriverCapture(['windowid']);
+      const value = await this.runInputDriverCapture(withWindowTitleArgs(['windowid'], opts));
       const parsed = Number.parseInt(value, 10);
       return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     } catch {
@@ -88,10 +99,10 @@ export class MacOSDriver {
     }
   }
 
-  async waitForMainWindow(timeoutMs = 10_000, pollIntervalMs = 150) {
+  async waitForMainWindow(timeoutMs = 10_000, pollIntervalMs = 150, opts = {}) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const wid = await this.mainWindowId();
+      const wid = await this.mainWindowId(opts);
       if (wid) {
         return wid;
       }
@@ -133,37 +144,71 @@ export class MacOSDriver {
     await this.pressKeyCode(36);
   }
 
-  async clickWindow(relativeX, relativeY) {
-    await this.runInputDriver([
+  async clickWindow(relativeX, relativeY, opts = {}) {
+    const args = [
       'click',
       '--relative-x',
       String(relativeX),
       '--relative-y',
       String(relativeY),
       '--prompt-accessibility',
-    ]);
+    ];
+    if (opts.modifiers) {
+      args.push('--modifiers', this.serializeModifiers(opts.modifiers));
+    }
+    await this.runInputDriver(withWindowTitleArgs(args, opts));
     await delay(this.actionDelayMs);
   }
 
-  async rightClickWindow(relativeX, relativeY) {
-    await this.runInputDriver([
+  async rightClickWindow(relativeX, relativeY, opts = {}) {
+    const args = [
       'right_click',
       '--relative-x',
       String(relativeX),
       '--relative-y',
       String(relativeY),
       '--prompt-accessibility',
-    ]);
+    ];
+    if (opts.modifiers) {
+      args.push('--modifiers', this.serializeModifiers(opts.modifiers));
+    }
+    await this.runInputDriver(withWindowTitleArgs(args, opts));
     await delay(this.actionDelayMs);
   }
 
-  async parkWindow(visiblePx) {
-    const stdout = await this.runInputDriverCapture([
+  // Warps the cursor to (relativeX, relativeY) inside the resolved window
+  // (same 0..1 semantics as clickWindow) and posts a pixel-unit scroll wheel
+  // event, split into opts.steps sub-events. Positive deltaY scrolls content
+  // up, negative scrolls it down (CGEvent convention) — see InputDriver.swift
+  // --help for a worked example.
+  async scrollWindow(relativeX, relativeY, deltaY, opts = {}) {
+    const args = [
+      'scroll',
+      '--relative-x',
+      String(relativeX),
+      '--relative-y',
+      String(relativeY),
+      '--delta-y',
+      String(deltaY),
+      '--prompt-accessibility',
+    ];
+    if (opts.deltaX !== undefined) {
+      args.push('--delta-x', String(opts.deltaX));
+    }
+    if (opts.steps !== undefined) {
+      args.push('--steps', String(opts.steps));
+    }
+    await this.runInputDriver(withWindowTitleArgs(args, opts));
+    await delay(this.actionDelayMs);
+  }
+
+  async parkWindow(visiblePx, opts = {}) {
+    const stdout = await this.runInputDriverCapture(withWindowTitleArgs([
       'window_park',
       '--visible-px',
       String(visiblePx),
       '--prompt-accessibility',
-    ]);
+    ], opts));
     console.log(`[RealAppHarness] Parked window: ${stdout.trim()}`);
   }
 

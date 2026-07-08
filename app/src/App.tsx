@@ -3,7 +3,7 @@ import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Sidebar, type SidebarHeaderAction, type DockItem, WorkflowIcon, EditorIcon, DiffIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
+import { Sidebar, type SidebarHeaderAction, type DockItem, WorkflowIcon, EditorIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
@@ -12,8 +12,6 @@ import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { CloseSessionPrompt } from './components/CloseSessionPrompt';
 import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPrompt';
-import { ChangesPanel } from './components/ChangesPanel';
-import { DiffDetailPanel } from './components/DiffDetailPanel';
 import { TicketDetailPanel } from './components/TicketDetailPanel';
 import { TicketBoardSurface } from './components/TicketBoardSurface';
 import { WorkflowRunView } from './components/WorkflowRunView';
@@ -48,7 +46,7 @@ import {
   readWarmWorkspaceLimit,
   writeWarmWorkspaceLimit,
 } from './utils/terminalVirtualization';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, BranchDiffFile, DaemonWarning, SessionExitInfo } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo } from './hooks/useDaemonSocket';
 import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
@@ -132,10 +130,6 @@ export function latestPresentationBySessionId(notices: Presentation[]): Map<stri
   }
   return bySessionId;
 }
-const CHANGES_BRANCH_DIFF_INTERVAL_MS = 30_000;
-const CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS = 750;
-const CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS = 5_000;
-const CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS = 30_000;
 const TERMINAL_AGENT: SessionAgent = 'shell';
 
 type LocationPickerPurpose = 'workspace' | 'session';
@@ -378,8 +372,11 @@ function App() {
   // Worktrees state (used by WorktreeCleanupPrompt)
   const [, setWorktrees] = useState<DaemonWorktree[]>([]);
 
-  // Git status state
-  const [gitStatus, setGitStatus] = useState<GitStatusUpdate | null>(null);
+  // Git status state. The value itself was only ever rendered by the old
+  // diff-review panels; the subscribe/unsubscribe lifecycle (driven by
+  // clearGitStatus below) still runs, so keep the setter without reading back
+  // an unused value.
+  const [, setGitStatus] = useState<GitStatusUpdate | null>(null);
   const [updateAvailableVersion, setUpdateAvailableVersion] = useState<string | null>(null);
   const [updateReleaseUrl, setUpdateReleaseUrl] = useState<string>(RELEASES_LATEST_WEB);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(() => getDismissedUpdateVersion());
@@ -569,7 +566,6 @@ function App() {
     sendBrowseDirectory,
     sendInspectPath,
     sendCreateWorktreeFromBranch,
-    sendFetchRemotes,
     sendFetchPRDetails,
     sendEnsureRepo,
     sendSubscribeGitStatus,
@@ -592,23 +588,14 @@ function App() {
     requestTileContent,
     sendRuntimeInput,
     isRuntimeAttached,
-    sendGetFileDiff,
-    sendGetBranchDiffFiles,
     getRepoInfo,
     listWorkflowRuns,
     getWorkflowRun,
-    getReviewState,
     fetchTicket,
     sendTicketChangeStatus,
     sendTicketAddComment,
     sendTicketEditDescription,
     sendTicketResume,
-    markFileViewed,
-    sendAddComment,
-    sendUpdateComment,
-    sendResolveComment,
-    sendDeleteComment,
-    sendGetComments,
     getPresentations,
     connectionError,
     hasReceivedInitialState,
@@ -699,7 +686,6 @@ function App() {
         daemonPluginIssues={daemonPluginIssues}
         daemonGitHubHosts={daemonGitHubHosts}
         settings={settings}
-        gitStatus={gitStatus}
         connectionError={connectionError}
         hasReceivedInitialState={hasReceivedInitialState}
         rateLimit={rateLimit}
@@ -759,7 +745,6 @@ function App() {
         sendBrowseDirectory={sendBrowseDirectory}
         sendInspectPath={sendInspectPath}
         sendCreateWorktreeFromBranch={sendCreateWorktreeFromBranch}
-        sendFetchRemotes={sendFetchRemotes}
         sendFetchPRDetails={sendFetchPRDetails}
         sendEnsureRepo={sendEnsureRepo}
         sendSubscribeGitStatus={sendSubscribeGitStatus}
@@ -782,23 +767,14 @@ function App() {
         requestTileContent={requestTileContent}
         sendRuntimeInput={sendRuntimeInput}
         isRuntimeAttached={isRuntimeAttached}
-        sendGetFileDiff={sendGetFileDiff}
-        sendGetBranchDiffFiles={sendGetBranchDiffFiles}
         getRepoInfo={getRepoInfo}
         listWorkflowRuns={listWorkflowRuns}
         getWorkflowRun={getWorkflowRun}
-        getReviewState={getReviewState}
         fetchTicket={fetchTicket}
         sendTicketChangeStatus={sendTicketChangeStatus}
         sendTicketAddComment={sendTicketAddComment}
         sendTicketEditDescription={sendTicketEditDescription}
         sendTicketResume={sendTicketResume}
-        markFileViewed={markFileViewed}
-        sendAddComment={sendAddComment}
-        sendUpdateComment={sendUpdateComment}
-        sendResolveComment={sendResolveComment}
-        sendDeleteComment={sendDeleteComment}
-        sendGetComments={sendGetComments}
         clearGitStatus={clearGitStatus}
         registerSessionExitHandler={registerSessionExitHandler}
       />
@@ -817,7 +793,6 @@ interface AppContentProps {
   daemonPluginIssues: DaemonPluginIssue[];
   daemonGitHubHosts: string[];
   settings: Record<string, string>;
-  gitStatus: GitStatusUpdate | null;
   connectionError: string | null;
   hasReceivedInitialState: boolean;
   rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
@@ -877,7 +852,6 @@ interface AppContentProps {
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
   sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
   sendCreateWorktreeFromBranch: ReturnType<typeof useDaemonSocket>['sendCreateWorktreeFromBranch'];
-  sendFetchRemotes: ReturnType<typeof useDaemonSocket>['sendFetchRemotes'];
   sendFetchPRDetails: ReturnType<typeof useDaemonSocket>['sendFetchPRDetails'];
   sendEnsureRepo: ReturnType<typeof useDaemonSocket>['sendEnsureRepo'];
   sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
@@ -900,23 +874,14 @@ interface AppContentProps {
   requestTileContent: ReturnType<typeof useDaemonSocket>['requestTileContent'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
   isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
-  sendGetFileDiff: ReturnType<typeof useDaemonSocket>['sendGetFileDiff'];
-  sendGetBranchDiffFiles: ReturnType<typeof useDaemonSocket>['sendGetBranchDiffFiles'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
   listWorkflowRuns: ReturnType<typeof useDaemonSocket>['listWorkflowRuns'];
   getWorkflowRun: ReturnType<typeof useDaemonSocket>['getWorkflowRun'];
-  getReviewState: ReturnType<typeof useDaemonSocket>['getReviewState'];
   fetchTicket: ReturnType<typeof useDaemonSocket>['fetchTicket'];
   sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
   sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
   sendTicketEditDescription: ReturnType<typeof useDaemonSocket>['sendTicketEditDescription'];
   sendTicketResume: ReturnType<typeof useDaemonSocket>['sendTicketResume'];
-  markFileViewed: ReturnType<typeof useDaemonSocket>['markFileViewed'];
-  sendAddComment: ReturnType<typeof useDaemonSocket>['sendAddComment'];
-  sendUpdateComment: ReturnType<typeof useDaemonSocket>['sendUpdateComment'];
-  sendResolveComment: ReturnType<typeof useDaemonSocket>['sendResolveComment'];
-  sendDeleteComment: ReturnType<typeof useDaemonSocket>['sendDeleteComment'];
-  sendGetComments: ReturnType<typeof useDaemonSocket>['sendGetComments'];
   clearGitStatus: () => void;
   registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
 }
@@ -930,7 +895,6 @@ function AppContent({
   daemonPluginIssues,
   daemonGitHubHosts,
   settings,
-  gitStatus,
   connectionError,
   hasReceivedInitialState,
   rateLimit,
@@ -989,7 +953,6 @@ function AppContent({
   sendBrowseDirectory,
 sendInspectPath,
     sendCreateWorktreeFromBranch,
-    sendFetchRemotes,
 sendFetchPRDetails,
   sendEnsureRepo,
   sendSubscribeGitStatus,
@@ -1012,23 +975,14 @@ sendFetchPRDetails,
   requestTileContent,
   sendRuntimeInput,
   isRuntimeAttached,
-  sendGetFileDiff,
-  sendGetBranchDiffFiles,
   getRepoInfo,
   listWorkflowRuns,
   getWorkflowRun,
-  getReviewState,
   fetchTicket,
   sendTicketChangeStatus,
   sendTicketAddComment,
   sendTicketEditDescription,
   sendTicketResume,
-  markFileViewed,
-  sendAddComment,
-  sendUpdateComment,
-  sendResolveComment,
-  sendDeleteComment,
-  sendGetComments,
   clearGitStatus,
   registerSessionExitHandler,
 }: AppContentProps) {
@@ -1205,12 +1159,6 @@ sendFetchPRDetails,
   // Track PR refresh state for progress indicator
   const [isRefreshingPRs, setIsRefreshingPRs] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [branchDiffFiles, setBranchDiffFiles] = useState<BranchDiffFile[]>([]);
-  const [branchDiffBaseRef, setBranchDiffBaseRef] = useState('');
-  const [branchDiffError, setBranchDiffError] = useState<string | null>(null);
-  const [branchDiffLoaded, setBranchDiffLoaded] = useState(false);
-  const [branchDiffLoading, setBranchDiffLoading] = useState(false);
-  const [branchDiffRefreshing, setBranchDiffRefreshing] = useState(false);
 
   // Worktree cleanup prompt state
   const cleanupRequestIdRef = useRef(0);
@@ -1228,10 +1176,6 @@ sendFetchPRDetails,
   } | null>(null);
   const [alwaysKeepWorktrees, setAlwaysKeepWorktrees] = useState(false);
 
-  // Owning the diff panel's selected file here keeps external triggers
-  // (ChangesPanel clicks, shortcut open) and internal navigation using
-  // the same setter, so re-clicking the same path always lands on it.
-  const [diffSelectedFilePath, setDiffSelectedFilePath] = useState<string | null>(null);
   const agentAvailability = useMemo(() => getAgentAvailability(settings), [settings]);
   const hasAvailableAgents = useMemo(
     () => hasAnyAvailableAgents(agentAvailability),
@@ -1406,7 +1350,7 @@ sendFetchPRDetails,
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'diff' | 'workflowRun' | 'attention' | 'diffDetail' | 'ticketDetail';
+  type DockPanelId = 'workflowRun' | 'attention' | 'ticketDetail';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1421,13 +1365,11 @@ sendFetchPRDetails,
     stack: DockPanelId[];
   }>({
     openPanels: {
-        diff: false,
         workflowRun: false,
         attention: false,
-        diffDetail: false,
         ticketDetail: false,
     },
-    stack: ['diff'],
+    stack: [],
   });
   // The ticket whose detail panel is open (null when none). Paired with the
   // ticketDetail dock panel.
@@ -1779,10 +1721,6 @@ sendFetchPRDetails,
     }
     return daemonSessions.find((session) => session.id === activeSessionId) || null;
   }, [activeSessionId, daemonSessions]);
-  const activeRepoDaemonSession = useMemo(
-    () => activeDaemonSession,
-    [activeDaemonSession],
-  );
   const activeRemoteSession = Boolean(activeDaemonSession?.endpoint_id);
   const activeEndpoint = useMemo(
     () => {
@@ -1796,12 +1734,9 @@ sendFetchPRDetails,
   );
   const openDockPanels = dockState.openPanels;
   const dockPanelStack = dockState.stack;
-  const diffPanelOpen = openDockPanels.diff;
   const workflowRunPanelOpen = openDockPanels.workflowRun;
   const attentionPanelOpen = openDockPanels.attention;
-  const diffDetailPanelOpen = openDockPanels.diffDetail;
   const ticketDetailPanelOpen = openDockPanels.ticketDetail;
-  const changesPanelVisible = view === 'session' && diffPanelOpen && Boolean(activeRepoDaemonSession?.directory);
   const blockingOverlayOpen = locationPickerOpen
     || whatsNew.isOpen
     || settingsOpen
@@ -2449,12 +2384,6 @@ sendFetchPRDetails,
     fitSessionActivePane,
     sendRuntimeInput,
     isRuntimeAttached,
-    getReviewState,
-    addComment: sendAddComment,
-    updateComment: sendUpdateComment,
-    resolveComment: sendResolveComment,
-    deleteComment: sendDeleteComment,
-    getComments: sendGetComments,
     // Ticket detail panel. Inlined (not the handleOpen/CloseTicketDetail
     // callbacks) because those are defined later in the body — past this call's
     // temporal-dead zone — and these are the same two trivial operations.
@@ -3081,203 +3010,6 @@ sendFetchPRDetails,
     });
   }, [getPaneSize, reloadSession, sessions, showError]);
 
-  // Open file in diff detail panel
-  const handleFileSelect = useCallback((path: string, _staged: boolean) => {
-    setDiffSelectedFilePath(path);
-    openDockPanel('diffDetail');
-  }, [openDockPanel]);
-
-  // Fetch diff for diff detail panel
-  // Options: staged (deprecated), baseRef (for PR-like branch diffs)
-  const fetchDiffForReview = useCallback(async (path: string, options?: { staged?: boolean; baseRef?: string }) => {
-    if (!activeRepoDaemonSession?.directory) {
-      throw new Error('No repo directory available');
-    }
-    return sendGetFileDiff(activeRepoDaemonSession.directory, path, options);
-  }, [activeRepoDaemonSession?.directory, sendGetFileDiff]);
-
-  const branchDiffRequestId = useRef(0);
-  const branchDiffLoadedRef = useRef(false);
-  const branchDiffInFlightRef = useRef(false);
-  const branchDiffDirtyAfterCurrentRef = useRef(false);
-  const branchDiffVisibleRef = useRef(false);
-  const branchDiffDirectoryRef = useRef<string | null>(null);
-  const branchDiffCooldownUntilRef = useRef(0);
-  const branchDiffScheduledTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    branchDiffVisibleRef.current = changesPanelVisible;
-    branchDiffDirectoryRef.current = activeRepoDaemonSession?.directory ?? null;
-  }, [activeRepoDaemonSession?.directory, changesPanelVisible]);
-
-  const clearScheduledBranchDiffRefresh = useCallback(() => {
-    if (branchDiffScheduledTimerRef.current !== null) {
-      window.clearTimeout(branchDiffScheduledTimerRef.current);
-      branchDiffScheduledTimerRef.current = null;
-    }
-  }, []);
-
-  const refreshBranchDiff = useCallback(async (directory: string) => {
-    if (branchDiffInFlightRef.current) {
-      branchDiffDirtyAfterCurrentRef.current = true;
-      return;
-    }
-
-    branchDiffInFlightRef.current = true;
-    branchDiffDirtyAfterCurrentRef.current = false;
-    const requestId = ++branchDiffRequestId.current;
-    const hadLoadedBranchDiff = branchDiffLoadedRef.current;
-    const startedAt = Date.now();
-    setBranchDiffLoading(!hadLoadedBranchDiff);
-    setBranchDiffRefreshing(hadLoadedBranchDiff);
-    setBranchDiffError(null);
-    try {
-      const result = await sendGetBranchDiffFiles(directory);
-      if (requestId !== branchDiffRequestId.current) return;
-      if (result.success) {
-        setBranchDiffFiles(result.files);
-        setBranchDiffBaseRef(result.base_ref);
-        setBranchDiffError(null);
-        branchDiffLoadedRef.current = true;
-        setBranchDiffLoaded(true);
-      } else {
-        if (!branchDiffLoadedRef.current) {
-          setBranchDiffFiles([]);
-          setBranchDiffBaseRef(result.base_ref || '');
-          setBranchDiffLoaded(false);
-        }
-        setBranchDiffError(result.error || 'Failed to load branch diff');
-      }
-    } catch (err) {
-      if (requestId !== branchDiffRequestId.current) return;
-      if (!branchDiffLoadedRef.current) {
-        setBranchDiffFiles([]);
-        setBranchDiffBaseRef('');
-        setBranchDiffLoaded(false);
-      }
-      setBranchDiffError(err instanceof Error ? err.message : 'Failed to load branch diff');
-    } finally {
-      if (requestId === branchDiffRequestId.current) {
-        const durationMs = Date.now() - startedAt;
-        if (durationMs >= CHANGES_BRANCH_DIFF_SLOW_THRESHOLD_MS) {
-          branchDiffCooldownUntilRef.current = Date.now() + CHANGES_BRANCH_DIFF_SLOW_COOLDOWN_MS;
-        }
-        branchDiffInFlightRef.current = false;
-        setBranchDiffLoading(false);
-        setBranchDiffRefreshing(false);
-        if (
-          branchDiffDirtyAfterCurrentRef.current &&
-          branchDiffVisibleRef.current &&
-          branchDiffDirectoryRef.current === directory
-        ) {
-          const delayMs = Math.max(0, branchDiffCooldownUntilRef.current - Date.now());
-          clearScheduledBranchDiffRefresh();
-          branchDiffScheduledTimerRef.current = window.setTimeout(() => {
-            branchDiffScheduledTimerRef.current = null;
-            void refreshBranchDiff(directory);
-          }, delayMs);
-        }
-      }
-    }
-  }, [clearScheduledBranchDiffRefresh, sendGetBranchDiffFiles]);
-
-  const scheduleBranchDiffRefresh = useCallback((options?: { force?: boolean; debounceMs?: number }) => {
-    const directory = branchDiffDirectoryRef.current;
-    if (!directory) {
-      return;
-    }
-
-    if (!branchDiffVisibleRef.current) {
-      branchDiffDirtyAfterCurrentRef.current = true;
-      return;
-    }
-
-    if (branchDiffInFlightRef.current) {
-      branchDiffDirtyAfterCurrentRef.current = true;
-      return;
-    }
-
-    const cooldownDelayMs = options?.force
-      ? 0
-      : Math.max(0, branchDiffCooldownUntilRef.current - Date.now());
-    const delayMs = Math.max(options?.debounceMs ?? 0, cooldownDelayMs);
-
-    clearScheduledBranchDiffRefresh();
-    branchDiffScheduledTimerRef.current = window.setTimeout(() => {
-      branchDiffScheduledTimerRef.current = null;
-      void refreshBranchDiff(directory);
-    }, delayMs);
-  }, [clearScheduledBranchDiffRefresh, refreshBranchDiff]);
-
-  useEffect(() => {
-    clearScheduledBranchDiffRefresh();
-    branchDiffRequestId.current += 1;
-    branchDiffLoadedRef.current = false;
-    branchDiffInFlightRef.current = false;
-    branchDiffDirtyAfterCurrentRef.current = false;
-    branchDiffCooldownUntilRef.current = 0;
-    setBranchDiffLoaded(false);
-    setBranchDiffFiles([]);
-    setBranchDiffBaseRef('');
-    setBranchDiffError(null);
-    setBranchDiffLoading(false);
-    setBranchDiffRefreshing(false);
-  }, [activeRepoDaemonSession?.directory, clearScheduledBranchDiffRefresh]);
-
-  useEffect(() => {
-    if (view !== 'session' || !activeRepoDaemonSession?.directory) {
-      clearScheduledBranchDiffRefresh();
-      branchDiffLoadedRef.current = false;
-      setBranchDiffLoaded(false);
-      setBranchDiffFiles([]);
-      setBranchDiffBaseRef('');
-      setBranchDiffError(null);
-      setBranchDiffLoading(false);
-      setBranchDiffRefreshing(false);
-      return;
-    }
-
-    if (!changesPanelVisible) {
-      clearScheduledBranchDiffRefresh();
-      return;
-    }
-
-    scheduleBranchDiffRefresh({ force: true });
-    const intervalId = window.setInterval(() => {
-      scheduleBranchDiffRefresh();
-    }, CHANGES_BRANCH_DIFF_INTERVAL_MS);
-
-    return () => {
-      window.clearInterval(intervalId);
-      clearScheduledBranchDiffRefresh();
-    };
-  }, [
-    activeRepoDaemonSession?.directory,
-    changesPanelVisible,
-    clearScheduledBranchDiffRefresh,
-    scheduleBranchDiffRefresh,
-    view,
-  ]);
-
-  useEffect(() => {
-    if (!gitStatus || !activeRepoDaemonSession?.directory) return;
-    if (gitStatus.directory !== activeRepoDaemonSession.directory) return;
-    branchDiffDirtyAfterCurrentRef.current = true;
-    if (!changesPanelVisible) return;
-    scheduleBranchDiffRefresh({ debounceMs: CHANGES_BRANCH_DIFF_STATUS_DEBOUNCE_MS });
-  }, [activeRepoDaemonSession?.directory, changesPanelVisible, gitStatus, scheduleBranchDiffRefresh]);
-
-  // Diff detail panel handlers
-  const handleOpenDiffDetailPanel = useCallback(() => {
-    setDiffSelectedFilePath(null); // Let the panel pick the first reviewable file.
-    openDockPanel('diffDetail');
-  }, [openDockPanel]);
-
-  const handleCloseDiffDetailPanel = useCallback(() => {
-    closeDockPanel('diffDetail');
-    setDiffSelectedFilePath(null);
-  }, [closeDockPanel]);
-
   // Ticket detail panel handlers — opened from a delegated session (the "from a
   // session" entry); the panel fetches the full record for the selected id.
   const handleOpenTicketDetail = useCallback((ticketId: string) => {
@@ -3318,12 +3050,6 @@ sendFetchPRDetails,
     onEditDescription: sendTicketEditDescription,
     onResume: handleResumeTicket,
   }), [fetchTicket, sendTicketChangeStatus, sendTicketAddComment, sendTicketEditDescription, handleResumeTicket]);
-
-  const handleSendToClaude = useCallback((reference: string) => {
-    if (!activeSessionId) return;
-    sendRuntimeInput(activeSessionId, reference, 'user');
-  }, [activeSessionId, sendRuntimeInput]);
-
 
   const isZedEditorConfigured = useMemo(() => {
     const editor = (settings.editor_executable || '').trim().toLowerCase();
@@ -3368,26 +3094,6 @@ sendFetchPRDetails,
     handleOpenEditor(activeSession.cwd);
   }, [sessions, activeSessionId, activeEndpoint, handleOpenEditor, isZedEditorConfigured, showError]);
 
-  const handleOpenEditorForReview = useCallback((filePath?: string) => {
-    if (!activeRepoDaemonSession?.directory) {
-      showError('No repo directory available');
-      return;
-    }
-    if (activeRemoteSession) {
-      if (!activeEndpoint) {
-        showError('Remote endpoint not available.');
-        return;
-      }
-      if (!isZedEditorConfigured) {
-        showError('Remote open-in-editor currently requires Zed.');
-        return;
-      }
-      handleOpenEditor(activeRepoDaemonSession.directory, filePath, activeEndpoint.ssh_target);
-      return;
-    }
-    handleOpenEditor(activeRepoDaemonSession.directory, filePath);
-  }, [activeEndpoint, activeRemoteSession, activeRepoDaemonSession?.directory, handleOpenEditor, isZedEditorConfigured, showError]);
-
   const remoteEditorAvailable = Boolean(activeRemoteSession && activeEndpoint && isZedEditorConfigured);
 
   const sidebarHeaderActions = useMemo<SidebarHeaderAction[]>(() => ([
@@ -3411,14 +3117,6 @@ sendFetchPRDetails,
       active: workflowRunPanelOpen,
       disabled: !activeSessionId,
       onClick: () => toggleDockPanel('workflowRun'),
-    },
-    {
-      id: 'diff',
-      title: diffPanelOpen ? 'Hide Diff Panel' : 'Show Diff Panel',
-      icon: <DiffIcon />,
-      active: diffPanelOpen,
-      disabled: !activeSessionId,
-      onClick: () => toggleDockPanel('diff'),
     },
     {
       id: 'attention',
@@ -3455,7 +3153,6 @@ sendFetchPRDetails,
     remoteEditorAvailable,
     attentionCount,
     attentionPanelOpen,
-    diffPanelOpen,
     handleOpenEditorForSession,
     workflowRunPanelOpen,
     toggleDockPanel,
@@ -3478,19 +3175,6 @@ sendFetchPRDetails,
     isActive?: boolean;
     available?: boolean;
   }>>>(() => ({
-    'dock.diffDetail': {
-      // Must match the dock.diffDetail keyboard shortcut, which toggles the
-      // diff-detail panel — not the external-editor action (that stays on the
-      // sidebar's "Open in Editor" tool button).
-      run: () => toggleDockPanel('diffDetail'),
-      isActive: diffDetailPanelOpen,
-      available: Boolean(activeSessionId),
-    },
-    'dock.diff': {
-      run: () => toggleDockPanel('diff'),
-      isActive: diffPanelOpen,
-      available: Boolean(activeSessionId),
-    },
     'dock.attention': {
       run: () => toggleDockPanel('attention'),
       isActive: attentionPanelOpen,
@@ -3501,8 +3185,6 @@ sendFetchPRDetails,
     'terminal.toggleZoom': { isActive: activeSessionZoomed, available: Boolean(activeSessionId) },
   }), [
     activeSessionId,
-    diffPanelOpen,
-    diffDetailPanelOpen,
     attentionPanelOpen,
     activeSessionZoomed,
     toggleDockPanel,
@@ -3551,12 +3233,6 @@ sendFetchPRDetails,
     onNextSession: handleNextWorkspace,
     onToggleSidebar: toggleSidebarCollapse,
     onRefreshPRs: handleRefreshPRs,
-    onToggleDiffPanel: () => {
-      toggleDockPanel('diff');
-    },
-    onToggleDiffDetailPanel: () => {
-      toggleDockPanel('diffDetail');
-    },
     onToggleAttentionPanel: () => toggleDockPanel('attention'),
     onOpenSettings: useCallback(() => setSettingsOpen(prev => !prev), []),
     onShowShortcuts: useCallback(() => setShortcutsOpen(prev => !prev), []),
@@ -3853,27 +3529,6 @@ sendFetchPRDetails,
           panelOrder={dockPanelStack}
           panels={[
             {
-              id: 'diff',
-              isOpen: diffPanelOpen,
-              width: 'clamp(280px, 30vw, 380px)',
-              className: 'dock-panel dock-panel--diff',
-              children: (
-                <ChangesPanel
-                  branchDiffFiles={branchDiffFiles}
-                  branchDiffBaseRef={branchDiffBaseRef}
-                  branchDiffError={branchDiffError}
-                  branchDiffLoaded={branchDiffLoaded}
-                  branchDiffLoading={branchDiffLoading}
-                  branchDiffRefreshing={branchDiffRefreshing}
-                  gitStatusLimited={Boolean(gitStatus?.limited && gitStatus.directory === activeRepoDaemonSession?.directory)}
-                  gitStatusLimitedReason={gitStatus?.limited_reason}
-                  selectedFile={null}
-                  onFileSelect={handleFileSelect}
-                  onOpenDiffClick={handleOpenDiffDetailPanel}
-                />
-              ),
-            },
-            {
               id: 'workflowRun',
               isOpen: workflowRunPanelOpen && Boolean(activeSessionId),
               width: 'clamp(420px, 50vw, 680px)',
@@ -3897,37 +3552,6 @@ sendFetchPRDetails,
                   waitingSessions={waitingLocalSessions}
                   prs={prs}
                   onSelectSession={handleSelectSession}
-                />
-              ),
-            },
-            {
-              id: 'diffDetail',
-              isOpen: diffDetailPanelOpen,
-              width: 'clamp(60vw, 72vw, 100vw)',
-              className: 'dock-panel dock-panel--diff-detail',
-              children: (
-                <DiffDetailPanel
-                  isOpen={diffDetailPanelOpen}
-                  gitStatus={gitStatus}
-                  repoPath={activeRepoDaemonSession?.directory || ''}
-                  branch={activeRepoDaemonSession?.branch || ''}
-                  onClose={handleCloseDiffDetailPanel}
-                  fetchDiff={fetchDiffForReview}
-                  sendGetBranchDiffFiles={sendGetBranchDiffFiles}
-                  sendFetchRemotes={sendFetchRemotes}
-                  getReviewState={getReviewState}
-                  markFileViewed={markFileViewed}
-                  addComment={sendAddComment}
-                  updateComment={sendUpdateComment}
-                  resolveComment={sendResolveComment}
-                  deleteComment={sendDeleteComment}
-                  getComments={sendGetComments}
-                  resolvedTheme={resolvedTheme}
-                  selectedFilePath={diffSelectedFilePath}
-                  onSelectFilePath={setDiffSelectedFilePath}
-                  onOpenEditor={handleOpenEditorForReview}
-                  onSendToClaude={activeSessionId ? handleSendToClaude : undefined}
-                  scale={scale}
                 />
               ),
             },

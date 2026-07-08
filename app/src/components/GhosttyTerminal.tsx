@@ -13,6 +13,7 @@ import { exists } from '@tauri-apps/plugin-fs';
 import { homeDir } from '@tauri-apps/api/path';
 import {
   fragmentAtColumn,
+  hyperlinkRangeAt,
   logicalIndexForCell,
   logicalLineAt,
   pathCandidatesForFragment,
@@ -23,6 +24,7 @@ import {
   type LogicalLine,
   type LogicalSpan,
 } from '../utils/terminalLinks';
+import { hyperlinkUriAt, scrollbackHyperlinkUri } from '../utils/ghosttyHyperlinks';
 import {
   initialFocusedMatch,
   startFindScan,
@@ -217,8 +219,8 @@ interface SelectionRange {
   endCol: number;
 }
 
-// ghostty-web's low-level model exposes hyperlink IDs but currently returns
-// null for hyperlink URIs, so OSC 8 labels cannot be opened without API work.
+// OSC 8 hyperlink URIs are read via ghosttyHyperlinks.ts, which reaches into
+// the vendored wasm's render-state/scrollback exports directly.
 // Ghostty's native renderer resets synchronized-output mode after 1000ms so
 // one bad producer cannot freeze rendering indefinitely.
 const SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS = 1000;
@@ -2119,6 +2121,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return 0;
     };
 
+    // OSC 8 hyperlink URI at a viewport cell, resolved through the same
+    // active-vs-scrollback split every other buffer read in this file uses.
+    const hyperlinkUriAtViewportCell = useCallback((row: number, col: number): string | null => {
+      const terminal = terminalRef.current;
+      if (!terminal) return null;
+      const history = terminal.getScrollbackLength();
+      const bufferRow = bufferRowFromViewportRow(row, history, viewportOffsetRef.current);
+      return bufferRow >= history
+        ? hyperlinkUriAt(terminal, bufferRow - history, col)
+        : scrollbackHyperlinkUri(terminal, bufferRow, col);
+    }, []);
+
     const hoverLinkAtCell = useCallback((cell: { row: number; col: number } | null): DetectedTerminalLink | null => {
       const hover = hoverLinkRef.current;
       if (!cell || !hover?.link || hover.generation !== hoverGenerationRef.current) return null;
@@ -2206,6 +2220,27 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         clearHover();
         return;
       }
+      // OSC 8 hyperlinks first: their visible label can contain spaces (e.g.
+      // "Learn more"), so the fragment/path detectors below would clip or
+      // miss them entirely if checked first.
+      const hyperlink = hyperlinkRangeAt(
+        (i) => hyperlinkUriAtViewportCell(logical.firstRow + Math.floor(i / logical.cols), i % logical.cols),
+        index,
+        logical.text.length,
+      );
+      if (hyperlink) {
+        hoverLinkRef.current = {
+          generation,
+          line: logical,
+          startIndex: hyperlink.startCol,
+          endIndex: hyperlink.endCol,
+          link: { kind: 'url', uri: hyperlink.uri, startCol: hyperlink.startCol, endCol: hyperlink.endCol },
+          linkSpan: spanFromLogicalRange(logical, hyperlink.startCol, hyperlink.endCol),
+        };
+        renderSurface(true);
+        updateLinkCursor(cell, acceleratorHeldRef.current);
+        return;
+      }
       const url = urlAtColumn(logical.text, index);
       if (url) {
         hoverLinkRef.current = {
@@ -2264,7 +2299,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return;
         }
       })();
-    }, [cachedPathExists, ensureHomeDir, isContinuationRow, lineAtVisibleRow, renderSurface, updateLinkCursor]);
+    }, [cachedPathExists, ensureHomeDir, hyperlinkUriAtViewportCell, isContinuationRow, lineAtVisibleRow, renderSurface, updateLinkCursor]);
 
     // Link under a cell for click handling: prefer the resolved hover state
     // (paths require it — existence was already validated), fall back to a
@@ -2273,13 +2308,31 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const hovered = hoverLinkAtCell(cell);
       if (hovered) return hovered;
       if (!cell) return null;
+      const terminal = terminalRef.current;
+      if (terminal) {
+        const hyperlink = hyperlinkRangeAt(
+          (i) => hyperlinkUriAtViewportCell(cell.row, i),
+          cell.col,
+          terminal.cols,
+        );
+        if (hyperlink) return { kind: 'url', uri: hyperlink.uri, startCol: hyperlink.startCol, endCol: hyperlink.endCol };
+      }
       const url = urlAtColumn(lineAtVisibleRow(cell.row), cell.col);
       return url ? { kind: 'url', uri: url.uri, startCol: url.startCol, endCol: url.endCol } : null;
-    }, [hoverLinkAtCell, lineAtVisibleRow]);
+    }, [hoverLinkAtCell, hyperlinkUriAtViewportCell, lineAtVisibleRow]);
 
     const openLink = useCallback((link: DetectedTerminalLink) => {
       if (link.kind === 'url' && link.uri) {
-        void openUrl(link.uri);
+        // Claude Code emits file:// OSC 8 links for file paths (e.g. citing a
+        // source file); route those through openPath like a detected path link.
+        if (link.uri.startsWith('file://')) {
+          const rest = link.uri.slice('file://'.length);
+          const slashIndex = rest.indexOf('/');
+          const path = slashIndex === -1 ? rest : rest.slice(slashIndex);
+          void openPath(decodeURIComponent(path));
+        } else {
+          void openUrl(link.uri);
+        }
       } else if (link.kind === 'path' && link.absolutePath) {
         void openPath(link.absolutePath);
       }
@@ -2422,6 +2475,27 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       }
     };
 
+    // Finalize a drag that has no real release event to interpret (window
+    // lost focus, or the OS/browser canceled the implicit pointer capture,
+    // e.g. a context menu opening mid-drag). There is no cell to resolve a
+    // click, link, or command-block hit against here, so this only stops the
+    // drag and copies whatever was already selected — it must never leave
+    // selectingRef stuck true.
+    const cancelSelectionDrag = () => {
+      stopSelectionDrag();
+      if (!selectingRef.current) return;
+      selectingRef.current = false;
+      selectionPointerStartRef.current = null;
+      if (!selectionDragThresholdMetRef.current) {
+        selectionRef.current = null;
+        renderSurface(true);
+        return;
+      }
+      const text = textForSelectionRange(selectionRef.current);
+      selectedTextRef.current = text || null;
+      if (text) void writeClipboardText(text);
+    };
+
     // Track an in-progress selection on the document rather than the terminal
     // element. The drag must keep updating and finalize even when the pointer
     // crosses a sibling overlay (e.g. a split divider sitting above the pane
@@ -2433,6 +2507,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         if (!selectingRef.current || !selectionRef.current) return;
         // The button was released without a mouseup we observed (e.g. focus
         // loss while over another window): finalize so we never get stuck.
+        // `buttons` itself can go stale in WebKit (the engine Tauri uses on
+        // macOS) after a release outside the webview, which is exactly why
+        // the blur/pointercancel listeners below exist as a second net that
+        // doesn't depend on this bit being accurate.
         if ((event.buttons & 1) === 0) {
           void finishSelectionDrag(event);
           return;
@@ -2460,11 +2538,29 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const onUp = (event: MouseEvent) => {
         void finishSelectionDrag(event);
       };
+      // Belt-and-suspenders against a real mouseup never reaching this
+      // listener at all — e.g. the release happens outside the app's window
+      // entirely, or a descendant calls stopPropagation() on the native event
+      // before it bubbles to document. `blur` fires whenever the window loses
+      // focus mid-drag (alt-tab, clicking another app, a native dialog), and
+      // `pointercancel` fires when the browser/OS revokes the implicit
+      // pointer capture (e.g. a context menu opening mid-drag) — the same
+      // pattern already used for pane drags in SessionTerminalWorkspace's
+      // leafDrag.ts. Without this, a swallowed or missed release leaves
+      // selectingRef stuck true and the selection keeps growing on the next
+      // mouse movement, even with no button held.
+      const onCancel = () => {
+        cancelSelectionDrag();
+      };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
+      window.addEventListener('blur', onCancel);
+      window.addEventListener('pointercancel', onCancel);
       selectionDragCleanupRef.current = () => {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        window.removeEventListener('blur', onCancel);
+        window.removeEventListener('pointercancel', onCancel);
       };
     };
 

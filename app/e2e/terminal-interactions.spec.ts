@@ -169,6 +169,45 @@ test.describe('Ghostty terminal interactions', () => {
     await expectOpenedUrl(page, url);
   });
 
+  test('cmd+click opens the hidden uri of an OSC 8 hyperlink label', async ({ page, daemon }) => {
+    // Claude Code emits label-style hyperlinks (e.g. "Learn more") whose
+    // visible text has nothing to do with the target — only the OSC 8 uri
+    // hidden behind the label can resolve it.
+    await installOpenerProbe(page);
+    const terminal = await openTerminalSession(page, daemon, 's-osc8-link');
+    const uri = 'https://example.com/hidden';
+    await writeTerminalOutput(
+      page,
+      's-osc8-link',
+      `[2J[H]8;;${uri}\\Learn more]8;;\\`,
+    );
+
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-osc8-link') ?? ''),
+        { timeout: 5000 },
+      )
+      .toContain('Learn more');
+
+    await terminal.hover({ position: { x: 30, y: 8 } });
+    await expect(terminal).toHaveCSS('cursor', 'text');
+    await terminal.click({ position: { x: 30, y: 8 } });
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_URLS?: string[] }).__OPENED_TERMINAL_URLS ?? [],
+        ),
+        { timeout: 500 },
+      )
+      .toEqual([]);
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'pointer');
+    await terminal.click({ position: { x: 30, y: 8 } });
+    await page.keyboard.up('Meta');
+
+    await expectOpenedUrl(page, uri);
+  });
+
   test('cmd+click opens an existing file path resolved against the session cwd', async ({ page, daemon }) => {
     await installFileLinkProbe(page, ['/tmp/test/terminal-links/src/main.go']);
     const terminal = await openTerminalSession(page, daemon, 's-file-link');

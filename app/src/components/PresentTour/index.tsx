@@ -1,0 +1,934 @@
+/**
+ * PresentTour — continuous scroll-tour reader for a Present round.
+ *
+ * Renders every manifest file's diff as a card in reading order inside ONE
+ * `@pierre/diffs` `CodeView` (react entry), the multi-item sibling of the
+ * single-file `DiffView` used by the main window. See DiffView.tsx for the
+ * annotation/draft wiring this ports from — same library primitives
+ * (`renderAnnotation`, `renderGutterUtility`/`onGutterUtilityClick`,
+ * controlled `selectedLines`, signed `line_end` convention), generalized so a
+ * comment/draft anchor is `${filepath}:${side}:${start}` instead of just
+ * `${side}:${start}`.
+ *
+ * Two design points called out in the slice-1 brief as "investigate, fall
+ * back if unworkable" were resolved toward the documented fallback rather
+ * than the preferred option, given the size of this slice:
+ *
+ *   - Per-file loading/error state: CodeView's controlled `items` only
+ *     accept a real `CodeViewDiffItem` (needs a parsed `FileDiffMetadata`)
+ *     or a `CodeViewFileItem` (needs real file contents) — there is no
+ *     skeleton/placeholder item type. Rather than synthesize placeholder
+ *     diffs, this component renders a single "loading tour…" state until
+ *     every file's diff fetch has settled, then builds the full item list
+ *     once. A per-file error still gets its own card in-order (rendered as
+ *     a plain `type: 'file'` item carrying the error text) rather than
+ *     being dropped, but it will not stream in before its siblings.
+ *   - Summary/footer placement: CodeView's react wrapper renders its own
+ *     internal scroll container (via `containerRef`), not a slot host
+ *     that's known to tolerate injected sibling DOM. Rather than risk
+ *     fighting the library's own layout, the summary card and end-of-tour
+ *     footer are flex siblings around the CodeView, not inside its own
+ *     scroller. They stay put (do not scroll with the tour) as a result —
+ *     acceptable for slice 1 per the brief's stated fallback.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  CodeView,
+  useStableCallback,
+  type AnnotationSide,
+  type CodeViewHandle,
+  type CodeViewItem,
+  type DiffLineAnnotation,
+  type FileContents,
+  type SelectedLineRange,
+} from '@pierre/diffs/react';
+// CodeViewLineSelection/CodeViewOptions are exported from the package root,
+// not the /react entry (same split FileDiffOptions has in DiffView.tsx).
+import { parseDiffFromFile, type CodeViewLineSelection, type CodeViewOptions } from '@pierre/diffs';
+import { useEscapeStack } from '../../hooks/useEscapeStack';
+import type { ResolvedTheme } from '../../hooks/useTheme';
+import type { ReviewComment } from '../../types/generated';
+import { isOriginalSideComment } from '../../utils/reviewComment';
+import { normalizeRange } from '../DiffView';
+import { DiffCommentThread } from '../DiffCommentThread';
+import { Markdown } from '../Markdown';
+import '../DiffView.css';
+import './PresentTour.css';
+
+export interface PresentTourFileDiff {
+  loading: boolean;
+  original?: string;
+  modified?: string;
+  error?: string;
+}
+
+export interface PresentTourFile {
+  path: string;
+  note?: string;
+  diff: PresentTourFileDiff;
+  /** Which rail section this card belongs to. Drives the skip-card
+   * de-emphasis and hides the reviewed toggle on skip cards, since skipped
+   * files aren't part of review progress. Defaults to 'tour' semantics when
+   * omitted (no de-emphasis, toggle shown). */
+  group?: 'tour' | 'other' | 'skip';
+}
+
+/** One annotation's render anchor: which file it's on, and the key
+ * (`${filepath}:${side}:${line}`) its rendered thread carries as
+ * `data-anchor-key`. Used for N/P hopping across the whole round. */
+export interface AnnotationAnchor {
+  path: string;
+  anchorKey: string;
+}
+
+export interface PresentTourProps {
+  summary?: string;
+  files: PresentTourFile[];
+  comments: ReviewComment[];
+  editingCommentId: string | null;
+  readOnlyCommentIds: Set<string>;
+  resolvedTheme?: ResolvedTheme;
+  fontSize?: number;
+  onAddComment: (filepath: string, lineStart: number, lineEnd: number, content: string) => void;
+  onEditComment: (id: string, content: string) => void;
+  onStartEdit: (id: string) => void;
+  onCancelEdit: () => void;
+  onResolveComment: (id: string, resolved: boolean) => void;
+  onDeleteComment: (id: string) => void;
+  onSendToClaude?: (reference: string) => void;
+  /** Path the caller wants the tour scrolled to (rail click / j-k). Paired
+   * with `scrollNonce` so re-clicking the same file still re-scrolls. */
+  scrollToPath?: string | null;
+  scrollNonce?: number;
+  /** Fires with the path nearest the top of the viewport as the user scrolls,
+   * or null when the viewport is scrolled to the very top (the summary
+   * region, above the first file). */
+  onActivePathChange?: (path: string | null) => void;
+  /** Paths the user has marked reviewed (jaunt-style per-file mark). */
+  reviewedPaths: ReadonlySet<string>;
+  onToggleReviewed: (path: string) => void;
+  /** Ids (within `comments`) that originated from manifest author
+   * annotations rather than reviewer replies. Drives read-only rendering
+   * (already covered by readOnlyCommentIds), the outside-diff fallback, and
+   * the N/P hop list — all annotation-specific behavior. */
+  annotationCommentIds?: Set<string>;
+  /** Fires whenever the annotation anchors change (new round, items settle),
+   * with every annotation's render anchor in document order: files in `files`
+   * order, then by rendered line within a file. PresentRoot uses this to
+   * drive N/P hopping without duplicating the grouping logic here. */
+  onAnnotationAnchorsChange?: (anchors: AnnotationAnchor[]) => void;
+  /** Rail-equivalent imperative "scroll to this annotation" instruction for
+   * N/P, paired with `annotationScrollNonce` so re-hopping to the same
+   * anchor (single annotation in the round) still re-scrolls. */
+  scrollToAnnotation?: AnnotationAnchor | null;
+  annotationScrollNonce?: number;
+}
+
+// Metadata carried on each native line annotation, generalized from DiffView's
+// AnnotationMeta with a filepath added so the same (side, line) can anchor
+// independently in different files sharing this one CodeView.
+interface AnnotationMeta {
+  filepath: string;
+  side: AnnotationSide;
+  lineNumber: number;
+  comments: ReviewComment[];
+  draft: boolean;
+  anchorKey: string;
+  /** Set when this group's anchor was re-positioned from a line outside the
+   * visible diff hunks (see the outside-diff fallback below); rendered as a
+   * caption above the thread. */
+  outsideDiffNote?: string;
+  /** Marks a synthetic annotation carrying a file note rather than review
+   * comments — see the file-note-as-annotation design note below `notePlacedPathsRef`
+   * for why notes have to enter the annotation system instead of
+   * `renderHeaderMetadata`. */
+  kind?: 'note';
+  noteMarkdown?: string;
+}
+
+type DraftState = {
+  filepath: string;
+  side: AnnotationSide;
+  start: number;
+  end: number;
+  content: string;
+};
+
+function anchorKeyOf(filepath: string, side: AnnotationSide, start: number): string {
+  return `${filepath}:${side}:${start}`;
+}
+
+type VisibleLineRanges = Record<AnnotationSide, Array<[number, number]>>;
+
+function isLineInRanges(line: number, ranges: Array<[number, number]>): boolean {
+  return ranges.some(([start, end]) => line >= start && line <= end);
+}
+
+// Nearest point to `target` that IS visible, across every hunk range on a
+// side. Every line inside a range is visible, so the nearest point within a
+// given range is just `target` clamped to that range; the overall nearest is
+// whichever range's clamp is closest, with ties broken toward the earlier
+// line (matches the outside-diff fallback's stated tie-break).
+function nearestVisibleLine(target: number, ranges: Array<[number, number]>): number | null {
+  let best: number | null = null;
+  let bestDistance = Infinity;
+  for (const [start, end] of ranges) {
+    const clamped = Math.max(start, Math.min(end, target));
+    const distance = Math.abs(target - clamped);
+    if (distance < bestDistance || (distance === bestDistance && best !== null && clamped < best)) {
+      bestDistance = distance;
+      best = clamped;
+    }
+  }
+  return best;
+}
+
+function getVisibleLineRangesFromDiff(diff: ReturnType<typeof parseDiffFromFile>): VisibleLineRanges {
+  return diff.hunks.reduce<VisibleLineRanges>(
+    (ranges, hunk) => {
+      ranges.deletions.push([hunk.deletionStart, hunk.deletionStart + hunk.deletionCount - 1]);
+      ranges.additions.push([hunk.additionStart, hunk.additionStart + hunk.additionCount - 1]);
+      return ranges;
+    },
+    { additions: [], deletions: [] }
+  );
+}
+
+export function PresentTour({
+  summary,
+  files,
+  comments,
+  editingCommentId,
+  readOnlyCommentIds,
+  resolvedTheme = 'dark',
+  fontSize,
+  onAddComment,
+  onEditComment,
+  onStartEdit,
+  onCancelEdit,
+  onResolveComment,
+  onDeleteComment,
+  onSendToClaude,
+  scrollToPath,
+  scrollNonce,
+  onActivePathChange,
+  reviewedPaths,
+  onToggleReviewed,
+  annotationCommentIds,
+  onAnnotationAnchorsChange,
+  scrollToAnnotation,
+  annotationScrollNonce,
+}: PresentTourProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const handleRef = useRef<CodeViewHandle<AnnotationMeta> | null>(null);
+  const suppressSelectionEndRef = useRef(false);
+  // Populated as a side effect of the items useMemo below (document order:
+  // files order, then rendered line within a file) and read back out by the
+  // annotation-anchors effect further down — same "mutate a ref inside the
+  // items useMemo" pattern this component already uses for frozenRef.
+  const annotationAnchorsRef = useRef<AnnotationAnchor[]>([]);
+  // CodeView computes item heights analytically from a global header-height
+  // constant (see `dist/types.d.ts` `diffHeaderHeight`); a file note rendered
+  // through `renderHeaderMetadata` (part of that header) breaks the layout
+  // math the moment its content is taller than that constant — no `version`
+  // bump can fix it, since the bug is in the height CodeView assumes, not in
+  // whether it re-measures. Annotation slots, by contrast, are DOM-measured
+  // by CodeView's own ResizeManager, so a note that needs to hold a mermaid
+  // diagram has to enter the annotation system as a synthetic "note"
+  // annotation on the file's first visible line instead. Populated in the
+  // items memo below (paths that got a placed note annotation), consumed by
+  // `renderHeaderMetadata` to suppress the header rendering for those files —
+  // the header path stays live as a fallback for files with no visible diff
+  // line to anchor to (see the memo).
+  const notePlacedPathsRef = useRef<Set<string>>(new Set());
+  // CodeView's controlled-item reconciliation keys off each item's `version`
+  // field (see components/CodeView.js `syncItemRecord`): a matching version
+  // — including two `undefined`s — means "no change, keep the cached
+  // record", so a brand new `items` array with different annotations but no
+  // `version` bump is silently ignored (verified against the real library:
+  // annotations built into `items` never reached the DOM without this).
+  // Bumped once per recompute of `items` below and shared by every item in
+  // that pass, since firing on any recompute is correct even though it's
+  // coarser than a per-file version would be.
+  const itemsVersionRef = useRef(0);
+
+  // Mermaid diagrams (in file notes and annotation bodies) render
+  // asynchronously: the item is first measured against a short "loading"
+  // placeholder, then the SVG lands and the header/annotation grows by
+  // hundreds of px. CodeView's cached layout never learns about that growth
+  // on its own, so a diagram completing has to force the same `version` bump
+  // reviewedPaths already forces above — this tick is folded into that memo's
+  // deps for exactly that purpose. rAF-coalesced so several diagrams settling
+  // in the same frame (a file note landing at the same time as annotations
+  // below it) produce one bump instead of one per diagram.
+  const [diagramLayoutTick, setDiagramLayoutTick] = useState(0);
+  const diagramLayoutRafRef = useRef<number | null>(null);
+  const handleDiagramLayoutChange = useCallback(() => {
+    if (diagramLayoutRafRef.current !== null) return;
+    diagramLayoutRafRef.current = requestAnimationFrame(() => {
+      diagramLayoutRafRef.current = null;
+      setDiagramLayoutTick((tick) => tick + 1);
+    });
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (diagramLayoutRafRef.current !== null) cancelAnimationFrame(diagramLayoutRafRef.current);
+    };
+  }, []);
+
+  // Per-anchor draft storage, keyed globally (filepath is already part of the
+  // anchor key) so a draft on file A and a draft on file B can be open at once
+  // — the multi-draft parity requirement this slice must keep.
+  const [drafts, setDrafts] = useState<Record<string, DraftState>>({});
+  const draftKeys = useMemo(() => Object.keys(drafts), [drafts]);
+
+  const openDraft = useCallback((filepath: string, side: AnnotationSide, start: number, end: number) => {
+    const key = anchorKeyOf(filepath, side, start);
+    setDrafts((current) => {
+      if (current[key]) return current;
+      return { ...current, [key]: { filepath, side, start, end, content: '' } };
+    });
+  }, []);
+
+  const updateDraftContent = useCallback((key: string, content: string) => {
+    setDrafts((current) => {
+      if (!current[key]) return current;
+      return { ...current, [key]: { ...current[key], content } };
+    });
+  }, []);
+
+  const closeDraft = useCallback((key: string) => {
+    setDrafts((current) => {
+      if (!(key in current)) return current;
+      const { [key]: _removed, ...rest } = current;
+      return rest;
+    });
+  }, []);
+
+  // Escape closes the most-recently-opened draft first, across ALL files —
+  // same LIFO contract DiffView has for one file, generalized.
+  const handleEscapeDraft = useCallback(() => {
+    if (draftKeys.length === 0) return;
+    closeDraft(draftKeys[draftKeys.length - 1]);
+  }, [draftKeys, closeDraft]);
+  useEscapeStack(handleEscapeDraft, draftKeys.length > 0);
+  useEscapeStack(onCancelEdit, editingCommentId !== null);
+
+  // Freeze each file's shown content while that file has an open draft or is
+  // hosting the comment being edited — same reasoning as DiffView's single
+  // `frozen` state, scoped per file since many files render at once here.
+  const formOpenByFile = useMemo(() => {
+    const open = new Set<string>();
+    for (const key of draftKeys) open.add(drafts[key].filepath);
+    if (editingCommentId) {
+      const editing = comments.find((c) => c.id === editingCommentId);
+      if (editing) open.add(editing.filepath);
+    }
+    return open;
+  }, [draftKeys, drafts, editingCommentId, comments]);
+
+  const frozenRef = useRef<Map<string, { original: string; modified: string }>>(new Map());
+  // Housekeeping: drop frozen snapshots for files that no longer have an open
+  // form, so the next content change is adopted immediately.
+  for (const path of Array.from(frozenRef.current.keys())) {
+    if (!formOpenByFile.has(path)) frozenRef.current.delete(path);
+  }
+
+  const commentsByFile = useMemo(() => {
+    const map = new Map<string, ReviewComment[]>();
+    for (const c of comments) {
+      const list = map.get(c.filepath);
+      if (list) list.push(c);
+      else map.set(c.filepath, [c]);
+    }
+    return map;
+  }, [comments]);
+
+  const draftsByFile = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const key of draftKeys) {
+      const filepath = drafts[key].filepath;
+      const list = map.get(filepath);
+      if (list) list.push(key);
+      else map.set(filepath, [key]);
+    }
+    return map;
+  }, [draftKeys, drafts]);
+
+  const allSettled = files.length > 0 && files.every((f) => !f.diff.loading);
+
+  const handleSaveDraft = useCallback(
+    async (key: string, content: string) => {
+      const d = drafts[key];
+      if (!d) return;
+      const lineStart = d.start;
+      const lineEnd = d.side === 'deletions' ? -d.end : d.end;
+      try {
+        onAddComment(d.filepath, lineStart, lineEnd, content);
+        closeDraft(key);
+      } catch {
+        // Parent owns error reporting; keep the draft so the user can retry.
+      }
+    },
+    [drafts, onAddComment, closeDraft]
+  );
+
+  const handleSendComment = useCallback(
+    (comment: ReviewComment) => {
+      if (!onSendToClaude) return;
+      const ref = normalizeRange({ side: isOriginalSideComment(comment) ? 'deletions' : 'additions', start: comment.line_start, end: Math.abs(comment.line_end) });
+      if (!ref) return;
+      onSendToClaude(`@${comment.filepath}:L${ref.start}${ref.start === ref.end ? '' : `-L${ref.end}`}\nComment: ${comment.content}`);
+    },
+    [onSendToClaude]
+  );
+
+  const renderAnnotation = useCallback(
+    (annotation: DiffLineAnnotation<AnnotationMeta>) => {
+      const meta = annotation.metadata;
+      if (!meta) return null;
+      const key = meta.anchorKey;
+      if (meta.kind === 'note') {
+        return (
+          <div key={key} className="present-tour-file-note-slot">
+            <Markdown className="present-tour-file-note" onDiagramLayoutChange={handleDiagramLayoutChange}>
+              {meta.noteMarkdown ?? ''}
+            </Markdown>
+          </div>
+        );
+      }
+      return (
+        // data-anchor-key lets the N/P scroll effect below locate this
+        // thread's mounted element without CodeView exposing an id hook of
+        // its own on rendered annotation slots.
+        <div key={key} data-anchor-key={key}>
+          <DiffCommentThread
+            comments={meta.comments}
+            draft={meta.draft}
+            editingCommentId={editingCommentId}
+            readOnlyCommentIds={readOnlyCommentIds}
+            showSendToClaude={!!onSendToClaude}
+            draftContent={meta.draft ? drafts[key]?.content : undefined}
+            onDraftContentChange={meta.draft ? (content) => updateDraftContent(key, content) : undefined}
+            onSaveDraft={(content) => handleSaveDraft(key, content)}
+            onCancelDraft={() => closeDraft(key)}
+            onStartEdit={onStartEdit}
+            onEditComment={onEditComment}
+            onCancelEdit={onCancelEdit}
+            onResolveComment={onResolveComment}
+            onDeleteComment={onDeleteComment}
+            onSendComment={handleSendComment}
+            caption={meta.outsideDiffNote}
+            onReply={meta.draft ? undefined : () => openDraft(meta.filepath, meta.side, meta.lineNumber, meta.lineNumber)}
+            onDiagramLayoutChange={handleDiagramLayoutChange}
+          />
+        </div>
+      );
+    },
+    [
+      editingCommentId,
+      readOnlyCommentIds,
+      onSendToClaude,
+      drafts,
+      updateDraftContent,
+      handleSaveDraft,
+      closeDraft,
+      onStartEdit,
+      onEditComment,
+      onCancelEdit,
+      onResolveComment,
+      onDeleteComment,
+      handleSendComment,
+      openDraft,
+      handleDiagramLayoutChange,
+    ]
+  );
+
+  // Build one CodeViewItem per manifest file, in reading order. Only runs
+  // once every file's diff fetch has settled (see the module doc for why).
+  const items = useMemo<CodeViewItem<AnnotationMeta>[]>(() => {
+    annotationAnchorsRef.current = [];
+    notePlacedPathsRef.current = new Set();
+    if (!allSettled) return [];
+    itemsVersionRef.current += 1;
+    const version = itemsVersionRef.current;
+    return files.map((file): CodeViewItem<AnnotationMeta> => {
+      const { diff } = file;
+      if (diff.error || diff.original === undefined || diff.modified === undefined) {
+        return {
+          id: file.path,
+          type: 'file',
+          file: { name: file.path, contents: diff.error ?? 'Failed to load this file’s diff.' },
+          version,
+        };
+      }
+
+      const frozen = frozenRef.current.get(file.path);
+      if (formOpenByFile.has(file.path) && !frozen) {
+        frozenRef.current.set(file.path, { original: diff.original, modified: diff.modified });
+      }
+      const shown = frozenRef.current.get(file.path) ?? { original: diff.original, modified: diff.modified };
+
+      const oldFile: FileContents = { name: file.path, contents: shown.original };
+      const newFile: FileContents = { name: file.path, contents: shown.modified };
+      const fileDiff = parseDiffFromFile(oldFile, newFile);
+      const visibleLineRanges = getVisibleLineRangesFromDiff(fileDiff);
+      const lineCounts = {
+        additions: shown.modified.split('\n').length,
+        deletions: shown.original.split('\n').length,
+      };
+
+      const fileComments = commentsByFile.get(file.path) ?? [];
+      const fileDraftKeys = draftsByFile.get(file.path) ?? [];
+
+      const groups = new Map<string, AnnotationMeta>();
+      for (const comment of fileComments) {
+        const side: AnnotationSide = isOriginalSideComment(comment) ? 'deletions' : 'additions';
+        const max = side === 'deletions' ? lineCounts.deletions : lineCounts.additions;
+        const lineExists = comment.line_start >= 1 && comment.line_start <= max;
+        // A line that doesn't exist at all (stale line number past the
+        // file's own length) is dropped regardless of comment kind — parity
+        // note: DiffView surfaces these via a collapsible "not visible"
+        // banner; this slice drops that affordance (see PR report).
+        if (!lineExists) continue;
+        const ranges = visibleLineRanges[side];
+        let line = comment.line_start;
+        let outsideDiffNote: string | undefined;
+        if (!isLineInRanges(line, ranges)) {
+          // A collapsed-hunk line otherwise gets dropped the same way — EXCEPT
+          // manifest author annotations, which can legitimately point at
+          // unchanged code far from any hunk. Those get re-anchored to the
+          // nearest visible line instead of disappearing.
+          if (!annotationCommentIds?.has(comment.id)) continue;
+          const nearest = nearestVisibleLine(line, ranges);
+          if (nearest === null) continue; // file has no visible lines at all on this side
+          line = nearest;
+          const originalEnd = Math.abs(comment.line_end);
+          const rangeText = comment.line_start === originalEnd ? `${comment.line_start}` : `${comment.line_start}–${originalEnd}`;
+          outsideDiffNote = `refers to line ${rangeText}, outside the visible diff`;
+        }
+        const key = anchorKeyOf(file.path, side, line);
+        let group = groups.get(key);
+        if (!group) {
+          group = { filepath: file.path, side, lineNumber: line, comments: [], draft: false, anchorKey: key };
+          groups.set(key, group);
+        }
+        if (outsideDiffNote && !group.outsideDiffNote) group.outsideDiffNote = outsideDiffNote;
+        group.comments.push(comment);
+      }
+      for (const key of fileDraftKeys) {
+        const d = drafts[key];
+        let group = groups.get(key);
+        if (!group) {
+          group = { filepath: file.path, side: d.side, lineNumber: d.start, comments: [], draft: true, anchorKey: key };
+          groups.set(key, group);
+        } else {
+          group.draft = true;
+        }
+      }
+
+      const all = Array.from(groups.values());
+
+      // Doc-order anchor list for N/P: this file's annotation-bearing groups,
+      // by rendered line — independent of the active/rest render-order split
+      // just below, which is about which thread paints an open form first,
+      // not hop order. Consumed by the annotation-anchors effect after this
+      // memo commits (see annotationAnchorsRef's declaration for why a ref).
+      const fileAnnotationGroups = all
+        .filter((g) => g.comments.some((c) => annotationCommentIds?.has(c.id)))
+        .sort((a, b) => a.lineNumber - b.lineNumber);
+      for (const g of fileAnnotationGroups) {
+        annotationAnchorsRef.current.push({ path: file.path, anchorKey: g.anchorKey });
+      }
+
+      const hasOpenForm = (g: AnnotationMeta) => g.draft || g.comments.some((c) => c.id === editingCommentId);
+      const active = all.filter(hasOpenForm).sort((a, b) => a.anchorKey.localeCompare(b.anchorKey));
+      const rest = all.filter((g) => !hasOpenForm(g));
+
+      // A file note anchors to the first visible line (additions, falling
+      // back to deletions) so it renders as a real DOM-measured annotation —
+      // see notePlacedPathsRef's declaration for why. A file with no visible
+      // hunk lines on either side (fully-context diff) can't anchor one; that
+      // case falls back to the header path via notePlacedPathsRef staying
+      // empty for it.
+      let noteAnnotation: DiffLineAnnotation<AnnotationMeta> | undefined;
+      if (file.note) {
+        const additionsStart = visibleLineRanges.additions[0]?.[0];
+        const deletionsStart = visibleLineRanges.deletions[0]?.[0];
+        const side: AnnotationSide | undefined = additionsStart !== undefined ? 'additions' : deletionsStart !== undefined ? 'deletions' : undefined;
+        const lineNumber = side === 'additions' ? additionsStart : deletionsStart;
+        if (side !== undefined && lineNumber !== undefined) {
+          const noteMeta: AnnotationMeta = {
+            kind: 'note',
+            noteMarkdown: file.note,
+            filepath: file.path,
+            side,
+            lineNumber,
+            comments: [],
+            draft: false,
+            anchorKey: `note:${file.path}`,
+          };
+          noteAnnotation = { side, lineNumber, metadata: noteMeta };
+          notePlacedPathsRef.current.add(file.path);
+        }
+      }
+
+      const annotations: DiffLineAnnotation<AnnotationMeta>[] = [
+        ...(noteAnnotation ? [noteAnnotation] : []),
+        ...[...active, ...rest].map((meta) => ({
+          side: meta.side,
+          lineNumber: meta.lineNumber,
+          metadata: meta,
+        })),
+      ];
+
+      return { id: file.path, type: 'diff', fileDiff, annotations, version };
+    });
+    // frozenRef is a ref (mutated in-place above); its contents are captured
+    // deliberately as part of this computation and don't need to be a dep.
+    // reviewedPaths is included purely to force a `version` bump on every
+    // reviewed toggle — same reasoning as editingCommentId above: CodeView's
+    // controlled items only re-render on a version bump (see module doc), and
+    // the reviewed indicator is otherwise rendered through renderHeaderPrefix,
+    // which this codebase has not proven re-renders on its own without one.
+    // diagramLayoutTick is included for the identical reason: a mermaid
+    // diagram settling (see handleDiagramLayoutChange above) needs the same
+    // version bump to invalidate CodeView's stale cached item height.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allSettled, files, commentsByFile, draftsByFile, drafts, formOpenByFile, editingCommentId, reviewedPaths, annotationCommentIds, diagramLayoutTick]);
+
+  // Notify the parent of the current annotation anchor list once items has
+  // committed (annotationAnchorsRef was populated by the memo above). A plain
+  // effect, not a callback inside the memo itself — that memo runs during
+  // render and must stay side-effect-free.
+  useEffect(() => {
+    onAnnotationAnchorsChange?.(annotationAnchorsRef.current);
+  }, [items, onAnnotationAnchorsChange]);
+
+  const handleGutterUtilityClick = useStableCallback(
+    (range: SelectedLineRange, context: { item: CodeViewItem<AnnotationMeta> }) => {
+      const normalized = normalizeRange(range);
+      if (!normalized) return;
+      const { side, start, end } = normalized;
+      suppressSelectionEndRef.current = true;
+      openDraft(context.item.id, side, start, end);
+    }
+  );
+
+  const handleLineSelectionEnd = useStableCallback(
+    (range: SelectedLineRange | null, context: { item: CodeViewItem<AnnotationMeta> }) => {
+      if (suppressSelectionEndRef.current) {
+        suppressSelectionEndRef.current = false;
+        return;
+      }
+      if (!range) return;
+      const normalized = normalizeRange(range);
+      if (!normalized) return;
+      const { side, start, end } = normalized;
+      openDraft(context.item.id, side, start, end);
+    }
+  );
+
+  const noteByPath = useMemo(() => new Map(files.map((f) => [f.path, f.note])), [files]);
+  const groupByPath = useMemo(() => new Map(files.map((f) => [f.path, f.group ?? 'tour'])), [files]);
+
+  // The library's items don't carry an arbitrary className slot, so the
+  // skip-card de-emphasis (see .present-tour-card-skip in PresentTour.css) is
+  // applied imperatively to each rendered card's root element — the same
+  // `getRenderedItems()` escape hatch handleScroll below already relies on.
+  // CodeView virtualizes: scrolling can mount new item elements without the
+  // `items` array changing, so this also has to re-run on every scroll (see
+  // handleScroll) — this effect alone only covers items already rendered
+  // when the item list settles.
+  const syncSkipClasses = useCallback(() => {
+    const instance = handleRef.current?.getInstance();
+    if (!instance) return;
+    for (const rendered of instance.getRenderedItems()) {
+      const isSkip = groupByPath.get(rendered.id) === 'skip';
+      rendered.element.classList.toggle('present-tour-card-skip', isSkip);
+    }
+  }, [groupByPath]);
+
+  useEffect(() => {
+    if (!allSettled) return;
+    syncSkipClasses();
+  }, [allSettled, items, groupByPath, syncSkipClasses]);
+
+  const renderHeaderMetadata = useCallback(
+    (item: CodeViewItem<AnnotationMeta>) => {
+      // The note already rendered as an annotation for this file (see
+      // notePlacedPathsRef) — this header path is only the fallback for
+      // files with no visible diff line to anchor a note annotation to.
+      if (notePlacedPathsRef.current.has(item.id)) return null;
+      const note = noteByPath.get(item.id);
+      if (!note) return null;
+      return (
+        <Markdown className="present-tour-file-note" onDiagramLayoutChange={handleDiagramLayoutChange}>
+          {note}
+        </Markdown>
+      );
+    },
+    [noteByPath, handleDiagramLayoutChange]
+  );
+
+  const renderHeaderPrefix = useCallback(
+    (item: CodeViewItem<AnnotationMeta>) => {
+      // Skipped files aren't part of review progress — no toggle to show.
+      if (groupByPath.get(item.id) === 'skip') return null;
+      const isReviewed = reviewedPaths.has(item.id);
+      return (
+        <button
+          type="button"
+          className={`present-tour-reviewed-toggle ${isReviewed ? 'is-reviewed' : ''}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleReviewed(item.id);
+          }}
+          title={isReviewed ? 'Mark as not reviewed' : 'Mark as reviewed'}
+        >
+          <span className="present-tour-reviewed-check">{isReviewed ? '✓' : '○'}</span>
+          <span className="present-tour-reviewed-label">{isReviewed ? 'Reviewed' : 'Mark reviewed'}</span>
+          <kbd>R</kbd>
+        </button>
+      );
+    },
+    [reviewedPaths, onToggleReviewed, groupByPath]
+  );
+
+  const options = useMemo<CodeViewOptions<AnnotationMeta>>(
+    () => ({
+      diffStyle: 'unified',
+      expandUnchanged: false,
+      diffIndicators: 'classic',
+      theme: { dark: 'pierre-dark', light: 'pierre-light' },
+      themeType: resolvedTheme,
+      preferredHighlighter: 'shiki-js',
+      enableLineSelection: true,
+      onLineSelectionEnd: handleLineSelectionEnd,
+      enableGutterUtility: true,
+      onGutterUtilityClick: handleGutterUtilityClick,
+      stickyHeaders: true,
+    }),
+    [resolvedTheme, handleLineSelectionEnd, handleGutterUtilityClick]
+  );
+
+  const selectedLines: CodeViewLineSelection | null = null;
+
+  // Scroll-pin: apply DiffView's cold-window defense (see the long comment
+  // there) to the tour's own scroll container. Arms once per mount. Shared
+  // as a ref (not a closure-local variable) because the rail/j-k scrollTo
+  // effect below also needs to arm it — see that effect's comment for why.
+  const userTookOverRef = useRef(false);
+  // Tracks allSettled as of the previous run of the scroll-replay effect
+  // below, to detect the specific false->true transition (CodeView just
+  // mounted this commit) rather than "a scroll has ever fired". See that
+  // effect's comment.
+  const wasSettledRef = useRef(false);
+  useEffect(() => {
+    const scroller = containerRef.current;
+    if (!scroller) return;
+    const takeover = () => {
+      userTookOverRef.current = true;
+    };
+    const onNativeScroll = () => {
+      if (!userTookOverRef.current && scroller.scrollTop !== 0) scroller.scrollTop = 0;
+    };
+    scroller.addEventListener('wheel', takeover, { passive: true });
+    scroller.addEventListener('touchstart', takeover, { passive: true });
+    scroller.addEventListener('pointerdown', takeover, { passive: true });
+    scroller.addEventListener('keydown', takeover);
+    scroller.addEventListener('scroll', onNativeScroll);
+    return () => {
+      scroller.removeEventListener('wheel', takeover);
+      scroller.removeEventListener('touchstart', takeover);
+      scroller.removeEventListener('pointerdown', takeover);
+      scroller.removeEventListener('keydown', takeover);
+      scroller.removeEventListener('scroll', onNativeScroll);
+    };
+  }, []);
+
+  // Rail-driven / j-k-driven scroll: nonce forces a re-scroll even to the
+  // same path (e.g. re-pressing j at the last file). A null scrollToPath
+  // paired with an advanced nonce means "scroll to the summary" (stop 0):
+  // the rail's pinned Summary row has no item id to scroll to, so this
+  // resets the scroller itself to the top instead of asking CodeView to
+  // resolve an item. `scrollNonce` (not scrollToPath) is what distinguishes
+  // "no request yet" (nonce still at its initial 0) from an explicit
+  // scroll-to-summary request, since scrollToPath is null in both cases.
+  //
+  // This request is itself deliberate user-driven navigation, but it does
+  // not fire a native wheel/touch/pointerdown/keydown ON THE SCROLLER (the
+  // rail lives outside PresentTour, and the click/keypress that triggered it
+  // targets the rail, not the scroll container) — the gutter "+" button
+  // used to open a draft has the same property (its click doesn't bubble a
+  // pointerdown out to the container's listener). Verified empirically: the
+  // library's smooth `scrollTo` fires native `scroll` events on the same
+  // container the cold-window pin listens on, and without this line those
+  // events kept getting fought back to 0 mid-animation, so a rail click
+  // issued before the user's first raw wheel/touch was silently swallowed.
+  // Arm the same flag the pin checks so the pin treats this as real input.
+  //
+  // `allSettled` is in the deps so a request that arrives while CodeView isn't
+  // mounted yet (handleRef.current is null / rows aren't laid out) is not lost:
+  // this effect no-ops without touching userTookOverRef while loading, then
+  // re-runs and performs the still-pending scroll once allSettled flips true.
+  // The arming stays here (at actual scroll time), not in a separate
+  // loading-phase branch, so a request that never got to scroll never marks
+  // the pin as taken over.
+  //
+  // wasSettledRef tracks whether the PREVIOUS run of this same effect already
+  // saw allSettled=true. It updates on every run (even the early-return ones,
+  // so a settle that happens with no scroll pending is still recorded) and is
+  // read before that update — so it's true exactly when CodeView had a prior
+  // commit to lay itself out in before this scroll, and false the one time
+  // allSettled just flipped true THIS render (CodeView mounts and this effect
+  // fires in the same commit, before the browser has laid out the fresh
+  // container). CodeView.scrollTo silently no-ops if it can't resolve a
+  // destination against an unmeasured layout, so that one case gets a rAF to
+  // let layout settle first; every other scroll (rail/j-k on an
+  // already-mounted tour) stays perfectly synchronous, unchanged from before.
+  useEffect(() => {
+    const wasSettled = wasSettledRef.current;
+    wasSettledRef.current = allSettled;
+    const hasRequest = (scrollNonce ?? 0) > 0;
+    if (!hasRequest || !allSettled) return;
+    const handle = handleRef.current;
+    if (!handle) return;
+    userTookOverRef.current = true;
+    const performScroll = () => {
+      if (scrollToPath) {
+        handle.scrollTo({ type: 'item', id: scrollToPath, align: 'start', behavior: 'smooth' });
+      } else {
+        containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    };
+    if (!wasSettled) {
+      const raf = requestAnimationFrame(performScroll);
+      return () => cancelAnimationFrame(raf);
+    }
+    performScroll();
+    // scrollNonce intentionally included so repeat clicks on the same path (or
+    // repeat clicks on Summary) re-fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollToPath, scrollNonce, allSettled]);
+
+  // N/P annotation hop: first get the target file into view via the same
+  // item-scroll CodeView uses for the rail/j-k path above, then locate the
+  // specific thread by its data-anchor-key (see renderAnnotation) and center
+  // it. CodeView virtualizes, so a just-scrolled-into-view file's annotation
+  // slot may not be mounted yet on the very next frame — retry across a few
+  // rAFs before giving up silently, rather than risk polling forever.
+  useEffect(() => {
+    if (!scrollToAnnotation) return;
+    const hasRequest = (annotationScrollNonce ?? 0) > 0;
+    if (!hasRequest || !allSettled) return;
+    const handle = handleRef.current;
+    if (!handle) return;
+    userTookOverRef.current = true;
+    const { path, anchorKey } = scrollToAnnotation;
+    handle.scrollTo({ type: 'item', id: path, align: 'start', behavior: 'smooth' });
+    const MAX_ATTEMPTS = 10;
+    let attempts = 0;
+    let raf = 0;
+    const tryLocate = () => {
+      const el = containerRef.current?.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(anchorKey)}"]`);
+      if (el) {
+        el.scrollIntoView({ block: 'center' });
+        return;
+      }
+      attempts += 1;
+      if (attempts >= MAX_ATTEMPTS) return;
+      raf = requestAnimationFrame(tryLocate);
+    };
+    raf = requestAnimationFrame(tryLocate);
+    return () => cancelAnimationFrame(raf);
+    // annotationScrollNonce intentionally included so re-hopping to the same
+    // anchor (e.g. a round with a single annotation) still re-scrolls.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollToAnnotation, annotationScrollNonce, allSettled]);
+
+  // Track the file nearest the top of the viewport so the rail can highlight
+  // it. There is no `data-*` attribute on CodeView's rendered item roots to
+  // query by id (confirmed against the real shadow DOM output, not just the
+  // types), so this uses the library's own `getRenderedItems()` — each
+  // record carries the real mounted `element` for that item — rather than a
+  // guessed selector.
+  const handleScroll = useCallback(
+    (scrollTop: number) => {
+      syncSkipClasses();
+      if (!onActivePathChange || !containerRef.current) return;
+      // At the very top of the scroller there is nothing above the first
+      // file to have scrolled past — this is the summary region.
+      if (scrollTop <= 0) {
+        onActivePathChange(null);
+        return;
+      }
+      const instance = handleRef.current?.getInstance();
+      if (!instance) return;
+      const containerTop = containerRef.current.getBoundingClientRect().top;
+      const threshold = 80;
+      let bestPath: string | null = null;
+      let bestTop = -Infinity; // largest top at-or-above the threshold line
+      let nearestPath: string | null = null;
+      let nearestDistance = Infinity; // fallback: closest to the threshold line either side
+      for (const rendered of instance.getRenderedItems()) {
+        const top = rendered.element.getBoundingClientRect().top - containerTop;
+        if (top <= threshold && top > bestTop) {
+          bestTop = top;
+          bestPath = rendered.id;
+        }
+        const distance = Math.abs(top - threshold);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestPath = rendered.id;
+        }
+      }
+      const path = bestPath ?? nearestPath;
+      if (path) onActivePathChange(path);
+    },
+    [onActivePathChange, syncSkipClasses]
+  );
+
+  return (
+    <div
+      className="present-tour"
+      data-testid="present-tour"
+      style={fontSize ? ({ '--diffs-font-size': `${fontSize}px` } as React.CSSProperties) : undefined}
+    >
+      {summary && (
+        <div className="present-tour-summary" data-testid="present-tour-summary">
+          <Markdown>{summary}</Markdown>
+        </div>
+      )}
+
+      {!allSettled ? (
+        <div className="present-tour-loading">Loading tour…</div>
+      ) : items.length === 0 ? (
+        <div className="present-tour-loading">No files in this round.</div>
+      ) : (
+        <CodeView<AnnotationMeta>
+          ref={handleRef}
+          items={items}
+          options={options}
+          className="present-tour-scroller"
+          style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
+          containerRef={containerRef}
+          selectedLines={selectedLines}
+          renderAnnotation={renderAnnotation}
+          renderHeaderMetadata={renderHeaderMetadata}
+          renderHeaderPrefix={renderHeaderPrefix}
+          onScroll={handleScroll}
+          disableWorkerPool
+        />
+      )}
+
+      {allSettled && items.length > 0 && (
+        <div className="present-tour-footer" data-testid="present-tour-footer">
+          End of tour — {items.length} file{items.length === 1 ? '' : 's'} reviewed.
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default PresentTour;

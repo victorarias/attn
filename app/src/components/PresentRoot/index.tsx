@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useDaemonSocket } from '../../hooks/useDaemonSocket';
 import { usePresentAutomationBridge } from '../../hooks/usePresentAutomationBridge';
-import { DiffView } from '../DiffView';
+import { usePresentReviewedMarks } from '../../hooks/usePresentReviewedMarks';
+import { PresentTour, type PresentTourFile } from '../PresentTour';
+import { DriveBar } from './DriveBar';
 import type {
   Presentation,
   PresentationRound,
   PresentationComment,
-  FileObject,
   ReviewComment,
   PresentCommentInput,
 } from '../../types/generated';
+import type { AnnotationAnchor } from '../PresentTour';
 import { hideBootSplash } from '../../utils/bootSplash';
 import '../../App.css';
 import './PresentRoot.css';
@@ -45,6 +45,20 @@ interface DiffCacheEntry {
   original?: string;
   modified?: string;
   error?: string;
+}
+
+// A rail/tour document row, unified across the three groups the rail derives
+// from a round: the authored tour (manifest.files, in order), Other (paths
+// changed in the round but not named by the manifest, alphabetical), and
+// Skipped (manifest.skip). Additions/deletions on Other/Skipped rows come
+// from the round's changed_files list — the manifest itself only carries
+// stats for tour files.
+interface DocFile {
+  path: string;
+  note?: string;
+  additions?: number;
+  deletions?: number;
+  group: 'tour' | 'other' | 'skip';
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -132,8 +146,16 @@ export function PresentRoot() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [daemonSettings, setDaemonSettings] = useState<Record<string, string>>({});
   const [refreshSignal, setRefreshSignal] = useState(0);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [diffState, setDiffState] = useState<DiffCacheEntry | null>(null);
+  // `activePath` drives the rail's highlight; it's updated both by explicit
+  // navigation (rail click, j/k) and passively by the tour reporting which
+  // file scrolled nearest the top. `scrollRequest` is the tour's imperative
+  // "scroll to this file" instruction — kept separate from `activePath` so a
+  // passive activePath update from scrolling can never itself re-trigger a
+  // programmatic scroll (which would fight the user's own scroll gesture).
+  const [activePath, setActivePath] = useState<string | null>(null);
+  const [scrollRequest, setScrollRequest] = useState<{ path: string | null; nonce: number } | null>(null);
+  const scrollNonceRef = useRef(0);
+  const [fileDiffs, setFileDiffs] = useState<Record<string, DiffCacheEntry>>({});
   const [driftDismissed, setDriftDismissed] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
@@ -142,16 +164,19 @@ export function PresentRoot() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const draftIdCounterRef = useRef(0);
 
-  // Cache of fetched diffs, keyed by `${round.id}:${path}`, valid for the
-  // lifetime of the loaded round. A fresh round (new refreshSignal) gets a
-  // fresh cache automatically because the key includes round.id.
-  const diffCacheRef = useRef<Map<string, DiffCacheEntry>>(new Map());
   const railRef = useRef<HTMLOListElement>(null);
-  // Kept in sync with selectedPath so the diff-fetch effect below can check
-  // "is this response still for the current selection" without nesting a
-  // setState call inside a setSelectedPath updater (updaters must stay pure).
-  const selectedPathRef = useRef<string | null>(null);
-  selectedPathRef.current = selectedPath;
+  // Kept in sync with the loaded round's identity so the diff-fetch effect
+  // below can reject stale responses from a PREVIOUS round after a
+  // presentation_updated refresh reloads the round (new round.id/base/head).
+  const activeRoundKeyRef = useRef<string | null>(null);
+  activeRoundKeyRef.current = round ? round.id : null;
+
+  // path=null requests a scroll to the pinned Summary row (stop 0).
+  const requestScroll = useCallback((path: string | null) => {
+    scrollNonceRef.current += 1;
+    setActivePath(path);
+    setScrollRequest({ path, nonce: scrollNonceRef.current });
+  }, []);
 
   // Fires once, unconditionally, regardless of load/error state below — the
   // splash must come down even if the presentation id is missing or the
@@ -201,8 +226,7 @@ export function PresentRoot() {
         setRepoHeadSha(h);
         setLoadError(null);
         setDriftDismissed(false);
-        diffCacheRef.current = new Map();
-        setSelectedPath((current) => {
+        setActivePath((current) => {
           if (current && r.manifest.files.some((f) => f.path === current)) return current;
           return r.manifest.files[0]?.path ?? null;
         });
@@ -218,101 +242,272 @@ export function PresentRoot() {
     };
   }, [presentationId, hasReceivedInitialState, getPresentationRound, refreshSignal]);
 
-  // Fetch (or serve from cache) the diff for the selected file, pinned to the
-  // round's base/head SHAs. Guards against a stale response for a
-  // previously-selected file clobbering the currently-selected one.
+  // tour = manifest.files, in authored order. other = paths the round's
+  // changed_files carries that the manifest didn't name (neither tour nor
+  // skip), alphabetical. skip = manifest.skip, with stats backfilled from
+  // changed_files when available (the manifest itself only carries stats for
+  // tour files — see present.go's handleGetPresentationRound). An absent
+  // changed_files (old daemon, or a git error) collapses `other` to empty and
+  // skip rows lose their stats, but tour/skip still render as before.
+  const tourDocFiles = useMemo<DocFile[]>(
+    () => (round?.manifest.files ?? []).map((f) => ({ ...f, group: 'tour' as const })),
+    [round]
+  );
+  const changedByPath = useMemo(() => {
+    const map = new Map<string, { additions?: number; deletions?: number }>();
+    for (const f of round?.changed_files ?? []) map.set(f.path, { additions: f.additions, deletions: f.deletions });
+    return map;
+  }, [round]);
+  const otherDocFiles = useMemo<DocFile[]>(() => {
+    const tourPaths = new Set(tourDocFiles.map((f) => f.path));
+    const skipPaths = new Set(round?.manifest.skip ?? []);
+    return (round?.changed_files ?? [])
+      .filter((f) => !tourPaths.has(f.path) && !skipPaths.has(f.path))
+      .map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions, group: 'other' as const }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }, [round, tourDocFiles]);
+  const skipDocFiles = useMemo<DocFile[]>(
+    () =>
+      (round?.manifest.skip ?? []).map((path) => ({
+        path,
+        additions: changedByPath.get(path)?.additions,
+        deletions: changedByPath.get(path)?.deletions,
+        group: 'skip' as const,
+      })),
+    [round, changedByPath]
+  );
+  // Full tour document order: appended cards after the authored tour.
+  const allDocFiles = useMemo<DocFile[]>(
+    () => [...tourDocFiles, ...otherDocFiles, ...skipDocFiles],
+    [tourDocFiles, otherDocFiles, skipDocFiles]
+  );
+  // Review progress (marks, "N of M", coverage advisory) covers tour + other
+  // only — skipped files were never meant to be walked.
+  const progressDocFiles = useMemo<DocFile[]>(() => [...tourDocFiles, ...otherDocFiles], [tourDocFiles, otherDocFiles]);
+  const groupByPath = useMemo(() => new Map(allDocFiles.map((f) => [f.path, f.group])), [allDocFiles]);
+
+  // Fetch every tour/other/skip file's diff, pinned to the round's base/head
+  // SHAs, with bounded concurrency — the tour renders all of them at once,
+  // unlike the old single-selection pane that only ever needed one file at a
+  // time. A fresh round (new refreshSignal / new round.id) always gets a
+  // fresh fetch pass: `fileDiffs` is reset to all-loading up front.
   useEffect(() => {
-    if (!presentation || !round || !selectedPath) {
-      setDiffState(null);
+    if (!presentation || !round) {
+      setFileDiffs({});
       return;
     }
 
-    const cacheKey = `${round.id}:${selectedPath}`;
-    const cached = diffCacheRef.current.get(cacheKey);
-    if (cached) {
-      setDiffState(cached);
-      return;
-    }
+    const paths = allDocFiles.map((f) => f.path);
+    const initial: Record<string, DiffCacheEntry> = {};
+    for (const path of paths) initial[path] = { loading: true };
+    setFileDiffs(initial);
 
-    const loadingEntry: DiffCacheEntry = { loading: true };
-    diffCacheRef.current.set(cacheKey, loadingEntry);
-    setDiffState(loadingEntry);
-
-    const requestedPath = selectedPath;
+    let cancelled = false;
     const requestedRoundId = round.id;
-    sendGetFileDiff(presentation.repo_path, requestedPath, {
-      baseRef: round.base_sha,
-      headRef: round.head_sha,
-    })
-      .then((result) => {
-        const entry: DiffCacheEntry = result.success
-          ? { loading: false, original: result.original, modified: result.modified }
-          : { loading: false, error: result.error || 'Failed to load diff.' };
-        diffCacheRef.current.set(`${requestedRoundId}:${requestedPath}`, entry);
-        if (selectedPathRef.current === requestedPath) {
-          setDiffState(entry);
-        }
-      })
-      .catch((err) => {
-        const entry: DiffCacheEntry = {
-          loading: false,
-          error: err instanceof Error ? err.message : 'Failed to load diff.',
-        };
-        diffCacheRef.current.set(`${requestedRoundId}:${requestedPath}`, entry);
-        if (selectedPathRef.current === requestedPath) {
-          setDiffState(entry);
-        }
-      });
-    // round.id/base_sha/head_sha are stable for the loaded round's lifetime;
-    // presentation.repo_path likewise. sendGetFileDiff is a stable callback.
-  }, [presentation, round, selectedPath, sendGetFileDiff]);
+    const repoPath = presentation.repo_path;
+    const baseRef = round.base_sha;
+    const headRef = round.head_sha;
+    const CONCURRENCY = 4;
+    let nextIndex = 0;
 
-  const files: FileObject[] = round?.manifest.files ?? [];
+    const isStale = () => cancelled || activeRoundKeyRef.current !== requestedRoundId;
 
+    async function worker() {
+      for (;;) {
+        const index = nextIndex++;
+        if (index >= paths.length) return;
+        const path = paths[index];
+        try {
+          const result = await sendGetFileDiff(repoPath, path, { baseRef, headRef });
+          if (isStale()) return;
+          const entry: DiffCacheEntry = result.success
+            ? { loading: false, original: result.original, modified: result.modified }
+            : { loading: false, error: result.error || 'Failed to load diff.' };
+          setFileDiffs((prev) => ({ ...prev, [path]: entry }));
+        } catch (err) {
+          if (isStale()) return;
+          setFileDiffs((prev) => ({
+            ...prev,
+            [path]: { loading: false, error: err instanceof Error ? err.message : 'Failed to load diff.' },
+          }));
+        }
+      }
+    }
+
+    const workerCount = Math.min(CONCURRENCY, paths.length);
+    for (let i = 0; i < workerCount; i++) void worker();
+
+    return () => {
+      cancelled = true;
+    };
+    // round.id/base_sha/head_sha/presentation.repo_path are stable for the
+    // loaded round's lifetime; sendGetFileDiff is a stable callback.
+  }, [presentation, round, sendGetFileDiff]);
+
+  const progressPaths = useMemo(() => progressDocFiles.map((f) => f.path), [progressDocFiles]);
+
+  const { reviewed, toggleReviewed, markReviewed } = usePresentReviewedMarks(
+    presentationId,
+    round?.id ?? null,
+    progressPaths
+  );
+
+  // J/K walk the full appended-tour document order (tour, other, skip cards
+  // alike); mark/toggle below are what keep skipped files out of progress.
   const moveSelection = useCallback((delta: number) => {
-    setSelectedPath((current) => {
-      if (files.length === 0) return current;
-      const index = current ? files.findIndex((f) => f.path === current) : -1;
-      const nextIndex = index === -1 ? 0 : Math.max(0, Math.min(files.length - 1, index + delta));
-      return files[nextIndex]?.path ?? current;
-    });
-  }, [files]);
+    if (allDocFiles.length === 0) return;
+    const index = activePath ? allDocFiles.findIndex((f) => f.path === activePath) : -1;
+    const nextIndex = index === -1 ? 0 : Math.max(0, Math.min(allDocFiles.length - 1, index + delta));
+    const next = allDocFiles[nextIndex]?.path;
+    if (next) requestScroll(next);
+  }, [allDocFiles, activePath, requestScroll]);
+
+  // N/P hop across every annotation anchor in the round, in the document
+  // order PresentTour reports (files in tour order, then by rendered line
+  // within a file) — independent of the rail's j/k file-level walk above.
+  // annotationAnchorIndexRef tracks "current" position in that list across
+  // hops; it starts at -1 so the first n lands on the first annotation.
+  const [annotationAnchors, setAnnotationAnchors] = useState<AnnotationAnchor[]>([]);
+  const annotationAnchorIndexRef = useRef(-1);
+  const annotationScrollNonceRef = useRef(0);
+  const [annotationScrollRequest, setAnnotationScrollRequest] = useState<
+    (AnnotationAnchor & { nonce: number }) | null
+  >(null);
+
+  const hopAnnotation = useCallback((delta: number) => {
+    if (annotationAnchors.length === 0) return;
+    const nextIndex =
+      (((annotationAnchorIndexRef.current + delta) % annotationAnchors.length) + annotationAnchors.length) %
+      annotationAnchors.length;
+    annotationAnchorIndexRef.current = nextIndex;
+    const anchor = annotationAnchors[nextIndex];
+    annotationScrollNonceRef.current += 1;
+    setActivePath(anchor.path);
+    setAnnotationScrollRequest({ ...anchor, nonce: annotationScrollNonceRef.current });
+  }, [annotationAnchors]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (isTypingTarget(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault();
+        // Auto-mark-on-leave (jaunt semantics): advancing past a file marks
+        // the one being left as reviewed. Visiting a file alone (arriving,
+        // scrolling past it passively) never marks it. Skipped files never
+        // get auto-marked — they aren't part of progress.
+        if (activePath && groupByPath.get(activePath) !== 'skip') markReviewed(activePath);
         moveSelection(1);
       } else if (e.key === 'k' || e.key === 'ArrowUp') {
         e.preventDefault();
         moveSelection(-1);
+      } else if (e.key === 'r') {
+        e.preventDefault();
+        if (activePath && groupByPath.get(activePath) !== 'skip') toggleReviewed(activePath);
+      } else if (e.key === 's') {
+        e.preventDefault();
+        setShowSubmitDialog((current) => {
+          if (current) return current;
+          setSubmitError(null);
+          return true;
+        });
+      } else if (e.key === 'n') {
+        e.preventDefault();
+        hopAnnotation(1);
+      } else if (e.key === 'p') {
+        e.preventDefault();
+        hopAnnotation(-1);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [moveSelection]);
+  }, [moveSelection, activePath, markReviewed, toggleReviewed, groupByPath, hopAnnotation]);
 
   useEffect(() => {
-    if (!selectedPath || !railRef.current) return;
-    const el = railRef.current.querySelector<HTMLElement>(`[data-path="${CSS.escape(selectedPath)}"]`);
+    if (!activePath || !railRef.current) return;
+    const el = railRef.current.querySelector<HTMLElement>(`[data-path="${CSS.escape(activePath)}"]`);
     el?.scrollIntoView({ block: 'nearest' });
-  }, [selectedPath]);
-
-  // An in-progress edit is scoped to whichever file's diff is showing it;
-  // switching files should not leave a stale editingCommentId pointing at a
-  // comment that's no longer rendered.
-  useEffect(() => {
-    setEditingCommentId(null);
-  }, [selectedPath]);
+  }, [activePath]);
 
   const draftIds = useMemo(() => new Set(drafts.map((d) => d.id)), [drafts]);
 
-  const handleAddComment = useCallback((lineStart: number, lineEnd: number, content: string) => {
-    if (!selectedPath) return;
+  // Manifest author annotations, adapted into the same ReviewComment shape
+  // reviewer comments use so the tour can render both through one pipeline.
+  // Each annotation's thread entries become individually-addressable
+  // comments (id `annot:${path}:${annotationIndex}:${threadIndex}`) so a
+  // reply lands as its own ReviewComment once submitted. Annotation line
+  // numbers are always the additions/new side (see the manifest schema), so
+  // line_end carries through unsigned — matching submittedToReviewComment's
+  // convention for a 'new'-side comment.
+  const annotationComments = useMemo<ReviewComment[]>(() => {
+    const result: ReviewComment[] = [];
+    for (const f of round?.manifest.files ?? []) {
+      (f.annotations ?? []).forEach((annotation, annotationIndex) => {
+        annotation.comments.forEach((content, threadIndex) => {
+          result.push({
+            id: `annot:${f.path}:${annotationIndex}:${threadIndex}`,
+            content,
+            filepath: f.path,
+            line_start: annotation.line_start,
+            line_end: annotation.line_end,
+            author: 'agent',
+            resolved: false,
+            created_at: '',
+            review_id: '',
+          });
+        });
+      });
+    }
+    return result;
+  }, [round]);
+  const annotationCommentIds = useMemo(
+    () => new Set(annotationComments.map((c) => c.id)),
+    [annotationComments]
+  );
+
+  // All comments across all files: the tour renders every file's diff at
+  // once, unlike the old single-selection pane that only ever needed one
+  // file at a time. Annotations are prepended so a shared anchor renders the
+  // author's notes above any reviewer replies. Memoized (and hoisted above
+  // the early-return branches below, since hooks must run unconditionally)
+  // so a passive activePath update from scrolling doesn't rebuild these on
+  // every render and bump every CodeView item's version.
+  const allComments = useMemo<ReviewComment[]>(
+    () => [...annotationComments, ...comments.map(submittedToReviewComment), ...drafts.map(draftToReviewComment)],
+    [annotationComments, comments, drafts]
+  );
+  // Submitted comments and annotations (author is the round's owner or
+  // agent, not a local draft) render read-only in the reader — only the
+  // user's own in-progress drafts are editable/resolvable/deletable here.
+  const readOnlyCommentIds = useMemo(
+    () => new Set(allComments.filter((c) => !draftIds.has(c.id)).map((c) => c.id)),
+    [allComments, draftIds]
+  );
+  // Rail comment chip: submitted comments (unresolved and resolved alike),
+  // annotations, and in-progress drafts, all merged into the one chip — no
+  // separate annotation indicator.
+  const commentCountByPath = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of comments) counts.set(c.filepath, (counts.get(c.filepath) ?? 0) + 1);
+    for (const d of drafts) counts.set(d.filepath, (counts.get(d.filepath) ?? 0) + 1);
+    for (const c of annotationComments) counts.set(c.filepath, (counts.get(c.filepath) ?? 0) + 1);
+    return counts;
+  }, [comments, drafts, annotationComments]);
+  const tourFiles = useMemo<PresentTourFile[]>(
+    () =>
+      allDocFiles.map((file) => ({
+        path: file.path,
+        note: file.note,
+        diff: fileDiffs[file.path] ?? { loading: true },
+        group: file.group,
+      })),
+    [allDocFiles, fileDiffs]
+  );
+
+  const handleAddComment = useCallback((filepath: string, lineStart: number, lineEnd: number, content: string) => {
     const id = `draft-${draftIdCounterRef.current++}`;
-    setDrafts((prev) => [...prev, draftFromAddComment(selectedPath, lineStart, lineEnd, content, id)]);
-  }, [selectedPath]);
+    setDrafts((prev) => [...prev, draftFromAddComment(filepath, lineStart, lineEnd, content, id)]);
+  }, []);
 
   const handleStartEdit = useCallback((id: string) => {
     if (draftIds.has(id)) setEditingCommentId(id);
@@ -389,20 +584,50 @@ export function PresentRoot() {
     );
   }
 
-  const selectedFile = files.find((f) => f.path === selectedPath) ?? null;
   const showDrift = !!repoHeadSha && repoHeadSha !== round.head_sha && !driftDismissed;
-  const selectedFileComments: ReviewComment[] = selectedFile
-    ? [
-        ...comments.filter((c) => c.filepath === selectedFile.path).map(submittedToReviewComment),
-        ...drafts.filter((d) => d.filepath === selectedFile.path).map(draftToReviewComment),
-      ]
-    : [];
-  // Submitted comments (author is the round's owner or agent, not a local
-  // draft) render read-only in the reader — only the user's own in-progress
-  // drafts are editable/resolvable/deletable here.
-  const readOnlyCommentIds = new Set(
-    selectedFileComments.filter((c) => !draftIds.has(c.id)).map((c) => c.id)
-  );
+
+  // Advisory-only coverage line for the submit dialog: never blocks
+  // submission, just tells the user what the tour didn't see them mark.
+  // Covers tour + other, never skipped.
+  const unreviewedPaths = progressPaths.filter((p) => !reviewed.has(p));
+  const COVERAGE_PREVIEW_COUNT = 5;
+  const unreviewedCoverageText =
+    unreviewedPaths.length > COVERAGE_PREVIEW_COUNT
+      ? `${unreviewedPaths.slice(0, COVERAGE_PREVIEW_COUNT).join(', ')}, and ${unreviewedPaths.length - COVERAGE_PREVIEW_COUNT} more`
+      : unreviewedPaths.join(', ');
+
+  // Shared row renderer across the Tour/Other/Skipped sections. `index` is
+  // 1-based for Tour rows and null for Other/Skipped (no numbering) — a
+  // reviewed row always shows a checkmark regardless of section, since Other
+  // participates in progress the same as Tour.
+  function renderRailRow(file: DocFile, index: number | null) {
+    const isReviewed = reviewed.has(file.path);
+    const commentCount = commentCountByPath.get(file.path) ?? 0;
+    const hasStats = file.additions !== undefined || file.deletions !== undefined;
+    return (
+      <li
+        key={file.path}
+        data-path={file.path}
+        className={`present-root-file ${file.path === activePath ? 'selected' : ''} ${isReviewed ? 'reviewed' : ''} ${file.group === 'skip' ? 'present-root-file-skipped' : ''}`}
+        onClick={() => requestScroll(file.path)}
+      >
+        <span className="present-root-file-index">{index !== null ? (isReviewed ? '✓' : index) : isReviewed ? '✓' : ''}</span>
+        <code className="present-root-file-path">{file.path}</code>
+        {file.note && <span className="present-root-file-note-marker" title="Has a note">●</span>}
+        {commentCount > 0 && (
+          <span className="present-root-file-comment-chip" title={`${commentCount} comment${commentCount === 1 ? '' : 's'}`}>
+            {commentCount}
+          </span>
+        )}
+        {hasStats && (
+          <span className="present-root-file-stats">
+            {file.additions !== undefined && <span className="adds">+{file.additions}</span>}
+            {file.deletions !== undefined && <span className="dels">−{file.deletions}</span>}
+          </span>
+        )}
+      </li>
+    );
+  }
 
   return (
     <div className="present-root">
@@ -422,17 +647,6 @@ export function PresentRoot() {
         <span className={`present-root-status ${round.submitted_at ? 'submitted' : 'draft'}`}>
           {round.submitted_at ? 'Submitted' : 'Draft'}
         </span>
-        <button
-          type="button"
-          className="present-root-submit-button"
-          onClick={() => {
-            setSubmitError(null);
-            setShowSubmitDialog(true);
-          }}
-          disabled={submitting}
-        >
-          {drafts.length > 0 ? `Submit review (${drafts.length})` : 'Submit review'}
-        </button>
       </section>
 
       {showSubmitDialog && (
@@ -442,6 +656,11 @@ export function PresentRoot() {
             <p>
               {drafts.length} comment{drafts.length === 1 ? '' : 's'}
             </p>
+            {unreviewedPaths.length > 0 && (
+              <p className="present-root-submit-coverage" data-testid="present-root-submit-coverage">
+                Not yet walked: {unreviewedCoverageText}
+              </p>
+            )}
             {submitError && <div className="present-root-submit-error">{submitError}</div>}
             <div className="present-root-submit-actions">
               <button type="button" onClick={() => setShowSubmitDialog(false)} disabled={submitting}>
@@ -472,12 +691,6 @@ export function PresentRoot() {
         </div>
       )}
 
-      {round.manifest.summary && (
-        <div className="present-root-summary">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{round.manifest.summary}</ReactMarkdown>
-        </div>
-      )}
-
       {comments.length > 0 && (
         <p className="present-root-comment-count">
           {comments.length} comment{comments.length === 1 ? '' : 's'} on this round
@@ -485,73 +698,94 @@ export function PresentRoot() {
       )}
 
       <div className="present-root-body">
-        <ol className="present-root-files" ref={railRef}>
-          {files.map((file, index) => (
-            <li
-              key={file.path}
-              data-path={file.path}
-              className={`present-root-file ${file.path === selectedPath ? 'selected' : ''}`}
-              onClick={() => setSelectedPath(file.path)}
-            >
-              <span className="present-root-file-index">{index + 1}</span>
-              <code className="present-root-file-path">{file.path}</code>
-              {file.note && <span className="present-root-file-note-marker" title="Has a note">●</span>}
-            </li>
-          ))}
+        <div className="present-root-rail">
+          <div className="present-root-rail-header">
+            <span className="present-root-rail-title">Files</span>
+            <span className="present-root-rail-count" data-testid="present-root-rail-count">
+              {reviewed.size}/{progressPaths.length}
+            </span>
+          </div>
+          <div className="present-root-rail-progress-track">
+            <div
+              className="present-root-rail-progress-fill"
+              style={{ width: `${progressPaths.length > 0 ? (reviewed.size / progressPaths.length) * 100 : 0}%` }}
+            />
+          </div>
 
-          {round.manifest.skip.length > 0 && (
-            <>
-              <li className="present-root-skip-divider">Skipped</li>
-              {round.manifest.skip.map((path) => (
-                <li key={path} className="present-root-file present-root-file-skipped">
-                  <code className="present-root-file-path">{path}</code>
-                </li>
-              ))}
-            </>
-          )}
-        </ol>
+          <ol className="present-root-files" ref={railRef}>
+            <li
+              key="__summary__"
+              data-testid="present-root-summary-row"
+              className={`present-root-summary-row ${activePath === null ? 'selected' : ''}`}
+              onClick={() => requestScroll(null)}
+            >
+              <span className="present-root-file-path">Summary</span>
+            </li>
+
+            {tourDocFiles.length > 0 && (
+              <>
+                <li className="present-root-section-header">Tour · {tourDocFiles.length}</li>
+                {tourDocFiles.map((file, index) => renderRailRow(file, index + 1))}
+              </>
+            )}
+
+            {otherDocFiles.length > 0 && (
+              <>
+                <li className="present-root-section-header">Other · {otherDocFiles.length}</li>
+                {otherDocFiles.map((file) => renderRailRow(file, null))}
+              </>
+            )}
+
+            {skipDocFiles.length > 0 && (
+              <>
+                <li className="present-root-section-header">Skipped · {skipDocFiles.length}</li>
+                {skipDocFiles.map((file) => renderRailRow(file, null))}
+              </>
+            )}
+          </ol>
+        </div>
 
         <main className="present-root-diff-pane">
-          {!selectedFile ? (
+          {allDocFiles.length === 0 ? (
             <div className="present-root-diff-placeholder">No files in this round.</div>
           ) : (
-            <>
-              {selectedFile.note && (
-                <div className="present-root-file-note-banner">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedFile.note}</ReactMarkdown>
-                </div>
-              )}
-
-              {diffState?.loading && (
-                <div className="present-root-diff-placeholder">Loading diff…</div>
-              )}
-
-              {diffState?.error && (
-                <div className="present-root-diff-error">{diffState.error}</div>
-              )}
-
-              {!diffState?.loading && !diffState?.error && diffState?.original !== undefined && diffState?.modified !== undefined && (
-                <DiffView
-                  original={diffState.original}
-                  modified={diffState.modified}
-                  filePath={selectedFile.path}
-                  comments={selectedFileComments}
-                  editingCommentId={editingCommentId}
-                  readOnlyCommentIds={readOnlyCommentIds}
-                  diffStyle="unified"
-                  expandUnchanged={false}
-                  onAddComment={handleAddComment}
-                  onEditComment={handleEditComment}
-                  onStartEdit={handleStartEdit}
-                  onCancelEdit={handleCancelEdit}
-                  onResolveComment={handleResolveComment}
-                  onDeleteComment={handleDeleteComment}
-                />
-              )}
-            </>
+            <PresentTour
+              summary={round.manifest.summary}
+              files={tourFiles}
+              comments={allComments}
+              editingCommentId={editingCommentId}
+              readOnlyCommentIds={readOnlyCommentIds}
+              onAddComment={handleAddComment}
+              onEditComment={handleEditComment}
+              onStartEdit={handleStartEdit}
+              onCancelEdit={handleCancelEdit}
+              onResolveComment={handleResolveComment}
+              onDeleteComment={handleDeleteComment}
+              scrollToPath={scrollRequest?.path ?? null}
+              scrollNonce={scrollRequest?.nonce ?? 0}
+              onActivePathChange={setActivePath}
+              reviewedPaths={reviewed}
+              onToggleReviewed={toggleReviewed}
+              annotationCommentIds={annotationCommentIds}
+              onAnnotationAnchorsChange={setAnnotationAnchors}
+              scrollToAnnotation={annotationScrollRequest}
+              annotationScrollNonce={annotationScrollRequest?.nonce ?? 0}
+            />
           )}
         </main>
       </div>
+
+      <DriveBar
+        reviewedCount={reviewed.size}
+        totalCount={progressPaths.length}
+        draftCount={drafts.length}
+        submitting={submitting}
+        hasAnnotations={annotationComments.length > 0}
+        onSubmit={() => {
+          setSubmitError(null);
+          setShowSubmitDialog(true);
+        }}
+      />
     </div>
   );
 }

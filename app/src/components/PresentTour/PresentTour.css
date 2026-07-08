@@ -1,0 +1,141 @@
+/* app/src/components/PresentTour/PresentTour.css
+   Styles for PresentTour (@pierre/diffs CodeView) and the summary/footer
+   flex siblings around it. Comment threads reuse DiffCommentThread's classes
+   from DiffView.css (imported by index.tsx alongside this file).
+*/
+
+.present-tour {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  --diffs-font-size: calc(13px * var(--ui-scale));
+}
+
+.present-tour-summary {
+  flex: 0 0 auto;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-panel);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  /* A summary can now hold a mermaid diagram; without a cap a tall one
+     squeezes the tour itself out of the viewport. */
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.present-tour-summary :first-child {
+  margin-top: 0;
+}
+
+.present-tour-summary :last-child {
+  margin-bottom: 0;
+}
+
+.present-tour-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  padding: 24px;
+}
+
+.present-tour-scroller {
+  min-height: 0;
+}
+
+.present-tour-file-note {
+  padding: 8px 12px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size);
+  line-height: 1.6;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.present-tour-file-note :first-child {
+  margin-top: 0;
+}
+
+.present-tour-file-note :last-child {
+  margin-bottom: 0;
+}
+
+/* A note rendered as an annotation (see PresentTour's notePlacedPathsRef) sits
+   among comment threads rather than under a header — the header's bottom
+   divider reads oddly there, so it's dropped in favor of the slot's own
+   padding, matching .diff-comment-thread's spacing. */
+.present-tour-file-note-slot {
+  padding: 6px 10px;
+}
+
+.present-tour-file-note-slot .present-tour-file-note {
+  padding: 0;
+  border-bottom: none;
+}
+
+.present-tour-reviewed-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  margin-right: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-app);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.present-tour-reviewed-toggle:hover {
+  color: var(--color-text-primary);
+}
+
+.present-tour-reviewed-toggle.is-reviewed {
+  border-color: var(--color-accent, #5b8cff);
+  color: var(--color-accent, #5b8cff);
+}
+
+.present-tour-reviewed-check {
+  font-size: var(--font-size-sm);
+  line-height: 1;
+}
+
+.present-tour-reviewed-toggle kbd {
+  padding: 0 4px;
+  border-radius: 3px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-panel);
+  font-family: monospace;
+  font-size: var(--font-size-xs);
+}
+
+.present-tour-footer {
+  flex: 0 0 auto;
+  margin-top: 16px;
+  padding: 16px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Skipped-file cards (jaunt's "deemph" analog): CodeView items render inside
+ * the library's own custom element, which has no exposed className slot to
+ * style just the header — opacity on the mounted item root dims the whole
+ * card instead, which reads the same way and isn't blocked by any internal
+ * shadow boundary. Applied imperatively via getRenderedItems(), see the
+ * component's groupByPath effect. */
+.present-tour-card-skip {
+  opacity: 0.55;
+}
+
+.present-tour-card-skip:hover,
+.present-tour-card-skip:focus-within {
+  opacity: 0.85;
+}

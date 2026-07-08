@@ -525,7 +525,11 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 	// output, which would otherwise disable colors inside every PTY.
 	env = filterEnvKeys(env, "NO_COLOR")
 
-	env = mergeEnvironment(env, []string{"TERM=xterm-256color"})
+	// Pin TERM_PROGRAM to ghostty and scrub its version string.
+	// TUIs gate OSC 8 hyperlink emission on TERM_PROGRAM; attn's terminal
+	// core is ghostty and now supports OSC 8, so advertise that deterministically.
+	env = filterEnvKeys(env, "TERM_PROGRAM_VERSION")
+	env = mergeEnvironment(env, []string{"TERM=xterm-256color", "TERM_PROGRAM=ghostty"})
 	if agent != "shell" {
 		env = mergeEnvironment(env, []string{
 			"ATTN_INSIDE_APP=1",

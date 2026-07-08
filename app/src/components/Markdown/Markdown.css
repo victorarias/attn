@@ -1,0 +1,29 @@
+.markdown-mermaid {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+
+.markdown-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-mermaid-loading {
+  color: var(--color-text-tertiary);
+  opacity: 0.7;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.markdown-mermaid-error-note {
+  margin: 0 0 4px 0;
+  color: var(--color-error, #ef4444);
+  font-size: var(--font-size-sm);
+}
+
+.markdown-mermaid-error {
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}

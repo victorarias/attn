@@ -242,42 +242,26 @@
   border-color: #2563eb;
 }
 
-/* --- Selection action popup (Send to Claude / Add comment) --- */
-.diff-selection-popup {
-  position: absolute;
-  z-index: 100;
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border-hover);
-  border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+.diff-comment-caption {
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--color-text-secondary);
+  font-style: italic;
 }
 
-.diff-selection-popup-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
+.reply-btn {
+  align-self: flex-start;
   background: transparent;
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-text-secondary);
+  font-size: calc(11px * var(--ui-scale));
+  padding: 2px 10px;
+  border-radius: 3px;
   cursor: pointer;
 }
 
-.diff-selection-popup-btn:hover {
+.reply-btn:hover {
   background: var(--color-border);
-}
-
-.diff-selection-popup-btn.send {
-  color: #d4a27f;
-}
-
-.diff-selection-popup-btn.comment {
-  color: #60a5fa;
+  color: var(--color-text-primary);
 }
 
 /* Comments that cannot render inline, either because their anchor no longer

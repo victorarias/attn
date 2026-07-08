@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "149"
+const ProtocolVersion = "153"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -140,20 +140,12 @@ const (
 	CmdSubscribeGitStatus                    = "subscribe_git_status"
 	CmdUnsubscribeGitStatus                  = "unsubscribe_git_status"
 	CmdGetFileDiff                           = "get_file_diff"
-	CmdGetBranchDiffFiles                    = "get_branch_diff_files"
 	CmdGetRepoInfo                           = "get_repo_info"
-	CmdGetReviewState                        = "get_review_state"
 	CmdWorkflowRunUpsert                     = "workflow_run_upsert"
 	CmdWorkflowCallUpsert                    = "workflow_call_upsert"
 	CmdWorkflowRunGet                        = "workflow_run_get"
 	CmdWorkflowRunList                       = "workflow_run_list"
 	CmdWorkflowRunCancel                     = "workflow_run_cancel"
-	CmdMarkFileViewed                        = "mark_file_viewed"
-	CmdAddComment                            = "add_comment"
-	CmdUpdateComment                         = "update_comment"
-	CmdResolveComment                        = "resolve_comment"
-	CmdDeleteComment                         = "delete_comment"
-	CmdGetComments                           = "get_comments"
 	CmdSpawnSession                          = "spawn_session"
 	CmdAttachSession                         = "attach_session"
 	CmdDetachSession                         = "detach_session"
@@ -261,17 +253,9 @@ const (
 	EventEnsureRepoResult            = "ensure_repo_result"
 	EventGitStatusUpdate             = "git_status_update"
 	EventFileDiffResult              = "file_diff_result"
-	EventBranchDiffFilesResult       = "branch_diff_files_result"
 	EventGetRepoInfoResult           = "get_repo_info_result"
-	EventGetReviewStateResult        = "get_review_state_result"
 	EventWorkflowRunUpdated          = "workflow_run_updated"
 	EventWorkflowActionResult        = "workflow_action_result"
-	EventMarkFileViewedResult        = "mark_file_viewed_result"
-	EventAddCommentResult            = "add_comment_result"
-	EventUpdateCommentResult         = "update_comment_result"
-	EventResolveCommentResult        = "resolve_comment_result"
-	EventDeleteCommentResult         = "delete_comment_result"
-	EventGetCommentsResult           = "get_comments_result"
 	EventPtyOutput                   = "pty_output"
 	EventSpawnResult                 = "spawn_result"
 	EventAttachResult                = "attach_result"
@@ -1062,29 +1046,8 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdGetBranchDiffFiles:
-		var msg GetBranchDiffFilesMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
 	case CmdGetRepoInfo:
 		var msg GetRepoInfoMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdGetReviewState:
-		var msg GetReviewStateMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdMarkFileViewed:
-		var msg MarkFileViewedMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
@@ -1122,41 +1085,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg WorkflowRunCancelMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal workflow_run_cancel: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdAddComment:
-		var msg AddCommentMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal add_comment: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdUpdateComment:
-		var msg UpdateCommentMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal update_comment: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdResolveComment:
-		var msg ResolveCommentMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal resolve_comment: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdDeleteComment:
-		var msg DeleteCommentMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal delete_comment: %w", err)
-		}
-		return peek.Cmd, &msg, nil
-
-	case CmdGetComments:
-		var msg GetCommentsMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, fmt.Errorf("unmarshal get_comments: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 const LEADER = { key: 'k', meta: true };
-const CANDIDATES = [{ id: 'dock.diff' as const, then: { key: 'd' } }];
+const CANDIDATES = [{ id: 'dock.attention' as const, then: { key: 'd' } }];
 
 describe('ChordLeaderHud', () => {
   it('renders nothing when no leader is armed', () => {
