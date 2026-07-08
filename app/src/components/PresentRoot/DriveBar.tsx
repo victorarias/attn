@@ -9,10 +9,12 @@ export interface DriveBarProps {
   totalCount: number;
   draftCount: number;
   submitting: boolean;
+  /** Shows the N/P hint iff the round carries any manifest author annotations. */
+  hasAnnotations: boolean;
   onSubmit: () => void;
 }
 
-export function DriveBar({ reviewedCount, totalCount, draftCount, submitting, onSubmit }: DriveBarProps) {
+export function DriveBar({ reviewedCount, totalCount, draftCount, submitting, hasAnnotations, onSubmit }: DriveBarProps) {
   const pct = totalCount > 0 ? Math.round((reviewedCount / totalCount) * 100) : 0;
 
   return (
@@ -33,6 +35,11 @@ export function DriveBar({ reviewedCount, totalCount, draftCount, submitting, on
         <span>
           <kbd>R</kbd> reviewed
         </span>
+        {hasAnnotations && (
+          <span>
+            <kbd>N</kbd>/<kbd>P</kbd> annotations
+          </span>
+        )}
       </div>
 
       <button

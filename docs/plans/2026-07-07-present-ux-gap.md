@@ -185,7 +185,7 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
 - [ ] 5. **Annotations**: manifest schema + store/protocol + inline threads
       (expect multiple PRs).
     - [x] 5a. manifest schema + resolution + protocol
-    - [ ] 5b. reader: inline threads, reply-as-comment, N/P, rail counts
+    - [x] 5b. reader: inline threads, reply-as-comment, N/P, rail counts
 - [ ] 6. **Diagrams**: mermaid in the shared markdown path.
 - [ ] 7. **Authoring skill**: interim level-0/1 version (voice, order, notes,
       skip) can land any time; full port (annotations, `thread:`, mermaid,

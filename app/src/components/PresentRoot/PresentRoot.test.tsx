@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PresentRoot } from './index';
 import { PresentTour } from '../PresentTour';
@@ -12,25 +13,49 @@ import type { PresentTourProps } from '../PresentTour';
 // comment-draft lifecycle — mirrors the DiffDetailPanel.test.tsx idiom. The
 // mock captures its full props so tests can invoke onAddComment etc. directly
 // and assert on what PresentRoot passes down.
+//
+// onAnnotationAnchorsChange is reported here from `comments`/`annotationCommentIds`
+// directly (in props order, one anchor per annotation comment id) rather than
+// from PresentTour's own line-grouping logic — that grouping is real
+// production logic covered separately in PresentTour.test.tsx; this mock only
+// needs to exercise PresentRoot's N/P hop-state wiring.
 vi.mock('../PresentTour', () => ({
-  PresentTour: vi.fn(({ summary, files, reviewedPaths, onToggleReviewed }: PresentTourProps) => (
-    <div data-testid="present-tour">
-      {summary && <div data-testid="present-tour-summary">{summary}</div>}
-      {files.map((f) => (
-        <div key={f.path} data-testid={`tour-file-${f.path}`}>
-          {f.note && <div className="note">{f.note}</div>}
-          {f.diff.loading && <span className="loading">loading</span>}
-          {f.diff.error && <span className="error">{f.diff.error}</span>}
-          {f.diff.original !== undefined && <div className="original">{f.diff.original}</div>}
-          {f.diff.modified !== undefined && <div className="modified">{f.diff.modified}</div>}
-          <span className="reviewed-state">{reviewedPaths.has(f.path) ? 'reviewed' : 'unreviewed'}</span>
-          <button type="button" onClick={() => onToggleReviewed(f.path)}>
-            toggle-reviewed-{f.path}
-          </button>
-        </div>
-      ))}
-    </div>
-  )),
+  PresentTour: vi.fn(({ summary, files, comments, annotationCommentIds, onAnnotationAnchorsChange, reviewedPaths, onToggleReviewed }: PresentTourProps) => {
+    useEffect(() => {
+      if (!onAnnotationAnchorsChange) return;
+      // One anchor per (filepath, line_start) group, not per thread entry —
+      // mirrors PresentTour's real grouping (multiple annotation comments on
+      // the same line share one rendered thread and one N/P stop).
+      const seen = new Set<string>();
+      const anchors: { path: string; anchorKey: string }[] = [];
+      for (const c of comments) {
+        if (!annotationCommentIds?.has(c.id)) continue;
+        const anchorKey = `${c.filepath}:additions:${c.line_start}`;
+        if (seen.has(anchorKey)) continue;
+        seen.add(anchorKey);
+        anchors.push({ path: c.filepath, anchorKey });
+      }
+      onAnnotationAnchorsChange(anchors);
+    }, [comments, annotationCommentIds, onAnnotationAnchorsChange]);
+    return (
+      <div data-testid="present-tour">
+        {summary && <div data-testid="present-tour-summary">{summary}</div>}
+        {files.map((f) => (
+          <div key={f.path} data-testid={`tour-file-${f.path}`}>
+            {f.note && <div className="note">{f.note}</div>}
+            {f.diff.loading && <span className="loading">loading</span>}
+            {f.diff.error && <span className="error">{f.diff.error}</span>}
+            {f.diff.original !== undefined && <div className="original">{f.diff.original}</div>}
+            {f.diff.modified !== undefined && <div className="modified">{f.diff.modified}</div>}
+            <span className="reviewed-state">{reviewedPaths.has(f.path) ? 'reviewed' : 'unreviewed'}</span>
+            <button type="button" onClick={() => onToggleReviewed(f.path)}>
+              toggle-reviewed-{f.path}
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }),
 }));
 
 // PresentRoot hides the present window on a successful submit via
@@ -208,6 +233,24 @@ const roundWithStats = {
     ...round.manifest,
     files: [
       { path: 'src/foo.ts', note: 'Core logic', additions: 12, deletions: 3 },
+      { path: 'src/foo.test.ts' },
+    ],
+  },
+};
+
+const roundWithAnnotations = {
+  ...round,
+  manifest: {
+    ...round.manifest,
+    files: [
+      {
+        path: 'src/foo.ts',
+        note: 'Core logic',
+        annotations: [
+          { line_start: 2, line_end: 2, comments: ['why this line?'] },
+          { line_start: 4, line_end: 5, comments: ['first note', 'second note'] },
+        ],
+      },
       { path: 'src/foo.test.ts' },
     ],
   },
@@ -1102,5 +1145,116 @@ describe('PresentRoot', () => {
       const raw = window.localStorage.getItem('attn.present.reviewed.pres-1.round-1');
       expect(JSON.parse(raw!)).toEqual(['src/foo.ts']);
     });
+  });
+
+  describe('manifest author annotations', () => {
+    it('adapts manifest annotations into read-only comments, prepended before reviewer comments', async () => {
+      await loadRound({
+        round: roundWithAnnotations,
+        comments: [
+          {
+            id: 'submitted-1',
+            content: 'a reviewer reply',
+            filepath: 'src/foo.ts',
+            line_start: 2,
+            line_end: 2,
+            side: 'new',
+            author: 'user',
+            created_at: '2026-07-01T00:00:00Z',
+            round_id: 'round-0',
+          },
+        ],
+      });
+
+      const props = latestTourProps();
+      const contents = props.comments.map((c) => c.content);
+      // Both thread entries on the line-4-5 annotation, then the single-entry
+      // line-2 annotation, then the reviewer reply — annotations precede
+      // reviewer comments regardless of manifest order, because they're all
+      // read from the same fixed per-file loop.
+      expect(contents).toEqual(['why this line?', 'first note', 'second note', 'a reviewer reply']);
+
+      const annotationComments = props.comments.filter((c) => c.author === 'agent');
+      expect(annotationComments).toHaveLength(3);
+      for (const c of annotationComments) {
+        expect(props.readOnlyCommentIds.has(c.id)).toBe(true);
+      }
+      expect(annotationComments.find((c) => c.content === 'why this line?')).toMatchObject({
+        filepath: 'src/foo.ts',
+        line_start: 2,
+        line_end: 2,
+      });
+      expect(annotationComments.find((c) => c.content === 'first note')).toMatchObject({
+        filepath: 'src/foo.ts',
+        line_start: 4,
+        line_end: 5,
+      });
+    });
+
+    it('merges annotation counts into the same rail comment chip as reviewer comments', async () => {
+      await loadRound({
+        round: roundWithAnnotations,
+        comments: [
+          {
+            id: 'submitted-1',
+            content: 'a reviewer reply',
+            filepath: 'src/foo.ts',
+            line_start: 2,
+            line_end: 2,
+            side: 'new',
+            author: 'user',
+            created_at: '2026-07-01T00:00:00Z',
+            round_id: 'round-0',
+          },
+        ],
+      });
+
+      // 3 annotation thread entries + 1 reviewer comment, one merged chip.
+      const row = screen.getByText('src/foo.ts').closest('li');
+      expect(row?.querySelector('.present-root-file-comment-chip')?.textContent).toBe('4');
+    });
+
+    it('shows the N/P hint in the drive bar only when the round has annotations', async () => {
+      await loadRound({ round: roundWithAnnotations });
+      expect(screen.getByTestId('present-drive-bar').textContent).toContain('annotations');
+
+      cleanup();
+      await loadRound();
+      expect(screen.getByTestId('present-drive-bar').textContent).not.toContain('annotations');
+    });
+
+    it('n/p hop across every annotation anchor in document order and wrap', async () => {
+      await loadRound({ round: roundWithAnnotations });
+
+      await waitFor(() => {
+        // The mock's effect has reported 2 anchors (one per annotation, not
+        // per thread entry: both line-4-5 entries share one anchor key).
+        expect(latestTourProps().onAnnotationAnchorsChange).toBeDefined();
+      }, WAIT_OPTS);
+
+      fireEvent.keyDown(window, { key: 'n' });
+      await waitFor(() => {
+        expect(latestTourProps().scrollToAnnotation).toMatchObject({ path: 'src/foo.ts', anchorKey: 'src/foo.ts:additions:2' });
+      }, WAIT_OPTS);
+      const nonceAfterFirst = latestTourProps().annotationScrollNonce;
+
+      fireEvent.keyDown(window, { key: 'n' });
+      await waitFor(() => {
+        expect(latestTourProps().scrollToAnnotation).toMatchObject({ path: 'src/foo.ts', anchorKey: 'src/foo.ts:additions:4' });
+      }, WAIT_OPTS);
+      expect(latestTourProps().annotationScrollNonce).toBeGreaterThan(nonceAfterFirst ?? 0);
+
+      // Wraps back to the first anchor.
+      fireEvent.keyDown(window, { key: 'n' });
+      await waitFor(() => {
+        expect(latestTourProps().scrollToAnnotation).toMatchObject({ path: 'src/foo.ts', anchorKey: 'src/foo.ts:additions:2' });
+      }, WAIT_OPTS);
+
+      // p steps backward, wrapping to the last anchor.
+      fireEvent.keyDown(window, { key: 'p' });
+      await waitFor(() => {
+        expect(latestTourProps().scrollToAnnotation).toMatchObject({ path: 'src/foo.ts', anchorKey: 'src/foo.ts:additions:4' });
+      }, WAIT_OPTS);
+    }, TEST_TIMEOUT);
   });
 });
