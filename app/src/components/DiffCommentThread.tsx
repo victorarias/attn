@@ -101,6 +101,13 @@ export interface DiffCommentThreadProps {
   onResolveComment: (id: string, resolved: boolean) => void;
   onDeleteComment: (id: string) => void;
   onSendComment: (comment: ReviewComment) => void;
+  /** Small muted note rendered above the thread (e.g. flagging that this
+   * anchor was re-positioned from a line outside the visible diff). */
+  caption?: string;
+  /** When present, renders a "Reply" affordance at the bottom of a read-only
+   * thread that has no draft or in-progress edit — lets a reader answer an
+   * author annotation without the gutter "+" control. */
+  onReply?: () => void;
 }
 
 export function DiffCommentThread({
@@ -119,9 +126,16 @@ export function DiffCommentThread({
   onResolveComment,
   onDeleteComment,
   onSendComment,
+  caption,
+  onReply,
 }: DiffCommentThreadProps) {
+  const hasReadOnlyComment = comments.some((c) => readOnlyCommentIds?.has(c.id));
+  const hasEditingComment = comments.some((c) => c.id === editingCommentId);
+  const showReply = !!onReply && hasReadOnlyComment && !draft && !hasEditingComment;
+
   return (
     <div className="diff-comment-thread" data-testid="diff-comment-thread">
+      {caption && <div className="diff-comment-caption">{caption}</div>}
       {comments.map((comment) => {
         const isEditing = editingCommentId === comment.id;
         const isAgent = comment.author === 'agent';
@@ -184,6 +198,11 @@ export function DiffCommentThread({
           onSave={onSaveDraft}
           onCancel={onCancelDraft}
         />
+      )}
+      {showReply && (
+        <button type="button" className="reply-btn" onClick={onReply}>
+          Reply
+        </button>
       )}
     </div>
   );

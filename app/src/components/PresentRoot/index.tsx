@@ -12,6 +12,7 @@ import type {
   ReviewComment,
   PresentCommentInput,
 } from '../../types/generated';
+import type { AnnotationAnchor } from '../PresentTour';
 import { hideBootSplash } from '../../utils/bootSplash';
 import '../../App.css';
 import './PresentRoot.css';
@@ -361,6 +362,30 @@ export function PresentRoot() {
     if (next) requestScroll(next);
   }, [allDocFiles, activePath, requestScroll]);
 
+  // N/P hop across every annotation anchor in the round, in the document
+  // order PresentTour reports (files in tour order, then by rendered line
+  // within a file) — independent of the rail's j/k file-level walk above.
+  // annotationAnchorIndexRef tracks "current" position in that list across
+  // hops; it starts at -1 so the first n lands on the first annotation.
+  const [annotationAnchors, setAnnotationAnchors] = useState<AnnotationAnchor[]>([]);
+  const annotationAnchorIndexRef = useRef(-1);
+  const annotationScrollNonceRef = useRef(0);
+  const [annotationScrollRequest, setAnnotationScrollRequest] = useState<
+    (AnnotationAnchor & { nonce: number }) | null
+  >(null);
+
+  const hopAnnotation = useCallback((delta: number) => {
+    if (annotationAnchors.length === 0) return;
+    const nextIndex =
+      (((annotationAnchorIndexRef.current + delta) % annotationAnchors.length) + annotationAnchors.length) %
+      annotationAnchors.length;
+    annotationAnchorIndexRef.current = nextIndex;
+    const anchor = annotationAnchors[nextIndex];
+    annotationScrollNonceRef.current += 1;
+    setActivePath(anchor.path);
+    setAnnotationScrollRequest({ ...anchor, nonce: annotationScrollNonceRef.current });
+  }, [annotationAnchors]);
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (isTypingTarget(e.target)) return;
@@ -386,11 +411,17 @@ export function PresentRoot() {
           setSubmitError(null);
           return true;
         });
+      } else if (e.key === 'n') {
+        e.preventDefault();
+        hopAnnotation(1);
+      } else if (e.key === 'p') {
+        e.preventDefault();
+        hopAnnotation(-1);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [moveSelection, activePath, markReviewed, toggleReviewed, groupByPath]);
+  }, [moveSelection, activePath, markReviewed, toggleReviewed, groupByPath, hopAnnotation]);
 
   useEffect(() => {
     if (!activePath || !railRef.current) return;
@@ -400,31 +431,68 @@ export function PresentRoot() {
 
   const draftIds = useMemo(() => new Set(drafts.map((d) => d.id)), [drafts]);
 
+  // Manifest author annotations, adapted into the same ReviewComment shape
+  // reviewer comments use so the tour can render both through one pipeline.
+  // Each annotation's thread entries become individually-addressable
+  // comments (id `annot:${path}:${annotationIndex}:${threadIndex}`) so a
+  // reply lands as its own ReviewComment once submitted. Annotation line
+  // numbers are always the additions/new side (see the manifest schema), so
+  // line_end carries through unsigned — matching submittedToReviewComment's
+  // convention for a 'new'-side comment.
+  const annotationComments = useMemo<ReviewComment[]>(() => {
+    const result: ReviewComment[] = [];
+    for (const f of round?.manifest.files ?? []) {
+      (f.annotations ?? []).forEach((annotation, annotationIndex) => {
+        annotation.comments.forEach((content, threadIndex) => {
+          result.push({
+            id: `annot:${f.path}:${annotationIndex}:${threadIndex}`,
+            content,
+            filepath: f.path,
+            line_start: annotation.line_start,
+            line_end: annotation.line_end,
+            author: 'agent',
+            resolved: false,
+            created_at: '',
+            review_id: '',
+          });
+        });
+      });
+    }
+    return result;
+  }, [round]);
+  const annotationCommentIds = useMemo(
+    () => new Set(annotationComments.map((c) => c.id)),
+    [annotationComments]
+  );
+
   // All comments across all files: the tour renders every file's diff at
   // once, unlike the old single-selection pane that only ever needed one
-  // file at a time. Memoized (and hoisted above the early-return branches
-  // below, since hooks must run unconditionally) so a passive activePath
-  // update from scrolling doesn't rebuild these on every render and bump
-  // every CodeView item's version.
+  // file at a time. Annotations are prepended so a shared anchor renders the
+  // author's notes above any reviewer replies. Memoized (and hoisted above
+  // the early-return branches below, since hooks must run unconditionally)
+  // so a passive activePath update from scrolling doesn't rebuild these on
+  // every render and bump every CodeView item's version.
   const allComments = useMemo<ReviewComment[]>(
-    () => [...comments.map(submittedToReviewComment), ...drafts.map(draftToReviewComment)],
-    [comments, drafts]
+    () => [...annotationComments, ...comments.map(submittedToReviewComment), ...drafts.map(draftToReviewComment)],
+    [annotationComments, comments, drafts]
   );
-  // Submitted comments (author is the round's owner or agent, not a local
-  // draft) render read-only in the reader — only the user's own in-progress
-  // drafts are editable/resolvable/deletable here.
+  // Submitted comments and annotations (author is the round's owner or
+  // agent, not a local draft) render read-only in the reader — only the
+  // user's own in-progress drafts are editable/resolvable/deletable here.
   const readOnlyCommentIds = useMemo(
     () => new Set(allComments.filter((c) => !draftIds.has(c.id)).map((c) => c.id)),
     [allComments, draftIds]
   );
-  // Rail comment chip: submitted comments (unresolved and resolved alike)
-  // plus in-progress drafts, per file.
+  // Rail comment chip: submitted comments (unresolved and resolved alike),
+  // annotations, and in-progress drafts, all merged into the one chip — no
+  // separate annotation indicator.
   const commentCountByPath = useMemo(() => {
     const counts = new Map<string, number>();
     for (const c of comments) counts.set(c.filepath, (counts.get(c.filepath) ?? 0) + 1);
     for (const d of drafts) counts.set(d.filepath, (counts.get(d.filepath) ?? 0) + 1);
+    for (const c of annotationComments) counts.set(c.filepath, (counts.get(c.filepath) ?? 0) + 1);
     return counts;
-  }, [comments, drafts]);
+  }, [comments, drafts, annotationComments]);
   const tourFiles = useMemo<PresentTourFile[]>(
     () =>
       allDocFiles.map((file) => ({
@@ -698,6 +766,10 @@ export function PresentRoot() {
               onActivePathChange={setActivePath}
               reviewedPaths={reviewed}
               onToggleReviewed={toggleReviewed}
+              annotationCommentIds={annotationCommentIds}
+              onAnnotationAnchorsChange={setAnnotationAnchors}
+              scrollToAnnotation={annotationScrollRequest}
+              annotationScrollNonce={annotationScrollRequest?.nonce ?? 0}
             />
           )}
         </main>
@@ -708,6 +780,7 @@ export function PresentRoot() {
         totalCount={progressPaths.length}
         draftCount={drafts.length}
         submitting={submitting}
+        hasAnnotations={annotationComments.length > 0}
         onSubmit={() => {
           setSubmitError(null);
           setShowSubmitDialog(true);

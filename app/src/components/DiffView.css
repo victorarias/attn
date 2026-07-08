@@ -242,6 +242,28 @@
   border-color: #2563eb;
 }
 
+.diff-comment-caption {
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.reply-btn {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-text-secondary);
+  font-size: calc(11px * var(--ui-scale));
+  padding: 2px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.reply-btn:hover {
+  background: var(--color-border);
+  color: var(--color-text-primary);
+}
+
 /* Comments that cannot render inline, either because their anchor no longer
    exists or Hunks mode collapsed it. Keep them collapsed at the top so they are
    never silently lost; click to expand. */

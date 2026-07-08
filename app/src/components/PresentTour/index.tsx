@@ -74,6 +74,14 @@ export interface PresentTourFile {
   group?: 'tour' | 'other' | 'skip';
 }
 
+/** One annotation's render anchor: which file it's on, and the key
+ * (`${filepath}:${side}:${line}`) its rendered thread carries as
+ * `data-anchor-key`. Used for N/P hopping across the whole round. */
+export interface AnnotationAnchor {
+  path: string;
+  anchorKey: string;
+}
+
 export interface PresentTourProps {
   summary?: string;
   files: PresentTourFile[];
@@ -100,6 +108,21 @@ export interface PresentTourProps {
   /** Paths the user has marked reviewed (jaunt-style per-file mark). */
   reviewedPaths: ReadonlySet<string>;
   onToggleReviewed: (path: string) => void;
+  /** Ids (within `comments`) that originated from manifest author
+   * annotations rather than reviewer replies. Drives read-only rendering
+   * (already covered by readOnlyCommentIds), the outside-diff fallback, and
+   * the N/P hop list — all annotation-specific behavior. */
+  annotationCommentIds?: Set<string>;
+  /** Fires whenever the annotation anchors change (new round, items settle),
+   * with every annotation's render anchor in document order: files in `files`
+   * order, then by rendered line within a file. PresentRoot uses this to
+   * drive N/P hopping without duplicating the grouping logic here. */
+  onAnnotationAnchorsChange?: (anchors: AnnotationAnchor[]) => void;
+  /** Rail-equivalent imperative "scroll to this annotation" instruction for
+   * N/P, paired with `annotationScrollNonce` so re-hopping to the same
+   * anchor (single annotation in the round) still re-scrolls. */
+  scrollToAnnotation?: AnnotationAnchor | null;
+  annotationScrollNonce?: number;
 }
 
 // Metadata carried on each native line annotation, generalized from DiffView's
@@ -112,6 +135,10 @@ interface AnnotationMeta {
   comments: ReviewComment[];
   draft: boolean;
   anchorKey: string;
+  /** Set when this group's anchor was re-positioned from a line outside the
+   * visible diff hunks (see the outside-diff fallback below); rendered as a
+   * caption above the thread. */
+  outsideDiffNote?: string;
 }
 
 type DraftState = {
@@ -130,6 +157,25 @@ type VisibleLineRanges = Record<AnnotationSide, Array<[number, number]>>;
 
 function isLineInRanges(line: number, ranges: Array<[number, number]>): boolean {
   return ranges.some(([start, end]) => line >= start && line <= end);
+}
+
+// Nearest point to `target` that IS visible, across every hunk range on a
+// side. Every line inside a range is visible, so the nearest point within a
+// given range is just `target` clamped to that range; the overall nearest is
+// whichever range's clamp is closest, with ties broken toward the earlier
+// line (matches the outside-diff fallback's stated tie-break).
+function nearestVisibleLine(target: number, ranges: Array<[number, number]>): number | null {
+  let best: number | null = null;
+  let bestDistance = Infinity;
+  for (const [start, end] of ranges) {
+    const clamped = Math.max(start, Math.min(end, target));
+    const distance = Math.abs(target - clamped);
+    if (distance < bestDistance || (distance === bestDistance && best !== null && clamped < best)) {
+      bestDistance = distance;
+      best = clamped;
+    }
+  }
+  return best;
 }
 
 function getVisibleLineRangesFromDiff(diff: ReturnType<typeof parseDiffFromFile>): VisibleLineRanges {
@@ -163,10 +209,19 @@ export function PresentTour({
   onActivePathChange,
   reviewedPaths,
   onToggleReviewed,
+  annotationCommentIds,
+  onAnnotationAnchorsChange,
+  scrollToAnnotation,
+  annotationScrollNonce,
 }: PresentTourProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<CodeViewHandle<AnnotationMeta> | null>(null);
   const suppressSelectionEndRef = useRef(false);
+  // Populated as a side effect of the items useMemo below (document order:
+  // files order, then rendered line within a file) and read back out by the
+  // annotation-anchors effect further down — same "mutate a ref inside the
+  // items useMemo" pattern this component already uses for frozenRef.
+  const annotationAnchorsRef = useRef<AnnotationAnchor[]>([]);
   // CodeView's controlled-item reconciliation keys off each item's `version`
   // field (see components/CodeView.js `syncItemRecord`): a matching version
   // — including two `undefined`s — means "no change, keep the cached
@@ -291,24 +346,30 @@ export function PresentTour({
       if (!meta) return null;
       const key = meta.anchorKey;
       return (
-        <DiffCommentThread
-          key={key}
-          comments={meta.comments}
-          draft={meta.draft}
-          editingCommentId={editingCommentId}
-          readOnlyCommentIds={readOnlyCommentIds}
-          showSendToClaude={!!onSendToClaude}
-          draftContent={meta.draft ? drafts[key]?.content : undefined}
-          onDraftContentChange={meta.draft ? (content) => updateDraftContent(key, content) : undefined}
-          onSaveDraft={(content) => handleSaveDraft(key, content)}
-          onCancelDraft={() => closeDraft(key)}
-          onStartEdit={onStartEdit}
-          onEditComment={onEditComment}
-          onCancelEdit={onCancelEdit}
-          onResolveComment={onResolveComment}
-          onDeleteComment={onDeleteComment}
-          onSendComment={handleSendComment}
-        />
+        // data-anchor-key lets the N/P scroll effect below locate this
+        // thread's mounted element without CodeView exposing an id hook of
+        // its own on rendered annotation slots.
+        <div key={key} data-anchor-key={key}>
+          <DiffCommentThread
+            comments={meta.comments}
+            draft={meta.draft}
+            editingCommentId={editingCommentId}
+            readOnlyCommentIds={readOnlyCommentIds}
+            showSendToClaude={!!onSendToClaude}
+            draftContent={meta.draft ? drafts[key]?.content : undefined}
+            onDraftContentChange={meta.draft ? (content) => updateDraftContent(key, content) : undefined}
+            onSaveDraft={(content) => handleSaveDraft(key, content)}
+            onCancelDraft={() => closeDraft(key)}
+            onStartEdit={onStartEdit}
+            onEditComment={onEditComment}
+            onCancelEdit={onCancelEdit}
+            onResolveComment={onResolveComment}
+            onDeleteComment={onDeleteComment}
+            onSendComment={handleSendComment}
+            caption={meta.outsideDiffNote}
+            onReply={meta.draft ? undefined : () => openDraft(meta.filepath, meta.side, meta.lineNumber, meta.lineNumber)}
+          />
+        </div>
       );
     },
     [
@@ -325,12 +386,14 @@ export function PresentTour({
       onResolveComment,
       onDeleteComment,
       handleSendComment,
+      openDraft,
     ]
   );
 
   // Build one CodeViewItem per manifest file, in reading order. Only runs
   // once every file's diff fetch has settled (see the module doc for why).
   const items = useMemo<CodeViewItem<AnnotationMeta>[]>(() => {
+    annotationAnchorsRef.current = [];
     if (!allSettled) return [];
     itemsVersionRef.current += 1;
     const version = itemsVersionRef.current;
@@ -366,21 +429,36 @@ export function PresentTour({
       const groups = new Map<string, AnnotationMeta>();
       for (const comment of fileComments) {
         const side: AnnotationSide = isOriginalSideComment(comment) ? 'deletions' : 'additions';
-        const line = comment.line_start;
         const max = side === 'deletions' ? lineCounts.deletions : lineCounts.additions;
-        const lineExists = line >= 1 && line <= max;
-        const lineVisible = !visibleLineRanges || isLineInRanges(line, visibleLineRanges[side]);
-        // Comments anchored to a line that no longer renders (collapsed hunk
-        // or a stale line number) simply don't get a native annotation slot —
-        // parity note: DiffView surfaces these via a collapsible "not visible"
+        const lineExists = comment.line_start >= 1 && comment.line_start <= max;
+        // A line that doesn't exist at all (stale line number past the
+        // file's own length) is dropped regardless of comment kind — parity
+        // note: DiffView surfaces these via a collapsible "not visible"
         // banner; this slice drops that affordance (see PR report).
-        if (!lineExists || !lineVisible) continue;
+        if (!lineExists) continue;
+        const ranges = visibleLineRanges[side];
+        let line = comment.line_start;
+        let outsideDiffNote: string | undefined;
+        if (!isLineInRanges(line, ranges)) {
+          // A collapsed-hunk line otherwise gets dropped the same way — EXCEPT
+          // manifest author annotations, which can legitimately point at
+          // unchanged code far from any hunk. Those get re-anchored to the
+          // nearest visible line instead of disappearing.
+          if (!annotationCommentIds?.has(comment.id)) continue;
+          const nearest = nearestVisibleLine(line, ranges);
+          if (nearest === null) continue; // file has no visible lines at all on this side
+          line = nearest;
+          const originalEnd = Math.abs(comment.line_end);
+          const rangeText = comment.line_start === originalEnd ? `${comment.line_start}` : `${comment.line_start}–${originalEnd}`;
+          outsideDiffNote = `refers to line ${rangeText}, outside the visible diff`;
+        }
         const key = anchorKeyOf(file.path, side, line);
         let group = groups.get(key);
         if (!group) {
           group = { filepath: file.path, side, lineNumber: line, comments: [], draft: false, anchorKey: key };
           groups.set(key, group);
         }
+        if (outsideDiffNote && !group.outsideDiffNote) group.outsideDiffNote = outsideDiffNote;
         group.comments.push(comment);
       }
       for (const key of fileDraftKeys) {
@@ -395,6 +473,19 @@ export function PresentTour({
       }
 
       const all = Array.from(groups.values());
+
+      // Doc-order anchor list for N/P: this file's annotation-bearing groups,
+      // by rendered line — independent of the active/rest render-order split
+      // just below, which is about which thread paints an open form first,
+      // not hop order. Consumed by the annotation-anchors effect after this
+      // memo commits (see annotationAnchorsRef's declaration for why a ref).
+      const fileAnnotationGroups = all
+        .filter((g) => g.comments.some((c) => annotationCommentIds?.has(c.id)))
+        .sort((a, b) => a.lineNumber - b.lineNumber);
+      for (const g of fileAnnotationGroups) {
+        annotationAnchorsRef.current.push({ path: file.path, anchorKey: g.anchorKey });
+      }
+
       const hasOpenForm = (g: AnnotationMeta) => g.draft || g.comments.some((c) => c.id === editingCommentId);
       const active = all.filter(hasOpenForm).sort((a, b) => a.anchorKey.localeCompare(b.anchorKey));
       const rest = all.filter((g) => !hasOpenForm(g));
@@ -414,7 +505,15 @@ export function PresentTour({
     // the reviewed indicator is otherwise rendered through renderHeaderPrefix,
     // which this codebase has not proven re-renders on its own without one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allSettled, files, commentsByFile, draftsByFile, drafts, formOpenByFile, editingCommentId, reviewedPaths]);
+  }, [allSettled, files, commentsByFile, draftsByFile, drafts, formOpenByFile, editingCommentId, reviewedPaths, annotationCommentIds]);
+
+  // Notify the parent of the current annotation anchor list once items has
+  // committed (annotationAnchorsRef was populated by the memo above). A plain
+  // effect, not a callback inside the memo itself — that memo runs during
+  // render and must stay side-effect-free.
+  useEffect(() => {
+    onAnnotationAnchorsChange?.(annotationAnchorsRef.current);
+  }, [items, onAnnotationAnchorsChange]);
 
   const handleGutterUtilityClick = useStableCallback(
     (range: SelectedLineRange, context: { item: CodeViewItem<AnnotationMeta> }) => {
@@ -618,6 +717,41 @@ export function PresentTour({
     // repeat clicks on Summary) re-fire.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollToPath, scrollNonce, allSettled]);
+
+  // N/P annotation hop: first get the target file into view via the same
+  // item-scroll CodeView uses for the rail/j-k path above, then locate the
+  // specific thread by its data-anchor-key (see renderAnnotation) and center
+  // it. CodeView virtualizes, so a just-scrolled-into-view file's annotation
+  // slot may not be mounted yet on the very next frame — retry across a few
+  // rAFs before giving up silently, rather than risk polling forever.
+  useEffect(() => {
+    if (!scrollToAnnotation) return;
+    const hasRequest = (annotationScrollNonce ?? 0) > 0;
+    if (!hasRequest || !allSettled) return;
+    const handle = handleRef.current;
+    if (!handle) return;
+    userTookOverRef.current = true;
+    const { path, anchorKey } = scrollToAnnotation;
+    handle.scrollTo({ type: 'item', id: path, align: 'start', behavior: 'smooth' });
+    const MAX_ATTEMPTS = 10;
+    let attempts = 0;
+    let raf = 0;
+    const tryLocate = () => {
+      const el = containerRef.current?.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(anchorKey)}"]`);
+      if (el) {
+        el.scrollIntoView({ block: 'center' });
+        return;
+      }
+      attempts += 1;
+      if (attempts >= MAX_ATTEMPTS) return;
+      raf = requestAnimationFrame(tryLocate);
+    };
+    raf = requestAnimationFrame(tryLocate);
+    return () => cancelAnimationFrame(raf);
+    // annotationScrollNonce intentionally included so re-hopping to the same
+    // anchor (e.g. a round with a single annotation) still re-scrolls.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollToAnnotation, annotationScrollNonce, allSettled]);
 
   // Track the file nearest the top of the viewport so the rail can highlight
   // it. There is no `data-*` attribute on CodeView's rendered item roots to
