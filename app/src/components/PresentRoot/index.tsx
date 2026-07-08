@@ -46,6 +46,20 @@ interface DiffCacheEntry {
   error?: string;
 }
 
+// A rail/tour document row, unified across the three groups the rail derives
+// from a round: the authored tour (manifest.files, in order), Other (paths
+// changed in the round but not named by the manifest, alphabetical), and
+// Skipped (manifest.skip). Additions/deletions on Other/Skipped rows come
+// from the round's changed_files list — the manifest itself only carries
+// stats for tour files.
+interface DocFile {
+  path: string;
+  note?: string;
+  additions?: number;
+  deletions?: number;
+  group: 'tour' | 'other' | 'skip';
+}
+
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
@@ -227,18 +241,62 @@ export function PresentRoot() {
     };
   }, [presentationId, hasReceivedInitialState, getPresentationRound, refreshSignal]);
 
-  // Fetch every manifest file's diff, pinned to the round's base/head SHAs,
-  // with bounded concurrency — the tour renders all of them at once, unlike
-  // the old single-selection pane that only ever needed one file at a time.
-  // A fresh round (new refreshSignal / new round.id) always gets a fresh
-  // fetch pass: `fileDiffs` is reset to all-loading up front.
+  // tour = manifest.files, in authored order. other = paths the round's
+  // changed_files carries that the manifest didn't name (neither tour nor
+  // skip), alphabetical. skip = manifest.skip, with stats backfilled from
+  // changed_files when available (the manifest itself only carries stats for
+  // tour files — see present.go's handleGetPresentationRound). An absent
+  // changed_files (old daemon, or a git error) collapses `other` to empty and
+  // skip rows lose their stats, but tour/skip still render as before.
+  const tourDocFiles = useMemo<DocFile[]>(
+    () => (round?.manifest.files ?? []).map((f) => ({ ...f, group: 'tour' as const })),
+    [round]
+  );
+  const changedByPath = useMemo(() => {
+    const map = new Map<string, { additions?: number; deletions?: number }>();
+    for (const f of round?.changed_files ?? []) map.set(f.path, { additions: f.additions, deletions: f.deletions });
+    return map;
+  }, [round]);
+  const otherDocFiles = useMemo<DocFile[]>(() => {
+    const tourPaths = new Set(tourDocFiles.map((f) => f.path));
+    const skipPaths = new Set(round?.manifest.skip ?? []);
+    return (round?.changed_files ?? [])
+      .filter((f) => !tourPaths.has(f.path) && !skipPaths.has(f.path))
+      .map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions, group: 'other' as const }))
+      .sort((a, b) => a.path.localeCompare(b.path));
+  }, [round, tourDocFiles]);
+  const skipDocFiles = useMemo<DocFile[]>(
+    () =>
+      (round?.manifest.skip ?? []).map((path) => ({
+        path,
+        additions: changedByPath.get(path)?.additions,
+        deletions: changedByPath.get(path)?.deletions,
+        group: 'skip' as const,
+      })),
+    [round, changedByPath]
+  );
+  // Full tour document order: appended cards after the authored tour.
+  const allDocFiles = useMemo<DocFile[]>(
+    () => [...tourDocFiles, ...otherDocFiles, ...skipDocFiles],
+    [tourDocFiles, otherDocFiles, skipDocFiles]
+  );
+  // Review progress (marks, "N of M", coverage advisory) covers tour + other
+  // only — skipped files were never meant to be walked.
+  const progressDocFiles = useMemo<DocFile[]>(() => [...tourDocFiles, ...otherDocFiles], [tourDocFiles, otherDocFiles]);
+  const groupByPath = useMemo(() => new Map(allDocFiles.map((f) => [f.path, f.group])), [allDocFiles]);
+
+  // Fetch every tour/other/skip file's diff, pinned to the round's base/head
+  // SHAs, with bounded concurrency — the tour renders all of them at once,
+  // unlike the old single-selection pane that only ever needed one file at a
+  // time. A fresh round (new refreshSignal / new round.id) always gets a
+  // fresh fetch pass: `fileDiffs` is reset to all-loading up front.
   useEffect(() => {
     if (!presentation || !round) {
       setFileDiffs({});
       return;
     }
 
-    const paths = round.manifest.files.map((f) => f.path);
+    const paths = allDocFiles.map((f) => f.path);
     const initial: Record<string, DiffCacheEntry> = {};
     for (const path of paths) initial[path] = { loading: true };
     setFileDiffs(initial);
@@ -285,22 +343,23 @@ export function PresentRoot() {
     // loaded round's lifetime; sendGetFileDiff is a stable callback.
   }, [presentation, round, sendGetFileDiff]);
 
-  const files = round?.manifest.files ?? [];
-  const filePaths = useMemo(() => files.map((f) => f.path), [files]);
+  const progressPaths = useMemo(() => progressDocFiles.map((f) => f.path), [progressDocFiles]);
 
   const { reviewed, toggleReviewed, markReviewed } = usePresentReviewedMarks(
     presentationId,
     round?.id ?? null,
-    filePaths
+    progressPaths
   );
 
+  // J/K walk the full appended-tour document order (tour, other, skip cards
+  // alike); mark/toggle below are what keep skipped files out of progress.
   const moveSelection = useCallback((delta: number) => {
-    if (files.length === 0) return;
-    const index = activePath ? files.findIndex((f) => f.path === activePath) : -1;
-    const nextIndex = index === -1 ? 0 : Math.max(0, Math.min(files.length - 1, index + delta));
-    const next = files[nextIndex]?.path;
+    if (allDocFiles.length === 0) return;
+    const index = activePath ? allDocFiles.findIndex((f) => f.path === activePath) : -1;
+    const nextIndex = index === -1 ? 0 : Math.max(0, Math.min(allDocFiles.length - 1, index + delta));
+    const next = allDocFiles[nextIndex]?.path;
     if (next) requestScroll(next);
-  }, [files, activePath, requestScroll]);
+  }, [allDocFiles, activePath, requestScroll]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -310,15 +369,16 @@ export function PresentRoot() {
         e.preventDefault();
         // Auto-mark-on-leave (jaunt semantics): advancing past a file marks
         // the one being left as reviewed. Visiting a file alone (arriving,
-        // scrolling past it passively) never marks it.
-        if (activePath) markReviewed(activePath);
+        // scrolling past it passively) never marks it. Skipped files never
+        // get auto-marked — they aren't part of progress.
+        if (activePath && groupByPath.get(activePath) !== 'skip') markReviewed(activePath);
         moveSelection(1);
       } else if (e.key === 'k' || e.key === 'ArrowUp') {
         e.preventDefault();
         moveSelection(-1);
       } else if (e.key === 'r') {
         e.preventDefault();
-        if (activePath) toggleReviewed(activePath);
+        if (activePath && groupByPath.get(activePath) !== 'skip') toggleReviewed(activePath);
       } else if (e.key === 's') {
         e.preventDefault();
         setShowSubmitDialog((current) => {
@@ -330,7 +390,7 @@ export function PresentRoot() {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [moveSelection, activePath, markReviewed, toggleReviewed]);
+  }, [moveSelection, activePath, markReviewed, toggleReviewed, groupByPath]);
 
   useEffect(() => {
     if (!activePath || !railRef.current) return;
@@ -367,12 +427,13 @@ export function PresentRoot() {
   }, [comments, drafts]);
   const tourFiles = useMemo<PresentTourFile[]>(
     () =>
-      files.map((file) => ({
+      allDocFiles.map((file) => ({
         path: file.path,
         note: file.note,
         diff: fileDiffs[file.path] ?? { loading: true },
+        group: file.group,
       })),
-    [files, fileDiffs]
+    [allDocFiles, fileDiffs]
   );
 
   const handleAddComment = useCallback((filepath: string, lineStart: number, lineEnd: number, content: string) => {
@@ -459,12 +520,46 @@ export function PresentRoot() {
 
   // Advisory-only coverage line for the submit dialog: never blocks
   // submission, just tells the user what the tour didn't see them mark.
-  const unreviewedPaths = filePaths.filter((p) => !reviewed.has(p));
+  // Covers tour + other, never skipped.
+  const unreviewedPaths = progressPaths.filter((p) => !reviewed.has(p));
   const COVERAGE_PREVIEW_COUNT = 5;
   const unreviewedCoverageText =
     unreviewedPaths.length > COVERAGE_PREVIEW_COUNT
       ? `${unreviewedPaths.slice(0, COVERAGE_PREVIEW_COUNT).join(', ')}, and ${unreviewedPaths.length - COVERAGE_PREVIEW_COUNT} more`
       : unreviewedPaths.join(', ');
+
+  // Shared row renderer across the Tour/Other/Skipped sections. `index` is
+  // 1-based for Tour rows and null for Other/Skipped (no numbering) — a
+  // reviewed row always shows a checkmark regardless of section, since Other
+  // participates in progress the same as Tour.
+  function renderRailRow(file: DocFile, index: number | null) {
+    const isReviewed = reviewed.has(file.path);
+    const commentCount = commentCountByPath.get(file.path) ?? 0;
+    const hasStats = file.additions !== undefined || file.deletions !== undefined;
+    return (
+      <li
+        key={file.path}
+        data-path={file.path}
+        className={`present-root-file ${file.path === activePath ? 'selected' : ''} ${isReviewed ? 'reviewed' : ''} ${file.group === 'skip' ? 'present-root-file-skipped' : ''}`}
+        onClick={() => requestScroll(file.path)}
+      >
+        <span className="present-root-file-index">{index !== null ? (isReviewed ? '✓' : index) : isReviewed ? '✓' : ''}</span>
+        <code className="present-root-file-path">{file.path}</code>
+        {file.note && <span className="present-root-file-note-marker" title="Has a note">●</span>}
+        {commentCount > 0 && (
+          <span className="present-root-file-comment-chip" title={`${commentCount} comment${commentCount === 1 ? '' : 's'}`}>
+            {commentCount}
+          </span>
+        )}
+        {hasStats && (
+          <span className="present-root-file-stats">
+            {file.additions !== undefined && <span className="adds">+{file.additions}</span>}
+            {file.deletions !== undefined && <span className="dels">−{file.deletions}</span>}
+          </span>
+        )}
+      </li>
+    );
+  }
 
   return (
     <div className="present-root">
@@ -539,13 +634,13 @@ export function PresentRoot() {
           <div className="present-root-rail-header">
             <span className="present-root-rail-title">Files</span>
             <span className="present-root-rail-count" data-testid="present-root-rail-count">
-              {reviewed.size}/{files.length}
+              {reviewed.size}/{progressPaths.length}
             </span>
           </div>
           <div className="present-root-rail-progress-track">
             <div
               className="present-root-rail-progress-fill"
-              style={{ width: `${files.length > 0 ? (reviewed.size / files.length) * 100 : 0}%` }}
+              style={{ width: `${progressPaths.length > 0 ? (reviewed.size / progressPaths.length) * 100 : 0}%` }}
             />
           </div>
 
@@ -559,50 +654,31 @@ export function PresentRoot() {
               <span className="present-root-file-path">Summary</span>
             </li>
 
-            {files.map((file, index) => {
-              const isReviewed = reviewed.has(file.path);
-              const commentCount = commentCountByPath.get(file.path) ?? 0;
-              const hasStats = file.additions !== undefined || file.deletions !== undefined;
-              return (
-                <li
-                  key={file.path}
-                  data-path={file.path}
-                  className={`present-root-file ${file.path === activePath ? 'selected' : ''} ${isReviewed ? 'reviewed' : ''}`}
-                  onClick={() => requestScroll(file.path)}
-                >
-                  <span className="present-root-file-index">{isReviewed ? '✓' : index + 1}</span>
-                  <code className="present-root-file-path">{file.path}</code>
-                  {file.note && <span className="present-root-file-note-marker" title="Has a note">●</span>}
-                  {commentCount > 0 && (
-                    <span className="present-root-file-comment-chip" title={`${commentCount} comment${commentCount === 1 ? '' : 's'}`}>
-                      {commentCount}
-                    </span>
-                  )}
-                  {hasStats && (
-                    <span className="present-root-file-stats">
-                      {file.additions !== undefined && <span className="adds">+{file.additions}</span>}
-                      {file.deletions !== undefined && <span className="dels">−{file.deletions}</span>}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-
-            {round.manifest.skip.length > 0 && (
+            {tourDocFiles.length > 0 && (
               <>
-                <li className="present-root-skip-divider">Skipped</li>
-                {round.manifest.skip.map((path) => (
-                  <li key={path} className="present-root-file present-root-file-skipped">
-                    <code className="present-root-file-path">{path}</code>
-                  </li>
-                ))}
+                <li className="present-root-section-header">Tour · {tourDocFiles.length}</li>
+                {tourDocFiles.map((file, index) => renderRailRow(file, index + 1))}
+              </>
+            )}
+
+            {otherDocFiles.length > 0 && (
+              <>
+                <li className="present-root-section-header">Other · {otherDocFiles.length}</li>
+                {otherDocFiles.map((file) => renderRailRow(file, null))}
+              </>
+            )}
+
+            {skipDocFiles.length > 0 && (
+              <>
+                <li className="present-root-section-header">Skipped · {skipDocFiles.length}</li>
+                {skipDocFiles.map((file) => renderRailRow(file, null))}
               </>
             )}
           </ol>
         </div>
 
         <main className="present-root-diff-pane">
-          {files.length === 0 ? (
+          {allDocFiles.length === 0 ? (
             <div className="present-root-diff-placeholder">No files in this round.</div>
           ) : (
             <PresentTour
@@ -629,7 +705,7 @@ export function PresentRoot() {
 
       <DriveBar
         reviewedCount={reviewed.size}
-        totalCount={files.length}
+        totalCount={progressPaths.length}
         draftCount={drafts.length}
         submitting={submitting}
         onSubmit={() => {

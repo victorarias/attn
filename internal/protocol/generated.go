@@ -2283,6 +2283,9 @@ type PresentationRound struct {
 	// BaseSHA corresponds to the JSON schema field "base_sha".
 	BaseSHA string `json:"base_sha"`
 
+	// ChangedFiles corresponds to the JSON schema field "changed_files".
+	ChangedFiles []PresentFile `json:"changed_files,omitempty,omitzero"`
+
 	// CreatedAt corresponds to the JSON schema field "created_at".
 	CreatedAt string `json:"created_at"`
 

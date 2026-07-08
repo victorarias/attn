@@ -1293,6 +1293,7 @@ export interface PresentationElement {
 
 export interface Round {
     base_sha:        string;
+    changed_files?:  ChangedFileElement[];
     created_at:      string;
     head_sha:        string;
     id:              string;
@@ -1303,19 +1304,19 @@ export interface Round {
     [property: string]: any;
 }
 
-export interface Manifest {
-    files:    FileElement[];
-    skip:     string[];
-    summary?: string;
-    title:    string;
-    [property: string]: any;
-}
-
-export interface FileElement {
+export interface ChangedFileElement {
     additions?: number;
     deletions?: number;
     note?:      string;
     path:       string;
+    [property: string]: any;
+}
+
+export interface Manifest {
+    files:    ChangedFileElement[];
+    skip:     string[];
+    summary?: string;
+    title:    string;
     [property: string]: any;
 }
 
@@ -2383,6 +2384,7 @@ export interface PresentationComment {
 
 export interface PresentationRound {
     base_sha:        string;
+    changed_files?:  ChangedFileElement[];
     created_at:      string;
     head_sha:        string;
     id:              string;
@@ -2439,7 +2441,7 @@ export interface PresentFile {
 }
 
 export interface PresentManifestView {
-    files:    FileElement[];
+    files:    ChangedFileElement[];
     skip:     string[];
     summary?: string;
     title:    string;
@@ -7692,6 +7694,7 @@ const typeMap: any = {
     ], "any"),
     "Round": o([
         { json: "base_sha", js: "base_sha", typ: "" },
+        { json: "changed_files", js: "changed_files", typ: u(undefined, a(r("ChangedFileElement"))) },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "head_sha", js: "head_sha", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -7700,17 +7703,17 @@ const typeMap: any = {
         { json: "seq", js: "seq", typ: 0 },
         { json: "submitted_at", js: "submitted_at", typ: u(undefined, "") },
     ], "any"),
-    "Manifest": o([
-        { json: "files", js: "files", typ: a(r("FileElement")) },
-        { json: "skip", js: "skip", typ: a("") },
-        { json: "summary", js: "summary", typ: u(undefined, "") },
-        { json: "title", js: "title", typ: "" },
-    ], "any"),
-    "FileElement": o([
+    "ChangedFileElement": o([
         { json: "additions", js: "additions", typ: u(undefined, 0) },
         { json: "deletions", js: "deletions", typ: u(undefined, 0) },
         { json: "note", js: "note", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
+    ], "any"),
+    "Manifest": o([
+        { json: "files", js: "files", typ: a(r("ChangedFileElement")) },
+        { json: "skip", js: "skip", typ: a("") },
+        { json: "summary", js: "summary", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
     ], "any"),
     "GetPresentationsMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetPresentationsMessageCmd") },
@@ -8333,6 +8336,7 @@ const typeMap: any = {
     ], "any"),
     "PresentationRound": o([
         { json: "base_sha", js: "base_sha", typ: "" },
+        { json: "changed_files", js: "changed_files", typ: u(undefined, a(r("ChangedFileElement"))) },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "head_sha", js: "head_sha", typ: "" },
         { json: "id", js: "id", typ: "" },
@@ -8369,7 +8373,7 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
     ], "any"),
     "PresentManifestView": o([
-        { json: "files", js: "files", typ: a(r("FileElement")) },
+        { json: "files", js: "files", typ: a(r("ChangedFileElement")) },
         { json: "skip", js: "skip", typ: a("") },
         { json: "summary", js: "summary", typ: u(undefined, "") },
         { json: "title", js: "title", typ: "" },

@@ -173,15 +173,15 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
 
 ## Implementation Steps (slices, one small PR each)
 
-- [ ] 1. **Tour scroll on CodeView**: `PresentTour` component, summary card,
+- [x] 1. **Tour scroll on CodeView**: `PresentTour` component, summary card,
       per-file sticky headers with note callouts, comment machinery ported at
       full parity with today's per-file DiffView (multi-draft, hover `+`,
       Escape LIFO, scroll-pin equivalent), rail click scrolls to the file.
-- [ ] 2. **Progress + keyboard + DriveBar**: J/K/R, reviewed collapse,
+- [x] 2. **Progress + keyboard + DriveBar**: J/K/R, reviewed collapse,
       kbd badges, localStorage persistence, coverage in submit dialog.
-- [ ] 3. **Rail anatomy**: ± stats, note/annotation dots, pinned summary row,
+- [x] 3. **Rail anatomy**: ± stats, note/annotation dots, pinned summary row,
       scroll-synced active state.
-- [ ] 4. **Grouping**: daemon changed-files list → Other group (protocol).
+- [x] 4. **Grouping**: daemon changed-files list → Other group (protocol).
 - [ ] 5. **Annotations**: manifest schema + store/protocol + inline threads
       (expect multiple PRs).
 - [ ] 6. **Diagrams**: mermaid in the shared markdown path.
@@ -210,6 +210,7 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
 - Scroll-pin: does CodeView's anchor logic have the same cold-window
   autonomous-scroll bug fixed for the single-file Virtualizer in PR #502?
   Verify on a cold present-window load during slice 1.
-- Per-file ± stats source: daemon returns stats in the round payload vs client
-  computes from lazily fetched diffs — decide in slice 3 (lean daemon).
+- Per-file ± stats source: **resolved in slice 3** — the daemon returns stats
+  in the round payload (lean daemon), not client-computed from lazily fetched
+  diffs.
 - Approve semantics on round/session state — decide in slice 7.

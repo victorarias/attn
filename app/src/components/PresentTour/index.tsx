@@ -67,6 +67,11 @@ export interface PresentTourFile {
   path: string;
   note?: string;
   diff: PresentTourFileDiff;
+  /** Which rail section this card belongs to. Drives the skip-card
+   * de-emphasis and hides the reviewed toggle on skip cards, since skipped
+   * files aren't part of review progress. Defaults to 'tour' semantics when
+   * omitted (no de-emphasis, toggle shown). */
+  group?: 'tour' | 'other' | 'skip';
 }
 
 export interface PresentTourProps {
@@ -436,6 +441,29 @@ export function PresentTour({
   );
 
   const noteByPath = useMemo(() => new Map(files.map((f) => [f.path, f.note])), [files]);
+  const groupByPath = useMemo(() => new Map(files.map((f) => [f.path, f.group ?? 'tour'])), [files]);
+
+  // The library's items don't carry an arbitrary className slot, so the
+  // skip-card de-emphasis (see .present-tour-card-skip in PresentTour.css) is
+  // applied imperatively to each rendered card's root element — the same
+  // `getRenderedItems()` escape hatch handleScroll below already relies on.
+  // CodeView virtualizes: scrolling can mount new item elements without the
+  // `items` array changing, so this also has to re-run on every scroll (see
+  // handleScroll) — this effect alone only covers items already rendered
+  // when the item list settles.
+  const syncSkipClasses = useCallback(() => {
+    const instance = handleRef.current?.getInstance();
+    if (!instance) return;
+    for (const rendered of instance.getRenderedItems()) {
+      const isSkip = groupByPath.get(rendered.id) === 'skip';
+      rendered.element.classList.toggle('present-tour-card-skip', isSkip);
+    }
+  }, [groupByPath]);
+
+  useEffect(() => {
+    if (!allSettled) return;
+    syncSkipClasses();
+  }, [allSettled, items, groupByPath, syncSkipClasses]);
 
   const renderHeaderMetadata = useCallback(
     (item: CodeViewItem<AnnotationMeta>) => {
@@ -452,6 +480,8 @@ export function PresentTour({
 
   const renderHeaderPrefix = useCallback(
     (item: CodeViewItem<AnnotationMeta>) => {
+      // Skipped files aren't part of review progress — no toggle to show.
+      if (groupByPath.get(item.id) === 'skip') return null;
       const isReviewed = reviewedPaths.has(item.id);
       return (
         <button
@@ -469,7 +499,7 @@ export function PresentTour({
         </button>
       );
     },
-    [reviewedPaths, onToggleReviewed]
+    [reviewedPaths, onToggleReviewed, groupByPath]
   );
 
   const options = useMemo<CodeViewOptions<AnnotationMeta>>(
@@ -597,6 +627,7 @@ export function PresentTour({
   // guessed selector.
   const handleScroll = useCallback(
     (scrollTop: number) => {
+      syncSkipClasses();
       if (!onActivePathChange || !containerRef.current) return;
       // At the very top of the scroller there is nothing above the first
       // file to have scrolled past — this is the summary region.
@@ -627,7 +658,7 @@ export function PresentTour({
       const path = bestPath ?? nearestPath;
       if (path) onActivePathChange(path);
     },
-    [onActivePathChange]
+    [onActivePathChange, syncSkipClasses]
   );
 
   return (

@@ -213,6 +213,20 @@ const roundWithStats = {
   },
 };
 
+// changed_files always lists every changed path — tour files included — so
+// this covers both the "Other" derivation (src/extra.ts, not in the
+// manifest) and the "no changed_files" fallback (roundWithSkip above has none).
+const roundWithChangedFiles = {
+  ...roundWithSkip,
+  changed_files: [
+    { path: 'src/foo.ts', additions: 12, deletions: 3 },
+    { path: 'src/foo.test.ts', additions: 1, deletions: 0 },
+    { path: 'src/extra.ts', additions: 5, deletions: 1 },
+    { path: 'src/generated.ts', additions: 0, deletions: 40 },
+    { path: 'src/vendor.ts' },
+  ],
+};
+
 const presentation = {
   id: 'pres-1',
   created_at: '2026-07-01T00:00:00Z',
@@ -572,13 +586,112 @@ describe('PresentRoot', () => {
     expect(screen.getByText('My presentation')).toBeInTheDocument();
   });
 
-  it('lists skipped files dimmed and non-clickable under a Skipped divider', async () => {
+  it('lists skipped files dimmed under a Skipped section header, and still clickable', async () => {
     await loadRound({ round: roundWithSkip });
 
-    expect(screen.getByText('Skipped')).toBeInTheDocument();
+    expect(screen.getByText('Skipped · 2')).toBeInTheDocument();
     expect(screen.getByText('src/generated.ts')).toBeInTheDocument();
     expect(screen.getByText('src/vendor.ts')).toBeInTheDocument();
     expect(screen.getByText('src/generated.ts').closest('li')).toHaveClass('present-root-file-skipped');
+
+    // Skipped rows are real document entries — clicking one still scrolls to it.
+    fireEvent.click(screen.getByText('src/generated.ts'));
+    await waitFor(() => {
+      expect(screen.getByText('src/generated.ts').closest('li')).toHaveClass('selected');
+    }, WAIT_OPTS);
+  });
+
+  it('shows a Tour section header sized to the manifest file count', async () => {
+    await loadRound();
+    expect(screen.getByText('Tour · 2')).toBeInTheDocument();
+  });
+
+  describe('file grouping (Tour / Other / Skipped)', () => {
+    it('renders changed_files paths not in the manifest under an alphabetical Other section', async () => {
+      await loadRound({ round: roundWithChangedFiles });
+
+      expect(screen.getByText('Other · 1')).toBeInTheDocument();
+      expect(screen.getByText('src/extra.ts')).toBeInTheDocument();
+      expect(screen.getByText('Skipped · 2')).toBeInTheDocument();
+
+      // Tour, Other, Skipped appear in that order (alphabetical within Other).
+      const paths = screen
+        .getAllByText(/^src\//)
+        .map((el) => el.textContent)
+        .filter((t): t is string => !!t);
+      expect(paths).toEqual(['src/foo.ts', 'src/foo.test.ts', 'src/extra.ts', 'src/generated.ts', 'src/vendor.ts']);
+    });
+
+    it('shows no Other section when the round carries no changed_files', async () => {
+      await loadRound({ round: roundWithSkip });
+      expect(screen.queryByText(/^Other ·/)).not.toBeInTheDocument();
+    });
+
+    it('shows ± stats and a comment chip on an Other row', async () => {
+      await loadRound({
+        round: roundWithChangedFiles,
+        comments: [
+          {
+            id: 'c1',
+            content: 'note on the extra file',
+            filepath: 'src/extra.ts',
+            line_start: 1,
+            line_end: 1,
+            side: 'new',
+            author: 'user',
+            created_at: '2026-07-01T00:00:00Z',
+            round_id: 'round-0',
+          },
+        ],
+      });
+
+      const row = screen.getByText('src/extra.ts').closest('li');
+      const statsEl = row?.querySelector('.present-root-file-stats');
+      expect(statsEl?.querySelector('.adds')?.textContent).toBe('+5');
+      expect(statsEl?.querySelector('.dels')?.textContent).toBe('−1');
+      expect(row?.querySelector('.present-root-file-comment-chip')?.textContent).toBe('1');
+    });
+
+    it('counts progress over tour + other only, excluding skipped', async () => {
+      await loadRound({ round: roundWithChangedFiles });
+      // 2 tour files + 1 other file = 3; the 2 skipped files don't count.
+      expect(screen.getByTestId('present-root-rail-count').textContent).toBe('0/3');
+    });
+
+    it('the coverage advisory in the submit dialog excludes skipped files', async () => {
+      await loadRound({ round: roundWithChangedFiles });
+
+      fireEvent.keyDown(window, { key: 's' });
+      await waitFor(() => {
+        expect(screen.getByTestId('present-root-submit-coverage')).toBeInTheDocument();
+      }, WAIT_OPTS);
+
+      const coverage = screen.getByTestId('present-root-submit-coverage').textContent ?? '';
+      expect(coverage).toContain('src/foo.ts');
+      expect(coverage).toContain('src/foo.test.ts');
+      expect(coverage).toContain('src/extra.ts');
+      expect(coverage).not.toContain('src/generated.ts');
+      expect(coverage).not.toContain('src/vendor.ts');
+    });
+
+    it('j leaving a skipped file does not auto-mark it, even though j still walks through it', async () => {
+      await loadRound({ round: roundWithChangedFiles });
+
+      // Doc order: src/foo.ts, src/foo.test.ts, src/extra.ts, src/generated.ts (skip), src/vendor.ts (skip).
+      // Four j-presses land on src/vendor.ts, having left src/generated.ts along the way.
+      for (let i = 0; i < 4; i++) {
+        fireEvent.keyDown(window, { key: 'j' });
+      }
+      await waitFor(() => {
+        expect(screen.getByText('src/vendor.ts').closest('li')).toHaveClass('selected');
+      }, WAIT_OPTS);
+
+      // tour(2) + other(1) all got auto-marked while leaving them; the two
+      // skipped files never do, regardless of how many were walked past.
+      expect(screen.getByTestId('present-root-rail-count').textContent).toBe('3/3');
+      expect(screen.getByText('src/generated.ts').closest('li')).not.toHaveClass('reviewed');
+      expect(screen.getByText('src/vendor.ts').closest('li')).not.toHaveClass('reviewed');
+    }, TEST_TIMEOUT);
   });
 
   async function loadRoundWithDiff(options?: {

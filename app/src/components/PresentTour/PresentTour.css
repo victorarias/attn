@@ -107,3 +107,18 @@
   font-size: var(--font-size);
   border-top: 1px solid var(--color-border);
 }
+
+/* Skipped-file cards (jaunt's "deemph" analog): CodeView items render inside
+ * the library's own custom element, which has no exposed className slot to
+ * style just the header — opacity on the mounted item root dims the whole
+ * card instead, which reads the same way and isn't blocked by any internal
+ * shadow boundary. Applied imperatively via getRenderedItems(), see the
+ * component's groupByPath effect. */
+.present-tour-card-skip {
+  opacity: 0.55;
+}
+
+.present-tour-card-skip:hover,
+.present-tour-card-skip:focus-within {
+  opacity: 0.85;
+}

@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '151';
+export const PROTOCOL_VERSION = '152';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
