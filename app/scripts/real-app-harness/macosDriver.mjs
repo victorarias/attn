@@ -111,6 +111,34 @@ export class MacOSDriver {
     return null;
   }
 
+  // Returns all onscreen windows owned by the driver's bundle, parsed from the
+  // `windowlist` subcommand: Array<{ id, name, x, y, width, height, layer }>.
+  // Returns [] on any failure (never throws), matching mainWindowId()'s
+  // tolerance.
+  async windowList() {
+    try {
+      const value = await this.runInputDriverCapture(['windowlist']);
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  // Polls windowList() until a window whose `name` equals `title` appears.
+  // Returns the matching window object, or null on timeout. Requires window
+  // names (Screen Recording permission); callers should treat null as "the
+  // window never opened" and fail loudly rather than guessing.
+  async waitForWindowTitled(title, { timeoutMs = 10_000, pollIntervalMs = 200 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const named = (await this.windowList()).find((w) => w.name === title);
+      if (named) return named;
+      await delay(pollIntervalMs);
+    }
+    return null;
+  }
+
   async typeText(text) {
     await this.runInputDriver(['text', '--text', text, '--prompt-accessibility']);
     await delay(this.actionDelayMs);

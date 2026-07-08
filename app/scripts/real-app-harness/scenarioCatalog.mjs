@@ -48,6 +48,14 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],
   },
   {
+    id: 'present-flow',
+    label: 'Present flow: chip → window → submit round → feedback CLI',
+    command: ['pnpm', 'run', 'real-app:scenario-present-flow'],
+    // Boots the app + a session + two CLI round-trips + a second native
+    // window; give it headroom like the other heavy scenarios.
+    timeoutMs: 240_000,
+  },
+  {
     id: 'ticket-lifecycle',
     label: 'Ticket lifecycle: chief delegates, worker reports, chief reviews in the panel',
     command: ['pnpm', 'run', 'real-app:scenario-ticket-lifecycle'],

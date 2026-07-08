@@ -108,28 +108,31 @@ Tests:
 
 ## Implementation Steps
 
-- [ ] **PR 1 — Go spine.** `internal/present` (parse, validate, SHA pinning);
+- [x] **PR 1 — Go spine.** `internal/present` (parse, validate, SHA pinning);
       store tables + migration; protocol messages + version bump; daemon
       handlers (`present_open`, feedback, get/list, submit_round persistence);
       `attn present` / `attn present validate` / `attn present feedback` in
       `cmd/attn`; doorbell-on-submit (ticket activity when bound, bare
-      doorbell otherwise). Tests as mapped.
-- [ ] **PR 2 — window shell.** Rust `open_presentation_window` (build-or-show,
+      doorbell otherwise). Tests as mapped. (Merged: #465.)
+- [x] **PR 2 — window shell.** Rust `open_presentation_window` (build-or-show,
       hide-on-close-request), label-guarded `on_page_load` show,
       `capabilities/present.json` (core:default + clipboard), focus-aware
       `on_menu_event`/`dispatch_native_shortcut` (⌘W on present window hides
       it, never touches main panes); `main.tsx` `?window=present` branch with
       a hello-world `PresentRoot` proving WS + theme; banner notice in main
       window wired to `presentation_added` → open window; banner persists
-      while window hidden (that IS minimize-to-banner).
-- [ ] **PR 3 — the reader.** Ordered file list, pinned-SHA diffs through
+      while window hidden (that IS minimize-to-banner). (Merged: #466.)
+- [x] **PR 3 — the reader.** Ordered file list, pinned-SHA diffs through
       `DiffView`, per-file notes + summary (existing simple markdown renderer;
       no new markdown stack), keyboard nav, inline comment drafts, submit
       dialog with handback toggle, drift banner (round head vs current branch
       head). `get_file_diff` head-ref extension lands here with its daemon
-      tests.
-- [ ] **PR 4 — packaged evidence + polish.** Real-app scenario for the full
+      tests. (Merged: #482.)
+- [x] **PR 4 — packaged evidence + polish.** Real-app scenario for the full
       loop; live dev-app smoke with a real delegated agent; CHANGELOG entry.
+      (Packaged scenario `scenario-present-flow.mjs` — PR #484, rebuilt on
+      main and kept current with the verdict-aware submit protocol from
+      PR #516.)
 
 ## Decisions
 
