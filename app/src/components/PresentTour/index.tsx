@@ -32,8 +32,6 @@
  *     acceptable for slice 1 per the brief's stated fallback.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import {
   CodeView,
   useStableCallback,
@@ -53,6 +51,7 @@ import type { ReviewComment } from '../../types/generated';
 import { isOriginalSideComment } from '../../utils/reviewComment';
 import { normalizeRange } from '../DiffView';
 import { DiffCommentThread } from '../DiffCommentThread';
+import { Markdown } from '../Markdown';
 import '../DiffView.css';
 import './PresentTour.css';
 
@@ -139,6 +138,12 @@ interface AnnotationMeta {
    * visible diff hunks (see the outside-diff fallback below); rendered as a
    * caption above the thread. */
   outsideDiffNote?: string;
+  /** Marks a synthetic annotation carrying a file note rather than review
+   * comments — see the file-note-as-annotation design note below `notePlacedPathsRef`
+   * for why notes have to enter the annotation system instead of
+   * `renderHeaderMetadata`. */
+  kind?: 'note';
+  noteMarkdown?: string;
 }
 
 type DraftState = {
@@ -222,6 +227,20 @@ export function PresentTour({
   // annotation-anchors effect further down — same "mutate a ref inside the
   // items useMemo" pattern this component already uses for frozenRef.
   const annotationAnchorsRef = useRef<AnnotationAnchor[]>([]);
+  // CodeView computes item heights analytically from a global header-height
+  // constant (see `dist/types.d.ts` `diffHeaderHeight`); a file note rendered
+  // through `renderHeaderMetadata` (part of that header) breaks the layout
+  // math the moment its content is taller than that constant — no `version`
+  // bump can fix it, since the bug is in the height CodeView assumes, not in
+  // whether it re-measures. Annotation slots, by contrast, are DOM-measured
+  // by CodeView's own ResizeManager, so a note that needs to hold a mermaid
+  // diagram has to enter the annotation system as a synthetic "note"
+  // annotation on the file's first visible line instead. Populated in the
+  // items memo below (paths that got a placed note annotation), consumed by
+  // `renderHeaderMetadata` to suppress the header rendering for those files —
+  // the header path stays live as a fallback for files with no visible diff
+  // line to anchor to (see the memo).
+  const notePlacedPathsRef = useRef<Set<string>>(new Set());
   // CodeView's controlled-item reconciliation keys off each item's `version`
   // field (see components/CodeView.js `syncItemRecord`): a matching version
   // — including two `undefined`s — means "no change, keep the cached
@@ -232,6 +251,30 @@ export function PresentTour({
   // that pass, since firing on any recompute is correct even though it's
   // coarser than a per-file version would be.
   const itemsVersionRef = useRef(0);
+
+  // Mermaid diagrams (in file notes and annotation bodies) render
+  // asynchronously: the item is first measured against a short "loading"
+  // placeholder, then the SVG lands and the header/annotation grows by
+  // hundreds of px. CodeView's cached layout never learns about that growth
+  // on its own, so a diagram completing has to force the same `version` bump
+  // reviewedPaths already forces above — this tick is folded into that memo's
+  // deps for exactly that purpose. rAF-coalesced so several diagrams settling
+  // in the same frame (a file note landing at the same time as annotations
+  // below it) produce one bump instead of one per diagram.
+  const [diagramLayoutTick, setDiagramLayoutTick] = useState(0);
+  const diagramLayoutRafRef = useRef<number | null>(null);
+  const handleDiagramLayoutChange = useCallback(() => {
+    if (diagramLayoutRafRef.current !== null) return;
+    diagramLayoutRafRef.current = requestAnimationFrame(() => {
+      diagramLayoutRafRef.current = null;
+      setDiagramLayoutTick((tick) => tick + 1);
+    });
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (diagramLayoutRafRef.current !== null) cancelAnimationFrame(diagramLayoutRafRef.current);
+    };
+  }, []);
 
   // Per-anchor draft storage, keyed globally (filepath is already part of the
   // anchor key) so a draft on file A and a draft on file B can be open at once
@@ -345,6 +388,15 @@ export function PresentTour({
       const meta = annotation.metadata;
       if (!meta) return null;
       const key = meta.anchorKey;
+      if (meta.kind === 'note') {
+        return (
+          <div key={key} className="present-tour-file-note-slot">
+            <Markdown className="present-tour-file-note" onDiagramLayoutChange={handleDiagramLayoutChange}>
+              {meta.noteMarkdown ?? ''}
+            </Markdown>
+          </div>
+        );
+      }
       return (
         // data-anchor-key lets the N/P scroll effect below locate this
         // thread's mounted element without CodeView exposing an id hook of
@@ -368,6 +420,7 @@ export function PresentTour({
             onSendComment={handleSendComment}
             caption={meta.outsideDiffNote}
             onReply={meta.draft ? undefined : () => openDraft(meta.filepath, meta.side, meta.lineNumber, meta.lineNumber)}
+            onDiagramLayoutChange={handleDiagramLayoutChange}
           />
         </div>
       );
@@ -387,6 +440,7 @@ export function PresentTour({
       onDeleteComment,
       handleSendComment,
       openDraft,
+      handleDiagramLayoutChange,
     ]
   );
 
@@ -394,6 +448,7 @@ export function PresentTour({
   // once every file's diff fetch has settled (see the module doc for why).
   const items = useMemo<CodeViewItem<AnnotationMeta>[]>(() => {
     annotationAnchorsRef.current = [];
+    notePlacedPathsRef.current = new Set();
     if (!allSettled) return [];
     itemsVersionRef.current += 1;
     const version = itemsVersionRef.current;
@@ -489,11 +544,43 @@ export function PresentTour({
       const hasOpenForm = (g: AnnotationMeta) => g.draft || g.comments.some((c) => c.id === editingCommentId);
       const active = all.filter(hasOpenForm).sort((a, b) => a.anchorKey.localeCompare(b.anchorKey));
       const rest = all.filter((g) => !hasOpenForm(g));
-      const annotations: DiffLineAnnotation<AnnotationMeta>[] = [...active, ...rest].map((meta) => ({
-        side: meta.side,
-        lineNumber: meta.lineNumber,
-        metadata: meta,
-      }));
+
+      // A file note anchors to the first visible line (additions, falling
+      // back to deletions) so it renders as a real DOM-measured annotation —
+      // see notePlacedPathsRef's declaration for why. A file with no visible
+      // hunk lines on either side (fully-context diff) can't anchor one; that
+      // case falls back to the header path via notePlacedPathsRef staying
+      // empty for it.
+      let noteAnnotation: DiffLineAnnotation<AnnotationMeta> | undefined;
+      if (file.note) {
+        const additionsStart = visibleLineRanges.additions[0]?.[0];
+        const deletionsStart = visibleLineRanges.deletions[0]?.[0];
+        const side: AnnotationSide | undefined = additionsStart !== undefined ? 'additions' : deletionsStart !== undefined ? 'deletions' : undefined;
+        const lineNumber = side === 'additions' ? additionsStart : deletionsStart;
+        if (side !== undefined && lineNumber !== undefined) {
+          const noteMeta: AnnotationMeta = {
+            kind: 'note',
+            noteMarkdown: file.note,
+            filepath: file.path,
+            side,
+            lineNumber,
+            comments: [],
+            draft: false,
+            anchorKey: `note:${file.path}`,
+          };
+          noteAnnotation = { side, lineNumber, metadata: noteMeta };
+          notePlacedPathsRef.current.add(file.path);
+        }
+      }
+
+      const annotations: DiffLineAnnotation<AnnotationMeta>[] = [
+        ...(noteAnnotation ? [noteAnnotation] : []),
+        ...[...active, ...rest].map((meta) => ({
+          side: meta.side,
+          lineNumber: meta.lineNumber,
+          metadata: meta,
+        })),
+      ];
 
       return { id: file.path, type: 'diff', fileDiff, annotations, version };
     });
@@ -504,8 +591,11 @@ export function PresentTour({
     // controlled items only re-render on a version bump (see module doc), and
     // the reviewed indicator is otherwise rendered through renderHeaderPrefix,
     // which this codebase has not proven re-renders on its own without one.
+    // diagramLayoutTick is included for the identical reason: a mermaid
+    // diagram settling (see handleDiagramLayoutChange above) needs the same
+    // version bump to invalidate CodeView's stale cached item height.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allSettled, files, commentsByFile, draftsByFile, drafts, formOpenByFile, editingCommentId, reviewedPaths, annotationCommentIds]);
+  }, [allSettled, files, commentsByFile, draftsByFile, drafts, formOpenByFile, editingCommentId, reviewedPaths, annotationCommentIds, diagramLayoutTick]);
 
   // Notify the parent of the current annotation anchor list once items has
   // committed (annotationAnchorsRef was populated by the memo above). A plain
@@ -566,15 +656,19 @@ export function PresentTour({
 
   const renderHeaderMetadata = useCallback(
     (item: CodeViewItem<AnnotationMeta>) => {
+      // The note already rendered as an annotation for this file (see
+      // notePlacedPathsRef) — this header path is only the fallback for
+      // files with no visible diff line to anchor a note annotation to.
+      if (notePlacedPathsRef.current.has(item.id)) return null;
       const note = noteByPath.get(item.id);
       if (!note) return null;
       return (
-        <div className="present-tour-file-note">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{note}</ReactMarkdown>
-        </div>
+        <Markdown className="present-tour-file-note" onDiagramLayoutChange={handleDiagramLayoutChange}>
+          {note}
+        </Markdown>
       );
     },
-    [noteByPath]
+    [noteByPath, handleDiagramLayoutChange]
   );
 
   const renderHeaderPrefix = useCallback(
@@ -803,7 +897,7 @@ export function PresentTour({
     >
       {summary && (
         <div className="present-tour-summary" data-testid="present-tour-summary">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary}</ReactMarkdown>
+          <Markdown>{summary}</Markdown>
         </div>
       )}
 

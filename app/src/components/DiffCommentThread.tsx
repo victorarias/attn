@@ -9,18 +9,16 @@
  * One thread groups every comment sharing the same (side, line) anchor, plus an
  * optional in-progress draft form for a brand new comment on that anchor.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { useEffect, useRef, useState } from 'react';
+import { Markdown } from './Markdown';
 import type { ReviewComment } from '../types/generated';
 
 /** Rendered comment body; react-markdown escapes raw HTML by default. */
-function CommentBody({ content }: { content: string }) {
-  const remarkPlugins = useMemo(() => [remarkGfm], []);
+function CommentBody({ content, onDiagramLayoutChange }: { content: string; onDiagramLayoutChange?: () => void }) {
   return (
-    <div className="diff-comment-content">
-      <ReactMarkdown remarkPlugins={remarkPlugins}>{content}</ReactMarkdown>
-    </div>
+    <Markdown className="diff-comment-content" breaks onDiagramLayoutChange={onDiagramLayoutChange}>
+      {content}
+    </Markdown>
   );
 }
 
@@ -108,6 +106,9 @@ export interface DiffCommentThreadProps {
    * thread that has no draft or in-progress edit — lets a reader answer an
    * author annotation without the gutter "+" control. */
   onReply?: () => void;
+  /** Forwarded to every comment body's mermaid diagrams — see Markdown's
+   * onDiagramLayoutChange for why a CodeView host needs this. */
+  onDiagramLayoutChange?: () => void;
 }
 
 export function DiffCommentThread({
@@ -128,6 +129,7 @@ export function DiffCommentThread({
   onSendComment,
   caption,
   onReply,
+  onDiagramLayoutChange,
 }: DiffCommentThreadProps) {
   const hasReadOnlyComment = comments.some((c) => readOnlyCommentIds?.has(c.id));
   const hasEditingComment = comments.some((c) => c.id === editingCommentId);
@@ -184,7 +186,7 @@ export function DiffCommentThread({
                     )}
                   </div>
                 </div>
-                <CommentBody content={comment.content} />
+                <CommentBody content={comment.content} onDiagramLayoutChange={onDiagramLayoutChange} />
               </>
             )}
           </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Ticket } from '../hooks/useDaemonSocket';
 import { isTicketOrphaned } from '../utils/ticketOrphan';
+import { Markdown } from './Markdown';
 import './TicketDetailPanel.css';
 
 interface TicketDetailPanelProps {
@@ -64,7 +65,7 @@ function ActivityEntry({ entry }: { entry: Ticket['activity'][number] }) {
           </span>
           {when && <span className="ticket-activity-when">{when}</span>}
         </div>
-        {entry.comment && <div className="ticket-activity-comment">{entry.comment}</div>}
+        {entry.comment && <Markdown className="ticket-activity-comment" breaks>{entry.comment}</Markdown>}
       </li>
     );
   }
@@ -73,7 +74,7 @@ function ActivityEntry({ entry }: { entry: Ticket['activity'][number] }) {
       <div className="ticket-activity-head">
         {when && <span className="ticket-activity-when">{when}</span>}
       </div>
-      {entry.comment && <div className="ticket-activity-comment">{entry.comment}</div>}
+      {entry.comment && <Markdown className="ticket-activity-comment" breaks>{entry.comment}</Markdown>}
     </li>
   );
 }
@@ -321,7 +322,7 @@ export function TicketDetailPanel({
                 </div>
               </div>
             ) : fullTicket.description ? (
-              <p className="ticket-detail-description">{fullTicket.description}</p>
+              <Markdown className="ticket-detail-description" breaks>{fullTicket.description}</Markdown>
             ) : (
               <p className="ticket-detail-empty">No description.</p>
             )}

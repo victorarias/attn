@@ -12,6 +12,25 @@ import type { ReviewComment } from '../../types/generated';
 // OWN annotation-grouping/outside-diff/N-P logic — the actual subject of this
 // slice — gets exercised for real, with a plain div standing in for the
 // library's rendering surface.
+// Mermaid diagrams are async, and the diagram-layout-change fix is exercised
+// against the mocked mermaid module below (jsdom cannot run real mermaid —
+// see Markdown.test.tsx's module doc for the same reasoning).
+const mermaidMock = vi.hoisted(() => ({
+  render: vi.fn(async () => ({ svg: '<svg data-testid="mermaid-svg"></svg>' })),
+  initialize: vi.fn(),
+}));
+
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: mermaidMock.initialize,
+    render: mermaidMock.render,
+  },
+}));
+
+// Every render's `items` array is captured here so tests can assert on the
+// `version` CodeView receives, without CodeView itself needing to be real.
+const codeViewRenders = vi.hoisted(() => ({ calls: [] as Array<Array<Record<string, unknown>>> }));
+
 vi.mock('@pierre/diffs/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@pierre/diffs/react')>();
   const MockCodeView = forwardRef((props: Record<string, unknown>, ref) => {
@@ -27,6 +46,7 @@ vi.mock('@pierre/diffs/react', async (importOriginal) => {
       clearSelectedLines: () => {},
     }));
     const items = props.items as Array<Record<string, unknown>>;
+    codeViewRenders.calls.push(items);
     const renderAnnotation = props.renderAnnotation as (annotation: unknown, item: unknown) => React.ReactNode;
     const renderHeaderPrefix = props.renderHeaderPrefix as ((item: unknown) => React.ReactNode) | undefined;
     const renderHeaderMetadata = props.renderHeaderMetadata as ((item: unknown) => React.ReactNode) | undefined;
@@ -54,6 +74,7 @@ vi.mock('@pierre/diffs/react', async (importOriginal) => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  codeViewRenders.calls = [];
 });
 
 const noop = () => {};
@@ -275,5 +296,139 @@ describe('PresentTour annotations', () => {
       { path: 'src/foo.ts', anchorKey: 'src/foo.ts:additions:8' },
       { path: 'src/b.ts', anchorKey: 'src/b.ts:additions:8' },
     ]);
+  });
+
+  it('renders a file note as the first annotation on the first visible line, suppressing the header fallback', async () => {
+    const file = tinyFile('src/foo.ts');
+    file.note = 'a note about this file';
+    const comment = annotationComment({ id: 'annot:1', content: 'a comment', line_start: 8, line_end: 8 });
+    render(
+      <PresentTour
+        {...baseProps({
+          files: [file],
+          comments: [comment],
+          readOnlyCommentIds: new Set([comment.id]),
+          annotationCommentIds: new Set([comment.id]),
+        })}
+      />
+    );
+    await waitForSettled();
+
+    const latestItems = codeViewRenders.calls[codeViewRenders.calls.length - 1];
+    const item = latestItems[0] as { annotations: Array<{ metadata: Record<string, unknown> }> };
+    // tinyFile's visible additions range starts at line 6 (see its doc comment).
+    expect(item.annotations[0].metadata).toMatchObject({ kind: 'note', side: 'additions', lineNumber: 6 });
+
+    // Rendered exactly once — the header fallback did not also render it.
+    expect(screen.getAllByText('a note about this file')).toHaveLength(1);
+  });
+
+  it('excludes the file note from the N/P annotation-anchors payload', async () => {
+    const onAnnotationAnchorsChange = vi.fn();
+    const file = tinyFile('src/foo.ts');
+    file.note = 'file note text';
+    const comment = annotationComment({ id: 'annot:1', content: 'real annotation', line_start: 8, line_end: 8 });
+    render(
+      <PresentTour
+        {...baseProps({
+          files: [file],
+          comments: [comment],
+          readOnlyCommentIds: new Set([comment.id]),
+          annotationCommentIds: new Set([comment.id]),
+          onAnnotationAnchorsChange,
+        })}
+      />
+    );
+    await waitForSettled();
+
+    await waitFor(() => {
+      expect(onAnnotationAnchorsChange).toHaveBeenCalled();
+    });
+    const lastCall = onAnnotationAnchorsChange.mock.calls[onAnnotationAnchorsChange.mock.calls.length - 1][0];
+    expect(lastCall).toEqual([{ path: 'src/foo.ts', anchorKey: 'src/foo.ts:additions:8' }]);
+  });
+
+  it('falls back to the header for a file note when its diff has no visible line to anchor to (errored diff)', async () => {
+    const file: PresentTourFile = { path: 'src/broken.ts', note: 'note on a broken file', diff: { loading: false, error: 'boom' } };
+    render(<PresentTour {...baseProps({ files: [file] })} />);
+    await waitForSettled();
+
+    expect(screen.getByText('note on a broken file')).toBeInTheDocument();
+    const latestItems = codeViewRenders.calls[codeViewRenders.calls.length - 1];
+    expect((latestItems[0] as { annotations?: unknown[] }).annotations).toBeUndefined();
+  });
+});
+
+describe('PresentTour diagram layout invalidation', () => {
+  // CodeView caches item layout keyed by `version` (see the module doc in
+  // PresentTour/index.tsx): a mermaid diagram settling asynchronously grows
+  // an item's rendered height without CodeView ever learning about it unless
+  // something bumps `version`. These tests exercise the fix — a settling
+  // diagram (in a file note or an annotation body) must force a version bump,
+  // and a version bump must never itself remount the diagram (which would
+  // re-fire the async render and bump again, forever).
+  const mermaidNote = '```mermaid\ngraph TD;\nA-->B;\n```';
+
+  it('bumps the items version CodeView receives when a file-note diagram finishes rendering', async () => {
+    const file = tinyFile('src/foo.ts');
+    file.note = mermaidNote;
+    render(<PresentTour {...baseProps({ files: [file] })} />);
+    await waitForSettled();
+
+    const versionBefore = codeViewRenders.calls[0][0].version;
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mermaid-svg')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      const latest = codeViewRenders.calls[codeViewRenders.calls.length - 1];
+      expect(latest[0].version).not.toBe(versionBefore);
+    });
+  });
+
+  it('bumps the items version CodeView receives when an annotation-body diagram finishes rendering', async () => {
+    const comment = annotationComment({ id: 'annot:1', content: mermaidNote, line_start: 8, line_end: 8 });
+    render(
+      <PresentTour
+        {...baseProps({
+          files: [tinyFile('src/foo.ts')],
+          comments: [comment],
+          readOnlyCommentIds: new Set([comment.id]),
+          annotationCommentIds: new Set([comment.id]),
+        })}
+      />
+    );
+    await waitForSettled();
+
+    const versionBefore = codeViewRenders.calls[0][0].version;
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mermaid-svg')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      const latest = codeViewRenders.calls[codeViewRenders.calls.length - 1];
+      expect(latest[0].version).not.toBe(versionBefore);
+    });
+  });
+
+  it('does not remount the diagram when a version bump re-renders CodeView (no infinite loop)', async () => {
+    const file = tinyFile('src/foo.ts');
+    file.note = mermaidNote;
+    render(<PresentTour {...baseProps({ files: [file] })} />);
+    await waitForSettled();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mermaid-svg')).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      const versionBefore = codeViewRenders.calls[0][0].version;
+      const latest = codeViewRenders.calls[codeViewRenders.calls.length - 1];
+      expect(latest[0].version).not.toBe(versionBefore);
+    });
+
+    // mermaid.render is called once per mount of a given diagram; a version
+    // bump that remounted MermaidDiagram would call it again (and, since the
+    // mock always resolves, would bump the version again, and so on forever).
+    expect(mermaidMock.render).toHaveBeenCalledTimes(1);
   });
 });
