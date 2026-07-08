@@ -205,6 +205,12 @@ model PresentationRound {
   created_at: string;
   submitted_at?: string;
   manifest: PresentManifestView;
+  // All files changed between base_sha and head_sha, computed at query time
+  // by the daemon from `git diff` (destination path for renames);
+  // additions/deletions filled from numstat when available (binary/rename
+  // entries have them absent). Not persisted with the round — omitted
+  // entirely when the diff cannot be computed.
+  changed_files?: PresentFile[];
 }
 
 // PresentationComment is a reviewer note anchored to a line range within one

@@ -331,7 +331,8 @@ func (d *Daemon) handleGetPresentationRound(client *wsClient, msg *protocol.GetP
 
 	// Per-file ± line stats are a progressive enhancement for the rail: a
 	// lookup failure or empty result must never fail the round fetch.
-	if stats := d.presentFileStats(pres.RepoPath, round.BaseSHA, round.HeadSHA); len(stats) > 0 {
+	stats := d.presentFileStats(pres.RepoPath, round.BaseSHA, round.HeadSHA)
+	if len(stats) > 0 {
 		for i := range result.Round.Manifest.Files {
 			path := result.Round.Manifest.Files[i].Path
 			if s, ok := stats[path]; ok {
@@ -339,6 +340,12 @@ func (d *Daemon) handleGetPresentationRound(client *wsClient, msg *protocol.GetP
 				result.Round.Manifest.Files[i].Deletions = protocol.Ptr(s[1])
 			}
 		}
+	}
+
+	// The full changed-file list (tour + other) is a progressive enhancement
+	// too: a git error leaves ChangedFiles nil and the round still loads.
+	if changed, err := d.presentChangedFiles(pres.RepoPath, round.BaseSHA, round.HeadSHA, stats); err == nil {
+		result.Round.ChangedFiles = changed
 	}
 
 	result.Success = true
@@ -358,6 +365,31 @@ func (d *Daemon) presentFileStats(repoDir, baseSHA, headSHA string) map[string][
 		return nil
 	}
 	return parsePresentNumstat(string(out))
+}
+
+// presentChangedFiles lists every path changed between the round's pinned
+// base..head SHAs, for the frontend to derive the Tour/Other/Skipped rail
+// groups from (paths already named in the manifest are included too — the
+// frontend does the set subtraction). stats is the same numstat map used for
+// manifest file stats, reused here so numstat only runs once per round fetch.
+func (d *Daemon) presentChangedFiles(repoDir, baseSHA, headSHA string, stats map[string][2]int) ([]protocol.PresentFile, error) {
+	out, err := attngit.Output(attngit.OpDiff, repoDir, "diff", "--name-only", "-z", baseSHA+".."+headSHA)
+	if err != nil {
+		return nil, err
+	}
+	var files []protocol.PresentFile
+	for _, path := range strings.Split(string(out), "\x00") {
+		if path == "" {
+			continue
+		}
+		pf := protocol.PresentFile{Path: path}
+		if s, ok := stats[path]; ok {
+			pf.Additions = protocol.Ptr(s[0])
+			pf.Deletions = protocol.Ptr(s[1])
+		}
+		files = append(files, pf)
+	}
+	return files, nil
 }
 
 // parsePresentNumstat parses `git diff --numstat` output into path ->

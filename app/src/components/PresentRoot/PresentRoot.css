@@ -357,7 +357,7 @@
   color: #fff;
 }
 
-.present-root-skip-divider {
+.present-root-section-header {
   padding: 8px 12px 4px;
   font-size: 11px;
   text-transform: uppercase;
@@ -368,13 +368,8 @@
 }
 
 .present-root-file-skipped {
-  cursor: default;
   color: var(--color-text-secondary);
   opacity: 0.6;
-}
-
-.present-root-file-skipped:hover {
-  background: none;
 }
 
 .present-root-diff-pane {

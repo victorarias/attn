@@ -380,6 +380,98 @@ func TestHandleGetPresentationRound_CarriesFileStats(t *testing.T) {
 	}
 }
 
+func TestHandleGetPresentationRound_CarriesChangedFiles(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, baseSHA, headSHA := presentStatsTestRepo(t)
+
+	// Manifest only names a.txt and img.png — b.txt changed in the round but
+	// is not in the tour, so it should still show up in changed_files.
+	manifestYAML := fmt.Sprintf(
+		"version: 1\nkind: changes\ntitle: %q\nframe:\n  repo: %q\n  base: %q\n  head: %q\nfiles:\n  - path: a.txt\n  - path: img.png\n",
+		"Changed Files", repoDir, baseSHA, headSHA,
+	)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    manifestYAML,
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleGetPresentationRound(client, &protocol.GetPresentationRoundMessage{
+		Cmd:            protocol.CmdGetPresentationRound,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	var res protocol.GetPresentationRoundResultMessage
+	readTicketResult(t, client.send, &res)
+	if !res.Success || res.Round == nil {
+		t.Fatalf("get_presentation_round = %+v, want success with a round", res)
+	}
+
+	byPath := make(map[string]protocol.PresentFile, len(res.Round.ChangedFiles))
+	for _, f := range res.Round.ChangedFiles {
+		byPath[f.Path] = f
+	}
+
+	bTxt, ok := byPath["b.txt"]
+	if !ok {
+		t.Fatalf("changed_files missing b.txt (not in manifest): %+v", byPath)
+	}
+	if bTxt.Additions == nil || *bTxt.Additions != 1 || bTxt.Deletions == nil || *bTxt.Deletions != 0 {
+		t.Errorf("b.txt stats = +%v/-%v, want +1/-0", derefIntOrNil(bTxt.Additions), derefIntOrNil(bTxt.Deletions))
+	}
+
+	imgPNG, ok := byPath["img.png"]
+	if !ok {
+		t.Fatalf("changed_files missing img.png: %+v", byPath)
+	}
+	if imgPNG.Additions != nil || imgPNG.Deletions != nil {
+		t.Errorf("img.png (binary) stats = +%v/-%v, want absent", derefIntOrNil(imgPNG.Additions), derefIntOrNil(imgPNG.Deletions))
+	}
+
+	if _, ok := byPath["a.txt"]; !ok {
+		t.Errorf("changed_files missing a.txt (also in manifest): %+v", byPath)
+	}
+}
+
+func TestHandleGetPresentationRound_ChangedFilesNilOnBogusSHA(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentTestRepo(t)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    presentManifestYAML("Bogus SHA", repoDir),
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	// Remove the repo out from under the pinned round so its `git diff`
+	// fails, without disturbing the round's ability to load otherwise (the
+	// manifest and comments come from the store, not the repo on disk).
+	if err := os.RemoveAll(repoDir); err != nil {
+		t.Fatalf("remove repo dir: %v", err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleGetPresentationRound(client, &protocol.GetPresentationRoundMessage{
+		Cmd:            protocol.CmdGetPresentationRound,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	var res protocol.GetPresentationRoundResultMessage
+	readTicketResult(t, client.send, &res)
+	if !res.Success || res.Round == nil {
+		t.Fatalf("get_presentation_round = %+v, want success with a round despite bogus SHAs", res)
+	}
+	if res.Round.ChangedFiles != nil {
+		t.Errorf("changed_files = %+v, want nil on git diff failure", res.Round.ChangedFiles)
+	}
+}
+
 func derefIntOrNil(p *int) string {
 	if p == nil {
 		return "<nil>"
