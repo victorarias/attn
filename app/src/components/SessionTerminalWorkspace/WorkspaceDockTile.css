@@ -137,8 +137,11 @@
   word-break: break-word;
 }
 
-/* Markdown element styling (adapted from the prototype tile). */
-.workspace-dock-tile-body > :first-child {
+/* Markdown element styling (adapted from the prototype tile). The shared
+   Markdown component wraps its output in a div (.workspace-dock-tile-markdown),
+   so the "no top margin on first element" rule targets one level deeper than
+   before. */
+.workspace-dock-tile-markdown > :first-child {
   margin-top: 0;
 }
 
