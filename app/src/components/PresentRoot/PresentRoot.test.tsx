@@ -1226,14 +1226,13 @@ describe('PresentRoot', () => {
     it('n/p hop across every annotation anchor in document order and wrap', async () => {
       await loadRound({ round: roundWithAnnotations });
 
+      // The mock's effect reports anchors asynchronously (one per annotation,
+      // not per thread entry: both line-4-5 entries share one anchor key), so
+      // retry the first 'n' press until PresentRoot's annotationAnchors state
+      // has actually landed — extra presses beforehand are harmless no-ops
+      // (hop() bails out while the anchor list is still empty).
       await waitFor(() => {
-        // The mock's effect has reported 2 anchors (one per annotation, not
-        // per thread entry: both line-4-5 entries share one anchor key).
-        expect(latestTourProps().onAnnotationAnchorsChange).toBeDefined();
-      }, WAIT_OPTS);
-
-      fireEvent.keyDown(window, { key: 'n' });
-      await waitFor(() => {
+        fireEvent.keyDown(window, { key: 'n' });
         expect(latestTourProps().scrollToAnnotation).toMatchObject({ path: 'src/foo.ts', anchorKey: 'src/foo.ts:additions:2' });
       }, WAIT_OPTS);
       const nonceAfterFirst = latestTourProps().annotationScrollNonce;
