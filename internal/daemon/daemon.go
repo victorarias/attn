@@ -1152,6 +1152,10 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 		// stale, and keeping it would misread this session's later genuine crash as
 		// a clean close.
 		d.store.ClearSessionIntentionalClose(sessionID)
+		// By the same token it cannot be crashed: a ticket stamped Crashed (a
+		// startup reap on an earlier boot, a sweep misread) whose owner turns out
+		// to be alive goes back to Working (ticket_revive.go).
+		d.reviveCrashedTicketsForSession(sessionID)
 		if protocol.Deref(existing.Recoverable) {
 			d.store.SetRecoverable(sessionID, false)
 			report.Changed = true
@@ -2154,6 +2158,9 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	if err := d.store.ClearTicketReconciliationForAssignee(session.ID); err != nil {
 		d.logf("clear ticket reconciliation on register for %s: %v", session.ID, err)
 	}
+	// A crash-stamped ticket whose owner just re-registered is no longer
+	// crashed: move it back to Working (ticket_revive.go).
+	d.reviveCrashedTicketsForSession(session.ID)
 	d.associateSessionWithWorkspace(session.ID, workspaceID)
 	if _, err := d.ensureWorkspaceLayout(workspaceID); err != nil {
 		d.logf("workspace layout bootstrap failed for workspace %s: %v", workspaceID, err)

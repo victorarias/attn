@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-09]
+
+### Fixed
+- **Reloading a crashed session moves its ticket back to Working automatically.** When a delegated session died mid-run its ticket was stamped Crashed — but bringing the session back to life (reloading the dead pane, resuming the ticket, or the daemon re-adopting a still-live worker after a restart) left the ticket sitting in the Crashed column until you moved it by hand. Reviving the session now flips the ticket back to Working on its own, and crash detection is re-armed so a later genuine crash is still stamped. Intentional closes are still never treated as crashes.
+
+---
+
 ## [2026-07-08]
 
 ### Fixed

@@ -734,6 +734,10 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		if err := d.store.ClearTicketReconciliationForAssignee(session.ID); err != nil {
 			d.logf("clear ticket reconciliation on spawn for %s: %v", session.ID, err)
 		}
+		// A crash-stamped ticket whose owner just respawned (dead-pane reload,
+		// ticket Resume) is no longer crashed: move it back to Working and put it
+		// back on the crash seam's radar (ticket_revive.go).
+		d.reviveCrashedTicketsForSession(session.ID)
 		if !isShell {
 			d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
 		}
