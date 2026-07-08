@@ -210,7 +210,7 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
 - [x] 3. **Rail anatomy**: ± stats, note/annotation dots, pinned summary row,
       scroll-synced active state.
 - [x] 4. **Grouping**: daemon changed-files list → Other group (protocol).
-- [ ] 5. **Annotations**: manifest schema + store/protocol + inline threads
+- [x] 5. **Annotations**: manifest schema + store/protocol + inline threads
       (expect multiple PRs).
     - [x] 5a. manifest schema + resolution + protocol
     - [x] 5b. reader: inline threads, reply-as-comment, N/P, rail counts
@@ -219,7 +219,12 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
       skip) can land any time; full port (annotations, `thread:`, mermaid,
       `attn present validate`) after slices 5–6; ships via daemon embed.
 - [x] 8. **Submit**: approve / submit feedback / close (protocol + CLI).
-- [ ] 9. **Polish pass** + the minor items above.
+- [x] 9. **Polish pass** + the minor items above.
+    - Landed as three PRs: #517 (cleanup: untrack input-driver binary, remove
+      dead CommentPopover + orphaned `marked` dep, feedback.go copy), #519
+      (reader polish: summary default stop, J/K reach summary, N-hop
+      wall-clock retry, end-of-tour footer mirrors rail progress), #518
+      (dock-tile markdown through the shared renderer — mermaid in tiles).
 
 ## Decisions
 
@@ -254,3 +259,14 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
   approved) is an error. No interplay with session `pending_approval`. Opening
   a new round reopens an approved or closed presentation back to `open`,
   since a new round is a new ask for review.
+
+## Follow-ups
+
+- Summary as stop 0 *inside* the CodeView scroller: deferred from slice 9.
+  The summary is a deliberate flex sibling above the scroller (see slice-1
+  layout decision); scroll tracking already treats scrollTop 0 as the summary
+  stop, so moving it inside the scroller is a layout change with no behavior
+  gap today.
+- The "Good but minor (later)" items above remain open: mid-review submits
+  keeping reviewed marks, what's-new-since-round view, collapse persistence
+  across reload, deleted-line context in whole-file views.
