@@ -22,9 +22,10 @@ workspace/session, or a collaborator they can steer themselves.
 
 Attn delegation starts another agent with a focused brief; it does not create
 durable parent-child lineage. If you are the chief of staff, attn binds a ticket
-to the delegated session and your system-prompt guidance covers how you follow it
-(arming a Monitor on `attn ticket inbox --watch`); ordinary delegation needs none
-of that.
+to the delegated session and your system-prompt guidance covers the runtime's
+supported follow-up path: Claude arms a Monitor on `attn ticket inbox --watch`,
+while Codex waits for attn's ticket nudge and then reads `attn ticket inbox`.
+Ordinary delegation needs none of that.
 
 ## Brief Workflow
 

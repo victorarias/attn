@@ -93,7 +93,7 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	// folded in by hooks.AgentInstructions). Non-chief agents are NOT nudged to
 	// journal: the keeper narrates each workspace's own work into the journal, and
 	// the chief journals the cross-workspace layer.
-	if guidance := hooks.ChiefGuidance(opts.NotebookRoot); guidance != "" {
+	if guidance := hooks.ChiefGuidance(opts.NotebookRoot, c.Capabilities().HasSelfMonitor); guidance != "" {
 		args = append(args, "--append-system-prompt", guidance)
 	} else if instructions := hooks.AgentInstructions(opts.WorkspaceContextPath, opts.InjectWorkflowGuidance); instructions != "" {
 		args = append(args, "--append-system-prompt", instructions)

@@ -504,6 +504,9 @@ func TestNotebookGuideChiefVsNonChief(t *testing.T) {
 	if chief.NotebookGuide.Root != wantRoot || chief.NotebookGuide.Guidance == "" {
 		t.Fatalf("chief guide = %+v, want root=%q and non-empty guidance", chief.NotebookGuide, wantRoot)
 	}
+	if !strings.Contains(chief.NotebookGuide.Guidance, "arm a harness Monitor") {
+		t.Fatalf("Claude chief guide should carry the self-monitor watch path: %q", chief.NotebookGuide.Guidance)
+	}
 
 	// The chief request ensured the scaffold exists, including the reserved files.
 	entries := listNotes(t, d, "")
@@ -523,6 +526,29 @@ func TestNotebookGuideChiefVsNonChief(t *testing.T) {
 	}
 	if worker.NotebookGuide.Guidance == "" {
 		t.Fatal("guidance text should be returned regardless of role")
+	}
+}
+
+func TestNotebookGuideUsesCodexTicketNudgeGuidance(t *testing.T) {
+	d := newNotebookDaemon(t)
+	addIdleNotebookSession(d, "chief", protocol.SessionStateIdle)
+	session := d.store.Get("chief")
+	session.Agent = protocol.SessionAgentCodex
+	d.store.Add(session)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "chief"); err != nil {
+		t.Fatal(err)
+	}
+
+	response := sendNotebookCmd(t, d, protocol.NotebookGuideMessage{Cmd: protocol.CmdNotebookGuide, SessionID: protocol.Ptr("chief")})
+	if response.NotebookGuide == nil {
+		t.Fatal("missing notebook guide")
+	}
+	guidance := response.NotebookGuide.Guidance
+	if !strings.Contains(guidance, "ticket nudges are the supported wake-up mechanism") {
+		t.Fatalf("Codex chief guide should carry nudge guidance: %q", guidance)
+	}
+	if strings.Contains(guidance, "arm a harness Monitor") {
+		t.Fatalf("Codex chief guide should not carry self-monitor guidance: %q", guidance)
 	}
 }
 

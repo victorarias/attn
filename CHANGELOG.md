@@ -22,6 +22,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Mermaid diagrams now render in presentation summaries, file notes, and annotation/comment bodies.** A fenced ` ```mermaid ` code block in a round summary, a file note, or a review/annotation comment now draws as a diagram instead of raw text, matching the app's light or dark theme; a bad diagram falls back to showing the original code rather than breaking the view. Ticket descriptions and comments also now render as markdown.
 - **Present's submit dialog now offers Approve, Submit feedback, and Close.** Approve hands the round back marked approved (comments are still welcome alongside — approve-with-nits) and marks the presentation approved. Submit feedback is the existing handback, now explicitly recorded as feedback rather than approval. Close lets you dismiss a presentation without reviewing it — it discards any draft comments and closes the presentation with no handback to the author. Opening a new round on an approved or closed presentation reopens it.
 
+### Fixed
+- **Codex chiefs now wake reliably when delegated work reports back.** Claude chiefs still monitor ticket updates live, while Codex chiefs rely on attn's existing ticket nudge instead of starting a background watcher that consumed the update without waking their turn.
+
 ## [2026-07-07]
 
 ### Changed

@@ -108,6 +108,8 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"--source-session <session-id>",
 		"Copilot delegation is currently unsupported",
 		"durable parent-child lineage",
+		"Claude arms a Monitor",
+		"Codex waits for attn's ticket nudge",
 	} {
 		if !strings.Contains(delegation, expected) {
 			t.Fatalf("delegation reference missing %q: %q", expected, delegation)

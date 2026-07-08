@@ -2,8 +2,10 @@
 
 /**
  * Real-agent benchmark: does a chief of staff, given the always-on ChiefGuidance
- * system prompt, ACTUALLY delegate, arm `attn ticket inbox --watch`, and react
- * proactively when a delegated ticket changes — with no further human prompting?
+ * system prompt, ACTUALLY delegate, use its runtime's supported ticket wake path,
+ * and react proactively when a delegated ticket changes — with no further human
+ * prompting? Claude must arm `attn ticket inbox --watch`; Codex must rely on attn's
+ * ticket nudge and leave no watcher running.
  *
  * This is an instruction-following benchmark, not a unit test: it stands up a REAL
  * Claude (or Codex) chief in an isolated packaged app, types a human-sounding
@@ -19,12 +21,12 @@
  *      reload (an empty zero-turn session can't be resumed, which is why the first
  *      launch, not a post-launch reload, must carry the guidance).
  *   3. GATE: confirm the daemon holds the role for this session AND its agent process
- *      was actually launched with the guidance (its --append-system-prompt / Codex
- *      developer_instructions carries "attn ticket inbox --watch"). Fail fast here so
- *      a setup miss never masquerades as a behavioral failure.
+ *      was actually launched with the runtime-specific guidance carried by its
+ *      --append-system-prompt / developer_instructions. Fail fast here so a setup
+ *      miss never masquerades as a behavioral failure.
  *   4. Type the human prompt. Observe (no coaching):
  *        - did the chief DELEGATE? (a ticket bound to a NEW worker session appears)
- *        - did it ARM THE WATCH? (a live `attn ticket inbox --watch` process)
+ *        - did Claude ARM THE WATCH, or did Codex leave the nudge path unobstructed?
  *      If the chief does the task ITSELF instead of delegating, capture the evidence
  *      and STOP with verdict=did-not-delegate — that is a finding to discuss, not a
  *      thing to auto-correct.
@@ -37,8 +39,8 @@
  *   ATTN_HARNESS_PROFILE=uat node scripts/real-app-harness/scenario-chief-ticket-watch.mjs --agent codex
  *
  * Prereqs: claude/codex on PATH; a built ./attn (or ATTN_HARNESS_BIN); a non-prod
- * profile install built from this branch (so its bundled attn has `--watch`, the new
- * guidance, and the create-as-chief spawn path) — e.g. `make install PROFILE=uat`.
+ * profile install built from this branch (so its bundled attn has the runtime-aware
+ * guidance and the create-as-chief spawn path) — e.g. `make install PROFILE=uat`.
  *
  * Repeatability: the chief role is profile-wide and persists in the profile DB, and
  * create-as-chief SKIPS when a chief already exists (it never transfers). So this
@@ -87,13 +89,12 @@ const PROMPTS = {
 // Set via the chief_model_<agent> setting before create_session; cleared in teardown.
 const CHIEF_MODELS = {
   claude: 'opus',
-  codex: '',
+  codex: 'gpt-5.5',
 };
 
 // --no-watch variant: tell the chief to delegate but explicitly NOT arm a watch /
-// Monitor. This exercises the DAEMON BACKSTOP (ticket_notify.go) — an idle
-// self-monitor with unread ticket activity that no Monitor drained gets the PTY
-// doorbell after the grace. So even a chief told not to watch still gets the nudge.
+// Monitor. For Claude this exercises the self-monitor backstop; for Codex it uses
+// the normal nudge path. Both should receive the same bounded PTY doorbell.
 const NO_WATCH_PROMPTS = {
   claude:
     'hey can you get someone going on a quick CHANGELOG audit? skim the last couple ' +
@@ -150,9 +151,13 @@ function resolveAttnBin() {
 
 function makeAttnRunner(attnBin, profile) {
   return function runAttn(args) {
+    const env = { ...process.env, ATTN_PROFILE: profile };
+    delete env.ATTN_SOCKET_PATH;
+    delete env.ATTN_SESSION_ID;
+    delete env.ATTN_WRAPPER_PATH;
     const stdout = execFileSync(attnBin, args, {
       encoding: 'utf8',
-      env: { ...process.env, ATTN_PROFILE: profile },
+      env,
     });
     const brace = stdout.indexOf('{');
     return { stdout, json: brace >= 0 ? JSON.parse(stdout.slice(brace)) : null };
@@ -190,13 +195,13 @@ function freshWatchProcesses(baselinePids) {
   return watchProcessLines().filter((l) => !baselinePids.has(pidOf(l))).join('\n');
 }
 
-// Did the chief's agent get launched WITH the new ChiefGuidance? "arm a harness
-// Monitor running" is a phrase that appears ONLY in the guidance text (not in any
-// watch command), and it rides in via --append-system-prompt (Claude) or
-// developer_instructions (Codex) — so a match is agent-agnostic proof the chief
-// carries this branch's guidance.
-function chiefGuidanceProcesses() {
-  return shell(`ps -Awwo pid=,command= | grep -- 'arm a harness Monitor running' | grep -v grep`).trim();
+// Did the chief's agent get launched WITH its runtime-specific ChiefGuidance? Each
+// marker appears only in the guidance text, not in a live watch command.
+function chiefGuidanceProcesses(agent) {
+  const marker = agent === 'claude'
+    ? 'arm a harness Monitor running'
+    : 'ticket nudges are the supported wake-up mechanism';
+  return shell(`ps -Awwo pid=,command= | grep -- '${marker}' | grep -v grep`).trim();
 }
 
 // Drive a session to the desired chief state via the same UI flow a user would
@@ -352,20 +357,19 @@ async function main() {
       throw new Error('SETUP FAILED: the daemon did not assign the chief role to the new session (create-as-chief was skipped — likely a stale chief still holds the role; reset the profile and re-run).');
     }
 
-    // 3) GATE (guidance): the agent process must actually carry the guidance in its
-    //    launch args. "arm a harness Monitor running" appears ONLY in the guidance
-    //    text and rides in via --append-system-prompt / developer_instructions.
+    // 3) GATE (guidance): the agent process must actually carry its runtime-specific
+    //    guidance in the launch args.
     await pollFor(
-      () => Boolean(chiefGuidanceProcesses()),
+      () => Boolean(chiefGuidanceProcesses(agent)),
       'chief agent launched with ChiefGuidance',
       30_000,
     );
-    const guidanceProc = chiefGuidanceProcesses();
+    const guidanceProc = chiefGuidanceProcesses(agent);
     evidence.guidanceProcess = guidanceProc;
     if (!guidanceProc) {
       await dumpPane('00-chief-no-guidance');
       saveEvidence('setup-failed-no-guidance');
-      throw new Error('SETUP FAILED: chief agent was not launched with ChiefGuidance (no process carries the "ticket inbox --watch" system prompt). The create-as-chief role-set did not reach the launch path.');
+      throw new Error(`SETUP FAILED: ${agent} chief was not launched with its runtime-specific ChiefGuidance. The create-as-chief role-set did not reach the launch path.`);
     }
     note(`role + guidance verified at first launch`);
     const readyPane = (await dumpPane('01-chief-ready-with-guidance')) || '';
@@ -502,6 +506,7 @@ async function main() {
 
     workerId = delegation.assignee;
     const ticketId = delegation.id;
+    const expectsWatch = agent === 'claude';
     note(`DELEGATED`, { workerId, ticketId, armedWatch: Boolean(armedWatch) });
     await observer.waitForSession({ id: workerId, timeoutMs: 30_000 }).catch(() => {});
 
@@ -522,6 +527,8 @@ async function main() {
         console.log('\n=== INCONCLUSIVE: chief still working; backstop precondition (idle) never met ===');
         return;
       }
+      await client.request('select_session', { sessionId: workerId });
+      note(`selected worker so the idle chief's nudge countdown can run`);
       const strayWatch = freshWatchProcesses(baselineWatchPids);
       if (strayWatch) {
         // The chief armed a watch despite being told not to — the backstop would then
@@ -568,6 +575,32 @@ async function main() {
       return;
     }
 
+    // The controlled report must land after the chief's delegation turn ends. A
+    // report that arrives while the chief is still working can be discovered by its
+    // own board upkeep, which does not prove either runtime's wake path. Claude must
+    // also have armed its watch before the event; Codex must remain watch-free.
+    const chiefIdle = () => ['idle', 'waiting_input'].includes(chiefState());
+    const settled = await pollFor(() => {
+      if (!armedWatch) armedWatch = freshWatchProcesses(baselineWatchPids);
+      if (!chiefIdle()) return null;
+      if (expectsWatch && !armedWatch) return null;
+      return true;
+    }, 'chief to finish delegation upkeep and arm its runtime wake path', 120_000, 1_500);
+    if (!settled) {
+      await dumpPane('04-chief-not-settled');
+      evidence.armedWatch = armedWatch;
+      evidence.chiefState = chiefState();
+      saveEvidence('inconclusive-chief-not-settled');
+      console.log('\n=== INCONCLUSIVE: chief did not settle into its runtime wake path ===');
+      console.log(`chief state: ${chiefState()}`);
+      console.log(`armed watch: ${armedWatch ? 'YES' : 'no'}`);
+      return;
+    }
+    if (!expectsWatch) {
+      await client.request('select_session', { sessionId: workerId });
+      note(`selected worker so the idle Codex chief's nudge countdown can run`);
+    }
+
     // 6) Drive the worker to report ready_for_review — the real producer path. The
     // chief cannot tell this from the sub-agent finishing on its own.
     await delay(2_000);
@@ -578,38 +611,50 @@ async function main() {
     // armed --watch Monitor or the daemon backstop. Codex (not a self-monitor): via
     // the daemon's direct nudge. Evidence = the chief runs `attn ticket inbox` /
     // mentions the review without us prompting it again.
-    // The chief arms its watch Monitor AFTER delegating (ChiefGuidance: "right after
-    // delegating, arm a harness Monitor running `attn ticket inbox --watch`"), so the
-    // `--watch` process only appears during THIS post-delegation window — not the
-    // delegation-wait loop above, which breaks the instant a ticket binds. Keep
-    // polling for it here. Claude self-monitors and is expected to arm the watch;
-    // Codex reacts via the daemon nudge and is not, so it breaks on reaction alone.
-    const expectsWatch = agent === 'claude';
+    // Claude arms its watch Monitor after delegating, so its `--watch` process only
+    // appears during this post-delegation window. Codex must not arm one: its unread
+    // event must remain available for the daemon's nudge path.
     const reactUntil = Date.now() + 240_000;
     let reacted = null;
+    let nudged = null;
     let rsnap = 0;
     while (Date.now() < reactUntil) {
       const text = await dumpPane(`04-react-${String(rsnap).padStart(2, '0')}`);
-      if (!reacted && /ticket inbox|ready[ _]for[ _]review|in review|review the|delegate|worker|audit/i.test(text.split('\n').slice(-25).join('\n'))) {
-        // Heuristic: recent pane mentions the inbox/review. Confirmed by reading below.
+      const recent = text.split('\n').slice(-35).join('\n');
+      if (!nudged && /New ticket activity/i.test(text)) {
+        nudged = text;
+        note(`daemon ticket nudge delivered to Codex chief`);
+      }
+      const handledUpdate = /ticket inbox|ready[ _]for[ _]review|in review|review the report/i.test(recent);
+      if (!reacted && handledUpdate && (expectsWatch || nudged)) {
         reacted = text;
       }
       if (!armedWatch) {
         const w = freshWatchProcesses(baselineWatchPids);
-        if (w) { armedWatch = w; note(`watch armed (post-delegation)`, { processes: w.split('\n').length }); }
+        if (w) {
+          armedWatch = w;
+          note(expectsWatch ? `watch armed (post-delegation)` : `UNEXPECTED watch armed by Codex`, { processes: w.split('\n').length });
+        }
       }
       if (reacted && (!expectsWatch || armedWatch)) break;
       rsnap += 1;
       await delay(3_000);
     }
     evidence.armedWatch = armedWatch;
+    evidence.nudged = Boolean(nudged);
     evidence.reacted = Boolean(reacted);
     const finalText = await dumpPane('05-chief-final');
 
-    saveEvidence(reacted ? 'delegated-and-reacted' : 'delegated-no-visible-reaction');
+    const verdict = !expectsWatch && armedWatch
+      ? 'codex-armed-watch'
+      : (!expectsWatch && !nudged
+          ? 'codex-not-nudged'
+          : (reacted ? 'delegated-and-reacted' : 'delegated-no-visible-reaction'));
+    saveEvidence(verdict);
     console.log(`\n=== VERDICT: ${evidence.verdict} ===`);
     console.log(`delegated: yes (worker=${workerId} ticket=${ticketId})`);
     console.log(`armed watch: ${armedWatch ? 'YES' : 'no'}`);
+    console.log(`daemon nudge delivered: ${nudged ? 'YES' : 'no'}`);
     console.log(`visible reaction to the report: ${reacted ? 'YES' : 'no'}`);
     console.log('--- chief pane (tail) ---');
     console.log(finalText.split('\n').slice(-45).join('\n'));
