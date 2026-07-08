@@ -21,6 +21,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Comment boxes in Present are now GitHub-style.** Multiple comments can now be open at once: the hover "+" button keeps working while a draft is open, each comment saves or cancels independently, and Escape closes the most recently opened box first.
+- **The terminal now opens hidden-URL hyperlinks with Cmd+click.** Label-style links like Claude Code's "Learn more" — where the visible text gives no hint of the destination — now open the URL hidden behind them, including links whose target is a file path.
 
 ### Fixed
 - **The Present window now opens scrolled to the top.** A freshly opened diff no longer arrives scrolled away from the beginning, and the first click won't jump and misplace a comment — the diff stays anchored until you scroll it.

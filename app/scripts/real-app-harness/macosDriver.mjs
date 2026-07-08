@@ -145,26 +145,34 @@ export class MacOSDriver {
   }
 
   async clickWindow(relativeX, relativeY, opts = {}) {
-    await this.runInputDriver(withWindowTitleArgs([
+    const args = [
       'click',
       '--relative-x',
       String(relativeX),
       '--relative-y',
       String(relativeY),
       '--prompt-accessibility',
-    ], opts));
+    ];
+    if (opts.modifiers) {
+      args.push('--modifiers', this.serializeModifiers(opts.modifiers));
+    }
+    await this.runInputDriver(withWindowTitleArgs(args, opts));
     await delay(this.actionDelayMs);
   }
 
   async rightClickWindow(relativeX, relativeY, opts = {}) {
-    await this.runInputDriver(withWindowTitleArgs([
+    const args = [
       'right_click',
       '--relative-x',
       String(relativeX),
       '--relative-y',
       String(relativeY),
       '--prompt-accessibility',
-    ], opts));
+    ];
+    if (opts.modifiers) {
+      args.push('--modifiers', this.serializeModifiers(opts.modifiers));
+    }
+    await this.runInputDriver(withWindowTitleArgs(args, opts));
     await delay(this.actionDelayMs);
   }
 

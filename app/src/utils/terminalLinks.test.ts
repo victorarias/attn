@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   fragmentAtColumn,
+  hyperlinkRangeAt,
   logicalIndexForCell,
   logicalLineAt,
   MAX_WRAP_JOIN_ROWS,
@@ -24,6 +25,57 @@ describe('urlAtColumn', () => {
   it('misses columns outside the uri', () => {
     const line = 'see https://example.test/page';
     expect(urlAtColumn(line, 2)).toBeNull();
+  });
+});
+
+describe('hyperlinkRangeAt', () => {
+  // A row of uris (or null) at each index, closed over by uriAtIndex — the
+  // fake IS the test input, standing in for what ghostty's OSC 8 lookup returns.
+  function uriAtIndexOver(uris: (string | null)[]) {
+    return (index: number) => uris[index] ?? null;
+  }
+
+  it('returns the full range for a label containing spaces', () => {
+    // "Learn more" behind one hidden uri, surrounded by plain text.
+    const uris = [null, null, null, null, 'https://x.test', 'https://x.test', 'https://x.test',
+      'https://x.test', 'https://x.test', 'https://x.test', 'https://x.test', 'https://x.test',
+      'https://x.test', 'https://x.test', null, null];
+    const hit = hyperlinkRangeAt(uriAtIndexOver(uris), 8, uris.length);
+    expect(hit).toEqual({ uri: 'https://x.test', startCol: 4, endCol: 14 });
+  });
+
+  it('does not merge two adjacent links with different uris', () => {
+    const uris = ['https://a.test', 'https://a.test', 'https://b.test', 'https://b.test'];
+    expect(hyperlinkRangeAt(uriAtIndexOver(uris), 1, uris.length)).toEqual({
+      uri: 'https://a.test',
+      startCol: 0,
+      endCol: 2,
+    });
+    expect(hyperlinkRangeAt(uriAtIndexOver(uris), 2, uris.length)).toEqual({
+      uri: 'https://b.test',
+      startCol: 2,
+      endCol: 4,
+    });
+  });
+
+  it('bounds the range exactly at the start and end of the line', () => {
+    const uris = ['https://x.test', 'https://x.test', 'https://x.test'];
+    expect(hyperlinkRangeAt(uriAtIndexOver(uris), 0, uris.length)).toEqual({
+      uri: 'https://x.test',
+      startCol: 0,
+      endCol: 3,
+    });
+    expect(hyperlinkRangeAt(uriAtIndexOver(uris), uris.length - 1, uris.length)).toEqual({
+      uri: 'https://x.test',
+      startCol: 0,
+      endCol: 3,
+    });
+  });
+
+  it('returns null when the hovered index has no uri', () => {
+    const uris = [null, 'https://x.test', null];
+    expect(hyperlinkRangeAt(uriAtIndexOver(uris), 0, uris.length)).toBeNull();
+    expect(hyperlinkRangeAt(uriAtIndexOver(uris), 2, uris.length)).toBeNull();
   });
 });
 
