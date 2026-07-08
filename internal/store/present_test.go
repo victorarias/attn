@@ -104,7 +104,7 @@ func TestPresentLatestRoundEnrichment(t *testing.T) {
 		t.Errorf("expected latest round seq=1 unsubmitted, got seq=%d submitted=%v", got.LatestRoundSeq, got.LatestRoundSubmitted)
 	}
 
-	if err := s.SubmitPresentationRound(round1.ID, nil, now); err != nil {
+	if err := s.SubmitPresentationRound(round1.ID, "feedback", nil, now); err != nil {
 		t.Fatalf("SubmitPresentationRound: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func TestPresentSubmitRoundStoresCommentsAndSetsSubmittedAt(t *testing.T) {
 		{Filepath: "a.go", LineStart: 5, LineEnd: 5, Side: "right", Content: "a comment earlier line", Author: "agent"},
 	}
 
-	if err := s.SubmitPresentationRound(round.ID, comments, now); err != nil {
+	if err := s.SubmitPresentationRound(round.ID, "feedback", comments, now); err != nil {
 		t.Fatalf("SubmitPresentationRound: %v", err)
 	}
 
@@ -272,6 +272,9 @@ func TestPresentSubmitRoundStoresCommentsAndSetsSubmittedAt(t *testing.T) {
 	}
 	if got.SubmittedAt == nil || *got.SubmittedAt == "" {
 		t.Fatal("expected round to be marked submitted")
+	}
+	if got.Verdict == nil || *got.Verdict != "feedback" {
+		t.Errorf("expected verdict 'feedback', got %v", got.Verdict)
 	}
 
 	all, err := s.ListPresentationComments(round.ID)
@@ -301,14 +304,239 @@ func TestPresentSubmitRoundStoresCommentsAndSetsSubmittedAt(t *testing.T) {
 	}
 
 	// Double-submit should error.
-	if err := s.SubmitPresentationRound(round.ID, nil, now); err == nil {
+	if err := s.SubmitPresentationRound(round.ID, "feedback", nil, now); err == nil {
 		t.Error("expected error submitting an already-submitted round")
 	}
 }
 
 func TestPresentSubmitRoundMissingRoundErrors(t *testing.T) {
 	s := newPresentTestStore(t)
-	if err := s.SubmitPresentationRound("does-not-exist", nil, time.Now()); err == nil {
+	if err := s.SubmitPresentationRound("does-not-exist", "feedback", nil, time.Now()); err == nil {
 		t.Error("expected error submitting a nonexistent round")
+	}
+}
+
+func TestPresentSubmitRoundRejectsInvalidVerdict(t *testing.T) {
+	s := newPresentTestStore(t)
+	now := time.Now()
+
+	p, err := s.CreatePresentation("session-1", nil, "Title", "pr", "/repo", now)
+	if err != nil {
+		t.Fatalf("CreatePresentation: %v", err)
+	}
+	round, err := s.CreatePresentationRound(p.ID, "manifest: v1", "base1", "head1", now)
+	if err != nil {
+		t.Fatalf("CreatePresentationRound: %v", err)
+	}
+
+	if err := s.SubmitPresentationRound(round.ID, "bogus", nil, now); err == nil {
+		t.Error("expected error for invalid verdict")
+	}
+
+	got, err := s.GetPresentationRound(p.ID, round.Seq)
+	if err != nil {
+		t.Fatalf("GetPresentationRound: %v", err)
+	}
+	if got.SubmittedAt != nil {
+		t.Error("expected round to remain unsubmitted after a rejected verdict")
+	}
+}
+
+func TestPresentSubmitRoundApprovedFlipsPresentationStatus(t *testing.T) {
+	s := newPresentTestStore(t)
+	now := time.Now()
+
+	p, err := s.CreatePresentation("session-1", nil, "Title", "pr", "/repo", now)
+	if err != nil {
+		t.Fatalf("CreatePresentation: %v", err)
+	}
+	round, err := s.CreatePresentationRound(p.ID, "manifest: v1", "base1", "head1", now)
+	if err != nil {
+		t.Fatalf("CreatePresentationRound: %v", err)
+	}
+
+	comments := []PresentationComment{
+		{Filepath: "a.go", LineStart: 1, LineEnd: 1, Side: "new", Content: "nit"},
+	}
+	if err := s.SubmitPresentationRound(round.ID, "approved", comments, now); err != nil {
+		t.Fatalf("SubmitPresentationRound: %v", err)
+	}
+
+	gotRound, err := s.GetPresentationRound(p.ID, round.Seq)
+	if err != nil {
+		t.Fatalf("GetPresentationRound: %v", err)
+	}
+	if gotRound.Verdict == nil || *gotRound.Verdict != "approved" {
+		t.Errorf("expected verdict 'approved', got %v", gotRound.Verdict)
+	}
+
+	gotPres, err := s.GetPresentation(p.ID)
+	if err != nil {
+		t.Fatalf("GetPresentation: %v", err)
+	}
+	if gotPres.Status != "approved" {
+		t.Errorf("expected presentation status 'approved', got %q", gotPres.Status)
+	}
+
+	all, err := s.ListPresentationComments(round.ID)
+	if err != nil {
+		t.Fatalf("ListPresentationComments: %v", err)
+	}
+	if len(all) != 1 {
+		t.Errorf("expected approve-with-nits to still store the comment, got %d", len(all))
+	}
+}
+
+func TestPresentCreatePresentationRoundReopensApprovedPresentation(t *testing.T) {
+	s := newPresentTestStore(t)
+	now := time.Now()
+
+	p, err := s.CreatePresentation("session-1", nil, "Title", "pr", "/repo", now)
+	if err != nil {
+		t.Fatalf("CreatePresentation: %v", err)
+	}
+	round, err := s.CreatePresentationRound(p.ID, "manifest: v1", "base1", "head1", now)
+	if err != nil {
+		t.Fatalf("CreatePresentationRound: %v", err)
+	}
+	if err := s.SubmitPresentationRound(round.ID, "approved", nil, now); err != nil {
+		t.Fatalf("SubmitPresentationRound: %v", err)
+	}
+
+	gotPres, err := s.GetPresentation(p.ID)
+	if err != nil {
+		t.Fatalf("GetPresentation: %v", err)
+	}
+	if gotPres.Status != "approved" {
+		t.Fatalf("expected presentation status 'approved' before round 2, got %q", gotPres.Status)
+	}
+
+	if _, err := s.CreatePresentationRound(p.ID, "manifest: v2", "base2", "head2", now); err != nil {
+		t.Fatalf("CreatePresentationRound (2): %v", err)
+	}
+
+	gotPres, err = s.GetPresentation(p.ID)
+	if err != nil {
+		t.Fatalf("GetPresentation: %v", err)
+	}
+	if gotPres.Status != "open" {
+		t.Errorf("expected a new round to reopen an approved presentation, got status %q", gotPres.Status)
+	}
+}
+
+func TestPresentCreatePresentationRoundReopensClosedPresentation(t *testing.T) {
+	s := newPresentTestStore(t)
+	now := time.Now()
+
+	p, err := s.CreatePresentation("session-1", nil, "Title", "pr", "/repo", now)
+	if err != nil {
+		t.Fatalf("CreatePresentation: %v", err)
+	}
+	if _, err := s.CreatePresentationRound(p.ID, "manifest: v1", "base1", "head1", now); err != nil {
+		t.Fatalf("CreatePresentationRound: %v", err)
+	}
+	if err := s.ClosePresentation(p.ID, now); err != nil {
+		t.Fatalf("ClosePresentation: %v", err)
+	}
+
+	gotPres, err := s.GetPresentation(p.ID)
+	if err != nil {
+		t.Fatalf("GetPresentation: %v", err)
+	}
+	if gotPres.Status != "closed" {
+		t.Fatalf("expected presentation status 'closed' before round 2, got %q", gotPres.Status)
+	}
+
+	if _, err := s.CreatePresentationRound(p.ID, "manifest: v2", "base2", "head2", now); err != nil {
+		t.Fatalf("CreatePresentationRound (2): %v", err)
+	}
+
+	gotPres, err = s.GetPresentation(p.ID)
+	if err != nil {
+		t.Fatalf("GetPresentation: %v", err)
+	}
+	if gotPres.Status != "open" {
+		t.Errorf("expected a new round to reopen a closed presentation, got status %q", gotPres.Status)
+	}
+}
+
+func TestPresentSubmitRoundFeedbackKeepsPresentationOpen(t *testing.T) {
+	s := newPresentTestStore(t)
+	now := time.Now()
+
+	p, err := s.CreatePresentation("session-1", nil, "Title", "pr", "/repo", now)
+	if err != nil {
+		t.Fatalf("CreatePresentation: %v", err)
+	}
+	round, err := s.CreatePresentationRound(p.ID, "manifest: v1", "base1", "head1", now)
+	if err != nil {
+		t.Fatalf("CreatePresentationRound: %v", err)
+	}
+
+	if err := s.SubmitPresentationRound(round.ID, "feedback", nil, now); err != nil {
+		t.Fatalf("SubmitPresentationRound: %v", err)
+	}
+
+	gotPres, err := s.GetPresentation(p.ID)
+	if err != nil {
+		t.Fatalf("GetPresentation: %v", err)
+	}
+	if gotPres.Status != "open" {
+		t.Errorf("expected presentation status to remain 'open', got %q", gotPres.Status)
+	}
+}
+
+func TestPresentClosePresentation(t *testing.T) {
+	s := newPresentTestStore(t)
+	now := time.Now()
+
+	p, err := s.CreatePresentation("session-1", nil, "Title", "pr", "/repo", now)
+	if err != nil {
+		t.Fatalf("CreatePresentation: %v", err)
+	}
+
+	if err := s.ClosePresentation(p.ID, now); err != nil {
+		t.Fatalf("ClosePresentation: %v", err)
+	}
+
+	got, err := s.GetPresentation(p.ID)
+	if err != nil {
+		t.Fatalf("GetPresentation: %v", err)
+	}
+	if got.Status != "closed" {
+		t.Errorf("expected status 'closed', got %q", got.Status)
+	}
+
+	// Closing an already-closed presentation errors.
+	if err := s.ClosePresentation(p.ID, now); err == nil {
+		t.Error("expected error closing an already-closed presentation")
+	}
+}
+
+func TestPresentCloseApprovedPresentationErrors(t *testing.T) {
+	s := newPresentTestStore(t)
+	now := time.Now()
+
+	p, err := s.CreatePresentation("session-1", nil, "Title", "pr", "/repo", now)
+	if err != nil {
+		t.Fatalf("CreatePresentation: %v", err)
+	}
+	round, err := s.CreatePresentationRound(p.ID, "manifest: v1", "base1", "head1", now)
+	if err != nil {
+		t.Fatalf("CreatePresentationRound: %v", err)
+	}
+	if err := s.SubmitPresentationRound(round.ID, "approved", nil, now); err != nil {
+		t.Fatalf("SubmitPresentationRound: %v", err)
+	}
+
+	if err := s.ClosePresentation(p.ID, now); err == nil {
+		t.Error("expected error closing an approved presentation")
+	}
+}
+
+func TestPresentCloseUnknownPresentationErrors(t *testing.T) {
+	s := newPresentTestStore(t)
+	if err := s.ClosePresentation("no-such-presentation", time.Now()); err == nil {
+		t.Error("expected error closing a nonexistent presentation")
 	}
 }

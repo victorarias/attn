@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '153';
+export const PROTOCOL_VERSION = '154';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2308,6 +2308,19 @@ export function useDaemonSocket({
                 pending.resolve({ roundId: data.round_id });
               } else {
                 pending.reject(new Error(data.error || 'Failed to submit presentation round'));
+              }
+            }
+            break;
+          }
+
+          case 'present_close_result': {
+            const pending = pendingActionsRef.current.get('present_close');
+            if (pending) {
+              pendingActionsRef.current.delete('present_close');
+              if (data.success) {
+                pending.resolve({ presentationId: data.presentation_id });
+              } else {
+                pending.reject(new Error(data.error || 'Failed to close presentation'));
               }
             }
             break;
@@ -4658,8 +4671,11 @@ export function useDaemonSocket({
   }, []);
 
   // Hand a round's review back to the authoring agent (presentation reader).
+  // verdict is "approved" (comments allowed alongside — approve-with-nits) or
+  // "feedback" (today's plain handback).
   const submitPresentationRound = useCallback((input: {
     roundId: string;
+    verdict: 'approved' | 'feedback';
     comments: PresentCommentInput[];
     handback: boolean;
   }): Promise<{ roundId: string }> => {
@@ -4676,6 +4692,7 @@ export function useDaemonSocket({
       ws.send(JSON.stringify({
         cmd: 'present_submit_round',
         round_id: input.roundId,
+        verdict: input.verdict,
         comments: input.comments,
         handback: input.handback,
       }));
@@ -4684,6 +4701,33 @@ export function useDaemonSocket({
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           reject(new Error('Submit presentation round timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  // Dismiss a presentation without a review: no round submission, no
+  // handback — the presentation's status moves straight to "closed".
+  const closePresentation = useCallback((presentationId: string): Promise<{ presentationId: string }> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = 'present_close';
+      pendingActionsRef.current.set(key, { resolve, reject });
+
+      ws.send(JSON.stringify({
+        cmd: 'present_close',
+        presentation_id: presentationId,
+      }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Close presentation timed out'));
         }
       }, 30000);
     });
@@ -4794,5 +4838,6 @@ export function useDaemonSocket({
     getPresentations,
     getPresentationRound,
     submitPresentationRound,
+    closePresentation,
   };
 }

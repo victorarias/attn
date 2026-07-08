@@ -115,6 +115,9 @@ func roundToProto(r *store.PresentationRound, repoDir string) (*protocol.Present
 	if r.SubmittedAt != nil {
 		out.SubmittedAt = r.SubmittedAt
 	}
+	if r.Verdict != nil {
+		out.Verdict = r.Verdict
+	}
 	return out, nil
 }
 
@@ -284,7 +287,17 @@ func (d *Daemon) handlePresentFeedback(conn net.Conn, msg *protocol.PresentFeedb
 	if round.SubmittedAt != nil {
 		submittedAt = *round.SubmittedAt
 	}
-	markdown := present.RenderFeedback(pres.RepoPath, pres.Title, round.Seq, round.BaseSHA, round.HeadSHA, submittedAt, feedbackComments)
+	verdict := ""
+	if round.Verdict != nil {
+		verdict = *round.Verdict
+	}
+	markdown := present.RenderFeedback(pres.RepoPath, pres.Title, round.Seq, round.BaseSHA, round.HeadSHA, submittedAt, verdict, feedbackComments)
+	// A reviewer can close a presentation without ever reviewing this round —
+	// surface that explicitly so a polling agent learns the review isn't
+	// coming, rather than polling "not submitted yet" forever.
+	if pres.Status == "closed" && round.SubmittedAt == nil {
+		markdown += "\nPresentation closed without review.\n"
+	}
 
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
 		Ok: true,
@@ -495,6 +508,12 @@ func (d *Daemon) handlePresentSubmitRound(client *wsClient, msg *protocol.Presen
 		return
 	}
 
+	if msg.Verdict != "approved" && msg.Verdict != "feedback" {
+		result.Error = protocol.Ptr(fmt.Sprintf("verdict must be \"approved\" or \"feedback\", got %q", msg.Verdict))
+		d.sendToClient(client, result)
+		return
+	}
+
 	comments := make([]store.PresentationComment, 0, len(msg.Comments))
 	for i, c := range msg.Comments {
 		if strings.TrimSpace(c.Filepath) == "" {
@@ -533,7 +552,7 @@ func (d *Daemon) handlePresentSubmitRound(client *wsClient, msg *protocol.Presen
 	}
 
 	now := time.Now()
-	if err := d.store.SubmitPresentationRound(roundID, comments, now); err != nil {
+	if err := d.store.SubmitPresentationRound(roundID, msg.Verdict, comments, now); err != nil {
 		result.Error = protocol.Ptr(err.Error())
 		d.sendToClient(client, result)
 		return
@@ -562,7 +581,7 @@ func (d *Daemon) handlePresentSubmitRound(client *wsClient, msg *protocol.Presen
 	if !msg.Handback {
 		return
 	}
-	d.handbackPresentationRound(pres, round.Seq)
+	d.handbackPresentationRound(pres, round.Seq, msg.Verdict)
 }
 
 // handbackPresentationRound wakes the authoring agent once a round has been
@@ -570,9 +589,16 @@ func (d *Daemon) handlePresentSubmitRound(client *wsClient, msg *protocol.Presen
 // regardless of the session's state); bare sessions get a best-effort direct
 // doorbell that is silently skipped when the session is not idle — chunk-1's
 // accepted limitation, since a bare presentation has no durable inbox to fall
-// back on.
-func (d *Daemon) handbackPresentationRound(pres *store.Presentation, seq int) {
-	notice := fmt.Sprintf("Present round %d of %q submitted — run `attn present feedback %s`", seq, pres.Title, pres.ID)
+// back on. verdict is verdict-aware wording: "approved" tells the agent the
+// round was approved (possibly with nits); "feedback" keeps the original
+// "submitted" wording.
+func (d *Daemon) handbackPresentationRound(pres *store.Presentation, seq int, verdict string) {
+	var notice string
+	if verdict == "approved" {
+		notice = fmt.Sprintf("Present round %d of %q approved — run `attn present feedback %s`", seq, pres.Title, pres.ID)
+	} else {
+		notice = fmt.Sprintf("Present round %d of %q submitted — run `attn present feedback %s`", seq, pres.Title, pres.ID)
+	}
 
 	if pres.TicketID != nil && strings.TrimSpace(*pres.TicketID) != "" {
 		ticketID := strings.TrimSpace(*pres.TicketID)
@@ -592,4 +618,42 @@ func (d *Daemon) handbackPresentationRound(pres *store.Presentation, seq int) {
 	if err := d.typeDoorbell(pres.SessionID, "\U0001F4FD "+notice+"."); err != nil {
 		d.logf("present handback: doorbell failed for session %s: %v", pres.SessionID, err)
 	}
+}
+
+// handlePresentClose dismisses a presentation without a review: the
+// presentation's status moves straight to "closed". Unlike
+// handlePresentSubmitRound, there is no round submission and no handback —
+// the reviewer is declining to review, not handing feedback back.
+func (d *Daemon) handlePresentClose(client *wsClient, msg *protocol.PresentCloseMessage) {
+	result := protocol.PresentCloseResultMessage{
+		Event:          protocol.EventPresentCloseResult,
+		PresentationID: msg.PresentationID,
+		Success:        false,
+	}
+
+	presentationID := strings.TrimSpace(msg.PresentationID)
+	if presentationID == "" {
+		result.Error = protocol.Ptr("presentation_id is required")
+		d.sendToClient(client, result)
+		return
+	}
+
+	if err := d.store.ClosePresentation(presentationID, time.Now()); err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+
+	result.Success = true
+	d.sendToClient(client, result)
+
+	pres, err := d.store.GetPresentation(presentationID)
+	if err != nil {
+		d.logf("present close: failed to reload presentation %s after close: %v", presentationID, err)
+		return
+	}
+	d.broadcastMessage(protocol.PresentationUpdatedMessage{
+		Event:        protocol.EventPresentationUpdated,
+		Presentation: presentationToProto(pres),
+	})
 }

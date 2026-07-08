@@ -217,6 +217,10 @@ model PresentationRound {
   head_sha: string;
   created_at: string;
   submitted_at?: string;
+  // "approved" | "feedback", set once the round is submitted. Plain string,
+  // not an enum, to avoid the quicktype identical-enum merge trap (see side
+  // on PresentationComment below).
+  verdict?: string;
   manifest: PresentManifestView;
   // All files changed between base_sha and head_sha, computed at query time
   // by the daemon from `git diff` (destination path for renames);
@@ -1891,9 +1895,11 @@ model PresentCommentInput {
 
 // PresentSubmitRoundMessage hands a round's review back to the authoring
 // agent. handback marks the round submitted, closing the loop for that round.
+// verdict is "approved" | "feedback" — plain string, see PresentationComment.side.
 model PresentSubmitRoundMessage {
   cmd: "present_submit_round";
   round_id: string;
+  verdict: string;
   comments: PresentCommentInput[];
   handback: boolean;
 }
@@ -1903,6 +1909,21 @@ model PresentSubmitRoundResultMessage {
   success: boolean;
   error?: string;
   round_id: string;
+}
+
+// PresentCloseMessage dismisses a presentation without a review: the
+// presentation's status moves straight to "closed", with no round submission
+// and no handback to the authoring agent.
+model PresentCloseMessage {
+  cmd: "present_close";
+  presentation_id: string;
+}
+
+model PresentCloseResultMessage {
+  event: "present_close_result";
+  success: boolean;
+  error?: string;
+  presentation_id: string;
 }
 
 model PresentationAddedMessage {
@@ -2867,5 +2888,6 @@ alias DaemonEvent =
   | GetPresentationsResultMessage
   | GetPresentationRoundResultMessage
   | PresentSubmitRoundResultMessage
+  | PresentCloseResultMessage
   | PresentationAddedMessage
   | PresentationUpdatedMessage;

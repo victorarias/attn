@@ -131,6 +131,17 @@
   cursor: default;
 }
 
+.present-root-submit-approve {
+  background: var(--color-accent, #5b8cff);
+  color: #fff;
+  border: none;
+}
+
+.present-root-submit-close {
+  color: #ff746c;
+  border-color: rgba(255, 116, 108, 0.38);
+}
+
 .present-root-drift {
   display: flex;
   align-items: flex-start;

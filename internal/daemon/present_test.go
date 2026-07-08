@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -376,6 +377,7 @@ func TestHandlePresentSubmitRound_ValidationRejects(t *testing.T) {
 			d.handlePresentSubmitRound(client, &protocol.PresentSubmitRoundMessage{
 				Cmd:      protocol.CmdPresentSubmitRound,
 				RoundID:  roundID,
+				Verdict:  "feedback",
 				Comments: []protocol.PresentCommentInput{tc.comment},
 			})
 			var res protocol.PresentSubmitRoundResultMessage
@@ -415,6 +417,7 @@ func TestHandlePresentSubmitRound_DoubleSubmitRejected(t *testing.T) {
 		d.handlePresentSubmitRound(client, &protocol.PresentSubmitRoundMessage{
 			Cmd:     protocol.CmdPresentSubmitRound,
 			RoundID: roundID,
+			Verdict: "feedback",
 			Comments: []protocol.PresentCommentInput{
 				{Filepath: "a.txt", LineStart: 1, LineEnd: 1, Side: "new", Content: "looks good"},
 			},
@@ -431,6 +434,172 @@ func TestHandlePresentSubmitRound_DoubleSubmitRejected(t *testing.T) {
 	second := submit()
 	if second.Success {
 		t.Fatalf("second submit of an already-submitted round returned success: %+v", second)
+	}
+}
+
+func TestHandlePresentSubmitRound_InvalidVerdictRejected(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentTestRepo(t)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    presentManifestYAML("My Change", repoDir),
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handlePresentSubmitRound(client, &protocol.PresentSubmitRoundMessage{
+		Cmd:     protocol.CmdPresentSubmitRound,
+		RoundID: opened.PresentOpenResult.RoundID,
+		Verdict: "bogus",
+	})
+	var res protocol.PresentSubmitRoundResultMessage
+	readTicketResult(t, client.send, &res)
+	if res.Success {
+		t.Fatalf("submit with an invalid verdict returned success: %+v", res)
+	}
+
+	round, err := d.store.GetPresentationRound(opened.PresentOpenResult.PresentationID, 0)
+	if err != nil {
+		t.Fatalf("GetPresentationRound: %v", err)
+	}
+	if round.SubmittedAt != nil {
+		t.Fatalf("round was marked submitted despite an invalid verdict: %+v", round)
+	}
+}
+
+func TestHandlePresentSubmitRound_ApprovedFlipsPresentationStatus(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentTestRepo(t)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    presentManifestYAML("My Change", repoDir),
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handlePresentSubmitRound(client, &protocol.PresentSubmitRoundMessage{
+		Cmd:     protocol.CmdPresentSubmitRound,
+		RoundID: opened.PresentOpenResult.RoundID,
+		Verdict: "approved",
+		Comments: []protocol.PresentCommentInput{
+			{Filepath: "a.txt", LineStart: 1, LineEnd: 1, Side: "new", Content: "nit"},
+		},
+	})
+	var res protocol.PresentSubmitRoundResultMessage
+	readTicketResult(t, client.send, &res)
+	if !res.Success {
+		t.Fatalf("approve submit = %+v, want success", res)
+	}
+
+	round, err := d.store.GetPresentationRound(opened.PresentOpenResult.PresentationID, 0)
+	if err != nil {
+		t.Fatalf("GetPresentationRound: %v", err)
+	}
+	if round.Verdict == nil || *round.Verdict != "approved" {
+		t.Fatalf("round verdict = %v, want approved", round.Verdict)
+	}
+
+	pres, err := d.store.GetPresentation(opened.PresentOpenResult.PresentationID)
+	if err != nil {
+		t.Fatalf("GetPresentation: %v", err)
+	}
+	if pres.Status != "approved" {
+		t.Fatalf("presentation status = %q, want approved", pres.Status)
+	}
+}
+
+func TestHandlePresentClose_Success(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentTestRepo(t)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    presentManifestYAML("My Change", repoDir),
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handlePresentClose(client, &protocol.PresentCloseMessage{
+		Cmd:            protocol.CmdPresentClose,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	var res protocol.PresentCloseResultMessage
+	readTicketResult(t, client.send, &res)
+	if !res.Success {
+		t.Fatalf("present close = %+v, want success", res)
+	}
+	if res.PresentationID != opened.PresentOpenResult.PresentationID {
+		t.Fatalf("present close result presentation_id = %q, want %q", res.PresentationID, opened.PresentOpenResult.PresentationID)
+	}
+
+	pres, err := d.store.GetPresentation(opened.PresentOpenResult.PresentationID)
+	if err != nil {
+		t.Fatalf("GetPresentation: %v", err)
+	}
+	if pres.Status != "closed" {
+		t.Fatalf("presentation status = %q, want closed", pres.Status)
+	}
+
+	// No round submission happened — the round is still a draft.
+	round, err := d.store.GetPresentationRound(opened.PresentOpenResult.PresentationID, 0)
+	if err != nil {
+		t.Fatalf("GetPresentationRound: %v", err)
+	}
+	if round.SubmittedAt != nil {
+		t.Fatalf("close should not submit the round, got submitted_at=%v", round.SubmittedAt)
+	}
+}
+
+func TestHandlePresentClose_RejectsWhenNotOpen(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentTestRepo(t)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    presentManifestYAML("My Change", repoDir),
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+	if err := d.store.ClosePresentation(opened.PresentOpenResult.PresentationID, time.Now()); err != nil {
+		t.Fatalf("ClosePresentation: %v", err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handlePresentClose(client, &protocol.PresentCloseMessage{
+		Cmd:            protocol.CmdPresentClose,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	var res protocol.PresentCloseResultMessage
+	readTicketResult(t, client.send, &res)
+	if res.Success {
+		t.Fatalf("closing an already-closed presentation returned success: %+v", res)
+	}
+}
+
+func TestHandlePresentClose_MissingIDRejected(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handlePresentClose(client, &protocol.PresentCloseMessage{
+		Cmd: protocol.CmdPresentClose,
+	})
+	var res protocol.PresentCloseResultMessage
+	readTicketResult(t, client.send, &res)
+	if res.Success {
+		t.Fatalf("present close with no presentation_id returned success: %+v", res)
 	}
 }
 
