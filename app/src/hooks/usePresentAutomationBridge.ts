@@ -54,32 +54,45 @@ async function waitForSubmitDialog(timeoutMs = 1_000): Promise<HTMLElement> {
   throw new Error('present_window_submit: submit dialog did not appear');
 }
 
-async function handlePresentWindowAction(action: string): Promise<unknown> {
+// Maps the payload's optional `action` (default "feedback") to the submit
+// dialog button it should click, by class — never by position, since the
+// dialog's button order is not a contract this bridge should depend on.
+const SUBMIT_DIALOG_ACTION_CLASS: Record<string, string> = {
+  feedback: 'present-root-submit-feedback',
+  approve: 'present-root-submit-approve',
+  close: 'present-root-submit-close',
+};
+
+async function handlePresentWindowAction(action: string, payload?: Record<string, unknown> | null): Promise<unknown> {
   switch (action) {
     case 'present_window_is_visible': {
       return { visible: await getCurrentWindow().isVisible() };
     }
     case 'present_window_submit': {
       // Drive the real DOM submit flow end to end: click the round-header
-      // submit button, wait for the confirm dialog, then click its confirm
-      // button (the second/last button in .present-root-submit-actions — the
-      // first is Cancel). Zero draft comments is a valid submit; nothing here
-      // requires any drafts to exist.
-      const submitButton = document.querySelector<HTMLElement>('.present-root-submit-button');
+      // submit button, wait for the confirm dialog, then click the button
+      // for the requested verdict (default "feedback", matching this
+      // action's historical behavior). Zero draft comments is a valid
+      // submit; nothing here requires any drafts to exist.
+      const dialogAction = typeof payload?.action === 'string' ? payload.action : 'feedback';
+      const buttonClass = SUBMIT_DIALOG_ACTION_CLASS[dialogAction];
+      if (!buttonClass) {
+        throw new Error(`present_window_submit: unknown action "${dialogAction}"`);
+      }
+
+      const submitButton = document.querySelector<HTMLElement>('.present-drive-bar-submit');
       if (!submitButton) {
         throw new Error('present_window_submit: submit button not found');
       }
       submitButton.click();
 
       const dialog = await waitForSubmitDialog();
-      const actions = dialog.querySelector<HTMLElement>('.present-root-submit-actions');
-      const buttons = actions ? Array.from(actions.querySelectorAll<HTMLButtonElement>('button')) : [];
-      const confirmButton = buttons[buttons.length - 1];
+      const confirmButton = dialog.querySelector<HTMLElement>(`.${buttonClass}`);
       if (!confirmButton) {
-        throw new Error('present_window_submit: confirm button not found in submit dialog');
+        throw new Error(`present_window_submit: "${dialogAction}" button not found in submit dialog`);
       }
       confirmButton.click();
-      return { submitted: true };
+      return { submitted: true, action: dialogAction };
     }
     default:
       throw new Error(`Unknown present-window automation action: ${action}`);
@@ -119,7 +132,7 @@ export function usePresentAutomationBridge(): void {
 
       let response: AutomationResponse;
       try {
-        const result = await handlePresentWindowAction(request.action);
+        const result = await handlePresentWindowAction(request.action, request.payload);
         response = { request_id: request.request_id, ok: true, result };
       } catch (error) {
         response = {

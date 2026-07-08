@@ -697,7 +697,12 @@ export function PresentRoot() {
               >
                 Close review
               </button>
-              <button type="button" onClick={() => handleSubmit('feedback')} disabled={submitting}>
+              <button
+                type="button"
+                className="present-root-submit-feedback"
+                onClick={() => handleSubmit('feedback')}
+                disabled={submitting}
+              >
                 {submitting ? 'Submitting…' : 'Submit feedback'}
               </button>
               <button
