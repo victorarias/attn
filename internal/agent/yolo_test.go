@@ -109,6 +109,9 @@ func TestClaudeBuildCommand_ChiefGuidanceTakesPrecedence(t *testing.T) {
 	if !strings.Contains(prompt, "/home/u/attn-notebook") || !strings.Contains(prompt, "chief of staff") {
 		t.Fatalf("system prompt = %q, want notebook guidance", prompt)
 	}
+	if !strings.Contains(prompt, "attn ticket inbox --watch") || !strings.Contains(prompt, "arm a harness Monitor") {
+		t.Fatalf("Claude chief prompt should preserve the self-monitor watch path: %q", prompt)
+	}
 	if strings.Contains(prompt, "/tmp/context.md") {
 		t.Fatalf("chief launch must not inject workspace-context guidance: %q", prompt)
 	}
@@ -144,6 +147,12 @@ func TestCodexConfigOverrides_ChiefGuidanceTakesPrecedence(t *testing.T) {
 	}
 	if !strings.Contains(joined, "attn-notebook") || !strings.Contains(joined, "chief of staff") {
 		t.Fatalf("developer_instructions should carry notebook guidance: %q", joined)
+	}
+	if !strings.Contains(joined, "ticket nudges are the supported wake-up mechanism") || !strings.Contains(joined, "when attn nudges you, run `attn ticket inbox`") {
+		t.Fatalf("Codex chief guidance should use attn's nudge path: %q", joined)
+	}
+	if strings.Contains(joined, "arm a harness Monitor") {
+		t.Fatalf("Codex chief guidance should not instruct Codex to arm a Monitor: %q", joined)
 	}
 	if strings.Contains(joined, "/tmp/context.md") {
 		t.Fatalf("chief launch must not inject workspace-context guidance: %q", joined)

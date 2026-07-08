@@ -82,7 +82,7 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceC
 	// folded in by AgentInstructions). Non-chief agents are NOT nudged to journal:
 	// the keeper narrates each workspace's own work into the journal, and the chief
 	// journals the cross-workspace layer.
-	if guidance := ChiefGuidance(notebookRoot); guidance != "" {
+	if guidance := ChiefGuidance(notebookRoot, false); guidance != "" {
 		overrides = append(overrides, "developer_instructions="+strconv.Quote(guidance))
 	} else if instructions := AgentInstructions(workspaceContextPath, injectWorkflow); instructions != "" {
 		overrides = append(overrides, "developer_instructions="+strconv.Quote(instructions))

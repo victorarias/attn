@@ -314,7 +314,7 @@ func TestWorkspaceContextSessionStartOutputWrapsGuidance(t *testing.T) {
 }
 
 func TestChiefGuidance(t *testing.T) {
-	guidance := ChiefGuidance("/home/u/attn-notebook")
+	guidance := ChiefGuidance("/home/u/attn-notebook", true)
 	for _, expected := range []string{
 		"/home/u/attn-notebook",
 		"chief of staff",
@@ -361,11 +361,29 @@ func TestChiefGuidance(t *testing.T) {
 	}
 }
 
+func TestChiefGuidanceUsesTicketNudgesWithoutSelfMonitor(t *testing.T) {
+	guidance := ChiefGuidance("/home/u/attn-notebook", false)
+	for _, expected := range []string{
+		"ticket nudges are the supported wake-up mechanism",
+		"Do not start `attn ticket inbox --watch`",
+		"when attn nudges you, run `attn ticket inbox`",
+		"your turn is done until attn nudges you",
+		"When delegated ticket activity comes back",
+	} {
+		if !strings.Contains(guidance, expected) {
+			t.Fatalf("non-self-monitor chief guidance missing %q: %q", expected, guidance)
+		}
+	}
+	if strings.Contains(guidance, "arm a harness Monitor") {
+		t.Fatalf("non-self-monitor chief guidance should not instruct the runtime to arm a Monitor: %q", guidance)
+	}
+}
+
 func TestChiefGuidanceEmptyWithoutRoot(t *testing.T) {
-	if got := ChiefGuidance(""); got != "" {
+	if got := ChiefGuidance("", true); got != "" {
 		t.Fatalf("ChiefGuidance(\"\") = %q, want empty", got)
 	}
-	if got := ChiefGuidance("   "); got != "" {
+	if got := ChiefGuidance("   ", false); got != "" {
 		t.Fatalf("ChiefGuidance(whitespace) = %q, want empty", got)
 	}
 }
