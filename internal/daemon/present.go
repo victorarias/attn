@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -328,8 +329,73 @@ func (d *Daemon) handleGetPresentationRound(client *wsClient, msg *protocol.GetP
 		result.RepoHeadSHA = protocol.Ptr(strings.TrimSpace(string(headSHA)))
 	}
 
+	// Per-file ± line stats are a progressive enhancement for the rail: a
+	// lookup failure or empty result must never fail the round fetch.
+	if stats := d.presentFileStats(pres.RepoPath, round.BaseSHA, round.HeadSHA); len(stats) > 0 {
+		for i := range result.Round.Manifest.Files {
+			path := result.Round.Manifest.Files[i].Path
+			if s, ok := stats[path]; ok {
+				result.Round.Manifest.Files[i].Additions = protocol.Ptr(s[0])
+				result.Round.Manifest.Files[i].Deletions = protocol.Ptr(s[1])
+			}
+		}
+	}
+
 	result.Success = true
 	d.sendToClient(client, result)
+}
+
+// presentFileStats returns path -> [additions, deletions] for the pinned
+// base..head diff, from `git diff --numstat`. Binary files (numstat "-") are
+// omitted. Rename lines are skipped — the numstat rename encoding
+// ("old => new" or "{old => new}/tail") doesn't cleanly resolve to a single
+// manifest path, and leaving those files stats-less is an accepted
+// limitation. Errors return nil; stats are a progressive enhancement and
+// must never fail a round fetch.
+func (d *Daemon) presentFileStats(repoDir, baseSHA, headSHA string) map[string][2]int {
+	out, err := attngit.Output(attngit.OpDiff, repoDir, "diff", "--numstat", baseSHA+".."+headSHA)
+	if err != nil {
+		return nil
+	}
+	return parsePresentNumstat(string(out))
+}
+
+// parsePresentNumstat parses `git diff --numstat` output into path ->
+// [additions, deletions]. Lines are tab-separated: additions, deletions,
+// path. Binary files report "-" for both counts and are omitted. Rename
+// lines carry a path field containing " => " (optionally with a "{old =>
+// new}" brace segment) and are skipped rather than guessed at.
+func parsePresentNumstat(output string) map[string][2]int {
+	result := make(map[string][2]int)
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if parts[0] == "-" || parts[1] == "-" {
+			// Binary file: no line stats available.
+			continue
+		}
+		additions, err := strconv.Atoi(parts[0])
+		if err != nil {
+			continue
+		}
+		deletions, err := strconv.Atoi(parts[1])
+		if err != nil {
+			continue
+		}
+		path := parts[2]
+		if strings.Contains(path, " => ") {
+			// Rename line — accepted limitation, see doc comment.
+			continue
+		}
+		result[path] = [2]int{additions, deletions}
+	}
+	return result
 }
 
 // handlePresentSubmitRound hands a round's review back to the authoring

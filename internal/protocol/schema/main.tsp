@@ -163,6 +163,10 @@ model WorkspaceContext {
 model PresentFile {
   path: string;
   note?: string;
+  // Line stats for this file across the round's pinned base..head diff,
+  // from git numstat. Absent when unknown (binary file, or stats lookup failed).
+  additions?: int32;
+  deletions?: int32;
 }
 
 // PresentManifestView is the parsed, daemon-pinned view of a present manifest —

@@ -2117,6 +2117,12 @@ type PresentFeedbackResult struct {
 }
 
 type PresentFile struct {
+	// Additions corresponds to the JSON schema field "additions".
+	Additions *int `json:"additions,omitempty,omitzero"`
+
+	// Deletions corresponds to the JSON schema field "deletions".
+	Deletions *int `json:"deletions,omitempty,omitzero"`
+
 	// Note corresponds to the JSON schema field "note".
 	Note *string `json:"note,omitempty,omitzero"`
 
