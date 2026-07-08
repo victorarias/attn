@@ -12,6 +12,21 @@ const opener = vi.hoisted(() => ({
 vi.mock('@tauri-apps/plugin-opener', () => opener);
 const invokeMock = vi.mocked(invoke);
 
+// jsdom cannot run real mermaid (it needs a canvas/layout engine); mock it the
+// same way app/src/components/Markdown/Markdown.test.tsx does so the shared
+// renderer's mermaid path is exercised here through the dock tile.
+const mermaidMock = vi.hoisted(() => ({
+  render: vi.fn(async () => ({ svg: '<svg data-testid="mermaid-svg"></svg>' })),
+  initialize: vi.fn(),
+}));
+
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: mermaidMock.initialize,
+    render: mermaidMock.render,
+  },
+}));
+
 function renderMarkdown(content: string, allowLocalTargets = true) {
   return render(
     <WorkspaceDockTile
@@ -109,6 +124,15 @@ describe('WorkspaceDockTile Markdown rendering', () => {
       'setup',
       'setup-1',
     ]);
+  });
+
+  it('renders a mermaid fence as a diagram via the shared Markdown renderer', async () => {
+    renderMarkdown('```mermaid\ngraph TD;\nA-->B;\n```');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mermaid-svg')).toBeInTheDocument();
+    });
+    expect(mermaidMock.render).toHaveBeenCalled();
   });
 });
 

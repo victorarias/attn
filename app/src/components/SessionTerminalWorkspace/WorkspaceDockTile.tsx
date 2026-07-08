@@ -5,15 +5,14 @@ import type {
   ReactNode,
   Ref,
 } from 'react';
-import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { browserHostLabel, claimBrowserHostFocus, controlBrowserHost } from '../../browser/host';
 import type { TileContentState, TileLeaf } from '../../types/workspace';
 import { deriveTileTitle, tilePathBasename } from '../../utils/tilePresentation';
 import { BrowserTileBody } from './BrowserTileBody';
+import { Markdown } from '../Markdown';
 import { NotebookTile } from '../notebook/NotebookTile';
 import './WorkspaceDockTile.css';
 
@@ -435,8 +434,11 @@ function MarkdownBody({ content, allowLocalTargets }: { content?: TileContentSta
     return <div className="workspace-dock-tile-message">This file is empty.</div>;
   }
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents(content.path, allowLocalTargets)}>
+    <Markdown
+      className="workspace-dock-tile-markdown"
+      components={markdownComponents(content.path, allowLocalTargets)}
+    >
       {content.content}
-    </ReactMarkdown>
+    </Markdown>
   );
 }
