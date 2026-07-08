@@ -159,6 +159,16 @@ model WorkspaceContext {
   updated_at: string;
 }
 
+// PresentAnnotation is an author-pinned note or thread, resolved at query
+// time by the daemon from the manifest's annotation entries against the
+// pinned head SHA. Comments are ordered; author is always the presenting
+// agent.
+model PresentAnnotation {
+  line_start: int32; // resolved head-side line range
+  line_end: int32;
+  comments: string[];
+}
+
 // PresentFile is one file entry in a present manifest, as authored by the agent.
 model PresentFile {
   path: string;
@@ -167,6 +177,9 @@ model PresentFile {
   // from git numstat. Absent when unknown (binary file, or stats lookup failed).
   additions?: int32;
   deletions?: int32;
+  // Author-pinned notes/threads, resolved against the pinned head SHA.
+  // Omitted when the file has none, or when resolution failed.
+  annotations?: PresentAnnotation[];
 }
 
 // PresentManifestView is the parsed, daemon-pinned view of a present manifest —
@@ -673,6 +686,10 @@ model PresentOpenResult {
   base_sha: string;
   head_sha: string;
   title: string;
+  // Anchor warnings from resolving the manifest's annotations (e.g. an
+  // ambiguous anchor), formatted "path[index]: message". Absent when there
+  // were none. An error-severity issue fails the open instead of appearing here.
+  warnings?: string[];
 }
 
 // PresentFeedbackMessage reads reviewer feedback for a round back to the

@@ -52,13 +52,25 @@ func commentToProto(c *store.PresentationComment) protocol.PresentationComment {
 
 // manifestToView converts a parsed manifest into the wire view sent to the
 // app — the same shape whether it comes from a fresh present_open or a
-// stored round's manifest_yaml.
-func manifestToView(m *present.Manifest) protocol.PresentManifestView {
+// stored round's manifest_yaml. annotations is the resolved-annotations map
+// (path -> resolved annotations); nil when resolution was not attempted or
+// failed, in which case every file's Annotations is simply omitted.
+func manifestToView(m *present.Manifest, annotations map[string][]present.ResolvedAnnotation) protocol.PresentManifestView {
 	files := make([]protocol.PresentFile, len(m.Files))
 	for i, f := range m.Files {
 		pf := protocol.PresentFile{Path: f.Path}
 		if f.Note != "" {
 			pf.Note = protocol.Ptr(f.Note)
+		}
+		if resolved, ok := annotations[f.Path]; ok {
+			pf.Annotations = make([]protocol.PresentAnnotation, len(resolved))
+			for j, r := range resolved {
+				pf.Annotations[j] = protocol.PresentAnnotation{
+					LineStart: r.LineStart,
+					LineEnd:   r.LineEnd,
+					Comments:  r.Comments,
+				}
+			}
 		}
 		files[i] = pf
 	}
@@ -80,12 +92,17 @@ func manifestToView(m *present.Manifest) protocol.PresentManifestView {
 // roundToProto converts a store round to protocol, reparsing its stored
 // manifest YAML to build the manifest view. The manifest was already
 // validated at open time, so a parse failure here means stored data is
-// corrupt, not a user input error.
-func roundToProto(r *store.PresentationRound) (*protocol.PresentationRound, error) {
+// corrupt, not a user input error. Annotations are re-resolved against the
+// round's pinned head SHA in repoDir — deterministic, same architecture as
+// the stats/changed-files progressive enhancements below. A resolution
+// problem (unreadable file, broken anchor) never fails the round: the
+// affected file's annotations are simply omitted from the view.
+func roundToProto(r *store.PresentationRound, repoDir string) (*protocol.PresentationRound, error) {
 	m, err := present.ParseManifest([]byte(r.ManifestYAML))
 	if err != nil {
 		return nil, fmt.Errorf("parse stored manifest for round %s: %w", r.ID, err)
 	}
+	annotations, _ := present.ResolveAnnotations(m, repoDir, r.HeadSHA)
 	out := &protocol.PresentationRound{
 		ID:             r.ID,
 		PresentationID: r.PresentationID,
@@ -93,12 +110,22 @@ func roundToProto(r *store.PresentationRound) (*protocol.PresentationRound, erro
 		BaseSHA:        r.BaseSHA,
 		HeadSHA:        r.HeadSHA,
 		CreatedAt:      r.CreatedAt,
-		Manifest:       manifestToView(m),
+		Manifest:       manifestToView(m, annotations),
 	}
 	if r.SubmittedAt != nil {
 		out.SubmittedAt = r.SubmittedAt
 	}
 	return out, nil
+}
+
+// formatAnchorIssue renders an annotation resolution issue for display to the
+// agent: "path[index]: message" for an issue tied to one annotation, or
+// "path: message" for a file-level issue (index -1, e.g. unreadable content).
+func formatAnchorIssue(issue present.AnchorIssue) string {
+	if issue.Index < 0 {
+		return fmt.Sprintf("%s: %s", issue.Path, issue.Message)
+	}
+	return fmt.Sprintf("%s[%d]: %s", issue.Path, issue.Index, issue.Message)
 }
 
 // handlePresentOpen opens a new presentation (or a new round on an existing
@@ -120,6 +147,21 @@ func (d *Daemon) handlePresentOpen(conn net.Conn, msg *protocol.PresentOpenMessa
 	baseSHA, headSHA, err := present.Pin(m)
 	if err != nil {
 		d.sendError(conn, "present open: "+err.Error())
+		return
+	}
+
+	_, issues := present.ResolveAnnotations(m, m.Frame.Repo, headSHA)
+	var warnings []string
+	var errMessages []string
+	for _, issue := range issues {
+		if issue.Warning {
+			warnings = append(warnings, formatAnchorIssue(issue))
+		} else {
+			errMessages = append(errMessages, formatAnchorIssue(issue))
+		}
+	}
+	if len(errMessages) > 0 {
+		d.sendError(conn, "present open: annotation errors:\n"+strings.Join(errMessages, "\n"))
 		return
 	}
 
@@ -162,16 +204,20 @@ func (d *Daemon) handlePresentOpen(conn net.Conn, msg *protocol.PresentOpenMessa
 		return
 	}
 
+	result := &protocol.PresentOpenResult{
+		PresentationID: pres.ID,
+		RoundID:        round.ID,
+		Seq:            round.Seq,
+		BaseSHA:        baseSHA,
+		HeadSHA:        headSHA,
+		Title:          m.Title,
+	}
+	if len(warnings) > 0 {
+		result.Warnings = warnings
+	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok: true,
-		PresentOpenResult: &protocol.PresentOpenResult{
-			PresentationID: pres.ID,
-			RoundID:        round.ID,
-			Seq:            round.Seq,
-			BaseSHA:        baseSHA,
-			HeadSHA:        headSHA,
-			Title:          m.Title,
-		},
+		Ok:                true,
+		PresentOpenResult: result,
 	})
 
 	// Re-fetch so the broadcast carries the fresh latest-round summary.
@@ -307,7 +353,7 @@ func (d *Daemon) handleGetPresentationRound(client *wsClient, msg *protocol.GetP
 		return
 	}
 
-	protoRound, err := roundToProto(round)
+	protoRound, err := roundToProto(round, pres.RepoPath)
 	if err != nil {
 		result.Error = protocol.Ptr(err.Error())
 		d.sendToClient(client, result)

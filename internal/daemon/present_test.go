@@ -104,6 +104,196 @@ func TestHandlePresentOpen_HappyPath(t *testing.T) {
 	}
 }
 
+// presentAnnotatedTestRepo creates a one-commit repo with a.txt containing
+// known lines, so tests can author manifests with anchor/line annotations
+// against predictable content.
+func presentAnnotatedTestRepo(t *testing.T) (dir, sha string) {
+	t.Helper()
+	dir = t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("package a\nfunc Foo() {\n  return\n}\n"), 0o644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	run("add", "a.txt")
+	run("commit", "-m", "init")
+	sha = run("rev-parse", "HEAD")
+	return dir, sha
+}
+
+func TestHandlePresentOpen_BrokenAnchorRejected(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentAnnotatedTestRepo(t)
+
+	manifestYAML := fmt.Sprintf(
+		"version: 1\nkind: changes\ntitle: %q\nframe:\n  repo: %q\n  base: HEAD\n  head: HEAD\nfiles:\n  - path: a.txt\n    annotations:\n      - anchor: %q\n        note: nope\n",
+		"Broken Anchor", repoDir, "does not exist",
+	)
+
+	resp := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    manifestYAML,
+	})
+	if resp.Ok {
+		t.Fatalf("present open with a broken anchor returned ok: %+v", resp)
+	}
+	if resp.Error == nil || !strings.Contains(*resp.Error, "a.txt[0]") {
+		t.Errorf("error = %v, want to name a.txt[0]", resp.Error)
+	}
+}
+
+func TestHandlePresentOpen_AmbiguousAnchorWarns(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir := t.TempDir()
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	run("init")
+	if err := os.WriteFile(filepath.Join(repoDir, "a.txt"), []byte("// TODO: fix\nfoo\n// TODO: also fix\n"), 0o644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	run("add", "a.txt")
+	run("commit", "-m", "init")
+
+	// "TODO" matches both line 1 and line 3.
+	manifestYAML := fmt.Sprintf(
+		"version: 1\nkind: changes\ntitle: %q\nframe:\n  repo: %q\n  base: HEAD\n  head: HEAD\nfiles:\n  - path: a.txt\n    annotations:\n      - anchor: \"TODO\"\n        note: which one\n",
+		"Ambiguous Anchor", repoDir,
+	)
+
+	resp := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    manifestYAML,
+	})
+	if !resp.Ok || resp.PresentOpenResult == nil {
+		t.Fatalf("present open with an ambiguous (but resolvable) anchor should still succeed: %+v", resp)
+	}
+	if len(resp.PresentOpenResult.Warnings) != 1 {
+		t.Fatalf("warnings = %+v, want 1", resp.PresentOpenResult.Warnings)
+	}
+	if !strings.Contains(resp.PresentOpenResult.Warnings[0], "a.txt[0]") {
+		t.Errorf("warning = %q, want to name a.txt[0]", resp.PresentOpenResult.Warnings[0])
+	}
+}
+
+func TestHandleGetPresentationRound_CarriesResolvedAnnotations(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentAnnotatedTestRepo(t)
+
+	manifestYAML := fmt.Sprintf(
+		"version: 1\nkind: changes\ntitle: %q\nframe:\n  repo: %q\n  base: HEAD\n  head: HEAD\nfiles:\n  - path: a.txt\n    annotations:\n      - anchor: \"func Foo\"\n        note: entry point\n",
+		"Annotated Change", repoDir,
+	)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    manifestYAML,
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleGetPresentationRound(client, &protocol.GetPresentationRoundMessage{
+		Cmd:            protocol.CmdGetPresentationRound,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	var res protocol.GetPresentationRoundResultMessage
+	readTicketResult(t, client.send, &res)
+	if !res.Success || res.Round == nil {
+		t.Fatalf("get_presentation_round = %+v, want success with a round", res)
+	}
+
+	byPath := make(map[string]protocol.PresentFile, len(res.Round.Manifest.Files))
+	for _, f := range res.Round.Manifest.Files {
+		byPath[f.Path] = f
+	}
+	aTxt, ok := byPath["a.txt"]
+	if !ok {
+		t.Fatalf("a.txt missing from manifest files: %+v", byPath)
+	}
+	if len(aTxt.Annotations) != 1 {
+		t.Fatalf("a.txt annotations = %+v, want 1", aTxt.Annotations)
+	}
+	ann := aTxt.Annotations[0]
+	if ann.LineStart != 2 || ann.LineEnd != 2 {
+		t.Errorf("annotation line start/end = %d/%d, want 2/2", ann.LineStart, ann.LineEnd)
+	}
+	if len(ann.Comments) != 1 || ann.Comments[0] != "entry point" {
+		t.Errorf("annotation comments = %+v, want [entry point]", ann.Comments)
+	}
+}
+
+func TestHandleGetPresentationRound_AnnotationResolutionFailureLeavesRoundLoading(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentAnnotatedTestRepo(t)
+
+	manifestYAML := fmt.Sprintf(
+		"version: 1\nkind: changes\ntitle: %q\nframe:\n  repo: %q\n  base: HEAD\n  head: HEAD\nfiles:\n  - path: a.txt\n    annotations:\n      - anchor: \"func Foo\"\n        note: entry point\n",
+		"Annotated Change", repoDir,
+	)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    manifestYAML,
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	// Remove the repo so re-resolving annotations at round-fetch time fails;
+	// the round must still load with annotations simply absent.
+	if err := os.RemoveAll(repoDir); err != nil {
+		t.Fatalf("remove repo dir: %v", err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleGetPresentationRound(client, &protocol.GetPresentationRoundMessage{
+		Cmd:            protocol.CmdGetPresentationRound,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	var res protocol.GetPresentationRoundResultMessage
+	readTicketResult(t, client.send, &res)
+	if !res.Success || res.Round == nil {
+		t.Fatalf("get_presentation_round = %+v, want success with a round despite annotation resolution failure", res)
+	}
+	byPath := make(map[string]protocol.PresentFile, len(res.Round.Manifest.Files))
+	for _, f := range res.Round.Manifest.Files {
+		byPath[f.Path] = f
+	}
+	aTxt, ok := byPath["a.txt"]
+	if !ok {
+		t.Fatalf("a.txt missing from manifest files: %+v", byPath)
+	}
+	if aTxt.Annotations != nil {
+		t.Errorf("a.txt annotations = %+v, want absent after resolution failure", aTxt.Annotations)
+	}
+}
+
 func TestHandlePresentOpen_BadYAML(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 

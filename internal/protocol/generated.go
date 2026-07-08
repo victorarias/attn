@@ -2077,6 +2077,17 @@ type PluginsUpdatedMessage struct {
 	Plugins []PluginInfo `json:"plugins"`
 }
 
+type PresentAnnotation struct {
+	// Comments corresponds to the JSON schema field "comments".
+	Comments []string `json:"comments"`
+
+	// LineEnd corresponds to the JSON schema field "line_end".
+	LineEnd int `json:"line_end"`
+
+	// LineStart corresponds to the JSON schema field "line_start".
+	LineStart int `json:"line_start"`
+}
+
 type PresentCommentInput struct {
 	// Content corresponds to the JSON schema field "content".
 	Content string `json:"content"`
@@ -2119,6 +2130,9 @@ type PresentFeedbackResult struct {
 type PresentFile struct {
 	// Additions corresponds to the JSON schema field "additions".
 	Additions *int `json:"additions,omitempty,omitzero"`
+
+	// Annotations corresponds to the JSON schema field "annotations".
+	Annotations []PresentAnnotation `json:"annotations,omitempty,omitzero"`
 
 	// Deletions corresponds to the JSON schema field "deletions".
 	Deletions *int `json:"deletions,omitempty,omitzero"`
@@ -2179,6 +2193,9 @@ type PresentOpenResult struct {
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
+
+	// Warnings corresponds to the JSON schema field "warnings".
+	Warnings []string `json:"warnings,omitempty,omitzero"`
 }
 
 type PresentSubmitRoundMessage struct {
