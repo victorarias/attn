@@ -1147,6 +1147,11 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 		}
 
 		d.store.Touch(sessionID)
+		// A session adopted as live cannot be mid-close: any intentional-close mark
+		// left behind (daemon died between terminateSession's mark and the kill) is
+		// stale, and keeping it would misread this session's later genuine crash as
+		// a clean close.
+		d.store.ClearSessionIntentionalClose(sessionID)
 		if protocol.Deref(existing.Recoverable) {
 			d.store.SetRecoverable(sessionID, false)
 			report.Changed = true
@@ -1508,6 +1513,15 @@ func (d *Daemon) removePTYSession(sessionID string) error {
 func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	d.stopTranscriptWatcher(sessionID)
 	d.markForcedStopClassification(sessionID)
+	// Also record the intentional close durably, BEFORE the kill: the in-memory
+	// forced-stop mark above expires after 30s and dies with the daemon, but the
+	// ticket crash/reconcile seam may run long after both (startup reap after a
+	// daemon restart). Without the durable mark, a user close whose seam runs
+	// late is indistinguishable from a spontaneous mid-flight death and would be
+	// crash-stamped (ticket_reconcile.go).
+	if d.store != nil {
+		d.store.MarkSessionIntentionalClose(sessionID, time.Now())
+	}
 
 	if d.ptyBackend == nil {
 		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))

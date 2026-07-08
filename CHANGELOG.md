@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-08]
+
+### Fixed
+- **Closing a delegated session no longer marks its ticket as Crashed.** Closing an agent's pane (or tearing down its workspace) while the session still looked busy used to be treated like a process death: the bound ticket — often already sitting In Review with finished work — was stamped Crashed. An intentional close now leaves the ticket exactly where the agent last reported it, and the reconciliation verdict still posts, framed as a clean close. The close is also remembered durably, so it is honored even when the reconciliation runs late — after a daemon restart, for example. Genuine unexpected agent deaths are still detected and stamped Crashed exactly as before.
+
 ## [2026-07-05]
 
 ### Added

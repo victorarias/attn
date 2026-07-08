@@ -180,6 +180,7 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		{"sessions", "agent_driver_report_seq"},
 		{"chief_of_staff_dispatches", "structured_report_json"},
 		{"tickets", "reconciled_at"},
+		{"sessions", "closed_intentionally_at"},
 	}
 
 	for _, tc := range migratedColumns {
