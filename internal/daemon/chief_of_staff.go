@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 const profileRoleChiefOfStaff = "chief_of_staff"
@@ -53,11 +54,7 @@ func (d *Daemon) delegatedFromChiefSessionIDs() map[string]bool {
 	if d.store == nil {
 		return nil
 	}
-	chiefSessionID := d.chiefOfStaffSessionID()
-	if chiefSessionID == "" {
-		return nil
-	}
-	return d.store.DelegatedFromChiefSessionIDs(chiefSessionID)
+	return d.store.TicketAssigneesOwnedByRole(store.TicketRoleChiefOfStaff)
 }
 
 // decorateDelegatedFromChief marks a session that was delegated from the chief
@@ -210,6 +207,11 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 		roleChanged = previousSessionID == sessionID
 	}
 	if roleChanged {
+		newChiefSessionID := ""
+		if msg.ChiefOfStaff {
+			newChiefSessionID = sessionID
+		}
+		d.retargetChiefTicketDelivery(previousSessionID, newChiefSessionID)
 		go d.reloadSessionAgent(sessionID)
 		// A role transfer (promote B while A still held it) demotes A via the
 		// single-holder upsert. Reload A too so the displaced chief drops the guidance
@@ -220,6 +222,18 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 		}
 	}
 	d.sendChiefOfStaffResult(client, sessionID, msg.ChiefOfStaff, previousSessionID, nil)
+}
+
+// retargetChiefTicketDelivery moves only the live delivery target. Durable role
+// ownership and its cursors do not move, copy, or advance.
+func (d *Daemon) retargetChiefTicketDelivery(previousSessionID, newSessionID string) {
+	if previousSessionID != "" {
+		d.cancelTicketBackstop(previousSessionID)
+		d.refreshTicketUnread(previousSessionID)
+	}
+	if newSessionID != "" {
+		d.notifyTicketSession(newSessionID, time.Now())
+	}
 }
 
 func (d *Daemon) sendChiefOfStaffResult(

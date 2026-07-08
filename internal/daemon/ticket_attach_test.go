@@ -184,7 +184,7 @@ func TestTicketAttachNotifiesChiefAndBroadcasts(t *testing.T) {
 	// agent is about to self-author. That isolates the fan-out: the chief is nudged
 	// solely because of the attachment, and the self-authoring agent is not nudged.
 	for _, id := range []string{chiefID, agentID} {
-		if _, err := ticketnotify.Consume(d.store, d.ticketObserverForSession(id), time.Now()); err != nil {
+		if _, err := ticketnotify.ConsumeAll(d.store, d.ticketObserversForSession(id), time.Now()); err != nil {
 			t.Fatalf("consume inbox for %s: %v", id, err)
 		}
 	}

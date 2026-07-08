@@ -12,22 +12,39 @@ import (
 	"github.com/victorarias/attn/internal/ticketnotify"
 )
 
-// ticketObserverForSession builds the notification observer for a session. Identity
-// is uniform: every session — the chief included — observes as its own session id,
-// the same string it authors events with, so involvement (assignee or author) and
-// the self-author exclusion line up. The literal ticketnotify.ObserverChief is only
-// the slice-2 harness placeholder; real wiring keys off the live session. The
+// ticketObserversForSession builds the effective notification identities for a
+// session. Every session retains its ordinary session identity. The active chief
+// additionally observes through the durable chief role identity, whose cursor
+// survives role transfers while AuthorID keeps self-authored events excluded. The
 // delivery path comes from the session's agent driver capability
 // (agent.Capabilities.HasSelfMonitor, resolved via the registry): Claude
 // self-monitors and watches; codex and the rest are nudged. An empty/unknown agent
 // resolves to nil → Capabilities{} → false, the safe nudge default.
-func (d *Daemon) ticketObserverForSession(sessionID string) ticketnotify.Observer {
+func (d *Daemon) ticketObserversForSession(sessionID string) []ticketnotify.Observer {
 	agentName := ""
 	if s := d.store.Get(sessionID); s != nil {
 		agentName = s.Agent
 	}
 	selfMonitor := agentdriver.EffectiveCapabilities(agentdriver.Get(agentName)).HasSelfMonitor
-	return ticketnotify.Observer{ID: sessionID, HasSelfMonitor: selfMonitor}
+	personal := ticketnotify.Observer{ID: sessionID, AuthorID: sessionID, DeliveryID: sessionID, HasSelfMonitor: selfMonitor}
+	observers := []ticketnotify.Observer{personal}
+	if d.isChiefOfStaffSession(sessionID) {
+		observers = append(observers, ticketnotify.Observer{
+			ID:             store.TicketRoleIdentity(store.TicketRoleChiefOfStaff),
+			AuthorID:       sessionID,
+			DeliveryID:     sessionID,
+			HasSelfMonitor: selfMonitor,
+		})
+	}
+	return observers
+}
+
+func (d *Daemon) ticketDeliveryObserverForSession(sessionID string) ticketnotify.Observer {
+	return d.ticketObserversForSession(sessionID)[0]
+}
+
+func (d *Daemon) ticketUnreadForSession(sessionID string) (int, error) {
+	return ticketnotify.UnreadAny(d.store, d.ticketObserversForSession(sessionID))
 }
 
 // handleTicketInbox returns the calling session's unread ticket events, bundled by
@@ -41,8 +58,7 @@ func (d *Daemon) handleTicketInbox(conn net.Conn, msg *protocol.TicketInboxMessa
 		d.sendError(conn, "ticket inbox: source_session_id is required")
 		return
 	}
-	obs := d.ticketObserverForSession(sourceSessionID)
-	bundles, err := ticketnotify.Consume(d.store, obs, time.Now())
+	bundles, err := ticketnotify.ConsumeAll(d.store, d.ticketObserversForSession(sourceSessionID), time.Now())
 	if err != nil {
 		d.sendError(conn, "ticket inbox: "+err.Error())
 		return

@@ -360,6 +360,92 @@ func TestTicketBackstopDoorbellsIdleChiefAfterAgentReports(t *testing.T) {
 	}
 }
 
+// Chief ticket awareness belongs to the role, not the session that happened to
+// delegate. A consumes one report, the role transfers to B, and the next report
+// reaches only B. The role cursor means B receives exactly the post-transfer
+// unread event: nothing A consumed is replayed and nothing new is skipped.
+func TestChiefTicketContinuityAcrossRoleTransfer(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopTicketBackstops)
+	t.Cleanup(d.stopNudgeCountdowns)
+	chiefA, agentID, inputs := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+
+	now := string(protocol.TimestampNow())
+	chiefB := "chief-b"
+	d.store.Add(&protocol.Session{
+		ID: chiefB, Label: "replacement chief", Agent: protocol.SessionAgentCodex,
+		Directory: "/tmp/chief-b", WorkspaceID: "workspace-chief-b",
+		State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	d.store.UpdateState(chiefA, protocol.StateIdle)
+	d.store.UpdateState(agentID, protocol.StateIdle)
+
+	// A consumes the first agent report, advancing the durable role cursor.
+	callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateNeedsInput), "need a decision")
+	first := callTicketInbox(t, d, chiefA)
+	if len(first) != 1 || len(first[0].Events) != 1 ||
+		first[0].Events[0].ToStatus == nil || *first[0].Events[0].ToStatus != protocol.TicketStatusBlocked {
+		t.Fatalf("chief A first inbox = %+v, want only the blocked report", first)
+	}
+	nudgesA := nudgeCount(inputs(chiefA))
+
+	// Transfer the singleton profile role. No cursor copy occurs; only delivery is
+	// retargeted and A's stale role nudge state is cleared.
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefB); err != nil {
+		t.Fatalf("transfer chief role: %v", err)
+	}
+	d.retargetChiefTicketDelivery(chiefA, chiefB)
+
+	callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateReadyForReview), "ready now")
+	deadline := time.Now().Add(time.Second)
+	for currentNudgeTimer(d, chiefB) == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	fireNudgeNow(t, d, chiefB)
+	if !wasNudged(inputs(chiefB)) {
+		t.Fatal("replacement chief was not nudged about unread chief-owned ticket activity")
+	}
+	if got := nudgeCount(inputs(chiefA)); got != nudgesA {
+		t.Fatalf("retired chief received a role nudge after transfer: %d -> %d", nudgesA, got)
+	}
+
+	second := callTicketInbox(t, d, chiefB)
+	if len(second) != 1 || second[0].TicketID != ticketID || len(second[0].Events) != 1 {
+		t.Fatalf("chief B inbox = %+v, want exactly one post-cursor event for %s", second, ticketID)
+	}
+	event := second[0].Events[0]
+	if event.ToStatus == nil || *event.ToStatus != protocol.TicketStatusInReview || event.Author != agentID {
+		t.Fatalf("chief B event = %+v, want agent's in-review report", event)
+	}
+	if again := callTicketInbox(t, d, chiefB); len(again) != 0 {
+		t.Fatalf("chief B second inbox = %+v, want no duplicate activity", again)
+	}
+}
+
+// A chief can still participate personally through the ordinary explicit
+// subscription path. When personal and durable-role scopes overlap, delivery is
+// deduplicated while both cursors advance.
+func TestChiefRoleAndExplicitSubscriptionDeliverOnce(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(d.stopTicketBackstops)
+	chiefID, agentID, _ := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	if resp := callTicketSubscribe(t, d, chiefID, ticketID); !resp.Ok {
+		t.Fatalf("subscribe response = %+v", resp)
+	}
+
+	callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateReadyForReview), "ready")
+	bundles := callTicketInbox(t, d, chiefID)
+	if len(bundles) != 1 || len(bundles[0].Events) != 1 {
+		t.Fatalf("overlapping role/subscriber inbox = %+v, want one event", bundles)
+	}
+	if again := callTicketInbox(t, d, chiefID); len(again) != 0 {
+		t.Fatalf("overlapping role/subscriber second inbox = %+v, want empty", again)
+	}
+}
+
 // Composition with A: if a live `--watch` Monitor already drained the inbox (the
 // cursor advanced), the deferred re-check sees nothing unread and self-suppresses,
 // so an actively-watching self-monitor is never double-notified.

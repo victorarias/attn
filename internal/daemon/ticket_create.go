@@ -59,7 +59,7 @@ func (d *Daemon) handleTicketCreate(conn net.Conn, msg *protocol.TicketCreateMes
 			Title:       title,
 			Description: desc,
 			Status:      store.TicketStatusTodo,
-		}, ticketSlug(title), author, now)
+		}, ticketSlug(title), author, "", now)
 		if err != nil {
 			d.sendError(conn, "ticket new: "+err.Error())
 			return

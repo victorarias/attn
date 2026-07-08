@@ -25,7 +25,7 @@ type erroringStore struct {
 
 var errBoom = errors.New("boom")
 
-func (e erroringStore) UnreadTicketEvents(string) ([]store.TicketEvent, error) {
+func (e erroringStore) UnreadTicketEventsFor(string, string) ([]store.TicketEvent, error) {
 	if e.failUnread {
 		return nil, errBoom
 	}
