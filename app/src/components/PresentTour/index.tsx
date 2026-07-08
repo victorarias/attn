@@ -816,8 +816,12 @@ export function PresentTour({
   // item-scroll CodeView uses for the rail/j-k path above, then locate the
   // specific thread by its data-anchor-key (see renderAnnotation) and center
   // it. CodeView virtualizes, so a just-scrolled-into-view file's annotation
-  // slot may not be mounted yet on the very next frame — retry across a few
-  // rAFs before giving up silently, rather than risk polling forever.
+  // slot may not be mounted yet on the very next frame — retry on every
+  // animation frame until the anchor mounts or a time budget elapses, rather
+  // than risk polling forever. A fixed attempt-count cap under-scrolled the
+  // first hop into a far, unmounted file: a smooth cross-file `scrollTo`
+  // routinely outlasts a handful of frames, so the poll gave up before the
+  // anchor ever mounted. A wall-clock budget tolerates that variance instead.
   useEffect(() => {
     if (!scrollToAnnotation) return;
     const hasRequest = (annotationScrollNonce ?? 0) > 0;
@@ -827,8 +831,8 @@ export function PresentTour({
     userTookOverRef.current = true;
     const { path, anchorKey } = scrollToAnnotation;
     handle.scrollTo({ type: 'item', id: path, align: 'start', behavior: 'smooth' });
-    const MAX_ATTEMPTS = 10;
-    let attempts = 0;
+    const LOCATE_BUDGET_MS = 1500;
+    const deadline = Date.now() + LOCATE_BUDGET_MS;
     let raf = 0;
     const tryLocate = () => {
       const el = containerRef.current?.querySelector<HTMLElement>(`[data-anchor-key="${CSS.escape(anchorKey)}"]`);
@@ -836,8 +840,7 @@ export function PresentTour({
         el.scrollIntoView({ block: 'center' });
         return;
       }
-      attempts += 1;
-      if (attempts >= MAX_ATTEMPTS) return;
+      if (Date.now() >= deadline) return;
       raf = requestAnimationFrame(tryLocate);
     };
     raf = requestAnimationFrame(tryLocate);
