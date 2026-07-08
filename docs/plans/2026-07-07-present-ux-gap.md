@@ -187,7 +187,7 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
     - [x] 5a. manifest schema + resolution + protocol
     - [x] 5b. reader: inline threads, reply-as-comment, N/P, rail counts
 - [ ] 6. **Diagrams**: mermaid in the shared markdown path.
-- [ ] 7. **Authoring skill**: interim level-0/1 version (voice, order, notes,
+- [x] 7. **Authoring skill**: interim level-0/1 version (voice, order, notes,
       skip) can land any time; full port (annotations, `thread:`, mermaid,
       `attn present validate`) after slices 5–6; ships via daemon embed.
 - [ ] 8. **Submit**: approve / submit feedback / close (protocol + CLI).
