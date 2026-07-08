@@ -299,12 +299,18 @@ func (d *Daemon) handlePresentFeedback(conn net.Conn, msg *protocol.PresentFeedb
 		markdown += "\nPresentation closed without review.\n"
 	}
 
+	var verdictPtr *string
+	if verdict != "" {
+		verdictPtr = &verdict
+	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
 		Ok: true,
 		PresentFeedbackResult: &protocol.PresentFeedbackResult{
-			Markdown:  markdown,
-			Seq:       round.Seq,
-			Submitted: round.SubmittedAt != nil,
+			Markdown:           markdown,
+			Seq:                round.Seq,
+			Submitted:          round.SubmittedAt != nil,
+			Verdict:            verdictPtr,
+			PresentationStatus: pres.Status,
 		},
 	})
 }

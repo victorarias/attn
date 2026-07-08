@@ -603,6 +603,133 @@ func TestHandlePresentClose_MissingIDRejected(t *testing.T) {
 	}
 }
 
+func callPresentFeedback(t *testing.T, d *Daemon, msg *protocol.PresentFeedbackMessage) protocol.Response {
+	t.Helper()
+	conn := &syncConn{}
+	d.handlePresentFeedback(conn, msg)
+	var resp protocol.Response
+	if err := json.Unmarshal(conn.buf.Bytes(), &resp); err != nil {
+		t.Fatalf("decode present-feedback response: %v", err)
+	}
+	return resp
+}
+
+// TestHandlePresentFeedback_CarriesVerdictAndPresentationStatus covers the
+// fields `attn present --wait` polls on: a submitted round's feedback result
+// must carry the verdict and the presentation's status, and a presentation
+// closed without review must report presentation_status "closed" with
+// submitted still false — the signal `waitForPresentFeedback` uses to stop
+// polling for a review that will never come.
+func TestHandlePresentFeedback_CarriesVerdictAndPresentationStatus(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentTestRepo(t)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    presentManifestYAML("My Change", repoDir),
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	before := callPresentFeedback(t, d, &protocol.PresentFeedbackMessage{
+		Cmd:            protocol.CmdPresentFeedback,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	if !before.Ok || before.PresentFeedbackResult == nil {
+		t.Fatalf("present feedback (pre-submit) = %+v, want ok", before)
+	}
+	if before.PresentFeedbackResult.Submitted {
+		t.Fatalf("feedback reports submitted before any submission: %+v", before.PresentFeedbackResult)
+	}
+	if before.PresentFeedbackResult.PresentationStatus != "open" {
+		t.Fatalf("presentation_status = %q, want %q", before.PresentFeedbackResult.PresentationStatus, "open")
+	}
+	if before.PresentFeedbackResult.Verdict != nil {
+		t.Fatalf("verdict = %v, want nil before submission", before.PresentFeedbackResult.Verdict)
+	}
+
+	submitClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handlePresentSubmitRound(submitClient, &protocol.PresentSubmitRoundMessage{
+		Cmd:     protocol.CmdPresentSubmitRound,
+		RoundID: opened.PresentOpenResult.RoundID,
+		Verdict: "approved",
+		Comments: []protocol.PresentCommentInput{
+			{Filepath: "a.txt", LineStart: 1, LineEnd: 1, Side: "new", Content: "nit"},
+		},
+	})
+	var submitRes protocol.PresentSubmitRoundResultMessage
+	readTicketResult(t, submitClient.send, &submitRes)
+	if !submitRes.Success {
+		t.Fatalf("submit round = %+v, want success", submitRes)
+	}
+
+	after := callPresentFeedback(t, d, &protocol.PresentFeedbackMessage{
+		Cmd:            protocol.CmdPresentFeedback,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	if !after.Ok || after.PresentFeedbackResult == nil {
+		t.Fatalf("present feedback (post-submit) = %+v, want ok", after)
+	}
+	if !after.PresentFeedbackResult.Submitted {
+		t.Fatalf("feedback does not report submitted after submission: %+v", after.PresentFeedbackResult)
+	}
+	if after.PresentFeedbackResult.Verdict == nil || *after.PresentFeedbackResult.Verdict != "approved" {
+		t.Fatalf("verdict = %v, want \"approved\"", after.PresentFeedbackResult.Verdict)
+	}
+	if after.PresentFeedbackResult.PresentationStatus != "approved" {
+		t.Fatalf("presentation_status = %q, want %q", after.PresentFeedbackResult.PresentationStatus, "approved")
+	}
+}
+
+// TestHandlePresentFeedback_ClosedWithoutSubmission covers the Close path: the
+// reviewer can dismiss a presentation without ever reviewing the round, and
+// the feedback result must surface presentation_status "closed" with
+// submitted false so a polling `--wait` caller can stop rather than block
+// forever on a handback that will never arrive.
+func TestHandlePresentFeedback_ClosedWithoutSubmission(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	repoDir, _ := presentTestRepo(t)
+
+	opened := callPresentOpen(t, d, &protocol.PresentOpenMessage{
+		Cmd:             protocol.CmdPresentOpen,
+		SourceSessionID: "session-1",
+		ManifestYaml:    presentManifestYAML("My Change", repoDir),
+	})
+	if !opened.Ok || opened.PresentOpenResult == nil {
+		t.Fatalf("setup present open response = %+v, want ok", opened)
+	}
+
+	closeClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handlePresentClose(closeClient, &protocol.PresentCloseMessage{
+		Cmd:            protocol.CmdPresentClose,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	var closeRes protocol.PresentCloseResultMessage
+	readTicketResult(t, closeClient.send, &closeRes)
+	if !closeRes.Success {
+		t.Fatalf("present close = %+v, want success", closeRes)
+	}
+
+	feedback := callPresentFeedback(t, d, &protocol.PresentFeedbackMessage{
+		Cmd:            protocol.CmdPresentFeedback,
+		PresentationID: opened.PresentOpenResult.PresentationID,
+	})
+	if !feedback.Ok || feedback.PresentFeedbackResult == nil {
+		t.Fatalf("present feedback (post-close) = %+v, want ok", feedback)
+	}
+	if feedback.PresentFeedbackResult.Submitted {
+		t.Fatalf("feedback reports submitted after a close with no round submission: %+v", feedback.PresentFeedbackResult)
+	}
+	if feedback.PresentFeedbackResult.PresentationStatus != "closed" {
+		t.Fatalf("presentation_status = %q, want %q", feedback.PresentFeedbackResult.PresentationStatus, "closed")
+	}
+	if feedback.PresentFeedbackResult.Verdict != nil {
+		t.Fatalf("verdict = %v, want nil on a closed-without-review presentation", feedback.PresentFeedbackResult.Verdict)
+	}
+}
+
 func TestHandleGetPresentationRound_CarriesRepoHeadSHA(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	repoDir, headSHA := presentTestRepo(t)

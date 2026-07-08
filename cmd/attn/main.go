@@ -1678,6 +1678,7 @@ type presentOpenArgs struct {
 	PresentationID string
 	Session        string
 	JSON           bool
+	Wait           bool
 }
 
 func parsePresentOpenArgs(args []string) (presentOpenArgs, error) {
@@ -1688,6 +1689,7 @@ func parsePresentOpenArgs(args []string) (presentOpenArgs, error) {
 	presentationID := fs.String("presentation", "", "existing presentation id to add a new round to")
 	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
 	jsonOutput := fs.Bool("json", false, "print the result as JSON")
+	wait := fs.Bool("wait", false, "block until the reviewer submits this round or closes the presentation, then print its feedback")
 	if err := fs.Parse(args); err != nil {
 		return result, err
 	}
@@ -1698,6 +1700,7 @@ func parsePresentOpenArgs(args []string) (presentOpenArgs, error) {
 	result.PresentationID = *presentationID
 	result.Session = *session
 	result.JSON = *jsonOutput
+	result.Wait = *wait
 	return result, nil
 }
 
@@ -1734,6 +1737,10 @@ func runPresentOpen(args []string) {
 	for _, w := range result.Warnings {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
 	}
+	if parsed.Wait {
+		runPresentOpenWait(result, parsed.JSON)
+		return
+	}
 	if parsed.JSON {
 		printJSON(result)
 		return
@@ -1741,6 +1748,84 @@ func runPresentOpen(args []string) {
 	fmt.Printf("presentation %s round %d pinned %s..%s\n",
 		shortenID(result.PresentationID), result.Seq, shortenID(result.BaseSHA), shortenID(result.HeadSHA))
 	fmt.Printf("feedback will arrive via: attn present feedback %s\n", result.PresentationID)
+}
+
+// presentWaitInterval is how often `attn present --wait` polls for the round's
+// feedback, mirroring ticketWatchInterval.
+const presentWaitInterval = 3 * time.Second
+
+// runPresentOpenWait is the blocking shell behind `attn present --wait`: it prints
+// a status line to stderr so the caller can see it's blocking, then polls the
+// daemon for the round we just opened until the reviewer submits it or closes the
+// presentation without reviewing, printing the outcome to stdout. The poll loop
+// lives in waitForPresentFeedback so it can be tested without a daemon, signals,
+// or a real ticker.
+func runPresentOpenWait(result *protocol.PresentOpenResult, jsonOutput bool) {
+	fmt.Fprintf(os.Stderr, "waiting for review of round %d of %q...\n", result.Seq, result.Title)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	c := client.New("")
+	ticker := time.NewTicker(presentWaitInterval)
+	defer ticker.Stop()
+	err := waitForPresentFeedback(ctx, ticker.C, func() (*protocol.PresentFeedbackResult, error) {
+		return c.PresentFeedback(result.PresentationID, result.Seq)
+	}, os.Stdout, jsonOutput)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "present --wait: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// waitForPresentFeedback is the poll loop behind `attn present --wait`. It polls
+// fetch on tick, tolerating transient daemon errors the way watchTicketInbox
+// does (report and keep polling rather than exit), and returns once the round has
+// been submitted or the presentation has been closed without review, having
+// rendered the outcome to out exactly once. Returns ctx.Err() if ctx is cancelled
+// first (SIGINT/SIGTERM in production).
+func waitForPresentFeedback(
+	ctx context.Context,
+	tick <-chan time.Time,
+	fetch func() (*protocol.PresentFeedbackResult, error),
+	out io.Writer,
+	jsonOutput bool,
+) error {
+	var lastErr string
+	for {
+		result, err := fetch()
+		if err != nil {
+			if msg := err.Error(); msg != lastErr {
+				fmt.Fprintf(os.Stderr, "present --wait: %s\n", msg)
+				lastErr = msg
+			}
+		} else {
+			lastErr = ""
+			if result != nil && result.Submitted {
+				if jsonOutput {
+					return fprintJSON(out, result)
+				}
+				fmt.Fprint(out, result.Markdown)
+				return nil
+			}
+			if result != nil && result.PresentationStatus == "closed" {
+				// The reviewer closed the presentation instead of reviewing this
+				// round — no handback is ever coming for a bare "not submitted
+				// yet" poll to catch, so stop here rather than polling forever.
+				if jsonOutput {
+					return fprintJSON(out, result)
+				}
+				fmt.Fprintln(out, "presentation closed by the reviewer without feedback — drafts were discarded; open a new round to re-present")
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-tick:
+		}
+	}
 }
 
 // runPresentValidate parses and validates a manifest locally, with no daemon
@@ -1885,6 +1970,11 @@ flags for the default (open) form:
   --presentation <id>               add a new round to an existing presentation
   --session <id>                    session id (defaults to ATTN_SESSION_ID)
   --json                            print the result as JSON
+  --wait                            block until the round is reviewed or the
+                                     presentation is closed, then print the
+                                     outcome to stdout instead of the
+                                     "pinned"/"feedback will arrive via" hint
+                                     lines
 
 flags for validate:
   --manifest <path>                 manifest path (default .present.yml)
