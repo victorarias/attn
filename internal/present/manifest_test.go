@@ -537,6 +537,69 @@ files:
 			wantErr: "field bogus not found",
 		},
 		{
+			name: "non-overlapping line and range annotations accepted",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - line: 2
+        note: a
+      - start: 4
+        end: 6
+        note: b
+`,
+		},
+		{
+			name: "line inside another annotation's range rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - line: 2
+        note: a
+      - start: 1
+        end: 3
+        note: b
+`,
+			wantErr: "overlaps",
+		},
+		{
+			name: "overlapping ranges rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - start: 1
+        end: 5
+        note: a
+      - start: 4
+        end: 8
+        note: b
+`,
+			wantErr: "overlaps",
+		},
+		{
 			name: "path in both files and skip rejected",
 			yaml: `
 version: 1

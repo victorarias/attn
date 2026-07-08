@@ -46,7 +46,11 @@ func ResolveAnnotations(m *Manifest, repoDir, headSHA string) (map[string][]Reso
 			continue
 		}
 
-		var fileResolved []ResolvedAnnotation
+		type candidate struct {
+			index int
+			r     ResolvedAnnotation
+		}
+		var candidates []candidate
 		for i, a := range f.Annotations {
 			r, issue, ok := resolveOne(a, lines)
 			if issue != nil {
@@ -57,7 +61,42 @@ func ResolveAnnotations(m *Manifest, repoDir, headSHA string) (map[string][]Reso
 			if !ok {
 				continue
 			}
-			fileResolved = append(fileResolved, r)
+			candidates = append(candidates, candidate{index: i, r: r})
+		}
+
+		// Resolved ranges must not overlap: the manifest contract requires
+		// each annotation to own a disjoint span of the file. A later
+		// annotation (by manifest order) that overlaps an earlier, already
+		// accepted one is an error and is dropped rather than silently
+		// carried over the protocol.
+		kept := make([]bool, len(candidates))
+		for i := range candidates {
+			kept[i] = true
+		}
+		for i := range candidates {
+			if !kept[i] {
+				continue
+			}
+			for j := i + 1; j < len(candidates); j++ {
+				if !kept[j] {
+					continue
+				}
+				if candidates[i].r.LineStart <= candidates[j].r.LineEnd && candidates[j].r.LineStart <= candidates[i].r.LineEnd {
+					issues = append(issues, AnchorIssue{
+						Path:    f.Path,
+						Index:   candidates[j].index,
+						Message: fmt.Sprintf("overlaps annotations[%d] (lines %d-%d) at lines %d-%d", candidates[i].index, candidates[i].r.LineStart, candidates[i].r.LineEnd, candidates[j].r.LineStart, candidates[j].r.LineEnd),
+					})
+					kept[j] = false
+				}
+			}
+		}
+
+		var fileResolved []ResolvedAnnotation
+		for i, c := range candidates {
+			if kept[i] {
+				fileResolved = append(fileResolved, c.r)
+			}
 		}
 		if len(fileResolved) > 0 {
 			resolved[f.Path] = fileResolved

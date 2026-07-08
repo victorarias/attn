@@ -115,6 +115,9 @@ func validate(m *Manifest) error {
 				return err
 			}
 		}
+		if err := validateNoStaticOverlap(f.Annotations, i); err != nil {
+			return err
+		}
 	}
 
 	seenSkip := make(map[string]bool, len(m.Skip))
@@ -188,6 +191,36 @@ func validateAnnotation(a AnnotationEntry, field string) error {
 		}
 	}
 
+	return nil
+}
+
+// validateNoStaticOverlap rejects line/start+end annotations within one file
+// entry whose ranges are known to overlap without resolving anything against
+// file content (anchor-derived overlaps can only be caught after resolution,
+// in ResolveAnnotations, once an anchor's matched line is known).
+func validateNoStaticOverlap(annotations []AnnotationEntry, fileIndex int) error {
+	type staticRange struct {
+		index      int
+		start, end int
+	}
+	var ranges []staticRange
+	for j, a := range annotations {
+		switch {
+		case a.Line != 0:
+			ranges = append(ranges, staticRange{index: j, start: a.Line, end: a.Line})
+		case a.Start != 0 || a.End != 0:
+			ranges = append(ranges, staticRange{index: j, start: a.Start, end: a.End})
+		}
+	}
+	for i := 0; i < len(ranges); i++ {
+		for j := i + 1; j < len(ranges); j++ {
+			a, b := ranges[i], ranges[j]
+			if a.start <= b.end && b.start <= a.end {
+				return fmt.Errorf("present: files[%d].annotations[%d] overlaps files[%d].annotations[%d] (lines %d-%d and %d-%d)",
+					fileIndex, b.index, fileIndex, a.index, b.start, b.end, a.start, a.end)
+			}
+		}
+	}
 	return nil
 }
 

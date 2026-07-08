@@ -175,6 +175,30 @@ func TestResolveAnnotations_MissingFileDropsAllItsAnnotations(t *testing.T) {
 	}
 }
 
+func TestResolveAnnotations_AnchorDerivedOverlapErrorsAndDrops(t *testing.T) {
+	dir, headSHA := resolveTestRepo(t, "a.go", []string{"package a", "func Foo() {", "  return", "}"})
+
+	m := &Manifest{Files: []FileEntry{
+		{Path: "a.go", Annotations: []AnnotationEntry{
+			{Start: 1, End: 3, Note: "range note"},
+			{Anchor: "func Foo", Note: "anchor note"}, // resolves to line 2, inside the range above
+		}},
+	}}
+
+	resolved, issues := ResolveAnnotations(m, dir, headSHA)
+	if len(issues) != 1 || issues[0].Warning {
+		t.Fatalf("issues = %+v, want 1 error issue for overlap", issues)
+	}
+	if issues[0].Path != "a.go" || issues[0].Index != 1 {
+		t.Errorf("issue path/index = %q/%d, want a.go/1 (the later, overlapping annotation)", issues[0].Path, issues[0].Index)
+	}
+
+	got := resolved["a.go"]
+	if len(got) != 1 || got[0].LineStart != 1 || got[0].LineEnd != 3 {
+		t.Fatalf("resolved[a.go] = %+v, want only the first (non-overlapping) annotation kept", got)
+	}
+}
+
 func TestResolveAnnotations_NoAnnotationsSkipsFileEntirely(t *testing.T) {
 	dir, headSHA := resolveTestRepo(t, "a.go", []string{"one"})
 
