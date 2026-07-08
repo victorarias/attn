@@ -1731,6 +1731,9 @@ func runPresentOpen(args []string) {
 		fmt.Fprintf(os.Stderr, "present: %v\n", err)
 		os.Exit(1)
 	}
+	for _, w := range result.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
 	if parsed.JSON {
 		printJSON(result)
 		return
@@ -1742,6 +1745,9 @@ func runPresentOpen(args []string) {
 
 // runPresentValidate parses and validates a manifest locally, with no daemon
 // call — a fast loop for an agent iterating on a manifest before opening it.
+// When the manifest has annotations, it also resolves the frame's refs to
+// SHAs and checks each anchor locally, the same way the daemon would at open
+// time — a manifest with annotations that can't be checked is not validated.
 func runPresentValidate(args []string) {
 	fs := flag.NewFlagSet("present validate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -1755,7 +1761,47 @@ func runPresentValidate(args []string) {
 		fmt.Fprintf(os.Stderr, "present validate: %v\n", err)
 		os.Exit(1)
 	}
+
+	if !hasAnyAnnotations(m) {
+		fmt.Printf("manifest ok: %s\n", m.Title)
+		return
+	}
+
+	_, headSHA, err := present.Pin(m)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "present validate: could not resolve refs to check annotations: %v\n", err)
+		os.Exit(1)
+	}
+	_, issues := present.ResolveAnnotations(m, m.Frame.Repo, headSHA)
+	hasError := false
+	for _, issue := range issues {
+		level := "error"
+		if issue.Warning {
+			level = "warning"
+		} else {
+			hasError = true
+		}
+		if issue.Index < 0 {
+			fmt.Fprintf(os.Stderr, "%s: %s: %s\n", level, issue.Path, issue.Message)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s: %s[%d]: %s\n", level, issue.Path, issue.Index, issue.Message)
+		}
+	}
+	if hasError {
+		os.Exit(1)
+	}
 	fmt.Printf("manifest ok: %s\n", m.Title)
+}
+
+// hasAnyAnnotations reports whether any file entry in the manifest carries
+// annotations.
+func hasAnyAnnotations(m *present.Manifest) bool {
+	for _, f := range m.Files {
+		if len(f.Annotations) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 type presentFeedbackArgs struct {

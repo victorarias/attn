@@ -299,6 +299,244 @@ skip:
 			wantErr: "skip[1] is a duplicate",
 		},
 		{
+			name: "valid anchor annotation with note",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - anchor: "func Foo"
+        note: why this shape
+`,
+		},
+		{
+			name: "valid line annotation with thread",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - line: 5
+        thread:
+          - first comment
+          - reply
+`,
+		},
+		{
+			name: "valid start/end range annotation",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - start: 1
+        end: 3
+        note: block note
+`,
+		},
+		{
+			name: "annotation with no anchor form rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - note: orphaned
+`,
+			wantErr: "must set one of anchor, line, or start+end",
+		},
+		{
+			name: "annotation with anchor and line rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - anchor: "func Foo"
+        line: 3
+        note: x
+`,
+			wantErr: "must set exactly one of anchor, line, or start+end",
+		},
+		{
+			name: "annotation anchor too short rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - anchor: "fn"
+        note: x
+`,
+			wantErr: "anchor must be at least 3 characters",
+		},
+		{
+			name: "annotation line < 1 rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - line: 0
+        note: x
+`,
+			wantErr: "must set one of anchor, line, or start+end",
+		},
+		{
+			name: "annotation start without end rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - start: 1
+        note: x
+`,
+			wantErr: "start and",
+		},
+		{
+			name: "annotation end < start rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - start: 5
+        end: 1
+        note: x
+`,
+			wantErr: "end must be >= start",
+		},
+		{
+			name: "annotation with note and thread rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - line: 1
+        note: x
+        thread:
+          - y
+`,
+			wantErr: "must set exactly one of note or thread",
+		},
+		{
+			name: "annotation with no note or thread rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - line: 1
+`,
+			wantErr: "must set one of note or thread",
+		},
+		{
+			name: "annotation with empty thread entry rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - line: 1
+        thread:
+          - "   "
+`,
+			wantErr: "thread[0] must not be empty",
+		},
+		{
+			name: "unknown annotation key rejected",
+			yaml: `
+version: 1
+kind: changes
+title: X
+frame:
+  repo: /abs/worktree
+  base: origin/main
+  head: HEAD
+files:
+  - path: a.go
+    annotations:
+      - line: 1
+        note: x
+        bogus: true
+`,
+			wantErr: "field bogus not found",
+		},
+		{
 			name: "path in both files and skip rejected",
 			yaml: `
 version: 1
