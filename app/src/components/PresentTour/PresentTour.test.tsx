@@ -359,6 +359,30 @@ describe('PresentTour annotations', () => {
   });
 });
 
+describe('PresentTour end-of-tour footer', () => {
+  it('counts reviewed over progress files only (skipped excluded), not every rendered card', async () => {
+    const tourFile = tinyFile('src/foo.ts');
+    const otherFile: PresentTourFile = { ...tinyFile('src/extra.ts'), group: 'other' };
+    const skipFile: PresentTourFile = { ...tinyFile('src/generated.ts'), group: 'skip' };
+    render(
+      <PresentTour
+        {...baseProps({
+          files: [tourFile, otherFile, skipFile],
+          reviewedPaths: new Set(['src/foo.ts']),
+        })}
+      />
+    );
+    await waitForSettled();
+
+    // 3 cards render, but progress covers tour + other only (2), of which
+    // one is marked reviewed — the footer must mirror the rail, not count
+    // skipped cards or claim everything reviewed.
+    await waitFor(() => {
+      expect(screen.getByTestId('present-tour-footer').textContent).toBe('End of tour — 1 of 2 files reviewed.');
+    });
+  });
+});
+
 describe('PresentTour diagram layout invalidation', () => {
   // CodeView caches item layout keyed by `version` (see the module doc in
   // PresentTour/index.tsx): a mermaid diagram settling asynchronously grows

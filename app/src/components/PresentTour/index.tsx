@@ -632,6 +632,17 @@ export function PresentTour({
   const noteByPath = useMemo(() => new Map(files.map((f) => [f.path, f.note])), [files]);
   const groupByPath = useMemo(() => new Map(files.map((f) => [f.path, f.group ?? 'tour'])), [files]);
 
+  // End-of-tour footer counts, mirroring the rail's progress semantics:
+  // progress covers tour + other only (skipped files were never meant to be
+  // walked), and only files actually marked reviewed count as reviewed.
+  const { reviewedCount, progressCount } = useMemo(() => {
+    const progressPaths = files.filter((f) => (f.group ?? 'tour') !== 'skip').map((f) => f.path);
+    return {
+      progressCount: progressPaths.length,
+      reviewedCount: progressPaths.filter((path) => reviewedPaths.has(path)).length,
+    };
+  }, [files, reviewedPaths]);
+
   // The library's items don't carry an arbitrary className slot, so the
   // skip-card de-emphasis (see .present-tour-card-skip in PresentTour.css) is
   // applied imperatively to each rendered card's root element — the same
@@ -927,7 +938,7 @@ export function PresentTour({
 
       {allSettled && items.length > 0 && (
         <div className="present-tour-footer" data-testid="present-tour-footer">
-          End of tour — {items.length} file{items.length === 1 ? '' : 's'} reviewed.
+          End of tour — {reviewedCount} of {progressCount} file{progressCount === 1 ? '' : 's'} reviewed.
         </div>
       )}
     </div>
