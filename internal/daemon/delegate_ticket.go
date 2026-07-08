@@ -33,10 +33,10 @@ func ticketSlug(label string) string {
 // createDelegatedTicket creates and binds the ticket for a chief-delegated session.
 // The brief is the description (the delegation prompt); the session id is the
 // assignee (its observer identity, so assignee == session is the binding); the
-// chief is the author (so the created event reads as "assigned to you" for the
-// agent and is self-authored for the chief). The ticket starts in Working since the
-// agent begins immediately. The slug is derived from the label, with a numeric
-// suffix on collision. Returns the created ticket id.
+// concrete chief session is the event author for audit, while durable chief-role
+// ownership supplies participation and the unread cursor. The ticket starts in
+// Working since the agent begins immediately. The slug is derived from the label,
+// with a numeric suffix on collision. Returns the created ticket id.
 func (d *Daemon) createDelegatedTicket(chiefSessionID string, session *protocol.Session, brief, label, agent string) (string, error) {
 	created, err := d.createTicketWithUniqueSlug(store.Ticket{
 		Title:       label,
@@ -45,7 +45,7 @@ func (d *Daemon) createDelegatedTicket(chiefSessionID string, session *protocol.
 		Assignee:    session.ID,
 		Cwd:         session.Directory,
 		LastAgentID: agent,
-	}, ticketSlug(label), chiefSessionID, time.Now())
+	}, ticketSlug(label), chiefSessionID, store.TicketRoleChiefOfStaff, time.Now())
 	if err != nil {
 		return "", err
 	}
@@ -58,13 +58,19 @@ func (d *Daemon) createDelegatedTicket(chiefSessionID string, session *protocol.
 // CreateTicket error verbatim, or a "could not allocate" exhaustion error. Both
 // createDelegatedTicket (bound, working) and the standalone ticket_create handler
 // (unbound, todo) share this so the auto-suffix behavior is identical.
-func (d *Daemon) createTicketWithUniqueSlug(template store.Ticket, base, author string, now time.Time) (*store.Ticket, error) {
+func (d *Daemon) createTicketWithUniqueSlug(template store.Ticket, base, author, ownerRole string, now time.Time) (*store.Ticket, error) {
 	for attempt := 0; attempt < 50; attempt++ {
 		template.ID = base
 		if attempt > 0 {
 			template.ID = fmt.Sprintf("%s-%d", base, attempt+1)
 		}
-		created, err := d.store.CreateTicket(template, author, now)
+		var created *store.Ticket
+		var err error
+		if ownerRole == "" {
+			created, err = d.store.CreateTicket(template, author, now)
+		} else {
+			created, err = d.store.CreateRoleOwnedTicket(template, author, ownerRole, now)
+		}
 		if err == nil {
 			return created, nil
 		}

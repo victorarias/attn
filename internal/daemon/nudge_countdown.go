@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/ticketnotify"
 )
 
 // defaultNudgeCountdownWindow is how long an armed ticket nudge waits — visible to
@@ -220,8 +219,7 @@ func (d *Daemon) runNudgeDelivery(sessionID string) string {
 		// Became the active session during the window; switching away re-arms it.
 		return "active"
 	}
-	obs := d.ticketObserverForSession(sessionID)
-	unread, err := ticketnotify.Unread(d.store, obs)
+	unread, err := d.ticketUnreadForSession(sessionID)
 	if err != nil {
 		d.logf("nudge countdown unread check %s: %v", sessionID, err)
 		return "error"
@@ -281,8 +279,7 @@ func (d *Daemon) refreshTicketUnread(sessionID string) {
 	if d.store == nil {
 		return
 	}
-	obs := d.ticketObserverForSession(sessionID)
-	unread, err := ticketnotify.Unread(d.store, obs)
+	unread, err := d.ticketUnreadForSession(sessionID)
 	if err != nil {
 		d.logf("ticket unread refresh %s: %v", sessionID, err)
 		return
@@ -317,8 +314,7 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	if session == nil || isExplicitNudgeBlocked(string(session.State)) {
 		return
 	}
-	obs := d.ticketObserverForSession(sessionID)
-	unread, err := ticketnotify.Unread(d.store, obs)
+	unread, err := d.ticketUnreadForSession(sessionID)
 	if err != nil || unread == 0 {
 		// Nothing to deliver; clear a stale indicator rather than doorbell into nothing.
 		d.markTicketUnread(sessionID, false)

@@ -616,6 +616,33 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 	`},
 	{64, "add closed_intentionally_at to sessions", "ALTER TABLE sessions ADD COLUMN closed_intentionally_at TEXT NOT NULL DEFAULT ''"},
 	{65, "add verdict to presentation_rounds", ""},
+	// Chief ticket awareness belongs to the durable profile role, not to whichever
+	// session happened to fill it when the ticket was delegated. Existing product
+	// data is safe to identify by its born-assigned shape: delegation is the only
+	// create path that persists an assignee before the created event lands. Do not
+	// seed a cursor here — a backfill must preserve every unread event.
+	{66, "add durable ticket role ownership", `
+		CREATE TABLE IF NOT EXISTS ticket_role_owners (
+			role TEXT NOT NULL,
+			ticket_id TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (role, ticket_id),
+			FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_ticket_role_owners_ticket
+			ON ticket_role_owners(ticket_id, role);
+		INSERT OR IGNORE INTO ticket_role_owners (role, ticket_id, created_at)
+		SELECT 'chief_of_staff', t.id, t.created_at
+		FROM tickets t
+		JOIN ticket_events e ON e.ticket_id = t.id AND e.kind = 'created'
+		WHERE t.assignee != ''
+			AND t.archived_at = ''
+			AND t.status NOT IN ('done', 'failed', 'crashed')
+			AND NOT EXISTS (
+				SELECT 1 FROM ticket_events assigned
+				WHERE assigned.ticket_id = t.id AND assigned.kind = 'assigned'
+			);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

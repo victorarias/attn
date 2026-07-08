@@ -430,24 +430,24 @@ func TestTicketTTLSweep(t *testing.T) {
 	}
 }
 
-func TestDelegatedFromChiefSessionIDs(t *testing.T) {
+func TestTicketAssigneesOwnedByRole(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
 
-	// No chief / empty arg -> empty set, never the full table.
-	if ids := s.DelegatedFromChiefSessionIDs(""); len(ids) != 0 {
-		t.Fatalf("empty chief = %v, want none", ids)
+	// Empty role -> empty set, never the full table.
+	if ids := s.TicketAssigneesOwnedByRole(""); len(ids) != 0 {
+		t.Fatalf("empty role = %v, want none", ids)
 	}
 
-	// A ticket the chief authored and assigned to a session is the delegated signal.
-	if _, err := s.CreateTicket(Ticket{
+	// Durable role ownership, not the concrete author, is the delegated signal.
+	if _, err := s.CreateRoleOwnedTicket(Ticket{
 		ID:       "delegated",
 		Title:    "do the thing",
 		Assignee: "sess-delegated",
-	}, "chief-1", ticketBase); err != nil {
+	}, "chief-1", TicketRoleChiefOfStaff, ticketBase); err != nil {
 		t.Fatalf("CreateTicket delegated: %v", err)
 	}
-	// A ticket authored by someone else must not leak into the chief's set.
+	// A session-authored ticket without role ownership must not leak into the set.
 	if _, err := s.CreateTicket(Ticket{
 		ID:       "self-authored",
 		Title:    "user work",
@@ -456,7 +456,7 @@ func TestDelegatedFromChiefSessionIDs(t *testing.T) {
 		t.Fatalf("CreateTicket self: %v", err)
 	}
 
-	ids := s.DelegatedFromChiefSessionIDs("chief-1")
+	ids := s.TicketAssigneesOwnedByRole(TicketRoleChiefOfStaff)
 	if !ids["sess-delegated"] {
 		t.Fatalf("delegated session missing from set: %v", ids)
 	}
@@ -470,7 +470,7 @@ func TestDelegatedFromChiefSessionIDs(t *testing.T) {
 	if _, err := s.SetTicketStatus("delegated", TicketStatusDone, "sess-delegated", "shipped", ticketBase.Add(time.Minute)); err != nil {
 		t.Fatalf("SetTicketStatus terminal: %v", err)
 	}
-	if ids := s.DelegatedFromChiefSessionIDs("chief-1"); !ids["sess-delegated"] {
+	if ids := s.TicketAssigneesOwnedByRole(TicketRoleChiefOfStaff); !ids["sess-delegated"] {
 		t.Fatalf("delegated session lost after terminal report: %v", ids)
 	}
 
@@ -478,7 +478,7 @@ func TestDelegatedFromChiefSessionIDs(t *testing.T) {
 	if err := s.ArchiveTicket("delegated", ticketBase.Add(2*time.Minute)); err != nil {
 		t.Fatalf("ArchiveTicket: %v", err)
 	}
-	if ids := s.DelegatedFromChiefSessionIDs("chief-1"); ids["sess-delegated"] {
+	if ids := s.TicketAssigneesOwnedByRole(TicketRoleChiefOfStaff); ids["sess-delegated"] {
 		t.Fatalf("archived ticket still in set: %v", ids)
 	}
 }

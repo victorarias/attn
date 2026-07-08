@@ -186,7 +186,7 @@ func (d *Daemon) handleNotebookGuide(conn net.Conn, msg *protocol.NotebookGuideM
 	}
 	sessionID := strings.TrimSpace(protocol.Deref(msg.SessionID))
 	sessionIsChief := sessionID != "" && sessionID == d.chiefOfStaffSessionID()
-	hasSelfMonitor := d.ticketObserverForSession(sessionID).HasSelfMonitor
+	hasSelfMonitor := d.ticketDeliveryObserverForSession(sessionID).HasSelfMonitor
 	if sessionIsChief {
 		if _, _, serr := d.ensureNotebookScaffold(); serr != nil {
 			d.logf("notebook guide: ensure scaffold failed: %v", serr)

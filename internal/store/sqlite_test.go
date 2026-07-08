@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -141,6 +142,61 @@ func TestMigrations_Idempotent(t *testing.T) {
 	}
 	if count != len(migrations) {
 		t.Errorf("migration count after reopen = %d, want %d", count, len(migrations))
+	}
+}
+
+func TestMigration66BackfillsActiveBornAssignedTicketsWithoutCursor(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-66.db")
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("open seeded store: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := s.CreateTicket(Ticket{
+		ID: "legacy-delegation", Title: "delegated work", Status: TicketStatusWorking, Assignee: "agent-a",
+	}, "chief-a", now); err != nil {
+		t.Fatalf("create legacy delegation: %v", err)
+	}
+	if _, err := s.CreateTicket(Ticket{
+		ID: "ordinary-ticket", Title: "ordinary work", Status: TicketStatusTodo,
+	}, "author", now); err != nil {
+		t.Fatalf("create ordinary ticket: %v", err)
+	}
+	if err := s.AssignTicket("ordinary-ticket", "agent-b", "author", now.Add(time.Minute)); err != nil {
+		t.Fatalf("assign ordinary ticket: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close seeded store: %v", err)
+	}
+
+	raw, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := raw.Exec(`
+		DROP TABLE ticket_role_owners;
+		DELETE FROM schema_migrations WHERE version = 66;
+	`); err != nil {
+		t.Fatalf("rewind migration 66: %v", err)
+	}
+	_ = raw.Close()
+
+	migrated, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("reopen migrated store: %v", err)
+	}
+	t.Cleanup(func() { _ = migrated.Close() })
+	owned, err := migrated.IsTicketRoleOwner(TicketRoleChiefOfStaff, "legacy-delegation")
+	if err != nil || !owned {
+		t.Fatalf("legacy delegation role ownership = %v, err %v; want true", owned, err)
+	}
+	ordinaryOwned, err := migrated.IsTicketRoleOwner(TicketRoleChiefOfStaff, "ordinary-ticket")
+	if err != nil || ordinaryOwned {
+		t.Fatalf("ordinary assigned ticket role ownership = %v, err %v; want false", ordinaryOwned, err)
+	}
+	cursor, err := migrated.GetTicketCursor(TicketRoleIdentity(TicketRoleChiefOfStaff), "legacy-delegation")
+	if err != nil || cursor != 0 {
+		t.Fatalf("backfilled role cursor = %d, err %v; want untouched zero", cursor, err)
 	}
 }
 

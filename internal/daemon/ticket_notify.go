@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/ticketnotify"
 )
 
@@ -41,7 +42,17 @@ func (d *Daemon) notifyTicketObservers(ticketID string) {
 		return
 	}
 	now := time.Now()
-	for _, id := range participants {
+	targets := make(map[string]bool, len(participants))
+	for _, identity := range participants {
+		id := identity
+		if identity == store.TicketRoleIdentity(store.TicketRoleChiefOfStaff) {
+			id = d.chiefOfStaffSessionID()
+		}
+		if id != "" {
+			targets[id] = true
+		}
+	}
+	for id := range targets {
 		d.notifyTicketSession(id, now)
 	}
 }
@@ -63,9 +74,9 @@ func (d *Daemon) notifyTicketSession(sessionID string, now time.Time) {
 	// the delivery mechanism (nudge / self-monitor watch / deferred-until-idle), so a
 	// working agent and a self-monitoring Claude both surface the unread marker.
 	d.refreshTicketUnread(sessionID)
-	obs := d.ticketObserverForSession(sessionID)
+	observers := d.ticketObserversForSession(sessionID)
 	idle := isIdleForNudge(string(session.State))
-	delivery, err := ticketnotify.Notify(d.store, obs, idle, ticketNudger{d}, now)
+	delivery, err := ticketnotify.NotifyAny(d.store, observers, observers[0], idle, ticketNudger{d}, now)
 	if err != nil {
 		d.logf("ticket notify: %s: %v", sessionID, err)
 		return
@@ -151,8 +162,7 @@ func (d *Daemon) ticketBackstopRecheck(sessionID string) {
 	if session == nil || !isIdleForNudge(string(session.State)) {
 		return
 	}
-	obs := d.ticketObserverForSession(sessionID)
-	unread, err := ticketnotify.Unread(d.store, obs)
+	unread, err := d.ticketUnreadForSession(sessionID)
 	if err != nil {
 		d.logf("ticket backstop: %s: %v", sessionID, err)
 		return
@@ -175,6 +185,17 @@ func (d *Daemon) stopTicketBackstops() {
 		t.Stop()
 		delete(d.ticketBackstopTimers, id)
 	}
+}
+
+// cancelTicketBackstop removes one session's pending self-monitor re-check. Role
+// transfer uses it so a displaced chief cannot receive a stale role doorbell.
+func (d *Daemon) cancelTicketBackstop(sessionID string) {
+	d.ticketBackstopMu.Lock()
+	if timer := d.ticketBackstopTimers[sessionID]; timer != nil {
+		timer.Stop()
+		delete(d.ticketBackstopTimers, sessionID)
+	}
+	d.ticketBackstopMu.Unlock()
 }
 
 // notifyTicketSessionWentIdle flushes a deferred nudge: a non-self-monitor that was

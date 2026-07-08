@@ -189,6 +189,16 @@ func ValidateTicketID(id string) error {
 // The supplied now stamps created_at/updated_at (and closed_at, in the unusual
 // case of creating directly into a terminal status).
 func (s *Store) CreateTicket(t Ticket, author string, now time.Time) (*Ticket, error) {
+	return s.createTicket(t, author, "", now)
+}
+
+// CreateRoleOwnedTicket creates a ticket whose notification ownership belongs to
+// a durable profile role. The concrete author remains on the event for audit.
+func (s *Store) CreateRoleOwnedTicket(t Ticket, author, ownerRole string, now time.Time) (*Ticket, error) {
+	return s.createTicket(t, author, strings.TrimSpace(ownerRole), now)
+}
+
+func (s *Store) createTicket(t Ticket, author, ownerRole string, now time.Time) (*Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -258,6 +268,14 @@ func (s *Store) CreateTicket(t Ticket, author string, now time.Time) (*Ticket, e
 	}, now)
 	if err != nil {
 		return nil, err
+	}
+	if ownerRole != "" {
+		if _, err := tx.Exec(`
+			INSERT INTO ticket_role_owners (role, ticket_id, created_at)
+			VALUES (?, ?, ?)
+		`, ownerRole, t.ID, formatTicketTime(now)); err != nil {
+			return nil, err
+		}
 	}
 	// A ticket born WITH an assignee is a chief delegation: the brief was already
 	// handed to that agent out of band via the spawn prompt, so mark the `created`
@@ -461,51 +479,6 @@ func (s *Store) ClearTicketReconciliationForAssignee(assignee string) error {
 		assignee,
 	)
 	return err
-}
-
-// DelegatedFromChiefSessionIDs returns the set of session IDs that were
-// delegated from the given chief of staff. A chief-delegated session is the
-// Assignee of a non-archived ticket the chief authored (see
-// daemon.createDelegatedTicket: the chief is the ticket's creator and the
-// session its assignee). Tickets persist for the session's lifetime, so an
-// assigned non-archived ticket authored by the chief is exactly the "delegated
-// from chief" signal. This bulk read lets a single broadcast decorate every
-// session without one query per session. Returns an empty map when chief is
-// unset or the store is db-less.
-func (s *Store) DelegatedFromChiefSessionIDs(chiefSessionID string) map[string]bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	out := make(map[string]bool)
-	chiefSessionID = strings.TrimSpace(chiefSessionID)
-	if s.db == nil || chiefSessionID == "" {
-		return out
-	}
-
-	// The ticket's author lives on its created event (ticket_events kind
-	// "created"), not the tickets row, so join through to scope by chief.
-	rows, err := s.db.Query(`
-		SELECT DISTINCT t.assignee
-		FROM tickets t
-		JOIN ticket_events e
-			ON e.ticket_id = t.id AND e.kind = ? AND e.author = ?
-		WHERE t.assignee != '' AND t.archived_at = ''`,
-		string(TicketEventCreated), chiefSessionID,
-	)
-	if err != nil {
-		return out
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var assignee string
-		if err := rows.Scan(&assignee); err != nil {
-			continue
-		}
-		if sid := strings.TrimSpace(assignee); sid != "" {
-			out[sid] = true
-		}
-	}
-	return out
 }
 
 // SetTicketStatus moves a ticket to a new column and records the change in the

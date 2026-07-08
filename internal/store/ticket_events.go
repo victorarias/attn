@@ -12,11 +12,11 @@ import (
 // cursors that express "unread". The decoupled notification handlers live in
 // internal/ticketnotify; this file is only the durable substrate.
 //
-// Cursors are keyed by (identity, ticket), not one global cursor per identity:
-// every identity — you, the chief, each agent (the chief is just another agent) —
-// has its own bookmark PER ticket. So a ticket newly assigned to an agent is
-// delivered from the start (it carries the brief and pre-assignment context),
-// and an agent's progress on one ticket never advances its bookmark on another.
+// Cursors are keyed by (identity, ticket), not one global cursor per identity.
+// Session identities own ordinary participation; durable role identities own
+// role-scoped participation. A ticket newly assigned to an agent is delivered
+// from the start, and activity on one ticket never advances another ticket's
+// bookmark.
 //
 // Events are a SUPERSET of the display activity thread (slice 1): activity holds
 // the two human-facing kinds (status_change, comment); the event log carries all
@@ -181,11 +181,11 @@ func (s *Store) TicketEventsSince(cursor int64) ([]TicketEvent, error) {
 }
 
 // UnreadTicketEvents returns, for an identity, every event it has not yet
-// consumed across the tickets it participates in — those currently assigned to it,
-// any it has authored a NON-COMMENT event on, plus any it has explicitly subscribed
-// to — excluding events it authored itself. Each event is compared against the identity's OWN per-(identity, ticket)
-// cursor, so a ticket the identity has never looked at is delivered from the start
-// (the brief and all pre-involvement context). Results are ordered by ticket then seq.
+// consumed across the tickets it participates in — those currently assigned to
+// it, any it has authored a NON-COMMENT event on, any it has explicitly subscribed
+// to, plus tickets owned by the matching durable role identity — excluding events
+// it authored itself. Each event is compared against the identity's OWN
+// per-(identity, ticket) cursor. Results are ordered by ticket then seq.
 //
 // Comment authorship is deliberately NOT a participation source: a one-shot
 // comment on an arbitrary ticket informs that ticket's participants without
@@ -197,10 +197,17 @@ func (s *Store) TicketEventsSince(cursor int64) ([]TicketEvent, error) {
 // per-ticket cursors, and the self-author exclusion together, so a quiet or
 // closed ticket the identity has nothing new on costs only an indexed lookup.
 func (s *Store) UnreadTicketEvents(identity string) ([]TicketEvent, error) {
+	return s.UnreadTicketEventsFor(identity, identity)
+}
+
+// UnreadTicketEventsFor reads cursorIdentity's queue while excluding events by
+// authorIdentity. They differ for a durable role: the cursor belongs to the role,
+// while the current session remains the audited event author.
+func (s *Store) UnreadTicketEventsFor(cursorIdentity, authorIdentity string) ([]TicketEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	if s.db == nil || identity == "" {
+	if s.db == nil || cursorIdentity == "" {
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
@@ -213,12 +220,21 @@ func (s *Store) UnreadTicketEvents(identity string) ([]TicketEvent, error) {
 			AND e.ticket_id IN (
 				SELECT id FROM tickets WHERE assignee = ?
 				UNION
-				SELECT DISTINCT ticket_id FROM ticket_events WHERE author = ? AND kind != 'commented'
+				SELECT DISTINCT e2.ticket_id FROM ticket_events e2
+				WHERE e2.author = ? AND e2.kind != 'commented'
+					AND NOT (
+						e2.kind = 'created' AND EXISTS (
+							SELECT 1 FROM ticket_role_owners ro WHERE ro.ticket_id = e2.ticket_id
+						)
+					)
 				UNION
 				SELECT ticket_id FROM ticket_subscriptions WHERE identity = ?
+				UNION
+				SELECT ticket_id FROM ticket_role_owners
+				WHERE ? = ('role:' || role)
 			)
 		ORDER BY e.ticket_id, e.seq ASC
-	`, identity, identity, identity, identity, identity)
+	`, cursorIdentity, authorIdentity, cursorIdentity, cursorIdentity, cursorIdentity, cursorIdentity)
 	if err != nil {
 		return nil, err
 	}
@@ -226,8 +242,9 @@ func (s *Store) UnreadTicketEvents(identity string) ([]TicketEvent, error) {
 }
 
 // TicketParticipants returns the identities involved with a single ticket — its
-// current assignee, everyone who has authored a NON-COMMENT event on it, and
-// everyone subscribed to it. This is the inverse of UnreadTicketEvents (identities-
+// current assignee, everyone who has authored a NON-COMMENT event on it, everyone
+// subscribed to it, and any durable owning role. A role-owned created event's
+// concrete author is audit provenance, not personal participation. This is the inverse of UnreadTicketEvents (identities-
 // for-a-ticket, not tickets-for-an-identity): when an event lands, the notifier
 // reaches exactly these identities, each of which sees only what it did not author.
 // Empty authors/assignees/subscribers are excluded, and comment authorship confers
@@ -243,11 +260,19 @@ func (s *Store) TicketParticipants(ticketID string) ([]string, error) {
 	rows, err := s.db.Query(`
 		SELECT assignee FROM tickets WHERE id = ? AND assignee != ''
 		UNION
-		SELECT DISTINCT author FROM ticket_events WHERE ticket_id = ? AND author != '' AND kind != 'commented'
+		SELECT DISTINCT e.author FROM ticket_events e
+		WHERE e.ticket_id = ? AND e.author != '' AND e.kind != 'commented'
+			AND NOT (
+				e.kind = 'created' AND EXISTS (
+					SELECT 1 FROM ticket_role_owners ro WHERE ro.ticket_id = e.ticket_id
+				)
+			)
 		UNION
 		SELECT identity FROM ticket_subscriptions WHERE ticket_id = ? AND identity != ''
+		UNION
+		SELECT ('role:' || role) FROM ticket_role_owners WHERE ticket_id = ? AND role != ''
 		ORDER BY 1 ASC
-	`, ticketID, ticketID, ticketID)
+	`, ticketID, ticketID, ticketID, ticketID)
 	if err != nil {
 		return nil, err
 	}
