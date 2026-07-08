@@ -2468,9 +2468,11 @@ export enum PresentFeedbackMessageCmd {
 }
 
 export interface PresentFeedbackResult {
-    markdown:  string;
-    seq:       number;
-    submitted: boolean;
+    markdown:            string;
+    presentation_status: string;
+    seq:                 number;
+    submitted:           boolean;
+    verdict?:            string;
     [property: string]: any;
 }
 
@@ -2892,9 +2894,11 @@ export interface NotebookGuide {
 }
 
 export interface PresentFeedbackResultObject {
-    markdown:  string;
-    seq:       number;
-    submitted: boolean;
+    markdown:            string;
+    presentation_status: string;
+    seq:                 number;
+    submitted:           boolean;
+    verdict?:            string;
     [property: string]: any;
 }
 
@@ -8456,8 +8460,10 @@ const typeMap: any = {
     ], "any"),
     "PresentFeedbackResult": o([
         { json: "markdown", js: "markdown", typ: "" },
+        { json: "presentation_status", js: "presentation_status", typ: "" },
         { json: "seq", js: "seq", typ: 0 },
         { json: "submitted", js: "submitted", typ: true },
+        { json: "verdict", js: "verdict", typ: u(undefined, "") },
     ], "any"),
     "PresentFile": o([
         { json: "additions", js: "additions", typ: u(undefined, 0) },
@@ -8698,8 +8704,10 @@ const typeMap: any = {
     ], "any"),
     "PresentFeedbackResultObject": o([
         { json: "markdown", js: "markdown", typ: "" },
+        { json: "presentation_status", js: "presentation_status", typ: "" },
         { json: "seq", js: "seq", typ: 0 },
         { json: "submitted", js: "submitted", typ: true },
+        { json: "verdict", js: "verdict", typ: u(undefined, "") },
     ], "any"),
     "PresentOpenResultObject": o([
         { json: "base_sha", js: "base_sha", typ: "" },

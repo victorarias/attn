@@ -705,11 +705,17 @@ model PresentFeedbackMessage {
 }
 
 // PresentFeedbackResult carries the rendered feedback markdown for the
-// resolved round, plus whether that round has been submitted yet.
+// resolved round, plus whether that round has been submitted yet. verdict is
+// the submitted round's verdict ("approved" | "feedback"), absent until
+// submitted. presentation_status is the presentation's current status
+// ("open" | "approved" | "closed") — a poller uses it to detect a reviewer
+// closing the presentation instead of submitting a round.
 model PresentFeedbackResult {
   markdown: string;
   seq: int32;
   submitted: boolean;
+  verdict?: string;
+  presentation_status: string;
 }
 
 // TicketInboxMessage reads (and consumes) the calling session's unread ticket

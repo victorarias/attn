@@ -2142,11 +2142,17 @@ type PresentFeedbackResult struct {
 	// Markdown corresponds to the JSON schema field "markdown".
 	Markdown string `json:"markdown"`
 
+	// PresentationStatus corresponds to the JSON schema field "presentation_status".
+	PresentationStatus string `json:"presentation_status"`
+
 	// Seq corresponds to the JSON schema field "seq".
 	Seq int `json:"seq"`
 
 	// Submitted corresponds to the JSON schema field "submitted".
 	Submitted bool `json:"submitted"`
+
+	// Verdict corresponds to the JSON schema field "verdict".
+	Verdict *string `json:"verdict,omitempty,omitzero"`
 }
 
 type PresentFile struct {
