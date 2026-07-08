@@ -1016,6 +1016,16 @@ func TestParseTicketStatusArgs(t *testing.T) {
 			args: []string{"failed"},
 			want: ticketStatusArgs{WorkState: "failed"},
 		},
+		{
+			name: "--ticket before the positional",
+			args: []string{"--ticket", "store-migration", "ready_for_review"},
+			want: ticketStatusArgs{WorkState: "ready_for_review", TicketID: "store-migration"},
+		},
+		{
+			name: "--ticket after the positional",
+			args: []string{"in_progress", "--ticket", "store-migration", "--comment", "moving it along"},
+			want: ticketStatusArgs{WorkState: "in_progress", TicketID: "store-migration", Comment: "moving it along"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

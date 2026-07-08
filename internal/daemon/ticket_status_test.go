@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
@@ -36,6 +37,13 @@ func delegateBoundSession(t *testing.T, d *Daemon) string {
 
 func callSetTicketStatus(t *testing.T, d *Daemon, sessionID, workState, comment string) protocol.Response {
 	t.Helper()
+	return callSetTicketStatusByID(t, d, sessionID, workState, comment, "")
+}
+
+// callSetTicketStatusByID is callSetTicketStatus plus an optional ticket id, for
+// the by-id form that bypasses session-bound resolution.
+func callSetTicketStatusByID(t *testing.T, d *Daemon, sessionID, workState, comment, ticketID string) protocol.Response {
+	t.Helper()
 	msg := &protocol.SetTicketStatusMessage{
 		Cmd:             protocol.CmdSetTicketStatus,
 		SourceSessionID: sessionID,
@@ -43,6 +51,9 @@ func callSetTicketStatus(t *testing.T, d *Daemon, sessionID, workState, comment 
 	}
 	if comment != "" {
 		msg.Comment = protocol.Ptr(comment)
+	}
+	if ticketID != "" {
+		msg.TicketID = protocol.Ptr(ticketID)
 	}
 	server, clientConn := net.Pipe()
 	go func() {
@@ -173,5 +184,72 @@ func TestTicketStatusFromWorkState(t *testing.T) {
 	}
 	if _, ok := ticketStatusFromWorkState(protocol.DispatchWorkState("nonsense")); ok {
 		t.Fatal("ticketStatusFromWorkState accepted an unknown work state")
+	}
+}
+
+// The by-id form is deliberately permissive: a session with no ticket bound to
+// it at all can still move someone else's ticket by naming its id. This is the
+// bug the by-id form exists to fix — on the pre-change handler this call would
+// error "no active ticket bound to this session" because the session lookup
+// happened unconditionally.
+func TestSetTicketStatusByIDMovesUnboundSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := time.Now()
+	if _, err := d.store.CreateTicket(store.Ticket{
+		ID:     "store-migration",
+		Title:  "Migrate the store",
+		Status: store.TicketStatusTodo,
+	}, "someone-else", now); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	observerSessionID := "observer-session"
+	resp := callSetTicketStatusByID(t, d, observerSessionID, string(protocol.DispatchWorkStateReadyForReview), "moving it along", "store-migration")
+	if !resp.Ok || resp.TicketStatusResult == nil {
+		t.Fatalf("response = %+v, want ok with ticket status result", resp)
+	}
+	if resp.TicketStatusResult.TicketID != "store-migration" {
+		t.Fatalf("result ticket id = %q, want store-migration", resp.TicketStatusResult.TicketID)
+	}
+	if resp.TicketStatusResult.Status != protocol.TicketStatusInReview {
+		t.Fatalf("result status = %q, want in_review", resp.TicketStatusResult.Status)
+	}
+
+	ticket, err := d.store.GetTicket("store-migration")
+	if err != nil {
+		t.Fatalf("GetTicket: %v", err)
+	}
+	if ticket.Status != store.TicketStatusInReview {
+		t.Fatalf("stored status = %q, want in_review", ticket.Status)
+	}
+
+	events, err := d.store.TicketEventsSince(0)
+	if err != nil {
+		t.Fatalf("TicketEventsSince: %v", err)
+	}
+	var change *store.TicketEvent
+	for i := range events {
+		if events[i].TicketID == "store-migration" && events[i].Kind == store.TicketEventStatusChanged {
+			change = &events[i]
+		}
+	}
+	if change == nil {
+		t.Fatalf("no status-changed event for ticket store-migration")
+	}
+	if change.Author != observerSessionID {
+		t.Fatalf("status-changed author = %q, want the acting session %q", change.Author, observerSessionID)
+	}
+}
+
+// Naming an id that doesn't exist surfaces the store's not-found error rather
+// than falling back to session resolution or panicking.
+func TestSetTicketStatusByIDUnknownTicket(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	resp := callSetTicketStatusByID(t, d, "observer-session", string(protocol.DispatchWorkStateInProgress), "", "does-not-exist")
+	if resp.Ok || resp.Error == nil {
+		t.Fatalf("response = %+v, want error", resp)
+	}
+	if !strings.Contains(*resp.Error, "not found") && !strings.Contains(*resp.Error, "does-not-exist") {
+		t.Fatalf("error = %q, want it to mention the missing ticket", *resp.Error)
 	}
 }

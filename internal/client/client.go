@@ -213,10 +213,13 @@ func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (
 	return resp.DelegateResult, nil
 }
 
-// SetTicketStatus reports the calling agent's work state; the daemon moves the
-// session's bound ticket to the matching column and echoes the resolved id and
-// status back.
-func (c *Client) SetTicketStatus(sourceSessionID, workState, comment string) (*protocol.TicketStatusResult, error) {
+// SetTicketStatus reports a work state and moves a ticket to the matching
+// column, echoing the resolved id and status back. With an empty ticketID,
+// the daemon resolves the calling session's own bound ticket (the agent
+// self-reporting form). With a non-empty ticketID, it moves that ticket
+// directly instead — any session may move any ticket this way, no ownership
+// gate.
+func (c *Client) SetTicketStatus(sourceSessionID, workState, comment, ticketID string) (*protocol.TicketStatusResult, error) {
 	msg := protocol.SetTicketStatusMessage{
 		Cmd:             protocol.CmdSetTicketStatus,
 		SourceSessionID: sourceSessionID,
@@ -224,6 +227,9 @@ func (c *Client) SetTicketStatus(sourceSessionID, workState, comment string) (*p
 	}
 	if value := strings.TrimSpace(comment); value != "" {
 		msg.Comment = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(ticketID); value != "" {
+		msg.TicketID = protocol.Ptr(value)
 	}
 	resp, err := c.send(msg)
 	if err != nil {
