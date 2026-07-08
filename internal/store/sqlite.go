@@ -614,6 +614,7 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		);
 		CREATE INDEX IF NOT EXISTS idx_presentation_comments_round ON presentation_comments(round_id);
 	`},
+	{64, "add closed_intentionally_at to sessions", "ALTER TABLE sessions ADD COLUMN closed_intentionally_at TEXT NOT NULL DEFAULT ''"},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -792,6 +793,11 @@ func migrateDB(db *sql.DB) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 64 {
+			if err := applyMigration64(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -893,6 +899,23 @@ func applyMigration60(tx *sql.Tx) error {
 		return nil
 	}
 	if _, err := tx.Exec("ALTER TABLE tickets ADD COLUMN reconciled_at TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// applyMigration64 adds closed_intentionally_at to sessions idempotently —
+// guarded by columnExists so a re-run (or a DB that already has the column) is
+// a no-op, mirroring applyMigration60.
+func applyMigration64(tx *sql.Tx) error {
+	hasClosedIntentionallyAt, err := columnExists(tx, "sessions", "closed_intentionally_at")
+	if err != nil {
+		return err
+	}
+	if hasClosedIntentionallyAt {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN closed_intentionally_at TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	return nil

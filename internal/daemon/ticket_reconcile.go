@@ -256,12 +256,21 @@ func (d *Daemon) reconcileTicketsOnSessionEnd(sessionID, state string) {
 	// enqueues once the runner is up.
 	runner := d.compactRunnerRef()
 
+	// An intentional close (user close, delegate teardown, workspace close) is
+	// not a crash, whatever the last runtime state was: the ticket stays where
+	// the agent last reported it (the common case: In Review, closed by Victor
+	// because the work is done). Only a spontaneous mid-flight death earns the
+	// Crashed stamp. Checked once per seam fire, while the session row is still
+	// present (both call sites guarantee it) — the durable half of the signal
+	// lives on that row.
+	intentionalClose := d.sessionCloseWasIntentional(sessionID)
+
 	for _, ticket := range tickets {
 		if ticket == nil {
 			continue
 		}
 		statusAtClaim := ticket.Status
-		if isMidFlightCrashState(state) {
+		if isMidFlightCrashState(state) && !intentionalClose {
 			// The blunt terminal stamp ships first (unchanged behavior); the
 			// classifier then annotates the crashed ticket with what was left
 			// (Victor 2026-07-01: crashes get verdicts too).
@@ -318,13 +327,27 @@ func (d *Daemon) reconcileCloseContext(sessionID, state string, column store.Tic
 		how = "was cut off mid-run"
 	}
 	source := "the agent process exited on its own"
-	if d.hasForcedStopMark(sessionID) {
+	if d.sessionCloseWasIntentional(sessionID) {
 		source = "the session was closed (user close or teardown)"
 	}
 	if state == "" {
 		return fmt.Sprintf("%s while the ticket was %s", source, column)
 	}
 	return fmt.Sprintf("%s (%s, last runtime state %s) while the ticket was %s", source, how, state, column)
+}
+
+// sessionCloseWasIntentional reports whether this session's death was an
+// attn/user-initiated close rather than a spontaneous process exit. Two
+// sources, either suffices: the in-memory forced-stop mark (fast path, set by
+// terminateSession moments before the seam fires) and the durable mark on the
+// session row (survives the mark's 30s TTL and a daemon restart, so the
+// startup reap re-running the seam still sees the close for what it was). It
+// gates the Crashed stamp and frames the reconcile comment.
+func (d *Daemon) sessionCloseWasIntentional(sessionID string) bool {
+	if d.hasForcedStopMark(sessionID) {
+		return true
+	}
+	return d.store != nil && d.store.SessionCloseIntentional(sessionID)
 }
 
 // hasForcedStopMark peeks (never consumes — stop-time classification suppression

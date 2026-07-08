@@ -669,3 +669,47 @@ func TestStore_ListAuthorStates(t *testing.T) {
 		t.Errorf("expected 2 author states, got %d", len(states))
 	}
 }
+
+// The intentional-close mark is the durable half of the close-vs-crash signal:
+// it must survive a store reopen (daemon restart) so the startup reap's ticket
+// seam can still tell a user close from a spontaneous death, and clearing it
+// must fully re-arm crash detection.
+func TestSessionIntentionalCloseMark_PersistsAndClears(t *testing.T) {
+	dbPath := t.TempDir() + "/test.db"
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	s.Add(&protocol.Session{ID: "sess-1", Label: "sess-1"})
+
+	if s.SessionCloseIntentional("sess-1") {
+		t.Fatal("fresh session should carry no intentional-close mark")
+	}
+	s.MarkSessionIntentionalClose("sess-1", time.Now())
+	if !s.SessionCloseIntentional("sess-1") {
+		t.Fatal("mark not readable after MarkSessionIntentionalClose")
+	}
+	s.Close()
+
+	s2, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewWithDB reopen error: %v", err)
+	}
+	defer s2.Close()
+	if !s2.SessionCloseIntentional("sess-1") {
+		t.Fatal("intentional-close mark must survive a store reopen (daemon restart)")
+	}
+	s2.ClearSessionIntentionalClose("sess-1")
+	if s2.SessionCloseIntentional("sess-1") {
+		t.Fatal("mark should be gone after ClearSessionIntentionalClose")
+	}
+}
+
+// Unknown sessions must read as not-intentionally-closed (the seam's default is
+// crash detection).
+func TestSessionIntentionalCloseMark_UnknownSessionFalse(t *testing.T) {
+	s := New()
+	if s.SessionCloseIntentional("nope") {
+		t.Fatal("unknown session must not read as intentionally closed")
+	}
+}

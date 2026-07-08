@@ -664,6 +664,66 @@ func (s *Store) GetResumeSessionID(id string) string {
 	return strings.TrimSpace(resumeSessionID)
 }
 
+// MarkSessionIntentionalClose durably records that this session's process is
+// being killed on purpose (user close, delegate teardown, workspace close) —
+// as opposed to dying on its own. Unlike the daemon's in-memory forced-stop
+// mark (30s TTL, lost on restart), this survives both, so the ticket
+// crash/reconcile seam can still tell a close from a crash when it runs late:
+// after the TTL, or from the startup reap after a daemon restart. The mark
+// lives on the session row and is garbage-collected with it (every close path
+// deletes the row moments after the seam consumes the mark).
+func (s *Store) MarkSessionIntentionalClose(id string, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	_, err := s.db.Exec("UPDATE sessions SET closed_intentionally_at = ? WHERE id = ?",
+		now.Format(time.RFC3339Nano), id)
+	if err != nil {
+		log.Printf("[store] MarkSessionIntentionalClose: failed for session %s: %v", id, err)
+	}
+}
+
+// SessionCloseIntentional reports whether the session carries a durable
+// intentional-close mark. Deliberately un-TTL'd: the reap that reads it can run
+// arbitrarily long after the close (the daemon may have been down); staleness
+// is handled by clearing the mark when recovery adopts the session as live.
+func (s *Store) SessionCloseIntentional(id string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return false
+	}
+
+	var closedAt string
+	if err := s.db.QueryRow("SELECT closed_intentionally_at FROM sessions WHERE id = ?", id).Scan(&closedAt); err != nil {
+		return false
+	}
+	return strings.TrimSpace(closedAt) != ""
+}
+
+// ClearSessionIntentionalClose removes a stale intentional-close mark — set
+// when a close was interrupted (daemon died between the mark and the kill) but
+// the worker turned out to still be alive at recovery. A live session must not
+// carry the mark, or a later genuine crash would be misread as a clean close.
+func (s *Store) ClearSessionIntentionalClose(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	_, err := s.db.Exec("UPDATE sessions SET closed_intentionally_at = '' WHERE id = ?", id)
+	if err != nil {
+		log.Printf("[store] ClearSessionIntentionalClose: failed for session %s: %v", id, err)
+	}
+}
+
 // GetAgentMetadata returns opaque plugin-owned JSON for a session.
 func (s *Store) GetAgentMetadata(id string) string {
 	s.mu.RLock()
