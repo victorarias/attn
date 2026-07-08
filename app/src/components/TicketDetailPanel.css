@@ -161,10 +161,37 @@
 }
 
 .ticket-detail-description {
-  margin: 0;
-  white-space: pre-wrap;
   font-size: var(--font-size-md);
   color: var(--color-text-secondary);
+}
+
+.ticket-detail-description p,
+.ticket-activity-comment p {
+  margin: 0 0 8px 0;
+}
+
+.ticket-detail-description :first-child,
+.ticket-activity-comment :first-child {
+  margin-top: 0;
+}
+
+.ticket-detail-description :last-child,
+.ticket-activity-comment :last-child {
+  margin-bottom: 0;
+}
+
+.ticket-detail-description pre,
+.ticket-activity-comment pre {
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--color-bg-input);
+  overflow-x: auto;
+}
+
+.ticket-detail-description code,
+.ticket-activity-comment code {
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, Menlo, monospace;
+  font-size: var(--font-size-sm);
 }
 
 .ticket-detail-empty {
@@ -213,7 +240,6 @@
 .ticket-activity-comment {
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
-  white-space: pre-wrap;
 }
 
 .ticket-attachment {

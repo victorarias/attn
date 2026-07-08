@@ -22,6 +22,10 @@
   background: var(--color-bg-panel);
   color: var(--color-text-primary);
   line-height: 1.6;
+  /* A summary can now hold a mermaid diagram; without a cap a tall one
+     squeezes the tour itself out of the viewport. */
+  max-height: 40vh;
+  overflow-y: auto;
 }
 
 .present-tour-summary :first-child {
@@ -59,6 +63,19 @@
 
 .present-tour-file-note :last-child {
   margin-bottom: 0;
+}
+
+/* A note rendered as an annotation (see PresentTour's notePlacedPathsRef) sits
+   among comment threads rather than under a header — the header's bottom
+   divider reads oddly there, so it's dropped in favor of the slot's own
+   padding, matching .diff-comment-thread's spacing. */
+.present-tour-file-note-slot {
+  padding: 6px 10px;
+}
+
+.present-tour-file-note-slot .present-tour-file-note {
+  padding: 0;
+  border-bottom: none;
 }
 
 .present-tour-reviewed-toggle {

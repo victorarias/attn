@@ -132,6 +132,33 @@ crown jewel. Captured here so the port doesn't get lost behind the reader work.
   `//go:embed`) so agents get it without per-repo setup — merge ≠ shipped,
   rebuild the daemon.
 
+**Additions from reviewing mattpocock's `teach` skill (2026-07-08):** one set of
+principles for every presentation kind — not a separate rulebook per artifact.
+
+- **Mission-first.** The skill's opening move: name the reader's job for this
+  presentation (merge decision, absorb a design, choose between options,
+  understand an incident) and structure the stops around that job. PRs get a
+  strong default mission — "decide this is right and safe to merge" — plus
+  guidance on overriding it (a risky migration tours the danger; a mechanical
+  rename is two stops and a skip list). Non-PR presentations must state the
+  mission explicitly; there is no default.
+- **Teach the delta (zone of proximal development).** Calibrate to what the
+  reader already holds. A same-session author knows what was already discussed
+  and decided — don't re-teach the agreed design; spend annotations on what
+  emerged during implementation (surprises, local decisions, places the plan
+  bent). Rounds are pure delta: round N+1 presents drift since the last
+  submit, not the whole tour again.
+- **Stop budget / one concept per stop.** A tour is a sequence of small
+  comprehension wins, not exhaustive coverage — working memory is the
+  constrained resource. Sharpens jaunt's "teach, don't list" for big PRs.
+- **Never present from parametric memory.** Re-read the actual diff/artifacts
+  before authoring; verify every anchor. The *why* behind the existing
+  validate-before-handoff rule.
+- **Explicit non-goal:** the goal is comprehension sufficient to decide, not
+  retention. None of the curriculum apparatus (quizzes, retrieval practice,
+  spacing, learning records) applies — Present is a one-shot guided read
+  ending in a decision.
+
 **Sequencing:** an interim level-0/1 version (voice rules, reading order,
 notes, summary, skip) is useful immediately — manifest v0 already supports
 everything it prescribes. The full port (annotations, `thread:`, mermaid,
