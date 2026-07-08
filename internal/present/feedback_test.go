@@ -22,12 +22,40 @@ func TestRenderFeedback_NoComments(t *testing.T) {
 	runGit(t, dir, "init")
 	sha := writeCommit(t, dir, "a.txt", "one\ntwo\n", "init")
 
-	got := RenderFeedback(dir, "My Change", 1, sha, sha, "", nil)
+	got := RenderFeedback(dir, "My Change", 1, sha, sha, "", "", nil)
 	if !strings.Contains(got, "No comments — round handed back clean.") {
 		t.Errorf("RenderFeedback() = %q, want the clean-handback line", got)
 	}
 	if !strings.Contains(got, "Round not submitted yet.") {
 		t.Errorf("RenderFeedback() = %q, want the not-submitted line", got)
+	}
+}
+
+func TestRenderFeedback_ApprovedVerdict(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	sha := writeCommit(t, dir, "a.txt", "one\ntwo\n", "init")
+
+	comments := []FeedbackComment{
+		{Filepath: "a.txt", LineStart: 1, LineEnd: 1, Side: "new", Content: "nit: rename this"},
+	}
+	got := RenderFeedback(dir, "My Change", 1, sha, sha, "2026-07-01T00:00:00Z", "approved", comments)
+	if !strings.Contains(got, "**Approved.**") {
+		t.Errorf("RenderFeedback() = %q, want the Approved verdict line", got)
+	}
+	if !strings.Contains(got, "nit: rename this") {
+		t.Errorf("RenderFeedback() approve-with-nits dropped the comment: %q", got)
+	}
+}
+
+func TestRenderFeedback_FeedbackVerdictUnchangedShape(t *testing.T) {
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	sha := writeCommit(t, dir, "a.txt", "one\ntwo\n", "init")
+
+	got := RenderFeedback(dir, "My Change", 1, sha, sha, "2026-07-01T00:00:00Z", "feedback", nil)
+	if strings.Contains(got, "**Approved.**") {
+		t.Errorf("RenderFeedback() = %q, feedback verdict should not render an Approved line", got)
 	}
 }
 
@@ -42,7 +70,7 @@ func TestRenderFeedback_QuotesAndSides(t *testing.T) {
 		{Filepath: "a.txt", LineStart: 4, LineEnd: 4, Side: "new", Content: "nice addition"},
 	}
 
-	got := RenderFeedback(dir, "My Change", 2, baseSHA, headSHA, "2026-07-01T00:00:00Z", comments)
+	got := RenderFeedback(dir, "My Change", 2, baseSHA, headSHA, "2026-07-01T00:00:00Z", "feedback", comments)
 
 	if !strings.Contains(got, "Submitted: 2026-07-01T00:00:00Z") {
 		t.Errorf("RenderFeedback() missing submitted timestamp: %q", got)
@@ -79,7 +107,7 @@ func TestRenderFeedback_GroupsByFileKeepingOrder(t *testing.T) {
 		{Filepath: "b.txt", LineStart: 2, LineEnd: 2, Side: "new", Content: "third, on b again"},
 	}
 
-	got := RenderFeedback(dir, "Multi File", 1, sha, headSHA, "", comments)
+	got := RenderFeedback(dir, "Multi File", 1, sha, headSHA, "", "", comments)
 
 	bIdx := strings.Index(got, "## b.txt")
 	aIdx := strings.Index(got, "## a.txt")
@@ -103,7 +131,7 @@ func TestRenderFeedback_OutOfRangeQuoteOmitted(t *testing.T) {
 		{Filepath: "missing.txt", LineStart: 1, LineEnd: 1, Side: "new", Content: "file does not exist at this SHA"},
 	}
 
-	got := RenderFeedback(dir, "Edge Cases", 1, sha, sha, "", comments)
+	got := RenderFeedback(dir, "Edge Cases", 1, sha, sha, "", "", comments)
 
 	if !strings.Contains(got, "out of range comment") || !strings.Contains(got, "file does not exist at this SHA") {
 		t.Fatalf("RenderFeedback() dropped comment content instead of just omitting the quote: %q", got)

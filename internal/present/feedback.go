@@ -25,8 +25,10 @@ type FeedbackComment struct {
 // git at the round's pinned base/head SHA (side "old" reads baseSHA, "new"
 // reads headSHA) — but a quote is best-effort: if git fails or the lines are
 // out of range, the quote is silently omitted rather than failing the whole
-// render.
-func RenderFeedback(repoPath, title string, seq int, baseSHA, headSHA string, submittedAt string, comments []FeedbackComment) string {
+// render. verdict is "" (unsubmitted), "approved", or "feedback" — "approved"
+// adds a bold verdict line right after the submitted line; "feedback" and ""
+// leave the rendered shape exactly as it was before verdicts existed.
+func RenderFeedback(repoPath, title string, seq int, baseSHA, headSHA string, submittedAt string, verdict string, comments []FeedbackComment) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# %s — round %d\n\n", title, seq)
@@ -35,6 +37,9 @@ func RenderFeedback(repoPath, title string, seq int, baseSHA, headSHA string, su
 		b.WriteString("Round not submitted yet.\n")
 	} else {
 		fmt.Fprintf(&b, "Submitted: %s\n", submittedAt)
+	}
+	if verdict == "approved" {
+		b.WriteString("\n**Approved.**\n")
 	}
 
 	if len(comments) == 0 {

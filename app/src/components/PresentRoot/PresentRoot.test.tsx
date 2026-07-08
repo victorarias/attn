@@ -822,13 +822,14 @@ describe('PresentRoot', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit feedback' }));
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
       const req = sent.find((m) => m.cmd === 'present_submit_round');
       expect(req).toBeDefined();
       expect(req.round_id).toBe('round-1');
+      expect(req.verdict).toBe('feedback');
       expect(req.handback).toBe(true);
       expect(req.comments).toEqual(
         expect.arrayContaining([
@@ -859,7 +860,7 @@ describe('PresentRoot', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit feedback' }));
 
     await waitFor(() => {
       expect(ws.sent.map((e) => JSON.parse(e)).some((m) => m.cmd === 'present_submit_round')).toBe(true);
@@ -886,7 +887,7 @@ describe('PresentRoot', () => {
     const ws = await loadRoundWithDiff();
 
     fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit feedback' }));
 
     await waitFor(() => {
       expect(ws.sent.map((e) => JSON.parse(e)).some((m) => m.cmd === 'present_submit_round')).toBe(true);
@@ -909,7 +910,7 @@ describe('PresentRoot', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit feedback' }));
 
     await waitFor(() => {
       expect(ws.sent.map((e) => JSON.parse(e)).some((m) => m.cmd === 'present_submit_round')).toBe(true);
@@ -924,6 +925,59 @@ describe('PresentRoot', () => {
     }, WAIT_OPTS);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(latestTourProps().comments.some((c) => c.content === 'looks off')).toBe(true);
+  }, TEST_TIMEOUT);
+
+  it('sends verdict "approved" when the Approve button is clicked', async () => {
+    const ws = await loadRoundWithDiff();
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      const req = sent.find((m) => m.cmd === 'present_submit_round');
+      expect(req).toBeDefined();
+      expect(req.verdict).toBe('approved');
+      expect(req.handback).toBe(true);
+    }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
+
+  it('closes the presentation without submitting the round when Close review is clicked', async () => {
+    const ws = await loadRoundWithDiff();
+
+    await act(async () => {
+      latestTourProps().onAddComment('src/foo.ts', 3, 5, 'a draft to be discarded');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close review' }));
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      const req = sent.find((m) => m.cmd === 'present_close');
+      expect(req).toBeDefined();
+      expect(req.presentation_id).toBe('pres-1');
+    }, WAIT_OPTS);
+
+    expect(ws.sent.map((e) => JSON.parse(e)).some((m) => m.cmd === 'present_submit_round')).toBe(false);
+
+    act(() => {
+      ws.emit({ event: 'present_close_result', success: true, presentation_id: 'pres-1' });
+    });
+
+    await waitFor(() => {
+      expect(mockHide).toHaveBeenCalledTimes(1);
+    }, WAIT_OPTS);
+  }, TEST_TIMEOUT);
+
+  it('shows Approve, Submit feedback, and Close review actions in the submit dialog', async () => {
+    await loadRoundWithDiff();
+
+    fireEvent.click(screen.getByRole('button', { name: /Submit review/ }));
+
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Submit feedback' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close review' })).toBeInTheDocument();
   }, TEST_TIMEOUT);
 
   it('keeps a draft on one file visible in the tour after navigating to another file', async () => {
@@ -1117,7 +1171,7 @@ describe('PresentRoot', () => {
         expect(screen.getByTestId('present-root-submit-coverage').textContent).toContain('src/foo.test.ts');
       }, WAIT_OPTS);
       // Submit stays enabled — coverage is advisory only, never a gate.
-      expect(screen.getByRole('button', { name: 'Submit' })).not.toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Submit feedback' })).not.toBeDisabled();
     });
 
     it('shows no coverage line once every file is reviewed', async () => {

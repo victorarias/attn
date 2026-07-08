@@ -1028,6 +1028,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleGetPresentationRound(client, msg.(*protocol.GetPresentationRoundMessage))
 	case protocol.CmdPresentSubmitRound:
 		d.handlePresentSubmitRound(client, msg.(*protocol.PresentSubmitRoundMessage))
+	case protocol.CmdPresentClose:
+		d.handlePresentClose(client, msg.(*protocol.PresentCloseMessage))
 	case protocol.CmdWorkflowRunGet:
 		d.handleWorkflowRunGetWS(client, msg.(*protocol.WorkflowRunGetMessage))
 	case protocol.CmdWorkflowRunList:

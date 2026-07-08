@@ -65,7 +65,8 @@ Victor's priorities, verbatim buckets:
 
 - **Submit** = three actions: Approve / Submit feedback / Close. No GitHub
   target toggle, no three-verdict picker, no end-review checkbox. Approve
-  semantics need protocol + `attn present feedback` output wording (slice 7).
+  semantics (protocol + `attn present feedback` output wording) shipped in
+  slice 8.
 - **No agent channel / transcript view** — vision non-goal.
 - **Visual identity**: keep attn's; polish density/spacing/states. No jaunt
   retheme (its terminal-green mono aesthetic stays jaunt's).
@@ -213,11 +214,11 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
       (expect multiple PRs).
     - [x] 5a. manifest schema + resolution + protocol
     - [x] 5b. reader: inline threads, reply-as-comment, N/P, rail counts
-- [ ] 6. **Diagrams**: mermaid in the shared markdown path.
+- [x] 6. **Diagrams**: mermaid in the shared markdown path.
 - [x] 7. **Authoring skill**: interim level-0/1 version (voice, order, notes,
       skip) can land any time; full port (annotations, `thread:`, mermaid,
       `attn present validate`) after slices 5–6; ships via daemon embed.
-- [ ] 8. **Submit**: approve / submit feedback / close (protocol + CLI).
+- [x] 8. **Submit**: approve / submit feedback / close (protocol + CLI).
 - [ ] 9. **Polish pass** + the minor items above.
 
 ## Decisions
@@ -242,4 +243,14 @@ keyed by file via `CodeViewLineSelection {id, range}`. Reviewed marks (slice
 - Per-file ± stats source: **resolved in slice 3** — the daemon returns stats
   in the round payload (lean daemon), not client-computed from lazily fetched
   diffs.
-- Approve semantics on round/session state — decide in slice 7.
+- Approve semantics on round/session state — **resolved in slice 8**: Approve
+  submits the current draft round with `verdict: "approved"` (comments still
+  allowed alongside — approve-with-nits) and, in the same transaction, flips
+  the presentation's `status` from `open` to `approved`; handback fires as
+  usual. Submit feedback is the existing path with `verdict: "feedback"` and
+  leaves `status` at `open`. Close skips round submission and handback
+  entirely — drafts are discarded client-side — and just moves `status` to
+  `closed`; closing a presentation that isn't `open` (already closed or
+  approved) is an error. No interplay with session `pending_approval`. Opening
+  a new round reopens an approved or closed presentation back to `open`,
+  since a new round is a new ask for review.

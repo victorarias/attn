@@ -33,6 +33,9 @@ type PresentationRound struct {
 	HeadSHA        string
 	CreatedAt      string
 	SubmittedAt    *string
+	// Verdict is nil for a draft (unsubmitted) round, and "approved" or
+	// "feedback" once submitted — set atomically with SubmittedAt.
+	Verdict *string
 }
 
 // PresentationComment represents a single inline comment left on a round.
@@ -115,6 +118,16 @@ func (s *Store) CreatePresentationRound(presentationID, manifestYAML, baseSHA, h
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, round.ID, round.PresentationID, round.Seq, round.ManifestYAML, round.BaseSHA, round.HeadSHA, round.CreatedAt); err != nil {
 		return nil, fmt.Errorf("failed to create presentation round: %w", err)
+	}
+
+	// A new round is a new ask for review: reopen a presentation that was
+	// previously approved or closed, or its chip never surfaces to the
+	// reviewer again (presentationNeedsNotice in App.tsx gates on status ==
+	// "open").
+	if _, err := tx.Exec(`
+		UPDATE presentations SET status = 'open' WHERE id = ? AND status != 'open'
+	`, presentationID); err != nil {
+		return nil, fmt.Errorf("failed to reopen presentation for new round: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -231,22 +244,22 @@ func (s *Store) GetPresentationRound(presentationID string, seq int) (*Presentat
 	var row *sql.Row
 	if seq <= 0 {
 		row = s.db.QueryRow(`
-			SELECT id, presentation_id, seq, manifest_yaml, base_sha, head_sha, created_at, submitted_at
+			SELECT id, presentation_id, seq, manifest_yaml, base_sha, head_sha, created_at, submitted_at, verdict
 			FROM presentation_rounds
 			WHERE presentation_id = ?
 			ORDER BY seq DESC LIMIT 1
 		`, presentationID)
 	} else {
 		row = s.db.QueryRow(`
-			SELECT id, presentation_id, seq, manifest_yaml, base_sha, head_sha, created_at, submitted_at
+			SELECT id, presentation_id, seq, manifest_yaml, base_sha, head_sha, created_at, submitted_at, verdict
 			FROM presentation_rounds
 			WHERE presentation_id = ? AND seq = ?
 		`, presentationID, seq)
 	}
 
 	var r PresentationRound
-	var submittedAt sql.NullString
-	err := row.Scan(&r.ID, &r.PresentationID, &r.Seq, &r.ManifestYAML, &r.BaseSHA, &r.HeadSHA, &r.CreatedAt, &submittedAt)
+	var submittedAt, verdict sql.NullString
+	err := row.Scan(&r.ID, &r.PresentationID, &r.Seq, &r.ManifestYAML, &r.BaseSHA, &r.HeadSHA, &r.CreatedAt, &submittedAt, &verdict)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, err
@@ -256,6 +269,10 @@ func (s *Store) GetPresentationRound(presentationID string, seq int) (*Presentat
 	if submittedAt.Valid {
 		v := submittedAt.String
 		r.SubmittedAt = &v
+	}
+	if verdict.Valid {
+		v := verdict.String
+		r.Verdict = &v
 	}
 
 	return &r, nil
@@ -269,11 +286,11 @@ func (s *Store) GetPresentationRoundByID(roundID string) (*PresentationRound, er
 	defer s.mu.RUnlock()
 
 	var r PresentationRound
-	var submittedAt sql.NullString
+	var submittedAt, verdict sql.NullString
 	err := s.db.QueryRow(`
-		SELECT id, presentation_id, seq, manifest_yaml, base_sha, head_sha, created_at, submitted_at
+		SELECT id, presentation_id, seq, manifest_yaml, base_sha, head_sha, created_at, submitted_at, verdict
 		FROM presentation_rounds WHERE id = ?
-	`, roundID).Scan(&r.ID, &r.PresentationID, &r.Seq, &r.ManifestYAML, &r.BaseSHA, &r.HeadSHA, &r.CreatedAt, &submittedAt)
+	`, roundID).Scan(&r.ID, &r.PresentationID, &r.Seq, &r.ManifestYAML, &r.BaseSHA, &r.HeadSHA, &r.CreatedAt, &submittedAt, &verdict)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, err
@@ -284,13 +301,30 @@ func (s *Store) GetPresentationRoundByID(roundID string) (*PresentationRound, er
 		v := submittedAt.String
 		r.SubmittedAt = &v
 	}
+	if verdict.Valid {
+		v := verdict.String
+		r.Verdict = &v
+	}
 
 	return &r, nil
 }
 
-// SubmitPresentationRound records comments for a round and marks it
-// submitted. It errors if the round doesn't exist or is already submitted.
-func (s *Store) SubmitPresentationRound(roundID string, comments []PresentationComment, now time.Time) error {
+// validPresentationVerdicts are the only values SubmitPresentationRound
+// accepts. "approved" additionally flips the owning presentation's status to
+// "approved" in the same transaction; "feedback" leaves it "open" (the author
+// is expected to open round N+1).
+var validPresentationVerdicts = map[string]bool{"approved": true, "feedback": true}
+
+// SubmitPresentationRound records comments for a round, marks it submitted
+// with the given verdict, and — when verdict is "approved" — flips the
+// presentation's status to "approved" in the same transaction. It errors if
+// the round doesn't exist, is already submitted, or verdict is not one of
+// "approved"/"feedback".
+func (s *Store) SubmitPresentationRound(roundID string, verdict string, comments []PresentationComment, now time.Time) error {
+	if !validPresentationVerdicts[verdict] {
+		return fmt.Errorf("invalid verdict %q: must be \"approved\" or \"feedback\"", verdict)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -301,7 +335,8 @@ func (s *Store) SubmitPresentationRound(roundID string, comments []PresentationC
 	defer tx.Rollback()
 
 	var existingSubmittedAt sql.NullString
-	err = tx.QueryRow(`SELECT submitted_at FROM presentation_rounds WHERE id = ?`, roundID).Scan(&existingSubmittedAt)
+	var presentationID string
+	err = tx.QueryRow(`SELECT submitted_at, presentation_id FROM presentation_rounds WHERE id = ?`, roundID).Scan(&existingSubmittedAt, &presentationID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("presentation round %s not found", roundID)
@@ -331,13 +366,57 @@ func (s *Store) SubmitPresentationRound(roundID string, comments []PresentationC
 	}
 
 	if _, err := tx.Exec(`
-		UPDATE presentation_rounds SET submitted_at = ? WHERE id = ?
-	`, createdAt, roundID); err != nil {
+		UPDATE presentation_rounds SET submitted_at = ?, verdict = ? WHERE id = ?
+	`, createdAt, verdict, roundID); err != nil {
 		return fmt.Errorf("failed to mark presentation round submitted: %w", err)
+	}
+
+	if verdict == "approved" {
+		if _, err := tx.Exec(`
+			UPDATE presentations SET status = 'approved' WHERE id = ?
+		`, presentationID); err != nil {
+			return fmt.Errorf("failed to approve presentation: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit presentation round submission: %w", err)
+	}
+
+	return nil
+}
+
+// ClosePresentation dismisses a presentation without a review: it flips
+// status from "open" to "closed", with no round submission and no handback.
+// It errors if the presentation is not currently "open" (already closed or
+// already approved).
+func (s *Store) ClosePresentation(id string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var status string
+	if err := tx.QueryRow(`SELECT status FROM presentations WHERE id = ?`, id).Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("presentation %s not found", id)
+		}
+		return fmt.Errorf("failed to look up presentation: %w", err)
+	}
+	if status != "open" {
+		return fmt.Errorf("presentation %s is not open (status: %s)", id, status)
+	}
+
+	if _, err := tx.Exec(`UPDATE presentations SET status = 'closed' WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("failed to close presentation: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit presentation close: %w", err)
 	}
 
 	return nil

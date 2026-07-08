@@ -2088,6 +2088,28 @@ type PresentAnnotation struct {
 	LineStart int `json:"line_start"`
 }
 
+type PresentCloseMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// PresentationID corresponds to the JSON schema field "presentation_id".
+	PresentationID string `json:"presentation_id"`
+}
+
+type PresentCloseResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// PresentationID corresponds to the JSON schema field "presentation_id".
+	PresentationID string `json:"presentation_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type PresentCommentInput struct {
 	// Content corresponds to the JSON schema field "content".
 	Content string `json:"content"`
@@ -2210,6 +2232,9 @@ type PresentSubmitRoundMessage struct {
 
 	// RoundID corresponds to the JSON schema field "round_id".
 	RoundID string `json:"round_id"`
+
+	// Verdict corresponds to the JSON schema field "verdict".
+	Verdict string `json:"verdict"`
 }
 
 type PresentSubmitRoundResultMessage struct {
@@ -2323,6 +2348,9 @@ type PresentationRound struct {
 
 	// SubmittedAt corresponds to the JSON schema field "submitted_at".
 	SubmittedAt *string `json:"submitted_at,omitempty,omitzero"`
+
+	// Verdict corresponds to the JSON schema field "verdict".
+	Verdict *string `json:"verdict,omitempty,omitzero"`
 }
 
 type PresentationUpdatedMessage struct {

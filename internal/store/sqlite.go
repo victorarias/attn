@@ -615,6 +615,7 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		CREATE INDEX IF NOT EXISTS idx_presentation_comments_round ON presentation_comments(round_id);
 	`},
 	{64, "add closed_intentionally_at to sessions", "ALTER TABLE sessions ADD COLUMN closed_intentionally_at TEXT NOT NULL DEFAULT ''"},
+	{65, "add verdict to presentation_rounds", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -795,6 +796,11 @@ func migrateDB(db *sql.DB) error {
 			}
 		} else if m.version == 64 {
 			if err := applyMigration64(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 65 {
+			if err := applyMigration65(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -1081,6 +1087,29 @@ func applyMigration54(tx *sql.Tx) error {
 		return nil
 	}
 	_, err = tx.Exec(`ALTER TABLE workspaces ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`)
+	return err
+}
+
+// applyMigration65 adds the verdict column to presentation_rounds, recording
+// whether a submitted round was "approved" or "feedback". Guarded with
+// tableExists and columnExists for idempotent re-run safety (see
+// applyMigration54 for the same pattern).
+func applyMigration65(tx *sql.Tx) error {
+	exists, err := tableExists(tx, "presentation_rounds")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	hasColumn, err := columnExists(tx, "presentation_rounds", "verdict")
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+	_, err = tx.Exec(`ALTER TABLE presentation_rounds ADD COLUMN verdict TEXT`)
 	return err
 }
 

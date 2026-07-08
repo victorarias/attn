@@ -191,6 +191,7 @@ export function PresentRoot() {
     getPresentationRound,
     sendGetFileDiff,
     submitPresentationRound,
+    closePresentation,
   } = useDaemonSocket({
     onSessionsUpdate: noop,
     onWorkspacesUpdate: noop,
@@ -532,7 +533,7 @@ export function PresentRoot() {
   // read-only here, so resolving is a no-op either way.
   const handleResolveComment = useCallback(() => {}, []);
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(async (verdict: 'approved' | 'feedback') => {
     if (!round) return;
     setSubmitting(true);
     setSubmitError(null);
@@ -544,7 +545,7 @@ export function PresentRoot() {
         side: d.side,
         content: d.content,
       }));
-      await submitPresentationRound({ roundId: round.id, comments, handback: true });
+      await submitPresentationRound({ roundId: round.id, verdict, comments, handback: true });
       setDrafts([]);
       setShowSubmitDialog(false);
       setRefreshSignal((n) => n + 1);
@@ -559,6 +560,28 @@ export function PresentRoot() {
       setSubmitting(false);
     }
   }, [round, drafts, submitPresentationRound]);
+
+  // Dismiss without reviewing: no round submission (drafts are intentionally
+  // discarded), no handback — just close the presentation and hide the window.
+  const handleClose = useCallback(async () => {
+    if (!presentation) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await closePresentation(presentation.id);
+      setShowSubmitDialog(false);
+      setRefreshSignal((n) => n + 1);
+      try {
+        await getCurrentWindow().hide();
+      } catch (hideErr) {
+        console.warn('[PresentRoot] failed to hide presentation window after close:', hideErr);
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Failed to close presentation.');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [presentation, closePresentation]);
 
   if (connectionError) {
     return (
@@ -666,8 +689,29 @@ export function PresentRoot() {
               <button type="button" onClick={() => setShowSubmitDialog(false)} disabled={submitting}>
                 Cancel
               </button>
-              <button type="button" onClick={handleSubmit} disabled={submitting}>
-                {submitting ? 'Submitting…' : 'Submit'}
+              <button
+                type="button"
+                className="present-root-submit-close"
+                onClick={handleClose}
+                disabled={submitting}
+              >
+                Close review
+              </button>
+              <button
+                type="button"
+                className="present-root-submit-feedback"
+                onClick={() => handleSubmit('feedback')}
+                disabled={submitting}
+              >
+                {submitting ? 'Submitting…' : 'Submit feedback'}
+              </button>
+              <button
+                type="button"
+                className="present-root-submit-approve"
+                onClick={() => handleSubmit('approved')}
+                disabled={submitting}
+              >
+                {submitting ? 'Submitting…' : 'Approve'}
               </button>
             </div>
           </div>
