@@ -190,6 +190,7 @@ async function main() {
         {
           presentationId,
           handback: true,
+          verdict: 'feedback',
           comments: [{ filepath: notedPath, line_start: 1, line_end: 1, side: 'new', content: REVIEWER_COMMENT }],
         },
         { port },

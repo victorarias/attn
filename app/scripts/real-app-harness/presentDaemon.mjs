@@ -106,14 +106,20 @@ export async function getPresentationRound(presentationId, { port, seq } = {}) {
 }
 
 // Shapes a present_submit_round message. Exported (pure, no socket) so tests
-// can cover payload shaping without a live daemon.
-export function buildSubmitMessage({ roundId, comments = [], handback = true }) {
+// can cover payload shaping without a live daemon. verdict mirrors the
+// daemon's own validation (handlePresentSubmitRound in internal/daemon/present.go):
+// it must be "approved" or "feedback".
+export function buildSubmitMessage({ roundId, comments = [], handback = true, verdict = 'feedback' }) {
   if (!roundId) {
     throw new Error('buildSubmitMessage requires roundId');
+  }
+  if (verdict !== 'approved' && verdict !== 'feedback') {
+    throw new Error(`verdict must be "approved" or "feedback", got ${JSON.stringify(verdict)}`);
   }
   return {
     cmd: 'present_submit_round',
     round_id: roundId,
+    verdict,
     comments: comments.map((comment, index) => {
       if (!comment.filepath) {
         throw new Error(`comments[${index}].filepath is required`);
@@ -135,7 +141,7 @@ export function buildSubmitMessage({ roundId, comments = [], handback = true }) 
 
 // If roundId is omitted, fetches the presentation's latest round first and
 // submits against it.
-export async function submitPresentationRound({ presentationId, roundId, comments = [], handback = true } = {}, { port } = {}) {
+export async function submitPresentationRound({ presentationId, roundId, comments = [], handback = true, verdict = 'feedback' } = {}, { port } = {}) {
   return withDaemonSocket(async (sendAndWait) => {
     let resolvedRoundId = roundId;
     if (!resolvedRoundId) {
@@ -154,7 +160,7 @@ export async function submitPresentationRound({ presentationId, roundId, comment
         throw new Error(`No round found for presentation ${presentationId}`);
       }
     }
-    const submitMessage = buildSubmitMessage({ roundId: resolvedRoundId, comments, handback });
+    const submitMessage = buildSubmitMessage({ roundId: resolvedRoundId, comments, handback, verdict });
     const result = await sendAndWait(submitMessage, 'present_submit_round_result');
     if (!result.success) {
       throw new Error(result.error || `present_submit_round failed for round ${resolvedRoundId}`);

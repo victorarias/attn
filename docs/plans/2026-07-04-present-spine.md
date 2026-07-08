@@ -129,7 +129,10 @@ Tests:
       head). `get_file_diff` head-ref extension lands here with its daemon
       tests. (Merged: #482.)
 - [x] **PR 4 — packaged evidence + polish.** Real-app scenario for the full
-      loop; live dev-app smoke with a real delegated agent; CHANGELOG entry. (Open: #484 — live-verified, in review.)
+      loop; live dev-app smoke with a real delegated agent; CHANGELOG entry.
+      (Packaged scenario `scenario-present-flow.mjs` — PR #484, rebuilt on
+      main and kept current with the verdict-aware submit protocol from
+      PR #516.)
 
 ## Decisions
 

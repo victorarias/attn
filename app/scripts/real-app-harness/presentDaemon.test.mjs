@@ -16,11 +16,13 @@ describe('buildSubmitMessage', () => {
         { filepath: 'a.go', line_start: 10, line_end: 12, side: 'new', content: 'nit' },
       ],
       handback: true,
+      verdict: 'approved',
     });
 
     expect(message).toEqual({
       cmd: 'present_submit_round',
       round_id: 'round-1',
+      verdict: 'approved',
       comments: [
         { filepath: 'a.go', line_start: 10, line_end: 12, side: 'new', content: 'nit' },
       ],
@@ -28,14 +30,21 @@ describe('buildSubmitMessage', () => {
     });
   });
 
-  it('defaults handback to true and comments to empty', () => {
+  it('defaults handback to true, verdict to feedback, and comments to empty', () => {
     const message = buildSubmitMessage({ roundId: 'round-2' });
     expect(message.handback).toBe(true);
+    expect(message.verdict).toBe('feedback');
     expect(message.comments).toEqual([]);
   });
 
   it('throws without a roundId', () => {
     expect(() => buildSubmitMessage({ comments: [] })).toThrow('requires roundId');
+  });
+
+  it('throws on an invalid verdict', () => {
+    expect(() => buildSubmitMessage({ roundId: 'round-5', verdict: 'lgtm' })).toThrow(
+      'verdict must be "approved" or "feedback"',
+    );
   });
 
   it('throws on an invalid comment side', () => {
