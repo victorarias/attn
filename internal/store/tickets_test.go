@@ -579,3 +579,41 @@ func TestTicketResumeSessionID(t *testing.T) {
 		t.Fatalf("unbound resume id = %q, want empty", got)
 	}
 }
+
+// CrashedTicketsForAssignee returns exactly the revivable set: crashed,
+// non-archived, and bound to the given session — nothing in another column,
+// archived, or owned by someone else.
+func TestCrashedTicketsForAssignee(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	mk := func(id string, status TicketStatus, assignee string) {
+		t.Helper()
+		if _, err := s.CreateTicket(Ticket{ID: id, Title: id, Status: status, Assignee: assignee}, "chief", ticketBase); err != nil {
+			t.Fatalf("CreateTicket %s: %v", id, err)
+		}
+	}
+	mk("crashed-mine", TicketStatusCrashed, "sess-1")
+	mk("crashed-archived", TicketStatusCrashed, "sess-1")
+	if err := s.ArchiveTicket("crashed-archived", ticketBase); err != nil {
+		t.Fatalf("ArchiveTicket: %v", err)
+	}
+	mk("working-mine", TicketStatusWorking, "sess-1")
+	mk("crashed-other", TicketStatusCrashed, "sess-2")
+
+	got, err := s.CrashedTicketsForAssignee("sess-1")
+	if err != nil {
+		t.Fatalf("CrashedTicketsForAssignee: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "crashed-mine" {
+		ids := make([]string, len(got))
+		for i, tk := range got {
+			ids[i] = tk.ID
+		}
+		t.Fatalf("got %v, want exactly [crashed-mine]", ids)
+	}
+
+	if got, err := s.CrashedTicketsForAssignee(""); err != nil || got != nil {
+		t.Fatalf("empty assignee = %v, %v, want nil, nil", got, err)
+	}
+}

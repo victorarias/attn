@@ -43,10 +43,10 @@ const (
 )
 
 // TicketAuthorAttn is the event author attn uses when it writes a transition on a
-// ticket itself rather than on behalf of the user, the chief, or an agent — today
-// only the Crashed status a dead worker could not report. It is an authoring
-// identity, never an observer, so it accrues no cursors and is excluded from
-// nobody's unread feed.
+// ticket itself rather than on behalf of the user, the chief, or an agent — the
+// Crashed status a dead worker could not report, and the crashed→working flip
+// when that worker is revived. It is an authoring identity, never an observer,
+// so it accrues no cursors and is excluded from nobody's unread feed.
 const TicketAuthorAttn = "attn"
 
 // TicketAuthorYou is the identity the human user authors with when acting on a
@@ -426,6 +426,43 @@ func (s *Store) ActiveTicketsForSession(sessionID string) ([]*Ticket, error) {
 		if !ticket.Status.IsTerminal() {
 			tickets = append(tickets, ticket)
 		}
+	}
+	return tickets, rows.Err()
+}
+
+// CrashedTicketsForAssignee returns every non-archived ticket sitting in the
+// Crashed column bound to a session id, newest first — the revival seam
+// (a crashed session respawned/registered/adopted back to live) flips exactly
+// these back to Working. Archived tickets stay archived: the user dismissed
+// them from the board, so a revival must not resurrect them. Activity and
+// attachments are not loaded.
+func (s *Store) CrashedTicketsForAssignee(assignee string) ([]*Ticket, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+	assignee = strings.TrimSpace(assignee)
+	if assignee == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(
+		ticketSelect+` WHERE assignee = ? AND status = ? AND archived_at = '' ORDER BY created_at DESC, id DESC`,
+		assignee, string(TicketStatusCrashed),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tickets []*Ticket
+	for rows.Next() {
+		ticket, err := scanTicket(rows)
+		if err != nil {
+			return nil, err
+		}
+		tickets = append(tickets, ticket)
 	}
 	return tickets, rows.Err()
 }
