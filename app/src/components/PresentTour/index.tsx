@@ -23,13 +23,14 @@
  *     once. A per-file error still gets its own card in-order (rendered as
  *     a plain `type: 'file'` item carrying the error text) rather than
  *     being dropped, but it will not stream in before its siblings.
- *   - Summary/footer placement: CodeView's react wrapper renders its own
- *     internal scroll container (via `containerRef`), not a slot host
- *     that's known to tolerate injected sibling DOM. Rather than risk
- *     fighting the library's own layout, the summary card and end-of-tour
- *     footer are flex siblings around the CodeView, not inside its own
- *     scroller. They stay put (do not scroll with the tour) as a result —
- *     acceptable for slice 1 per the brief's stated fallback.
+ *   - Summary placement: CodeView's react wrapper renders its own internal
+ *     scroll container (via `containerRef`), not a slot host that's known to
+ *     tolerate injected sibling DOM. Rather than risk fighting the library's
+ *     own layout, the summary card is a flex sibling above the CodeView, not
+ *     inside its own scroller — it does not scroll with the tour as a
+ *     result. Instead it folds away via `summaryVisible` once the caller
+ *     reports the user has scrolled past the pinned Summary stop, so it
+ *     doesn't permanently steal space from the diff.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -83,6 +84,9 @@ export interface AnnotationAnchor {
 
 export interface PresentTourProps {
   summary?: string;
+  /** Whether the summary card is expanded. The card stays mounted so the fold
+   * can animate; false collapses it to zero height. */
+  summaryVisible?: boolean;
   files: PresentTourFile[];
   comments: ReviewComment[];
   editingCommentId: string | null;
@@ -100,9 +104,11 @@ export interface PresentTourProps {
    * with `scrollNonce` so re-clicking the same file still re-scrolls. */
   scrollToPath?: string | null;
   scrollNonce?: number;
-  /** Fires with the path nearest the top of the viewport as the user scrolls,
-   * or null when the viewport is scrolled to the very top (the summary
-   * region, above the first file). */
+  /** Fires with the path nearest the top of the viewport as the user
+   * passively scrolls — never with null. The Summary stop (null) is entered
+   * only explicitly (initial state, rail Summary click, or K from the first
+   * file), never as a side effect of scrolling to the top of the tour; see
+   * `handleScroll` below for why passive tracking can't report it. */
   onActivePathChange?: (path: string | null) => void;
   /** Paths the user has marked reviewed (jaunt-style per-file mark). */
   reviewedPaths: ReadonlySet<string>;
@@ -196,6 +202,7 @@ function getVisibleLineRangesFromDiff(diff: ReturnType<typeof parseDiffFromFile>
 
 export function PresentTour({
   summary,
+  summaryVisible = true,
   files,
   comments,
   editingCommentId,
@@ -632,17 +639,6 @@ export function PresentTour({
   const noteByPath = useMemo(() => new Map(files.map((f) => [f.path, f.note])), [files]);
   const groupByPath = useMemo(() => new Map(files.map((f) => [f.path, f.group ?? 'tour'])), [files]);
 
-  // End-of-tour footer counts, mirroring the rail's progress semantics:
-  // progress covers tour + other only (skipped files were never meant to be
-  // walked), and only files actually marked reviewed count as reviewed.
-  const { reviewedCount, progressCount } = useMemo(() => {
-    const progressPaths = files.filter((f) => (f.group ?? 'tour') !== 'skip').map((f) => f.path);
-    return {
-      progressCount: progressPaths.length,
-      reviewedCount: progressPaths.filter((path) => reviewedPaths.has(path)).length,
-    };
-  }, [files, reviewedPaths]);
-
   // The library's items don't carry an arbitrary className slot, so the
   // skip-card de-emphasis (see .present-tour-card-skip in PresentTour.css) is
   // applied imperatively to each rendered card's root element — the same
@@ -735,11 +731,27 @@ export function PresentTour({
   // mounted this commit) rather than "a scroll has ever fired". See that
   // effect's comment.
   const wasSettledRef = useRef(false);
+  // True while a programmatic smooth scroll (rail/j-k or N/P) is settling —
+  // handleScroll swallows passive reports during this window so the
+  // animation's own scroll events can't fight the explicit navigation that
+  // triggered it (e.g. K from the first file scrolling to the summary must
+  // not have its own settling events report the first file and re-fold the
+  // summary). A real user gesture (see `takeover` below) clears this
+  // immediately, since a user's own scroll always wins over a still-animating
+  // programmatic one.
+  const passiveSuppressedRef = useRef(false);
+  // Quiet-window timer backing passiveSuppressedRef: each settling scroll
+  // event re-arms it (see handleScroll), so suppression lifts ~200ms after
+  // the last such event rather than on a fixed delay from when the
+  // programmatic scroll started.
+  const suppressQuietTimerRef = useRef<number>(0);
   useEffect(() => {
     const scroller = containerRef.current;
     if (!scroller) return;
     const takeover = () => {
       userTookOverRef.current = true;
+      passiveSuppressedRef.current = false;
+      window.clearTimeout(suppressQuietTimerRef.current);
     };
     const onNativeScroll = () => {
       if (!userTookOverRef.current && scroller.scrollTop !== 0) scroller.scrollTop = 0;
@@ -755,6 +767,7 @@ export function PresentTour({
       scroller.removeEventListener('pointerdown', takeover);
       scroller.removeEventListener('keydown', takeover);
       scroller.removeEventListener('scroll', onNativeScroll);
+      window.clearTimeout(suppressQuietTimerRef.current);
     };
   }, []);
 
@@ -806,6 +819,8 @@ export function PresentTour({
     const handle = handleRef.current;
     if (!handle) return;
     userTookOverRef.current = true;
+    passiveSuppressedRef.current = true;
+    window.clearTimeout(suppressQuietTimerRef.current);
     const performScroll = () => {
       if (scrollToPath) {
         handle.scrollTo({ type: 'item', id: scrollToPath, align: 'start', behavior: 'smooth' });
@@ -840,6 +855,8 @@ export function PresentTour({
     const handle = handleRef.current;
     if (!handle) return;
     userTookOverRef.current = true;
+    passiveSuppressedRef.current = true;
+    window.clearTimeout(suppressQuietTimerRef.current);
     const { path, anchorKey } = scrollToAnnotation;
     handle.scrollTo({ type: 'item', id: path, align: 'start', behavior: 'smooth' });
     const LOCATE_BUDGET_MS = 1500;
@@ -868,13 +885,28 @@ export function PresentTour({
   // record carries the real mounted `element` for that item — rather than a
   // guessed selector.
   const handleScroll = useCallback(
-    (scrollTop: number) => {
+    (_scrollTop: number) => {
       syncSkipClasses();
       if (!onActivePathChange || !containerRef.current) return;
-      // At the very top of the scroller there is nothing above the first
-      // file to have scrolled past — this is the summary region.
-      if (scrollTop <= 0) {
-        onActivePathChange(null);
+      // Mount/cold-window-pin scroll noise never reports — passive tracking
+      // only starts once the user has taken over with a real gesture (see the
+      // takeover listeners above). Without this, the initial scroll-pin
+      // settling could fold the summary before the user ever touched
+      // anything.
+      if (!userTookOverRef.current) return;
+      // A programmatic smooth scroll (rail/j-k, N/P) is still settling — its
+      // own scroll events must not fight the explicit navigation that
+      // triggered them (e.g. K from the first file scrolling to the summary
+      // must not have the animation's own events report the first file and
+      // re-fold the summary). Re-arm the quiet window on every such event; it
+      // clears itself ~200ms after the last one. If the programmatic scroll
+      // produces no events at all (target already in view), suppression just
+      // stays armed until the user's next gesture clears it.
+      if (passiveSuppressedRef.current) {
+        window.clearTimeout(suppressQuietTimerRef.current);
+        suppressQuietTimerRef.current = window.setTimeout(() => {
+          passiveSuppressedRef.current = false;
+        }, 200);
         return;
       }
       const instance = handleRef.current?.getInstance();
@@ -910,7 +942,11 @@ export function PresentTour({
       style={fontSize ? ({ '--diffs-font-size': `${fontSize}px` } as React.CSSProperties) : undefined}
     >
       {summary && (
-        <div className="present-tour-summary" data-testid="present-tour-summary">
+        <div
+          className={`present-tour-summary ${summaryVisible ? '' : 'collapsed'}`}
+          data-testid="present-tour-summary"
+          aria-hidden={!summaryVisible}
+        >
           <Markdown>{summary}</Markdown>
         </div>
       )}
@@ -934,12 +970,6 @@ export function PresentTour({
           onScroll={handleScroll}
           disableWorkerPool
         />
-      )}
-
-      {allSettled && items.length > 0 && (
-        <div className="present-tour-footer" data-testid="present-tour-footer">
-          End of tour — {reviewedCount} of {progressCount} file{progressCount === 1 ? '' : 's'} reviewed.
-        </div>
       )}
     </div>
   );

@@ -666,16 +666,34 @@ describe('PresentRoot', () => {
     expect(screen.getByTestId('present-root-summary-row')).not.toHaveClass('selected');
   }, TEST_TIMEOUT);
 
-  it('shows a drift banner iff repoHeadSha differs from the pinned round head', async () => {
+  it('shows a drift pill (with the long explanation in its title) iff repoHeadSha differs from the pinned round head, and it dismisses', async () => {
     await loadRound({ repoHeadSha: 'deadbeef000000' });
 
-    expect(screen.getByText(/repo has moved on/)).toBeInTheDocument();
+    const pill = screen.getByRole('status');
+    expect(pill.textContent).toContain('deadbee');
+    expect(pill.getAttribute('title')).toContain('The repo has moved on since this round was pinned');
+
+    fireEvent.click(screen.getByLabelText('Dismiss'));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('shows no drift banner when repoHeadSha matches the pinned round head', async () => {
+  it('shows no drift pill when repoHeadSha matches the pinned round head', async () => {
     await loadRound({ repoHeadSha: round.head_sha });
 
-    expect(screen.queryByText(/repo has moved on/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('passes summaryVisible=true while on the pinned Summary stop, and false after navigating to a file', async () => {
+    await loadRound();
+
+    await waitFor(() => {
+      expect(latestTourProps().summaryVisible).toBe(true);
+    }, WAIT_OPTS);
+
+    fireEvent.click(screen.getByText('src/foo.ts'));
+    await waitFor(() => {
+      expect(latestTourProps().summaryVisible).toBe(false);
+    }, WAIT_OPTS);
   });
 
   it('shows an inline error when a diff fetch fails, without blanking the window', async () => {

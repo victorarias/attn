@@ -152,6 +152,9 @@ export function PresentRoot() {
   // "scroll to this file" instruction — kept separate from `activePath` so a
   // passive activePath update from scrolling can never itself re-trigger a
   // programmatic scroll (which would fight the user's own scroll gesture).
+  // Passive scroll updates never report null — the Summary stop (null) is
+  // only entered explicitly (initial state, rail Summary click, or K from the
+  // first file).
   const [activePath, setActivePath] = useState<string | null>(null);
   const [scrollRequest, setScrollRequest] = useState<{ path: string | null; nonce: number } | null>(null);
   const scrollNonceRef = useRef(0);
@@ -676,23 +679,26 @@ export function PresentRoot() {
 
   return (
     <div className="present-root">
-      <header className="present-root-header">
-        <h1>{presentation.title}</h1>
-        <div className="present-root-meta">
-          <span className="present-root-kind">{presentation.kind}</span>
-          <span className="present-root-repo">{presentation.repo_path}</span>
+      <header className="present-root-topbar">
+        <h1 className="present-root-title" title={presentation.title}>{presentation.title}</h1>
+        <span className="present-root-kind">{presentation.kind}</span>
+        <span className="present-root-repo" title={presentation.repo_path}>{presentation.repo_path}</span>
+        <div className="present-root-topbar-right">
+          <span className="present-root-round-label">Round {round.seq}</span>
+          <span className="present-root-shas">{shortSha(round.base_sha)}…{shortSha(round.head_sha)}</span>
+          <span className={`present-root-status ${round.submitted_at ? 'submitted' : 'draft'}`}>{round.submitted_at ? 'Submitted' : 'Draft'}</span>
+          {showDrift && (
+            <span className="present-root-drift" role="status"
+                  title={`The repo has moved on since this round was pinned (${shortSha(round.head_sha)} → ${shortSha(repoHeadSha!)}). Diffs below still show the pinned commits.`}>
+              moved on → {shortSha(repoHeadSha!)}
+              <button type="button" className="present-root-drift-dismiss" aria-label="Dismiss" onClick={() => setDriftDismissed(true)}>×</button>
+            </span>
+          )}
+          {comments.length > 0 && (
+            <span className="present-root-comment-count">{comments.length} comment{comments.length === 1 ? '' : 's'}</span>
+          )}
         </div>
       </header>
-
-      <section className="present-root-round">
-        <span>Round {round.seq}</span>
-        <span className="present-root-shas">
-          {shortSha(round.base_sha)}…{shortSha(round.head_sha)}
-        </span>
-        <span className={`present-root-status ${round.submitted_at ? 'submitted' : 'draft'}`}>
-          {round.submitted_at ? 'Submitted' : 'Draft'}
-        </span>
-      </section>
 
       {showSubmitDialog && (
         <div className="present-root-submit-overlay" role="dialog" aria-modal="true" aria-label="Submit review">
@@ -738,29 +744,6 @@ export function PresentRoot() {
             </div>
           </div>
         </div>
-      )}
-
-      {showDrift && (
-        <div className="present-root-drift" role="status">
-          <span>
-            The repo has moved on since this round was pinned ({shortSha(round.head_sha)} → {shortSha(repoHeadSha!)}).
-            Diffs below still show the pinned commits.
-          </span>
-          <button
-            type="button"
-            className="present-root-drift-dismiss"
-            aria-label="Dismiss"
-            onClick={() => setDriftDismissed(true)}
-          >
-            ×
-          </button>
-        </div>
-      )}
-
-      {comments.length > 0 && (
-        <p className="present-root-comment-count">
-          {comments.length} comment{comments.length === 1 ? '' : 's'} on this round
-        </p>
       )}
 
       <div className="present-root-body">
@@ -817,6 +800,7 @@ export function PresentRoot() {
           ) : (
             <PresentTour
               summary={round.manifest.summary}
+              summaryVisible={activePath === null}
               files={tourFiles}
               comments={allComments}
               editingCommentId={editingCommentId}

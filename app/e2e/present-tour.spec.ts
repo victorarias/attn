@@ -88,12 +88,26 @@ async function findContainerByTitle(page: Page, path: string): Promise<Locator |
   return null;
 }
 
-/** Opens a draft on the given line via the gutter "+" (hover then click), scoped to one file's container. */
+/**
+ * Opens a draft on the given line via the gutter "+" (hover then click),
+ * scoped to one file's container.
+ *
+ * The diff rows re-render while hover state, draft mounts, and the
+ * virtualizer churn, so the "+" can detach between resolving and clicking
+ * (observed as `element was detached from the DOM, retrying` until the test
+ * times out). Retry the whole hover→click gesture until a new draft form
+ * actually appears, skipping the click if a prior attempt already landed.
+ */
 async function openDraftViaGutter(container: Locator, line: Locator) {
-  await line.hover();
-  const plus = container.locator('[data-utility-button]');
-  await plus.waitFor({ state: 'visible' });
-  await plus.click();
+  const page = container.page();
+  const forms = page.getByTestId('diff-comment-form');
+  const before = await forms.count();
+  await expect(async () => {
+    if ((await forms.count()) > before) return; // a prior attempt's click landed
+    await line.hover();
+    await container.locator('[data-utility-button]').click({ timeout: 2000 });
+    await expect(forms).toHaveCount(before + 1, { timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
 }
 
 test.describe('PresentTour rendering', () => {
@@ -117,8 +131,6 @@ test.describe('PresentTour rendering', () => {
       const last = containers.last();
       return titleOf(last);
     }).toBe('src/gamma.ts');
-
-    await expect(page.getByTestId('present-tour-footer')).toContainText('3 files reviewed');
   });
 
   test('renders the per-file note as a callout under that file only', async ({ page }) => {
