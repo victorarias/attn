@@ -359,27 +359,30 @@ describe('PresentTour annotations', () => {
   });
 });
 
-describe('PresentTour end-of-tour footer', () => {
-  it('counts reviewed over progress files only (skipped excluded), not every rendered card', async () => {
-    const tourFile = tinyFile('src/foo.ts');
-    const otherFile: PresentTourFile = { ...tinyFile('src/extra.ts'), group: 'other' };
-    const skipFile: PresentTourFile = { ...tinyFile('src/generated.ts'), group: 'skip' };
+describe('PresentTour summary fold', () => {
+  it('renders expanded (no collapsed class, aria-hidden=false) when summaryVisible is omitted or true', async () => {
+    render(<PresentTour {...baseProps({ files: [tinyFile('src/foo.ts')], summary: 'The summary text' })} />);
+    await waitForSettled();
+
+    const summaryEl = screen.getByTestId('present-tour-summary');
+    expect(summaryEl).not.toHaveClass('collapsed');
+    expect(summaryEl).toHaveAttribute('aria-hidden', 'false');
+    expect(summaryEl.textContent).toContain('The summary text');
+  });
+
+  it('applies the collapsed class and aria-hidden=true when summaryVisible is false, without unmounting the card', async () => {
     render(
       <PresentTour
-        {...baseProps({
-          files: [tourFile, otherFile, skipFile],
-          reviewedPaths: new Set(['src/foo.ts']),
-        })}
+        {...baseProps({ files: [tinyFile('src/foo.ts')], summary: 'The summary text', summaryVisible: false })}
       />
     );
     await waitForSettled();
 
-    // 3 cards render, but progress covers tour + other only (2), of which
-    // one is marked reviewed — the footer must mirror the rail, not count
-    // skipped cards or claim everything reviewed.
-    await waitFor(() => {
-      expect(screen.getByTestId('present-tour-footer').textContent).toBe('End of tour — 1 of 2 files reviewed.');
-    });
+    const summaryEl = screen.getByTestId('present-tour-summary');
+    expect(summaryEl).toHaveClass('collapsed');
+    expect(summaryEl).toHaveAttribute('aria-hidden', 'true');
+    // Stays mounted (not removed) so the fold can animate.
+    expect(summaryEl.textContent).toContain('The summary text');
   });
 });
 

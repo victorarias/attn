@@ -1,7 +1,7 @@
 .present-root {
   height: 100vh;
   overflow-y: auto;
-  padding: 32px 40px;
+  padding: 10px 16px 12px;
   background: var(--color-bg-app);
   color: var(--color-text-primary);
   display: flex;
@@ -15,41 +15,65 @@
   color: var(--color-text-secondary);
 }
 
-.present-root-header h1 {
-  margin: 0 0 8px 0;
-  font-size: 20px;
-  font-weight: 600;
+.present-root-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 10px;
+  border-bottom: 1px solid var(--color-border);
+  min-width: 0;
 }
 
-.present-root-meta {
-  display: flex;
-  gap: 12px;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size);
+.present-root-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .present-root-kind {
   text-transform: capitalize;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  flex: none;
 }
 
-.present-root-round {
+.present-root-repo {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-family: monospace;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.present-root-topbar-right {
+  margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 20px;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: var(--font-size);
+  gap: 10px;
+  flex: none;
+  white-space: nowrap;
+}
+
+.present-root-round-label {
+  font-size: var(--font-size-sm);
 }
 
 .present-root-shas {
   font-family: monospace;
   color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
 }
 
 .present-root-status {
-  margin-left: auto;
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 12px;
@@ -143,45 +167,44 @@
 }
 
 .present-root-drift {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 16px;
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-bg-panel);
-  color: var(--color-text-secondary);
-  font-size: var(--font-size);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: var(--font-size-sm);
+  background: #d9770622;
+  color: #d97706;
+  border: 1px solid #d9770655;
 }
 
 .present-root-drift-dismiss {
   background: none;
   border: none;
-  color: var(--color-text-secondary);
+  color: inherit;
   cursor: pointer;
-  font-size: 16px;
+  font-size: 13px;
   line-height: 1;
-  padding: 0 2px;
+  padding: 0;
+  opacity: 0.7;
 }
 
 .present-root-drift-dismiss:hover {
-  color: var(--color-text-primary);
+  opacity: 1;
 }
 
 .present-root-comment-count {
-  margin-top: 16px;
   color: var(--color-text-secondary);
-  font-size: var(--font-size);
+  font-size: var(--font-size-sm);
+  margin: 0;
 }
 
 .present-root-body {
   display: flex;
   flex: 1;
   min-height: 0;
-  margin-top: 20px;
-  gap: 20px;
+  margin-top: 12px;
+  gap: 14px;
 }
 
 .present-root-rail {

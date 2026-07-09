@@ -26,6 +26,26 @@
      squeezes the tour itself out of the viewport. */
   max-height: 40vh;
   overflow-y: auto;
+  transition: max-height 0.18s ease, opacity 0.18s ease, padding 0.18s ease, margin-bottom 0.18s ease;
+}
+
+/* Folded once the user scrolls past the pinned Summary stop (see
+   summaryVisible) — the card stays mounted so the fold can animate, rather
+   than unmounting and losing the transition. */
+.present-tour-summary.collapsed {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-width: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .present-tour-summary {
+    transition: none;
+  }
 }
 
 .present-tour-summary :first-child {
@@ -113,16 +133,6 @@
   background: var(--color-bg-panel);
   font-family: monospace;
   font-size: var(--font-size-xs);
-}
-
-.present-tour-footer {
-  flex: 0 0 auto;
-  margin-top: 16px;
-  padding: 16px;
-  text-align: center;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size);
-  border-top: 1px solid var(--color-border);
 }
 
 /* Skipped-file cards (jaunt's "deemph" analog): CodeView items render inside

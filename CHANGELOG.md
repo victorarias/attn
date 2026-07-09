@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-09]
 
+### Changed
+- **The Present review window reclaims vertical space for the diff.** The title, kind, repo path, round info, drift notice, and comment count now share one compact line at the top instead of a tall stacked header. The summary card folds away once you scroll into the tour and reappears when you jump back to the Summary stop, and the redundant "End of tour" strip — which just repeated the drive bar's reviewed count — is gone.
+
 ### Fixed
 - **Reloading a crashed session moves its ticket back to Working automatically.** When a delegated session died mid-run its ticket was stamped Crashed — but bringing the session back to life (reloading the dead pane, resuming the ticket, or the daemon re-adopting a still-live worker after a restart) left the ticket sitting in the Crashed column until you moved it by hand. Reviving the session now flips the ticket back to Working on its own, and crash detection is re-armed so a later genuine crash is still stamped. Intentional closes are still never treated as crashes.
 

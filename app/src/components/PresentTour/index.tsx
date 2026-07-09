@@ -23,13 +23,14 @@
  *     once. A per-file error still gets its own card in-order (rendered as
  *     a plain `type: 'file'` item carrying the error text) rather than
  *     being dropped, but it will not stream in before its siblings.
- *   - Summary/footer placement: CodeView's react wrapper renders its own
- *     internal scroll container (via `containerRef`), not a slot host
- *     that's known to tolerate injected sibling DOM. Rather than risk
- *     fighting the library's own layout, the summary card and end-of-tour
- *     footer are flex siblings around the CodeView, not inside its own
- *     scroller. They stay put (do not scroll with the tour) as a result —
- *     acceptable for slice 1 per the brief's stated fallback.
+ *   - Summary placement: CodeView's react wrapper renders its own internal
+ *     scroll container (via `containerRef`), not a slot host that's known to
+ *     tolerate injected sibling DOM. Rather than risk fighting the library's
+ *     own layout, the summary card is a flex sibling above the CodeView, not
+ *     inside its own scroller — it does not scroll with the tour as a
+ *     result. Instead it folds away via `summaryVisible` once the caller
+ *     reports the user has scrolled past the pinned Summary stop, so it
+ *     doesn't permanently steal space from the diff.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -83,6 +84,9 @@ export interface AnnotationAnchor {
 
 export interface PresentTourProps {
   summary?: string;
+  /** Whether the summary card is expanded. The card stays mounted so the fold
+   * can animate; false collapses it to zero height. */
+  summaryVisible?: boolean;
   files: PresentTourFile[];
   comments: ReviewComment[];
   editingCommentId: string | null;
@@ -196,6 +200,7 @@ function getVisibleLineRangesFromDiff(diff: ReturnType<typeof parseDiffFromFile>
 
 export function PresentTour({
   summary,
+  summaryVisible = true,
   files,
   comments,
   editingCommentId,
@@ -632,17 +637,6 @@ export function PresentTour({
   const noteByPath = useMemo(() => new Map(files.map((f) => [f.path, f.note])), [files]);
   const groupByPath = useMemo(() => new Map(files.map((f) => [f.path, f.group ?? 'tour'])), [files]);
 
-  // End-of-tour footer counts, mirroring the rail's progress semantics:
-  // progress covers tour + other only (skipped files were never meant to be
-  // walked), and only files actually marked reviewed count as reviewed.
-  const { reviewedCount, progressCount } = useMemo(() => {
-    const progressPaths = files.filter((f) => (f.group ?? 'tour') !== 'skip').map((f) => f.path);
-    return {
-      progressCount: progressPaths.length,
-      reviewedCount: progressPaths.filter((path) => reviewedPaths.has(path)).length,
-    };
-  }, [files, reviewedPaths]);
-
   // The library's items don't carry an arbitrary className slot, so the
   // skip-card de-emphasis (see .present-tour-card-skip in PresentTour.css) is
   // applied imperatively to each rendered card's root element — the same
@@ -910,7 +904,11 @@ export function PresentTour({
       style={fontSize ? ({ '--diffs-font-size': `${fontSize}px` } as React.CSSProperties) : undefined}
     >
       {summary && (
-        <div className="present-tour-summary" data-testid="present-tour-summary">
+        <div
+          className={`present-tour-summary ${summaryVisible ? '' : 'collapsed'}`}
+          data-testid="present-tour-summary"
+          aria-hidden={!summaryVisible}
+        >
           <Markdown>{summary}</Markdown>
         </div>
       )}
@@ -934,12 +932,6 @@ export function PresentTour({
           onScroll={handleScroll}
           disableWorkerPool
         />
-      )}
-
-      {allSettled && items.length > 0 && (
-        <div className="present-tour-footer" data-testid="present-tour-footer">
-          End of tour — {reviewedCount} of {progressCount} file{progressCount === 1 ? '' : 's'} reviewed.
-        </div>
       )}
     </div>
   );
