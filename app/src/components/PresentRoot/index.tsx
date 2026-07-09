@@ -152,6 +152,9 @@ export function PresentRoot() {
   // "scroll to this file" instruction — kept separate from `activePath` so a
   // passive activePath update from scrolling can never itself re-trigger a
   // programmatic scroll (which would fight the user's own scroll gesture).
+  // Passive scroll updates never report null — the Summary stop (null) is
+  // only entered explicitly (initial state, rail Summary click, or K from the
+  // first file).
   const [activePath, setActivePath] = useState<string | null>(null);
   const [scrollRequest, setScrollRequest] = useState<{ path: string | null; nonce: number } | null>(null);
   const scrollNonceRef = useRef(0);

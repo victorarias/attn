@@ -31,11 +31,32 @@ vi.mock('mermaid', () => ({
 // `version` CodeView receives, without CodeView itself needing to be real.
 const codeViewRenders = vi.hoisted(() => ({ calls: [] as Array<Array<Record<string, unknown>>> }));
 
+// The latest full props object CodeView received, so scroll tests can invoke
+// `props.onScroll(scrollTop)` directly — the same callback PresentTour wires
+// up as `handleScroll` — without needing the real library's scroll machinery.
+const codeViewProps = vi.hoisted(() => ({ latest: null as Record<string, unknown> | null }));
+
 vi.mock('@pierre/diffs/react', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@pierre/diffs/react')>();
   const MockCodeView = forwardRef((props: Record<string, unknown>, ref) => {
+    codeViewProps.latest = props;
     useImperativeHandle(ref, () => ({
-      getInstance: () => ({ getRenderedItems: () => [] }),
+      // Derived from the mock's own rendered DOM (each `[data-item-id]` div
+      // below) rather than hardcoded — in jsdom `getBoundingClientRect()`
+      // returns all zeros, so the first item's `top` always lands at 0,
+      // which is <= handleScroll's 80px threshold and makes it `bestPath`.
+      // That's what lets these tests exercise the real bestPath/nearestPath
+      // loop instead of just the pre-loop early returns.
+      getInstance: () => ({
+        getRenderedItems: () => {
+          const container = document.querySelector('[data-testid="mock-codeview"]');
+          if (!container) return [];
+          return Array.from(container.querySelectorAll<HTMLElement>('[data-item-id]')).map((el) => ({
+            id: el.getAttribute('data-item-id') as string,
+            element: el,
+          }));
+        },
+      }),
       scrollTo: () => {},
       getItem: () => undefined,
       updateItem: () => false,
@@ -75,6 +96,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   codeViewRenders.calls = [];
+  codeViewProps.latest = null;
 });
 
 const noop = () => {};
@@ -383,6 +405,116 @@ describe('PresentTour summary fold', () => {
     expect(summaryEl).toHaveAttribute('aria-hidden', 'true');
     // Stays mounted (not removed) so the fold can animate.
     expect(summaryEl.textContent).toContain('The summary text');
+  });
+});
+
+// These exercise handleScroll's new explicit-only Summary semantics: passive
+// scroll tracking (the mock's onScroll callback, captured via codeViewProps)
+// never reports null, and it is suppressed both before the user's first real
+// gesture and while a programmatic scroll (rail/j-k) is still settling.
+describe('PresentTour summary fold vs scroll', () => {
+  function latestOnScroll(): (scrollTop: number) => void {
+    return codeViewProps.latest!.onScroll as (scrollTop: number) => void;
+  }
+
+  it('does not report scroll position before any user gesture (mount/cold-window-pin noise)', async () => {
+    const onActivePathChange = vi.fn();
+    render(
+      <PresentTour
+        {...baseProps({ files: [tinyFile('src/foo.ts'), tinyFile('src/bar.ts')], onActivePathChange })}
+      />
+    );
+    await waitForSettled();
+
+    act(() => {
+      latestOnScroll()(0);
+    });
+    act(() => {
+      latestOnScroll()(50);
+    });
+
+    expect(onActivePathChange).not.toHaveBeenCalled();
+  });
+
+  it('reports the first file (never null) at the top of the scroller once the user has taken over', async () => {
+    const onActivePathChange = vi.fn();
+    render(
+      <PresentTour
+        {...baseProps({ files: [tinyFile('src/foo.ts'), tinyFile('src/bar.ts')], onActivePathChange })}
+      />
+    );
+    await waitForSettled();
+
+    // A real user gesture on the scroller (the takeover listeners live on
+    // containerRef, which is this mock's root div) enables passive tracking.
+    fireEvent.wheel(screen.getByTestId('mock-codeview'));
+    act(() => {
+      latestOnScroll()(0);
+    });
+
+    expect(onActivePathChange).toHaveBeenCalledWith('src/foo.ts');
+    expect(onActivePathChange).not.toHaveBeenCalledWith(null);
+  });
+
+  it('suppresses passive reporting while a programmatic scroll settles; user takeover restores it immediately', async () => {
+    const onActivePathChange = vi.fn();
+    const files = [tinyFile('src/foo.ts'), tinyFile('src/bar.ts')];
+    const { rerender } = render(
+      <PresentTour {...baseProps({ files, onActivePathChange, scrollToPath: null, scrollNonce: 0 })} />
+    );
+    await waitForSettled();
+
+    const container = screen.getByTestId('mock-codeview');
+    // Arm passive tracking first so an unsuppressed onScroll below would
+    // otherwise report — isolating the assertion to suppression, not to the
+    // pre-gesture guard covered by the previous test.
+    fireEvent.wheel(container);
+
+    // Simulate the rail/j-k path: scrollToPath + an advanced scrollNonce.
+    rerender(
+      <PresentTour {...baseProps({ files, onActivePathChange, scrollToPath: 'src/bar.ts', scrollNonce: 1 })} />
+    );
+
+    act(() => {
+      latestOnScroll()(120);
+    });
+    expect(onActivePathChange).not.toHaveBeenCalled();
+
+    // A real user gesture takes over immediately, even mid-settle.
+    fireEvent.wheel(container);
+    act(() => {
+      latestOnScroll()(120);
+    });
+    expect(onActivePathChange).toHaveBeenCalled();
+  });
+
+  it('clears suppression after the quiet window elapses with no further scroll events', async () => {
+    const onActivePathChange = vi.fn();
+    const files = [tinyFile('src/foo.ts'), tinyFile('src/bar.ts')];
+    const { rerender } = render(
+      <PresentTour {...baseProps({ files, onActivePathChange, scrollToPath: null, scrollNonce: 0 })} />
+    );
+    await waitForSettled();
+
+    fireEvent.wheel(screen.getByTestId('mock-codeview'));
+    rerender(<PresentTour {...baseProps({ files, onActivePathChange, scrollToPath: 'src/bar.ts', scrollNonce: 1 })} />);
+
+    act(() => {
+      latestOnScroll()(120);
+    });
+    expect(onActivePathChange).not.toHaveBeenCalled();
+
+    // Real ~250ms wait past the 200ms quiet window — fake timers fight this
+    // suite's use of testing-library's `waitFor` (see waitForSettled), so
+    // this is a genuine wall-clock wait rather than `vi.advanceTimersByTime`.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    });
+
+    act(() => {
+      latestOnScroll()(80);
+    });
+    expect(onActivePathChange).toHaveBeenCalled();
   });
 });
 
