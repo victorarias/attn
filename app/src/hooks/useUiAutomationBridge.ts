@@ -1217,9 +1217,8 @@ function collectTicketDetailUiState() {
       move: entry.querySelector('.ticket-activity-move')?.textContent?.trim() ?? '',
       comment: entry.querySelector('.ticket-activity-comment')?.textContent?.trim() ?? '',
     })),
-    attachments: Array.from(panel.querySelectorAll('.ticket-attachment')).map((attachment) => ({
-      filename: attachment.querySelector('.ticket-attachment-name')?.textContent?.trim() ?? '',
-      note: attachment.querySelector('.ticket-attachment-note')?.textContent?.trim() ?? '',
+    artifacts: Array.from(panel.querySelectorAll('.ticket-artifact')).map((artifact) => ({
+      filename: artifact.querySelector('.ticket-artifact-name')?.textContent?.trim() ?? '',
     })),
     canResume: panel.querySelector('[data-testid="ticket-resume"]') instanceof HTMLElement,
     loading: Boolean(panel.querySelector('.ticket-detail-loading')),

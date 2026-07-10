@@ -61,3 +61,25 @@ location.
 Reporting does not stop or transfer your session. Continue working unless the task
 is blocked or complete. Do not report ticket status for ordinary, untracked
 delegation.
+
+## Hand Over Durable Artifacts
+
+When tracked work produces a plan, design, or other Markdown artifact that must
+outlive this session, hand it over to the ticket:
+
+    "$ATTN_WRAPPER_PATH" ticket handover \
+      --file docs/plans/design.md \
+      --file docs/plans/rollout.md \
+      --state ready_for_review \
+      --comment "The plan and decision context are ready."
+
+`--file` is repeatable. `--state` and `--comment` are optional. The command copies
+the files into the ticket's visible Notebook directory, records one durable
+handover event, and returns the canonical paths. A matching retry returns the same
+receipt; a same-name file with different bytes is preserved and must be renamed
+before retrying.
+
+After success, edit the returned files directly. They are ordinary Markdown files
+and the filesystem is the current artifact index. When you make a meaningful edit,
+rename, or deletion, report it with `ticket status --comment` or `ticket comment`
+so the chief knows to re-read the ticket.

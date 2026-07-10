@@ -3,6 +3,9 @@ import { render, screen, waitFor, sleep, fireEvent } from '../test/utils';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import type { Ticket } from '../hooks/useDaemonSocket';
 import { TicketStatus, TicketActivityKind } from '../types/generated';
+import { open } from '@tauri-apps/plugin-dialog';
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
   return {
@@ -34,8 +37,8 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
         created_at: '2026-06-27T10:06:00Z',
       },
     ],
-    attachments: [
-      { id: 1, filename: 'report.md', path: '/repo/report.md', note: 'the findings', created_at: '2026-06-27T10:07:00Z' },
+    artifacts: [
+      { filename: 'report.md', path: '/repo/report.md', notebook_path: 'tickets/store-migration/report.md' },
     ],
     ...overrides,
   };
@@ -57,7 +60,7 @@ describe('TicketDetailPanel', () => {
     );
 
     await waitFor(() => screen.getByText('Move the store to X'));
-    // history (status change + comment) and attachments are the full-record detail
+    // history and artifacts are the full-record detail
     expect(screen.getByText('ready for a look')).toBeTruthy();
     expect(screen.getByText('looks good')).toBeTruthy();
     expect(screen.getByText('report.md')).toBeTruthy();
@@ -412,6 +415,68 @@ describe('TicketDetailPanel', () => {
     expect(screen.queryByTestId('ticket-status-select')).toBeNull();
     expect(screen.queryByTestId('ticket-comment-input')).toBeNull();
     expect(screen.queryByTestId('ticket-edit-description')).toBeNull();
+  });
+
+  it('hands over selected Markdown files with optional state and comment', async () => {
+    vi.mocked(open).mockResolvedValue(['/tmp/design.md', '/tmp/rollout.md']);
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    const onHandover = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onHandover={onHandover}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByTestId('ticket-choose-handover'));
+    fireEvent.click(screen.getByTestId('ticket-choose-handover'));
+    await waitFor(() => screen.getByTestId('ticket-handover-form'));
+    fireEvent.change(screen.getByLabelText('Resulting ticket state'), { target: { value: 'ready_for_review' } });
+    fireEvent.change(screen.getByPlaceholderText('Decision context (optional)'), { target: { value: 'Chosen approach' } });
+    fireEvent.click(screen.getByTestId('ticket-submit-handover'));
+    await waitFor(() => expect(onHandover).toHaveBeenCalledWith(
+      'store-migration',
+      ['/tmp/design.md', '/tmp/rollout.md'],
+      'ready_for_review',
+      'Chosen approach',
+    ));
+  });
+
+  it('opens, renames, and deletes a current artifact', async () => {
+    const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
+    const onOpenArtifact = vi.fn();
+    const onRenameArtifact = vi.fn().mockResolvedValue(undefined);
+    const onDeleteArtifact = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window, 'confirm', { configurable: true, value: vi.fn(() => true) });
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onOpenArtifact={onOpenArtifact}
+        onRenameArtifact={onRenameArtifact}
+        onDeleteArtifact={onDeleteArtifact}
+        onClose={() => {}}
+      />,
+    );
+    const artifact = await screen.findByText('report.md');
+    fireEvent.click(artifact);
+    expect(onOpenArtifact).toHaveBeenCalledWith('tickets/store-migration/report.md');
+
+    fireEvent.click(screen.getByText('Rename'));
+    fireEvent.change(screen.getByLabelText('Rename report.md'), { target: { value: 'implementation.md' } });
+    fireEvent.click(screen.getByText('Save'));
+    await waitFor(() => expect(onRenameArtifact).toHaveBeenCalledWith(
+      'tickets/store-migration/report.md',
+      'tickets/store-migration/implementation.md',
+    ));
+
+    fireEvent.click(screen.getByText('Delete'));
+    await waitFor(() => expect(onDeleteArtifact).toHaveBeenCalledWith('tickets/store-migration/report.md'));
   });
 
   it('shows the orphan badge for an open reconciled ticket and hides it otherwise', async () => {

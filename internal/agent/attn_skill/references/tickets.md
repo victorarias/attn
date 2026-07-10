@@ -29,16 +29,42 @@ How much to prescribe, what "done" is, and who reviews all change with the kind 
 
 | deliverable | what "done" is | attach | how much to prescribe | who reviews |
 |---|---|---|---|---|
-| feature / code | behavior exists, tests green, PR up | the diff / PR | outcome + constraints, not the implementation | the user (engineering) |
-| bug fix | root cause found *then* fixed, regression test | repro + diagnosis | symptom + repro only — prescribing the fix invites symptom-patching | the user |
-| research | a sourced answer feeding a decision | the findings | frame the *question*, not a task | the answer is the deliverable |
-| docs / prose | the durable point made, the old superseded | the doc | audience + what it replaces + the one idea | the chief may review on the merits |
-| refactor / migration | transform complete, behavior preserved | before/after + invariant checks | here you *do* prescribe; list the behaviors that must survive | the user, lighter |
-| prototype | a decision or a feel; throwaway | the thing + what was learned | the question being de-risked; tests optional | informal |
+| feature / code | behavior exists, tests green, PR up | hand over the plan when it remains active | outcome + constraints, not the implementation | the user (engineering) |
+| bug fix | root cause found *then* fixed, regression test | hand over durable diagnosis when needed | symptom + repro only — prescribing the fix invites symptom-patching | the user |
+| research | a sourced answer feeding a decision | hand over the findings | frame the *question*, not a task | the answer is the deliverable |
+| docs / prose | the durable point made, the old superseded | hand over the doc | audience + what it replaces + the one idea | the chief may review on the merits |
+| refactor / migration | transform complete, behavior preserved | hand over before/after and invariants | here you *do* prescribe; list the behaviors that must survive | the user, lighter |
+| prototype | a decision or a feel; throwaway | hand over the thing and learning when durable | the question being de-risked; tests optional | informal |
 
 Deliverable type also predicts the terminal status: research and prose often go straight
 to **done** (the artifact is the proof); code lands in **in review** because someone else
 validates it.
+
+## Handing over Markdown artifacts
+
+`attn ticket handover` is the durable producer-to-ticket operation:
+
+    "$ATTN_WRAPPER_PATH" ticket handover \
+      --file docs/plans/design.md \
+      --file docs/plans/rollout.md \
+      --ticket <ticket-id> \
+      --state ready_for_review \
+      --comment "Decision context for the chief."
+
+- Omit `--ticket` to use your own bound ticket; include it to target any known
+  ticket, matching `ticket status --ticket` and `ticket comment`.
+- Repeat `--file` to submit several Markdown files in one handover.
+- `--state` uses the reporting vocabulary: `in_progress`, `needs_input`,
+  `ready_for_review`, `completed`, or `failed`.
+- `--comment` is short decision context. Put the full reasoning in the Markdown.
+- The receipt's Notebook paths are canonical. Current artifacts are whatever
+  regular `.md` files exist directly in `tickets/<ticket-id>/` when the ticket is
+  read.
+- Retrying an identical handover returns its existing receipt. A destination with
+  different bytes is never overwritten; choose a new filename and retry.
+
+After handover, edit, rename, or delete the canonical files with ordinary file
+tools. Report meaningful changes on the ticket so participants know to re-read it.
 
 ## Creating a ticket
 

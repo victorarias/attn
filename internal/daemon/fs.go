@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"errors"
+
 	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
@@ -129,6 +131,62 @@ func (d *Daemon) sendFsWriteWSResult(client *wsClient, requestID, path, content,
 		Success:   err == nil,
 		Result:    result,
 	}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
+}
+
+func (d *Daemon) sendFsRenameWSResult(client *wsClient, requestID, oldPath, newPath string) {
+	oldRel, oldErr := fsdoc.CleanPath(oldPath)
+	newRel, newErr := fsdoc.CleanPath(newPath)
+	err := errors.Join(oldErr, newErr)
+	var result *protocol.FsRenameResult
+	store, storeErr := d.fsStoreFor()
+	if err == nil {
+		err = storeErr
+	}
+	if err == nil {
+		_, hash, readErr := store.Read(oldRel)
+		if readErr != nil {
+			err = readErr
+		} else {
+			d.noteNotebookSelfWrite(
+				notebook.SelfWrite{Rel: oldRel},
+				notebook.SelfWrite{Rel: newRel, Hash: hash},
+			)
+			err = store.Rename(oldRel, newRel)
+			if err == nil {
+				result = &protocol.FsRenameResult{Path: oldRel, NewPath: newRel}
+				d.broadcastNotebookChanged(originUI, oldRel, newRel)
+				d.broadcastFsChanged(originUI, oldRel, newRel)
+			}
+		}
+	}
+	msg := protocol.FsRenameResultMessage{Event: protocol.EventFsRenameResult, RequestID: requestID, Success: err == nil, Result: result}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
+}
+
+func (d *Daemon) sendFsDeleteWSResult(client *wsClient, requestID, path string) {
+	rel, err := fsdoc.CleanPath(path)
+	var result *protocol.FsDeleteResult
+	store, storeErr := d.fsStoreFor()
+	if err == nil {
+		err = storeErr
+	}
+	if err == nil {
+		d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: rel})
+		err = store.Delete(rel)
+		if err == nil {
+			result = &protocol.FsDeleteResult{Path: rel}
+			d.broadcastNotebookChanged(originUI, rel)
+			d.broadcastFsChanged(originUI, rel)
+		}
+	}
+	msg := protocol.FsDeleteResultMessage{Event: protocol.EventFsDeleteResult, RequestID: requestID, Success: err == nil, Result: result}
 	if err != nil {
 		msg.Error = protocol.Ptr(err.Error())
 	}

@@ -7,6 +7,7 @@ export { parseNotebookHref, type NotebookHref } from './NotebookSurface';
 
 interface NotebookBrowserProps {
   isOpen: boolean;
+  initialPath?: string | null;
   onClose: () => void;
   // List one directory's immediate children over the daemon's generic filesystem
   // surface. '' = the notebook root. Drives the lazy folder tree in the sidebar.

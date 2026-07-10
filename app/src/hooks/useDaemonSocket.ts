@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '156';
+export const PROTOCOL_VERSION = '157';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -408,6 +408,15 @@ export interface FsWriteResult {
   hash?: string;
   conflict: boolean;
   currentHash?: string;
+}
+
+export interface FsRenameResult {
+  path: string;
+  new_path: string;
+}
+
+export interface FsDeleteResult {
+  path: string;
 }
 
 // Whether a path exists under the notebook root, without reading it. Used to flag
@@ -1559,6 +1568,23 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'fs_rename_result':
+          case 'fs_delete_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') break;
+            const prefix = data.event === 'fs_rename_result' ? 'fs_rename' : 'fs_delete';
+            const key = `${prefix}:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) break;
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.result) {
+              pending.resolve(data.result);
+            } else {
+              pending.reject(new Error(data.error || 'Filesystem action failed'));
+            }
+            break;
+          }
+
           case 'fs_exists_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') {
@@ -1655,6 +1681,21 @@ export function useDaemonSocket({
               pending.resolve(undefined);
             } else {
               pending.reject(new Error(data.error || 'Ticket action failed'));
+            }
+            break;
+          }
+
+          case 'ticket_handover_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') break;
+            const key = `ticket_handover:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) break;
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.result) {
+              pending.resolve(data.result);
+            } else {
+              pending.reject(new Error(data.error || 'Ticket handover failed'));
             }
             break;
           }
@@ -3932,7 +3973,7 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
-  // Fetch one ticket's full record (row + activity thread + attachments) for the
+  // Fetch one ticket's full record (row + activity thread + current artifacts) for the
   // detail view. The board feed carries only bare rows, so the detail panel pulls
   // the full record by id, correlated by request_id against the ticket_result event.
   const fetchTicket = useCallback((ticketId: string): Promise<Ticket> => {
@@ -3999,6 +4040,40 @@ export function useDaemonSocket({
       sendTicketAction('ticket_edit_description', { ticket_id: ticketId, description }),
     [sendTicketAction],
   );
+
+  const sendTicketHandover = useCallback((
+    ticketId: string,
+    paths: string[],
+    state?: string,
+    comment?: string,
+  ): Promise<unknown> => new Promise((resolve, reject) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      reject(new Error('WebSocket not connected'));
+      return;
+    }
+    const requestId = nextRequestID('ticket_handover');
+    const key = `ticket_handover:${requestId}`;
+    pendingActionsRef.current.set(key, { resolve, reject });
+    ws.send(JSON.stringify({
+      cmd: 'ticket_handover',
+      request_id: requestId,
+      source_session_id: 'you',
+      ticket_id: ticketId,
+      files: paths.map((sourcePath) => ({
+        source_path: sourcePath,
+        filename: sourcePath.split(/[\\/]/).pop() || sourcePath,
+      })),
+      ...(state ? { state } : {}),
+      ...(comment ? { comment } : {}),
+    }));
+    setTimeout(() => {
+      if (pendingActionsRef.current.has(key)) {
+        pendingActionsRef.current.delete(key);
+        reject(new Error('Ticket handover timed out'));
+      }
+    }, 30000);
+  }), [nextRequestID]);
 
   // Reopen the agent session bound to a ticket. The daemon owns the whole resume
   // composite (register workspace + add pane + spawn, with rollback), so this just
@@ -4263,6 +4338,42 @@ export function useDaemonSocket({
       }, 10000);
     });
   }, [nextRequestID]);
+
+  const sendFsRename = useCallback((path: string, newPath: string): Promise<FsRenameResult> => new Promise((resolve, reject) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      reject(new Error('WebSocket not connected'));
+      return;
+    }
+    const requestId = nextRequestID('fs_rename');
+    const key = `fs_rename:${requestId}`;
+    pendingActionsRef.current.set(key, { resolve, reject });
+    ws.send(JSON.stringify({ cmd: 'fs_rename', request_id: requestId, path, new_path: newPath }));
+    setTimeout(() => {
+      if (pendingActionsRef.current.has(key)) {
+        pendingActionsRef.current.delete(key);
+        reject(new Error('Filesystem rename timed out'));
+      }
+    }, 10000);
+  }), [nextRequestID]);
+
+  const sendFsDelete = useCallback((path: string): Promise<FsDeleteResult> => new Promise((resolve, reject) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      reject(new Error('WebSocket not connected'));
+      return;
+    }
+    const requestId = nextRequestID('fs_delete');
+    const key = `fs_delete:${requestId}`;
+    pendingActionsRef.current.set(key, { resolve, reject });
+    ws.send(JSON.stringify({ cmd: 'fs_delete', request_id: requestId, path }));
+    setTimeout(() => {
+      if (pendingActionsRef.current.has(key)) {
+        pendingActionsRef.current.delete(key);
+        reject(new Error('Filesystem delete timed out'));
+      }
+    }, 10000);
+  }), [nextRequestID]);
 
   // Check whether a path exists under the notebook root, without reading it. Used
   // to flag in-notebook markdown links whose target note is missing. Rejects on a
@@ -4790,6 +4901,7 @@ export function useDaemonSocket({
     sendTicketChangeStatus,
     sendTicketAddComment,
     sendTicketEditDescription,
+    sendTicketHandover,
     sendTicketResume,
     sendTaskList,
     sendTaskRetry,
@@ -4801,6 +4913,8 @@ export function useDaemonSocket({
     sendFsList,
     sendFsRead,
     sendFsWrite,
+    sendFsRename,
+    sendFsDelete,
     sendFsExists,
     sendGetRecentLocations,
     sendBrowseDirectory,

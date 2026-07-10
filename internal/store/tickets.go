@@ -76,10 +76,7 @@ func (st TicketStatus) IsTerminal() bool {
 	return false
 }
 
-// TicketActivityKind is the type of a history entry. Per the model there are
-// exactly two: a status change (the ticket moved column, optionally with a note)
-// and a freeform comment. What used to be a dispatch "report" is just a status
-// change with a comment.
+// TicketActivityKind is the type of a human-facing history entry.
 type TicketActivityKind string
 
 const (
@@ -88,6 +85,9 @@ const (
 	TicketActivityStatusChange TicketActivityKind = "status_change"
 	// TicketActivityComment records a freeform note from either side.
 	TicketActivityComment TicketActivityKind = "comment"
+	// TicketActivityHandover records the files and decision context submitted in
+	// one durable ticket handover.
+	TicketActivityHandover TicketActivityKind = "handover"
 )
 
 // Ticket is the durable record. Activity and Attachments are populated by
@@ -136,6 +136,13 @@ type TicketAttachment struct {
 	Path      string
 	Note      string
 	CreatedAt time.Time
+}
+
+// TicketHandoverResult is the durable portion of a handover receipt.
+type TicketHandoverResult struct {
+	EventSeq     int64
+	Status       TicketStatus
+	Deduplicated bool
 }
 
 // TicketListFilter narrows ListTickets. The zero value lists every non-archived
@@ -541,6 +548,17 @@ func (s *Store) SetTicketStatus(id string, to TicketStatus, author, comment stri
 	}
 	defer tx.Rollback()
 
+	current, err := setTicketStatusTx(tx, id, to, author, comment, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return current, nil
+}
+
+func setTicketStatusTx(tx *sql.Tx, id string, to TicketStatus, author, comment string, now time.Time) (*Ticket, error) {
 	current, err := scanTicket(tx.QueryRow(ticketSelect+` WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %q", ErrTicketNotFound, id)
@@ -557,9 +575,6 @@ func (s *Store) SetTicketStatus(id string, to TicketStatus, author, comment stri
 		closed := now
 		closedAt = &closed
 	case !to.IsTerminal():
-		// Reopening to an open status: clear closed_at AND un-archive, so the
-		// ticket returns to the durable, visible, sweepable board. Otherwise an
-		// archived-then-reopened ticket becomes an invisible zombie.
 		closedAt = nil
 		archivedAt = nil
 	}
@@ -583,9 +598,6 @@ func (s *Store) SetTicketStatus(id string, to TicketStatus, author, comment stri
 		ToStatus:   to,
 		Comment:    comment,
 	}, now); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 
@@ -818,6 +830,91 @@ func (s *Store) AddTicketAttachment(att TicketAttachment, author string, now tim
 	att.ID = attachmentID
 	att.CreatedAt = now
 	return &att, nil
+}
+
+// SubmitTicketHandover records one durable handover receipt and optionally moves
+// the ticket in the same transaction. The fingerprint prefix in detail makes a
+// lost-response retry discoverable even when a status event followed the handover.
+func (s *Store) SubmitTicketHandover(
+	ticketID, author, fingerprint, detail, activityComment string,
+	status *TicketStatus,
+	now time.Time,
+) (*TicketHandoverResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(fingerprint) == "" {
+		return nil, errors.New("handover fingerprint required")
+	}
+	if status != nil && !status.IsValid() {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidTicketStatus, *status)
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var existingSeq int64
+	var existingStatus string
+	err = tx.QueryRow(`
+		SELECT seq, to_status FROM ticket_events
+		WHERE ticket_id = ? AND kind = ? AND detail LIKE ?
+		ORDER BY seq DESC LIMIT 1
+	`, ticketID, string(TicketEventHandoverSubmitted), fingerprint+"\n%").Scan(&existingSeq, &existingStatus)
+	if err == nil {
+		return &TicketHandoverResult{EventSeq: existingSeq, Status: TicketStatus(existingStatus), Deduplicated: true}, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	current, err := scanTicket(tx.QueryRow(ticketSelect+` WHERE id = ?`, ticketID))
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("%w: %q", ErrTicketNotFound, ticketID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := touchTicketTx(tx, ticketID, now); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO ticket_activity (ticket_id, kind, author, comment, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, ticketID, string(TicketActivityHandover), author, activityComment, formatTicketTime(now)); err != nil {
+		return nil, err
+	}
+	resultStatus := current.Status
+	if status != nil {
+		resultStatus = *status
+	}
+	eventSeq, _, err := appendTicketEventTx(tx, TicketEvent{
+		TicketID: ticketID,
+		Kind:     TicketEventHandoverSubmitted,
+		Author:   author,
+		Comment:  activityComment,
+		Detail:   detail,
+		ToStatus: resultStatus,
+	}, now)
+	if err != nil {
+		return nil, err
+	}
+	if status != nil {
+		updated, updateErr := setTicketStatusTx(tx, ticketID, *status, author, "", now)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		resultStatus = updated.Status
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &TicketHandoverResult{EventSeq: eventSeq, Status: resultStatus}, nil
 }
 
 // ArchiveTicket clears a closed ticket from the active board. Only terminal

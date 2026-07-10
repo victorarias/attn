@@ -202,7 +202,7 @@
 }
 
 .ticket-activity-list,
-.ticket-attachment-list {
+.ticket-artifact-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -242,21 +242,64 @@
   color: var(--color-text-secondary);
 }
 
-.ticket-attachment {
+.ticket-artifact {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.ticket-attachment-name {
+.ticket-artifact-name {
+  border: 0;
+  background: transparent;
+  padding: 0;
   font-family: var(--font-mono, monospace);
   font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
+  color: var(--color-accent);
+  cursor: pointer;
+  text-align: left;
 }
 
-.ticket-attachment-note {
-  font-size: var(--font-size-xs);
+.ticket-artifact-actions,
+.ticket-artifact-rename {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ticket-artifact-actions button,
+.ticket-artifact-rename button {
+  border: 0;
+  background: transparent;
   color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.ticket-artifact-rename input {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-input, var(--color-bg-elevated));
+  color: var(--color-text-primary);
+  padding: 4px 6px;
+}
+
+.ticket-handover-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.ticket-handover-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
 }
 
 /* Chief/user action controls (slice 4c) */

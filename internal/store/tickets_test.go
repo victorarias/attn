@@ -617,3 +617,36 @@ func TestCrashedTicketsForAssignee(t *testing.T) {
 		t.Fatalf("empty assignee = %v, %v, want nil, nil", got, err)
 	}
 }
+
+func TestSubmitTicketHandoverIsAtomicAndIdempotent(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+	if _, err := s.CreateTicket(Ticket{ID: "handover", Title: "Handover", Status: TicketStatusWorking}, "chief", ticketBase); err != nil {
+		t.Fatal(err)
+	}
+	status := TicketStatusInReview
+	first, err := s.SubmitTicketHandover("handover", "agent", "fingerprint", "fingerprint\n{}", "Handed over: plan.md\n\nDecision context", &status, ticketBase.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.EventSeq == 0 || first.Status != TicketStatusInReview || first.Deduplicated {
+		t.Fatalf("first receipt = %+v", first)
+	}
+	retry, err := s.SubmitTicketHandover("handover", "agent", "fingerprint", "fingerprint\n{}", "Handed over: plan.md\n\nDecision context", &status, ticketBase.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !retry.Deduplicated || retry.EventSeq != first.EventSeq || retry.Status != first.Status {
+		t.Fatalf("retry receipt = %+v, first = %+v", retry, first)
+	}
+	ticket, _ := s.GetTicket("handover")
+	var handovers int
+	for _, activity := range ticket.Activity {
+		if activity.Kind == TicketActivityHandover {
+			handovers++
+		}
+	}
+	if handovers != 1 || ticket.Status != TicketStatusInReview {
+		t.Fatalf("ticket = %+v, handovers=%d", ticket, handovers)
+	}
+}

@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -49,7 +51,7 @@ func captureTicketBroadcasts(d *Daemon) (latest func() []protocol.Ticket) {
 }
 
 // get_ticket returns the FULL record: the row plus its activity thread (status
-// changes with from/to + note, freeform comments) and attachments — the detail the
+// changes with from/to + note, freeform comments) and artifacts — the detail the
 // bare board feed deliberately omits.
 func TestGetTicketWSResultReturnsFullRecord(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
@@ -71,13 +73,14 @@ func TestGetTicketWSResultReturnsFullRecord(t *testing.T) {
 	if _, err := d.store.AddTicketComment("store-migration", "chief-1", "looks good", now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("add comment: %v", err)
 	}
-	if _, err := d.store.AddTicketAttachment(store.TicketAttachment{
-		TicketID: "store-migration",
-		Filename: "report.md",
-		Path:     "/repo/report.md",
-		Note:     "the findings",
-	}, "sess-1", now.Add(3*time.Minute)); err != nil {
-		t.Fatalf("add attachment: %v", err)
+	root := t.TempDir()
+	d.store.SetSetting(SettingNotebookRoot, root)
+	artifactDir := filepath.Join(root, "tickets", "store-migration")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "report.md"), []byte("the findings"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
@@ -114,11 +117,8 @@ func TestGetTicketWSResultReturnsFullRecord(t *testing.T) {
 	if !sawStatusChange || !sawComment {
 		t.Fatalf("activity kinds: statusChange=%v comment=%v (activity=%+v)", sawStatusChange, sawComment, tk.Activity)
 	}
-	if len(tk.Attachments) != 1 || tk.Attachments[0].Filename != "report.md" {
-		t.Fatalf("attachments = %+v", tk.Attachments)
-	}
-	if tk.Attachments[0].Note == nil || *tk.Attachments[0].Note != "the findings" {
-		t.Fatalf("attachment note = %v", tk.Attachments[0].Note)
+	if len(tk.Artifacts) != 1 || tk.Artifacts[0].Filename != "report.md" || tk.Artifacts[0].NotebookPath != "tickets/store-migration/report.md" {
+		t.Fatalf("artifacts = %+v", tk.Artifacts)
 	}
 }
 
@@ -139,8 +139,62 @@ func TestGetTicketWSResultUnknownIDFails(t *testing.T) {
 	}
 }
 
+func TestTicketArtifactsFollowFilesystemAtReadTime(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	root := t.TempDir()
+	d.store.SetSetting(SettingNotebookRoot, root)
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "filesystem", Title: "Filesystem", Status: store.TicketStatusWorking}, "chief", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "tickets", "filesystem")
+	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"b.md": "b", "a.md": "a", ".hidden.md": "hidden", "notes.txt": "text"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "nested", "nested.md"), []byte("nested"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "a.md"), filepath.Join(dir, "link.md")); err != nil {
+		t.Logf("symlink unavailable: %v", err)
+	}
+
+	ticket, _ := d.store.GetTicket("filesystem")
+	first, err := d.ticketToProtocolFull(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := artifactNames(first.Artifacts); !reflect.DeepEqual(names, []string{"a.md", "b.md"}) {
+		t.Fatalf("artifact names = %v", names)
+	}
+	if err := os.Rename(filepath.Join(dir, "a.md"), filepath.Join(dir, "implementation.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "b.md")); err != nil {
+		t.Fatal(err)
+	}
+	second, err := d.ticketToProtocolFull(ticket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := artifactNames(second.Artifacts); !reflect.DeepEqual(names, []string{"implementation.md"}) {
+		t.Fatalf("artifacts after rename/delete = %v", names)
+	}
+}
+
+func artifactNames(artifacts []protocol.TicketArtifact) []string {
+	names := make([]string, len(artifacts))
+	for i, artifact := range artifacts {
+		names[i] = artifact.Filename
+	}
+	return names
+}
+
 // The board feed is the non-archived set, and each row is BARE — activity and
-// attachments stay empty so a busy board is cheap to broadcast; the detail fetch
+// artifacts stay empty so a busy board is cheap to broadcast; the detail fetch
 // loads them.
 func TestTicketsForBroadcastBareNonArchived(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
@@ -166,7 +220,7 @@ func TestTicketsForBroadcastBareNonArchived(t *testing.T) {
 	if len(board) != 1 || board[0].ID != "open-one" {
 		t.Fatalf("board = %+v, want only the non-archived open-one", board)
 	}
-	if len(board[0].Activity) != 0 || len(board[0].Attachments) != 0 {
-		t.Fatalf("board row should be bare, got activity=%d attachments=%d", len(board[0].Activity), len(board[0].Attachments))
+	if len(board[0].Activity) != 0 || len(board[0].Artifacts) != 0 {
+		t.Fatalf("board row should be bare, got activity=%d artifacts=%d", len(board[0].Activity), len(board[0].Artifacts))
 	}
 }

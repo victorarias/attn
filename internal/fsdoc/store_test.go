@@ -258,3 +258,29 @@ func TestSymlinkEscapeContained(t *testing.T) {
 		t.Fatal("Read followed an escaping symlink")
 	}
 }
+
+func TestRenameAndDeletePreserveCollisions(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "tickets", "tk", "plan.md"), "plan")
+	write(t, filepath.Join(root, "tickets", "tk", "existing.md"), "existing")
+	s := NewStore(root)
+
+	if err := s.Rename("tickets/tk/plan.md", "tickets/tk/implementation.md"); err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	if got, _, err := s.Read("tickets/tk/implementation.md"); err != nil || string(got) != "plan" {
+		t.Fatalf("renamed content = %q, err=%v", got, err)
+	}
+	if err := s.Rename("tickets/tk/implementation.md", "tickets/tk/existing.md"); err == nil {
+		t.Fatal("Rename over existing destination succeeded")
+	}
+	if got, _, _ := s.Read("tickets/tk/existing.md"); string(got) != "existing" {
+		t.Fatalf("collision overwrote destination: %q", got)
+	}
+	if err := s.Delete("tickets/tk/implementation.md"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if exists, err := s.Exists("tickets/tk/implementation.md"); err != nil || exists {
+		t.Fatalf("deleted file exists=%v err=%v", exists, err)
+	}
+}

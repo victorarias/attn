@@ -235,6 +235,77 @@ func (s *Store) Exists(p string) (bool, error) {
 	return true, nil
 }
 
+// Rename moves one regular file within the root. The destination is never
+// overwritten, and directories are outside this operation's scope.
+func (s *Store) Rename(from, to string) error {
+	fromRel, err := cleanRel(from, false)
+	if err != nil {
+		return err
+	}
+	toRel, err := cleanRel(to, false)
+	if err != nil {
+		return err
+	}
+	fromAbs, err := s.abs(fromRel)
+	if err != nil {
+		return err
+	}
+	toAbs, err := s.abs(toRel)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	info, err := os.Lstat(fromAbs)
+	if os.IsNotExist(err) {
+		return &NotFoundError{Path: from}
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("fsdoc: %q is not a regular file", from)
+	}
+	if fromAbs == toAbs {
+		return nil
+	}
+	if _, err := os.Lstat(toAbs); err == nil {
+		return fmt.Errorf("fsdoc: %q already exists", to)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(toAbs), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(fromAbs, toAbs)
+}
+
+// Delete removes one regular file within the root.
+func (s *Store) Delete(p string) error {
+	rel, err := cleanRel(p, false)
+	if err != nil {
+		return err
+	}
+	abs, err := s.abs(rel)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	info, err := os.Lstat(abs)
+	if os.IsNotExist(err) {
+		return &NotFoundError{Path: p}
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("fsdoc: %q is not a regular file", p)
+	}
+	return os.Remove(abs)
+}
+
 // CleanPath normalizes a file path (root-absolute or relative) to its clean,
 // slash-separated root-relative form — the same form List returns — or errors if
 // it escapes the root or names the root itself. The daemon uses it to echo and

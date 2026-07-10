@@ -342,6 +342,8 @@ func TestChiefGuidance(t *testing.T) {
 		"do not validate that specialist work",
 		"the agent's claim, not as confirmed",
 		"review on the merits",
+		"current paths before follow-on work",
+		"canonical paths to the next agent",
 		// Coordinator-not-doer rule.
 		"coordinator, not a doer",
 		"I want to X",

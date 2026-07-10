@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-10]
+
+### Added
+- **Durable ticket handovers keep plans alive after the producing agent stops.** `attn ticket handover` copies one or more Markdown files into a visible `tickets/<ticket-id>/` Notebook directory, can change ticket state in the same operation, records a retry-safe handover receipt, and returns the canonical paths. Ticket reads now derive their current artifact list directly from that directory, so ordinary edits, renames, and deletions are reflected without reconciliation. The ticket panel can hand over files, open them in the Notebook editor, copy their paths, rename them, and delete them. Chiefs and delegated agents receive role-specific guidance for continuing work from the same canonical plan.
+
+---
+
 ## [2026-07-09]
 
 ### Changed

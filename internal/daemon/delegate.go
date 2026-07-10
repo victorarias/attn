@@ -514,6 +514,13 @@ Use the state that matches the outcome when work needs input, is ready, or ends:
     "$ATTN_WRAPPER_PATH" ticket status completed --comment "<completed outcome>"
     "$ATTN_WRAPPER_PATH" ticket status failed --comment "<terminal failure>"
 
+When the deliverable is a durable plan, design, or other Markdown artifact, hand
+it over with ` + "`" + `"$ATTN_WRAPPER_PATH" ticket handover --file <path>` + "`" + `. Use repeatable
+` + "`" + `--file` + "`" + ` flags for multiple artifacts and optionally include ` + "`" + `--state` + "`" + ` and
+` + "`" + `--comment` + "`" + `. After success, the returned Notebook paths are canonical: keep
+those files current, and report meaningful edits, renames, or deletions through
+ticket status or a ticket comment so the chief can react.
+
 Closing a ticket is the user's call, not yours: when you believe the work is
 done, ask the user to confirm and wait for their go-ahead before you report the
 completed state. Report the other states as they happen.

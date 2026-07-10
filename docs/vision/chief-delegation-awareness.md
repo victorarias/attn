@@ -81,7 +81,7 @@ How it runs:
   a dead worker can't report.
 - **The chief reads the board** (Todo · Working · Blocked · In Review · Done) and is
   pushed a `tickets_updated` the instant a ticket moves; it opens a ticket for the
-  full activity thread and attachments only when a decision needs the detail.
+  full activity thread and current artifacts only when a decision needs the detail.
 - **Steering back goes through the same ticket** — a comment, a re-brief, a status
   nudge — which the agent picks up with `attn ticket inbox`. There is no separate
   mailbox; the reverse channel is just more events on the ticket.
@@ -113,11 +113,11 @@ How it runs:
   failures — never on routine tool-approval prompts. And silence never equals success:
   a mid-flight death surfaces as **crashed**, captured from the session's pre-clobber
   runtime state the instant its process exits, not left as a stale Working column.
-- **Distilled by default, drill-in on demand.** The activity thread — status changes
-  plus comments — is the digest the chief ingests; it opens the full ticket (history,
-  attachments, the handover artifact, the transcript) only when a decision needs it.
-  Big outputs land as **attachments** or a Notebook note referenced from the ticket,
-  so awareness makes the chief *more* useful, not drowned.
+- **Distilled by default, drill-in on demand.** The activity thread — status changes,
+  comments, and handovers — is the digest the chief ingests; it opens the full ticket
+  (history, current artifacts, the transcript) only when a decision needs it. Durable
+  plans land as Markdown in the ticket's Notebook directory, so awareness makes the
+  chief *more* useful, not drowned.
 - **Awareness lives in durable structure, not just attention.** The ticket and board
   persist on disk, so a *future* chief — post-compaction, next day, another machine —
   still holds the thread without re-arming anything. Live context for immediate help;
@@ -136,7 +136,7 @@ How it runs:
 
 ## Scope & non-goals
 
-**In scope.** The durable **ticket** model (status, activity thread, attachments,
+**In scope.** The durable **ticket** model (status, activity thread, artifacts,
 resume); the **board** as the read-only awareness surface the chief reads instead of
 polling; agent self-report via `attn ticket status`; the reverse channel via
 `attn ticket inbox`; the **notification split** (a live watch for self-monitoring
@@ -162,7 +162,7 @@ The work-tracker epic delivered the loop across slices 1–7.
 
 **Shipped:**
 - [x] **Durable ticket store + lifecycle** — status enum, activity thread (status
-  changes + comments, no separate "report"), attachments, memorable slugs, archive/TTL.
+  changes + comments + handovers, no separate "report"), artifacts, memorable slugs, archive/TTL.
 - [x] **Event-driven notification core** — one event log, per-identity per-ticket
   unread cursors, dedup.
 - [x] **Delegation ⇄ tickets** — delegating mints and binds a ticket (description =
@@ -173,9 +173,10 @@ The work-tracker epic delivered the loop across slices 1–7.
   the chief makes are read here.
 - [x] **Notification split by capability** — `HasSelfMonitor`: Claude watches live;
   codex is idle-nudged with a fixed doorbell.
-- [x] **Ticket view + resume + attachments** — the chief edits, comments, and changes
+- [x] **Ticket view + resume + artifacts** — the chief edits, comments, and changes
   status from the UI; **resume** reopens a stopped agent on the same ticket (its cwd +
-  last agent id); `attn ticket attach` hands over a file.
+  last agent id); `attn ticket handover` copies one or more Markdown files into the
+  ticket's visible Notebook directory and returns their canonical paths.
 - [x] **The board** — status columns + a Todo backlog + filters (blocked / in review /
   closed today), read-only, live `tickets_updated`.
 - [x] **The `dispatch` namespace retired** — tickets-only delegation via

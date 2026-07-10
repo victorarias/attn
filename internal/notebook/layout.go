@@ -59,6 +59,12 @@ func TicketAttachmentsDir(root, ticketID string) string {
 	return filepath.Join(TicketsDir(root), ticketID)
 }
 
+// TicketArtifactsDir returns the visible Notebook directory whose direct
+// Markdown children are the current artifacts for one ticket.
+func TicketArtifactsDir(root, ticketID string) string {
+	return filepath.Join(root, "tickets", ticketID)
+}
+
 // CleanPath validates and normalizes a notebook path. The input may be
 // root-absolute ("/knowledge/areas/foo.md", matching the link convention) or
 // relative ("knowledge/areas/foo.md"); the result is always a clean, slash-separated relative

@@ -241,28 +241,28 @@ func (c *Client) SetTicketStatus(sourceSessionID, workState, comment, ticketID s
 	return resp.TicketStatusResult, nil
 }
 
-// AttachTicket hands a file to the calling session's bound ticket. sourcePath is
-// the absolute path of the file the daemon copies into the ticket's store; the
-// daemon resolves which ticket from the session and echoes the id and stored
-// filename back.
-func (c *Client) AttachTicket(sourceSessionID, sourcePath, filename, note string) (*protocol.TicketAttachResult, error) {
-	msg := protocol.TicketAttachMessage{
-		Cmd:             protocol.CmdTicketAttach,
-		SourceSessionID: sourceSessionID,
-		SourcePath:      sourcePath,
-		Filename:        filename,
+// HandoverTicket copies one or more Markdown files into a ticket's canonical
+// Notebook directory and returns its durable receipt.
+func (c *Client) HandoverTicket(sourceSessionID string, files []protocol.TicketHandoverFile, ticketID, state, comment string) (*protocol.TicketHandoverResult, error) {
+	msg := protocol.TicketHandoverMessage{Cmd: protocol.CmdTicketHandover, SourceSessionID: sourceSessionID, Files: files}
+	if value := strings.TrimSpace(ticketID); value != "" {
+		msg.TicketID = protocol.Ptr(value)
 	}
-	if value := strings.TrimSpace(note); value != "" {
-		msg.Note = protocol.Ptr(value)
+	if value := strings.TrimSpace(state); value != "" {
+		workState := protocol.DispatchWorkState(value)
+		msg.State = &workState
+	}
+	if value := strings.TrimSpace(comment); value != "" {
+		msg.Comment = protocol.Ptr(value)
 	}
 	resp, err := c.send(msg)
 	if err != nil {
 		return nil, err
 	}
-	if resp.TicketAttachResult == nil {
-		return nil, errors.New("daemon returned no ticket attach result")
+	if resp.TicketHandoverResult == nil {
+		return nil, errors.New("daemon returned no ticket handover result")
 	}
-	return resp.TicketAttachResult, nil
+	return resp.TicketHandoverResult, nil
 }
 
 // CreateTicket mints a standalone backlog ticket — unbound, starting in todo. The
@@ -399,7 +399,7 @@ func (c *Client) TicketList(sourceSessionID, status string, includeArchived bool
 }
 
 // ShowTicket reads one ticket's full record — metadata, description, and the
-// complete activity thread (full bodies) plus attachments. It is a non-consuming
+// complete activity thread (full bodies) plus current artifacts. It is a non-consuming
 // read (unlike TicketInbox, it never advances the calling session's unread
 // cursor) and, like TicketList, a global read: sourceSessionID is passed for
 // command-shape uniformity but the daemon does not use it.
