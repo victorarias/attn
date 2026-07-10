@@ -11,6 +11,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Durable ticket handovers keep plans alive after the producing agent stops.** `attn ticket handover` copies one or more Markdown files into a visible `tickets/<ticket-id>/` Notebook directory, can change ticket state in the same operation, records a retry-safe handover receipt, and returns the canonical paths. Ticket reads now derive their current artifact list directly from that directory, so ordinary edits, renames, and deletions are reflected without reconciliation. The ticket panel can hand over files, open them in the Notebook editor, copy their paths, rename them, and delete them. Chiefs and delegated agents receive role-specific guidance for continuing work from the same canonical plan.
 
+### Fixed
+- **The Present window's summary card now actually collapses when you scroll the code.** Wheel-scrolling the diff — including wheel gestures over the card itself — folds the summary to a slim strip, which you can also collapse or expand by hand at any time; previously, scrolling never folded it.
+
 ---
 
 ## [2026-07-09]

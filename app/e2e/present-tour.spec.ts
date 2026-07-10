@@ -382,6 +382,37 @@ test.describe('PresentTour draft and comment gutter interactions', () => {
   });
 });
 
+test.describe('PresentTour summary fold', () => {
+  // Browser-level regression for the listener-never-attached bug: the harness's
+  // `deferred=1` + `settleDiffs()` mode reproduces the live app's loading ->
+  // settled transition (diffs arrive async over the daemon WS), which is
+  // exactly the case unit tests and the default harness mode (diffs
+  // pre-loaded) never exercised.
+  test('wheel-scrolling the diff folds the summary card; the toggle re-expands it', async ({ page }) => {
+    await page.goto('/test-harness/?component=PresentTour&seed=0&deferred=1');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+
+    const summary = page.locator('.present-tour-summary');
+    await expect(summary).toBeVisible();
+    await expect(summary).not.toHaveClass(/collapsed/);
+
+    await page.evaluate(() => (window.__HARNESS__ as unknown as { settleDiffs: () => void }).settleDiffs());
+    await page.waitForSelector('diffs-container');
+    await page.locator('diffs-container [data-line-number-content]').first().waitFor();
+
+    await expect(async () => {
+      const box = await page.locator('.present-tour-scroller').boundingBox();
+      if (!box) throw new Error('scroller not laid out yet');
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 400);
+      await expect(summary).toHaveClass(/collapsed/, { timeout: 1000 });
+    }).toPass({ timeout: 15_000 });
+
+    await page.getByTestId('present-tour-summary-toggle').click();
+    await expect(summary).not.toHaveClass(/collapsed/);
+  });
+});
+
 test.describe('PresentTour deferred-load scroll replay', () => {
   test('a scroll request issued while still loading is replayed once files settle', async ({ page }) => {
     // `&deferred=1` starts every file `{loading: true}` (no `<diffs-container>`

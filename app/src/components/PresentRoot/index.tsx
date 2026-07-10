@@ -158,6 +158,14 @@ export function PresentRoot() {
   const [activePath, setActivePath] = useState<string | null>(null);
   const [scrollRequest, setScrollRequest] = useState<{ path: string | null; nonce: number } | null>(null);
   const scrollNonceRef = useRef(0);
+  // Owned separately from activePath so a manual toggle (click, overscroll
+  // wheel) can win independently of navigation, while still folding
+  // automatically on any arrival at a file stop. See the effect below and
+  // `requestScroll`'s null-path branch for the two ways this un-collapses.
+  const [summaryCollapsed, setSummaryCollapsed] = useState(false);
+  useEffect(() => {
+    if (activePath !== null) setSummaryCollapsed(true);
+  }, [activePath]);
   const [fileDiffs, setFileDiffs] = useState<Record<string, DiffCacheEntry>>({});
   const [driftDismissed, setDriftDismissed] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -174,11 +182,14 @@ export function PresentRoot() {
   const activeRoundKeyRef = useRef<string | null>(null);
   activeRoundKeyRef.current = round ? round.id : null;
 
-  // path=null requests a scroll to the pinned Summary row (stop 0).
+  // path=null requests a scroll to the pinned Summary row (stop 0), and also
+  // re-expands the summary card — an explicit return to the Summary stop
+  // should always show it, even if it was manually collapsed earlier.
   const requestScroll = useCallback((path: string | null) => {
     scrollNonceRef.current += 1;
     setActivePath(path);
     setScrollRequest({ path, nonce: scrollNonceRef.current });
+    if (path === null) setSummaryCollapsed(false);
   }, []);
 
   // Fires once, unconditionally, regardless of load/error state below — the
@@ -800,7 +811,8 @@ export function PresentRoot() {
           ) : (
             <PresentTour
               summary={round.manifest.summary}
-              summaryVisible={activePath === null}
+              summaryVisible={!summaryCollapsed}
+              onSummaryVisibleChange={(visible) => setSummaryCollapsed(!visible)}
               files={tourFiles}
               comments={allComments}
               editingCommentId={editingCommentId}

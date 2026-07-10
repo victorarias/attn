@@ -87,6 +87,11 @@ export interface PresentTourProps {
   /** Whether the summary card is expanded. The card stays mounted so the fold
    * can animate; false collapses it to zero height. */
   summaryVisible?: boolean;
+  /** Fires when the user asks to change the summary's expanded state — the
+   * manual toggle button, or the overscroll-to-collapse wheel gesture over
+   * the card (see `handleSummaryWheel`). The caller owns the actual
+   * `summaryVisible` state; this component never flips it itself. */
+  onSummaryVisibleChange?: (visible: boolean) => void;
   files: PresentTourFile[];
   comments: ReviewComment[];
   editingCommentId: string | null;
@@ -203,6 +208,7 @@ function getVisibleLineRangesFromDiff(diff: ReturnType<typeof parseDiffFromFile>
 export function PresentTour({
   summary,
   summaryVisible = true,
+  onSummaryVisibleChange,
   files,
   comments,
   editingCommentId,
@@ -229,6 +235,23 @@ export function PresentTour({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const handleRef = useRef<CodeViewHandle<AnnotationMeta> | null>(null);
   const suppressSelectionEndRef = useRef(false);
+  // The summary card is a flex sibling above the CodeView scroller (see the
+  // module doc), so a wheel gesture with the cursor over the card never
+  // reaches the takeover/scroll listeners below — without this, wheeling
+  // over the card was a dead zone that neither scrolled the tour nor folded
+  // the summary. Wheel-down over the card collapses it, but only once the
+  // card's own internal scroll (see `.present-tour-summary-body`'s
+  // `overflow-y: auto`) is exhausted, so a tall summary can still be read.
+  const summaryBodyRef = useRef<HTMLDivElement>(null);
+  const handleSummaryWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (!summaryVisible || e.deltaY <= 0) return;
+      const body = summaryBodyRef.current;
+      if (body && body.scrollTop + body.clientHeight < body.scrollHeight - 1) return; // still has content to scroll
+      onSummaryVisibleChange?.(false);
+    },
+    [summaryVisible, onSummaryVisibleChange]
+  );
   // Populated as a side effect of the items useMemo below (document order:
   // files order, then rendered line within a file) and read back out by the
   // annotation-anchors effect further down — same "mutate a ref inside the
@@ -745,6 +768,17 @@ export function PresentTour({
   // the last such event rather than on a fixed delay from when the
   // programmatic scroll started.
   const suppressQuietTimerRef = useRef<number>(0);
+  // Must attach once CodeView actually mounts, not just on this component's
+  // own mount: diffs load async over the daemon WS, so on first render
+  // `allSettled` is often still false, the "Loading tour…" branch renders
+  // instead of CodeView, and `containerRef.current` is null — an empty dep
+  // array would run this effect exactly once against that null ref and never
+  // again, permanently disarming the takeover/cold-window-pin listeners (the
+  // summary card would then never fold, since passive scroll reports never
+  // arm `userTookOverRef`). `allSettled` in the deps re-runs the effect the
+  // moment CodeView mounts; the cleanup also re-runs if diffs ever reload
+  // (allSettled true -> false -> true), which is correct since the container
+  // itself may have been swapped out during the loading branch.
   useEffect(() => {
     const scroller = containerRef.current;
     if (!scroller) return;
@@ -769,7 +803,7 @@ export function PresentTour({
       scroller.removeEventListener('scroll', onNativeScroll);
       window.clearTimeout(suppressQuietTimerRef.current);
     };
-  }, []);
+  }, [allSettled]);
 
   // Rail-driven / j-k-driven scroll: nonce forces a re-scroll even to the
   // same path (e.g. re-pressing j at the last file). A null scrollToPath
@@ -945,9 +979,28 @@ export function PresentTour({
         <div
           className={`present-tour-summary ${summaryVisible ? '' : 'collapsed'}`}
           data-testid="present-tour-summary"
-          aria-hidden={!summaryVisible}
+          onWheel={handleSummaryWheel}
         >
-          <Markdown>{summary}</Markdown>
+          <button
+            type="button"
+            className="present-tour-summary-toggle"
+            data-testid="present-tour-summary-toggle"
+            aria-expanded={summaryVisible}
+            onClick={() => onSummaryVisibleChange?.(!summaryVisible)}
+          >
+            <span className={`present-tour-summary-chevron${summaryVisible ? ' is-open' : ''}`} aria-hidden="true">
+              ▸
+            </span>
+            Summary
+          </button>
+          <div
+            className="present-tour-summary-body"
+            data-testid="present-tour-summary-body"
+            aria-hidden={!summaryVisible}
+            ref={summaryBodyRef}
+          >
+            <Markdown>{summary}</Markdown>
+          </div>
         </div>
       )}
 
