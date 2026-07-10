@@ -110,6 +110,23 @@ async function openDraftViaGutter(container: Locator, line: Locator) {
   }).toPass({ timeout: 15_000 });
 }
 
+/**
+ * Collapses the summary card up front so its scroll-triggered fold (an
+ * ~0.18s height animation that shifts the whole scroller and churns the
+ * virtualizer) can't fire mid-gesture in specs whose subject is draft/form
+ * behavior, not the fold. The fold itself is covered by its own spec.
+ */
+async function collapseSummaryFirst(page: Page) {
+  const summary = page.locator('.present-tour-summary');
+  if ((await summary.count()) === 0) return;
+  await page.getByTestId('present-tour-summary-toggle').click();
+  await expect(summary).toHaveClass(/collapsed/);
+  // The class flips immediately, but the body's height transition
+  // (max-height 0.18s) still runs after — settle it too so the scroller's
+  // layout has fully stopped moving before any gesture below.
+  await expect(page.getByTestId('present-tour-summary-body')).toHaveCSS('max-height', '0px');
+}
+
 test.describe('PresentTour rendering', () => {
   test('renders every manifest file as a card inside one scroller, in reading order', async ({ page }) => {
     await openHarness(page, UNSEEDED);
@@ -255,6 +272,7 @@ test.describe('PresentTour rail-driven scroll', () => {
 test.describe('PresentTour multiple simultaneous drafts across files', () => {
   test('opening a draft on one file and one on another keeps both open independently', async ({ page }) => {
     await openHarness(page, UNSEEDED);
+    await collapseSummaryFirst(page);
 
     const alphaContainer = fileContainers(page).first();
     const alphaLine = alphaContainer.locator('[data-line-index][data-column-number]').nth(4);
@@ -303,6 +321,7 @@ test.describe('PresentTour multiple simultaneous drafts across files', () => {
 
   test('Escape closes the most-recently-opened draft first, across files', async ({ page }) => {
     await openHarness(page, UNSEEDED);
+    await collapseSummaryFirst(page);
 
     const alphaContainer = fileContainers(page).first();
     const alphaLine = alphaContainer.locator('[data-line-index][data-column-number]').nth(4);
@@ -339,6 +358,7 @@ test.describe('PresentTour multiple simultaneous drafts across files', () => {
 test.describe('PresentTour draft and comment gutter interactions', () => {
   test('gutter "+" on a specific line opens a draft form anchored to that line', async ({ page }) => {
     await openHarness(page, UNSEEDED);
+    await collapseSummaryFirst(page);
 
     const alphaContainer = fileContainers(page).first();
     const line = alphaContainer.locator('[data-line-index][data-column-number]').nth(3);
@@ -364,6 +384,7 @@ test.describe('PresentTour draft and comment gutter interactions', () => {
   test('a seeded comment can be edited and deleted', async ({ page }) => {
     // seed=1 (default): harness seeds one comment on src/alpha.ts.
     await openHarness(page, '/test-harness/?component=PresentTour');
+    await collapseSummaryFirst(page);
 
     const thread = page.getByTestId('diff-comment-thread');
     await expect(thread).toContainText('Seeded comment on alpha');
