@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "156"
+const ProtocolVersion = "157"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -50,7 +50,7 @@ const (
 	CmdTicketSubscribe                       = "ticket_subscribe"
 	CmdTicketUnsubscribe                     = "ticket_unsubscribe"
 	CmdTicketTake                            = "ticket_take"
-	CmdTicketAttach                          = "ticket_attach"
+	CmdTicketHandover                        = "ticket_handover"
 	CmdTicketCreate                          = "ticket_create"
 	CmdTicketComment                         = "ticket_comment"
 	CmdGetTicket                             = "get_ticket"
@@ -84,6 +84,8 @@ const (
 	CmdFsList                                = "fs_list"
 	CmdFsRead                                = "fs_read"
 	CmdFsWrite                               = "fs_write"
+	CmdFsRename                              = "fs_rename"
+	CmdFsDelete                              = "fs_delete"
 	CmdFsExists                              = "fs_exists"
 	CmdUnregister                            = "unregister"
 	CmdState                                 = "state"
@@ -196,6 +198,7 @@ const (
 	EventTicketsUpdated              = "tickets_updated"
 	EventTicketResult                = "ticket_result"
 	EventTicketActionResult          = "ticket_action_result"
+	EventTicketHandoverResult        = "ticket_handover_result"
 	EventTicketResumeResult          = "ticket_resume_result"
 	EventGetPresentationsResult      = "get_presentations_result"
 	EventGetPresentationRoundResult  = "get_presentation_round_result"
@@ -220,6 +223,8 @@ const (
 	EventFsListResult                = "fs_list_result"
 	EventFsReadResult                = "fs_read_result"
 	EventFsWriteResult               = "fs_write_result"
+	EventFsRenameResult              = "fs_rename_result"
+	EventFsDeleteResult              = "fs_delete_result"
 	EventFsExistsResult              = "fs_exists_result"
 	EventFsChanged                   = "fs_changed"
 	EventPRsUpdated                  = "prs_updated"
@@ -418,8 +423,8 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdTicketAttach:
-		var msg TicketAttachMessage
+	case CmdTicketHandover:
+		var msg TicketHandoverMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
@@ -651,6 +656,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdFsWrite:
 		var msg FsWriteMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdFsRename:
+		var msg FsRenameMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdFsDelete:
+		var msg FsDeleteMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

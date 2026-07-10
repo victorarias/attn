@@ -27,6 +27,11 @@ supported follow-up path: Claude arms a Monitor on `attn ticket inbox --watch`,
 while Codex waits for attn's ticket nudge and then reads `attn ticket inbox`.
 Ordinary delegation needs none of that.
 
+For a chief-tracked delegation that returns a durable plan, read the ticket before
+continuing: `attn ticket show <ticket-id>` lists the Markdown files currently in
+the ticket's Notebook directory. Pass those canonical paths in follow-on briefs so
+the next agent updates the same plan instead of creating a conversational copy.
+
 ## Brief Workflow
 
 Prefer a brief file so the task can be drafted and revised before submission:

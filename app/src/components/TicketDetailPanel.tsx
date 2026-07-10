@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import type { Ticket } from '../hooks/useDaemonSocket';
 import { isTicketOrphaned } from '../utils/ticketOrphan';
+import { writeClipboardText } from '../utils/clipboardBridge';
 import { Markdown } from './Markdown';
 import './TicketDetailPanel.css';
 
@@ -18,6 +20,10 @@ interface TicketDetailPanelProps {
   onChangeStatus?: (ticketId: string, status: Ticket['status'], comment?: string) => Promise<void>;
   onAddComment?: (ticketId: string, comment: string) => Promise<void>;
   onEditDescription?: (ticketId: string, description: string) => Promise<void>;
+  onHandover?: (ticketId: string, paths: string[], state?: string, comment?: string) => Promise<unknown>;
+  onRenameArtifact?: (path: string, newPath: string) => Promise<unknown>;
+  onDeleteArtifact?: (path: string) => Promise<unknown>;
+  onOpenArtifact?: (path: string) => void;
   // Reopen the ticket's agent session (in its stored cwd, resuming the prior
   // conversation). Optional; shown only when the ticket has a resumable agent.
   onResume?: (ticketId: string) => void;
@@ -70,7 +76,7 @@ function ActivityEntry({ entry }: { entry: Ticket['activity'][number] }) {
     );
   }
   return (
-    <li className="ticket-activity-entry" data-kind="comment">
+    <li className="ticket-activity-entry" data-kind={entry.kind}>
       <div className="ticket-activity-head">
         {when && <span className="ticket-activity-when">{when}</span>}
       </div>
@@ -87,6 +93,10 @@ export function TicketDetailPanel({
   onChangeStatus,
   onAddComment,
   onEditDescription,
+  onHandover,
+  onRenameArtifact,
+  onDeleteArtifact,
+  onOpenArtifact,
   onResume,
   onClose,
 }: TicketDetailPanelProps) {
@@ -104,6 +114,11 @@ export function TicketDetailPanel({
   const [commentDraft, setCommentDraft] = useState('');
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [handoverFiles, setHandoverFiles] = useState<string[]>([]);
+  const [handoverState, setHandoverState] = useState('');
+  const [handoverComment, setHandoverComment] = useState('');
+  const [renamingArtifact, setRenamingArtifact] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
 
   // updated_at moves on every mutation; using it as a dep makes the open panel
   // re-fetch the full record live when the ticket changes (a status move, a new
@@ -142,6 +157,11 @@ export function TicketDetailPanel({
     setCommentDraft('');
     setEditingDescription(false);
     setDescriptionDraft('');
+    setHandoverFiles([]);
+    setHandoverState('');
+    setHandoverComment('');
+    setRenamingArtifact(null);
+    setRenameDraft('');
   }, [ticketId]);
 
   // runAction wraps a mutation in the shared busy/error handling. It rethrows so
@@ -156,6 +176,11 @@ export function TicketDetailPanel({
         throw err;
       })
       .finally(() => setBusyAction(null));
+  };
+
+  const refreshTicket = async () => {
+    if (!ticketId) return;
+    setTicket(await fetchTicket(ticketId));
   };
 
   if (!isOpen) {
@@ -376,20 +401,136 @@ export function TicketDetailPanel({
           </section>
 
           <section className="ticket-detail-section">
-            <h3 className="ticket-section-label">Attachments</h3>
-            {fullTicket.attachments.length > 0 ? (
-              <ul className="ticket-attachment-list">
-                {fullTicket.attachments.map((att) => (
-                  <li key={att.id} className="ticket-attachment">
-                    <span className="ticket-attachment-name" title={att.path || undefined}>
-                      {att.filename}
-                    </span>
-                    {att.note && <span className="ticket-attachment-note">{att.note}</span>}
-                  </li>
-                ))}
+            <div className="ticket-section-head">
+              <h3 className="ticket-section-label">Artifacts</h3>
+              {onHandover && (
+                <button
+                  type="button"
+                  className="ticket-section-action"
+                  data-testid="ticket-choose-handover"
+                  disabled={busyAction !== null}
+                  onClick={() => {
+                    void open({ multiple: true, filters: [{ name: 'Markdown', extensions: ['md'] }] })
+                      .then((selected) => {
+                        const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+                        if (paths.length > 0) setHandoverFiles(paths);
+                      })
+                      .catch((err) => setActionError(err instanceof Error ? err.message : 'Could not choose files'));
+                  }}
+                >
+                  Hand over…
+                </button>
+              )}
+            </div>
+            {handoverFiles.length > 0 && onHandover && (
+              <div className="ticket-handover-form" data-testid="ticket-handover-form">
+                <div className="ticket-handover-files">
+                  {handoverFiles.map((path) => <span key={path}>{path.split(/[\\/]/).pop()}</span>)}
+                </div>
+                <select
+                  aria-label="Resulting ticket state"
+                  className="ticket-status-select"
+                  value={handoverState}
+                  onChange={(event) => setHandoverState(event.target.value)}
+                >
+                  <option value="">Keep current state</option>
+                  <option value="in_progress">Working</option>
+                  <option value="needs_input">Blocked</option>
+                  <option value="ready_for_review">In review</option>
+                  <option value="completed">Done</option>
+                  <option value="failed">Failed</option>
+                </select>
+                <textarea
+                  className="ticket-comment-input"
+                  placeholder="Decision context (optional)"
+                  value={handoverComment}
+                  onChange={(event) => setHandoverComment(event.target.value)}
+                  rows={2}
+                />
+                <div className="ticket-edit-buttons">
+                  <button
+                    type="button"
+                    className="ticket-edit-save"
+                    data-testid="ticket-submit-handover"
+                    disabled={busyAction !== null}
+                    onClick={() => {
+                      runAction('handover', async () => {
+                        await onHandover(fullTicket.id, handoverFiles, handoverState || undefined, handoverComment.trim() || undefined);
+                        setHandoverFiles([]);
+                        setHandoverState('');
+                        setHandoverComment('');
+                        await refreshTicket();
+                      }).catch(() => {});
+                    }}
+                  >
+                    {busyAction === 'handover' ? 'Handing over…' : 'Hand over'}
+                  </button>
+                  <button type="button" className="ticket-edit-cancel" onClick={() => setHandoverFiles([])}>Cancel</button>
+                </div>
+              </div>
+            )}
+            {fullTicket.artifacts.length > 0 ? (
+              <ul className="ticket-artifact-list">
+                {fullTicket.artifacts.map((artifact) => {
+                  const parent = artifact.notebook_path.slice(0, artifact.notebook_path.lastIndexOf('/') + 1);
+                  const isRenaming = renamingArtifact === artifact.notebook_path;
+                  return (
+                    <li key={artifact.notebook_path} className="ticket-artifact">
+                      {isRenaming ? (
+                        <div className="ticket-artifact-rename">
+                          <input
+                            value={renameDraft}
+                            aria-label={`Rename ${artifact.filename}`}
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                          />
+                          <button
+                            type="button"
+                            disabled={busyAction !== null || !renameDraft.trim().endsWith('.md') || renameDraft.includes('/')}
+                            onClick={() => {
+                              if (!onRenameArtifact) return;
+                              runAction('rename-artifact', async () => {
+                                await onRenameArtifact(artifact.notebook_path, parent + renameDraft.trim());
+                                setRenamingArtifact(null);
+                                await refreshTicket();
+                              }).catch(() => {});
+                            }}
+                          >Save</button>
+                          <button type="button" onClick={() => setRenamingArtifact(null)}>Cancel</button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="ticket-artifact-name"
+                            title={artifact.path}
+                            onClick={() => onOpenArtifact?.(artifact.notebook_path)}
+                          >
+                            {artifact.filename}
+                          </button>
+                          <div className="ticket-artifact-actions">
+                            <button type="button" onClick={() => runAction('copy-artifact', () => writeClipboardText(artifact.path)).catch(() => {})}>Copy path</button>
+                            {onRenameArtifact && <button type="button" onClick={() => { setRenamingArtifact(artifact.notebook_path); setRenameDraft(artifact.filename); }}>Rename</button>}
+                            {onDeleteArtifact && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!window.confirm(`Delete ${artifact.filename}?`)) return;
+                                  runAction('delete-artifact', async () => {
+                                    await onDeleteArtifact(artifact.notebook_path);
+                                    await refreshTicket();
+                                  }).catch(() => {});
+                                }}
+                              >Delete</button>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
-              <p className="ticket-detail-empty">No attachments.</p>
+              <p className="ticket-detail-empty">No artifacts.</p>
             )}
           </section>
         </div>

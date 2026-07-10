@@ -143,8 +143,9 @@ The chief delegates a unit of work to a sub-agent, and that work is tracked as a
 The agent reports its own **work state** — in progress, needs input, ready for
 review, completed, or failed — which moves the ticket across the board
 (Todo · Working · Blocked · In Review · Done). Comments, status changes, and
-handover attachments accumulate on the ticket's activity thread, and the chief
-watches progress from the ticket view and board rather than polling the agent.
+artifact handovers accumulate on the ticket's activity thread. Current artifacts
+are the Markdown files in the ticket's Notebook directory, and the chief watches
+progress from the ticket view and board rather than polling the agent.
 
 ## The raw tier
 

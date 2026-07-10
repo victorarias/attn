@@ -6,11 +6,11 @@
  *
  * Bootstraps a chief-of-staff, delegates a real codex worker (which mints a bound
  * ticket), drives the WORKER side via the agent CLI verbs (`attn ticket
- * status|attach`), then opens and drives the CHIEF side entirely through the
+ * status|handover`), then opens and drives the CHIEF side entirely through the
  * packaged app's TicketDetailPanel via the new `ticket_*` automation actions —
  * which click the real controls, so the panel's own gating runs. Asserts the
  * rendered panel reflects every step (status moves, comment, edited description,
- * attachment, resumable agent, and that `crashed` is NOT a manual destination),
+ * artifacts, resumable agent, and that `crashed` is NOT a manual destination),
  * and captures an occlusion-proof screenshot of the populated panel.
  *
  * Bootstrap (chief + delegate) is self-contained: no existing scenario sets up a
@@ -34,7 +34,7 @@ import {
 } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
-import { currentHarnessProfile } from './harnessProfile.mjs';
+import { currentHarnessProfile, socketPathForProfile } from './harnessProfile.mjs';
 
 const HARNESS_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -71,12 +71,14 @@ function resolveAttnBin() {
 }
 
 function makeAttnRunner(attnBin, profile) {
-  // The CLI targets the profile's daemon via ATTN_PROFILE; the leading
-  // `[attn profile=…]` banner is stripped so JSON output parses.
+  // ATTN_SOCKET_PATH is injected into attn-managed sessions and takes precedence
+  // over ATTN_PROFILE, so set both explicitly when the harness targets a sibling
+  // profile. The leading `[attn profile=…]` banner is stripped so JSON parses.
+  const socketPath = socketPathForProfile(profile);
   return function runAttn(args) {
     const stdout = execFileSync(attnBin, args, {
       encoding: 'utf8',
-      env: { ...process.env, ATTN_PROFILE: profile },
+      env: { ...process.env, ATTN_PROFILE: profile, ATTN_SOCKET_PATH: socketPath },
     });
     const brace = stdout.indexOf('{');
     return { stdout, json: brace >= 0 ? JSON.parse(stdout.slice(brace)) : null };
@@ -131,8 +133,10 @@ async function main() {
     cwd: repoDir,
     env: { ...process.env, GIT_AUTHOR_NAME: 'attn', GIT_AUTHOR_EMAIL: 'attn@local', GIT_COMMITTER_NAME: 'attn', GIT_COMMITTER_EMAIL: 'attn@local' },
   });
-  const attachmentPath = path.join(sessionDir, 'report.md');
-  fs.writeFileSync(attachmentPath, 'slice-4 lifecycle attachment\nsecond line\n', 'utf8');
+  const reportPath = path.join(sessionDir, 'report.md');
+  const rolloutPath = path.join(sessionDir, 'rollout.md');
+  fs.writeFileSync(reportPath, 'ticket handover report\nsecond line\n', 'utf8');
+  fs.writeFileSync(rolloutPath, 'ticket handover rollout\n', 'utf8');
 
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
@@ -182,8 +186,19 @@ async function main() {
 
     // 3) Worker side via the real agent CLI verbs.
     runAttn(['ticket', 'status', 'in_progress', '--session', workerId]);
-    runAttn(['ticket', 'attach', '--file', attachmentPath, '--note', 'QA report v1', '--session', workerId]);
-    runAttn(['ticket', 'status', 'ready_for_review', '--comment', 'Please review the attached report.', '--session', workerId]);
+    const handoverArgs = ['ticket', 'handover', '--file', reportPath, '--file', rolloutPath, '--state', 'ready_for_review', '--comment', 'Please review the handed-over plan.', '--session', workerId, '--json'];
+    const handover = runAttn(handoverArgs);
+    assert(handover.json?.artifacts?.length === 2, `multi-file handover returned two artifacts (got ${JSON.stringify(handover.json)})`);
+    const retry = runAttn(handoverArgs);
+    assert(retry.json?.deduplicated === true && retry.json?.event_seq === handover.json?.event_seq, `retry returned the existing receipt (got ${JSON.stringify(retry.json)})`);
+
+    const canonicalReport = handover.json.artifacts.find((artifact) => artifact.filename === 'report.md')?.path;
+    const canonicalRollout = handover.json.artifacts.find((artifact) => artifact.filename === 'rollout.md')?.path;
+    assert(canonicalReport && canonicalRollout, 'handover returned canonical report and rollout paths');
+    fs.appendFileSync(canonicalReport, 'updated after handover\n', 'utf8');
+    const canonicalImplementation = path.join(path.dirname(canonicalRollout), 'implementation.md');
+    fs.renameSync(canonicalRollout, canonicalImplementation);
+    runAttn(['ticket', 'comment', ticketId, '-m', 'Updated report.md and renamed rollout.md to implementation.md.', '--session', workerId]);
 
     // 4) Open the panel the real way — the Dashboard "View ticket" link.
     await client.request('ticket_open_via_dashboard', { sessionId: workerId });
@@ -200,12 +215,13 @@ async function main() {
     assert(afterWorker.canResume === true, 'panel offers Resume (ticket carries a bound agent session)');
     assert(!afterWorker.statusOptions.includes('crashed'), `crashed is not a selectable status (options: ${afterWorker.statusOptions.join(', ')})`);
     assert(
-      afterWorker.attachments.some((att) => att.filename === 'report.md' && att.note.includes('QA report')),
-      `attachment report.md with note is rendered (got ${JSON.stringify(afterWorker.attachments)})`,
+      afterWorker.artifacts.some((artifact) => artifact.filename === 'report.md')
+        && afterWorker.artifacts.some((artifact) => artifact.filename === 'implementation.md'),
+      `filesystem-current artifacts are rendered (got ${JSON.stringify(afterWorker.artifacts)})`,
     );
     assert(
-      afterWorker.activity.some((entry) => entry.comment.includes('Please review the attached report')),
-      'worker review comment is in the activity history',
+      afterWorker.activity.some((entry) => entry.comment.includes('Please review the handed-over plan')),
+      'handover decision context is in the activity history',
     );
 
     // 5) Chief side — drive the real panel controls. Each mutation drives the
@@ -282,6 +298,13 @@ async function main() {
       console.warn(`[RealAppHarness] Panel screenshot skipped: ${error instanceof Error ? error.message : String(error)}`);
     }
 
+    fs.rmSync(canonicalReport);
+    runAttn(['ticket', 'comment', ticketId, '-m', 'Removed report.md; implementation.md remains canonical.', '--session', workerId]);
+    const afterDelete = await pollPanel(
+      (state) => state.artifacts.length === 1 && state.artifacts[0].filename === 'implementation.md',
+      'ticket artifact list to reflect direct deletion',
+    );
+
     const summary = {
       ok: true,
       runId,
@@ -292,7 +315,7 @@ async function main() {
       finalStatus: afterBlocked.status,
       description: afterBlocked.description,
       activityCount: afterBlocked.activity.length,
-      attachments: afterBlocked.attachments,
+      artifacts: afterDelete.artifacts,
       statusOptions: afterBlocked.statusOptions,
       crashedRejected,
       screenshot: screenshotCaptured ? screenshotPath : null,

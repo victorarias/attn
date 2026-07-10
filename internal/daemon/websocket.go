@@ -920,6 +920,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		go d.handleTicketAddComment(client, msg.(*protocol.TicketAddCommentMessage))
 	case protocol.CmdTicketEditDescription:
 		go d.handleTicketEditDescription(client, msg.(*protocol.TicketEditDescriptionMessage))
+	case protocol.CmdTicketHandover:
+		go d.handleTicketHandoverWS(client, msg.(*protocol.TicketHandoverMessage))
 	case protocol.CmdTicketResume:
 		go d.handleTicketResume(client, msg.(*protocol.TicketResumeMessage))
 	case protocol.CmdFsList:
@@ -931,6 +933,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdFsWrite:
 		fsWrite := msg.(*protocol.FsWriteMessage)
 		go d.sendFsWriteWSResult(client, protocol.Deref(fsWrite.RequestID), fsWrite.Path, fsWrite.Content, protocol.Deref(fsWrite.BaseHash))
+	case protocol.CmdFsRename:
+		fsRename := msg.(*protocol.FsRenameMessage)
+		go d.sendFsRenameWSResult(client, protocol.Deref(fsRename.RequestID), fsRename.Path, fsRename.NewPath)
+	case protocol.CmdFsDelete:
+		fsDelete := msg.(*protocol.FsDeleteMessage)
+		go d.sendFsDeleteWSResult(client, protocol.Deref(fsDelete.RequestID), fsDelete.Path)
 	case protocol.CmdFsExists:
 		fsExists := msg.(*protocol.FsExistsMessage)
 		go d.sendFsExistsWSResult(client, protocol.Deref(fsExists.RequestID), fsExists.Path)

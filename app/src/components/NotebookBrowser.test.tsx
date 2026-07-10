@@ -171,6 +171,16 @@ describe('NotebookBrowser', () => {
     expect(await screen.findByRole('button', { name: '2026-06-13' })).toBeInTheDocument();
   });
 
+  it('opens an explicitly requested ticket artifact before the preferred note', async () => {
+    const path = 'tickets/tk/design.md';
+    const { props, readFile } = makeProps({ initialPath: path });
+    render(<NotebookBrowser {...props} />);
+
+    await waitFor(() => expect(editor().value).toContain(`# ${path}`));
+    expect(readFile).toHaveBeenCalledWith(path);
+    expect(readFile).not.toHaveBeenCalledWith('knowledge/index.md');
+  });
+
   it('renders the filesystem tree in the sidebar and opens a clicked text file in a plain editor', async () => {
     const { props, readFile } = makeProps();
     render(<NotebookBrowser {...props} />);

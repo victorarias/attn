@@ -41,8 +41,8 @@ func TestFprintTicketShowFullBodyNoTruncation(t *testing.T) {
 				Comment:   &longComment,
 			},
 		},
-		Attachments: []protocol.TicketAttachment{
-			{Filename: "report.md", Path: "/repo/report.md"},
+		Artifacts: []protocol.TicketArtifact{
+			{Filename: "report.md", Path: "/repo/report.md", NotebookPath: "tickets/store-migration/report.md"},
 		},
 	}
 
@@ -60,12 +60,12 @@ func TestFprintTicketShowFullBodyNoTruncation(t *testing.T) {
 		t.Fatalf("description not rendered; out:\n%s", out)
 	}
 	if !strings.Contains(out, "report.md") {
-		t.Fatalf("attachment not rendered; out:\n%s", out)
+		t.Fatalf("artifact not rendered; out:\n%s", out)
 	}
 }
 
 // An empty-activity ticket (freshly created, unbound) should render sanely
-// with no attachments/activity noise instead of blowing up.
+// with no artifact/activity noise instead of blowing up.
 func TestFprintTicketShowEmptyActivity(t *testing.T) {
 	ticket := &protocol.Ticket{
 		ID:        "fresh-ticket",
@@ -85,7 +85,7 @@ func TestFprintTicketShowEmptyActivity(t *testing.T) {
 	if !strings.Contains(out, "fresh-ticket") || !strings.Contains(out, "A fresh backlog item") {
 		t.Fatalf("expected header with id/title; out:\n%s", out)
 	}
-	if strings.Contains(out, "attachments:") {
-		t.Fatalf("should not print attachments section when there are none; out:\n%s", out)
+	if strings.Contains(out, "artifacts:") {
+		t.Fatalf("should not print artifacts section when there are none; out:\n%s", out)
 	}
 }

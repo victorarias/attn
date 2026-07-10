@@ -146,6 +146,9 @@ type Daemon struct {
 	// lookup seam: nil in production (reconcileGroundTruth derives the fetcher
 	// from ghRegistry per-host); tests set it to a fake so no network runs.
 	ticketReconcilePRFetch prStateFetcher
+	// ticketArtifactMu serializes handover installation with its durable ticket
+	// receipt so concurrent submissions cannot race on destination names.
+	ticketArtifactMu sync.Mutex
 	// reloadingSessions marks sessions whose agent is being re-spawned in place
 	// (chief-of-staff assign/demote reload). handlePTYExit consumes the flag to
 	// suppress the killed worker's session_exited so the reload reads as a runtime
@@ -1979,8 +1982,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleTicketSubscribe(conn, msg.(*protocol.TicketSubscribeMessage))
 	case protocol.CmdTicketUnsubscribe:
 		d.handleTicketUnsubscribe(conn, msg.(*protocol.TicketUnsubscribeMessage))
-	case protocol.CmdTicketAttach:
-		d.handleTicketAttach(conn, msg.(*protocol.TicketAttachMessage))
+	case protocol.CmdTicketHandover:
+		d.handleTicketHandover(conn, msg.(*protocol.TicketHandoverMessage))
 	case protocol.CmdTicketCreate:
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
 	case protocol.CmdTicketComment:

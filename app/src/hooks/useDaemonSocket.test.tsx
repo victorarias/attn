@@ -2775,6 +2775,26 @@ describe('useDaemonSocket fs surface', () => {
     unmount();
   });
 
+  it('sends and resolves fs rename and delete actions', async () => {
+    const { result, unmount } = renderFsHook();
+    const ws = await waitForOpenSocket();
+
+    const rename = result.current.sendFsRename('tickets/tk/plan.md', 'tickets/tk/implementation.md');
+    await Promise.resolve();
+    let sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'fs_rename', path: 'tickets/tk/plan.md', new_path: 'tickets/tk/implementation.md' });
+    ws.emit({ event: 'fs_rename_result', request_id: sent.request_id, success: true, result: { path: sent.path, new_path: sent.new_path } });
+    await expect(rename).resolves.toEqual({ path: 'tickets/tk/plan.md', new_path: 'tickets/tk/implementation.md' });
+
+    const deletion = result.current.sendFsDelete('tickets/tk/implementation.md');
+    await Promise.resolve();
+    sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'fs_delete', path: 'tickets/tk/implementation.md' });
+    ws.emit({ event: 'fs_delete_result', request_id: sent.request_id, success: true, result: { path: sent.path } });
+    await expect(deletion).resolves.toEqual({ path: 'tickets/tk/implementation.md' });
+    unmount();
+  });
+
   it('invokes onFsChanged with origin and paths', async () => {
     const onFsChanged = vi.fn();
     const { unmount } = renderFsHook({ onFsChanged });
@@ -2888,6 +2908,28 @@ describe('useDaemonSocket ticket request/result', () => {
 
     ws.emit({ event: 'ticket_action_result', request_id: sent.request_id, success: true });
     await expect(promise).resolves.toBeUndefined();
+    unmount();
+  });
+
+  it('sends a multi-file ticket handover and resolves its receipt', async () => {
+    const { result, unmount } = renderTicketHook();
+    const ws = await waitForOpenSocket();
+    const promise = result.current.sendTicketHandover('tk-1', ['/tmp/design.md', '/tmp/rollout.md'], 'ready_for_review', 'ready');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({
+      cmd: 'ticket_handover',
+      ticket_id: 'tk-1',
+      state: 'ready_for_review',
+      comment: 'ready',
+      files: [
+        { source_path: '/tmp/design.md', filename: 'design.md' },
+        { source_path: '/tmp/rollout.md', filename: 'rollout.md' },
+      ],
+    });
+    const receipt = { ticket_id: 'tk-1', artifacts: [], fingerprint: 'abc', event_seq: 7, state: 'in_review', deduplicated: false };
+    ws.emit({ event: 'ticket_handover_result', request_id: sent.request_id, success: true, result: receipt });
+    await expect(promise).resolves.toEqual(receipt);
     unmount();
   });
 

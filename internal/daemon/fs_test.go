@@ -214,6 +214,20 @@ func TestFsDispatchThroughClientMessage(t *testing.T) {
 		exists.Result.Path != "docs/readme.md" || !exists.Result.Exists {
 		t.Fatalf("exists dispatch = %+v", exists)
 	}
+
+	d.handleClientMessage(client, []byte(`{"cmd":"fs_rename","request_id":"rn1","path":"docs/readme.md","new_path":"docs/plan.md"}`))
+	var renamed protocol.FsRenameResultMessage
+	readNotebookWSEvent(t, client.send, &renamed)
+	if renamed.RequestID != "rn1" || !renamed.Success || renamed.Result == nil || renamed.Result.NewPath != "docs/plan.md" {
+		t.Fatalf("rename dispatch = %+v", renamed)
+	}
+
+	d.handleClientMessage(client, []byte(`{"cmd":"fs_delete","request_id":"d1","path":"docs/plan.md"}`))
+	var deleted protocol.FsDeleteResultMessage
+	readNotebookWSEvent(t, client.send, &deleted)
+	if deleted.RequestID != "d1" || !deleted.Success || deleted.Result == nil || deleted.Result.Path != "docs/plan.md" {
+		t.Fatalf("delete dispatch = %+v", deleted)
+	}
 }
 
 // fs_write broadcasts fs_changed(origin=ui) with the written path, so an open fs

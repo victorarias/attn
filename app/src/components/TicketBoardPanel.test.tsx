@@ -24,7 +24,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     created_at: '2026-06-27T10:00:00Z',
     updated_at: '2026-06-27T10:05:00Z',
     activity: [],
-    attachments: [],
+    artifacts: [],
     ...overrides,
   };
 }

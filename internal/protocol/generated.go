@@ -773,6 +773,39 @@ type FsChangedMessage struct {
 	Paths []string `json:"paths"`
 }
 
+type FsDeleteMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type FsDeleteResult struct {
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
+type FsDeleteResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Result corresponds to the JSON schema field "result".
+	Result *FsDeleteResult `json:"result,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type FsEntry struct {
 	// IsDir corresponds to the JSON schema field "is_dir".
 	IsDir bool `json:"is_dir"`
@@ -888,6 +921,45 @@ type FsReadResultMessage struct {
 
 	// Result corresponds to the JSON schema field "result".
 	Result *FsReadResult `json:"result,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type FsRenameMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// NewPath corresponds to the JSON schema field "new_path".
+	NewPath string `json:"new_path"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type FsRenameResult struct {
+	// NewPath corresponds to the JSON schema field "new_path".
+	NewPath string `json:"new_path"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+}
+
+type FsRenameResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Result corresponds to the JSON schema field "result".
+	Result *FsRenameResult `json:"result,omitempty,omitzero"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -2722,15 +2794,16 @@ type Response struct {
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
-	// TicketAttachResult corresponds to the JSON schema field "ticket_attach_result".
-	TicketAttachResult *TicketAttachResult `json:"ticket_attach_result,omitempty,omitzero"`
-
 	// TicketCommentResult corresponds to the JSON schema field
 	// "ticket_comment_result".
 	TicketCommentResult *TicketCommentResult `json:"ticket_comment_result,omitempty,omitzero"`
 
 	// TicketCreateResult corresponds to the JSON schema field "ticket_create_result".
 	TicketCreateResult *TicketCreateResult `json:"ticket_create_result,omitempty,omitzero"`
+
+	// TicketHandoverResult corresponds to the JSON schema field
+	// "ticket_handover_result".
+	TicketHandoverResult *TicketHandoverResult `json:"ticket_handover_result,omitempty,omitzero"`
 
 	// TicketInboxResult corresponds to the JSON schema field "ticket_inbox_result".
 	TicketInboxResult *TicketInboxResult `json:"ticket_inbox_result,omitempty,omitzero"`
@@ -3262,11 +3335,11 @@ type Ticket struct {
 	// ArchivedAt corresponds to the JSON schema field "archived_at".
 	ArchivedAt *string `json:"archived_at,omitempty,omitzero"`
 
+	// Artifacts corresponds to the JSON schema field "artifacts".
+	Artifacts []TicketArtifact `json:"artifacts"`
+
 	// Assignee corresponds to the JSON schema field "assignee".
 	Assignee string `json:"assignee"`
-
-	// Attachments corresponds to the JSON schema field "attachments".
-	Attachments []TicketAttachment `json:"attachments"`
 
 	// ClosedAt corresponds to the JSON schema field "closed_at".
 	ClosedAt *string `json:"closed_at,omitempty,omitzero"`
@@ -3342,6 +3415,7 @@ type TicketActivity struct {
 type TicketActivityKind string
 
 const TicketActivityKindComment TicketActivityKind = "comment"
+const TicketActivityKindHandover TicketActivityKind = "handover"
 const TicketActivityKindStatusChange TicketActivityKind = "status_change"
 
 type TicketAddCommentMessage struct {
@@ -3358,43 +3432,12 @@ type TicketAddCommentMessage struct {
 	TicketID string `json:"ticket_id"`
 }
 
-type TicketAttachMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
+type TicketArtifact struct {
 	// Filename corresponds to the JSON schema field "filename".
 	Filename string `json:"filename"`
 
-	// Note corresponds to the JSON schema field "note".
-	Note *string `json:"note,omitempty,omitzero"`
-
-	// SourcePath corresponds to the JSON schema field "source_path".
-	SourcePath string `json:"source_path"`
-
-	// SourceSessionID corresponds to the JSON schema field "source_session_id".
-	SourceSessionID string `json:"source_session_id"`
-}
-
-type TicketAttachResult struct {
-	// Filename corresponds to the JSON schema field "filename".
-	Filename string `json:"filename"`
-
-	// TicketID corresponds to the JSON schema field "ticket_id".
-	TicketID string `json:"ticket_id"`
-}
-
-type TicketAttachment struct {
-	// CreatedAt corresponds to the JSON schema field "created_at".
-	CreatedAt string `json:"created_at"`
-
-	// Filename corresponds to the JSON schema field "filename".
-	Filename string `json:"filename"`
-
-	// ID corresponds to the JSON schema field "id".
-	ID int `json:"id"`
-
-	// Note corresponds to the JSON schema field "note".
-	Note *string `json:"note,omitempty,omitzero"`
+	// NotebookPath corresponds to the JSON schema field "notebook_path".
+	NotebookPath string `json:"notebook_path"`
 
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
@@ -3515,11 +3558,79 @@ type TicketEventBundle struct {
 type TicketEventKind string
 
 const TicketEventKindAssigned TicketEventKind = "assigned"
-const TicketEventKindAttachmentAdded TicketEventKind = "attachment_added"
 const TicketEventKindCommented TicketEventKind = "commented"
 const TicketEventKindCreated TicketEventKind = "created"
 const TicketEventKindDescriptionEdited TicketEventKind = "description_edited"
+const TicketEventKindHandoverSubmitted TicketEventKind = "handover_submitted"
 const TicketEventKindStatusChanged TicketEventKind = "status_changed"
+
+type TicketHandoverFile struct {
+	// Filename corresponds to the JSON schema field "filename".
+	Filename string `json:"filename"`
+
+	// SourcePath corresponds to the JSON schema field "source_path".
+	SourcePath string `json:"source_path"`
+}
+
+type TicketHandoverMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Comment corresponds to the JSON schema field "comment".
+	Comment *string `json:"comment,omitempty,omitzero"`
+
+	// Files corresponds to the JSON schema field "files".
+	Files []TicketHandoverFile `json:"files"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID string `json:"source_session_id"`
+
+	// State corresponds to the JSON schema field "state".
+	State *DispatchWorkState `json:"state,omitempty,omitzero"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID *string `json:"ticket_id,omitempty,omitzero"`
+}
+
+type TicketHandoverResult struct {
+	// Artifacts corresponds to the JSON schema field "artifacts".
+	Artifacts []TicketArtifact `json:"artifacts"`
+
+	// Deduplicated corresponds to the JSON schema field "deduplicated".
+	Deduplicated bool `json:"deduplicated"`
+
+	// EventSeq corresponds to the JSON schema field "event_seq".
+	EventSeq int `json:"event_seq"`
+
+	// Fingerprint corresponds to the JSON schema field "fingerprint".
+	Fingerprint string `json:"fingerprint"`
+
+	// State corresponds to the JSON schema field "state".
+	State TicketStatus `json:"state"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID string `json:"ticket_id"`
+}
+
+type TicketHandoverResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Result corresponds to the JSON schema field "result".
+	Result *TicketHandoverResult `json:"result,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
 
 type TicketInboxMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".

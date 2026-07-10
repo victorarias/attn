@@ -276,7 +276,7 @@ enum TicketEventKind {
   commented,
   assigned,
   description_edited,
-  attachment_added,
+  handover_submitted,
 }
 
 // TicketEvent is one entry in a ticket's append-only event log, as delivered to an
@@ -322,6 +322,7 @@ model TicketInboxResult {
 enum TicketActivityKind {
   status_change,
   comment,
+  handover,
 }
 
 // TicketActivity is one entry in a ticket's history thread, as shown in the detail
@@ -337,18 +338,17 @@ model TicketActivity {
   created_at: string;
 }
 
-// TicketAttachment is a file handed over with a ticket's work, copied into the
-// ticket's store and shown in the detail view.
-model TicketAttachment {
-  id: int32;
+// TicketArtifact is a current Markdown file in the ticket's visible Notebook
+// directory. The filesystem is authoritative, so the shape carries paths rather
+// than a database identity or lifecycle metadata.
+model TicketArtifact {
   filename: string;
+  notebook_path: string;
   path: string;
-  note?: string;
-  created_at: string;
 }
 
 // Ticket is the wire shape of a durable tracked-work record. `activity` and
-// `attachments` are the full history thread and handover files — populated on the
+// `artifacts` are the full history thread and current handover files — populated on the
 // get_ticket full record, and left empty on the list / board feed for cheapness.
 model Ticket {
   id: string;
@@ -368,7 +368,7 @@ model Ticket {
   // attn-authored comment). Non-terminal + reconciled_at set = the orphan badge.
   reconciled_at?: string;
   activity: TicketActivity[];
-  attachments: TicketAttachment[];
+  artifacts: TicketArtifact[];
 }
 
 model PR {
@@ -749,7 +749,7 @@ model TicketListResult {
 }
 
 // TicketShowMessage reads one ticket's full record — metadata, description, and the
-// complete activity thread (with full bodies) plus attachments — pulled over the
+// complete activity thread (with full bodies) plus current artifacts — pulled over the
 // agent socket instead of pushed as a tickets_updated broadcast. Unlike ticket_inbox
 // this is non-consuming: it never advances the calling session's unread cursor, so
 // it can be re-read at will. Like ticket_list it is NOT identity-scoped — a global
@@ -762,7 +762,7 @@ model TicketShowMessage {
 }
 
 // TicketShowResult is the full ticket record — the same shape the app's get_ticket
-// serves, with Activity and Attachments populated.
+// serves, with Activity and Artifacts populated.
 model TicketShowResult {
   ticket: Ticket;
 }
@@ -819,28 +819,46 @@ model TicketTakeResult {
   previous_assignee: string;
 }
 
-// TicketAttachMessage hands a file to the calling session's bound ticket. The
-// daemon resolves the ticket from the session (the assignee), copies the file at
-// source_path into the ticket's store directory (.attn/tickets/<id>/), and records
-// the attachment authored by the session. source_path is absolute (the CLI resolves
-// it against its cwd) and read by the daemon, so this is a same-machine operation.
-model TicketAttachMessage {
-  cmd: "ticket_attach";
-  source_session_id: string;
+model TicketHandoverFile {
   source_path: string;
   filename: string;
-  note?: string;
 }
 
-// TicketAttachResult echoes the ticket the file landed on and the stored filename,
-// so the caller can confirm what was attached and where.
-model TicketAttachResult {
+// TicketHandoverMessage copies one or more Markdown artifacts into a ticket's
+// visible Notebook directory and records one durable handover receipt. Without a
+// ticket_id the daemon resolves the caller's bound ticket; with one it follows the
+// same permissive by-id authorization as ticket status and comment.
+model TicketHandoverMessage {
+  cmd: "ticket_handover";
+  source_session_id: string;
+  ticket_id?: string;
+  files: TicketHandoverFile[];
+  state?: DispatchWorkState;
+  comment?: string;
+  request_id?: string;
+}
+
+// TicketHandoverResult is the durable receipt returned for a new submission and
+// for an idempotent retry of the same fingerprint.
+model TicketHandoverResult {
   ticket_id: string;
-  filename: string;
+  artifacts: TicketArtifact[];
+  fingerprint: string;
+  event_seq: int32;
+  state: TicketStatus;
+  deduplicated: boolean;
+}
+
+model TicketHandoverResultMessage {
+  event: "ticket_handover_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: TicketHandoverResult;
 }
 
 // GetTicketMessage fetches one ticket's full record — the row plus its activity
-// thread and attachments — for the detail view. A by-id read needs no caller
+// thread and current artifacts — for the detail view. A by-id read needs no caller
 // identity: the board feed (the initial_state push / tickets_updated broadcast)
 // already bounds what the app can see, and detail is the row it clicked. The
 // daemon replies with a ticket_result event correlated by request_id.
@@ -1094,6 +1112,19 @@ model FsWriteMessage {
   content: string;
   base_hash?: string; // omitted = create-only; present = hash-CAS edit
   request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+model FsRenameMessage {
+  cmd: "fs_rename";
+  path: string;
+  new_path: string;
+  request_id?: string;
+}
+
+model FsDeleteMessage {
+  cmd: "fs_delete";
+  path: string;
+  request_id?: string;
 }
 
 // Check whether a path exists under the root, without reading it. Used to flag
@@ -1840,7 +1871,7 @@ model ChiefOfStaffResultMessage {
 }
 
 // TicketsUpdatedMessage is the live board feed: the non-archived ticket rows
-// (bare — no activity/attachments), re-pushed whenever any ticket mutates. It is
+// (bare — no activity/artifacts), re-pushed whenever any ticket mutates. It is
 // the same shape carried in InitialStateMessage.tickets, so a client renders the
 // board identically from the bootstrap snapshot and from each update.
 model TicketsUpdatedMessage {
@@ -2395,7 +2426,7 @@ model Response {
   ticket_inbox_result?: TicketInboxResult;
   ticket_list_result?: TicketListResult;
   ticket_show_result?: TicketShowResult;
-  ticket_attach_result?: TicketAttachResult;
+  ticket_handover_result?: TicketHandoverResult;
   ticket_create_result?: TicketCreateResult;
   ticket_comment_result?: TicketCommentResult;
   ticket_subscribe_result?: TicketSubscribeResult;
@@ -2649,6 +2680,15 @@ model FsWriteResult {
   current_hash?: string;
 }
 
+model FsRenameResult {
+  path: string;
+  new_path: string;
+}
+
+model FsDeleteResult {
+  path: string;
+}
+
 model FsListResultMessage {
   event: "fs_list_result";
   request_id: string;
@@ -2663,6 +2703,22 @@ model FsReadResultMessage {
   success: boolean;
   error?: string;
   result?: FsReadResult;
+}
+
+model FsRenameResultMessage {
+  event: "fs_rename_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: FsRenameResult;
+}
+
+model FsDeleteResultMessage {
+  event: "fs_delete_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: FsDeleteResult;
 }
 
 // Result of fs_write (hash-CAS). A conflict is a successful response the UI
@@ -2837,6 +2893,7 @@ alias DaemonEvent =
   | TicketsUpdatedMessage
   | TicketResultMessage
   | TicketActionResultMessage
+  | TicketHandoverResultMessage
   | TicketResumeResultMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage
@@ -2877,6 +2934,13 @@ alias DaemonEvent =
   | NotebookBacklinksResultMessage
   | NotebookWriteResultMessage
   | NotebookSendToChiefResultMessage
+  | FsListResultMessage
+  | FsReadResultMessage
+  | FsWriteResultMessage
+  | FsRenameResultMessage
+  | FsDeleteResultMessage
+  | FsExistsResultMessage
+  | FsChangedMessage
   | TaskListResultMessage
   | TaskRetryResultMessage
   | TasksChangedMessage

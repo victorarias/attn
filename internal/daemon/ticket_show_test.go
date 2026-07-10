@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func callTicketShow(t *testing.T, d *Daemon, ticketID string) protocol.Response 
 
 // ticket_show is the agent-socket counterpart of the app's get_ticket: a
 // non-consuming full-record read (description + complete activity thread with
-// full bodies + attachments) for a ticket with 2+ activity events, including a
+// full bodies + current artifacts) for a ticket with 2+ activity events, including a
 // long multi-line comment. Nothing here should be truncated.
 func TestHandleTicketShowReturnsFullRecord(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
@@ -50,13 +51,14 @@ func TestHandleTicketShowReturnsFullRecord(t *testing.T) {
 	if _, err := d.store.AddTicketComment("store-migration", "chief-1", longComment, now.Add(2*time.Minute)); err != nil {
 		t.Fatalf("add comment: %v", err)
 	}
-	if _, err := d.store.AddTicketAttachment(store.TicketAttachment{
-		TicketID: "store-migration",
-		Filename: "report.md",
-		Path:     "/repo/report.md",
-		Note:     "the findings",
-	}, "sess-1", now.Add(3*time.Minute)); err != nil {
-		t.Fatalf("add attachment: %v", err)
+	root := t.TempDir()
+	d.store.SetSetting(SettingNotebookRoot, root)
+	artifactDir := filepath.Join(root, "tickets", "store-migration")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "report.md"), []byte("the findings"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	resp := callTicketShow(t, d, "store-migration")
@@ -86,8 +88,8 @@ func TestHandleTicketShowReturnsFullRecord(t *testing.T) {
 	if !sawStatusChange || !sawComment {
 		t.Fatalf("activity kinds: statusChange=%v comment=%v (activity=%+v)", sawStatusChange, sawComment, tk.Activity)
 	}
-	if len(tk.Attachments) != 1 || tk.Attachments[0].Filename != "report.md" {
-		t.Fatalf("attachments = %+v", tk.Attachments)
+	if len(tk.Artifacts) != 1 || tk.Artifacts[0].Filename != "report.md" {
+		t.Fatalf("artifacts = %+v", tk.Artifacts)
 	}
 }
 

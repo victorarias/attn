@@ -30,8 +30,8 @@ export interface NotebookSurfaceProps {
   // mounted but idle while closed); a tile is always active once mounted. Gates the
   // on-open file selection, the live-refresh reload, and the tasks fetch.
   active: boolean;
-  // The file a tile reopens to (its persisted open-file path); null/undefined shows
-  // the no-selection screen. Modal ignores it (it probes its own entry points).
+  // The file to open first. Tiles persist it; the modal uses it when another
+  // surface opens a specific Notebook file.
   initialPath?: string | null;
   // Modal close (persist-then-close). A tile has no Close button, so it omits this.
   onClose?: () => void;
@@ -571,6 +571,15 @@ export function NotebookSurface({
           if (!cancelled) clearSelection();
         }
         return;
+      }
+      if (initialPath) {
+        try {
+          const res = await readFile(initialPath);
+          if (!cancelled) void loadFile(initialPath, res);
+          return;
+        } catch {
+          // Fall through to the modal's normal entry points.
+        }
       }
       // Keep the current selection if it still exists (a reopen on the same file).
       const current = selectedPathRef.current;

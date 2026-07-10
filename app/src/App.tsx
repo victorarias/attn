@@ -554,6 +554,8 @@ function App() {
     sendFsList,
     sendFsRead,
     sendFsWrite,
+    sendFsRename,
+    sendFsDelete,
     sendFsExists,
     sendTaskList,
     sendTaskRetry,
@@ -595,6 +597,7 @@ function App() {
     sendTicketChangeStatus,
     sendTicketAddComment,
     sendTicketEditDescription,
+    sendTicketHandover,
     sendTicketResume,
     getPresentations,
     connectionError,
@@ -729,6 +732,8 @@ function App() {
         sendFsList={sendFsList}
         sendFsRead={sendFsRead}
         sendFsWrite={sendFsWrite}
+        sendFsRename={sendFsRename}
+        sendFsDelete={sendFsDelete}
         sendFsExists={sendFsExists}
         sendTaskList={sendTaskList}
         sendTaskRetry={sendTaskRetry}
@@ -774,6 +779,7 @@ function App() {
         sendTicketChangeStatus={sendTicketChangeStatus}
         sendTicketAddComment={sendTicketAddComment}
         sendTicketEditDescription={sendTicketEditDescription}
+        sendTicketHandover={sendTicketHandover}
         sendTicketResume={sendTicketResume}
         clearGitStatus={clearGitStatus}
         registerSessionExitHandler={registerSessionExitHandler}
@@ -836,6 +842,8 @@ interface AppContentProps {
   sendFsList: ReturnType<typeof useDaemonSocket>['sendFsList'];
   sendFsRead: ReturnType<typeof useDaemonSocket>['sendFsRead'];
   sendFsWrite: ReturnType<typeof useDaemonSocket>['sendFsWrite'];
+  sendFsRename: ReturnType<typeof useDaemonSocket>['sendFsRename'];
+  sendFsDelete: ReturnType<typeof useDaemonSocket>['sendFsDelete'];
   sendFsExists: ReturnType<typeof useDaemonSocket>['sendFsExists'];
   sendTaskList: ReturnType<typeof useDaemonSocket>['sendTaskList'];
   sendTaskRetry: ReturnType<typeof useDaemonSocket>['sendTaskRetry'];
@@ -881,6 +889,7 @@ interface AppContentProps {
   sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
   sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
   sendTicketEditDescription: ReturnType<typeof useDaemonSocket>['sendTicketEditDescription'];
+  sendTicketHandover: ReturnType<typeof useDaemonSocket>['sendTicketHandover'];
   sendTicketResume: ReturnType<typeof useDaemonSocket>['sendTicketResume'];
   clearGitStatus: () => void;
   registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
@@ -937,6 +946,8 @@ function AppContent({
   sendFsList,
   sendFsRead,
   sendFsWrite,
+  sendFsRename,
+  sendFsDelete,
   sendFsExists,
   sendTaskList,
   sendTaskRetry,
@@ -982,6 +993,7 @@ sendFetchPRDetails,
   sendTicketChangeStatus,
   sendTicketAddComment,
   sendTicketEditDescription,
+  sendTicketHandover,
   sendTicketResume,
   clearGitStatus,
   registerSessionExitHandler,
@@ -1141,6 +1153,7 @@ sendFetchPRDetails,
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [workspaceContextsOpen, setWorkspaceContextsOpen] = useState(false);
   const [notebookOpen, setNotebookOpen] = useState(false);
+  const [notebookRequestedPath, setNotebookRequestedPath] = useState<string | null>(null);
   const [boardSurfaceOpen, setBoardSurfaceOpen] = useState(false);
   const [notificationsPanelOpen, setNotificationsPanelOpen] = useState(false);
   const [workspaceContextsLoading, setWorkspaceContextsLoading] = useState(false);
@@ -3048,8 +3061,15 @@ sendFetchPRDetails,
     onChangeStatus: sendTicketChangeStatus,
     onAddComment: sendTicketAddComment,
     onEditDescription: sendTicketEditDescription,
+    onHandover: sendTicketHandover,
+    onRenameArtifact: sendFsRename,
+    onDeleteArtifact: sendFsDelete,
+    onOpenArtifact: (path: string) => {
+      setNotebookRequestedPath(path);
+      setNotebookOpen(true);
+    },
     onResume: handleResumeTicket,
-  }), [fetchTicket, sendTicketChangeStatus, sendTicketAddComment, sendTicketEditDescription, handleResumeTicket]);
+  }), [fetchTicket, sendTicketChangeStatus, sendTicketAddComment, sendTicketEditDescription, sendTicketHandover, sendFsRename, sendFsDelete, handleResumeTicket]);
 
   const isZedEditorConfigured = useMemo(() => {
     const editor = (settings.editor_executable || '').trim().toLowerCase();
@@ -3569,6 +3589,13 @@ sendFetchPRDetails,
                   onChangeStatus={sendTicketChangeStatus}
                   onAddComment={sendTicketAddComment}
                   onEditDescription={sendTicketEditDescription}
+                  onHandover={sendTicketHandover}
+                  onRenameArtifact={sendFsRename}
+                  onDeleteArtifact={sendFsDelete}
+                  onOpenArtifact={(path) => {
+                    setNotebookRequestedPath(path);
+                    setNotebookOpen(true);
+                  }}
                   onResume={handleResumeTicket}
                   onClose={handleCloseTicketDetail}
                 />
@@ -3664,7 +3691,11 @@ sendFetchPRDetails,
       />
       <NotebookBrowser
         isOpen={notebookOpen}
-        onClose={() => setNotebookOpen(false)}
+        initialPath={notebookRequestedPath}
+        onClose={() => {
+          setNotebookOpen(false);
+          setNotebookRequestedPath(null);
+        }}
         listDir={sendFsList}
         readFile={sendFsRead}
         writeFile={sendFsWrite}
