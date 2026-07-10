@@ -382,17 +382,20 @@ describe('PresentTour annotations', () => {
 });
 
 describe('PresentTour summary fold', () => {
-  it('renders expanded (no collapsed class, aria-hidden=false) when summaryVisible is omitted or true', async () => {
+  it('renders expanded (no collapsed class, body aria-hidden=false) when summaryVisible is omitted or true', async () => {
     render(<PresentTour {...baseProps({ files: [tinyFile('src/foo.ts')], summary: 'The summary text' })} />);
     await waitForSettled();
 
     const summaryEl = screen.getByTestId('present-tour-summary');
     expect(summaryEl).not.toHaveClass('collapsed');
-    expect(summaryEl).toHaveAttribute('aria-hidden', 'false');
-    expect(summaryEl.textContent).toContain('The summary text');
+    const bodyEl = screen.getByTestId('present-tour-summary-body');
+    expect(bodyEl).toHaveAttribute('aria-hidden', 'false');
+    expect(bodyEl.textContent).toContain('The summary text');
+    // The toggle stays present and clickable while expanded.
+    expect(screen.getByTestId('present-tour-summary-toggle')).toBeEnabled();
   });
 
-  it('applies the collapsed class and aria-hidden=true when summaryVisible is false, without unmounting the card', async () => {
+  it('applies the collapsed class and body aria-hidden=true when summaryVisible is false, without unmounting the card', async () => {
     render(
       <PresentTour
         {...baseProps({ files: [tinyFile('src/foo.ts')], summary: 'The summary text', summaryVisible: false })}
@@ -402,9 +405,125 @@ describe('PresentTour summary fold', () => {
 
     const summaryEl = screen.getByTestId('present-tour-summary');
     expect(summaryEl).toHaveClass('collapsed');
-    expect(summaryEl).toHaveAttribute('aria-hidden', 'true');
+    const bodyEl = screen.getByTestId('present-tour-summary-body');
+    expect(bodyEl).toHaveAttribute('aria-hidden', 'true');
     // Stays mounted (not removed) so the fold can animate.
-    expect(summaryEl.textContent).toContain('The summary text');
+    expect(bodyEl.textContent).toContain('The summary text');
+    // The toggle stays present and clickable while collapsed.
+    expect(screen.getByTestId('present-tour-summary-toggle')).toBeEnabled();
+  });
+
+  it('clicking the toggle calls onSummaryVisibleChange with the opposite of summaryVisible', async () => {
+    const onSummaryVisibleChange = vi.fn();
+    const { rerender } = render(
+      <PresentTour
+        {...baseProps({
+          files: [tinyFile('src/foo.ts')],
+          summary: 'The summary text',
+          summaryVisible: true,
+          onSummaryVisibleChange,
+        })}
+      />
+    );
+    await waitForSettled();
+
+    fireEvent.click(screen.getByTestId('present-tour-summary-toggle'));
+    expect(onSummaryVisibleChange).toHaveBeenCalledWith(false);
+
+    onSummaryVisibleChange.mockClear();
+    rerender(
+      <PresentTour
+        {...baseProps({
+          files: [tinyFile('src/foo.ts')],
+          summary: 'The summary text',
+          summaryVisible: false,
+          onSummaryVisibleChange,
+        })}
+      />
+    );
+    fireEvent.click(screen.getByTestId('present-tour-summary-toggle'));
+    expect(onSummaryVisibleChange).toHaveBeenCalledWith(true);
+  });
+
+  it('wheel-down over an at-bottom (no further scroll) card body collapses; wheel-up does not', async () => {
+    const onSummaryVisibleChange = vi.fn();
+    render(
+      <PresentTour
+        {...baseProps({
+          files: [tinyFile('src/foo.ts')],
+          summary: 'The summary text',
+          summaryVisible: true,
+          onSummaryVisibleChange,
+        })}
+      />
+    );
+    await waitForSettled();
+
+    const summaryEl = screen.getByTestId('present-tour-summary');
+    // jsdom gives every element zero geometry (scrollTop/clientHeight/
+    // scrollHeight all 0), so scrollTop + clientHeight >= scrollHeight holds
+    // by default — this exercises the "no more content to scroll" case
+    // without needing to fake non-zero geometry.
+    fireEvent.wheel(summaryEl, { deltaY: -50 });
+    expect(onSummaryVisibleChange).not.toHaveBeenCalled();
+
+    fireEvent.wheel(summaryEl, { deltaY: 50 });
+    expect(onSummaryVisibleChange).toHaveBeenCalledWith(false);
+  });
+
+  it('wheel-down does not collapse while the card body still has content to scroll', async () => {
+    const onSummaryVisibleChange = vi.fn();
+    render(
+      <PresentTour
+        {...baseProps({
+          files: [tinyFile('src/foo.ts')],
+          summary: 'The summary text',
+          summaryVisible: true,
+          onSummaryVisibleChange,
+        })}
+      />
+    );
+    await waitForSettled();
+
+    const body = screen.getByTestId('present-tour-summary-body');
+    Object.defineProperty(body, 'scrollHeight', { value: 800, configurable: true });
+    Object.defineProperty(body, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(body, 'scrollTop', { value: 0, configurable: true });
+
+    fireEvent.wheel(screen.getByTestId('present-tour-summary'), { deltaY: 50 });
+    expect(onSummaryVisibleChange).not.toHaveBeenCalled();
+  });
+});
+
+// Regression test for the root-cause bug: the takeover/cold-window-pin
+// listener effect used to have `[]` deps, so it ran once against
+// `containerRef.current === null` while the first render's `allSettled` was
+// still false (diffs load async over the daemon WS in the live app) and then
+// never ran again once CodeView actually mounted. Passive scroll tracking
+// never armed, `handleScroll` returned early forever, and neither the
+// summary fold nor the cold-window scroll pin ever worked outside tests
+// (which, unlike the live app, feed pre-loaded diffs so `allSettled` is true
+// on the very first render). This must fail on the pre-fix `[]` deps and
+// pass once the effect depends on `allSettled`.
+describe('PresentTour listener re-attach on deferred load (regression)', () => {
+  it('arms passive scroll tracking once CodeView mounts after starting in the loading state', async () => {
+    const onActivePathChange = vi.fn();
+    const loadingFile: PresentTourFile = { path: 'src/foo.ts', diff: { loading: true } };
+    const { rerender } = render(
+      <PresentTour {...baseProps({ files: [loadingFile], onActivePathChange })} />
+    );
+
+    expect(screen.getByText('Loading tour…')).toBeInTheDocument();
+
+    rerender(<PresentTour {...baseProps({ files: [tinyFile('src/foo.ts')], onActivePathChange })} />);
+    await waitForSettled();
+
+    fireEvent.wheel(screen.getByTestId('mock-codeview'));
+    act(() => {
+      (codeViewProps.latest!.onScroll as (scrollTop: number) => void)(0);
+    });
+
+    expect(onActivePathChange).toHaveBeenCalledWith('src/foo.ts');
   });
 });
 

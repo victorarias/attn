@@ -21,7 +21,7 @@ import type { PresentationRound } from '../../types/generated';
 // production logic covered separately in PresentTour.test.tsx; this mock only
 // needs to exercise PresentRoot's N/P hop-state wiring.
 vi.mock('../PresentTour', () => ({
-  PresentTour: vi.fn(({ summary, files, comments, annotationCommentIds, onAnnotationAnchorsChange, reviewedPaths, onToggleReviewed }: PresentTourProps) => {
+  PresentTour: vi.fn(({ summary, summaryVisible, onSummaryVisibleChange, files, comments, annotationCommentIds, onAnnotationAnchorsChange, reviewedPaths, onToggleReviewed }: PresentTourProps) => {
     useEffect(() => {
       if (!onAnnotationAnchorsChange) return;
       // One anchor per (filepath, line_start) group, not per thread entry —
@@ -41,6 +41,10 @@ vi.mock('../PresentTour', () => ({
     return (
       <div data-testid="present-tour">
         {summary && <div data-testid="present-tour-summary">{summary}</div>}
+        <span data-testid="present-tour-summary-visible">{String(summaryVisible)}</span>
+        <button type="button" onClick={() => onSummaryVisibleChange?.(!summaryVisible)}>
+          toggle-summary-visible
+        </button>
         {files.map((f) => (
           <div key={f.path} data-testid={`tour-file-${f.path}`}>
             {f.note && <div className="note">{f.note}</div>}
@@ -693,6 +697,38 @@ describe('PresentRoot', () => {
     fireEvent.click(screen.getByText('src/foo.ts'));
     await waitFor(() => {
       expect(latestTourProps().summaryVisible).toBe(false);
+    }, WAIT_OPTS);
+  });
+
+  it('restores summaryVisible=true when the rail Summary row is clicked after navigating away', async () => {
+    await loadRound();
+
+    fireEvent.click(screen.getByText('src/foo.ts'));
+    await waitFor(() => {
+      expect(latestTourProps().summaryVisible).toBe(false);
+    }, WAIT_OPTS);
+
+    fireEvent.click(screen.getByTestId('present-root-summary-row'));
+    await waitFor(() => {
+      expect(latestTourProps().summaryVisible).toBe(true);
+    }, WAIT_OPTS);
+  });
+
+  it('flips summaryVisible via onSummaryVisibleChange (manual toggle) while still on the Summary stop', async () => {
+    await loadRound();
+
+    await waitFor(() => {
+      expect(latestTourProps().summaryVisible).toBe(true);
+    }, WAIT_OPTS);
+
+    fireEvent.click(screen.getByText('toggle-summary-visible'));
+    await waitFor(() => {
+      expect(latestTourProps().summaryVisible).toBe(false);
+    }, WAIT_OPTS);
+
+    fireEvent.click(screen.getByText('toggle-summary-visible'));
+    await waitFor(() => {
+      expect(latestTourProps().summaryVisible).toBe(true);
     }, WAIT_OPTS);
   });
 

@@ -16,43 +16,76 @@
 .present-tour-summary {
   flex: 0 0 auto;
   margin-bottom: 16px;
-  padding: 14px 16px;
   border: 1px solid var(--color-border);
   border-radius: 6px;
   background: var(--color-bg-panel);
   color: var(--color-text-primary);
+}
+
+/* The always-visible strip: folding hides only the body below, so the card
+   can still be expanded again once collapsed. */
+.present-tour-summary-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.present-tour-summary-toggle:focus-visible {
+  outline: 2px solid var(--color-accent, #5b8cff);
+  outline-offset: -2px;
+}
+
+.present-tour-summary-chevron {
+  display: inline-block;
+  transition: transform 0.18s ease;
+}
+
+.present-tour-summary-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.present-tour-summary-body {
+  color: var(--color-text-primary);
   line-height: 1.6;
+  padding: 0 16px 14px;
   /* A summary can now hold a mermaid diagram; without a cap a tall one
      squeezes the tour itself out of the viewport. */
   max-height: 40vh;
   overflow-y: auto;
-  transition: max-height 0.18s ease, opacity 0.18s ease, padding 0.18s ease, margin-bottom 0.18s ease;
+  transition: max-height 0.18s ease, opacity 0.18s ease, padding 0.18s ease;
 }
 
-/* Folded once the user scrolls past the pinned Summary stop (see
-   summaryVisible) — the card stays mounted so the fold can animate, rather
-   than unmounting and losing the transition. */
-.present-tour-summary.collapsed {
+/* Folded on scroll-away or manual toggle (see onSummaryVisibleChange) — the
+   body stays mounted so the fold can animate, rather than unmounting and
+   losing the transition. The strip itself (toggle button) stays visible. */
+.present-tour-summary.collapsed .present-tour-summary-body {
   max-height: 0;
   opacity: 0;
   padding-top: 0;
   padding-bottom: 0;
-  margin-bottom: 0;
-  border-width: 0;
   overflow: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .present-tour-summary {
+  .present-tour-summary-body,
+  .present-tour-summary-chevron {
     transition: none;
   }
 }
 
-.present-tour-summary :first-child {
+.present-tour-summary-body :first-child {
   margin-top: 0;
 }
 
-.present-tour-summary :last-child {
+.present-tour-summary-body :last-child {
   margin-bottom: 0;
 }
 

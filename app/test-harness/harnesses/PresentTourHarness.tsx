@@ -117,6 +117,13 @@ export function PresentTourHarness({ onReady }: HarnessProps) {
   const [scrollNonce, setScrollNonce] = useState(0);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [reviewedPaths, setReviewedPaths] = useState<Set<string>>(new Set());
+  // Mirrors PresentRoot's summary-collapse wiring so e2e can exercise the
+  // fold: any arrival at a file stop collapses it, a manual toggle wins
+  // otherwise.
+  const [summaryCollapsed, setSummaryCollapsed] = useState(false);
+  useEffect(() => {
+    if (activePath !== null) setSummaryCollapsed(true);
+  }, [activePath]);
   // When `deferred=1`, files start loading (mirroring PresentRoot's fetch pass)
   // so tests can exercise scroll requests issued before CodeView mounts, then
   // call `settleDiffs()` to supply content and let the tour finish loading.
@@ -224,6 +231,8 @@ export function PresentTourHarness({ onReady }: HarnessProps) {
           summary={`## Harness summary
 
 Three files, reading order alpha -> beta -> gamma.`}
+          summaryVisible={!summaryCollapsed}
+          onSummaryVisibleChange={(visible) => setSummaryCollapsed(!visible)}
           files={files}
           comments={comments}
           editingCommentId={editingCommentId}
