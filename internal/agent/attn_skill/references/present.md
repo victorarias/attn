@@ -400,21 +400,19 @@ don't. Iterate until clean before opening — a broken anchor or a schema
 mistake should never reach the reviewer's screen.
 
 ```bash
-attn present --manifest .present.yml
+attn present --manifest .present.yml --wait
 ```
 
 Validates again, hands the manifest to the daemon, which pins `base`/`head`
 to SHAs and opens the presentation — a banner notice plus a Present window
-chip appear in the app. Prints any warnings, the pinned SHAs, and the exact
-feedback command to run later.
+chip appear in the app. **When you are Codex, always include `--wait` and keep
+this foreground tool call open while the reviewer works.** It blocks
+synchronously until the round is submitted or the presentation is closed,
+then returns the outcome on stdout. Submitted feedback is printed as markdown,
+so use that command result as the review handback and continue the same turn
+from it.
 
-**After opening, end your turn.** Don't poll for a review, don't sit in a
-loop watching for the reviewer. The daemon wakes you when a round is
-submitted: a ticket-bound presentation gets a durable ticket comment; a bare
-session gets a doorbell message typed into the session — but only if the
-session is idle at that exact moment, otherwise it's skipped, not queued.
-So if you were mid-work when a submit could plausibly have landed, don't
-assume silence means "no review yet" — check directly:
+To inspect feedback from an older or non-waiting presentation explicitly:
 
 ```bash
 attn present feedback <presentation-id> [--round <n>] [--json]
@@ -426,7 +424,7 @@ Prints the round's feedback as markdown (defaults to the latest round).
 a new round on the same presentation:
 
 ```bash
-attn present --manifest .present.yml --presentation <presentation-id>
+attn present --manifest .present.yml --presentation <presentation-id> --wait
 ```
 
 Author round N+1 as the **delta** since the last submitted round — what
