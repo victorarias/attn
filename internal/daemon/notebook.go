@@ -335,7 +335,8 @@ func chiefInboxNudgePrompt(root string) string {
 
 // sendNotebookToChiefWSResult delivers a Notebook selection to the chief of staff:
 // it appends the selection to the chief inbox note (the daemon is the sole writer)
-// and, when a chief session is live and idle/waiting, fires a bounded PTY nudge.
+// and, when a chief session is live and not waiting for approval, fires a bounded
+// PTY nudge.
 // The inbox delivery is the durable channel; the nudge is best-effort immediacy.
 // The UI never messages the chief directly — it only hands the selection here.
 func (d *Daemon) sendNotebookToChiefWSResult(client *wsClient, requestID, sourcePath, selection string) {

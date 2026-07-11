@@ -105,6 +105,41 @@ func TestHandlePresentOpen_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHandbackPresentationRoundNudgesEligibleBareSession(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state string
+		want  bool
+	}{
+		{name: "working", state: protocol.StateWorking, want: true},
+		{name: "launching", state: protocol.StateLaunching, want: true},
+		{name: "unknown", state: protocol.StateUnknown, want: true},
+		{name: "pending approval", state: protocol.StatePendingApproval, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+			_, sessionID, inputs := delegateForNotify(t, d, "codex")
+			d.store.UpdateState(sessionID, tc.state)
+			pres, err := d.store.CreatePresentation(sessionID, nil, "Review", "changes", t.TempDir(), time.Now())
+			if err != nil {
+				t.Fatalf("CreatePresentation: %v", err)
+			}
+
+			d.handbackPresentationRound(pres, 1, "approved")
+			gotDoorbell := false
+			for _, input := range inputs(sessionID) {
+				if strings.Contains(input, "attn present feedback") {
+					gotDoorbell = true
+					break
+				}
+			}
+			if gotDoorbell != tc.want {
+				t.Fatalf("handback doorbell = %v, want %v for state %s", gotDoorbell, tc.want, tc.state)
+			}
+		})
+	}
+}
+
 // presentAnnotatedTestRepo creates a one-commit repo with a.txt containing
 // known lines, so tests can author manifests with anchor/line annotations
 // against predictable content.

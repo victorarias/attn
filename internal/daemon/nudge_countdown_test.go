@@ -20,9 +20,9 @@ func currentNudgeTimer(d *Daemon, sessionID string) *time.Timer {
 }
 
 // fireNudgeNow simulates the countdown timer firing immediately, by invoking the fire
-// callback with the live timer handle — the faithful deterministic path (mirrors the
-// backstop tests' hour-long-grace + fire-by-hand pattern). Tests that use it set an
-// hour-long window override so the real timer never races this hand-fire.
+// callback with the live timer handle — the faithful deterministic path. Tests that
+// use it set an hour-long window override so the real timer never races this
+// hand-fire.
 func fireNudgeNow(t *testing.T, d *Daemon, sessionID string) {
 	t.Helper()
 	timer := currentNudgeTimer(d, sessionID)
@@ -169,6 +169,56 @@ func TestNudgeCountdownCancelsOnPendingApproval(t *testing.T) {
 	}
 }
 
+func TestDoorbellWriteDoesNotInterleaveWithPendingApproval(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	sessionID := "doorbell-state-fence"
+	now := protocol.TimestampNow().String()
+	d.store.Add(&protocol.Session{
+		ID:             sessionID,
+		Label:          "doorbell-state-fence",
+		Agent:          protocol.SessionAgentCodex,
+		Directory:      t.TempDir(),
+		State:          protocol.SessionStateWorking,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	inputStarted := make(chan struct{})
+	releaseInput := make(chan struct{})
+	inputs := make(chan string, 1)
+	d.ptyBackend = &fakeSpawnBackend{onInput: func(_ string, data []byte) {
+		inputs <- string(data)
+		close(inputStarted)
+		<-releaseInput
+	}}
+
+	doorbellDone := make(chan error, 1)
+	go func() { doorbellDone <- d.typeDoorbell(sessionID, ticketNudgePrompt) }()
+	<-inputStarted
+
+	stateDone := make(chan struct{})
+	go func() {
+		d.updateAndBroadcastState(sessionID, protocol.StatePendingApproval)
+		close(stateDone)
+	}()
+	select {
+	case <-stateDone:
+		t.Fatal("pending approval committed while a doorbell input was in flight")
+	case <-time.After(20 * time.Millisecond):
+		// The shared fence holds the state report until the complete input is sent.
+	}
+
+	close(releaseInput)
+	if err := <-doorbellDone; err != nil {
+		t.Fatalf("typeDoorbell() error = %v", err)
+	}
+	<-stateDone
+	if got := <-inputs; got != ticketNudgePrompt+"\r" {
+		t.Fatalf("doorbell input = %q, want one atomic prompt+Enter write", got)
+	}
+}
+
 func TestNudgeDeliveryStatePolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -236,9 +286,9 @@ func TestTriggerNudgeFiresImmediately(t *testing.T) {
 	}
 }
 
-// An explicit click delivers even when the session rests in 'unknown' — codex's common
-// resting state when its turn-end classifier can't find a transcript. The auto
-// countdown stays idle-only, but the user's click is unambiguous intent.
+// An explicit click delivers when the session rests in 'unknown' — Codex's common
+// resting state when its turn-end classifier cannot find a transcript. Unknown is
+// also auto-nudge-eligible; the click simply bypasses the countdown.
 func TestTriggerNudgeDeliversWhenUnknown(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour
@@ -256,8 +306,8 @@ func TestTriggerNudgeDeliversWhenUnknown(t *testing.T) {
 	}
 }
 
-// An explicit click delivers on demand even while the agent is working — the user has
-// chosen to deliver now, and unlike the automatic countdown the click is not idle-gated.
+// An explicit click delivers on demand while the agent is working. Working is also
+// auto-nudge-eligible; the click simply bypasses the countdown.
 func TestTriggerNudgeDeliversWhileWorking(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour

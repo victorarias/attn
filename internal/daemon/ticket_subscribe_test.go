@@ -53,9 +53,9 @@ func inboxHasTicket(bundles []protocol.TicketEventBundle, ticketID string) bool 
 // ticket, and after unsubscribing it is neither nudged by nor served further events.
 // codex (no self-monitor) is used so the doorbell is observable; the trigger is a
 // chief comment on the ticket, an event the subscriber did not author. The trigger
-// goes through commentOnTicket (synchronous handleTicketAddComment), so the doorbell
-// — typeDoorbell sleeps mid-delivery — completes before the assertion, unlike the
-// net.Pipe-based callSetTicketStatus which would return before the async notify ran.
+// goes through commentOnTicket (synchronous handleTicketAddComment), so the nudge
+// countdown is armed before the assertion, unlike the net.Pipe-based
+// callSetTicketStatus which can return before its async notify runs.
 func TestTicketSubscribeLifecycle(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour

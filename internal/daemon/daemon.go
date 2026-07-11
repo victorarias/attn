@@ -175,6 +175,10 @@ type Daemon struct {
 	// place a real doorbell happens, and only if no genuine user keystroke landed in
 	// the guard window (the anti-splice guarantee). All maps lazy-init so a
 	// directly-constructed test daemon is nil-safe.
+	// doorbellMu serializes authoritative session-state commits with a complete
+	// doorbell write. This keeps a pending_approval report from interleaving
+	// between the prompt and its trailing Enter.
+	doorbellMu          sync.Mutex
 	nudgeMu             sync.Mutex
 	nudgeCountdowns     map[string]*nudgeCountdown     // presence == a running (unpaused) countdown
 	unreadCache         map[string]bool                // per-session unread ticket activity, for cheap broadcast decoration
@@ -1602,8 +1606,11 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 	case protocol.StateIdle, protocol.StateScheduled:
 		d.clearLongRunTracking(sessionID)
 	}
-	d.store.UpdateState(sessionID, state)
-	d.store.Touch(sessionID)
+	d.applyStateAndSyncNudge(sessionID, state, func() bool {
+		d.store.UpdateState(sessionID, state)
+		d.store.Touch(sessionID)
+		return true
+	})
 	updated := d.sessionForBroadcast(d.store.Get(sessionID))
 	if updated == nil {
 		return
@@ -1613,7 +1620,6 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 		Session: updated,
 	})
 	d.recomputeAndBroadcastWorkspaceForSession(sessionID)
-	d.syncNudgeForState(sessionID, state)
 }
 
 // initHTTPServer creates the HTTP server synchronously to avoid race with Stop().
@@ -2186,11 +2192,13 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 		// review on the next short resumed turn.
 		d.clearLongRunTracking(msg.ID)
 	}
-	d.store.UpdateState(msg.ID, msg.State)
-	d.store.Touch(msg.ID)
-	// The hook is the authoritative state path for codex/claude, so it must also
-	// reconcile a nudge deferred by an approval prompt.
-	d.syncNudgeForState(msg.ID, msg.State)
+	d.applyStateAndSyncNudge(msg.ID, msg.State, func() bool {
+		d.store.UpdateState(msg.ID, msg.State)
+		d.store.Touch(msg.ID)
+		return true
+	})
+	// The hook is the authoritative state path for Codex and Claude; the shared
+	// state helper also reconciles a nudge deferred by an approval prompt.
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
@@ -2827,8 +2835,10 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 	case protocol.StateIdle, protocol.StateScheduled:
 		d.clearLongRunTracking(sessionID)
 	}
-	d.store.UpdateState(sessionID, state)
-	d.syncNudgeForState(sessionID, state)
+	d.applyStateAndSyncNudge(sessionID, state, func() bool {
+		d.store.UpdateState(sessionID, state)
+		return true
+	})
 	// Broadcast to WebSocket clients
 	session := d.sessionForBroadcast(d.store.Get(sessionID))
 	if session != nil {
@@ -2845,14 +2855,15 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 // than the current state. Used by classifier to prevent stale results from overwriting
 // newer state updates that arrived during classification.
 func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) bool {
-	if d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt) {
+	if d.applyStateAndSyncNudge(sessionID, state, func() bool {
+		return d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt)
+	}) {
 		switch state {
 		case protocol.StateWorking:
 			d.markRunStartedIfNeeded(sessionID)
 		case protocol.StateIdle, protocol.StateScheduled:
 			d.clearLongRunTracking(sessionID)
 		}
-		d.syncNudgeForState(sessionID, state)
 		// Broadcast to WebSocket clients
 		session := d.sessionForBroadcast(d.store.Get(sessionID))
 		if session != nil {

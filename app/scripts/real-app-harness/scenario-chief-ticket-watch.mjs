@@ -2,10 +2,10 @@
 
 /**
  * Real-agent benchmark: does a chief of staff, given the always-on ChiefGuidance
- * system prompt, ACTUALLY delegate, use its runtime's supported ticket wake path,
- * and react proactively when a delegated ticket changes — with no further human
- * prompting? Claude must arm `attn ticket inbox --watch`; Codex must rely on attn's
- * ticket nudge and leave no watcher running.
+ * system prompt, ACTUALLY delegate and react proactively when a delegated ticket
+ * changes — with no further human prompting? A runtime may optionally arm
+ * `attn ticket inbox --watch`, but every non-approval chief shares the same ticket
+ * nudge path when unread activity remains.
  *
  * This is an instruction-following benchmark, not a unit test: it stands up a REAL
  * Claude (or Codex) chief in an isolated packaged app, types a human-sounding
@@ -26,7 +26,8 @@
  *      miss never masquerades as a behavioral failure.
  *   4. Type the human prompt. Observe (no coaching):
  *        - did the chief DELEGATE? (a ticket bound to a NEW worker session appears)
- *        - did Claude ARM THE WATCH, or did Codex leave the nudge path unobstructed?
+ *        - did it optionally arm a watch, or leave unread activity for the shared
+ *          nudge path?
  *      If the chief does the task ITSELF instead of delegating, capture the evidence
  *      and STOP with verdict=did-not-delegate — that is a finding to discuss, not a
  *      thing to auto-correct.
@@ -93,8 +94,7 @@ const CHIEF_MODELS = {
 };
 
 // --no-watch variant: tell the chief to delegate but explicitly NOT arm a watch /
-// Monitor. For Claude this exercises the self-monitor backstop; for Codex it uses
-// the normal nudge path. Both should receive the same bounded PTY doorbell.
+// Monitor. This isolates the shared daemon nudge path for either runtime.
 const NO_WATCH_PROMPTS = {
   claude:
     'hey can you get someone going on a quick CHANGELOG audit? skim the last couple ' +
@@ -438,7 +438,8 @@ async function main() {
     const baselineIds = new Set((baseline.tickets || []).map((tk) => tk.id));
     note(`ticket baseline captured`, { existing: baselineIds.size });
 
-    // 5) Observe: delegation (a NEW ticket bound to a non-chief session) + watch-arming.
+    // 5) Observe: delegation (a NEW ticket bound to a non-chief session) and any
+    // optional watch arming. A watch is evidence, never a prerequisite.
     // No coaching. Snapshot the pane along the way so we can read the chief's reasoning.
     let delegation = null;
     let armedWatch = '';
@@ -506,40 +507,38 @@ async function main() {
 
     workerId = delegation.assignee;
     const ticketId = delegation.id;
-    const expectsWatch = agent === 'claude';
     note(`DELEGATED`, { workerId, ticketId, armedWatch: Boolean(armedWatch) });
     await observer.waitForSession({ id: workerId, timeoutMs: 30_000 }).catch(() => {});
 
     if (noWatch) {
-      // === DAEMON BACKSTOP PATH (--no-watch) ===
-      // The chief was told NOT to arm a Monitor. Verify attn nudges it anyway: an
-      // idle self-monitor with unread ticket activity that no `--watch` drained gets
-      // the deferred PTY doorbell (ticket_notify.go backstop, grace ~8s).
-      const chiefIdle = () => ['idle', 'waiting_input'].includes(chiefState());
+      // === SHARED DAEMON NUDGE PATH (--no-watch) ===
+      // The chief was told NOT to arm a Monitor. Any state except pending approval
+      // can receive the bounded nudge once it is not the selected pane.
+      const chiefEligible = () => chiefState() !== 'pending_approval';
 
-      // 6a) The backstop only fires for an IDLE chief, so wait for its turn to end
-      //     (delegated, reported back, no watch armed) before triggering the event.
-      const wentIdle = await pollFor(() => (chiefIdle() ? true : null), 'chief to finish its turn (no-watch)', 120_000, 1_500);
-      if (!wentIdle) {
-        await dumpPane('06-nowatch-still-working');
-        note(`chief never went idle in the no-watch window`, { finalState: chiefState() });
-        saveEvidence('nowatch-inconclusive-still-working');
-        console.log('\n=== INCONCLUSIVE: chief still working; backstop precondition (idle) never met ===');
+      // 6a) Do not send into an approval prompt, then select the worker so the
+      //     chief's countdown is allowed to run even if it remains active/green.
+      const eligible = await pollFor(() => (chiefEligible() ? true : null), 'chief to leave pending approval (no-watch)', 120_000, 1_500);
+      if (!eligible) {
+        await dumpPane('06-nowatch-pending-approval');
+        note(`chief remained pending approval in the no-watch window`, { finalState: chiefState() });
+        saveEvidence('nowatch-blocked-on-approval');
+        console.log('\n=== INCONCLUSIVE: chief remained at an approval prompt ===');
         return;
       }
       await client.request('select_session', { sessionId: workerId });
-      note(`selected worker so the idle chief's nudge countdown can run`);
+      note(`selected worker so the chief's shared nudge countdown can run`);
       const strayWatch = freshWatchProcesses(baselineWatchPids);
       if (strayWatch) {
-        // The chief armed a watch despite being told not to — the backstop would then
-        // self-suppress, so we can't observe it. Report it as the finding.
+        // The chief armed a watch despite being told not to — it may consume the
+        // event before the countdown, so report the alternate consumer outcome.
         note(`chief ARMED A WATCH despite the no-watch prompt`, { processes: strayWatch.split('\n').length });
       } else {
-        note(`chief is idle with no watch armed — backstop precondition met`);
+        note(`chief is nudge-eligible with no watch armed`);
       }
 
-      // 6b) Now fire the producer event. With the chief idle + unread + no watch, the
-      //     daemon schedules the backstop and doorbells after the grace.
+      // 6b) Now fire the producer event. With unread activity and no watch, the
+      //     daemon schedules the shared countdown and doorbells the chief.
       runAttn(['ticket', 'status', 'ready_for_review', '--comment', 'Audit done — 3 entries flagged, rewrites in the report.', '--session', workerId]);
       note(`worker reported ready_for_review`);
 
@@ -551,55 +550,50 @@ async function main() {
       let nsnap = 0;
       while (Date.now() < nudgeUntil) {
         const text = await dumpPane(`06-nudge-${String(nsnap).padStart(2, '0')}`);
-        if (!nudged && /New ticket activity/i.test(text)) { nudged = text; note(`daemon backstop nudge delivered to chief`); }
+        if (!nudged && /New ticket activity/i.test(text)) { nudged = text; note(`shared daemon nudge delivered to chief`); }
         if (nudged && /ticket inbox|ready[ _]for[ _]review|in review|review the|audit/i.test(text.split('\n').slice(-25).join('\n'))) { reactedNw = text; break; }
         nsnap += 1;
         await delay(3_000);
       }
-      evidence.backstopNudged = Boolean(nudged);
+      evidence.sharedNudgeDelivered = Boolean(nudged);
       evidence.reacted = Boolean(reactedNw);
       evidence.strayWatch = Boolean(strayWatch);
       const finalText = await dumpPane('07-chief-final-nowatch');
 
       const verdict = !nudged
-        ? (strayWatch ? 'nowatch-chief-self-armed-watch' : 'backstop-not-delivered')
-        : (reactedNw ? 'backstop-nudged-and-reacted' : 'backstop-nudged-no-reaction');
+        ? (strayWatch ? 'nowatch-chief-self-armed-watch' : 'shared-nudge-not-delivered')
+        : (reactedNw ? 'shared-nudge-and-reacted' : 'shared-nudge-no-reaction');
       saveEvidence(verdict);
       console.log(`\n=== VERDICT: ${verdict} ===`);
       console.log(`delegated: yes (worker=${workerId} ticket=${ticketId})`);
       console.log(`chief armed its own watch despite no-watch prompt: ${strayWatch ? 'YES' : 'no'}`);
-      console.log(`daemon backstop nudge delivered: ${nudged ? 'YES' : 'no'}`);
+      console.log(`shared daemon nudge delivered: ${nudged ? 'YES' : 'no'}`);
       console.log(`visible reaction to the nudge: ${reactedNw ? 'YES' : 'no'}`);
       console.log('--- chief pane (tail) ---');
       console.log(finalText.split('\n').slice(-45).join('\n'));
       return;
     }
 
-    // The controlled report must land after the chief's delegation turn ends. A
-    // report that arrives while the chief is still working can be discovered by its
-    // own board upkeep, which does not prove either runtime's wake path. Claude must
-    // also have armed its watch before the event; Codex must remain watch-free.
-    const chiefIdle = () => ['idle', 'waiting_input'].includes(chiefState());
+    // The controlled report may land while the chief is active: the shared policy
+    // permits every state except pending approval. Select the worker so a countdown
+    // is not intentionally paused by the user's current pane.
+    const chiefEligible = () => chiefState() !== 'pending_approval';
     const settled = await pollFor(() => {
       if (!armedWatch) armedWatch = freshWatchProcesses(baselineWatchPids);
-      if (!chiefIdle()) return null;
-      if (expectsWatch && !armedWatch) return null;
-      return true;
-    }, 'chief to finish delegation upkeep and arm its runtime wake path', 120_000, 1_500);
+      return chiefEligible() ? true : null;
+    }, 'chief to leave pending approval', 120_000, 1_500);
     if (!settled) {
-      await dumpPane('04-chief-not-settled');
+      await dumpPane('04-chief-pending-approval');
       evidence.armedWatch = armedWatch;
       evidence.chiefState = chiefState();
-      saveEvidence('inconclusive-chief-not-settled');
-      console.log('\n=== INCONCLUSIVE: chief did not settle into its runtime wake path ===');
+      saveEvidence('inconclusive-chief-pending-approval');
+      console.log('\n=== INCONCLUSIVE: chief remained at an approval prompt ===');
       console.log(`chief state: ${chiefState()}`);
       console.log(`armed watch: ${armedWatch ? 'YES' : 'no'}`);
       return;
     }
-    if (!expectsWatch) {
-      await client.request('select_session', { sessionId: workerId });
-      note(`selected worker so the idle Codex chief's nudge countdown can run`);
-    }
+    await client.request('select_session', { sessionId: workerId });
+    note(`selected worker so the chief's shared nudge countdown can run`);
 
     // 6) Drive the worker to report ready_for_review — the real producer path. The
     // chief cannot tell this from the sub-agent finishing on its own.
@@ -607,13 +601,10 @@ async function main() {
     runAttn(['ticket', 'status', 'ready_for_review', '--comment', 'Audit done — 3 entries flagged, rewrites in the report.', '--session', workerId]);
     note(`worker reported ready_for_review`);
 
-    // 7) Observe whether the chief surfaces the update ON ITS OWN. Claude: via its
-    // armed --watch Monitor or the daemon backstop. Codex (not a self-monitor): via
-    // the daemon's direct nudge. Evidence = the chief runs `attn ticket inbox` /
-    // mentions the review without us prompting it again.
-    // Claude arms its watch Monitor after delegating, so its `--watch` process only
-    // appears during this post-delegation window. Codex must not arm one: its unread
-    // event must remain available for the daemon's nudge path.
+    // 7) Observe whether the chief surfaces the update ON ITS OWN. An optional watch
+    // may consume it before the shared countdown rings; otherwise the fixed nudge
+    // must arrive. Evidence = the chief runs `attn ticket inbox` / mentions the
+    // review without us prompting it again.
     const reactUntil = Date.now() + 240_000;
     let reacted = null;
     let nudged = null;
@@ -623,20 +614,20 @@ async function main() {
       const recent = text.split('\n').slice(-35).join('\n');
       if (!nudged && /New ticket activity/i.test(text)) {
         nudged = text;
-        note(`daemon ticket nudge delivered to Codex chief`);
+        note(`shared daemon ticket nudge delivered to chief`);
       }
       const handledUpdate = /ticket inbox|ready[ _]for[ _]review|in review|review the report/i.test(recent);
-      if (!reacted && handledUpdate && (expectsWatch || nudged)) {
+      if (!reacted && handledUpdate && (armedWatch || nudged)) {
         reacted = text;
       }
       if (!armedWatch) {
         const w = freshWatchProcesses(baselineWatchPids);
         if (w) {
           armedWatch = w;
-          note(expectsWatch ? `watch armed (post-delegation)` : `UNEXPECTED watch armed by Codex`, { processes: w.split('\n').length });
+          note(`optional watch armed (post-delegation)`, { processes: w.split('\n').length });
         }
       }
-      if (reacted && (!expectsWatch || armedWatch)) break;
+      if (reacted) break;
       rsnap += 1;
       await delay(3_000);
     }
@@ -645,11 +636,9 @@ async function main() {
     evidence.reacted = Boolean(reacted);
     const finalText = await dumpPane('05-chief-final');
 
-    const verdict = !expectsWatch && armedWatch
-      ? 'codex-armed-watch'
-      : (!expectsWatch && !nudged
-          ? 'codex-not-nudged'
-          : (reacted ? 'delegated-and-reacted' : 'delegated-no-visible-reaction'));
+    const verdict = reacted
+      ? 'delegated-and-reacted'
+      : (armedWatch ? 'watch-no-visible-reaction' : 'shared-nudge-not-delivered');
     saveEvidence(verdict);
     console.log(`\n=== VERDICT: ${evidence.verdict} ===`);
     console.log(`delegated: yes (worker=${workerId} ticket=${ticketId})`);
