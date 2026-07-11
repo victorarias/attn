@@ -23,8 +23,9 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	index := readSkillFile(t, skillDir, "SKILL.md")
 	for _, expected := range []string{
 		"name: attn",
-		"A subagent always means a native runtime subagent",
-		"user can inspect, converse with, and steer directly",
+		"Operate attn capabilities from an agent",
+		"Use when the user explicitly asks for an attn capability or delegation",
+		"inspect, converse with, and steer directly",
 		"ATTN_WRAPPER_PATH",
 		"references/delegation.md",
 		"references/delegated-agent.md",

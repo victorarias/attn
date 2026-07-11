@@ -1,6 +1,6 @@
 ---
 name: attn
-description: "Drive attn from an agent: create a visible agent session the user can inspect, converse with, and steer directly; run durable resumable multi-agent workflows; maintain shared workspace context; journal; open markdown; present changes for a guided review; or control attn's persistent in-app browser. Use when the user explicitly asks for an attn session or delegation, ticket, workflow, browser, presentation/review, or markdown document in the app, or when you are attn's chief of staff. A subagent always means a native runtime subagent, including when the user says to delegate or dispatch subagents."
+description: "Operate attn capabilities from an agent, including user-steered delegations, tickets, workflows, shared workspace context, the Notebook, Present reviews, markdown, and the in-app browser. Use when the user explicitly asks for an attn capability or delegation, or when acting as attn's chief of staff."
 ---
 
 # attn
