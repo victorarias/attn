@@ -196,15 +196,15 @@ describe("OpenCode server-backed driver", () => {
     await driver.spawn(params("run-overlapping-attention"));
     await eventually(() => target.prompts.length === 1, "native prompt submission");
 
-    target.askQuestion("native-1", "question-overlap");
-    await eventually(
-      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "waiting_input",
-      "initial question report",
-    );
     target.askPermission("native-1", "permission-overlap");
     await eventually(
       () => (rpc.calls.at(-1)?.params as { state?: string }).state === "pending_approval",
-      "overlapping permission report",
+      "initial permission report",
+    );
+    target.askQuestion("native-1", "question-overlap");
+    await eventually(
+      () => rpc.calls.filter((call) => (call.params as { state?: string }).state === "pending_approval").length === 2,
+      "permission remains authoritative after overlapping question",
     );
 
     target.replyPermission("native-1", "permission-overlap");
@@ -220,7 +220,7 @@ describe("OpenCode server-backed driver", () => {
     );
     target.replyQuestion("native-1", "question-overlap");
     await eventually(
-      () => rpc.calls.filter((call) => (call.params as { state?: string }).state === "pending_approval").length === 3,
+      () => rpc.calls.filter((call) => (call.params as { state?: string }).state === "pending_approval").length === 4,
       "remaining permission after question reply",
     );
 

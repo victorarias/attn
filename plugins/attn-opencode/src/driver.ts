@@ -432,7 +432,7 @@ export class OpenCodeDriver {
     } else if (event.type === "session.idle") {
       await this.reportIdleWithinDeadline(record, client, binding.nativeID, parentSignal);
     } else if (event.type === "question.asked") {
-      await this.enqueueReport(record, { kind: "state", state: "waiting_input" });
+      await this.reportAttentionWithinDeadline(record, client, binding.nativeID, parentSignal, { kind: "state", state: "waiting_input" });
     } else if (event.type === "question.replied" || event.type === "question.rejected") {
       await this.reportAttentionWithinDeadline(record, client, binding.nativeID, parentSignal, { kind: "state", state: "working" });
     } else if (event.type === "permission.asked") {
