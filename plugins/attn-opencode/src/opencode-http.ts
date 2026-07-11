@@ -6,6 +6,8 @@ export type ServerEvent = {
   status?: string;
 };
 
+export type NativeAttention = "question" | "permission";
+
 export type EventSubscription = {
   ready: Promise<void>;
   done: Promise<void>;
@@ -71,6 +73,18 @@ export class OpenCodeHTTP {
   async statusFor(sessionID: string, signal?: AbortSignal): Promise<string | undefined> {
     const body = await this.request<unknown>("/session/status", { signal });
     return extractStatus(body, sessionID);
+  }
+
+  async pendingAttentionFor(sessionID: string, signal?: AbortSignal): Promise<NativeAttention | undefined> {
+    const [questions, permissions] = await Promise.all([
+      this.request<unknown>("/question", { signal }),
+      this.request<unknown>("/permission", { signal }),
+    ]);
+    // A permission requires a constrained approval response, so prefer that
+    // state if a buggy or transitioning server briefly returns both kinds.
+    if (hasPendingRequest(permissions, sessionID)) return "permission";
+    if (hasPendingRequest(questions, sessionID)) return "question";
+    return undefined;
   }
 
   subscribe(onEvent: (event: ServerEvent) => Promise<void> | void, parentSignal?: AbortSignal): EventSubscription {
@@ -223,11 +237,27 @@ function normalizeEvent(eventName: string, raw: string): ServerEvent | undefined
   }
   const root = asObject(data);
   const properties = asObject(root?.properties) ?? root;
-  const type = eventName || asString(root?.type) || asString(root?.event);
+  const type = normalizeEventType(eventName || asString(root?.type) || asString(root?.event));
   if (!type) return undefined;
   const statusValue = properties?.status;
   const status = typeof statusValue === "string" ? statusValue : asString(asObject(statusValue)?.type);
   return { type, sessionID: sessionIDFrom(properties) ?? sessionIDFrom(root), status };
+}
+
+function normalizeEventType(type: string | undefined): string | undefined {
+  return type?.replace(/^(question|permission)\.v2\./, "$1.");
+}
+
+function hasPendingRequest(body: unknown, sessionID: string): boolean {
+  const root = asObject(body);
+  const requests = Array.isArray(body)
+    ? body
+    : Array.isArray(root?.requests)
+      ? root.requests
+      : Array.isArray(root?.data)
+        ? root.data
+        : [];
+  return requests.some((request) => sessionIDFrom(asObject(request)) === sessionID);
 }
 
 function extractStatus(body: unknown, sessionID: string): string | undefined {

@@ -30,6 +30,10 @@ password and staged prompt live in private files under the active profile's
 attn data directory (`plugins/attn-opencode/`), are never included in metadata
 or argv, and are deleted when attn reports that the PTY run has closed.
 
-The first slice reports OpenCode `busy` and `retry` as `working`, and explicit
-`idle` as `idle`. It intentionally does not infer `waiting_input` from an idle
-event.
+The plugin reports OpenCode `busy` and `retry` as `working`. Native question
+requests become `waiting_input`, and native permission requests become
+`pending_approval`; answering either returns the session to `working`. On
+startup, reconnect, and explicit idle events, the plugin checks OpenCode's
+pending request lists before reporting `idle`, so a missed SSE event cannot hide
+a session that needs attention. It intentionally does not classify ordinary
+prose questions that did not use OpenCode's question tool.

@@ -97,7 +97,10 @@ describe("OpenCode server-backed driver", () => {
     await expect(new OpenCodeHTTP({ port: target.port, password: "wrong-password" }).health()).rejects.toThrow("HTTP 401");
     const client = new OpenCodeHTTP({ port: target.port, password: "correct-password" });
     await expect(client.health()).resolves.toEqual({ version: "1.17.18" });
-    expect(target.requests).toHaveLength(2);
+    target.pendingQuestions.set("question-auth", "native-auth");
+    await expect(client.pendingAttentionFor("native-auth")).resolves.toBe("question");
+    expect(target.requests).toHaveLength(4);
+    expect(target.requests.slice(1).every((request) => request.authorization?.startsWith("Basic "))).toBe(true);
   });
 
   test("creates a pinned native session after authenticated SSE subscription and does not infer idle from a missing status", async () => {
@@ -137,6 +140,136 @@ describe("OpenCode server-backed driver", () => {
     ]);
     const sequences = rpc.calls.slice(1).map((call) => (call.params as { seq: number }).seq);
     expect(sequences).toEqual([1, 2, 3, 4]);
+  });
+
+  test("maps native question and permission events for only the linked session", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-attention-events"));
+    await eventually(() => target.prompts.length === 1, "native prompt submission");
+
+    const reportsBeforeOtherSession = rpc.calls.length;
+    target.askQuestion("native-other", "question-other");
+    await Bun.sleep(20);
+    expect(rpc.calls).toHaveLength(reportsBeforeOtherSession);
+
+    target.askQuestion("native-1", "question-1", "question.v2.asked");
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "waiting_input",
+      "question waiting-input report",
+    );
+    target.replyQuestion("native-1", "question-1", "question.v2.replied");
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "working",
+      "question reply working report",
+    );
+    target.askPermission("native-1", "permission-1", "permission.v2.asked");
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "pending_approval",
+      "permission pending-approval report",
+    );
+    target.replyPermission("native-1", "permission-1", "permission.v2.replied");
+    await eventually(
+      () => rpc.calls.filter((call) => (call.params as { state?: string }).state === "working").length === 2,
+      "permission reply working report",
+    );
+
+    const attentionReports = rpc.calls.slice(reportsBeforeOtherSession);
+    expect(attentionReports.map((call) => (call.params as { state?: string }).state)).toEqual([
+      "waiting_input",
+      "working",
+      "pending_approval",
+      "working",
+    ]);
+    expect(attentionReports.map((call) => (call.params as { seq: number }).seq)).toEqual([2, 3, 4, 5]);
+  });
+
+  test("checks pending native attention before reporting an explicit idle event", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-idle-attention"));
+    await eventually(() => target.prompts.length === 1, "native prompt submission");
+
+    target.pendingQuestions.set("question-idle", "native-1");
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "waiting_input",
+      "idle with pending question",
+    );
+    expect(rpc.calls.some((call) => call.method === "session.report_stop")).toBe(false);
+
+    target.pendingQuestions.clear();
+    target.pendingPermissions.set("permission-idle", "native-1");
+    target.emit("session.status", { sessionID: "native-1", status: { type: "idle" } });
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "pending_approval",
+      "idle with pending permission",
+    );
+    expect(rpc.calls.some((call) => call.method === "session.report_stop")).toBe(false);
+
+    target.pendingPermissions.clear();
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(() => rpc.calls.at(-1)?.method === "session.report_stop", "idle without pending attention");
+    expect((rpc.calls.at(-1)?.params as { verdict: string }).verdict).toBe("idle");
+  });
+
+  test("reconciles a missed pending question after the SSE stream reconnects", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-question-reconnect"));
+    await eventually(() => target.prompts.length === 1 && target.eventSubscriberCount === 1, "initial native run");
+
+    target.pendingQuestions.set("question-missed", "native-1");
+    target.closeEvents();
+    await eventually(
+      () => target.requests.filter((request) => request.path === "/event").length >= 2 &&
+        (rpc.calls.at(-1)?.params as { state?: string }).state === "waiting_input",
+      "reconnected pending-question reconciliation",
+    );
+    expect(driver.health()).toEqual({ ok: true, message: "OpenCode 1.17.18 is ready" });
+  });
+
+  test("applies events buffered during reconnect after the older pending-request snapshot", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-question-reconnect-order"));
+    await eventually(() => target.prompts.length === 1 && target.eventSubscriberCount === 1, "initial native run");
+
+    target.pendingQuestions.set("question-race", "native-1");
+    let releaseSnapshot!: () => void;
+    target.pendingListBarrier = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    target.closeEvents();
+    await eventually(
+      () => target.requests.filter((request) => request.path === "/question").length >= 2 &&
+        target.requests.filter((request) => request.path === "/permission").length >= 2 &&
+        target.eventSubscriberCount === 1,
+      "reconnect snapshot in flight",
+    );
+
+    target.replyQuestion("native-1", "question-race");
+    releaseSnapshot();
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "working",
+      "buffered question reply after stale snapshot",
+    );
+    const states = rpc.calls
+      .filter((call) => call.method === "session.report_state")
+      .map((call) => (call.params as { state: string }).state);
+    expect(states.slice(-2)).toEqual(["waiting_input", "working"]);
   });
 
   test("lets an unpinned interactive launch use OpenCode defaults and records its first native session", async () => {

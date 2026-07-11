@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import { join } from "node:path";
-import { type EventSubscription, OpenCodeHTTP, parseModelPin, sessionModel, sessionModelMatches, variantForEffort } from "./opencode-http";
+import { type EventSubscription, type ServerEvent, OpenCodeHTTP, parseModelPin, sessionModel, sessionModelMatches, variantForEffort } from "./opencode-http";
 import { RunRegistry } from "./run-registry";
 import {
   type DriverSpawnParams,
@@ -55,6 +55,11 @@ type NativeBinding = {
   mode: LaunchSelection["mode"];
 };
 
+type BufferedSubscription = {
+  subscription: EventSubscription;
+  release: () => Promise<void>;
+};
+
 export class OpenCodeDriver {
   private readonly executable: string;
   private readonly runCommand: (argv: string[]) => Promise<CommandResult>;
@@ -98,7 +103,9 @@ export class OpenCodeDriver {
           resume: true,
           yolo: true,
           initial_prompt: true,
+          classifier: false,
           state_reporting: true,
+          pending_approval: true,
           model_pin: true,
           effort_pin: true,
         },
@@ -238,7 +245,8 @@ export class OpenCodeDriver {
       const client = await this.waitForHealthyServer(binding.record, signal);
       if (signal.aborted) return;
 
-      subscription = client.subscribe((event) => this.handleEvent(client, binding, event, eventController.signal), eventController.signal);
+      let bufferedSubscription = this.subscribeBuffered(client, binding, eventController.signal);
+      subscription = bufferedSubscription.subscription;
       const setup = this.requestDeadline(signal);
       try {
         await this.awaitSubscriptionReady(subscription, setup.signal);
@@ -274,6 +282,7 @@ export class OpenCodeDriver {
           const prompt = await this.options.registry.prompt(binding.record);
           if (prompt !== "") await client.promptAsync(nativeID, prompt, model, setup.signal);
         }
+        await bufferedSubscription.release();
       } finally {
         setup.dispose();
       }
@@ -298,11 +307,13 @@ export class OpenCodeDriver {
         for (let attempt = 0; attempt < eventReconnectAttempts; attempt += 1) {
           await sleep(this.reconnectDelay, signal);
           if (signal.aborted) return;
-          subscription = client.subscribe((event) => this.handleEvent(client, binding, event, eventController.signal), eventController.signal);
+          bufferedSubscription = this.subscribeBuffered(client, binding, eventController.signal);
+          subscription = bufferedSubscription.subscription;
           const setup = this.requestDeadline(signal);
           try {
             await this.awaitSubscriptionReady(subscription, setup.signal);
             await this.reconcileStatus(binding.record, client, binding.nativeID, setup.signal);
+            await bufferedSubscription.release();
             reconnectError = undefined;
             break;
           } catch (error) {
@@ -359,8 +370,15 @@ export class OpenCodeDriver {
 
   private async reconcileStatus(record: RunRecord, client: OpenCodeHTTP, nativeID: string | undefined, signal?: AbortSignal): Promise<void> {
     if (!nativeID) return;
-    const status = await client.statusFor(nativeID, signal);
-    if (status === "busy" || status === "retry") {
+    const [status, attention] = await Promise.all([
+      client.statusFor(nativeID, signal),
+      client.pendingAttentionFor(nativeID, signal),
+    ]);
+    if (attention === "permission") {
+      await this.enqueueReport(record, { kind: "state", state: "pending_approval" });
+    } else if (attention === "question") {
+      await this.enqueueReport(record, { kind: "state", state: "waiting_input" });
+    } else if (status === "busy" || status === "retry") {
       await this.enqueueReport(record, { kind: "state", state: "working" });
     } else if (status === "idle") {
       await this.enqueueReport(record, { kind: "stop", verdict: "idle" });
@@ -409,12 +427,62 @@ export class OpenCodeDriver {
       if (event.status === "busy" || event.status === "retry") {
         await this.enqueueReport(record, { kind: "state", state: "working" });
       } else if (event.status === "idle") {
-        await this.enqueueReport(record, { kind: "stop", verdict: "idle" });
+        await this.reportIdleWithinDeadline(record, client, binding.nativeID, parentSignal);
       }
     } else if (event.type === "session.idle") {
-      await this.enqueueReport(record, { kind: "stop", verdict: "idle" });
+      await this.reportIdleWithinDeadline(record, client, binding.nativeID, parentSignal);
+    } else if (event.type === "question.asked") {
+      await this.enqueueReport(record, { kind: "state", state: "waiting_input" });
+    } else if (event.type === "question.replied" || event.type === "question.rejected") {
+      await this.enqueueReport(record, { kind: "state", state: "working" });
+    } else if (event.type === "permission.asked") {
+      await this.enqueueReport(record, { kind: "state", state: "pending_approval" });
+    } else if (event.type === "permission.replied") {
+      await this.enqueueReport(record, { kind: "state", state: "working" });
     } else if (event.type === "session.error") {
       await this.enqueueReport(record, { kind: "state", state: "unknown" });
+    }
+  }
+
+  private subscribeBuffered(client: OpenCodeHTTP, binding: NativeBinding, signal: AbortSignal): BufferedSubscription {
+    const events: ServerEvent[] = [];
+    let buffering = true;
+    const subscription = client.subscribe((event) => {
+      if (buffering) {
+        events.push(event);
+        return;
+      }
+      return this.handleEvent(client, binding, event, signal);
+    }, signal);
+    return {
+      subscription,
+      release: async () => {
+        while (events.length > 0) {
+          await this.handleEvent(client, binding, events.shift()!, signal);
+        }
+        buffering = false;
+      },
+    };
+  }
+
+  private async reportIdleWithinDeadline(
+    record: RunRecord,
+    client: OpenCodeHTTP,
+    nativeID: string,
+    parentSignal: AbortSignal,
+  ): Promise<void> {
+    const request = this.requestDeadline(parentSignal);
+    try {
+      const attention = await client.pendingAttentionFor(nativeID, request.signal);
+      if (attention === "permission") {
+        await this.enqueueReport(record, { kind: "state", state: "pending_approval" });
+      } else if (attention === "question") {
+        await this.enqueueReport(record, { kind: "state", state: "waiting_input" });
+      } else {
+        await this.enqueueReport(record, { kind: "stop", verdict: "idle" });
+      }
+    } finally {
+      request.dispose();
     }
   }
 

@@ -76,9 +76,9 @@ export type LaunchConfig = {
   resume_session_id?: string;
 };
 
-export type ReportState = "working" | "idle" | "unknown";
+export type ReportState = "working" | "waiting_input" | "pending_approval" | "idle" | "unknown";
 
 export type Report =
   | { kind: "metadata"; metadata: OpenCodeMetadata }
   | { kind: "state"; state: ReportState }
-  | { kind: "stop"; verdict: "idle" | "unknown" };
+  | { kind: "stop"; verdict: "idle" | "waiting_input" | "unknown" };
