@@ -86,7 +86,8 @@ state and the existing monotonic report cursor.
 
 ## Verification Evidence
 
-- `bun test` in `plugins/attn-opencode`: 22 passed, 59 assertions.
+- `bun test` in `plugins/attn-opencode`: 23 passed, 59 assertions, including
+  overlapping question/permission arrival and resolution ordering.
 - `go test ./... -count=1`: passed. An earlier run hit the existing flaky
   `TestCodexResumeMappingEndToEnd`; its isolated rerun and the final full-tree
   run both passed.
@@ -101,9 +102,11 @@ state and the existing monotonic report cursor.
   `pending_approval`, then returned through `working` to `idle` after approval
   and completion. The test session/workspace was removed; production was not
   installed, restarted, or tested.
-- External Codex autoreview was attempted with explicit diff-disclosure
-  authorization, but the execution approval layer rejected the disclosure.
-  Local diff review and `git diff --check` found no actionable defects.
+- Codex autoreview accepted two P2 overlap findings: resolving one request could
+  hide another, and a later question could hide an existing permission. Both
+  were fixed by reconciling OpenCode's pending lists while preserving permission
+  priority. The final branch review returned no actionable findings and judged
+  the patch correct with 0.9 confidence.
 
 ## Follow-ups
 
