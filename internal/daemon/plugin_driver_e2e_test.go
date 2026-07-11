@@ -128,13 +128,13 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 		return asString(event["event"]) == protocol.EventWorkspaceRegistered
 	})
 
-	assertPluginFixtureStateTransitions(t, spawnFixtureSession(t, ws, sessionID, workspaceID, tmpDir, true, ""))
+	assertPluginFixtureStateTransitions(t, spawnFixtureSession(t, ws, sessionID, workspaceID, tmpDir, true, "", "spotify-glm/zai-org/GLM-5.2-FP8", "max"))
 	assertPluginFixtureReports(t, d, sessionID, "driver.spawn-native")
 	attachAndAssertPluginPTY(t, ws, sessionID, "driver.spawn", fixtureCWD)
 	triggerAndAssertPluginFixtureStateTransitions(t, ws, sessionID, fixtureStateTrigger)
 
 	records := waitForPluginFixtureRecords(t, fixtureLog, 1)
-	if records[0].Method != "driver.spawn" || !records[0].Params.Yolo {
+	if records[0].Method != "driver.spawn" || !records[0].Params.Yolo || records[0].Params.Model != "spotify-glm/zai-org/GLM-5.2-FP8" || records[0].Params.Effort != "max" {
 		t.Fatalf("first plugin request=%+v, want yolo driver.spawn", records[0])
 	}
 
@@ -147,13 +147,13 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 		session := d.store.Get(sessionID)
 		return session != nil && session.State == protocol.SessionStateIdle
 	}, "initial PTY exit to settle before resume")
-	assertPluginFixtureStateTransitions(t, spawnFixtureSession(t, ws, sessionID, workspaceID, tmpDir, false, sessionID))
+	assertPluginFixtureStateTransitions(t, spawnFixtureSession(t, ws, sessionID, workspaceID, tmpDir, false, sessionID, "spotify-glm/zai-org/GLM-5.2-FP8", "max"))
 	assertPluginFixtureReports(t, d, sessionID, "driver.resume-native")
 	attachAndAssertPluginPTY(t, ws, sessionID, "driver.resume", fixtureCWD)
 
 	records = waitForPluginFixtureRecords(t, fixtureLog, 2)
 	resume := records[1]
-	if resume.Method != "driver.resume" {
+	if resume.Method != "driver.resume" || resume.Params.Model != "spotify-glm/zai-org/GLM-5.2-FP8" || resume.Params.Effort != "max" {
 		t.Fatalf("second plugin method=%q, want driver.resume", resume.Method)
 	}
 	if string(resume.Params.Metadata) != `{"native_id":"driver.spawn-native"}` {
@@ -184,7 +184,7 @@ func terminatePluginFixturePTY(t *testing.T, d *Daemon, sessionID string) {
 	}
 }
 
-func spawnFixtureSession(t *testing.T, ws *websocket.Conn, sessionID, workspaceID, cwd string, yolo bool, resumeID string) []string {
+func spawnFixtureSession(t *testing.T, ws *websocket.Conn, sessionID, workspaceID, cwd string, yolo bool, resumeID, model, effort string) []string {
 	t.Helper()
 	message := map[string]interface{}{
 		"cmd":          protocol.CmdSpawnSession,
@@ -195,6 +195,8 @@ func spawnFixtureSession(t *testing.T, ws *websocket.Conn, sessionID, workspaceI
 		"cols":         80,
 		"rows":         24,
 		"yolo_mode":    yolo,
+		"model":        model,
+		"effort":       effort,
 	}
 	if resumeID != "" {
 		message["resume_session_id"] = resumeID
@@ -403,6 +405,8 @@ func TestPluginDriverFixtureProcess(t *testing.T) {
 		"resume":          true,
 		"yolo":            true,
 		"state_reporting": true,
+		"model_pin":       true,
+		"effort_pin":      true,
 	})
 	if err := os.WriteFile(os.Getenv("ATTN_DRIVER_FIXTURE_READY"), []byte("ready"), 0o644); err != nil {
 		t.Fatalf("write fixture ready marker: %v", err)

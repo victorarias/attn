@@ -595,6 +595,8 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			CWD:           cwd,
 			Label:         label,
 			Yolo:          protocol.Deref(msg.YoloMode),
+			Model:         spawnOpts.Model,
+			Effort:        spawnOpts.Effort,
 			InitialPrompt: initialPrompt,
 		}
 		if metadata := strings.TrimSpace(d.store.GetAgentMetadata(msg.ID)); metadata != "" && json.Valid([]byte(metadata)) {
@@ -608,7 +610,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		commandEnv, err := pluginCommandEnv(result.Env)
 		if err != nil {
-			d.finishPluginSessionLaunch(msg.ID, false)
+			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
 			d.sendSpawnFailure(client, msg.ID, err)
 			return
 		}
@@ -625,7 +627,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 
 	if err := d.ptyBackend.Spawn(context.Background(), spawnOpts); err != nil {
 		if hasPluginDriver {
-			d.finishPluginSessionLaunch(msg.ID, false)
+			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
 		}
 		if chiefAssigned {
 			d.clearChiefOfStaffIfSession(msg.ID)
@@ -696,7 +698,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		if err := d.store.AddChecked(session); err != nil {
 			if hasPluginDriver {
-				d.finishPluginSessionLaunch(msg.ID, false)
+				d.abortPluginSessionLaunch(msg.ID, "launch_failed")
 			}
 			if chiefAssigned {
 				d.clearChiefOfStaffIfSession(msg.ID)
@@ -714,8 +716,24 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			return
 		}
 		if hasPluginDriver && !d.store.BeginAgentDriverRun(session.ID, pluginDriver.PluginName, pluginRunID) {
-			d.finishPluginSessionLaunch(msg.ID, false)
-			d.logf("failed to initialize plugin driver run cursor: session=%s", session.ID)
+			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
+			if chiefAssigned {
+				d.clearChiefOfStaffIfSession(msg.ID)
+			}
+			killErr := d.ptyBackend.Kill(context.Background(), msg.ID, syscall.SIGTERM)
+			removeErr := d.ptyBackend.Remove(context.Background(), msg.ID)
+			if existingSession == nil {
+				d.store.Remove(session.ID)
+			}
+			cursorErr := fmt.Errorf("initialize plugin driver run cursor")
+			if killErr != nil {
+				cursorErr = fmt.Errorf("%w; kill spawned runtime: %v", cursorErr, killErr)
+			}
+			if removeErr != nil {
+				cursorErr = fmt.Errorf("%w; remove spawned runtime: %v", cursorErr, removeErr)
+			}
+			d.sendSpawnFailure(client, msg.ID, cursorErr)
+			return
 		}
 		if persistResumeID := agentdriver.SpawnResumeSessionID(
 			driver,

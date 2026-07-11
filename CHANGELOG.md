@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-11]
 
+### Added
+- **OpenCode can now run as an installable attn agent.** The server-backed `attn-opencode` plugin launches an interactive OpenCode TUI inside attn, using OpenCode's configured defaults for ordinary sessions and an authenticated local server for delegated prompts. It retains the native session for resume and keeps attn’s working/idle state in sync. Delegations can pin the OpenCode provider/model and the contract-tested `low` or `max` variant, including isolated concurrent runs.
+
 ### Fixed
 - **Closed sessions no longer leave workspace tiles that reappear in the sidebar.** Closing now removes the pane before announcing the session's departure, stale agent panes cannot be moved into another workspace, and startup repairs any orphan panes left by older runs.
 - **Ticket nudges now reach active, new, and unknown sessions too.** Any live chief or delegated agent receives the same bounded ticket nudge unless it is waiting for an approval prompt, where the doorbell could answer on its behalf. Claude's optional inbox watch can still consume an update before the countdown fires.

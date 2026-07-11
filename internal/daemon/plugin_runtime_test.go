@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+func TestPluginDirForSocketUsesSocketRuntimeRoot(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "profile", "attn.sock")
+	if got, want := pluginDirForSocket(socketPath), filepath.Join(filepath.Dir(socketPath), "plugins"); got != want {
+		t.Fatalf("pluginDirForSocket() = %q, want %q", got, want)
+	}
+
+	override := filepath.Join(t.TempDir(), "custom-plugins")
+	t.Setenv("ATTN_PLUGIN_DIR", override)
+	if got := pluginDirForSocket(socketPath); got != override {
+		t.Fatalf("pluginDirForSocket() with override = %q, want %q", got, override)
+	}
+}
+
 func TestDiscoverPluginManifests_LoadsValidInstalledPlugins(t *testing.T) {
 	pluginDir := filepath.Join(t.TempDir(), "plugins")
 	writeTestPluginManifest(t, pluginDir, "worktree-provider")
@@ -37,7 +50,7 @@ func TestDiscoverPluginManifests_ReportsInvalidManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(badDir, pluginManifestName), []byte(`
 name = "bad-plugin"
 version = "0.1.0"
-attn_api_version = 1
+attn_api_version = 2
 `), 0o644); err != nil {
 		t.Fatalf("write bad manifest: %v", err)
 	}
@@ -64,7 +77,7 @@ func TestDiscoverPluginManifests_AllowsRuntimeOnlyManifestNames(t *testing.T) {
 	manifest := []byte(`
 name = "manual/provider"
 version = "0.1.0"
-attn_api_version = 1
+attn_api_version = 2
 
 [plugin]
 entrypoint = "src/index.ts"
@@ -184,7 +197,7 @@ func writeTestPluginManifest(t *testing.T, pluginDir, name string) {
 	manifest := []byte(`
 name = "` + name + `"
 version = "0.1.0"
-attn_api_version = 1
+attn_api_version = 2
 
 [plugin]
 entrypoint = "src/index.ts"

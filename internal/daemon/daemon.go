@@ -539,7 +539,7 @@ func New(socketPath string) *Daemon {
 		tailscale:          newTailscaleRuntime(),
 		plugins:            newPluginRegistry(),
 		pluginProcesses:    newPluginProcessRegistry(),
-		pluginDir:          config.PluginDir(),
+		pluginDir:          pluginDirForSocket(socketPath),
 		workspaces:         newWorkspaceRegistry(),
 	}
 	// Production wiring for the orphaned-ticket reconciliation classifier. Test
@@ -577,6 +577,7 @@ func NewForTesting(socketPath string) *Daemon {
 		tailscale:          newTailscaleRuntime(),
 		plugins:            newPluginRegistry(),
 		pluginProcesses:    newPluginProcessRegistry(),
+		pluginDir:          pluginDirForSocket(socketPath),
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),
@@ -620,6 +621,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		tailscale:          newTailscaleRuntime(),
 		plugins:            newPluginRegistry(),
 		pluginProcesses:    newPluginProcessRegistry(),
+		pluginDir:          pluginDirForSocket(socketPath),
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),

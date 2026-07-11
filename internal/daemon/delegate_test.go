@@ -518,6 +518,53 @@ func TestDelegateThreadsModelAndEffortIntoSpawn(t *testing.T) {
 	}
 }
 
+func TestDelegateThreadsModelAndEffortIntoPluginDriver(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	client, done := startPluginPipe(t, d, "fixture-plugin", nil)
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, client, "fixture", map[string]bool{
+		"initial_prompt": true,
+		"model_pin":      true,
+		"effort_pin":     true,
+	})
+
+	requestDone := make(chan struct{})
+	go func() {
+		defer close(requestDone)
+		request := decodeJSONRPCMessage(t, client)
+		if request.Method != "driver.spawn" {
+			t.Errorf("method=%q, want driver.spawn", request.Method)
+			return
+		}
+		var got pluginDriverSpawnParams
+		if err := json.Unmarshal(request.Params, &got); err != nil {
+			t.Errorf("decode plugin spawn params: %v", err)
+			return
+		}
+		if got.Model != "spotify-glm/zai-org/GLM-5.2-FP8" || got.Effort != "low" {
+			t.Errorf("plugin spawn pins=%q/%q, want selected model/low", got.Model, got.Effort)
+		}
+		respondPluginRequest(t, client, request, pluginDriverSpawnResult{Argv: []string{"fixture"}})
+	}()
+
+	if _, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Use the selected OpenCode variant.",
+		Agent:           protocol.Ptr("fixture"),
+		Model:           protocol.Ptr("spotify-glm/zai-org/GLM-5.2-FP8"),
+		Effort:          protocol.Ptr("LOW"),
+	}); err != nil {
+		t.Fatalf("delegate() error=%v", err)
+	}
+	<-requestDone
+}
+
 // A delegation without pins must not inherit any: the spawned agent keeps its
 // own defaults (empty model/effort all the way down).
 func TestDelegateWithoutModelEffortLeavesAgentDefaults(t *testing.T) {
