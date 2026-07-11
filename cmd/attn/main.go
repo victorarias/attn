@@ -648,7 +648,7 @@ func hasHelpFlag(args []string) bool {
 }
 
 // runTicket routes `attn ticket <command>`: `status` (the agent's forward channel
-// onto its own bound ticket), `inbox`, `handover`, `new` (mint a standalone, unbound
+// onto its own bound ticket), `inbox`, `attach`, `new` (mint a standalone, unbound
 // backlog ticket without delegating), and `comment` (post a one-shot note onto any
 // ticket by id).
 func runTicket() {
@@ -682,12 +682,12 @@ func runTicket() {
 			return
 		}
 		runTicketShow(os.Args[3:])
-	case "handover":
+	case "attach":
 		if hasHelpFlag(os.Args[3:]) {
 			writeTicketHelp(os.Stdout)
 			return
 		}
-		runTicketHandover(os.Args[3:])
+		runTicketAttach(os.Args[3:])
 	case "new":
 		if hasHelpFlag(os.Args[3:]) {
 			writeTicketHelp(os.Stdout)
@@ -809,7 +809,7 @@ func (f *stringListFlag) Set(value string) error {
 	return nil
 }
 
-type ticketHandoverArgs struct {
+type ticketAttachArgs struct {
 	Files   []string
 	Ticket  string
 	State   string
@@ -818,15 +818,15 @@ type ticketHandoverArgs struct {
 	JSON    bool
 }
 
-func parseTicketHandoverArgs(args []string) (ticketHandoverArgs, error) {
-	var result ticketHandoverArgs
-	fs := flag.NewFlagSet("ticket handover", flag.ContinueOnError)
+func parseTicketAttachArgs(args []string) (ticketAttachArgs, error) {
+	var result ticketAttachArgs
+	fs := flag.NewFlagSet("ticket attach", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var files stringListFlag
 	fs.Var(&files, "file", "path to a Markdown artifact (repeatable)")
-	ticketID := fs.String("ticket", "", "hand over to this ticket instead of the session's bound ticket")
+	ticketID := fs.String("ticket", "", "attach to this ticket instead of the session's bound ticket")
 	state := fs.String("state", "", "optional resulting work state")
-	comment := fs.String("comment", "", "optional decision context recorded with the handover")
+	comment := fs.String("comment", "", "optional context recorded with the attachment")
 	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
 	jsonOutput := fs.Bool("json", false, "print the result as JSON")
 	if err := fs.Parse(args); err != nil {
@@ -853,46 +853,46 @@ func parseTicketHandoverArgs(args []string) (ticketHandoverArgs, error) {
 	return result, nil
 }
 
-func runTicketHandover(args []string) {
-	parsed, err := parseTicketHandoverArgs(args)
+func runTicketAttach(args []string) {
+	parsed, err := parseTicketAttachArgs(args)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ticket handover: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
 		writeTicketHelp(os.Stderr)
 		os.Exit(2)
 	}
 	source, err := resolveDispatchSession(parsed.Session)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ticket handover: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
 		os.Exit(2)
 	}
-	files := make([]protocol.TicketHandoverFile, 0, len(parsed.Files))
+	files := make([]protocol.TicketAttachFile, 0, len(parsed.Files))
 	for _, path := range parsed.Files {
 		absPath, absErr := filepath.Abs(path)
 		if absErr != nil {
-			fmt.Fprintf(os.Stderr, "ticket handover: %v\n", absErr)
+			fmt.Fprintf(os.Stderr, "ticket attach: %v\n", absErr)
 			os.Exit(2)
 		}
 		info, statErr := os.Lstat(absPath)
 		if statErr != nil {
-			fmt.Fprintf(os.Stderr, "ticket handover: %v\n", statErr)
+			fmt.Fprintf(os.Stderr, "ticket attach: %v\n", statErr)
 			os.Exit(1)
 		}
 		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || filepath.Ext(absPath) != ".md" {
-			fmt.Fprintf(os.Stderr, "ticket handover: %q is not a regular Markdown file\n", absPath)
+			fmt.Fprintf(os.Stderr, "ticket attach: %q is not a regular Markdown file\n", absPath)
 			os.Exit(1)
 		}
-		files = append(files, protocol.TicketHandoverFile{SourcePath: absPath, Filename: filepath.Base(absPath)})
+		files = append(files, protocol.TicketAttachFile{SourcePath: absPath, Filename: filepath.Base(absPath)})
 	}
-	result, err := client.New("").HandoverTicket(source, files, parsed.Ticket, parsed.State, parsed.Comment)
+	result, err := client.New("").AttachTicket(source, files, parsed.Ticket, parsed.State, parsed.Comment)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ticket handover: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
 		os.Exit(1)
 	}
 	if parsed.JSON {
 		printJSON(result)
 		return
 	}
-	fmt.Printf("handed over %d artifact(s) to ticket %s → %s\n", len(result.Artifacts), result.TicketID, result.State)
+	fmt.Printf("attached %d artifact(s) to ticket %s → %s\n", len(result.Artifacts), result.TicketID, result.State)
 	for _, artifact := range result.Artifacts {
 		fmt.Printf("  %s\n", artifact.Path)
 	}
@@ -1529,10 +1529,10 @@ commands:
         print one ticket's full record — description, complete activity thread
         with full bodies, current artifacts; non-consuming, does not touch your inbox
         cursor
-  handover --file <path> [--file <path> ...] [--ticket <id>]
+  attach --file <path> [--file <path> ...] [--ticket <id>]
         [--state <work-state>] [--comment <text>] [--session <id>] [--json]
         copy Markdown artifacts into a ticket's canonical Notebook directory,
-        record one durable handover, and optionally change ticket state
+        record one durable attachment, and optionally change ticket state
   new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]
         create an unbound backlog ticket in todo (no agent, no session)
   comment <ticket-id> --message <text> [--session <id>] [--json]

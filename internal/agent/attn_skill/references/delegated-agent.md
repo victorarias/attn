@@ -67,7 +67,7 @@ delegation.
 When tracked work produces a plan, design, or other Markdown artifact that must
 outlive this session, hand it over to the ticket:
 
-    "$ATTN_WRAPPER_PATH" ticket handover \
+    "$ATTN_WRAPPER_PATH" ticket attach \
       --file docs/plans/design.md \
       --file docs/plans/rollout.md \
       --state ready_for_review \
@@ -75,7 +75,7 @@ outlive this session, hand it over to the ticket:
 
 `--file` is repeatable. `--state` and `--comment` are optional. The command copies
 the files into the ticket's visible Notebook directory, records one durable
-handover event, and returns the canonical paths. A matching retry returns the same
+attach event, and returns the canonical paths. A matching retry returns the same
 receipt; a same-name file with different bytes is preserved and must be renamed
 before retrying.
 

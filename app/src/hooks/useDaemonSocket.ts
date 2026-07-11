@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '157';
+export const PROTOCOL_VERSION = '158';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1685,17 +1685,17 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'ticket_handover_result': {
+          case 'ticket_attach_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') break;
-            const key = `ticket_handover:${requestId}`;
+            const key = `ticket_attach:${requestId}`;
             const pending = pendingActionsRef.current.get(key);
             if (!pending) break;
             pendingActionsRef.current.delete(key);
             if (data.success && data.result) {
               pending.resolve(data.result);
             } else {
-              pending.reject(new Error(data.error || 'Ticket handover failed'));
+              pending.reject(new Error(data.error || 'Ticket attach failed'));
             }
             break;
           }
@@ -4041,7 +4041,7 @@ export function useDaemonSocket({
     [sendTicketAction],
   );
 
-  const sendTicketHandover = useCallback((
+  const sendTicketAttach = useCallback((
     ticketId: string,
     paths: string[],
     state?: string,
@@ -4052,11 +4052,11 @@ export function useDaemonSocket({
       reject(new Error('WebSocket not connected'));
       return;
     }
-    const requestId = nextRequestID('ticket_handover');
-    const key = `ticket_handover:${requestId}`;
+    const requestId = nextRequestID('ticket_attach');
+    const key = `ticket_attach:${requestId}`;
     pendingActionsRef.current.set(key, { resolve, reject });
     ws.send(JSON.stringify({
-      cmd: 'ticket_handover',
+      cmd: 'ticket_attach',
       request_id: requestId,
       source_session_id: 'you',
       ticket_id: ticketId,
@@ -4070,7 +4070,7 @@ export function useDaemonSocket({
     setTimeout(() => {
       if (pendingActionsRef.current.has(key)) {
         pendingActionsRef.current.delete(key);
-        reject(new Error('Ticket handover timed out'));
+        reject(new Error('Ticket attach timed out'));
       }
     }, 30000);
   }), [nextRequestID]);
@@ -4901,7 +4901,7 @@ export function useDaemonSocket({
     sendTicketChangeStatus,
     sendTicketAddComment,
     sendTicketEditDescription,
-    sendTicketHandover,
+    sendTicketAttach,
     sendTicketResume,
     sendTaskList,
     sendTaskRetry,

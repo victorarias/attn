@@ -1056,18 +1056,18 @@ func TestParseTicketStatusArgsErrors(t *testing.T) {
 	}
 }
 
-func TestParseTicketHandoverArgs(t *testing.T) {
-	got, err := parseTicketHandoverArgs([]string{"--file", "report.md", "--file", "rollout.md", "--ticket", "tk", "--state", "ready_for_review", "--comment", "for review", "--session", "s1", "--json"})
+func TestParseTicketAttachArgs(t *testing.T) {
+	got, err := parseTicketAttachArgs([]string{"--file", "report.md", "--file", "rollout.md", "--ticket", "tk", "--state", "ready_for_review", "--comment", "for review", "--session", "s1", "--json"})
 	if err != nil {
-		t.Fatalf("parseTicketHandoverArgs: %v", err)
+		t.Fatalf("parseTicketAttachArgs: %v", err)
 	}
-	want := ticketHandoverArgs{Files: []string{"report.md", "rollout.md"}, Ticket: "tk", State: "ready_for_review", Comment: "for review", Session: "s1", JSON: true}
+	want := ticketAttachArgs{Files: []string{"report.md", "rollout.md"}, Ticket: "tk", State: "ready_for_review", Comment: "for review", Session: "s1", JSON: true}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("parseTicketHandoverArgs = %+v, want %+v", got, want)
+		t.Fatalf("parseTicketAttachArgs = %+v, want %+v", got, want)
 	}
 }
 
-func TestParseTicketHandoverArgsErrors(t *testing.T) {
+func TestParseTicketAttachArgsErrors(t *testing.T) {
 	cases := map[string][]string{
 		"missing file":          {"--comment", "hi"},
 		"unexpected positional": {"--file", "a.md", "extra"},
@@ -1075,8 +1075,8 @@ func TestParseTicketHandoverArgsErrors(t *testing.T) {
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := parseTicketHandoverArgs(args); err == nil {
-				t.Fatalf("parseTicketHandoverArgs(%v) = nil error, want error", args)
+			if _, err := parseTicketAttachArgs(args); err == nil {
+				t.Fatalf("parseTicketAttachArgs(%v) = nil error, want error", args)
 			}
 		})
 	}

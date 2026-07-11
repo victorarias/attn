@@ -420,24 +420,24 @@ describe('TicketDetailPanel', () => {
   it('hands over selected Markdown files with optional state and comment', async () => {
     vi.mocked(open).mockResolvedValue(['/tmp/design.md', '/tmp/rollout.md']);
     const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
-    const onHandover = vi.fn().mockResolvedValue(undefined);
+    const onAttach = vi.fn().mockResolvedValue(undefined);
     render(
       <TicketDetailPanel
         isOpen
         ticketId="store-migration"
         ticketRow={makeTicket()}
         fetchTicket={fetchTicket}
-        onHandover={onHandover}
+        onAttach={onAttach}
         onClose={() => {}}
       />,
     );
-    await waitFor(() => screen.getByTestId('ticket-choose-handover'));
-    fireEvent.click(screen.getByTestId('ticket-choose-handover'));
-    await waitFor(() => screen.getByTestId('ticket-handover-form'));
+    await waitFor(() => screen.getByTestId('ticket-choose-attach'));
+    fireEvent.click(screen.getByTestId('ticket-choose-attach'));
+    await waitFor(() => screen.getByTestId('ticket-attach-form'));
     fireEvent.change(screen.getByLabelText('Resulting ticket state'), { target: { value: 'ready_for_review' } });
     fireEvent.change(screen.getByPlaceholderText('Decision context (optional)'), { target: { value: 'Chosen approach' } });
-    fireEvent.click(screen.getByTestId('ticket-submit-handover'));
-    await waitFor(() => expect(onHandover).toHaveBeenCalledWith(
+    fireEvent.click(screen.getByTestId('ticket-submit-attach'));
+    await waitFor(() => expect(onAttach).toHaveBeenCalledWith(
       'store-migration',
       ['/tmp/design.md', '/tmp/rollout.md'],
       'ready_for_review',

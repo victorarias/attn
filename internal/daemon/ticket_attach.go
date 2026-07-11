@@ -18,7 +18,7 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-type stagedHandoverFile struct {
+type stagedAttachFile struct {
 	filename    string
 	stagedPath  string
 	destination string
@@ -26,36 +26,36 @@ type stagedHandoverFile struct {
 	installed   bool
 }
 
-type handoverFingerprintFile struct {
+type attachFingerprintFile struct {
 	Filename string `json:"filename"`
 	Hash     string `json:"hash"`
 }
 
-type handoverFingerprintInput struct {
-	Version  int                       `json:"version"`
-	TicketID string                    `json:"ticket_id"`
-	Files    []handoverFingerprintFile `json:"files"`
-	State    string                    `json:"state,omitempty"`
-	Comment  string                    `json:"comment,omitempty"`
+type attachFingerprintInput struct {
+	Version  int                     `json:"version"`
+	TicketID string                  `json:"ticket_id"`
+	Files    []attachFingerprintFile `json:"files"`
+	State    string                  `json:"state,omitempty"`
+	Comment  string                  `json:"comment,omitempty"`
 }
 
-// handleTicketHandover is the Unix-socket form used by the CLI and agents.
-func (d *Daemon) handleTicketHandover(conn net.Conn, msg *protocol.TicketHandoverMessage) {
-	result, err := d.submitTicketHandover(msg, strings.TrimSpace(msg.SourceSessionID), true)
+// handleTicketAttach is the Unix-socket form used by the CLI and agents.
+func (d *Daemon) handleTicketAttach(conn net.Conn, msg *protocol.TicketAttachMessage) {
+	result, err := d.submitTicketAttach(msg, strings.TrimSpace(msg.SourceSessionID), true)
 	if err != nil {
-		d.sendError(conn, "ticket handover: "+err.Error())
+		d.sendError(conn, "ticket attach: "+err.Error())
 		return
 	}
-	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketHandoverResult: result})
+	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketAttachResult: result})
 }
 
-// handleTicketHandoverWS is the in-app form. The human is the audited author and
+// handleTicketAttachWS is the in-app form. The human is the audited author and
 // must name the ticket explicitly.
-func (d *Daemon) handleTicketHandoverWS(client *wsClient, msg *protocol.TicketHandoverMessage) {
+func (d *Daemon) handleTicketAttachWS(client *wsClient, msg *protocol.TicketAttachMessage) {
 	requestID := protocol.Deref(msg.RequestID)
-	result, err := d.submitTicketHandover(msg, store.TicketAuthorYou, false)
-	reply := protocol.TicketHandoverResultMessage{
-		Event:     protocol.EventTicketHandoverResult,
+	result, err := d.submitTicketAttach(msg, store.TicketAuthorYou, false)
+	reply := protocol.TicketAttachResultMessage{
+		Event:     protocol.EventTicketAttachResult,
 		RequestID: requestID,
 		Success:   err == nil,
 		Result:    result,
@@ -66,7 +66,7 @@ func (d *Daemon) handleTicketHandoverWS(client *wsClient, msg *protocol.TicketHa
 	d.sendToClient(client, reply)
 }
 
-func (d *Daemon) submitTicketHandover(msg *protocol.TicketHandoverMessage, author string, resolveBound bool) (*protocol.TicketHandoverResult, error) {
+func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author string, resolveBound bool) (*protocol.TicketAttachResult, error) {
 	if strings.TrimSpace(author) == "" {
 		return nil, errors.New("source_session_id is required")
 	}
@@ -115,31 +115,31 @@ func (d *Daemon) submitTicketHandover(msg *protocol.TicketHandoverMessage, autho
 		return nil, err
 	}
 
-	staged, err := stageTicketHandoverFiles(dir, msg.Files)
+	staged, err := stageTicketAttachFiles(dir, msg.Files)
 	if err != nil {
 		return nil, err
 	}
-	defer removeHandoverStages(staged)
+	defer removeAttachStages(staged)
 
-	fingerprint, detail, err := handoverFingerprint(ticketID, staged, msg.State, comment)
+	fingerprint, detail, err := attachFingerprint(ticketID, staged, msg.State, comment)
 	if err != nil {
 		return nil, err
 	}
-	activityComment := handoverActivityComment(staged, comment)
+	activityComment := attachActivityComment(staged, comment)
 
 	d.ticketArtifactMu.Lock()
 	defer d.ticketArtifactMu.Unlock()
 
-	if err := validateHandoverDestinations(staged); err != nil {
+	if err := validateAttachDestinations(staged); err != nil {
 		return nil, err
 	}
-	if err := installHandoverFiles(staged); err != nil {
-		rollbackInstalledHandoverFiles(staged)
+	if err := installAttachFiles(staged); err != nil {
+		rollbackInstalledAttachFiles(staged)
 		return nil, err
 	}
-	record, err := d.store.SubmitTicketHandover(ticketID, author, fingerprint, detail, activityComment, status, time.Now())
+	record, err := d.store.SubmitTicketAttach(ticketID, author, fingerprint, detail, activityComment, status, time.Now())
 	if err != nil {
-		rollbackInstalledHandoverFiles(staged)
+		rollbackInstalledAttachFiles(staged)
 		return nil, err
 	}
 
@@ -158,7 +158,7 @@ func (d *Daemon) submitTicketHandover(msg *protocol.TicketHandoverMessage, autho
 	d.broadcastNotebookChanged(originAgent, changedPaths...)
 	d.broadcastFsChanged(originAgent, changedPaths...)
 
-	return &protocol.TicketHandoverResult{
+	return &protocol.TicketAttachResult{
 		TicketID:     ticketID,
 		Artifacts:    artifacts,
 		Fingerprint:  fingerprint,
@@ -168,17 +168,17 @@ func (d *Daemon) submitTicketHandover(msg *protocol.TicketHandoverMessage, autho
 	}, nil
 }
 
-func stageTicketHandoverFiles(dir string, files []protocol.TicketHandoverFile) ([]*stagedHandoverFile, error) {
+func stageTicketAttachFiles(dir string, files []protocol.TicketAttachFile) ([]*stagedAttachFile, error) {
 	seen := make(map[string]struct{}, len(files))
-	staged := make([]*stagedHandoverFile, 0, len(files))
+	staged := make([]*stagedAttachFile, 0, len(files))
 	for _, input := range files {
 		filename := filepath.Base(strings.TrimSpace(input.Filename))
 		if filename == "" || filename == "." || filename == ".." || strings.HasPrefix(filename, ".") || filepath.Ext(filename) != ".md" {
-			removeHandoverStages(staged)
+			removeAttachStages(staged)
 			return nil, fmt.Errorf("%q is not a visible Markdown filename", input.Filename)
 		}
 		if _, exists := seen[filename]; exists {
-			removeHandoverStages(staged)
+			removeAttachStages(staged)
 			return nil, fmt.Errorf("duplicate destination filename %q", filename)
 		}
 		seen[filename] = struct{}{}
@@ -186,22 +186,22 @@ func stageTicketHandoverFiles(dir string, files []protocol.TicketHandoverFile) (
 		source := strings.TrimSpace(input.SourcePath)
 		info, err := os.Lstat(source)
 		if err != nil {
-			removeHandoverStages(staged)
+			removeAttachStages(staged)
 			return nil, fmt.Errorf("read %q: %w", source, err)
 		}
 		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			removeHandoverStages(staged)
+			removeAttachStages(staged)
 			return nil, fmt.Errorf("%q is not a regular file", source)
 		}
 		in, err := os.Open(source)
 		if err != nil {
-			removeHandoverStages(staged)
+			removeAttachStages(staged)
 			return nil, err
 		}
-		stage, err := os.CreateTemp(dir, ".handover-*")
+		stage, err := os.CreateTemp(dir, ".attach-*")
 		if err != nil {
 			in.Close()
-			removeHandoverStages(staged)
+			removeAttachStages(staged)
 			return nil, err
 		}
 		hasher := sha256.New()
@@ -210,23 +210,23 @@ func stageTicketHandoverFiles(dir string, files []protocol.TicketHandoverFile) (
 		closeStageErr := stage.Close()
 		if copyErr != nil || closeInErr != nil || closeStageErr != nil {
 			_ = os.Remove(stage.Name())
-			removeHandoverStages(staged)
+			removeAttachStages(staged)
 			return nil, errors.Join(copyErr, closeInErr, closeStageErr)
 		}
-		staged = append(staged, &stagedHandoverFile{
+		staged = append(staged, &stagedAttachFile{
 			filename: filename, stagedPath: stage.Name(), destination: filepath.Join(dir, filename), hash: hex.EncodeToString(hasher.Sum(nil)),
 		})
 	}
 	return staged, nil
 }
 
-func handoverFingerprint(ticketID string, files []*stagedHandoverFile, state *protocol.DispatchWorkState, comment string) (string, string, error) {
-	payload := handoverFingerprintInput{Version: 1, TicketID: ticketID, Comment: comment}
+func attachFingerprint(ticketID string, files []*stagedAttachFile, state *protocol.DispatchWorkState, comment string) (string, string, error) {
+	payload := attachFingerprintInput{Version: 1, TicketID: ticketID, Comment: comment}
 	if state != nil {
 		payload.State = string(*state)
 	}
 	for _, file := range files {
-		payload.Files = append(payload.Files, handoverFingerprintFile{Filename: file.filename, Hash: file.hash})
+		payload.Files = append(payload.Files, attachFingerprintFile{Filename: file.filename, Hash: file.hash})
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -237,7 +237,7 @@ func handoverFingerprint(ticketID string, files []*stagedHandoverFile, state *pr
 	return fingerprint, fingerprint + "\n" + string(encoded), nil
 }
 
-func handoverActivityComment(files []*stagedHandoverFile, comment string) string {
+func attachActivityComment(files []*stagedAttachFile, comment string) string {
 	names := make([]string, 0, len(files))
 	for _, file := range files {
 		names = append(names, file.filename)
@@ -249,7 +249,7 @@ func handoverActivityComment(files []*stagedHandoverFile, comment string) string
 	return text
 }
 
-func validateHandoverDestinations(files []*stagedHandoverFile) error {
+func validateAttachDestinations(files []*stagedAttachFile) error {
 	for _, file := range files {
 		data, err := os.ReadFile(file.destination)
 		if os.IsNotExist(err) {
@@ -266,7 +266,7 @@ func validateHandoverDestinations(files []*stagedHandoverFile) error {
 	return nil
 }
 
-func installHandoverFiles(files []*stagedHandoverFile) error {
+func installAttachFiles(files []*stagedAttachFile) error {
 	for _, file := range files {
 		if _, err := os.Stat(file.destination); err == nil {
 			continue
@@ -298,7 +298,7 @@ func installHandoverFiles(files []*stagedHandoverFile) error {
 	return nil
 }
 
-func rollbackInstalledHandoverFiles(files []*stagedHandoverFile) {
+func rollbackInstalledAttachFiles(files []*stagedAttachFile) {
 	for _, file := range files {
 		if file.installed {
 			data, err := os.ReadFile(file.destination)
@@ -313,7 +313,7 @@ func rollbackInstalledHandoverFiles(files []*stagedHandoverFile) {
 	}
 }
 
-func removeHandoverStages(files []*stagedHandoverFile) {
+func removeAttachStages(files []*stagedAttachFile) {
 	for _, file := range files {
 		if file.stagedPath != "" {
 			_ = os.Remove(file.stagedPath)

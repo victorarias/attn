@@ -233,7 +233,7 @@ func TestTicketAttachments(t *testing.T) {
 	att, err := s.AddTicketAttachment(TicketAttachment{
 		TicketID: "tk",
 		Filename: "results.json",
-		Path:     "/handover/results.json",
+		Path:     "/attach/results.json",
 		Note:     "benchmark output",
 	}, "agent7", t1)
 	if err != nil {
@@ -618,35 +618,35 @@ func TestCrashedTicketsForAssignee(t *testing.T) {
 	}
 }
 
-func TestSubmitTicketHandoverIsAtomicAndIdempotent(t *testing.T) {
+func TestSubmitTicketAttachIsAtomicAndIdempotent(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
-	if _, err := s.CreateTicket(Ticket{ID: "handover", Title: "Handover", Status: TicketStatusWorking}, "chief", ticketBase); err != nil {
+	if _, err := s.CreateTicket(Ticket{ID: "attach", Title: "Attach", Status: TicketStatusWorking}, "chief", ticketBase); err != nil {
 		t.Fatal(err)
 	}
 	status := TicketStatusInReview
-	first, err := s.SubmitTicketHandover("handover", "agent", "fingerprint", "fingerprint\n{}", "Handed over: plan.md\n\nDecision context", &status, ticketBase.Add(time.Minute))
+	first, err := s.SubmitTicketAttach("attach", "agent", "fingerprint", "fingerprint\n{}", "Handed over: plan.md\n\nDecision context", &status, ticketBase.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.EventSeq == 0 || first.Status != TicketStatusInReview || first.Deduplicated {
 		t.Fatalf("first receipt = %+v", first)
 	}
-	retry, err := s.SubmitTicketHandover("handover", "agent", "fingerprint", "fingerprint\n{}", "Handed over: plan.md\n\nDecision context", &status, ticketBase.Add(2*time.Minute))
+	retry, err := s.SubmitTicketAttach("attach", "agent", "fingerprint", "fingerprint\n{}", "Handed over: plan.md\n\nDecision context", &status, ticketBase.Add(2*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !retry.Deduplicated || retry.EventSeq != first.EventSeq || retry.Status != first.Status {
 		t.Fatalf("retry receipt = %+v, first = %+v", retry, first)
 	}
-	ticket, _ := s.GetTicket("handover")
-	var handovers int
+	ticket, _ := s.GetTicket("attach")
+	var attachments int
 	for _, activity := range ticket.Activity {
-		if activity.Kind == TicketActivityHandover {
-			handovers++
+		if activity.Kind == TicketActivityAttach {
+			attachments++
 		}
 	}
-	if handovers != 1 || ticket.Status != TicketStatusInReview {
-		t.Fatalf("ticket = %+v, handovers=%d", ticket, handovers)
+	if attachments != 1 || ticket.Status != TicketStatusInReview {
+		t.Fatalf("ticket = %+v, attachments=%d", ticket, attachments)
 	}
 }

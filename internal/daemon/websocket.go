@@ -920,8 +920,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		go d.handleTicketAddComment(client, msg.(*protocol.TicketAddCommentMessage))
 	case protocol.CmdTicketEditDescription:
 		go d.handleTicketEditDescription(client, msg.(*protocol.TicketEditDescriptionMessage))
-	case protocol.CmdTicketHandover:
-		go d.handleTicketHandoverWS(client, msg.(*protocol.TicketHandoverMessage))
+	case protocol.CmdTicketAttach:
+		go d.handleTicketAttachWS(client, msg.(*protocol.TicketAttachMessage))
 	case protocol.CmdTicketResume:
 		go d.handleTicketResume(client, msg.(*protocol.TicketResumeMessage))
 	case protocol.CmdFsList:

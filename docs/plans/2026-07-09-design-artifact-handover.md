@@ -35,14 +35,14 @@ state, delegation association, discussion, and handover history.
 - Ticket events and role-owned unread cursors deliver durable activity to the
   chief (`internal/store/ticket_events.go`, `internal/daemon/ticket_read.go`,
   `internal/daemon/ticket_notify.go`).
-- `ticket handover` validates and stages one or more Markdown sources, installs
-  them into the ticket's visible Notebook directory, and commits the handover
+- `ticket attach` validates and stages one or more Markdown sources, installs
+  them into the ticket's visible Notebook directory, and commits the attachment
   event and optional state change as one recoverable operation
-  (`internal/daemon/ticket_handover.go`, `internal/store/tickets.go`).
+  (`internal/daemon/ticket_attach.go`, `internal/store/tickets.go`).
 - Full ticket reads enumerate current files directly from
   `tickets/<ticket-id>/`; the board remains a lightweight summary
   (`internal/daemon/ticket_artifacts.go`, `internal/daemon/ticket_board.go`).
-- Ticket detail supports handover, open, copy-path, rename, and delete actions,
+- Ticket detail supports attach, open, copy-path, rename, and delete actions,
   while `ticket show` exposes the same filesystem-derived paths
   (`app/src/components/TicketDetailPanel.tsx`, `cmd/attn/main.go`).
 - Built-in and plugin-provided agents receive a shared delegated initial prompt
@@ -91,7 +91,7 @@ supplies the current file index.
 ### Hand over one or several files
 
 ```sh
-"$ATTN_WRAPPER_PATH" ticket handover \
+"$ATTN_WRAPPER_PATH" ticket attach \
   --file docs/plans/design.md \
   --file docs/plans/rollout.md \
   --state ready_for_review \
@@ -103,7 +103,7 @@ The command:
 1. resolves the caller's bound ticket, or an explicitly supplied ticket ID;
 2. validates every source before changing the ticket;
 3. copies the files into `<notebook>/tickets/<ticket-id>/`;
-4. records one `handover_submitted` ticket event containing the submitted file
+4. records one `attach_submitted` ticket event containing the submitted file
    names and decision-context comment;
 5. applies the optional state transition;
 6. notifies ticket participants; and
@@ -156,10 +156,10 @@ The stable ticket association lets the chief:
 
 ## Delivery semantics
 
-A successful handover means all submitted files are present at the returned
-paths, the `handover_submitted` event is durable, the requested state is
+A successful attachment means all submitted files are present at the returned
+paths, the `attach_submitted` event is durable, the requested state is
 durable, and the receipt identifies all three. Notification delivery may be
-repeated; ticket reads and the handover receipt remain authoritative.
+repeated; ticket reads and the attachment receipt remain authoritative.
 
 The command uses a deterministic fingerprint of the ticket ID, destination
 names, file contents, requested state, and comment. The event stores that key.
@@ -210,7 +210,7 @@ command examples and detailed operation guidance.
 | Role | Guaranteed guidance | Skill guidance |
 |---|---|---|
 | Chief of staff | Read the ticket's current artifact paths before follow-on work, pass those paths to delegated agents, and expect meaningful changes to be reported on the ticket. | How to inspect handover receipts, open plans, and include canonical paths in delegation briefs. |
-| Chief-tracked delegated agent | Hand over a durable plan with `ticket handover`; after success, treat the returned Notebook paths as canonical and report meaningful edits, renames, or deletions through ticket status or comments. | Multi-file examples, optional state/comment usage, collision handling, and retry behavior. |
+| Chief-tracked delegated agent | Hand over a durable plan with `ticket attach`; after success, treat the returned Notebook paths as canonical and report meaningful edits, renames, or deletions through ticket status or comments. | Multi-file examples, optional state/comment usage, collision handling, and retry behavior. |
 | Plugin-provided delegated agent | The same tracked-agent rule arrives in the universal delegated initial prompt. | Plugins may expose the bundled references when supported. |
 | Ordinary agent | Existing ticket-awareness guidance remains sufficient. | Ticket handover guidance is loaded when the agent is working with a tracked ticket. |
 
@@ -240,9 +240,9 @@ reads.
 
 ## One-PR implementation
 
-- [x] Replace the current file-handoff command and protocol with `ticket handover`,
+- [x] Replace the current file-handoff command and protocol with `ticket attach`,
    including repeatable files, optional state/comment, a structured receipt,
-   and the `handover_submitted` event.
+   and the `attach_submitted` event.
 - [x] Write new handovers to `tickets/<ticket-id>/` and make directory enumeration
    the ticket-read source. Existing attachment data remains untouched.
 - [x] Add deterministic handover fingerprints, staging, locking, rollback, and

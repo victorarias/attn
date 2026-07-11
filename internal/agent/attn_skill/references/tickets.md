@@ -42,9 +42,9 @@ validates it.
 
 ## Handing over Markdown artifacts
 
-`attn ticket handover` is the durable producer-to-ticket operation:
+`attn ticket attach` is the durable producer-to-ticket operation:
 
-    "$ATTN_WRAPPER_PATH" ticket handover \
+    "$ATTN_WRAPPER_PATH" ticket attach \
       --file docs/plans/design.md \
       --file docs/plans/rollout.md \
       --ticket <ticket-id> \
@@ -53,17 +53,17 @@ validates it.
 
 - Omit `--ticket` to use your own bound ticket; include it to target any known
   ticket, matching `ticket status --ticket` and `ticket comment`.
-- Repeat `--file` to submit several Markdown files in one handover.
+- Repeat `--file` to submit several Markdown files in one attachment.
 - `--state` uses the reporting vocabulary: `in_progress`, `needs_input`,
   `ready_for_review`, `completed`, or `failed`.
 - `--comment` is short decision context. Put the full reasoning in the Markdown.
 - The receipt's Notebook paths are canonical. Current artifacts are whatever
   regular `.md` files exist directly in `tickets/<ticket-id>/` when the ticket is
   read.
-- Retrying an identical handover returns its existing receipt. A destination with
+- Retrying an identical attachment returns its existing receipt. A destination with
   different bytes is never overwritten; choose a new filename and retry.
 
-After handover, edit, rename, or delete the canonical files with ordinary file
+After attaching, edit, rename, or delete the canonical files with ordinary file
 tools. Report meaningful changes on the ticket so participants know to re-read it.
 
 ## Creating a ticket
@@ -113,4 +113,4 @@ inbox (see the delegated-agent reference). These two commands reach **any** tick
   ticket **already assigned to someone else** requires `--confirm`, so you cannot silently
   take over a sibling's active work — without it the command refuses and names the current
   assignee. Taking does not skip the backlog: your first `attn ticket inbox` afterward
-  delivers the ticket's history. The displaced assignee is notified of the handover.
+  delivers the ticket's history. The displaced assignee is notified of the attach.

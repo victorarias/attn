@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketHandoverFile, TicketHandoverMessage, TicketHandoverResult, TicketHandoverResultMessage, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
@@ -238,10 +238,10 @@
 //   const ticketEvent = Convert.toTicketEvent(json);
 //   const ticketEventBundle = Convert.toTicketEventBundle(json);
 //   const ticketEventKind = Convert.toTicketEventKind(json);
-//   const ticketHandoverFile = Convert.toTicketHandoverFile(json);
-//   const ticketHandoverMessage = Convert.toTicketHandoverMessage(json);
-//   const ticketHandoverResult = Convert.toTicketHandoverResult(json);
-//   const ticketHandoverResultMessage = Convert.toTicketHandoverResultMessage(json);
+//   const ticketAttachFile = Convert.toTicketAttachFile(json);
+//   const ticketAttachMessage = Convert.toTicketAttachMessage(json);
+//   const ticketAttachResult = Convert.toTicketAttachResult(json);
+//   const ticketAttachResultMessage = Convert.toTicketAttachResultMessage(json);
 //   const ticketInboxMessage = Convert.toTicketInboxMessage(json);
 //   const ticketInboxResult = Convert.toTicketInboxResult(json);
 //   const ticketListMessage = Convert.toTicketListMessage(json);
@@ -1720,7 +1720,7 @@ export enum TicketStatus {
 
 export enum TicketActivityKind {
     Comment = "comment",
-    Handover = "handover",
+    Attach = "attach",
     StatusChange = "status_change",
 }
 
@@ -2943,7 +2943,7 @@ export interface Response {
     sessions?:                             SessionElement[];
     ticket_comment_result?:                TicketCommentResultObject;
     ticket_create_result?:                 TicketCreateResultObject;
-    ticket_handover_result?:               TicketHandoverResultObject;
+    ticket_attach_result?:               TicketAttachResultObject;
     ticket_inbox_result?:                  TicketInboxResultObject;
     ticket_list_result?:                   TicketListResultObject;
     ticket_show_result?:                   TicketShowResultObject;
@@ -3003,7 +3003,7 @@ export interface TicketCreateResultObject {
     [property: string]: any;
 }
 
-export interface TicketHandoverResultObject {
+export interface TicketAttachResultObject {
     artifacts:    ArtifactElement[];
     deduplicated: boolean;
     event_seq:    number;
@@ -3042,7 +3042,7 @@ export enum TicketEventKind {
     Commented = "commented",
     Created = "created",
     DescriptionEdited = "description_edited",
-    HandoverSubmitted = "handover_submitted",
+    AttachSubmitted = "attach_submitted",
     StatusChanged = "status_changed",
 }
 
@@ -3644,14 +3644,14 @@ export interface TicketEventBundle {
     [property: string]: any;
 }
 
-export interface TicketHandoverFile {
+export interface TicketAttachFile {
     filename:    string;
     source_path: string;
     [property: string]: any;
 }
 
-export interface TicketHandoverMessage {
-    cmd:               TicketHandoverMessageCmd;
+export interface TicketAttachMessage {
+    cmd:               TicketAttachMessageCmd;
     comment?:          string;
     files:             FileObject[];
     request_id?:       string;
@@ -3661,8 +3661,8 @@ export interface TicketHandoverMessage {
     [property: string]: any;
 }
 
-export enum TicketHandoverMessageCmd {
-    TicketHandover = "ticket_handover",
+export enum TicketAttachMessageCmd {
+    TicketAttach = "ticket_attach",
 }
 
 export interface FileObject {
@@ -3671,7 +3671,7 @@ export interface FileObject {
     [property: string]: any;
 }
 
-export interface TicketHandoverResult {
+export interface TicketAttachResult {
     artifacts:    ArtifactElement[];
     deduplicated: boolean;
     event_seq:    number;
@@ -3681,17 +3681,17 @@ export interface TicketHandoverResult {
     [property: string]: any;
 }
 
-export interface TicketHandoverResultMessage {
+export interface TicketAttachResultMessage {
     error?:     string;
-    event:      TicketHandoverResultMessageEvent;
+    event:      TicketAttachResultMessageEvent;
     request_id: string;
-    result?:    TicketHandoverResultObject;
+    result?:    TicketAttachResultObject;
     success:    boolean;
     [property: string]: any;
 }
 
-export enum TicketHandoverResultMessageEvent {
-    TicketHandoverResult = "ticket_handover_result",
+export enum TicketAttachResultMessageEvent {
+    TicketAttachResult = "ticket_attach_result",
 }
 
 export interface TicketInboxMessage {
@@ -6528,36 +6528,36 @@ export class Convert {
         return JSON.stringify(uncast(value, r("TicketEventKind")), null, 2);
     }
 
-    public static toTicketHandoverFile(json: string): TicketHandoverFile {
-        return cast(JSON.parse(json), r("TicketHandoverFile"));
+    public static toTicketAttachFile(json: string): TicketAttachFile {
+        return cast(JSON.parse(json), r("TicketAttachFile"));
     }
 
-    public static ticketHandoverFileToJson(value: TicketHandoverFile): string {
-        return JSON.stringify(uncast(value, r("TicketHandoverFile")), null, 2);
+    public static ticketAttachFileToJson(value: TicketAttachFile): string {
+        return JSON.stringify(uncast(value, r("TicketAttachFile")), null, 2);
     }
 
-    public static toTicketHandoverMessage(json: string): TicketHandoverMessage {
-        return cast(JSON.parse(json), r("TicketHandoverMessage"));
+    public static toTicketAttachMessage(json: string): TicketAttachMessage {
+        return cast(JSON.parse(json), r("TicketAttachMessage"));
     }
 
-    public static ticketHandoverMessageToJson(value: TicketHandoverMessage): string {
-        return JSON.stringify(uncast(value, r("TicketHandoverMessage")), null, 2);
+    public static ticketAttachMessageToJson(value: TicketAttachMessage): string {
+        return JSON.stringify(uncast(value, r("TicketAttachMessage")), null, 2);
     }
 
-    public static toTicketHandoverResult(json: string): TicketHandoverResult {
-        return cast(JSON.parse(json), r("TicketHandoverResult"));
+    public static toTicketAttachResult(json: string): TicketAttachResult {
+        return cast(JSON.parse(json), r("TicketAttachResult"));
     }
 
-    public static ticketHandoverResultToJson(value: TicketHandoverResult): string {
-        return JSON.stringify(uncast(value, r("TicketHandoverResult")), null, 2);
+    public static ticketAttachResultToJson(value: TicketAttachResult): string {
+        return JSON.stringify(uncast(value, r("TicketAttachResult")), null, 2);
     }
 
-    public static toTicketHandoverResultMessage(json: string): TicketHandoverResultMessage {
-        return cast(JSON.parse(json), r("TicketHandoverResultMessage"));
+    public static toTicketAttachResultMessage(json: string): TicketAttachResultMessage {
+        return cast(JSON.parse(json), r("TicketAttachResultMessage"));
     }
 
-    public static ticketHandoverResultMessageToJson(value: TicketHandoverResultMessage): string {
-        return JSON.stringify(uncast(value, r("TicketHandoverResultMessage")), null, 2);
+    public static ticketAttachResultMessageToJson(value: TicketAttachResultMessage): string {
+        return JSON.stringify(uncast(value, r("TicketAttachResultMessage")), null, 2);
     }
 
     public static toTicketInboxMessage(json: string): TicketInboxMessage {
@@ -8893,7 +8893,7 @@ const typeMap: any = {
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
         { json: "ticket_comment_result", js: "ticket_comment_result", typ: u(undefined, r("TicketCommentResultObject")) },
         { json: "ticket_create_result", js: "ticket_create_result", typ: u(undefined, r("TicketCreateResultObject")) },
-        { json: "ticket_handover_result", js: "ticket_handover_result", typ: u(undefined, r("TicketHandoverResultObject")) },
+        { json: "ticket_attach_result", js: "ticket_attach_result", typ: u(undefined, r("TicketAttachResultObject")) },
         { json: "ticket_inbox_result", js: "ticket_inbox_result", typ: u(undefined, r("TicketInboxResultObject")) },
         { json: "ticket_list_result", js: "ticket_list_result", typ: u(undefined, r("TicketListResultObject")) },
         { json: "ticket_show_result", js: "ticket_show_result", typ: u(undefined, r("TicketShowResultObject")) },
@@ -8939,7 +8939,7 @@ const typeMap: any = {
         { json: "ticket_id", js: "ticket_id", typ: "" },
         { json: "title", js: "title", typ: "" },
     ], "any"),
-    "TicketHandoverResultObject": o([
+    "TicketAttachResultObject": o([
         { json: "artifacts", js: "artifacts", typ: a(r("ArtifactElement")) },
         { json: "deduplicated", js: "deduplicated", typ: true },
         { json: "event_seq", js: "event_seq", typ: 0 },
@@ -9312,12 +9312,12 @@ const typeMap: any = {
         { json: "events", js: "events", typ: a(r("EventElement")) },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
-    "TicketHandoverFile": o([
+    "TicketAttachFile": o([
         { json: "filename", js: "filename", typ: "" },
         { json: "source_path", js: "source_path", typ: "" },
     ], "any"),
-    "TicketHandoverMessage": o([
-        { json: "cmd", js: "cmd", typ: r("TicketHandoverMessageCmd") },
+    "TicketAttachMessage": o([
+        { json: "cmd", js: "cmd", typ: r("TicketAttachMessageCmd") },
         { json: "comment", js: "comment", typ: u(undefined, "") },
         { json: "files", js: "files", typ: a(r("FileObject")) },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
@@ -9329,7 +9329,7 @@ const typeMap: any = {
         { json: "filename", js: "filename", typ: "" },
         { json: "source_path", js: "source_path", typ: "" },
     ], "any"),
-    "TicketHandoverResult": o([
+    "TicketAttachResult": o([
         { json: "artifacts", js: "artifacts", typ: a(r("ArtifactElement")) },
         { json: "deduplicated", js: "deduplicated", typ: true },
         { json: "event_seq", js: "event_seq", typ: 0 },
@@ -9337,11 +9337,11 @@ const typeMap: any = {
         { json: "state", js: "state", typ: r("TicketStatus") },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
-    "TicketHandoverResultMessage": o([
+    "TicketAttachResultMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },
-        { json: "event", js: "event", typ: r("TicketHandoverResultMessageEvent") },
+        { json: "event", js: "event", typ: r("TicketAttachResultMessageEvent") },
         { json: "request_id", js: "request_id", typ: "" },
-        { json: "result", js: "result", typ: u(undefined, r("TicketHandoverResultObject")) },
+        { json: "result", js: "result", typ: u(undefined, r("TicketAttachResultObject")) },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "TicketInboxMessage": o([
@@ -10145,7 +10145,7 @@ const typeMap: any = {
     ],
     "TicketActivityKind": [
         "comment",
-        "handover",
+        "attach",
         "status_change",
     ],
     "WorkspaceLayoutPaneKind": [
@@ -10377,7 +10377,7 @@ const typeMap: any = {
         "commented",
         "created",
         "description_edited",
-        "handover_submitted",
+        "attach_submitted",
         "status_changed",
     ],
     "WorkspaceContextMaintenanceAction": [
@@ -10490,11 +10490,11 @@ const typeMap: any = {
     "TicketEditDescriptionMessageCmd": [
         "ticket_edit_description",
     ],
-    "TicketHandoverMessageCmd": [
-        "ticket_handover",
+    "TicketAttachMessageCmd": [
+        "ticket_attach",
     ],
-    "TicketHandoverResultMessageEvent": [
-        "ticket_handover_result",
+    "TicketAttachResultMessageEvent": [
+        "ticket_attach_result",
     ],
     "TicketInboxMessageCmd": [
         "ticket_inbox",

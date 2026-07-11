@@ -175,7 +175,7 @@ The work-tracker epic delivered the loop across slices 1–7.
   codex is idle-nudged with a fixed doorbell.
 - [x] **Ticket view + resume + artifacts** — the chief edits, comments, and changes
   status from the UI; **resume** reopens a stopped agent on the same ticket (its cwd +
-  last agent id); `attn ticket handover` copies one or more Markdown files into the
+  last agent id); `attn ticket attach` copies one or more Markdown files into the
   ticket's visible Notebook directory and returns their canonical paths.
 - [x] **The board** — status columns + a Todo backlog + filters (blocked / in review /
   closed today), read-only, live `tickets_updated`.

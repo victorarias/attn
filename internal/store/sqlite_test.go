@@ -145,6 +145,46 @@ func TestMigrations_Idempotent(t *testing.T) {
 	}
 }
 
+func TestMigration67RenamesTicketArtifactRecords(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-67.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() error = %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO tickets (id, title, status, created_at, updated_at)
+		VALUES ('artifact-ticket', 'Artifact ticket', 'working', '2026-07-10T00:00:00Z', '2026-07-10T00:00:00Z');
+		INSERT INTO ticket_activity (ticket_id, kind, author, created_at)
+		VALUES ('artifact-ticket', 'handover', 'agent', '2026-07-10T00:00:00Z');
+		INSERT INTO ticket_events (ticket_id, kind, author, detail, created_at)
+		VALUES ('artifact-ticket', 'handover_submitted', 'agent', 'fingerprint', '2026-07-10T00:00:00Z');
+		DELETE FROM schema_migrations WHERE version = 67;
+	`); err != nil {
+		db.Close()
+		t.Fatalf("seed legacy artifact records: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close seeded db: %v", err)
+	}
+
+	migrated, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() migrate error = %v", err)
+	}
+	defer migrated.Close()
+
+	var activityKind, eventKind string
+	if err := migrated.QueryRow(`SELECT kind FROM ticket_activity WHERE ticket_id = 'artifact-ticket'`).Scan(&activityKind); err != nil {
+		t.Fatalf("read migrated activity: %v", err)
+	}
+	if err := migrated.QueryRow(`SELECT kind FROM ticket_events WHERE ticket_id = 'artifact-ticket'`).Scan(&eventKind); err != nil {
+		t.Fatalf("read migrated event: %v", err)
+	}
+	if activityKind != "attach" || eventKind != "attach_submitted" {
+		t.Fatalf("migrated kinds = (%q, %q), want (attach, attach_submitted)", activityKind, eventKind)
+	}
+}
+
 func TestMigration66BackfillsActiveBornAssignedTicketsWithoutCursor(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "migration-66.db")
 	s, err := NewWithDB(dbPath)
@@ -175,7 +215,7 @@ func TestMigration66BackfillsActiveBornAssignedTicketsWithoutCursor(t *testing.T
 	}
 	if _, err := raw.Exec(`
 		DROP TABLE ticket_role_owners;
-		DELETE FROM schema_migrations WHERE version = 66;
+		DELETE FROM schema_migrations WHERE version >= 66;
 	`); err != nil {
 		t.Fatalf("rewind migration 66: %v", err)
 	}

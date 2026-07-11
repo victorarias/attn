@@ -85,9 +85,9 @@ const (
 	TicketActivityStatusChange TicketActivityKind = "status_change"
 	// TicketActivityComment records a freeform note from either side.
 	TicketActivityComment TicketActivityKind = "comment"
-	// TicketActivityHandover records the files and decision context submitted in
-	// one durable ticket handover.
-	TicketActivityHandover TicketActivityKind = "handover"
+	// TicketActivityAttach records the files and decision context submitted in
+	// one durable ticket attach.
+	TicketActivityAttach TicketActivityKind = "attach"
 )
 
 // Ticket is the durable record. Activity and Attachments are populated by
@@ -127,7 +127,7 @@ type TicketActivity struct {
 	CreatedAt  time.Time
 }
 
-// TicketAttachment is a file handed over with the work. Slice 1 stores the
+// TicketAttachment is a file attached to the ticket. Slice 1 stores the
 // record; the file-handling ergonomics (copy-into-store) come with slice 4.
 type TicketAttachment struct {
 	ID        int64
@@ -138,8 +138,8 @@ type TicketAttachment struct {
 	CreatedAt time.Time
 }
 
-// TicketHandoverResult is the durable portion of a handover receipt.
-type TicketHandoverResult struct {
+// TicketAttachResult is the durable portion of an attachment receipt.
+type TicketAttachResult struct {
 	EventSeq     int64
 	Status       TicketStatus
 	Deduplicated bool
@@ -781,7 +781,7 @@ func (s *Store) GetTicketResumeSessionID(assignee string) string {
 	return strings.TrimSpace(resumeSessionID)
 }
 
-// AddTicketAttachment records a handover file on the ticket, bumps updated_at, and
+// AddTicketAttachment records an attached file on the ticket, bumps updated_at, and
 // emits an attachment_added event (Detail = filename) authored by author. Returns
 // the stored attachment (with its assigned id).
 func (s *Store) AddTicketAttachment(att TicketAttachment, author string, now time.Time) (*TicketAttachment, error) {
@@ -832,14 +832,14 @@ func (s *Store) AddTicketAttachment(att TicketAttachment, author string, now tim
 	return &att, nil
 }
 
-// SubmitTicketHandover records one durable handover receipt and optionally moves
+// SubmitTicketAttach records one durable attachment receipt and optionally moves
 // the ticket in the same transaction. The fingerprint prefix in detail makes a
-// lost-response retry discoverable even when a status event followed the handover.
-func (s *Store) SubmitTicketHandover(
+// lost-response retry discoverable even when a status event followed the attach.
+func (s *Store) SubmitTicketAttach(
 	ticketID, author, fingerprint, detail, activityComment string,
 	status *TicketStatus,
 	now time.Time,
-) (*TicketHandoverResult, error) {
+) (*TicketAttachResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -847,7 +847,7 @@ func (s *Store) SubmitTicketHandover(
 		return nil, nil
 	}
 	if strings.TrimSpace(fingerprint) == "" {
-		return nil, errors.New("handover fingerprint required")
+		return nil, errors.New("attach fingerprint required")
 	}
 	if status != nil && !status.IsValid() {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidTicketStatus, *status)
@@ -865,9 +865,9 @@ func (s *Store) SubmitTicketHandover(
 		SELECT seq, to_status FROM ticket_events
 		WHERE ticket_id = ? AND kind = ? AND detail LIKE ?
 		ORDER BY seq DESC LIMIT 1
-	`, ticketID, string(TicketEventHandoverSubmitted), fingerprint+"\n%").Scan(&existingSeq, &existingStatus)
+	`, ticketID, string(TicketEventAttachSubmitted), fingerprint+"\n%").Scan(&existingSeq, &existingStatus)
 	if err == nil {
-		return &TicketHandoverResult{EventSeq: existingSeq, Status: TicketStatus(existingStatus), Deduplicated: true}, nil
+		return &TicketAttachResult{EventSeq: existingSeq, Status: TicketStatus(existingStatus), Deduplicated: true}, nil
 	}
 	if err != sql.ErrNoRows {
 		return nil, err
@@ -886,7 +886,7 @@ func (s *Store) SubmitTicketHandover(
 	if _, err := tx.Exec(`
 		INSERT INTO ticket_activity (ticket_id, kind, author, comment, created_at)
 		VALUES (?, ?, ?, ?, ?)
-	`, ticketID, string(TicketActivityHandover), author, activityComment, formatTicketTime(now)); err != nil {
+	`, ticketID, string(TicketActivityAttach), author, activityComment, formatTicketTime(now)); err != nil {
 		return nil, err
 	}
 	resultStatus := current.Status
@@ -895,7 +895,7 @@ func (s *Store) SubmitTicketHandover(
 	}
 	eventSeq, _, err := appendTicketEventTx(tx, TicketEvent{
 		TicketID: ticketID,
-		Kind:     TicketEventHandoverSubmitted,
+		Kind:     TicketEventAttachSubmitted,
 		Author:   author,
 		Comment:  activityComment,
 		Detail:   detail,
@@ -914,7 +914,7 @@ func (s *Store) SubmitTicketHandover(
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &TicketHandoverResult{EventSeq: eventSeq, Status: resultStatus}, nil
+	return &TicketAttachResult{EventSeq: eventSeq, Status: resultStatus}, nil
 }
 
 // ArchiveTicket clears a closed ticket from the active board. Only terminal

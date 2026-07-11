@@ -14,34 +14,34 @@ import (
 	"github.com/victorarias/attn/internal/ticketnotify"
 )
 
-func callTicketHandover(t *testing.T, d *Daemon, msg *protocol.TicketHandoverMessage) protocol.Response {
+func callTicketAttach(t *testing.T, d *Daemon, msg *protocol.TicketAttachMessage) protocol.Response {
 	t.Helper()
 	server, client := net.Pipe()
 	defer client.Close()
 	done := make(chan struct{})
 	go func() {
-		d.handleTicketHandover(server, msg)
+		d.handleTicketAttach(server, msg)
 		_ = server.Close()
 		close(done)
 	}()
 	var resp protocol.Response
 	if err := json.NewDecoder(client).Decode(&resp); err != nil {
-		t.Fatalf("decode ticket handover response: %v", err)
+		t.Fatalf("decode ticket attach response: %v", err)
 	}
 	<-done
 	return resp
 }
 
-func handoverSource(t *testing.T, dir, name, content string) protocol.TicketHandoverFile {
+func attachSource(t *testing.T, dir, name, content string) protocol.TicketAttachFile {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
-	return protocol.TicketHandoverFile{SourcePath: path, Filename: name}
+	return protocol.TicketAttachFile{SourcePath: path, Filename: name}
 }
 
-func TestTicketHandoverCopiesMultipleFilesAndChangesState(t *testing.T) {
+func TestTicketAttachCopiesMultipleFilesAndChangesState(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	notebookRoot := t.TempDir()
 	d.store.SetSetting(SettingNotebookRoot, notebookRoot)
@@ -51,20 +51,20 @@ func TestTicketHandoverCopiesMultipleFilesAndChangesState(t *testing.T) {
 	state := protocol.DispatchWorkStateReadyForReview
 	comment := "Storage choice is confirmed."
 
-	resp := callTicketHandover(t, d, &protocol.TicketHandoverMessage{
-		Cmd:             protocol.CmdTicketHandover,
+	resp := callTicketAttach(t, d, &protocol.TicketAttachMessage{
+		Cmd:             protocol.CmdTicketAttach,
 		SourceSessionID: agentID,
-		Files: []protocol.TicketHandoverFile{
-			handoverSource(t, sources, "design.md", "the design"),
-			handoverSource(t, sources, "rollout.md", "the rollout"),
+		Files: []protocol.TicketAttachFile{
+			attachSource(t, sources, "design.md", "the design"),
+			attachSource(t, sources, "rollout.md", "the rollout"),
 		},
 		State:   &state,
 		Comment: &comment,
 	})
-	if !resp.Ok || resp.TicketHandoverResult == nil {
-		t.Fatalf("response = %+v, want handover receipt", resp)
+	if !resp.Ok || resp.TicketAttachResult == nil {
+		t.Fatalf("response = %+v, want attach receipt", resp)
 	}
-	result := resp.TicketHandoverResult
+	result := resp.TicketAttachResult
 	if result.TicketID != ticketID || result.State != protocol.TicketStatusInReview || len(result.Artifacts) != 2 || result.EventSeq == 0 {
 		t.Fatalf("receipt = %+v", result)
 	}
@@ -83,35 +83,35 @@ func TestTicketHandoverCopiesMultipleFilesAndChangesState(t *testing.T) {
 	if ticket.Status != store.TicketStatusInReview {
 		t.Fatalf("ticket status = %s", ticket.Status)
 	}
-	var sawHandover bool
+	var sawAttach bool
 	for _, activity := range ticket.Activity {
-		if activity.Kind == store.TicketActivityHandover {
-			sawHandover = strings.Contains(activity.Comment, "design.md, rollout.md") && strings.Contains(activity.Comment, comment)
+		if activity.Kind == store.TicketActivityAttach {
+			sawAttach = strings.Contains(activity.Comment, "design.md, rollout.md") && strings.Contains(activity.Comment, comment)
 		}
 	}
-	if !sawHandover {
-		t.Fatalf("handover history missing: %+v", ticket.Activity)
+	if !sawAttach {
+		t.Fatalf("attach history missing: %+v", ticket.Activity)
 	}
 }
 
-func TestTicketHandoverRetryReturnsExistingReceipt(t *testing.T) {
+func TestTicketAttachRetryReturnsExistingReceipt(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
 	_, agentID, _ := delegateForNotify(t, d, "codex")
-	source := handoverSource(t, t.TempDir(), "design.md", "same bytes")
-	msg := &protocol.TicketHandoverMessage{Cmd: protocol.CmdTicketHandover, SourceSessionID: agentID, Files: []protocol.TicketHandoverFile{source}}
+	source := attachSource(t, t.TempDir(), "design.md", "same bytes")
+	msg := &protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: agentID, Files: []protocol.TicketAttachFile{source}}
 
-	first := callTicketHandover(t, d, msg)
-	second := callTicketHandover(t, d, msg)
-	if !first.Ok || !second.Ok || first.TicketHandoverResult == nil || second.TicketHandoverResult == nil {
+	first := callTicketAttach(t, d, msg)
+	second := callTicketAttach(t, d, msg)
+	if !first.Ok || !second.Ok || first.TicketAttachResult == nil || second.TicketAttachResult == nil {
 		t.Fatalf("responses = %+v / %+v", first, second)
 	}
-	if second.TicketHandoverResult.Fingerprint != first.TicketHandoverResult.Fingerprint || second.TicketHandoverResult.EventSeq != first.TicketHandoverResult.EventSeq || !second.TicketHandoverResult.Deduplicated {
-		t.Fatalf("retry receipt = %+v, first = %+v", second.TicketHandoverResult, first.TicketHandoverResult)
+	if second.TicketAttachResult.Fingerprint != first.TicketAttachResult.Fingerprint || second.TicketAttachResult.EventSeq != first.TicketAttachResult.EventSeq || !second.TicketAttachResult.Deduplicated {
+		t.Fatalf("retry receipt = %+v, first = %+v", second.TicketAttachResult, first.TicketAttachResult)
 	}
 }
 
-func TestTicketHandoverPreservesDifferentExistingArtifact(t *testing.T) {
+func TestTicketAttachPreservesDifferentExistingArtifact(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	root := t.TempDir()
 	d.store.SetSetting(SettingNotebookRoot, root)
@@ -125,8 +125,8 @@ func TestTicketHandoverPreservesDifferentExistingArtifact(t *testing.T) {
 	if err := os.WriteFile(destination, []byte("keep me"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	source := handoverSource(t, t.TempDir(), "design.md", "replacement")
-	resp := callTicketHandover(t, d, &protocol.TicketHandoverMessage{Cmd: protocol.CmdTicketHandover, SourceSessionID: agentID, Files: []protocol.TicketHandoverFile{source}})
+	source := attachSource(t, t.TempDir(), "design.md", "replacement")
+	resp := callTicketAttach(t, d, &protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: agentID, Files: []protocol.TicketAttachFile{source}})
 	if resp.Ok || resp.Error == nil || !strings.Contains(*resp.Error, "different contents") {
 		t.Fatalf("response = %+v, want collision error", resp)
 	}
@@ -135,42 +135,42 @@ func TestTicketHandoverPreservesDifferentExistingArtifact(t *testing.T) {
 	}
 }
 
-func TestTicketHandoverSupportsExplicitTicketID(t *testing.T) {
+func TestTicketAttachSupportsExplicitTicketID(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
 	if _, err := d.store.CreateTicket(store.Ticket{ID: "other-ticket", Title: "Other", Status: store.TicketStatusTodo}, "chief", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	ticketID := "other-ticket"
-	source := handoverSource(t, t.TempDir(), "plan.md", "plan")
-	resp := callTicketHandover(t, d, &protocol.TicketHandoverMessage{Cmd: protocol.CmdTicketHandover, SourceSessionID: "peer", TicketID: &ticketID, Files: []protocol.TicketHandoverFile{source}})
-	if !resp.Ok || resp.TicketHandoverResult == nil || resp.TicketHandoverResult.TicketID != ticketID {
+	source := attachSource(t, t.TempDir(), "plan.md", "plan")
+	resp := callTicketAttach(t, d, &protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: "peer", TicketID: &ticketID, Files: []protocol.TicketAttachFile{source}})
+	if !resp.Ok || resp.TicketAttachResult == nil || resp.TicketAttachResult.TicketID != ticketID {
 		t.Fatalf("response = %+v", resp)
 	}
 }
 
-func TestTicketHandoverDispatchesFromWebSocketAsUser(t *testing.T) {
+func TestTicketAttachDispatchesFromWebSocketAsUser(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
 	if _, err := d.store.CreateTicket(store.Ticket{ID: "ui-ticket", Title: "UI", Status: store.TicketStatusWorking}, "chief", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	source := handoverSource(t, t.TempDir(), "plan.md", "plan")
+	source := attachSource(t, t.TempDir(), "plan.md", "plan")
 	client := newWorkspaceProtocolTestClient()
 	client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
-	payload, _ := json.Marshal(protocol.TicketHandoverMessage{
-		Cmd: protocol.CmdTicketHandover, SourceSessionID: store.TicketAuthorYou,
-		TicketID: protocol.Ptr("ui-ticket"), Files: []protocol.TicketHandoverFile{source}, RequestID: protocol.Ptr("h1"),
+	payload, _ := json.Marshal(protocol.TicketAttachMessage{
+		Cmd: protocol.CmdTicketAttach, SourceSessionID: store.TicketAuthorYou,
+		TicketID: protocol.Ptr("ui-ticket"), Files: []protocol.TicketAttachFile{source}, RequestID: protocol.Ptr("h1"),
 	})
 	d.handleClientMessage(client, payload)
-	var result protocol.TicketHandoverResultMessage
+	var result protocol.TicketAttachResultMessage
 	readNotebookWSEvent(t, client.send, &result)
 	if result.RequestID != "h1" || !result.Success || result.Result == nil || result.Result.TicketID != "ui-ticket" {
-		t.Fatalf("websocket handover = %+v", result)
+		t.Fatalf("websocket attach = %+v", result)
 	}
 }
 
-func TestTicketHandoverNotifiesChiefAndBroadcasts(t *testing.T) {
+func TestTicketAttachNotifiesChiefAndBroadcasts(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour
 	t.Cleanup(d.stopNudgeCountdowns)
@@ -185,10 +185,10 @@ func TestTicketHandoverNotifiesChiefAndBroadcasts(t *testing.T) {
 	d.store.UpdateState(chiefID, protocol.StateIdle)
 	d.store.UpdateState(agentID, protocol.StateIdle)
 	latestBroadcast := captureTicketBroadcasts(d)
-	source := handoverSource(t, t.TempDir(), "report.md", "findings")
-	resp := callTicketHandover(t, d, &protocol.TicketHandoverMessage{Cmd: protocol.CmdTicketHandover, SourceSessionID: agentID, Files: []protocol.TicketHandoverFile{source}})
+	source := attachSource(t, t.TempDir(), "report.md", "findings")
+	resp := callTicketAttach(t, d, &protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: agentID, Files: []protocol.TicketAttachFile{source}})
 	if !resp.Ok {
-		t.Fatalf("handover failed: %+v", resp)
+		t.Fatalf("attach failed: %+v", resp)
 	}
 	fireNudgeNow(t, d, chiefID)
 	if !wasNudged(inputs(chiefID)) || wasNudged(inputs(agentID)) {

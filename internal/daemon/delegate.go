@@ -515,7 +515,7 @@ Use the state that matches the outcome when work needs input, is ready, or ends:
     "$ATTN_WRAPPER_PATH" ticket status failed --comment "<terminal failure>"
 
 When the deliverable is a durable plan, design, or other Markdown artifact, hand
-it over with ` + "`" + `"$ATTN_WRAPPER_PATH" ticket handover --file <path>` + "`" + `. Use repeatable
+it over with ` + "`" + `"$ATTN_WRAPPER_PATH" ticket attach --file <path>` + "`" + `. Use repeatable
 ` + "`" + `--file` + "`" + ` flags for multiple artifacts and optionally include ` + "`" + `--state` + "`" + ` and
 ` + "`" + `--comment` + "`" + `. After success, the returned Notebook paths are canonical: keep
 those files current, and report meaningful edits, renames, or deletions through

@@ -6,7 +6,7 @@
  *
  * Bootstraps a chief-of-staff, delegates a real codex worker (which mints a bound
  * ticket), drives the WORKER side via the agent CLI verbs (`attn ticket
- * status|handover`), then opens and drives the CHIEF side entirely through the
+ * status|attach`), then opens and drives the CHIEF side entirely through the
  * packaged app's TicketDetailPanel via the new `ticket_*` automation actions —
  * which click the real controls, so the panel's own gating runs. Asserts the
  * rendered panel reflects every step (status moves, comment, edited description,
@@ -135,8 +135,8 @@ async function main() {
   });
   const reportPath = path.join(sessionDir, 'report.md');
   const rolloutPath = path.join(sessionDir, 'rollout.md');
-  fs.writeFileSync(reportPath, 'ticket handover report\nsecond line\n', 'utf8');
-  fs.writeFileSync(rolloutPath, 'ticket handover rollout\n', 'utf8');
+  fs.writeFileSync(reportPath, 'ticket attach report\nsecond line\n', 'utf8');
+  fs.writeFileSync(rolloutPath, 'ticket attach rollout\n', 'utf8');
 
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
@@ -186,16 +186,16 @@ async function main() {
 
     // 3) Worker side via the real agent CLI verbs.
     runAttn(['ticket', 'status', 'in_progress', '--session', workerId]);
-    const handoverArgs = ['ticket', 'handover', '--file', reportPath, '--file', rolloutPath, '--state', 'ready_for_review', '--comment', 'Please review the handed-over plan.', '--session', workerId, '--json'];
-    const handover = runAttn(handoverArgs);
-    assert(handover.json?.artifacts?.length === 2, `multi-file handover returned two artifacts (got ${JSON.stringify(handover.json)})`);
-    const retry = runAttn(handoverArgs);
-    assert(retry.json?.deduplicated === true && retry.json?.event_seq === handover.json?.event_seq, `retry returned the existing receipt (got ${JSON.stringify(retry.json)})`);
+    const attachArgs = ['ticket', 'attach', '--file', reportPath, '--file', rolloutPath, '--state', 'ready_for_review', '--comment', 'Please review the handed-over plan.', '--session', workerId, '--json'];
+    const attach = runAttn(attachArgs);
+    assert(attach.json?.artifacts?.length === 2, `multi-file attach returned two artifacts (got ${JSON.stringify(attach.json)})`);
+    const retry = runAttn(attachArgs);
+    assert(retry.json?.deduplicated === true && retry.json?.event_seq === attach.json?.event_seq, `retry returned the existing receipt (got ${JSON.stringify(retry.json)})`);
 
-    const canonicalReport = handover.json.artifacts.find((artifact) => artifact.filename === 'report.md')?.path;
-    const canonicalRollout = handover.json.artifacts.find((artifact) => artifact.filename === 'rollout.md')?.path;
-    assert(canonicalReport && canonicalRollout, 'handover returned canonical report and rollout paths');
-    fs.appendFileSync(canonicalReport, 'updated after handover\n', 'utf8');
+    const canonicalReport = attach.json.artifacts.find((artifact) => artifact.filename === 'report.md')?.path;
+    const canonicalRollout = attach.json.artifacts.find((artifact) => artifact.filename === 'rollout.md')?.path;
+    assert(canonicalReport && canonicalRollout, 'attach returned canonical report and rollout paths');
+    fs.appendFileSync(canonicalReport, 'updated after attach\n', 'utf8');
     const canonicalImplementation = path.join(path.dirname(canonicalRollout), 'implementation.md');
     fs.renameSync(canonicalRollout, canonicalImplementation);
     runAttn(['ticket', 'comment', ticketId, '-m', 'Updated report.md and renamed rollout.md to implementation.md.', '--session', workerId]);
@@ -221,7 +221,7 @@ async function main() {
     );
     assert(
       afterWorker.activity.some((entry) => entry.comment.includes('Please review the handed-over plan')),
-      'handover decision context is in the activity history',
+      'attach decision context is in the activity history',
     );
 
     // 5) Chief side — drive the real panel controls. Each mutation drives the

@@ -241,10 +241,10 @@ func (c *Client) SetTicketStatus(sourceSessionID, workState, comment, ticketID s
 	return resp.TicketStatusResult, nil
 }
 
-// HandoverTicket copies one or more Markdown files into a ticket's canonical
+// AttachTicket copies one or more Markdown files into a ticket's canonical
 // Notebook directory and returns its durable receipt.
-func (c *Client) HandoverTicket(sourceSessionID string, files []protocol.TicketHandoverFile, ticketID, state, comment string) (*protocol.TicketHandoverResult, error) {
-	msg := protocol.TicketHandoverMessage{Cmd: protocol.CmdTicketHandover, SourceSessionID: sourceSessionID, Files: files}
+func (c *Client) AttachTicket(sourceSessionID string, files []protocol.TicketAttachFile, ticketID, state, comment string) (*protocol.TicketAttachResult, error) {
+	msg := protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: sourceSessionID, Files: files}
 	if value := strings.TrimSpace(ticketID); value != "" {
 		msg.TicketID = protocol.Ptr(value)
 	}
@@ -259,10 +259,10 @@ func (c *Client) HandoverTicket(sourceSessionID string, files []protocol.TicketH
 	if err != nil {
 		return nil, err
 	}
-	if resp.TicketHandoverResult == nil {
-		return nil, errors.New("daemon returned no ticket handover result")
+	if resp.TicketAttachResult == nil {
+		return nil, errors.New("daemon returned no ticket attach result")
 	}
-	return resp.TicketHandoverResult, nil
+	return resp.TicketAttachResult, nil
 }
 
 // CreateTicket mints a standalone backlog ticket — unbound, starting in todo. The
