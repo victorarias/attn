@@ -118,11 +118,9 @@ type Capabilities struct {
 	// instructions for using a workspace context checkout.
 	HasWorkspaceContext bool
 
-	// HasSelfMonitor indicates the agent watches its own ticket/event stream via
-	// a live Monitor (true push) rather than needing an idle PTY nudge when ticket
-	// activity arrives. Consumed by the work-tracker notifier (internal/ticketnotify)
-	// to pick DeliveryWatch (self-monitor) vs DeliveryNudge (idle pty-nudge). Only
-	// Claude self-monitors today.
+	// HasSelfMonitor indicates the agent can optionally watch its own ticket/event
+	// stream via a live Monitor. It selects chief guidance only; daemon nudge
+	// eligibility is shared across runtimes. Only Claude supports this today.
 	HasSelfMonitor bool
 
 	// HasModelPin indicates the agent's launch command accepts a per-session

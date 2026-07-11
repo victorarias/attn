@@ -499,7 +499,8 @@ func parsePresentNumstat(output string) map[string][2]int {
 // agent: it validates and stores the comments, marks the round submitted, and
 // — when handback is set — wakes the authoring agent up, either through a
 // ticket comment (ticket-bound presentations) or a direct doorbell (bare
-// sessions, best-effort: skipped, not queued, if the session is not idle).
+// sessions, best-effort: skipped, not queued, while the session waits for
+// approval).
 func (d *Daemon) handlePresentSubmitRound(client *wsClient, msg *protocol.PresentSubmitRoundMessage) {
 	result := protocol.PresentSubmitRoundResultMessage{
 		Event:   protocol.EventPresentSubmitRoundResult,
@@ -593,11 +594,11 @@ func (d *Daemon) handlePresentSubmitRound(client *wsClient, msg *protocol.Presen
 // handbackPresentationRound wakes the authoring agent once a round has been
 // submitted. Ticket-bound presentations get a durable ticket comment (queued
 // regardless of the session's state); bare sessions get a best-effort direct
-// doorbell that is silently skipped when the session is not idle — chunk-1's
-// accepted limitation, since a bare presentation has no durable inbox to fall
-// back on. verdict is verdict-aware wording: "approved" tells the agent the
-// round was approved (possibly with nits); "feedback" keeps the original
-// "submitted" wording.
+// doorbell that is silently skipped while the session waits for approval — the
+// accepted limitation for a bare presentation, which has no durable inbox to fall
+// back on. verdict is verdict-aware wording: "approved" tells the agent the round
+// was approved (possibly with nits); "feedback" keeps the original "submitted"
+// wording.
 func (d *Daemon) handbackPresentationRound(pres *store.Presentation, seq int, verdict string) {
 	var notice string
 	if verdict == "approved" {
@@ -617,8 +618,8 @@ func (d *Daemon) handbackPresentationRound(pres *store.Presentation, seq int, ve
 	}
 
 	session := d.store.Get(pres.SessionID)
-	if session == nil || !isIdleForNudge(string(session.State)) || isExplicitNudgeBlocked(string(session.State)) {
-		d.logf("present handback: session %s not idle, skipping doorbell for presentation %s", pres.SessionID, pres.ID)
+	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
+		d.logf("present handback: session %s is waiting for approval, skipping doorbell for presentation %s", pres.SessionID, pres.ID)
 		return
 	}
 	if err := d.typeDoorbell(pres.SessionID, "\U0001F4FD "+notice+"."); err != nil {

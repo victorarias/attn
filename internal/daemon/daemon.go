@@ -169,21 +169,16 @@ type Daemon struct {
 	// stale mark (reload kill that never produced an exit) cannot swallow a real
 	// crash later. Lazily initialized under reloadingMu.
 	reloadKills map[string]time.Time
-	// ticketBackstop debounces the deferred self-monitor doorbell (see
-	// ticket_notify.go): an idle self-monitor with unread ticket activity is
-	// re-checked after a grace delay and doorbelled only if still unread, so a live
-	// `attn ticket inbox --watch` Monitor (which drains within its poll interval)
-	// self-suppresses it. ticketBackstopGrace is 0 in production (=> the default
-	// const) and a test override otherwise.
-	ticketBackstopMu     sync.Mutex
-	ticketBackstopTimers map[string]*time.Timer
-	ticketBackstopGrace  time.Duration
 	// nudge countdown (see nudge_countdown.go): every ticket doorbell arms a
 	// visible per-session countdown instead of injecting immediately. The
 	// currently-selected session's countdown is paused; the timer fire is the only
 	// place a real doorbell happens, and only if no genuine user keystroke landed in
 	// the guard window (the anti-splice guarantee). All maps lazy-init so a
 	// directly-constructed test daemon is nil-safe.
+	// doorbellMu serializes authoritative session-state commits with a complete
+	// doorbell write. This keeps a pending_approval report from interleaving
+	// between the prompt and its trailing Enter.
+	doorbellMu          sync.Mutex
 	nudgeMu             sync.Mutex
 	nudgeCountdowns     map[string]*nudgeCountdown     // presence == a running (unpaused) countdown
 	unreadCache         map[string]bool                // per-session unread ticket activity, for cheap broadcast decoration
@@ -1380,7 +1375,6 @@ func (d *Daemon) Stop() {
 	}
 	d.stopInstalledPlugins()
 	d.stopAllTranscriptWatchers()
-	d.stopTicketBackstops()
 	d.stopNudgeCountdowns()
 	if d.ptyBackend != nil {
 		_ = d.ptyBackend.Shutdown(context.Background())
@@ -1612,8 +1606,11 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 	case protocol.StateIdle, protocol.StateScheduled:
 		d.clearLongRunTracking(sessionID)
 	}
-	d.store.UpdateState(sessionID, state)
-	d.store.Touch(sessionID)
+	d.applyStateAndSyncNudge(sessionID, state, func() bool {
+		d.store.UpdateState(sessionID, state)
+		d.store.Touch(sessionID)
+		return true
+	})
 	updated := d.sessionForBroadcast(d.store.Get(sessionID))
 	if updated == nil {
 		return
@@ -1623,25 +1620,6 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 		Session: updated,
 	})
 	d.recomputeAndBroadcastWorkspaceForSession(sessionID)
-	// A non-self-monitoring agent that was busy when a ticket event landed gets its
-	// deferred doorbell the moment it goes idle. Off the read-loop goroutine: the
-	// doorbell write briefly blocks, and a no-unread observer is a quick no-op.
-	if isIdleForNudge(state) {
-		go d.notifyTicketSessionWentIdle(sessionID)
-	}
-	d.cancelNudgeOnLeaveIdle(sessionID, state)
-}
-
-// cancelNudgeOnLeaveIdle cancels a session's pending nudge countdown when its state is
-// no longer idle/waiting — you don't count down to nudge a working agent (the unread
-// marker survives until it reads its inbox). Called from every state-broadcast path so
-// the "armed only while idle" invariant holds regardless of which signal (PTY
-// detector, hook, classifier, transcript) drove the transition; the no-op-when-idle
-// guard makes it safe to call unconditionally.
-func (d *Daemon) cancelNudgeOnLeaveIdle(sessionID, state string) {
-	if !isIdleForNudge(state) {
-		d.cancelNudgeCountdown(sessionID, "left idle")
-	}
 }
 
 // initHTTPServer creates the HTTP server synchronously to avoid race with Stop().
@@ -2214,11 +2192,13 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 		// review on the next short resumed turn.
 		d.clearLongRunTracking(msg.ID)
 	}
-	d.store.UpdateState(msg.ID, msg.State)
-	d.store.Touch(msg.ID)
-	// The hook is the authoritative state path for codex/claude, which never flow
-	// through handlePTYState, so the leaving-idle countdown cancel must hook here too.
-	d.cancelNudgeOnLeaveIdle(msg.ID, msg.State)
+	d.applyStateAndSyncNudge(msg.ID, msg.State, func() bool {
+		d.store.UpdateState(msg.ID, msg.State)
+		d.store.Touch(msg.ID)
+		return true
+	})
+	// The hook is the authoritative state path for Codex and Claude; the shared
+	// state helper also reconciles a nudge deferred by an approval prompt.
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
@@ -2855,8 +2835,10 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 	case protocol.StateIdle, protocol.StateScheduled:
 		d.clearLongRunTracking(sessionID)
 	}
-	d.store.UpdateState(sessionID, state)
-	d.cancelNudgeOnLeaveIdle(sessionID, state)
+	d.applyStateAndSyncNudge(sessionID, state, func() bool {
+		d.store.UpdateState(sessionID, state)
+		return true
+	})
 	// Broadcast to WebSocket clients
 	session := d.sessionForBroadcast(d.store.Get(sessionID))
 	if session != nil {
@@ -2873,14 +2855,15 @@ func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
 // than the current state. Used by classifier to prevent stale results from overwriting
 // newer state updates that arrived during classification.
 func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) bool {
-	if d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt) {
+	if d.applyStateAndSyncNudge(sessionID, state, func() bool {
+		return d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt)
+	}) {
 		switch state {
 		case protocol.StateWorking:
 			d.markRunStartedIfNeeded(sessionID)
 		case protocol.StateIdle, protocol.StateScheduled:
 			d.clearLongRunTracking(sessionID)
 		}
-		d.cancelNudgeOnLeaveIdle(sessionID, state)
 		// Broadcast to WebSocket clients
 		session := d.sessionForBroadcast(d.store.Get(sessionID))
 		if session != nil {

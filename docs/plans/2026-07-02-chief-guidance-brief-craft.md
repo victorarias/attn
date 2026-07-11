@@ -156,9 +156,9 @@ Count net new prose lines against this table when done (`git diff --stat` sanity
       > (a default, not a hard rule — skip it if the user asks; the daemon
       > doorbells you if unread ticket activity sits unwatched).
 
-      The backstop claim is real: `internal/daemon/ticket_notify.go` re-checks
-      after a grace and doorbells a self-monitoring chief whose queue is still
-      unread. While executing, also mark the "Open product question for Victor"
+      The shared countdown claim is real: `internal/daemon/ticket_notify.go`
+      doorbells every non-approval chief unless an optional watch already consumed
+      the queue. While executing, also mark the "Open product question for Victor"
       line in `docs/plans/2026-06-28-delegated-ticket-awareness.md` resolved with
       a pointer to this plan.
 

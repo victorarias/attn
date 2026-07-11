@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
+
+var errDoorbellBlockedByApproval = errors.New("doorbell blocked by pending approval")
 
 const profileRoleChiefOfStaff = "chief_of_staff"
 
@@ -88,8 +91,8 @@ func (d *Daemon) clearChiefOfStaffIfSession(sessionID string) {
 }
 
 // nudgeChiefOfStaff types a bounded prompt into the current chief-of-staff
-// session's PTY, but only when a chief is set and that session is idle or waiting
-// for input — never an agent mid-task. It re-confirms the role right before
+// session's PTY whenever a chief is set and it is not waiting for approval. It
+// re-confirms the role right before
 // typing (the role is a single-holder upsert that another promotion may have
 // moved). Returns true only when the nudge was actually delivered, so callers can
 // report whether the chief was pinged live versus only queued in the inbox.
@@ -105,7 +108,7 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 	if session == nil {
 		return false
 	}
-	if session.State != protocol.SessionStateIdle && session.State != protocol.SessionStateWaitingInput {
+	if !isNudgeDeliveryAllowed(string(session.State)) {
 		return false
 	}
 	if d.chiefOfStaffSessionID() != sessionID {
@@ -118,15 +121,21 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 	return true
 }
 
-// typeDoorbell types a bounded prompt followed by Enter into a session's PTY. It
-// is the shared primitive behind the chief-of-staff doorbells (notebook
-// activation, inbox nudge): a fixed trigger, never arbitrary streamed content.
+// typeDoorbell types a bounded prompt and its Enter as one PTY write. It serializes
+// that write against authoritative state commits, so a pending_approval report
+// cannot land between the prompt and Enter. It is the shared primitive behind the
+// chief-of-staff doorbells (notebook activation, inbox nudge): a fixed trigger,
+// never arbitrary streamed content.
 func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
-	if err := d.ptyBackend.Input(context.Background(), sessionID, []byte(prompt)); err != nil {
-		return err
+	d.doorbellMu.Lock()
+	defer d.doorbellMu.Unlock()
+	if session := d.store.Get(sessionID); session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
+		return errDoorbellBlockedByApproval
 	}
-	time.Sleep(100 * time.Millisecond)
-	return d.ptyBackend.Input(context.Background(), sessionID, []byte{'\r'})
+	input := make([]byte, 0, len(prompt)+1)
+	input = append(input, prompt...)
+	input = append(input, '\r')
+	return d.ptyBackend.Input(context.Background(), sessionID, input)
 }
 
 // maybeAssignChiefOnSpawn assigns the chief-of-staff role at a session's first
@@ -228,7 +237,6 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 // ownership and its cursors do not move, copy, or advance.
 func (d *Daemon) retargetChiefTicketDelivery(previousSessionID, newSessionID string) {
 	if previousSessionID != "" {
-		d.cancelTicketBackstop(previousSessionID)
 		d.refreshTicketUnread(previousSessionID)
 	}
 	if newSessionID != "" {

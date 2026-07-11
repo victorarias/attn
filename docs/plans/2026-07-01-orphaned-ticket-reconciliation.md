@@ -397,9 +397,10 @@ Evidence: last assistant turn (~14:32): "tests pass locally except e2e, which…
 
 Then the existing fan-out: `notifyTicketObservers(ticketID)`
 (ticket_notify.go:34) + `broadcastTicketsUpdated()` (ticket_board.go:72). The
-chief is a participant (it authored `created` at delegation) and self-monitors
-via `attn ticket inbox --watch`; non-self-monitor chiefs get the standard
-countdown doorbell. No new event kind, no new protocol message for delivery.
+chief is a participant (it authored `created` at delegation) and receives the
+standard countdown doorbell whenever it is not waiting for approval. A runtime
+may additionally use `attn ticket inbox --watch` to consume before the countdown
+delivers. No new event kind, no new protocol message for delivery.
 
 Edge worth naming: a ticket with no chief in its participant set (created by
 `attn ticket new` from the user, taken by an agent that later died) may have no

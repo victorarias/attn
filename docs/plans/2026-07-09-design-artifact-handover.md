@@ -233,10 +233,10 @@ the core behavior available across supported runtimes.
 ## Cross-runtime behavior
 
 Codex, Claude, and plugin-provided interactive agents use the same handover,
-status, comment, and ticket-read protocol. Runtime-specific ticket delivery
-continues to use each runtime's existing capability: Claude may self-monitor,
-while Codex and plugin runtimes respond to nudges and perform one-shot inbox
-reads.
+status, comment, ticket-read, and ticket-nudge protocol. Every live session is
+eligible for the same bounded nudge unless it is waiting for approval; Claude may
+also self-monitor with `ticket inbox --watch`, which can consume unread activity
+before the countdown fires.
 
 ## One-PR implementation
 

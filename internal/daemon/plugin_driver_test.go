@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -372,6 +373,51 @@ func TestPluginDriverReports_StateStopAndMetadataAreOwnedByRegisteredAgent(t *te
 	})
 	if got := d.store.Get("snipe-report").State; got != protocol.SessionStateWaitingInput {
 		t.Fatalf("state=%q, want waiting_input", got)
+	}
+}
+
+func TestPluginReportedStateFlushesDeferredTicketNudge(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	_, sessionID, inputs := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, sessionID)
+	setSessionAgent(t, d, sessionID, protocol.SessionAgent("snipe"))
+	if !d.store.BeginAgentDriverRun(sessionID, "snipe-plugin", "run-nudge") {
+		t.Fatal("failed to begin plugin driver run")
+	}
+
+	if !d.applyPluginReportedState(pluginReportStateParams{
+		SessionID: sessionID,
+		RunID:     "run-nudge",
+		Seq:       1,
+		State:     protocol.StatePendingApproval,
+	}) {
+		t.Fatal("pending approval plugin report was rejected")
+	}
+	commentOnTicket(t, d, ticketID, "review this update")
+	if currentNudgeTimer(d, sessionID) != nil {
+		t.Fatal("pending approval plugin session armed a countdown")
+	}
+
+	if !d.applyPluginReportedState(pluginReportStateParams{
+		SessionID: sessionID,
+		RunID:     "run-nudge",
+		Seq:       2,
+		State:     protocol.StateWorking,
+	}) {
+		t.Fatal("working plugin report was rejected")
+	}
+	deadline := time.Now().Add(time.Second)
+	for currentNudgeTimer(d, sessionID) == nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if currentNudgeTimer(d, sessionID) == nil {
+		t.Fatal("eligible plugin state did not re-arm the deferred nudge")
+	}
+	fireNudgeNow(t, d, sessionID)
+	if !wasNudged(inputs(sessionID)) {
+		t.Fatal("eligible plugin session was not nudged after approval cleared")
 	}
 }
 

@@ -256,10 +256,11 @@ each is a meaningful, verifiable chunk.
    tear out anyway. *Test:* store-level — create/read/update, transitions, archival, TTL
    with injected time.
 2. **Event-driven notification core.** Mutations emit events; observers + cursors;
-   the two decoupled handlers (watch-consume / nudge), bundled-by-ticket, dedup,
-   unread. Built against the store, **proven by a simulation harness** (drives
-   producers + both handlers, nudge included; real Monitor arming skippable). *Test:*
-   harness scenarios — emit → consume → unread cursor, dedup, bundle, nudge path.
+   a shared nudge countdown for every non-approval session, bundled-by-ticket,
+   dedup, unread. An optional `ticket inbox --watch` consumes the same queue before
+   the countdown delivers. Built against the store, **proven by a simulation
+   harness**. *Test:* harness scenarios — emit → consume → unread cursor, dedup,
+   bundle, nudge path.
 3. **Delegation ⇄ tickets (live wiring).** Delegating creates/binds a ticket
    (description = prompt); the agent's self-reported status moves the ticket (forward);
    editing the ticket emits events the agent observes (reverse). Wires the event core to
@@ -274,9 +275,9 @@ each is a meaningful, verifiable chunk.
    closed one, bind a bare session.
 5. **Board view.** The session list as status columns with the Todo backlog and
    filters. *Test:* tickets appear in the right columns; backlog persists; filters work.
-6. **Codex nudge path.** `HasSelfMonitor` capability + the idle-nudge handler for
-   non-Claude agents, both chief→agent and agent→chief. *Test:* a codex agent gets
-   nudged on a ticket change and consumes it.
+6. **Shared nudge path.** A non-approval session gets the same ticket nudge whether
+   it is Codex or Claude, chief or delegated agent; `HasSelfMonitor` only controls
+   optional runtime guidance. *Test:* both runtimes receive a nudge and consume it.
 7. **Retire the `dispatch` namespace (completion bar).** Remove every old verb
    (`watch / report / message / inbox / messages / resolve / status / handoff / list`)
    and the mailbox / journal / `Classify` / #397 remnants — once the `ticket` surface

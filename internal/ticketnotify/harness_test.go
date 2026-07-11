@@ -193,11 +193,8 @@ func TestHarnessDedup(t *testing.T) {
 func TestHarnessNudgePath(t *testing.T) {
 	h := newHarness(t)
 
-	// A codex agent can't self-monitor; a Claude agent can. The agent->capability
-	// mapping now lives on the agent driver (internal/agent); here the bool is given
-	// explicitly, which is more honest for this pure package.
-	codex := Observer{ID: "codexbot", HasSelfMonitor: false}
-	claude := Observer{ID: "agent7", HasSelfMonitor: true}
+	codex := Observer{ID: "codexbot"}
+	claude := Observer{ID: "agent7"}
 
 	h.create("alpha", "codexbot", ObserverChief)
 	h.create("beta", "agent7", ObserverChief)
@@ -206,16 +203,16 @@ func TestHarnessNudgePath(t *testing.T) {
 	h.comment("alpha", ObserverChief, "please rebase")
 	h.comment("beta", ObserverChief, "tweak the title")
 
-	// Busy codex: deferred, no nudge yet.
+	// An approval-waiting codex agent is deferred, with no nudge yet.
 	d, err := Notify(h.s, codex, false, h, h.tick())
 	if err != nil || d != DeliveryDeferred {
-		t.Fatalf("busy codex delivery = %v (err %v), want Deferred", d, err)
+		t.Fatalf("approval-waiting codex delivery = %v (err %v), want Deferred", d, err)
 	}
 	if len(h.nudges) != 0 {
-		t.Fatalf("nudges = %v, want none while busy", h.nudges)
+		t.Fatalf("nudges = %v, want none while waiting for approval", h.nudges)
 	}
 
-	// Idle codex: nudged (a fixed trigger carrying only the observer id).
+	// A nudge-eligible codex agent receives the fixed trigger.
 	d, err = Notify(h.s, codex, true, h, h.tick())
 	if err != nil || d != DeliveryNudge {
 		t.Fatalf("idle codex delivery = %v (err %v), want Nudge", d, err)
@@ -224,13 +221,14 @@ func TestHarnessNudgePath(t *testing.T) {
 		t.Fatalf("nudges = %v, want [codexbot]", h.nudges)
 	}
 
-	// Claude agent: its own watch consumes; never nudged.
+	// Claude receives the same nudge. Its optional watch can consume the queue
+	// before a daemon countdown reaches the PTY, but does not change this decision.
 	d, err = Notify(h.s, claude, true, h, h.tick())
-	if err != nil || d != DeliveryWatch {
-		t.Fatalf("claude delivery = %v (err %v), want Watch", d, err)
+	if err != nil || d != DeliveryNudge {
+		t.Fatalf("claude delivery = %v (err %v), want Nudge", d, err)
 	}
-	if len(h.nudges) != 1 {
-		t.Fatalf("nudges = %v, claude must not be nudged", h.nudges)
+	if len(h.nudges) != 2 || h.nudges[1] != "agent7" {
+		t.Fatalf("nudges = %v, want [codexbot agent7]", h.nudges)
 	}
 
 	// After the nudge, the codex agent consumes its own queue and sees the steer.
@@ -252,7 +250,7 @@ func TestHarnessNudgePath(t *testing.T) {
 func TestHarnessAgentScopeAndSelfAuthored(t *testing.T) {
 	h := newHarness(t)
 	chief := ChiefObserver()
-	agent7 := Observer{ID: "agent7", HasSelfMonitor: true}
+	agent7 := Observer{ID: "agent7"}
 
 	h.create("alpha", "agent7", ObserverChief) // assigned to agent7
 	h.create("beta", "agent9", ObserverChief)  // assigned to someone else
@@ -304,7 +302,7 @@ func TestHarnessAgentScopeAndSelfAuthored(t *testing.T) {
 // silently skipped.
 func TestHarnessLateAssignmentDeliversContext(t *testing.T) {
 	h := newHarness(t)
-	agent7 := Observer{ID: "agent7", HasSelfMonitor: true}
+	agent7 := Observer{ID: "agent7"}
 
 	// agent7 has prior work it already consumed — its bookmark on "early" is advanced.
 	h.create("early", "agent7", ObserverChief)
@@ -353,7 +351,7 @@ func TestHarnessLateAssignmentDeliversContext(t *testing.T) {
 // assignee's progress, so the new agent picks up with full context.
 func TestHarnessReassignmentHandsOverHistory(t *testing.T) {
 	h := newHarness(t)
-	agent9 := Observer{ID: "agent9", HasSelfMonitor: true}
+	agent9 := Observer{ID: "agent9"}
 
 	// agent7 works a ticket and reports progress.
 	h.create("handoff", "agent7", ObserverChief)

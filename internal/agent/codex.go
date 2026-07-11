@@ -55,8 +55,8 @@ func (c *Codex) Capabilities() Capabilities {
 		HasYolo:             true,
 		HasInitialPrompt:    true,
 		HasWorkspaceContext: true,
-		// HasSelfMonitor: false — codex has no live ticket Monitor, so it is
-		// pty-nudged when ticket activity arrives while it is idle.
+		// HasSelfMonitor: false — Codex has no live ticket Monitor. It still uses
+		// the shared daemon nudge for unread ticket activity.
 		HasModelPin:  true,
 		HasEffortPin: true,
 	}

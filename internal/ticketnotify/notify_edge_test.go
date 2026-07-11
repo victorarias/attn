@@ -40,7 +40,7 @@ func (e erroringStore) SetTicketCursor(string, string, int64, time.Time) error {
 
 func TestNotifyNudgeError(t *testing.T) {
 	h := newHarness(t)
-	codex := Observer{ID: "codexbot", HasSelfMonitor: false}
+	codex := Observer{ID: "codexbot"}
 	h.create("alpha", "codexbot", ObserverChief)
 	h.comment("alpha", ObserverChief, "steer")
 

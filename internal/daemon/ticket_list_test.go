@@ -47,7 +47,6 @@ func ticketsByID(tickets []protocol.Ticket) map[string]protocol.Ticket {
 // each row carrying its description (the brief), not just a bare title.
 func TestHandleTicketListReturnsBoardWithoutSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	t.Cleanup(d.stopTicketBackstops)
 	_, agents, _ := delegateMany(t, d, "codex", "Task Y", "Task X")
 	wantY := boundTicketID(t, d, agents[0])
 	wantX := boundTicketID(t, d, agents[1])
@@ -76,7 +75,6 @@ func TestHandleTicketListReturnsBoardWithoutSession(t *testing.T) {
 // only the other — proving the filter reaches the store query, not just the wire.
 func TestHandleTicketListStatusFilter(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	t.Cleanup(d.stopTicketBackstops)
 	_, agents, _ := delegateMany(t, d, "codex", "Task Y", "Task X")
 	reviewing := boundTicketID(t, d, agents[0])
 	working := boundTicketID(t, d, agents[1])
