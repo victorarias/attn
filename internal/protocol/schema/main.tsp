@@ -276,7 +276,7 @@ enum TicketEventKind {
   commented,
   assigned,
   description_edited,
-  handover_submitted,
+  attach_submitted,
 }
 
 // TicketEvent is one entry in a ticket's append-only event log, as delivered to an
@@ -322,7 +322,7 @@ model TicketInboxResult {
 enum TicketActivityKind {
   status_change,
   comment,
-  handover,
+  attach,
 }
 
 // TicketActivity is one entry in a ticket's history thread, as shown in the detail
@@ -348,7 +348,7 @@ model TicketArtifact {
 }
 
 // Ticket is the wire shape of a durable tracked-work record. `activity` and
-// `artifacts` are the full history thread and current handover files — populated on the
+// `artifacts` are the full history thread and current attach files — populated on the
 // get_ticket full record, and left empty on the list / board feed for cheapness.
 model Ticket {
   id: string;
@@ -819,28 +819,28 @@ model TicketTakeResult {
   previous_assignee: string;
 }
 
-model TicketHandoverFile {
+model TicketAttachFile {
   source_path: string;
   filename: string;
 }
 
-// TicketHandoverMessage copies one or more Markdown artifacts into a ticket's
-// visible Notebook directory and records one durable handover receipt. Without a
+// TicketAttachMessage copies one or more Markdown artifacts into a ticket's
+// visible Notebook directory and records one durable attach receipt. Without a
 // ticket_id the daemon resolves the caller's bound ticket; with one it follows the
 // same permissive by-id authorization as ticket status and comment.
-model TicketHandoverMessage {
-  cmd: "ticket_handover";
+model TicketAttachMessage {
+  cmd: "ticket_attach";
   source_session_id: string;
   ticket_id?: string;
-  files: TicketHandoverFile[];
+  files: TicketAttachFile[];
   state?: DispatchWorkState;
   comment?: string;
   request_id?: string;
 }
 
-// TicketHandoverResult is the durable receipt returned for a new submission and
+// TicketAttachResult is the durable receipt returned for a new submission and
 // for an idempotent retry of the same fingerprint.
-model TicketHandoverResult {
+model TicketAttachResult {
   ticket_id: string;
   artifacts: TicketArtifact[];
   fingerprint: string;
@@ -849,12 +849,12 @@ model TicketHandoverResult {
   deduplicated: boolean;
 }
 
-model TicketHandoverResultMessage {
-  event: "ticket_handover_result";
+model TicketAttachResultMessage {
+  event: "ticket_attach_result";
   request_id: string;
   success: boolean;
   error?: string;
-  result?: TicketHandoverResult;
+  result?: TicketAttachResult;
 }
 
 // GetTicketMessage fetches one ticket's full record — the row plus its activity
@@ -2426,7 +2426,7 @@ model Response {
   ticket_inbox_result?: TicketInboxResult;
   ticket_list_result?: TicketListResult;
   ticket_show_result?: TicketShowResult;
-  ticket_handover_result?: TicketHandoverResult;
+  ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
   ticket_comment_result?: TicketCommentResult;
   ticket_subscribe_result?: TicketSubscribeResult;
@@ -2893,7 +2893,7 @@ alias DaemonEvent =
   | TicketsUpdatedMessage
   | TicketResultMessage
   | TicketActionResultMessage
-  | TicketHandoverResultMessage
+  | TicketAttachResultMessage
   | TicketResumeResultMessage
   | WorkspaceTileContentMessage
   | BrowserControlResponseMessage

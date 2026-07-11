@@ -127,7 +127,7 @@ interface SessionTerminalWorkspaceProps {
     onChangeStatus: (ticketId: string, status: Ticket['status'], comment?: string) => Promise<void>;
     onAddComment: (ticketId: string, comment: string) => Promise<void>;
     onEditDescription: (ticketId: string, description: string) => Promise<void>;
-    onHandover?: (ticketId: string, paths: string[], state?: string, comment?: string) => Promise<unknown>;
+    onAttach?: (ticketId: string, paths: string[], state?: string, comment?: string) => Promise<unknown>;
     onRenameArtifact?: (path: string, newPath: string) => Promise<unknown>;
     onDeleteArtifact?: (path: string) => Promise<unknown>;
     onOpenArtifact?: (path: string) => void;
@@ -913,7 +913,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                     onChangeStatus={ticketActions.onChangeStatus}
                     onAddComment={ticketActions.onAddComment}
                     onEditDescription={ticketActions.onEditDescription}
-                    onHandover={ticketActions.onHandover}
+                    onAttach={ticketActions.onAttach}
                     onRenameArtifact={ticketActions.onRenameArtifact}
                     onDeleteArtifact={ticketActions.onDeleteArtifact}
                     onOpenArtifact={ticketActions.onOpenArtifact}

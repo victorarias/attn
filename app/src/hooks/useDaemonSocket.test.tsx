@@ -2911,14 +2911,14 @@ describe('useDaemonSocket ticket request/result', () => {
     unmount();
   });
 
-  it('sends a multi-file ticket handover and resolves its receipt', async () => {
+  it('sends a multi-file ticket attach and resolves its receipt', async () => {
     const { result, unmount } = renderTicketHook();
     const ws = await waitForOpenSocket();
-    const promise = result.current.sendTicketHandover('tk-1', ['/tmp/design.md', '/tmp/rollout.md'], 'ready_for_review', 'ready');
+    const promise = result.current.sendTicketAttach('tk-1', ['/tmp/design.md', '/tmp/rollout.md'], 'ready_for_review', 'ready');
     await Promise.resolve();
     const sent = lastSent(ws);
     expect(sent).toMatchObject({
-      cmd: 'ticket_handover',
+      cmd: 'ticket_attach',
       ticket_id: 'tk-1',
       state: 'ready_for_review',
       comment: 'ready',
@@ -2928,7 +2928,7 @@ describe('useDaemonSocket ticket request/result', () => {
       ],
     });
     const receipt = { ticket_id: 'tk-1', artifacts: [], fingerprint: 'abc', event_seq: 7, state: 'in_review', deduplicated: false };
-    ws.emit({ event: 'ticket_handover_result', request_id: sent.request_id, success: true, result: receipt });
+    ws.emit({ event: 'ticket_attach_result', request_id: sent.request_id, success: true, result: receipt });
     await expect(promise).resolves.toEqual(receipt);
     unmount();
   });

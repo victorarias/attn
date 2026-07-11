@@ -597,7 +597,7 @@ function App() {
     sendTicketChangeStatus,
     sendTicketAddComment,
     sendTicketEditDescription,
-    sendTicketHandover,
+    sendTicketAttach,
     sendTicketResume,
     getPresentations,
     connectionError,
@@ -779,7 +779,7 @@ function App() {
         sendTicketChangeStatus={sendTicketChangeStatus}
         sendTicketAddComment={sendTicketAddComment}
         sendTicketEditDescription={sendTicketEditDescription}
-        sendTicketHandover={sendTicketHandover}
+        sendTicketAttach={sendTicketAttach}
         sendTicketResume={sendTicketResume}
         clearGitStatus={clearGitStatus}
         registerSessionExitHandler={registerSessionExitHandler}
@@ -889,7 +889,7 @@ interface AppContentProps {
   sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
   sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
   sendTicketEditDescription: ReturnType<typeof useDaemonSocket>['sendTicketEditDescription'];
-  sendTicketHandover: ReturnType<typeof useDaemonSocket>['sendTicketHandover'];
+  sendTicketAttach: ReturnType<typeof useDaemonSocket>['sendTicketAttach'];
   sendTicketResume: ReturnType<typeof useDaemonSocket>['sendTicketResume'];
   clearGitStatus: () => void;
   registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
@@ -993,7 +993,7 @@ sendFetchPRDetails,
   sendTicketChangeStatus,
   sendTicketAddComment,
   sendTicketEditDescription,
-  sendTicketHandover,
+  sendTicketAttach,
   sendTicketResume,
   clearGitStatus,
   registerSessionExitHandler,
@@ -3061,7 +3061,7 @@ sendFetchPRDetails,
     onChangeStatus: sendTicketChangeStatus,
     onAddComment: sendTicketAddComment,
     onEditDescription: sendTicketEditDescription,
-    onHandover: sendTicketHandover,
+    onAttach: sendTicketAttach,
     onRenameArtifact: sendFsRename,
     onDeleteArtifact: sendFsDelete,
     onOpenArtifact: (path: string) => {
@@ -3069,7 +3069,7 @@ sendFetchPRDetails,
       setNotebookOpen(true);
     },
     onResume: handleResumeTicket,
-  }), [fetchTicket, sendTicketChangeStatus, sendTicketAddComment, sendTicketEditDescription, sendTicketHandover, sendFsRename, sendFsDelete, handleResumeTicket]);
+  }), [fetchTicket, sendTicketChangeStatus, sendTicketAddComment, sendTicketEditDescription, sendTicketAttach, sendFsRename, sendFsDelete, handleResumeTicket]);
 
   const isZedEditorConfigured = useMemo(() => {
     const editor = (settings.editor_executable || '').trim().toLowerCase();
@@ -3589,7 +3589,7 @@ sendFetchPRDetails,
                   onChangeStatus={sendTicketChangeStatus}
                   onAddComment={sendTicketAddComment}
                   onEditDescription={sendTicketEditDescription}
-                  onHandover={sendTicketHandover}
+                  onAttach={sendTicketAttach}
                   onRenameArtifact={sendFsRename}
                   onDeleteArtifact={sendFsDelete}
                   onOpenArtifact={(path) => {

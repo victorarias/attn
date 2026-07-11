@@ -643,6 +643,10 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 				WHERE assigned.ticket_id = t.id AND assigned.kind = 'assigned'
 			);
 	`},
+	{67, "rename ticket artifact handover records to attachments", `
+		UPDATE ticket_activity SET kind = 'attach' WHERE kind = 'handover';
+		UPDATE ticket_events SET kind = 'attach_submitted' WHERE kind = 'handover_submitted';
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

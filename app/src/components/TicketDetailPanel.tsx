@@ -20,7 +20,7 @@ interface TicketDetailPanelProps {
   onChangeStatus?: (ticketId: string, status: Ticket['status'], comment?: string) => Promise<void>;
   onAddComment?: (ticketId: string, comment: string) => Promise<void>;
   onEditDescription?: (ticketId: string, description: string) => Promise<void>;
-  onHandover?: (ticketId: string, paths: string[], state?: string, comment?: string) => Promise<unknown>;
+  onAttach?: (ticketId: string, paths: string[], state?: string, comment?: string) => Promise<unknown>;
   onRenameArtifact?: (path: string, newPath: string) => Promise<unknown>;
   onDeleteArtifact?: (path: string) => Promise<unknown>;
   onOpenArtifact?: (path: string) => void;
@@ -93,7 +93,7 @@ export function TicketDetailPanel({
   onChangeStatus,
   onAddComment,
   onEditDescription,
-  onHandover,
+  onAttach,
   onRenameArtifact,
   onDeleteArtifact,
   onOpenArtifact,
@@ -114,9 +114,9 @@ export function TicketDetailPanel({
   const [commentDraft, setCommentDraft] = useState('');
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
-  const [handoverFiles, setHandoverFiles] = useState<string[]>([]);
-  const [handoverState, setHandoverState] = useState('');
-  const [handoverComment, setHandoverComment] = useState('');
+  const [attachFiles, setAttachFiles] = useState<string[]>([]);
+  const [attachState, setAttachState] = useState('');
+  const [attachComment, setAttachComment] = useState('');
   const [renamingArtifact, setRenamingArtifact] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
 
@@ -157,9 +157,9 @@ export function TicketDetailPanel({
     setCommentDraft('');
     setEditingDescription(false);
     setDescriptionDraft('');
-    setHandoverFiles([]);
-    setHandoverState('');
-    setHandoverComment('');
+    setAttachFiles([]);
+    setAttachState('');
+    setAttachComment('');
     setRenamingArtifact(null);
     setRenameDraft('');
   }, [ticketId]);
@@ -403,17 +403,17 @@ export function TicketDetailPanel({
           <section className="ticket-detail-section">
             <div className="ticket-section-head">
               <h3 className="ticket-section-label">Artifacts</h3>
-              {onHandover && (
+              {onAttach && (
                 <button
                   type="button"
                   className="ticket-section-action"
-                  data-testid="ticket-choose-handover"
+                  data-testid="ticket-choose-attach"
                   disabled={busyAction !== null}
                   onClick={() => {
                     void open({ multiple: true, filters: [{ name: 'Markdown', extensions: ['md'] }] })
                       .then((selected) => {
                         const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
-                        if (paths.length > 0) setHandoverFiles(paths);
+                        if (paths.length > 0) setAttachFiles(paths);
                       })
                       .catch((err) => setActionError(err instanceof Error ? err.message : 'Could not choose files'));
                   }}
@@ -422,16 +422,16 @@ export function TicketDetailPanel({
                 </button>
               )}
             </div>
-            {handoverFiles.length > 0 && onHandover && (
-              <div className="ticket-handover-form" data-testid="ticket-handover-form">
-                <div className="ticket-handover-files">
-                  {handoverFiles.map((path) => <span key={path}>{path.split(/[\\/]/).pop()}</span>)}
+            {attachFiles.length > 0 && onAttach && (
+              <div className="ticket-attach-form" data-testid="ticket-attach-form">
+                <div className="ticket-attach-files">
+                  {attachFiles.map((path) => <span key={path}>{path.split(/[\\/]/).pop()}</span>)}
                 </div>
                 <select
                   aria-label="Resulting ticket state"
                   className="ticket-status-select"
-                  value={handoverState}
-                  onChange={(event) => setHandoverState(event.target.value)}
+                  value={attachState}
+                  onChange={(event) => setAttachState(event.target.value)}
                 >
                   <option value="">Keep current state</option>
                   <option value="in_progress">Working</option>
@@ -443,29 +443,29 @@ export function TicketDetailPanel({
                 <textarea
                   className="ticket-comment-input"
                   placeholder="Decision context (optional)"
-                  value={handoverComment}
-                  onChange={(event) => setHandoverComment(event.target.value)}
+                  value={attachComment}
+                  onChange={(event) => setAttachComment(event.target.value)}
                   rows={2}
                 />
                 <div className="ticket-edit-buttons">
                   <button
                     type="button"
                     className="ticket-edit-save"
-                    data-testid="ticket-submit-handover"
+                    data-testid="ticket-submit-attach"
                     disabled={busyAction !== null}
                     onClick={() => {
-                      runAction('handover', async () => {
-                        await onHandover(fullTicket.id, handoverFiles, handoverState || undefined, handoverComment.trim() || undefined);
-                        setHandoverFiles([]);
-                        setHandoverState('');
-                        setHandoverComment('');
+                      runAction('attach', async () => {
+                        await onAttach(fullTicket.id, attachFiles, attachState || undefined, attachComment.trim() || undefined);
+                        setAttachFiles([]);
+                        setAttachState('');
+                        setAttachComment('');
                         await refreshTicket();
                       }).catch(() => {});
                     }}
                   >
-                    {busyAction === 'handover' ? 'Handing over…' : 'Hand over'}
+                    {busyAction === 'attach' ? 'Attaching…' : 'Attach'}
                   </button>
-                  <button type="button" className="ticket-edit-cancel" onClick={() => setHandoverFiles([])}>Cancel</button>
+                  <button type="button" className="ticket-edit-cancel" onClick={() => setAttachFiles([])}>Cancel</button>
                 </div>
               </div>
             )}

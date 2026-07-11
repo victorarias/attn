@@ -32,7 +32,7 @@ func callTicketTake(t *testing.T, d *Daemon, sessionID, ticketID string, confirm
 // Taking over an actively-worked ticket: x cannot take z's ticket without
 // --confirm (the steal guard), takes it with --confirm, and the displaced
 // assignee z — a participant because it reported status while working — is nudged
-// about the handover. The taker's first inbox then delivers the ticket's history
+// about the attach. The taker's first inbox then delivers the ticket's history
 // (take does not advance the cursor). codex agents are used so the doorbell is
 // observable; handleTicketTake notifies synchronously, so the assertion is
 // deterministic.
@@ -74,7 +74,7 @@ func TestTicketTakeOverNotifiesPreviousAssignee(t *testing.T) {
 		t.Fatalf("ticket not reassigned to taker: %+v", tk)
 	}
 
-	// The displaced assignee z is nudged about the handover.
+	// The displaced assignee z is nudged about the attach.
 	fireNudgeNow(t, d, z) // the takeover armed z's countdown
 	if !wasNudged(inputs(z)) {
 		t.Fatal("previous assignee was not nudged about the takeover")

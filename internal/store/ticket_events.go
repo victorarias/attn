@@ -38,11 +38,11 @@ const (
 	// TicketEventDescriptionEdited fires when the brief is edited.
 	TicketEventDescriptionEdited TicketEventKind = "description_edited"
 	// TicketEventAttachmentAdded is retained for historical attachment rows and
-	// events. New handovers use TicketEventHandoverSubmitted.
+	// events. New attachments use TicketEventAttachSubmitted.
 	TicketEventAttachmentAdded TicketEventKind = "attachment_added"
-	// TicketEventHandoverSubmitted fires when one or more artifacts are handed
-	// over. Detail contains the versioned receipt payload.
-	TicketEventHandoverSubmitted TicketEventKind = "handover_submitted"
+	// TicketEventAttachSubmitted fires when one or more artifacts are attached.
+	// Detail contains the versioned receipt payload.
+	TicketEventAttachSubmitted TicketEventKind = "attach_submitted"
 )
 
 // TicketEvent is one entry in the append-only event log. Seq is the global
