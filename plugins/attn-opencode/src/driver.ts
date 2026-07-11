@@ -434,11 +434,11 @@ export class OpenCodeDriver {
     } else if (event.type === "question.asked") {
       await this.enqueueReport(record, { kind: "state", state: "waiting_input" });
     } else if (event.type === "question.replied" || event.type === "question.rejected") {
-      await this.enqueueReport(record, { kind: "state", state: "working" });
+      await this.reportAttentionWithinDeadline(record, client, binding.nativeID, parentSignal, { kind: "state", state: "working" });
     } else if (event.type === "permission.asked") {
       await this.enqueueReport(record, { kind: "state", state: "pending_approval" });
     } else if (event.type === "permission.replied") {
-      await this.enqueueReport(record, { kind: "state", state: "working" });
+      await this.reportAttentionWithinDeadline(record, client, binding.nativeID, parentSignal, { kind: "state", state: "working" });
     } else if (event.type === "session.error") {
       await this.enqueueReport(record, { kind: "state", state: "unknown" });
     }
@@ -471,6 +471,16 @@ export class OpenCodeDriver {
     nativeID: string,
     parentSignal: AbortSignal,
   ): Promise<void> {
+    await this.reportAttentionWithinDeadline(record, client, nativeID, parentSignal, { kind: "stop", verdict: "idle" });
+  }
+
+  private async reportAttentionWithinDeadline(
+    record: RunRecord,
+    client: OpenCodeHTTP,
+    nativeID: string,
+    parentSignal: AbortSignal,
+    fallback: Report,
+  ): Promise<void> {
     const request = this.requestDeadline(parentSignal);
     try {
       const attention = await client.pendingAttentionFor(nativeID, request.signal);
@@ -479,7 +489,7 @@ export class OpenCodeDriver {
       } else if (attention === "question") {
         await this.enqueueReport(record, { kind: "state", state: "waiting_input" });
       } else {
-        await this.enqueueReport(record, { kind: "stop", verdict: "idle" });
+        await this.enqueueReport(record, fallback);
       }
     } finally {
       request.dispose();

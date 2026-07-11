@@ -187,6 +187,50 @@ describe("OpenCode server-backed driver", () => {
     expect(attentionReports.map((call) => (call.params as { seq: number }).seq)).toEqual([2, 3, 4, 5]);
   });
 
+  test("keeps reporting attention when another native request remains after a resolution", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-overlapping-attention"));
+    await eventually(() => target.prompts.length === 1, "native prompt submission");
+
+    target.askQuestion("native-1", "question-overlap");
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "waiting_input",
+      "initial question report",
+    );
+    target.askPermission("native-1", "permission-overlap");
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "pending_approval",
+      "overlapping permission report",
+    );
+
+    target.replyPermission("native-1", "permission-overlap");
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "waiting_input",
+      "remaining question after permission reply",
+    );
+
+    target.askPermission("native-1", "permission-overlap-2");
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "pending_approval",
+      "second overlapping permission report",
+    );
+    target.replyQuestion("native-1", "question-overlap");
+    await eventually(
+      () => rpc.calls.filter((call) => (call.params as { state?: string }).state === "pending_approval").length === 3,
+      "remaining permission after question reply",
+    );
+
+    target.replyPermission("native-1", "permission-overlap-2");
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { state?: string }).state === "working",
+      "working after all native attention resolves",
+    );
+  });
+
   test("checks pending native attention before reporting an explicit idle event", async () => {
     const rpc = new RecordingRPC();
     const target = server("*");
