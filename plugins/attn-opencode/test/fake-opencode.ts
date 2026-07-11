@@ -9,6 +9,9 @@ export class FakeOpenCode {
   readonly requests: RequestRecord[] = [];
   readonly statuses = new Map<string, string>();
   readonly sessions = new Map<string, unknown>();
+  readonly pendingQuestions = new Map<string, string>();
+  readonly pendingPermissions = new Map<string, string>();
+  pendingListBarrier?: Promise<void>;
   readonly hangingSessionReads = new Set<string>();
   readonly prompts: Array<{ sessionID: string; body: unknown }> = [];
   private controllers = new Set<ReadableStreamDefaultController<Uint8Array>>();
@@ -40,6 +43,26 @@ export class FakeOpenCode {
   emit(type: string, properties: Record<string, unknown>): void {
     const frame = `event: ${type}\ndata: ${JSON.stringify({ type, properties })}\n\n`;
     for (const controller of this.controllers) controller.enqueue(new TextEncoder().encode(frame));
+  }
+
+  askQuestion(sessionID: string, requestID = "question-1", type = "question.asked"): void {
+    this.pendingQuestions.set(requestID, sessionID);
+    this.emit(type, { id: requestID, sessionID, questions: [] });
+  }
+
+  replyQuestion(sessionID: string, requestID = "question-1", type = "question.replied"): void {
+    this.pendingQuestions.delete(requestID);
+    this.emit(type, { sessionID, requestID, answers: [] });
+  }
+
+  askPermission(sessionID: string, requestID = "permission-1", type = "permission.asked"): void {
+    this.pendingPermissions.set(requestID, sessionID);
+    this.emit(type, { id: requestID, sessionID, permission: "bash", patterns: [], metadata: {}, always: [] });
+  }
+
+  replyPermission(sessionID: string, requestID = "permission-1", type = "permission.replied"): void {
+    this.pendingPermissions.delete(requestID);
+    this.emit(type, { sessionID, requestID, reply: "once" });
   }
 
   closeEvents(): void {
@@ -80,6 +103,23 @@ export class FakeOpenCode {
       return Response.json({ id });
     }
     if (url.pathname === "/session/status") return Response.json(Object.fromEntries(this.statuses));
+    if (url.pathname === "/question") {
+      const snapshot = [...this.pendingQuestions].map(([id, sessionID]) => ({ id, sessionID, questions: [] }));
+      await this.pendingListBarrier;
+      return Response.json(snapshot);
+    }
+    if (url.pathname === "/permission") {
+      const snapshot = [...this.pendingPermissions].map(([id, sessionID]) => ({
+        id,
+        sessionID,
+        permission: "bash",
+        patterns: [],
+        metadata: {},
+        always: [],
+      }));
+      await this.pendingListBarrier;
+      return Response.json(snapshot);
+    }
     if (url.pathname.startsWith("/session/") && url.pathname.endsWith("/prompt_async")) {
       const sessionID = decodeURIComponent(url.pathname.slice("/session/".length, -"/prompt_async".length));
       const prompt = body as {
