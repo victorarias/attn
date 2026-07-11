@@ -33,11 +33,10 @@ type sessionStartHookOutput struct {
 	HookSpecificOutput sessionStartHookSpecificOutput `json:"hookSpecificOutput"`
 }
 
-// delegationBoundary is the standing guardrail every launched agent needs even
-// if it never opens the skill: attn delegation spawns a VISIBLE, steerable agent,
-// not an internal worker. Injected verbatim into both Tier-1 blocks so the rule
-// reaches an agent that skips the skill (the chief is the worst case).
-const delegationBoundary = "`attn delegate` spawns a visible agent the user can inspect and steer — use it only when the user wants that. For your own research, verification, or parallel reasoning, use native subagents instead; load the attn skill's delegation reference before delegating."
+// delegationBoundary is the standing vocabulary and routing rule every launched
+// agent needs even if it never opens the skill. Injected verbatim into both
+// Tier-1 blocks so the rule reaches an agent that skips the skill.
+const delegationBoundary = "A subagent is always a native runtime subagent that reports to the calling agent, including in phrases such as \"delegate subagents\" or \"dispatch subagents\". `attn delegate` creates a visible agent session the user can inspect, converse with, and steer directly. An explicit user request selects attn delegation; otherwise, use native subagents. Load the attn skill's delegation reference before creating an attn delegation."
 
 // WorkspaceContextGuidance teaches an agent how to use this session's checkout
 // without embedding the shared context itself.
@@ -58,13 +57,13 @@ func WorkspaceContextGuidance(path string) string {
 }
 
 // WorkflowTriggerGuidance teaches an agent when it is allowed to author and run
-// a durable multi-agent workflow. Running one fans out many subagents and can
+// a durable multi-agent workflow. Running one fans out many workflow agents and can
 // burn a large amount of tokens, so it is strictly opt-in: the agent watches its
 // OWN user messages for the trigger keywords and otherwise never reaches for one.
 func WorkflowTriggerGuidance() string {
-	return `You can author and run durable, resumable multi-agent **workflows** through the ` + "`attn workflow`" + ` CLI (load the attn skill's workflow reference for the authoring contract before writing one). A workflow orchestrates many subagents deterministically.
+	return `You can author and run durable, resumable multi-agent **workflows** through the ` + "`attn workflow`" + ` CLI (load the attn skill's workflow reference for the authoring contract before writing one). A workflow orchestrates many headless workflow agents deterministically.
 
-Running a workflow spawns multiple subagents and can consume a large amount of tokens, so treat it as an explicit, opt-in tool — never the default for an ordinary task. Run one ONLY when the user has opted in, which means one of:
+Running a workflow starts multiple workflow agents and can consume a large amount of tokens, so treat it as an explicit, opt-in tool — never the default for an ordinary task. Run one ONLY when the user has opted in, which means one of:
 
 - **"attn workflow"** appears in the user's message — run exactly ONE workflow scoped to that task, then stop. Use it when the task genuinely benefits from parallel fan-out or adversarial verification.
 - **"hypercode"** appears — a standing, session-wide opt-in. While it is in effect, default to authoring and running a workflow for every substantive task, and aim for the most exhaustive, correct result you can produce; token cost is not a constraint. Solo only on trivial or conversational turns.

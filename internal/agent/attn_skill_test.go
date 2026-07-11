@@ -23,9 +23,9 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	index := readSkillFile(t, skillDir, "SKILL.md")
 	for _, expected := range []string{
 		"name: attn",
-		"Not for private research", // description boundary vs native subagents
-		"use native subagents for those",
-		"visible interactive agent",
+		"Operate attn capabilities from an agent",
+		"Use when the user explicitly asks for an attn capability or delegation",
+		"inspect, converse with, and steer directly",
 		"ATTN_WRAPPER_PATH",
 		"references/delegation.md",
 		"references/delegated-agent.md",
@@ -51,7 +51,9 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 	delegatedAgent := readSkillFile(t, skillDir, "references/delegated-agent.md")
 	for _, expected := range []string{
 		"You Are A Leaf, Not A Coordinator",
-		"not `attn delegate`",
+		"A subagent is always a native runtime",
+		"explicit request from the user steering this session selects attn delegation",
+		"Native subagents report to you",
 		"ticket status in_progress",
 		"ticket status needs_input",
 		"ticket status ready_for_review",
@@ -63,15 +65,14 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 			t.Fatalf("delegated-agent reference missing %q: %q", expected, delegatedAgent)
 		}
 	}
-	// The chief-of-staff coordination guidance (surface vs act boundary, native
-	// subagents, the prose-review exception) moved to the always-on system prompt
+	// The chief-of-staff coordination guidance (surface vs act boundary and the
+	// prose-review exception) moved to the always-on system prompt
 	// (hooks.ChiefGuidance); this worker-facing reference must not carry it back,
 	// and must keep the retired dispatch UX out.
 	for _, chiefOrLegacy := range []string{
 		"As Chief of Staff",
 		"do not validate that specialist work",
 		"coordination-file",
-		"dispatch ",
 	} {
 		if strings.Contains(delegatedAgent, chiefOrLegacy) {
 			t.Fatalf("delegated-agent reference should not carry chief/legacy guidance %q: %q", chiefOrLegacy, delegatedAgent)
@@ -92,10 +93,11 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 
 	delegation := readSkillFile(t, skillDir, "references/delegation.md")
 	for _, expected := range []string{
-		"visible, full interactive agent session",
-		"native subagent or multi-agent tools",
-		"default to native subagents",
-		"user explicitly asks for delegation",
+		"full interactive agent session",
+		"A subagent is always a native runtime subagent",
+		"explicit user request selects attn delegation",
+		"delegate subagents to review",
+		"dispatch an agent",
 		"delegate --brief-file",
 		"--new-workspace",
 		"Before creating a new workspace, check whether an existing one already fits",

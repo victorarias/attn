@@ -1,10 +1,11 @@
 # Workflows
 
 A workflow is a deterministic JavaScript script that orchestrates one or more
-subagents. The engine runs in the `attn workflow run` process, journals every
-`agent()` call to the daemon, and lets you resume a prior run by replaying the
-journaled prefix and re-running only what changed. Use workflows when you want a
-reproducible multi-step agent pipeline you can observe, retrieve, and resume.
+headless workflow agents. The engine runs in the `attn workflow run` process,
+journals every `agent()` call to the daemon, and lets you resume a prior run by
+replaying the journaled prefix and re-running only what changed. Use workflows
+when you want a reproducible multi-step agent pipeline you can observe, retrieve,
+and resume.
 
 ## Contents
 
@@ -38,19 +39,19 @@ a pure object literal (no computed values, no function calls). Recognized fields
 
 ### Host functions (available to the script)
 
-- `agent(prompt, opts?)` — run one subagent and resolve to its result. Returns a
+- `agent(prompt, opts?)` — run one workflow agent and resolve to its result. Returns a
   Promise. Options:
-  - `schema` — a JSON Schema object. When present, the subagent is FORCED to
+  - `schema` — a JSON Schema object. When present, the workflow agent is FORCED to
     return a structured result matching the schema (it calls a `return_result`
     tool exactly once); `agent()` resolves to that validated object. Without a
-    schema, `agent()` resolves to the subagent's final text.
+    schema, `agent()` resolves to the workflow agent's final text.
   - `label` — a human-readable label for the call.
   - `phase` — group the call under a named phase.
   - `model` — override the model for this call.
   - `isolation` — isolation mode for the call.
-  - `agentType` — the subagent type to run.
-  - A subagent that fails terminally resolves to `null` (it never throws past the
-    `agent()` boundary), so guard results you depend on.
+  - `agentType` — the workflow agent type to run.
+  - A workflow agent that fails terminally resolves to `null` (it never throws
+    past the `agent()` boundary), so guard results you depend on.
 - `parallel(thunks)` — run an array of zero-arg thunks concurrently and resolve to
   an array of their results. A throwing thunk yields `null` in its slot;
   `parallel` never rejects.
@@ -171,7 +172,7 @@ the unix socket. The daemon owns the store and the read-only UI.
 
 ### Running and monitoring a run
 
-Each `agent()` call runs a real headless subagent (codex/claude) and routinely
+Each `agent()` call runs a real headless workflow agent (codex/claude) and routinely
 takes SEVERAL MINUTES; a multi-call run can run 10+ minutes. Never assume a run
 is stuck just because it is taking a long time.
 
@@ -224,8 +225,8 @@ run that is still progressing.
 - `--session <id>` — attach the run to a session. Defaults to `ATTN_SESSION_ID`.
 - `--resume <runId>` — resume a prior run, replaying its journaled prefix and
   re-running the first divergent call (and everything structurally after it).
-- `--harness <codex|claude>` — the subagent harness. Default `codex`.
-- `--model <m>` — the subagent model.
+- `--harness <codex|claude>` — the agent harness. Default `codex`.
+- `--model <m>` — the workflow agent model.
 
 `run` prints the runId (no `--wait`) or the terminal result JSON (`--wait`).
 
