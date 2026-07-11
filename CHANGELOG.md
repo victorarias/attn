@@ -14,6 +14,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Ticket artifacts use attachment language throughout.** `attn ticket attach` now names the durable operation for adding Markdown artifacts to a ticket; its multi-file, optional state/comment, retry-safe receipt, and canonical Notebook behavior are unchanged.
+- **Agent guidance now distinguishes native subagents from user-steered delegations.** “Subagent” consistently means a native worker that reports to the calling agent, while `attn delegate` creates a visible session the user can inspect and steer directly. Requests to delegate or dispatch subagents stay on the native subagent path.
 
 ### Changed
 - **Ticket artifacts use attachment language throughout.** `attn ticket attach` now names the durable operation for adding Markdown artifacts to a ticket; its multi-file, optional state/comment, retry-safe receipt, and canonical Notebook behavior are unchanged.

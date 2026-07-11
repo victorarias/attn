@@ -70,8 +70,8 @@ run options:
   --wait                       run in the foreground and block until terminal
   --session <id>               attach the run to a session (default ATTN_SESSION_ID)
   --resume <runId>             resume a prior run, replaying its journaled prefix
-  --harness <codex|claude>     subagent harness (default codex)
-  --model <m>                  subagent model
+  --harness <codex|claude>     agent harness (default codex)
+  --model <m>                  workflow agent model
 `)
 }
 
@@ -110,8 +110,8 @@ func parseWorkflowRunArgs(argv []string, envSession string) (workflowRunArgs, er
 	wait := fs.Bool("wait", false, "run in the foreground and block until terminal")
 	session := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
 	resume := fs.String("resume", "", "resume a prior run id")
-	harness := fs.String("harness", "codex", "subagent harness (codex|claude)")
-	model := fs.String("model", "", "subagent model")
+	harness := fs.String("harness", "codex", "agent harness (codex|claude)")
+	model := fs.String("model", "", "workflow agent model")
 	runID := fs.String("run-id", "", "") // hidden: reused by the detached child
 
 	if err := fs.Parse(rest); err != nil {

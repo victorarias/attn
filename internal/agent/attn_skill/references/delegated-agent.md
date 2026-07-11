@@ -5,14 +5,13 @@ with a line identifying you as a delegated attn session.
 
 ## You Are A Leaf, Not A Coordinator
 
-Do the assigned work in this session. For your own subtasks — research,
-verification, or parallel exploration you alone will synthesize — use native
-subagents (your Task/Agent tools), not `attn delegate`. Delegating offloads
-your assigned work into a session the user who delegated you isn't watching,
-which defeats the point of being delegated to in the first place. Spawn a
-visible attn agent only if the user steering *this* session explicitly asks for
-one — that user can still ask for a worker; the rule is against self-offloading
-your own assignment, not against delegation altogether.
+Do the assigned work in this session. A subagent is always a native runtime
+subagent, including when the user says to delegate or dispatch subagents. An
+explicit request from the user steering this session selects attn delegation;
+otherwise, use native subagents.
+
+An attn delegation creates a visible agent session the user can inspect,
+converse with, and steer directly. Native subagents report to you.
 
 ## If Your Work Is Tracked, Report Your State
 

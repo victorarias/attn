@@ -1,24 +1,23 @@
 # Delegation
 
-This file is mechanics. It assumes you already confirmed in SKILL.md's role
-check that delegating is yours to do right now — the chief of staff, or an
-ordinary session the user is steering directly. A delegated leaf re-delegating
-its own assigned work onward is the bug this skill exists to prevent; if that
-might be you, read [delegated-agent.md](delegated-agent.md) first.
+This file covers attn delegation mechanics. Confirm your role in SKILL.md first;
+delegated agents also read [delegated-agent.md](delegated-agent.md).
 
-Attn delegation creates a visible, full interactive agent session for the user.
-Use it when the user wants another agent they can inspect, converse with, and
-steer directly.
+A subagent is always a native runtime subagent, including in phrases such as
+"delegate subagents" and "dispatch subagents."
 
-Do not use attn delegation as an internal parallel-reasoning mechanism. For
-research, adversarial analysis, verification, or other work that you alone will
-synthesize for the user, use your native subagent or multi-agent tools instead.
-Those workers are implementation details of your response; they should not
-create attn sessions or appear in the user's workspace.
+Native subagents report to the calling agent. Attn delegation creates a visible,
+full interactive agent session for the user: an agent they can inspect, converse
+with, and steer directly. An explicit user request selects attn delegation;
+otherwise, use native subagents.
 
-When the user's intent is unclear, default to native subagents. Use attn only
-when the user explicitly asks for delegation, an interactive agent, a separate
-workspace/session, or a collaborator they can steer themselves.
+Interpret the requested object first:
+
+- "delegate this problem" or "delegate this to an agent" means attn delegation
+- "dispatch an agent" means attn delegation
+- "use a subagent" means a native subagent
+- "delegate subagents to review" means native subagents
+- "dispatch subagents to investigate" means native subagents
 
 Attn delegation starts another agent with a focused brief; it does not create
 durable parent-child lineage. If you are the chief of staff, attn binds a ticket

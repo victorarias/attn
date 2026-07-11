@@ -1,6 +1,6 @@
 ---
 name: attn
-description: "Drive attn from an agent: spawn a visible interactive agent the user can inspect and steer, run durable resumable multi-agent workflows, maintain shared workspace context, journal, open markdown, present changes for a guided review, or control attn's persistent in-app browser. Use when the user explicitly asks for an attn session, delegation, creating a new ticket, workflow, browser, presenting/reviewing a change, or to show a markdown explainer or doc in the app, or when you are attn's chief of staff. Not for private research, verification, or parallel reasoning you synthesize yourself — use native subagents for those."
+description: "Drive attn from an agent: create a visible agent session the user can inspect, converse with, and steer directly; run durable resumable multi-agent workflows; maintain shared workspace context; journal; open markdown; present changes for a guided review; or control attn's persistent in-app browser. Use when the user explicitly asks for an attn session or delegation, ticket, workflow, browser, presentation/review, or markdown document in the app, or when you are attn's chief of staff. A subagent always means a native runtime subagent, including when the user says to delegate or dispatch subagents."
 ---
 
 # attn
@@ -22,19 +22,22 @@ If a command reports an unknown subcommand or shows another tool's help, check
 
 ## Confirm Your Role First
 
-A delegated leaf re-delegating its own assigned work — mistaking itself for the
-chief — is this skill's most common failure. Check which you are before reading
-anything about delegation:
+A **subagent** is always a native runtime subagent, including in phrases such as
+"delegate subagents" and "dispatch subagents." Native subagents report to the
+calling agent. An **attn delegation** creates a visible agent session the user
+can inspect, converse with, and steer directly.
+
+Choose your role before reading anything about delegation:
 
 - **Chief of staff**, if your system prompt says so: it already carries your
-  full delegation, ticket, and Notebook guidance. Use native subagents for your
-  own research and synthesis.
+  full delegation, ticket, and Notebook guidance.
 - **A delegated leaf**, if your initial task opens with a line identifying you
-  as a delegated attn session: do the work here. Native subagents for your own
-  subtasks; `attn delegate` again only if the user steering *this* session
-  explicitly asks. See [references/delegated-agent.md](references/delegated-agent.md).
-- **Otherwise, an ordinary session:** `attn delegate` only when the user
-  explicitly asks for a visible, steerable agent.
+  as a delegated attn session: do the work here. An explicit request from the
+  user steering *this* session selects attn delegation; otherwise, use native
+  subagents. See
+  [references/delegated-agent.md](references/delegated-agent.md).
+- **Otherwise, an ordinary session:** an explicit user request selects attn
+  delegation; otherwise, use native subagents.
 
 A ticket-tracked task is still a leaf task — being tracked means the chief is
 *watching* your ticket, not that you inherited the chief's delegation license.
@@ -51,8 +54,8 @@ A ticket-tracked task is still a leaf task — being tracked means the chief is
   [references/workspace-context.md](references/workspace-context.md).
 - **Read or maintain the durable Notebook (journal + knowledge base), esp. as
   chief of staff:** read [references/notebook.md](references/notebook.md).
-- **Run a durable, resumable multi-agent workflow — a script that spawns
-  subagents with fan-out/pipeline, journaled and observable via `attn workflow
+- **Run a durable, resumable multi-agent workflow — a script that runs headless
+  workflow agents with fan-out/pipeline, journaled and observable via `attn workflow
   run`:** read [references/workflow.md](references/workflow.md).
 - **Show the user a markdown document:** read
   [references/markdown.md](references/markdown.md).
