@@ -289,6 +289,41 @@ func TestMoveLeafToNewWorkspaceCreatesWorkspace(t *testing.T) {
 	}
 }
 
+func TestMoveLeafToNewWorkspaceRejectsOrphanAgentPane(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "ws-orphan"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: workspaceID, Title: "Orphan", Directory: cwd,
+	})
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd: protocol.CmdWorkspaceLayoutAddSessionPane, WorkspaceID: workspaceID,
+		PaneID: protocol.Ptr("pane-orphan"), SessionID: "session-gone", Title: protocol.Ptr("gone"),
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "pane-orphan", true)
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	snapshot.Panes[0].Status = workspacelayout.PaneStatusReady
+	if err := d.store.SaveWorkspaceLayout(*snapshot); err != nil {
+		t.Fatalf("mark orphan pane ready: %v", err)
+	}
+	workspaceCount := len(d.store.ListWorkspaces())
+
+	d.handleWorkspaceLayoutMoveLeafToNewWorkspace(client, &protocol.WorkspaceLayoutMoveLeafToNewWorkspaceMessage{
+		Cmd: protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace, SourceWorkspaceID: workspaceID, LeafID: "pane-orphan",
+	})
+	expectMoveToNewWorkspaceResult(t, client, workspaceID, "pane-orphan", false)
+
+	if got := len(d.store.ListWorkspaces()); got != workspaceCount {
+		t.Fatalf("workspace count = %d, want %d after rejected orphan move", got, workspaceCount)
+	}
+	if source := d.store.GetWorkspaceLayout(workspaceID); source == nil || !workspacelayout.HasPane(source.Layout, "pane-orphan") {
+		t.Fatalf("rejected move changed source layout: %+v", source)
+	}
+}
+
 func TestMoveLeafToNewWorkspaceTearsDownEmptySource(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ptyBackend = &fakeSpawnBackend{}

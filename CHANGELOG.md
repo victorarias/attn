@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-11]
+
+### Fixed
+- **Closed sessions no longer leave workspace tiles that reappear in the sidebar.** Closing now removes the pane before announcing the session's departure, stale agent panes cannot be moved into another workspace, and startup repairs any orphan panes left by older runs.
+
 ## [2026-07-10]
 
 ### Added
