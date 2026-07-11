@@ -866,6 +866,12 @@ func (d *Daemon) moveLeafToWorkspace(sourceWorkspaceID, targetWorkspaceID, leafI
 		}
 	}
 	if movedPane != nil {
+		if strings.TrimSpace(movedPane.SessionID) == "" {
+			return "", fmt.Errorf("agent pane has no backing session: %s", leafID)
+		}
+		if d.store.Get(movedPane.SessionID) == nil && movedPane.Status != workspacelayout.PaneStatusSpawning {
+			return "", fmt.Errorf("agent pane session no longer exists: %s", movedPane.SessionID)
+		}
 		for _, pane := range target.Panes {
 			if pane.SessionID != "" && pane.SessionID == movedPane.SessionID {
 				return "", fmt.Errorf("target workspace already has session: %s", movedPane.SessionID)
@@ -1121,6 +1127,18 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 	snapshot.Layout = layout
 	snapshot.Panes = nextPanes
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
+	layoutEmpty := workspacelayout.LayoutEmpty(normalized.Layout)
+
+	// Commit the pane removal before terminating and unregistering the session.
+	// Session teardown broadcasts immediately and may also decide whether the
+	// workspace survives; every observer of those events must therefore see the
+	// pane-free layout rather than a stale agent leaf.
+	if layoutEmpty {
+		d.store.RemoveWorkspaceLayout(msg.WorkspaceID)
+	} else if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
+		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), err)
+		return
+	}
 
 	if strings.TrimSpace(sessionID) != "" {
 		if session := d.unregisterSession(sessionID, syscall.SIGTERM); session != nil {
@@ -1132,17 +1150,6 @@ func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.
 		}
 	}
 
-	// A workspace dies only when its last leaf is gone. A tile left behind
-	// keeps the workspace (now sessionless) and its layout alive.
-	layoutEmpty := workspacelayout.LayoutEmpty(normalized.Layout)
-	if layoutEmpty {
-		d.store.RemoveWorkspaceLayout(msg.WorkspaceID)
-	} else {
-		if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
-			d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), err)
-			return
-		}
-	}
 	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutClosePane, msg.WorkspaceID, protocol.Ptr(msg.PaneID), nil)
 
 	if layoutEmpty {
@@ -1214,9 +1221,14 @@ func (d *Daemon) reconcileWorkspaceLayoutsWithPTYBackend(ctx context.Context) {
 		nextPanes := make([]workspacelayout.Pane, 0, len(snapshot.Panes))
 		changed := false
 		for _, pane := range snapshot.Panes {
-			if pane.Kind == workspacelayout.PaneKindAgent && strings.TrimSpace(pane.SessionID) != "" {
+			sessionID := strings.TrimSpace(pane.SessionID)
+			if pane.Kind == workspacelayout.PaneKindAgent && sessionID != "" &&
+				(d.store.Get(sessionID) != nil || pane.Status == workspacelayout.PaneStatusSpawning) {
 				nextPanes = append(nextPanes, pane)
 				continue
+			}
+			if pane.Kind == workspacelayout.PaneKindAgent {
+				snapshot.Layout, _ = workspacelayout.Remove(snapshot.Layout, pane.PaneID)
 			}
 			changed = true
 		}
@@ -1224,7 +1236,9 @@ func (d *Daemon) reconcileWorkspaceLayoutsWithPTYBackend(ctx context.Context) {
 		if changed {
 			snapshot.Panes = nextPanes
 			normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
-			if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
+			if workspacelayout.LayoutEmpty(normalized.Layout) {
+				d.store.RemoveWorkspaceLayout(workspace.ID)
+			} else if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
 				d.logf("workspace layout reconcile save failed for session %s: %v", workspace.ID, err)
 			}
 			continue

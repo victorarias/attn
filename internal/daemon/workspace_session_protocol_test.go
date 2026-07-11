@@ -155,7 +155,7 @@ func TestWorkspaceSessionProtocolShellSpawnsIdleNotWorking(t *testing.T) {
 	}
 }
 
-func TestWorkspaceLayoutClosePaneKeepsLayoutUntilSessionUnregistered(t *testing.T) {
+func TestWorkspaceLayoutClosePanePersistsRemovalBeforeSessionUnregistered(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := newWorkspaceProtocolTestClient()
 	workspaceID := "workspace-close-order"
@@ -168,11 +168,11 @@ func TestWorkspaceLayoutClosePaneKeepsLayoutUntilSessionUnregistered(t *testing.
 		if session := d.store.Get(sessionID); session == nil {
 			t.Fatalf("session %s was removed before pty kill", sessionID)
 		}
-		if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot == nil {
-			t.Fatalf("workspace layout %s was removed while session %s still existed", workspaceID, sessionID)
+		if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot != nil {
+			t.Fatalf("workspace layout still referenced session %s when pty kill began: %+v", sessionID, snapshot)
 		}
-		if _, _, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID); !ok {
-			t.Fatalf("workspace pane mapping for session %s was removed before pty kill", sessionID)
+		if _, _, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID); ok {
+			t.Fatalf("workspace pane mapping for session %s still existed when pty kill began", sessionID)
 		}
 	}
 	d.ptyBackend = backend
@@ -217,6 +217,45 @@ func TestWorkspaceLayoutClosePaneKeepsLayoutUntilSessionUnregistered(t *testing.
 	}
 	if workspace := d.store.GetWorkspace(workspaceID); workspace != nil {
 		t.Fatalf("workspace still exists after closing its only session pane: %+v", workspace)
+	}
+}
+
+func TestWorkspaceLayoutStartupReconcileRemovesOrphanButKeepsPendingSpawn(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	cwd := t.TempDir()
+
+	for _, fixture := range []struct {
+		workspaceID string
+		sessionID   string
+		status      workspacelayout.PaneStatus
+	}{
+		{workspaceID: "workspace-orphan", sessionID: "session-gone", status: workspacelayout.PaneStatusReady},
+		{workspaceID: "workspace-pending", sessionID: "session-pending", status: workspacelayout.PaneStatusSpawning},
+	} {
+		d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+			Cmd: protocol.CmdRegisterWorkspace, ID: fixture.workspaceID, Title: fixture.workspaceID, Directory: cwd,
+		})
+		d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+			Cmd: protocol.CmdWorkspaceLayoutAddSessionPane, WorkspaceID: fixture.workspaceID,
+			PaneID: protocol.Ptr("pane-" + fixture.sessionID), SessionID: fixture.sessionID,
+		})
+		expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, fixture.workspaceID, "pane-"+fixture.sessionID, true)
+		snapshot := d.store.GetWorkspaceLayout(fixture.workspaceID)
+		snapshot.Panes[0].Status = fixture.status
+		if err := d.store.SaveWorkspaceLayout(*snapshot); err != nil {
+			t.Fatalf("save %s fixture: %v", fixture.workspaceID, err)
+		}
+	}
+
+	d.reconcileWorkspaceLayoutsWithPTYBackend(context.Background())
+
+	if orphan := d.store.GetWorkspaceLayout("workspace-orphan"); orphan != nil {
+		t.Fatalf("orphan layout survived startup reconciliation: %+v", orphan)
+	}
+	if pending := d.store.GetWorkspaceLayout("workspace-pending"); pending == nil || !workspacelayout.HasPane(pending.Layout, "pane-session-pending") {
+		t.Fatalf("valid pending spawn was removed: %+v", pending)
 	}
 }
 
