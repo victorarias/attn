@@ -16,31 +16,27 @@ import (
 // session. Every session retains its ordinary session identity. The active chief
 // additionally observes through the durable chief role identity, whose cursor
 // survives role transfers while AuthorID keeps self-authored events excluded. The
-// delivery path comes from the session's agent driver capability
-// (agent.Capabilities.HasSelfMonitor, resolved via the registry): Claude
-// self-monitors and watches; codex and the rest are nudged. An empty/unknown agent
-// resolves to nil → Capabilities{} → false, the safe nudge default.
+// delivery path is shared by all runtimes; an optional runtime `ticket inbox
+// --watch` consumes the same unread queue before a countdown has to ring.
 func (d *Daemon) ticketObserversForSession(sessionID string) []ticketnotify.Observer {
-	agentName := ""
-	if s := d.store.Get(sessionID); s != nil {
-		agentName = s.Agent
-	}
-	selfMonitor := agentdriver.EffectiveCapabilities(agentdriver.Get(agentName)).HasSelfMonitor
-	personal := ticketnotify.Observer{ID: sessionID, AuthorID: sessionID, DeliveryID: sessionID, HasSelfMonitor: selfMonitor}
+	personal := ticketnotify.Observer{ID: sessionID, AuthorID: sessionID, DeliveryID: sessionID}
 	observers := []ticketnotify.Observer{personal}
 	if d.isChiefOfStaffSession(sessionID) {
 		observers = append(observers, ticketnotify.Observer{
-			ID:             store.TicketRoleIdentity(store.TicketRoleChiefOfStaff),
-			AuthorID:       sessionID,
-			DeliveryID:     sessionID,
-			HasSelfMonitor: selfMonitor,
+			ID:         store.TicketRoleIdentity(store.TicketRoleChiefOfStaff),
+			AuthorID:   sessionID,
+			DeliveryID: sessionID,
 		})
 	}
 	return observers
 }
 
-func (d *Daemon) ticketDeliveryObserverForSession(sessionID string) ticketnotify.Observer {
-	return d.ticketObserversForSession(sessionID)[0]
+func (d *Daemon) sessionHasSelfMonitor(sessionID string) bool {
+	agentName := ""
+	if s := d.store.Get(sessionID); s != nil {
+		agentName = s.Agent
+	}
+	return agentdriver.EffectiveCapabilities(agentdriver.Get(agentName)).HasSelfMonitor
 }
 
 func (d *Daemon) ticketUnreadForSession(sessionID string) (int, error) {
@@ -49,9 +45,9 @@ func (d *Daemon) ticketUnreadForSession(sessionID string) (int, error) {
 
 // handleTicketInbox returns the calling session's unread ticket events, bundled by
 // ticket, and advances its per-ticket cursors past them (a consume). This is the
-// agent's read path — what a nudged agent runs to catch up, and what a
-// self-monitoring agent's own watch drains. The observer identity is resolved from
-// the session, so the caller names nothing.
+// agent's read path — what a nudged agent runs to catch up, and what a runtime's
+// optional watch drains. The observer identity is resolved from the session, so the
+// caller names nothing.
 func (d *Daemon) handleTicketInbox(conn net.Conn, msg *protocol.TicketInboxMessage) {
 	sourceSessionID := strings.TrimSpace(msg.SourceSessionID)
 	if sourceSessionID == "" {
@@ -65,7 +61,7 @@ func (d *Daemon) handleTicketInbox(conn net.Conn, msg *protocol.TicketInboxMessa
 	}
 	// The consume advanced this session's cursors, so its unread count just dropped.
 	// Refresh the indicator (and cancel any pending countdown if fully drained) — this
-	// is the chokepoint a self-monitoring agent's own watch drains through.
+	// is the chokepoint a runtime's optional watch drains through.
 	d.refreshTicketUnread(sourceSessionID)
 	result := &protocol.TicketInboxResult{Bundles: ticketEventBundlesToProtocol(bundles)}
 	if lastActive := d.lastUserActivityAt(); !lastActive.IsZero() {

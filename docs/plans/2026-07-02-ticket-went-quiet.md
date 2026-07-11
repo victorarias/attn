@@ -1,5 +1,10 @@
 # Plan: The went-quiet floor — projection + stopped-without-report event
 
+> **Policy update (2026-07-11):** the nudge policy referenced below is now shared
+> across runtimes and roles: only `pending_approval` blocks delivery. Any future
+> state-hook work should use `isNudgeDeliveryAllowed`, not the removed idle-only
+> gate.
+
 ## Goal
 
 Close the last open mechanism gap in

@@ -22,10 +22,10 @@ workspace/session, or a collaborator they can steer themselves.
 
 Attn delegation starts another agent with a focused brief; it does not create
 durable parent-child lineage. If you are the chief of staff, attn binds a ticket
-to the delegated session and your system-prompt guidance covers the runtime's
-supported follow-up path: Claude arms a Monitor on `attn ticket inbox --watch`,
-while Codex waits for attn's ticket nudge and then reads `attn ticket inbox`.
-Ordinary delegation needs none of that.
+to the delegated session and your system-prompt guidance covers the follow-up path:
+all runtimes receive the same ticket nudge when activity remains unread; Claude may
+also arm a Monitor on `attn ticket inbox --watch` to consume updates sooner. Ordinary
+delegation needs none of that.
 
 For a chief-tracked delegation that returns a durable plan, read the ticket before
 continuing: `attn ticket show <ticket-id>` lists the Markdown files currently in

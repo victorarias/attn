@@ -617,8 +617,8 @@ func (d *Daemon) handbackPresentationRound(pres *store.Presentation, seq int, ve
 	}
 
 	session := d.store.Get(pres.SessionID)
-	if session == nil || !isIdleForNudge(string(session.State)) || isExplicitNudgeBlocked(string(session.State)) {
-		d.logf("present handback: session %s not idle, skipping doorbell for presentation %s", pres.SessionID, pres.ID)
+	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
+		d.logf("present handback: session %s is waiting for approval, skipping doorbell for presentation %s", pres.SessionID, pres.ID)
 		return
 	}
 	if err := d.typeDoorbell(pres.SessionID, "\U0001F4FD "+notice+"."); err != nil {

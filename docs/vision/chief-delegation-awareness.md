@@ -55,10 +55,10 @@ not *reach* it is a sensor, not a hand. So the loop closes both ways: the chief,
 and Victor through it, can steer work already in flight — answer a blocker,
 re-brief it, feed it context — by editing the same ticket. And the reverse
 channel must be as ambient as the forward one: a steer to an agent never rots in a
-queue no one watches. A self-monitoring agent learns of it the moment it lands; an
-agent that can't is nudged to check at a sensible moment; and Victor sees the
-pending signal in the sidebar where he already looks — never buried in a dashboard
-he never opens.
+queue no one watches. Any live agent receives the same bounded nudge unless it is
+waiting for approval; an optional watcher can consume its inbox sooner. Victor sees
+the pending signal in the sidebar where he already looks — never buried in a
+dashboard he never opens.
 
 ## The shape: an issue tracker, not a switchboard
 
@@ -91,12 +91,11 @@ How it runs:
 
 ## North-star principles
 
-- **Event-driven where we can; attn-triggered where we can't.** A ticket move emits
-  an event. A self-monitoring agent (Claude) watches the event stream live and drains
-  it the moment it lands; an agent that can't (codex, etc.) gets a fixed doorbell
-  typed into its PTY *only when it is idle*, nudging it to run `attn ticket inbox` — a
-  sensible-moment poke, not a busy-loop timer. The split is a first-class capability
-  (`HasSelfMonitor`), resolved from the driver registry, never guessed.
+- **One safe nudge policy for every runtime.** A ticket move emits an event and arms
+  the same bounded doorbell for every live observer. The only state that suppresses
+  delivery is `pending_approval`, where the doorbell's Enter could approve a prompt.
+  Claude may also watch `attn ticket inbox --watch`; that optional consumer can drain
+  unread activity before the countdown fires, but it does not change eligibility.
 - **The loop runs both ways.** Observing is half a loop; the chief must also steer a
   running agent. Steering is just another authored event on the ticket (comment,
   re-brief, status), delivered by the same layer and read with `attn ticket inbox` —
@@ -139,9 +138,9 @@ How it runs:
 **In scope.** The durable **ticket** model (status, activity thread, artifacts,
 resume); the **board** as the read-only awareness surface the chief reads instead of
 polling; agent self-report via `attn ticket status`; the reverse channel via
-`attn ticket inbox`; the **notification split** (a live watch for self-monitoring
-agents, an idle pty-nudge for the rest) and the per-identity read cursor that tracks
-delivery; and attn-authored **crash** capture so a silent death is still visible.
+`attn ticket inbox`; the shared approval-safe pty-nudge policy (with an optional live
+watch for capable runtimes) and the per-identity read cursor that tracks delivery;
+and attn-authored **crash** capture so a silent death is still visible.
 
 **Non-goals.**
 - *Not Jira.* Linear's restraint — a few fields, and a board that **informs, never
@@ -171,8 +170,9 @@ The work-tracker epic delivered the loop across slices 1–7.
   mid-flight close.
 - [x] **Agent reverse channel** — `attn ticket inbox` consume path; the steering edits
   the chief makes are read here.
-- [x] **Notification split by capability** — `HasSelfMonitor`: Claude watches live;
-  codex is idle-nudged with a fixed doorbell.
+- [x] **Approval-safe notification policy** — every live runtime gets the same
+  bounded nudge unless it is waiting for approval; capable runtimes may additionally
+  watch their inbox live.
 - [x] **Ticket view + resume + artifacts** — the chief edits, comments, and changes
   status from the UI; **resume** reopens a stopped agent on the same ticket (its cwd +
   last agent id); `attn ticket attach` copies one or more Markdown files into the

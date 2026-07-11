@@ -53,7 +53,6 @@ func callTicketComment(t *testing.T, d *Daemon, sessionID, ticketID, comment str
 // does not exist is a clear error rather than a silently dropped note.
 func TestHandleTicketCommentValidatesTicket(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	t.Cleanup(d.stopTicketBackstops)
 	_, agents, _ := delegateMany(t, d, "codex", "Task Y", "Task X")
 	z, x := agents[0], agents[1]
 	ticketY := boundTicketID(t, d, z)
@@ -80,7 +79,6 @@ func TestHandleTicketCommentValidatesTicket(t *testing.T) {
 func TestAgentCommentDoesNotSubscribeCommenter(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour
-	t.Cleanup(d.stopTicketBackstops)
 	t.Cleanup(d.stopNudgeCountdowns)
 	_, agents, inputs := delegateMany(t, d, "codex", "Task Y", "Task X")
 	z, x := agents[0], agents[1] // z owns ticket Y; x owns its own ticket

@@ -47,9 +47,8 @@ func waitForNudge(t *testing.T, inputs func(string) []string, sessionID string) 
 	t.Fatalf("session %s was never doorbelled", sessionID)
 }
 
-// armForTest gives an idle codex agent an unread chief steer, which arms its nudge
-// countdown (codex is a non-self-monitor, so notify resolves to the immediate-nudge
-// path that now arms the countdown). Returns the agent id and inputs accessor.
+// armForTest gives an idle codex agent an unread chief steer, which arms its shared
+// nudge countdown. Returns the agent id and inputs accessor.
 func armForTest(t *testing.T, d *Daemon) (agentID string, inputs func(string) []string) {
 	t.Helper()
 	_, agentID, inputs = delegateForNotify(t, d, "codex")
@@ -139,10 +138,9 @@ func TestNudgeCountdownPausesOnSwitchTo(t *testing.T) {
 	}
 }
 
-// Leaving idle (the agent starts working) cancels the countdown — you don't count
-// down to nudge a working agent. Driven through a non-PTY state-broadcast path, since
-// codex/claude state is hook-owned and never flows through handlePTYState.
-func TestNudgeCountdownCanceledOnLeavingIdle(t *testing.T) {
+// Moving to another eligible state keeps the countdown armed. This covers the hook
+// path used by Codex and Claude, which does not flow through handlePTYState.
+func TestNudgeCountdownSurvivesEligibleStateChange(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour
 	t.Cleanup(d.stopNudgeCountdowns)
@@ -153,14 +151,47 @@ func TestNudgeCountdownCanceledOnLeavingIdle(t *testing.T) {
 
 	d.updateAndBroadcastState(agentID, protocol.StateWorking)
 
-	if currentNudgeTimer(d, agentID) != nil {
-		t.Fatal("countdown survived the agent leaving idle")
+	if currentNudgeTimer(d, agentID) == nil {
+		t.Fatal("countdown was canceled when the agent became active")
 	}
 }
 
-// Draining the inbox clears the indicator and cancels the countdown — the chokepoint
-// a self-monitoring agent's own watch drains through. After draining, nothing is
-// unread, so there is nothing to nudge.
+func TestNudgeCountdownCancelsOnPendingApproval(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	agentID, _ := armForTest(t, d)
+
+	d.updateAndBroadcastState(agentID, protocol.StatePendingApproval)
+
+	if currentNudgeTimer(d, agentID) != nil {
+		t.Fatal("countdown survived a pending approval prompt")
+	}
+}
+
+func TestNudgeDeliveryStatePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state string
+		want  bool
+	}{
+		{name: "active green", state: protocol.StateWorking, want: true},
+		{name: "new initial", state: protocol.StateLaunching, want: true},
+		{name: "unknown", state: protocol.StateUnknown, want: true},
+		{name: "waiting for input", state: protocol.StateWaitingInput, want: true},
+		{name: "flashing approval", state: protocol.StatePendingApproval, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isNudgeDeliveryAllowed(tc.state); got != tc.want {
+				t.Fatalf("isNudgeDeliveryAllowed(%q) = %v, want %v", tc.state, got, tc.want)
+			}
+		})
+	}
+}
+
+// Draining the inbox clears the indicator and cancels the countdown — including when
+// an optional runtime watch is the consumer. After draining, nothing is unread, so
+// there is nothing to nudge.
 func TestNudgeCountdownClearedWhenInboxDrained(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour

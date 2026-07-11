@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Closed sessions no longer leave workspace tiles that reappear in the sidebar.** Closing now removes the pane before announcing the session's departure, stale agent panes cannot be moved into another workspace, and startup repairs any orphan panes left by older runs.
+- **Ticket nudges now reach active, new, and unknown sessions too.** Any live chief or delegated agent receives the same bounded ticket nudge unless it is waiting for an approval prompt, where the doorbell could answer on its behalf. Claude's optional inbox watch can still consume an update before the countdown fires.
 
 ### Changed
 - **Ticket artifacts use attachment language throughout.** `attn ticket attach` now names the durable operation for adding Markdown artifacts to a ticket; its multi-file, optional state/comment, retry-safe receipt, and canonical Notebook behavior are unchanged.

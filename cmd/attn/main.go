@@ -1389,16 +1389,15 @@ func runTicketInbox(args []string) {
 }
 
 // ticketWatchInterval is how often `attn ticket inbox --watch` polls the consuming
-// inbox. It is the lower bound on push latency for a self-monitoring chief, and it
-// is coupled to the daemon's self-monitor backstop grace
-// (defaultTicketBackstopGrace, 8s): the grace must stay above this interval so a
-// live watch drains its queue before the daemon's backstop doorbell would fire.
+// inbox. A watch may consume unread activity before the daemon's shared nudge
+// countdown fires, but it is not required for delivery.
 const ticketWatchInterval = 3 * time.Second
 
 // runTicketInboxWatch blocks and prints new ticket activity as it lands, so a
-// harness Monitor can wrap it as a true push for a self-monitoring chief. It polls
-// the consuming ticket-inbox: the daemon advances the session's per-ticket cursor
-// on each read, so each event prints exactly once and the client tracks no state.
+// harness Monitor can wrap it as a true push for a chief. Whether a runtime is
+// guided to use it is separate from daemon nudge eligibility. It polls the
+// consuming ticket-inbox: the daemon advances the session's per-ticket cursor on
+// each read, so each event prints exactly once and the client tracks no state.
 // Silent when nothing is new; exits cleanly on SIGINT/SIGTERM (the harness stops
 // the Monitor on session end). A transient daemon error is reported once per outage
 // but does not end the watch. The poll loop lives in watchTicketInbox so it can be

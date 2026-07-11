@@ -59,7 +59,6 @@ func inboxHasTicket(bundles []protocol.TicketEventBundle, ticketID string) bool 
 func TestTicketSubscribeLifecycle(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour
-	t.Cleanup(d.stopTicketBackstops)
 	t.Cleanup(d.stopNudgeCountdowns)
 	_, agents, inputs := delegateMany(t, d, "codex", "Task Y", "Task X")
 	z, x := agents[0], agents[1] // z owns ticket Y; x owns its own ticket
@@ -106,7 +105,6 @@ func TestTicketSubscribeLifecycle(t *testing.T) {
 // idempotent and tolerant of an unknown id.
 func TestTicketSubscribeValidatesTicket(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	t.Cleanup(d.stopTicketBackstops)
 	_, agents, _ := delegateMany(t, d, "codex", "Task Y")
 	x := agents[0]
 

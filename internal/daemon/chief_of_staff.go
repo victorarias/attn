@@ -88,8 +88,8 @@ func (d *Daemon) clearChiefOfStaffIfSession(sessionID string) {
 }
 
 // nudgeChiefOfStaff types a bounded prompt into the current chief-of-staff
-// session's PTY, but only when a chief is set and that session is idle or waiting
-// for input — never an agent mid-task. It re-confirms the role right before
+// session's PTY whenever a chief is set and it is not waiting for approval. It
+// re-confirms the role right before
 // typing (the role is a single-holder upsert that another promotion may have
 // moved). Returns true only when the nudge was actually delivered, so callers can
 // report whether the chief was pinged live versus only queued in the inbox.
@@ -105,7 +105,7 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 	if session == nil {
 		return false
 	}
-	if session.State != protocol.SessionStateIdle && session.State != protocol.SessionStateWaitingInput {
+	if !isNudgeDeliveryAllowed(string(session.State)) {
 		return false
 	}
 	if d.chiefOfStaffSessionID() != sessionID {
@@ -228,7 +228,6 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 // ownership and its cursors do not move, copy, or advance.
 func (d *Daemon) retargetChiefTicketDelivery(previousSessionID, newSessionID string) {
 	if previousSessionID != "" {
-		d.cancelTicketBackstop(previousSessionID)
 		d.refreshTicketUnread(previousSessionID)
 	}
 	if newSessionID != "" {

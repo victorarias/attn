@@ -1,9 +1,9 @@
 // Package ticketnotify is the event-driven notification core of the work tracker
 // (slice 2 of docs/plans/2026-06-26-work-tracker.md). It is the decoupled layer
 // that sits above the store's append-only event log: every identity has a
-// per-ticket cursor, events past it are unread, and two handlers turn unread
-// events into a notification — a watch-consume for agents that self-monitor
-// (Claude), and an idle pty-nudge for those that can't (codex).
+// per-ticket cursor, events past it are unread, and a shared pty-nudge asks the
+// owning session to consume them. A runtime may also run `ticket inbox --watch`,
+// which simply consumes the same queue before the countdown reaches its doorbell.
 //
 // Every observer reads through one or more identities. Ordinary assignment,
 // authorship, and explicit subscription use session identities. Durable product
@@ -19,7 +19,7 @@
 //	                                an identity's cursor on a ticket are unread
 //	bundle by sender                Consume groups unread events by ticket
 //	hardcoded chief id              observer IDs supplied by the caller
-//	two consumers (watch / nudge)   the two Delivery paths below
+//	watch / nudge race              either may consume; unread is authoritative
 //	never stream content to a PTY   Nudger carries only a fixed trigger
 //
 // It knows nothing about live sessions or real Monitors — it is built against the
@@ -51,18 +51,16 @@ type EventStore interface {
 
 // Observer is one ticket-event view. ID owns the cursor, AuthorID is excluded as
 // self-authored activity, and DeliveryID is the live session to nudge. All three
-// are the session ID for ordinary agents; durable roles split them. HasSelfMonitor
-// selects watch versus nudge delivery.
+// are the session ID for ordinary agents; durable roles split them.
 type Observer struct {
-	ID             string
-	AuthorID       string
-	DeliveryID     string
-	HasSelfMonitor bool
+	ID         string
+	AuthorID   string
+	DeliveryID string
 }
 
 // ChiefObserver returns the harness-only chief observer.
 func ChiefObserver() Observer {
-	return Observer{ID: ObserverChief, AuthorID: ObserverChief, DeliveryID: ObserverChief, HasSelfMonitor: true}
+	return Observer{ID: ObserverChief, AuthorID: ObserverChief, DeliveryID: ObserverChief}
 }
 
 // Bundle is an observer's unread events for a single ticket. Consume returns one
@@ -75,8 +73,8 @@ type Bundle struct {
 
 // Consume returns the observer's unread events, bundled by ticket, and advances
 // the observer's cursor on each of those tickets past everything just delivered.
-// This is the watch-consume handler: a self-monitoring observer calls it when its
-// Monitor fires; a nudged observer calls it after the nudge lands.
+// A runtime may call this from `ticket inbox --watch`; a nudged session calls it
+// after the nudge lands. Both consume the same per-identity queue.
 //
 // Single-consumer-per-observer assumption: Consume reads unread events then writes
 // each touched ticket's cursor as separately-locked store calls, so two Consume
@@ -168,20 +166,16 @@ type Delivery int
 const (
 	// DeliveryNone means there was nothing unread.
 	DeliveryNone Delivery = iota
-	// DeliveryWatch means a self-monitoring observer's own watch will consume it
-	// (true push) — nothing is injected.
-	DeliveryWatch
-	// DeliveryNudge means an idle, non-self-monitoring observer was pty-nudged to
-	// go consume. Only a fixed trigger is sent, never event content.
+	// DeliveryNudge means a nudge-eligible observer was asked to consume. Only a
+	// fixed trigger is sent, never event content.
 	DeliveryNudge
-	// DeliveryDeferred means a non-self-monitoring observer is busy; the nudge
-	// waits until it goes idle.
+	// DeliveryDeferred means the observer is waiting for approval, so a doorbell
+	// could accidentally answer that prompt. A later eligible state rechecks it.
 	DeliveryDeferred
 )
 
-// Nudger delivers a fixed wake trigger to an observer that can't self-monitor. It
-// carries NO event content — only the bounded "go consume your tickets" trigger,
-// mirroring the daemon's doorbell rule (the agent then reads its own queue).
+// Nudger delivers a fixed wake trigger. It carries NO event content — only the
+// bounded "go consume your tickets" trigger, mirroring the daemon's doorbell rule.
 type Nudger interface {
 	Nudge(observerID string) error
 }
@@ -191,17 +185,16 @@ type Nudger interface {
 // triggers the observer to consume:
 //
 //   - nothing unread            -> DeliveryNone
-//   - self-monitors             -> DeliveryWatch (its own watch consumes)
-//   - idle, can't self-monitor  -> DeliveryNudge (fixed trigger; it then consumes)
-//   - busy, can't self-monitor  -> DeliveryDeferred (wait for idle)
-func Notify(es EventStore, obs Observer, idle bool, nudger Nudger, now time.Time) (Delivery, error) {
-	return NotifyAny(es, []Observer{obs}, obs, idle, nudger, now)
+//   - nudge-eligible            -> DeliveryNudge (fixed trigger; it then consumes)
+//   - waiting for approval       -> DeliveryDeferred (recheck after it clears)
+func Notify(es EventStore, obs Observer, nudgeEligible bool, nudger Nudger, now time.Time) (Delivery, error) {
+	return NotifyAny(es, []Observer{obs}, obs, nudgeEligible, nudger, now)
 }
 
 // NotifyAny makes one delivery decision for a session that observes through more
-// than one identity. deliveryObserver supplies the session capability and target;
-// the observed identities only determine whether anything is unread.
-func NotifyAny(es EventStore, observers []Observer, deliveryObserver Observer, idle bool, nudger Nudger, now time.Time) (Delivery, error) {
+// than one identity. deliveryObserver supplies the target; the observed identities
+// only determine whether anything is unread.
+func NotifyAny(es EventStore, observers []Observer, deliveryObserver Observer, nudgeEligible bool, nudger Nudger, now time.Time) (Delivery, error) {
 	unread, err := UnreadAny(es, observers)
 	if err != nil {
 		return DeliveryNone, err
@@ -209,10 +202,7 @@ func NotifyAny(es EventStore, observers []Observer, deliveryObserver Observer, i
 	if unread == 0 {
 		return DeliveryNone, nil
 	}
-	if deliveryObserver.HasSelfMonitor {
-		return DeliveryWatch, nil
-	}
-	if !idle {
+	if !nudgeEligible {
 		return DeliveryDeferred, nil
 	}
 	deliveryID := deliveryObserver.DeliveryID

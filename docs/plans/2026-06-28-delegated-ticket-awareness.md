@@ -1,5 +1,11 @@
 # Plan: Close the delegated-ticket awareness gap (chief watch + daemon backstop)
 
+> **Status (2026-07-11): superseded.** This plan records the earlier
+> runtime-aware watch/backstop design. Ticket delivery now uses one shared policy:
+> every session is nudge-eligible except one waiting for approval. Claude's
+> `ticket inbox --watch` remains optional and may consume activity before the
+> shared countdown delivers.
+
 ## Goal
 
 When the chief delegates, it currently goes silent until Victor prompts it: a

@@ -39,7 +39,6 @@ func callTicketTake(t *testing.T, d *Daemon, sessionID, ticketID string, confirm
 func TestTicketTakeOverNotifiesPreviousAssignee(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour
-	t.Cleanup(d.stopTicketBackstops)
 	t.Cleanup(d.stopNudgeCountdowns)
 	_, agents, inputs := delegateMany(t, d, "codex", "Task Y", "Task X")
 	z, x := agents[0], agents[1] // z owns ticket Y; x owns its own ticket
@@ -89,7 +88,6 @@ func TestTicketTakeOverNotifiesPreviousAssignee(t *testing.T) {
 // already owned is a harmless no-op; taking an unknown ticket is a clear error.
 func TestTicketTakeUnassignedSelfAndUnknown(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	t.Cleanup(d.stopTicketBackstops)
 	_, agents, _ := delegateMany(t, d, "codex", "Task X")
 	x := agents[0]
 

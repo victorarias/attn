@@ -113,8 +113,9 @@ async function readPaneText(client, sessionId) {
 
 // A freshly-booted agent sits at its prompt but is not yet `idle`/`waiting_input`
 // — that state is only reached after a completed turn (boot -> working -> idle).
-// The nudge only arms for an idle session, so drive one trivial turn first. The
-// text and the Enter are sent as SEPARATE writes (a fast burst ending in CR is
+// This scenario uses an idle target to isolate the paused manual-trigger path; the
+// shared nudge policy also permits active, launching, and unknown targets. The text
+// and the Enter are sent as SEPARATE writes (a fast burst ending in CR is
 // treated as a bracketed paste and never submits).
 async function driveAgentToIdle(client, observer, sessionId, note) {
   const pane = await waitForFirstWorkspacePane(client, sessionId, `pane for ${sessionId}`, 20_000);

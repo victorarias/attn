@@ -8,7 +8,7 @@ import (
 )
 
 // defaultNudgeCountdownWindow is how long an armed ticket nudge waits — visible to
-// the user as a countdown — before the daemon doorbells an idle session. The user
+// the user as a countdown — before the daemon doorbells an eligible session. The user
 // can switch to the session and trigger it early, or let it elapse so attn delivers
 // it. It gates every ticket doorbell so a nudge is never a silent surprise.
 const defaultNudgeCountdownWindow = 30 * time.Second
@@ -173,7 +173,7 @@ func (d *Daemon) stopNudgeCountdowns() {
 }
 
 // nudgeCountdownFire is the deferred delivery. The identity check against the map
-// entry mirrors ticketBackstopFire: a countdown that lost a reschedule/cancel race
+// entry keeps a countdown that lost a reschedule/cancel race from delivering twice:
 // finds a different (or absent) timer and bails, keeping delivery to a single
 // doorbell. The entry is consumed here; deliverNudgeOrReArm decides what to do.
 func (d *Daemon) nudgeCountdownFire(sessionID string, self *time.Timer) {
@@ -202,8 +202,9 @@ func (d *Daemon) deliverNudgeOrReArm(sessionID string) {
 }
 
 // runNudgeDelivery is the fire-time decision, separated so its outcome is a single
-// string the test hook can assert. It doorbells only when the session is still idle,
-// not the active session, still has unread ticket activity, and — the splice guard —
+// string the test hook can assert. It doorbells only when the session is not waiting
+// for approval, is not the active session, still has unread ticket activity, and —
+// the splice guard —
 // has not received a genuine user keystroke within userInputGuardWindow. A keystroke
 // re-arms a fresh countdown rather than dropping the nudge: the user is mid-keystroke,
 // not gone.
@@ -212,8 +213,8 @@ func (d *Daemon) runNudgeDelivery(sessionID string) string {
 		return "noop"
 	}
 	session := d.store.Get(sessionID)
-	if session == nil || !isIdleForNudge(string(session.State)) {
-		return "not-idle"
+	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
+		return "blocked"
 	}
 	if d.currentlySelectedSession() == sessionID {
 		// Became the active session during the window; switching away re-arms it.
@@ -244,11 +245,11 @@ func (d *Daemon) runNudgeDelivery(sessionID string) string {
 // updateNudgeSelection pauses the newly selected session's countdown and resumes the
 // previously selected one. Selection drives only this UX; the splice guard above is
 // what protects a second visible tile the user types into. The store read for the
-// idle check is done before taking nudgeMu to keep the lock ordering one-way.
+// approval check is done before taking nudgeMu to keep the lock ordering one-way.
 func (d *Daemon) updateNudgeSelection(oldID, newID string) {
 	resumeOld := false
 	if oldID != "" && oldID != newID && d.store != nil {
-		if s := d.store.Get(oldID); s != nil && isIdleForNudge(string(s.State)) {
+		if s := d.store.Get(oldID); s != nil && isNudgeDeliveryAllowed(string(s.State)) {
 			resumeOld = true
 		}
 	}
@@ -274,7 +275,7 @@ func (d *Daemon) updateNudgeSelection(oldID, newID string) {
 // refreshTicketUnread recomputes a session's unread ticket count and updates the
 // indicator. Called after an inbox consume (handleTicketInbox) and on each notify so
 // the indicator reflects reality for every agent — including self-monitoring Claude,
-// whose own watch drains the queue with no doorbell.
+// whose optional watch can drain the queue before the countdown doorbells.
 func (d *Daemon) refreshTicketUnread(sessionID string) {
 	if d.store == nil {
 		return
@@ -287,18 +288,17 @@ func (d *Daemon) refreshTicketUnread(sessionID string) {
 	d.markTicketUnread(sessionID, unread > 0)
 }
 
-// isExplicitNudgeBlocked reports the one state where a user's explicit click must NOT
-// doorbell: pending_approval. Typing the doorbell prompt + Enter into an approval
-// prompt could answer the approval — an unsafe, hard-to-undo side effect. Every other
-// state honors the click on demand (idle, waiting_input, working, unknown, launching):
-// an explicit click is unambiguous intent, so unlike the automatic countdown (which
-// stays idle-only) the user has chosen to deliver now regardless of the agent's state.
-func isExplicitNudgeBlocked(state string) bool {
-	return state == protocol.StatePendingApproval
+// isNudgeDeliveryAllowed is the sole session-state gate for every doorbell. A
+// pending approval is the only unsafe target because a trailing Enter could answer
+// it. Active, launching, unknown, idle, waiting-input, and scheduled sessions all
+// remain eligible; selection and recent-keypress checks are separate user-safety
+// mechanisms, not state policy.
+func isNudgeDeliveryAllowed(state string) bool {
+	return state != protocol.StatePendingApproval
 }
 
 // handleTriggerNudge is the user clicking the incoming-nudge indicator: deliver the
-// pending doorbell now, on demand, in any state but pending_approval. It is exempt
+// pending doorbell now, on demand, in any nudge-eligible state. It is exempt
 // from the keystroke guard — an explicit click is unambiguous intent — and respects
 // only unread (a click on a stale, already-drained indicator is a harmless no-op).
 func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
@@ -311,7 +311,7 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 		return
 	}
 	session := d.store.Get(sessionID)
-	if session == nil || isExplicitNudgeBlocked(string(session.State)) {
+	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
 		return
 	}
 	unread, err := d.ticketUnreadForSession(sessionID)

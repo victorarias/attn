@@ -752,9 +752,8 @@ func TestNotebookSendToChiefQueuesWithoutLiveChief(t *testing.T) {
 	}
 }
 
-// A busy chief (working/pending) is not interrupted: the inbox delivery happens
-// but the nudge is withheld, mirroring the activation doorbell's state gate.
-func TestNotebookSendToChiefDoesNotNudgeBusyChief(t *testing.T) {
+// A green/working chief receives the same live nudge as any other eligible session.
+func TestNotebookSendToChiefNudgesWorkingChief(t *testing.T) {
 	d := newNotebookDaemon(t)
 	var mu sync.Mutex
 	var inputs []string
@@ -769,14 +768,40 @@ func TestNotebookSendToChiefDoesNotNudgeBusyChief(t *testing.T) {
 
 	var res protocol.NotebookSendToChiefResultMessage
 	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.Result == nil || !res.Result.Nudged {
+		t.Fatalf("send-to-chief result = %+v, want success with working chief nudged", res.Result)
+	}
+	mu.Lock()
+	n := len(inputs)
+	mu.Unlock()
+	if n != 2 {
+		t.Fatalf("PTY inputs = %d, want prompt plus Enter", n)
+	}
+}
+
+func TestNotebookSendToChiefDoesNotNudgePendingApprovalChief(t *testing.T) {
+	d := newNotebookDaemon(t)
+	var mu sync.Mutex
+	var inputs []string
+	d.ptyBackend = recordingBackend(&inputs, &mu)
+	addIdleNotebookSession(d, "chief", protocol.SessionStatePendingApproval)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "chief"); err != nil {
+		t.Fatal(err)
+	}
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.sendNotebookToChiefWSResult(client, "c3-pending", "/index.md", "wait for approval")
+
+	var res protocol.NotebookSendToChiefResultMessage
+	readNotebookWSEvent(t, client.send, &res)
 	if !res.Success || res.Result == nil || res.Result.Nudged {
-		t.Fatalf("send-to-chief result = %+v, want success not nudged for a busy chief", res.Result)
+		t.Fatalf("send-to-chief result = %+v, want success without a pending-approval nudge", res.Result)
 	}
 	mu.Lock()
 	n := len(inputs)
 	mu.Unlock()
 	if n != 0 {
-		t.Fatalf("PTY inputs = %d, want 0 (never interrupt a working chief)", n)
+		t.Fatalf("PTY inputs = %d, want 0 while approval is pending", n)
 	}
 }
 
