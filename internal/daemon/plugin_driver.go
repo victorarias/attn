@@ -37,6 +37,8 @@ type pluginDriverSpawnParams struct {
 	CWD           string          `json:"cwd"`
 	Label         string          `json:"label,omitempty"`
 	Yolo          bool            `json:"yolo,omitempty"`
+	Model         string          `json:"model,omitempty"`
+	Effort        string          `json:"effort,omitempty"`
 	InitialPrompt string          `json:"initial_prompt,omitempty"`
 	Metadata      json.RawMessage `json:"metadata,omitempty"`
 }
@@ -160,6 +162,8 @@ func validatePluginDriverCapabilities(values map[string]bool) (map[string]bool, 
 		"classifier":       {},
 		"state_reporting":  {},
 		"pending_approval": {},
+		"model_pin":        {},
+		"effort_pin":       {},
 	}
 	out := make(map[string]bool, len(values))
 	for name, enabled := range values {
@@ -182,6 +186,7 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 		if err := d.ensurePluginRegistry().registerDriver(plugin, params); err != nil {
 			return nil, true, err
 		}
+		d.logf("plugin driver registered plugin=%s agent=%s", plugin.name, normalizePluginAgent(params.Agent))
 		d.broadcastSettings("")
 		return pluginDriverRegisterResult{OK: true}, true, nil
 	case "session.report_state":
@@ -395,6 +400,23 @@ func (d *Daemon) finishPluginSessionLaunch(sessionID string, success bool) *ptyb
 	return nil
 }
 
+// abortPluginSessionLaunch closes plugin-owned resources created by a successful
+// driver.spawn/driver.resume response when attn fails before a durable active
+// run exists. In particular, a driver may already have staged a prompt or
+// credential before PTY spawn or session persistence fails.
+func (d *Daemon) abortPluginSessionLaunch(sessionID, reason string) {
+	d.pluginDriverMu.Lock()
+	launch, ok := d.pluginLaunching[sessionID]
+	delete(d.pluginReports, sessionID)
+	delete(d.pluginExits, sessionID)
+	delete(d.pluginLaunching, sessionID)
+	d.pluginDriverMu.Unlock()
+	if !ok {
+		return
+	}
+	d.notifyPluginDriverSessionClosed(launch.PluginName, sessionID, launch.RunID, reason, nil, "")
+}
+
 func (r pendingPluginReport) runID() string {
 	switch {
 	case r.State != nil:
@@ -417,14 +439,18 @@ func (d *Daemon) closePluginDriverSession(sessionID, reason string, exitCode *in
 	if run.RunID == "" {
 		return
 	}
-	plugin := d.ensurePluginRegistry().get(run.PluginName)
+	d.notifyPluginDriverSessionClosed(run.PluginName, sessionID, run.RunID, reason, exitCode, signal)
+}
+
+func (d *Daemon) notifyPluginDriverSessionClosed(pluginName, sessionID, runID, reason string, exitCode *int, signal string) {
+	plugin := d.ensurePluginRegistry().get(pluginName)
 	if plugin == nil {
-		d.logf("plugin session close notification dropped: plugin=%s session=%s run=%s owner disconnected", run.PluginName, sessionID, run.RunID)
+		d.logf("plugin session close notification dropped: plugin=%s session=%s run=%s owner disconnected", pluginName, sessionID, runID)
 		return
 	}
 	params := pluginDriverSessionClosedParams{
 		SessionID: sessionID,
-		RunID:     run.RunID,
+		RunID:     runID,
 		Reason:    strings.TrimSpace(reason),
 		ExitCode:  exitCode,
 		Signal:    strings.TrimSpace(signal),
@@ -434,7 +460,7 @@ func (d *Daemon) closePluginDriverSession(sessionID, reason string, exitCode *in
 		defer cancel()
 		var result pluginDriverSessionClosedResult
 		if err := plugin.request(ctx, "driver.session_closed", params, &result); err != nil {
-			d.logf("plugin session close notification failed: plugin=%s session=%s run=%s err=%v", run.PluginName, sessionID, run.RunID, err)
+			d.logf("plugin session close notification failed: plugin=%s session=%s run=%s err=%v", pluginName, sessionID, runID, err)
 		}
 	}()
 }
@@ -442,6 +468,12 @@ func (d *Daemon) closePluginDriverSession(sessionID, reason string, exitCode *in
 func (d *Daemon) resolvePluginDriverLaunch(reg pluginDriverRegistration, params pluginDriverSpawnParams, resume bool) (pluginDriverSpawnResult, error) {
 	if params.Yolo && !reg.Capabilities["yolo"] {
 		return pluginDriverSpawnResult{}, fmt.Errorf("agent %q does not support yolo launches", reg.Agent)
+	}
+	if params.Model != "" && !reg.Capabilities["model_pin"] {
+		return pluginDriverSpawnResult{}, fmt.Errorf("agent %q does not support model pins", reg.Agent)
+	}
+	if params.Effort != "" && !reg.Capabilities["effort_pin"] {
+		return pluginDriverSpawnResult{}, fmt.Errorf("agent %q does not support effort pins", reg.Agent)
 	}
 	if resume && !reg.Capabilities["resume"] {
 		return pluginDriverSpawnResult{}, fmt.Errorf("agent %q does not support resume", reg.Agent)

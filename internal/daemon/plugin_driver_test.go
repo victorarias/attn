@@ -6,6 +6,7 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -21,8 +22,10 @@ func TestPluginDriverRegister_PublishesDynamicAgentSettings(t *testing.T) {
 	}()
 
 	registerTestPluginDriver(t, client, "snipe", map[string]bool{
-		"resume": true,
-		"yolo":   true,
+		"resume":     true,
+		"yolo":       true,
+		"model_pin":  true,
+		"effort_pin": true,
 	})
 
 	settings := d.settingsWithAgentAvailability()
@@ -31,6 +34,9 @@ func TestPluginDriverRegister_PublishesDynamicAgentSettings(t *testing.T) {
 	}
 	if got := settings["snipe_cap_resume"]; got != "true" {
 		t.Fatalf("snipe_cap_resume=%v, want true", got)
+	}
+	if got := settings["snipe_cap_model_pin"]; got != "true" {
+		t.Fatalf("snipe_cap_model_pin=%v, want true", got)
 	}
 	if err := d.validateNewSessionAgent("snipe"); err != nil {
 		t.Fatalf("validateNewSessionAgent(snipe) error=%v", err)
@@ -46,7 +52,7 @@ func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {
 		_ = client.Close()
 		<-done
 	}()
-	registerTestPluginDriver(t, client, "snipe", map[string]bool{"yolo": true})
+	registerTestPluginDriver(t, client, "snipe", map[string]bool{"yolo": true, "model_pin": true, "effort_pin": true})
 
 	requestDone := make(chan struct{})
 	go func() {
@@ -61,8 +67,8 @@ func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {
 			t.Errorf("decode spawn params: %v", err)
 			return
 		}
-		if params.SessionID != "snipe-session" || !params.Yolo {
-			t.Errorf("spawn params=%+v, want session id and yolo request", params)
+		if params.SessionID != "snipe-session" || !params.Yolo || params.Model != "gpt-5" || params.Effort != "low" {
+			t.Errorf("spawn params=%+v, want session id, yolo, model, and effort request", params)
 			return
 		}
 		if params.RunID == "" {
@@ -86,6 +92,8 @@ func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {
 		Cols:        80,
 		Rows:        24,
 		YoloMode:    protocol.Ptr(true),
+		Model:       protocol.Ptr("gpt-5"),
+		Effort:      protocol.Ptr("low"),
 	})
 	<-requestDone
 
@@ -107,6 +115,69 @@ func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {
 	}
 	if session := d.store.Get("snipe-session"); session.State != protocol.SessionStateWorking {
 		t.Fatalf("stored session state=%q, want working for driver without state_reporting", session.State)
+	}
+}
+
+func TestResolvePluginDriverLaunch_RejectsUnsupportedPins(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	reg := pluginDriverRegistration{Agent: "snipe", Capabilities: map[string]bool{}}
+	for _, params := range []pluginDriverSpawnParams{{Model: "gpt-5"}, {Effort: "low"}} {
+		_, err := d.resolvePluginDriverLaunch(reg, params, false)
+		if err == nil || !strings.Contains(err.Error(), "does not support") {
+			t.Fatalf("resolvePluginDriverLaunch(%+v) error=%v, want pin capability error", params, err)
+		}
+	}
+}
+
+func TestHandleSpawnSession_PluginDriverClosesRunWhenPTYSpawnFails(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &failingSpawnBackend{err: errors.New("pty spawn failed")}
+	client, done := startPluginPipe(t, d, "snipe-plugin", nil)
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, client, "snipe", map[string]bool{})
+
+	closed := make(chan pluginDriverSessionClosedParams, 1)
+	go func() {
+		request := decodeJSONRPCMessage(t, client)
+		if request.Method != "driver.spawn" {
+			t.Errorf("method=%q, want driver.spawn", request.Method)
+			return
+		}
+		respondPluginRequest(t, client, request, pluginDriverSpawnResult{Argv: []string{"snipe"}})
+		request = decodeJSONRPCMessage(t, client)
+		if request.Method != "driver.session_closed" {
+			t.Errorf("method=%q, want driver.session_closed", request.Method)
+			return
+		}
+		var params pluginDriverSessionClosedParams
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			t.Errorf("decode session_closed params: %v", err)
+			return
+		}
+		respondPluginRequest(t, client, request, pluginDriverSessionClosedResult{OK: true})
+		closed <- params
+	}()
+
+	addTestWorkspace(d, "workspace-snipe-failed-spawn", t.TempDir())
+	ws := &wsClient{send: make(chan outboundMessage, 2), attachedStreams: make(map[string]ptybackend.Stream)}
+	d.handleSpawnSession(ws, &protocol.SpawnSessionMessage{
+		ID:          "snipe-failed-spawn",
+		Cwd:         t.TempDir(),
+		WorkspaceID: "workspace-snipe-failed-spawn",
+		Agent:       "snipe",
+		Cols:        80,
+		Rows:        24,
+	})
+
+	params := <-closed
+	if params.SessionID != "snipe-failed-spawn" || params.RunID == "" || params.Reason != "launch_failed" {
+		t.Fatalf("session_closed params=%+v, want failed launch cleanup", params)
+	}
+	if session := d.store.Get("snipe-failed-spawn"); session != nil {
+		t.Fatalf("stored session=%+v after failed PTY spawn, want none", session)
 	}
 }
 

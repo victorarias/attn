@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -18,6 +19,17 @@ type pluginManifestIssue = plugins.ManifestIssue
 
 func discoverPluginManifests(pluginDir string) ([]pluginManifest, []pluginManifestIssue) {
 	return plugins.Discover(pluginDir)
+}
+
+// pluginDirForSocket keeps plugin discovery in the same runtime root as the
+// daemon socket. App-managed daemon restarts route by socket path, so relying
+// only on an inherited ATTN_PROFILE can otherwise make a profile daemon start
+// against the default profile's plugins after a restart.
+func pluginDirForSocket(socketPath string) string {
+	if override := strings.TrimSpace(os.Getenv("ATTN_PLUGIN_DIR")); override != "" {
+		return override
+	}
+	return filepath.Join(filepath.Dir(socketPath), "plugins")
 }
 
 func loadPluginManifest(path string) (pluginManifest, error) {
@@ -90,6 +102,7 @@ func (d *Daemon) ensurePluginProcessRegistry() *pluginProcessRegistry {
 
 func (d *Daemon) startInstalledPlugins() {
 	manifests, issues := discoverPluginManifests(d.pluginDir)
+	d.logf("plugin discovery dir=%s manifests=%d issues=%d", d.pluginDir, len(manifests), len(issues))
 	for _, issue := range issues {
 		d.logf("plugin manifest skipped: %v", issue)
 	}

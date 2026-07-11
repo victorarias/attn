@@ -119,7 +119,7 @@ type HealthResult = {
   ok: boolean;
 };
 
-const pluginAPIVersion = 1;
+const pluginAPIVersion = 2;
 
 export class AttnPluginClient {
   private socket?: Socket;

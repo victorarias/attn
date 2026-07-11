@@ -13,6 +13,7 @@
 //	go run ./scripts/wsctl rm-workspace --id I
 //	go run ./scripts/wsctl add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24]
 //	go run ./scripts/wsctl rm-session --id I
+//	go run ./scripts/wsctl kill-session --id I [--reload]
 //	go run ./scripts/wsctl screen --id I
 //	go run ./scripts/wsctl input --id I --text T [--enter]
 //	go run ./scripts/wsctl list
@@ -54,6 +55,8 @@ func main() {
 		err = addSession(args)
 	case "rm-session":
 		err = rmSession(args)
+	case "kill-session":
+		err = killSession(args)
 	case "screen":
 		err = screen(args)
 	case "input":
@@ -84,6 +87,7 @@ Commands:
   rm-workspace --id I
   add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24]
   rm-session --id I
+  kill-session --id I [--reload]
   screen --id I
   input --id I --text T [--enter]
   list
@@ -237,6 +241,28 @@ func rmSession(args []string) error {
 		return err
 	}
 	fmt.Printf("session removed: id=%s\n", *id)
+	return nil
+}
+
+func killSession(args []string) error {
+	fs := flag.NewFlagSet("kill-session", flag.ExitOnError)
+	id := fs.String("id", "", "session id (required)")
+	reload := fs.Bool("reload", false, "mark the kill as the first half of an in-place reload")
+	fs.Parse(args)
+	if *id == "" {
+		return errors.New("--id is required")
+	}
+	msg := map[string]any{
+		"cmd": "kill_session",
+		"id":  *id,
+	}
+	if *reload {
+		msg["reload"] = true
+	}
+	if err := send(msg); err != nil {
+		return err
+	}
+	fmt.Printf("session killed: id=%s reload=%t\n", *id, *reload)
 	return nil
 }
 
