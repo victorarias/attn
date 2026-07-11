@@ -3,11 +3,11 @@
 /**
  * Real-app scenario: the full "Present" loop in the packaged app.
  *
- * An agent (via the attn CLI, `attn present`) opens a presentation from a
+ * An agent (via the attn CLI, `attn present --wait`) opens a presentation from a
  * manifest -> a notice chip appears in the main window -> clicking the chip
  * opens the second Tauri window (titled "attn — present") -> a reviewer
- * submits a round over the real daemon socket -> the authoring agent reads
- * the feedback back (`attn present feedback --json`).
+ * submits a round over the real daemon socket -> the same blocking CLI call
+ * returns the feedback to the authoring agent.
  *
  * The present window itself carries NO automation bridge, so loop mechanics
  * are asserted via the MAIN-window bridge (present_get_state /
@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
@@ -33,7 +33,7 @@ import { MacOSDriver } from './macosDriver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { buildPresentFixtureRepo } from './presentFixtureRepo.mjs';
 import { getPresentations, getPresentationRound, submitPresentationRound } from './presentDaemon.mjs';
-import { currentHarnessProfile, defaultDaemonPortForProfile } from './harnessProfile.mjs';
+import { currentHarnessProfile, defaultDaemonPortForProfile, socketPathForProfile } from './harnessProfile.mjs';
 
 const HARNESS_DIR = path.dirname(fileURLToPath(import.meta.url));
 // The em dash (U+2014) is load-bearing: it must match the native window title
@@ -67,19 +67,41 @@ function resolveAttnBin() {
   throw new Error('attn binary not found (build ./attn or set ATTN_HARNESS_BIN)');
 }
 
-// Extends scenario-chief-ticket-watch.mjs's makeAttnRunner with a per-call
-// { cwd, extraEnv }: `attn present` reads .present.yml from its cwd and
-// resolves the acting session from ATTN_SESSION_ID (or --session).
-function makeAttnRunner(attnBin, profile) {
-  return function runAttn(args, { cwd, extraEnv } = {}) {
-    const stdout = execFileSync(attnBin, args, {
-      encoding: 'utf8',
-      cwd,
-      env: { ...process.env, ATTN_PROFILE: profile, ...(extraEnv || {}) },
+function startWaitingPresent(attnBin, profile, { cwd, sessionId }) {
+  const child = spawn(attnBin, ['present', '--wait', '--json'], {
+    cwd,
+    env: {
+      ...process.env,
+      ATTN_PROFILE: profile,
+      ATTN_SOCKET_PATH: socketPathForProfile(profile),
+      ATTN_SESSION_ID: sessionId,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+
+  const completion = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code, signal) => {
+      if (code !== 0) {
+        reject(new Error(`attn present --wait exited with code ${code} signal ${signal}: ${stderr}`));
+        return;
+      }
+      const brace = stdout.indexOf('{');
+      resolve({ stdout, stderr, json: brace >= 0 ? JSON.parse(stdout.slice(brace)) : null });
     });
-    const brace = stdout.indexOf('{');
-    return { stdout, json: brace >= 0 ? JSON.parse(stdout.slice(brace)) : null };
-  };
+  });
+  // A later scenario step awaits the original promise. Attach a rejection
+  // observer now as well so cleanup after an earlier failure cannot produce an
+  // unhandled rejection while the harness is unwinding.
+  completion.catch(() => {});
+
+  return { completion, kill: () => child.kill('SIGTERM') };
 }
 
 async function main() {
@@ -92,13 +114,12 @@ async function main() {
   const runner = createScenarioRunner(options, {
     scenarioId: 'PRESENT-FLOW',
     prefix: 'present-flow',
-    metadata: { focus: 'chip -> present window -> submit round -> feedback CLI' },
+    metadata: { focus: 'waiting CLI -> chip -> present window -> submit round -> synchronous feedback' },
   });
 
   const profile = currentHarnessProfile();
   const port = defaultDaemonPortForProfile(profile);
   const attnBin = resolveAttnBin();
-  const runAttn = makeAttnRunner(attnBin, profile);
 
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
@@ -106,6 +127,7 @@ async function main() {
 
   let sessionId = null;
   let presentationId = null;
+  let waitingPresent = null;
 
   try {
     const { repoDir, baseSha, headSha, notedPath } = await runner.step('build_fixture', async () => {
@@ -133,11 +155,20 @@ async function main() {
     });
     runner.registerCleanup('close_session', () => client.request('close_session', { sessionId }));
 
-    presentationId = await runner.step('open_presentation', async () => {
-      const { stdout } = runAttn(['present'], { cwd: repoDir, extraEnv: { ATTN_SESSION_ID: sessionId } });
-      const match = /attn present feedback (\S+)/.exec(stdout);
-      runner.assert(Boolean(match), 'attn present printed a "feedback will arrive via" line with a presentation id', { stdout });
-      const id = match[1];
+    presentationId = await runner.step('open_presentation_and_wait', async () => {
+      const existingIds = new Set((await getPresentations({ port })).map((p) => p.id));
+      waitingPresent = startWaitingPresent(attnBin, profile, { cwd: repoDir, sessionId });
+      runner.registerCleanup('stop_waiting_present', () => waitingPresent?.kill());
+      const opened = await Promise.race([
+        pollFor(async () => {
+          const presentations = await getPresentations({ port });
+          return presentations.find((p) => !existingIds.has(p.id) && p.session_id === sessionId) || null;
+        }, 'attn present --wait to open a presentation', 30_000),
+        waitingPresent.completion.then(({ stdout, stderr }) => {
+          throw new Error(`attn present --wait returned before review: stdout=${stdout} stderr=${stderr}`);
+        }),
+      ]);
+      const id = opened.id;
       const presentations = await getPresentations({ port });
       runner.assert(
         presentations.some((p) => p.id === id),
@@ -210,10 +241,16 @@ async function main() {
       return roundResult.round.submitted_at;
     });
 
-    await runner.step('read_feedback', async () => {
-      const { json } = runAttn(['present', 'feedback', presentationId, '--json']);
-      runner.assert(json && typeof json.markdown === 'string', 'present feedback --json returned a markdown field', json);
-      runner.assert(json.markdown.includes(REVIEWER_COMMENT), 'feedback markdown includes the reviewer note', json.markdown);
+    await runner.step('waiting_cli_receives_feedback', async () => {
+      const { json, stderr } = await waitingPresent.completion;
+      waitingPresent = null;
+      runner.assert(
+        stderr.includes('waiting for review of round'),
+        'attn present --wait reported that it was synchronously waiting',
+        { stderr },
+      );
+      runner.assert(json && typeof json.markdown === 'string', 'attn present --wait returned a markdown field', json);
+      runner.assert(json.markdown.includes(REVIEWER_COMMENT), 'waiting CLI feedback includes the reviewer note', json.markdown);
     });
 
     const summary = runner.finishSuccess({ sessionId, presentationId, window: presentWindow, submittedAt, baseSha, headSha });
@@ -223,6 +260,7 @@ async function main() {
     console.error(summary.error);
     process.exitCode = 1;
   } finally {
+    waitingPresent?.kill();
     if (sessionId) {
       await client.request('close_session', { sessionId }).catch(() => {});
     }

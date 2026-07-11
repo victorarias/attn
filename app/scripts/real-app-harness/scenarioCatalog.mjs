@@ -49,9 +49,9 @@ export const scenarioCatalog = [
   },
   {
     id: 'present-flow',
-    label: 'Present flow: chip → window → submit round → feedback CLI',
+    label: 'Present flow: waiting CLI → window → submit round → synchronous feedback',
     command: ['pnpm', 'run', 'real-app:scenario-present-flow'],
-    // Boots the app + a session + two CLI round-trips + a second native
+    // Boots the app + a session + a blocking CLI handback + a second native
     // window; give it headroom like the other heavy scenarios.
     timeoutMs: 240_000,
   },
