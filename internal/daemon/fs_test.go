@@ -417,6 +417,26 @@ func TestFsReadAssetMaxSizeFitsMessageCap(t *testing.T) {
 	}
 }
 
+// assetMessageFits is the exact per-request wire-size check that guards against
+// an arbitrarily long path pushing a max-size asset's message over the cap. It
+// is a pure function, tested directly here rather than through a real long path
+// on disk: macOS's PATH_MAX (1024) makes a real >4 KiB path uncreatable, but the
+// check itself must still hold for paths far longer than that.
+func TestAssetMessageFitsRejectsLongPath(t *testing.T) {
+	longPath := strings.Repeat("d/", 4096) + "x.png"
+	if fits, err := assetMessageFits("a1", longPath, "image/png", maxAssetBytes); err != nil {
+		t.Fatalf("assetMessageFits(long path): %v", err)
+	} else if fits {
+		t.Fatalf("assetMessageFits(long path) = true, want false")
+	}
+
+	if fits, err := assetMessageFits("a1", "assets/pic.png", "image/png", maxAssetBytes); err != nil {
+		t.Fatalf("assetMessageFits(short path): %v", err)
+	} else if !fits {
+		t.Fatalf("assetMessageFits(short path) = false, want true")
+	}
+}
+
 // An extension outside the image allowlist is rejected before the file is even
 // read, regardless of the file's actual content.
 func TestFsReadAssetUnsupportedExtension(t *testing.T) {
