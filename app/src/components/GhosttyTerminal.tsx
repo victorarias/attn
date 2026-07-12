@@ -78,7 +78,7 @@ import {
   type ResizeCoalescer,
   type TerminalDimensions,
 } from '../utils/ghosttyResize';
-import { buildTerminalQueryResponses, stripDaemonOwnedResponses } from '../utils/terminalQueryResponses';
+import { stripDaemonOwnedResponses } from '../utils/terminalQueryResponses';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog';
 import {
@@ -1319,18 +1319,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         }
         if (!options?.suppressResponses) {
           for (const response of responses) {
-            // CPR (cursor position) and DA1 (device attributes) replies are
-            // owned by the daemon, the geometry/capability authority. Answering
-            // here too would double-reply and the shell reads the extra
-            // ESC[r;cR / ESC[?...c as stray input — and after a reattach the
-            // frontend can miss them entirely, stalling fish's prompt. Strip
-            // both; forward everything else (DSR, OSC color, etc.) the model
-            // produced.
+            // CPR (cursor position), DA1 (device attributes), and OSC 10/11/12
+            // (color) replies are all owned by the daemon-side worker, which
+            // answers them directly from the theme the app pushes down via
+            // set_terminal_theme. Answering here too would double-reply and the
+            // shell reads the extra bytes as stray input — and after a
+            // reattach the frontend can miss them entirely, stalling fish's
+            // prompt. Strip all three; forward everything else (DSR, OSC52,
+            // etc.) the model produced.
             const forwarded = stripDaemonOwnedResponses(response);
             if (forwarded) onInputRef.current(forwarded);
-          }
-          for (const response of buildTerminalQueryResponses(data, resolvedTheme, responses)) {
-            onInputRef.current(response);
           }
         }
         viewportOffsetRef.current = offsetAfterWrite(

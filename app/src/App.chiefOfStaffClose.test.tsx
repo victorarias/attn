@@ -196,6 +196,7 @@ describe('chief-of-staff session is protected from close', () => {
       rateLimit: null,
       warnings: [],
       clearWarnings: fn,
+      sendSetTerminalTheme: fn,
     });
   });
 

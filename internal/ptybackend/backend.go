@@ -3,6 +3,8 @@ package ptybackend
 import (
 	"context"
 	"syscall"
+
+	"github.com/victorarias/attn/internal/pty"
 )
 
 const (
@@ -24,6 +26,10 @@ type SpawnOptions struct {
 	ResumePicker      bool
 	YoloMode          bool
 	InitialPromptFile string
+
+	// Theme seeds the colors the session answers OSC 10/11/12 color queries
+	// with. Zero-value fields fall back to built-in defaults.
+	Theme pty.TerminalTheme
 
 	// Executable is the selected CLI path for opts.Agent.
 	Executable string
@@ -146,6 +152,9 @@ type Backend interface {
 	Attach(ctx context.Context, sessionID, subscriberID string) (AttachInfo, Stream, error)
 	Input(ctx context.Context, sessionID string, data []byte) error
 	Resize(ctx context.Context, sessionID string, cols, rows uint16) error
+	// SetTheme updates the colors the session answers OSC 10/11/12 color
+	// queries with. Best-effort: a worker predating the method returns nil.
+	SetTheme(ctx context.Context, sessionID string, theme pty.TerminalTheme) error
 	// Kill returns nil only after the child process has exited.
 	Kill(ctx context.Context, sessionID string, sig syscall.Signal) error
 	Remove(ctx context.Context, sessionID string) error

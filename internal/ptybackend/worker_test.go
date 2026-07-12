@@ -1294,6 +1294,101 @@ func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
 	t.Fatalf("worker pid %d still alive after spawn failure cleanup", pid)
 }
 
+// TestWorkerBackend_Spawn_PassesThemeFlagsOnlyWhenSet covers the --theme-*
+// flag round-trip in Spawn(): a fake worker binary dumps its argv to a file
+// instead of running, so the assertion never depends on worker readiness.
+func TestWorkerBackend_Spawn_PassesThemeFlagsOnlyWhenSet(t *testing.T) {
+	root := newWorkerBackendTestRoot(t)
+	argsFile := filepath.Join(root, "args.txt")
+	scriptPath := filepath.Join(root, "fake-worker.sh")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > \"$ATTN_TEST_ARGS_FILE\"\n" +
+		"exit 1\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil {
+		t.Fatalf("WriteFile(fake worker script) error: %v", err)
+	}
+	t.Setenv("ATTN_TEST_ARGS_FILE", argsFile)
+
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       scriptPath,
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+
+	prevSpawnReadyTimeout := spawnReadyTimeout
+	spawnReadyTimeout = 2 * time.Second
+	defer func() { spawnReadyTimeout = prevSpawnReadyTimeout }()
+
+	// The fake worker never writes a ready registry, so Spawn always errors —
+	// only the recorded argv (written before exit) matters here.
+	_ = backend.Spawn(context.Background(), SpawnOptions{
+		ID:    "sess-theme-set",
+		Agent: "shell",
+		CWD:   root,
+		Cols:  80,
+		Rows:  24,
+		Theme: pty.TerminalTheme{Foreground: "#aabbcc", Background: "#001122", Cursor: "#334455"},
+	})
+	argv := readSpawnArgsFile(t, argsFile)
+	wantFlags := map[string]string{
+		"--theme-foreground": "#aabbcc",
+		"--theme-background": "#001122",
+		"--theme-cursor":     "#334455",
+	}
+	for flag, want := range wantFlags {
+		if got := argAfterFlag(argv, flag); got != want {
+			t.Fatalf("argv flag %s = %q, want %q (argv=%v)", flag, got, want, argv)
+		}
+	}
+
+	_ = os.Remove(argsFile)
+	_ = backend.Spawn(context.Background(), SpawnOptions{
+		ID:    "sess-theme-unset",
+		Agent: "shell",
+		CWD:   root,
+		Cols:  80,
+		Rows:  24,
+	})
+	argv = readSpawnArgsFile(t, argsFile)
+	for _, flag := range []string{"--theme-foreground", "--theme-background", "--theme-cursor"} {
+		for _, arg := range argv {
+			if arg == flag {
+				t.Fatalf("argv unexpectedly contains %s when Theme is unset (argv=%v)", flag, argv)
+			}
+		}
+	}
+}
+
+func readSpawnArgsFile(t *testing.T, path string) []string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var data []byte
+	var err error
+	for time.Now().Before(deadline) {
+		data, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("timed out reading spawn args file %s: %v", path, err)
+	}
+	return strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+}
+
+func argAfterFlag(argv []string, flag string) string {
+	for i, arg := range argv {
+		if arg == flag && i+1 < len(argv) {
+			return argv[i+1]
+		}
+	}
+	return ""
+}
+
 func TestWorkerBackend_Spawn_ToleratesSlowWorkerBinaryStartup(t *testing.T) {
 	if os.Getenv("ATTN_RUN_WORKER_INTEGRATION") == "" {
 		t.Skip("set ATTN_RUN_WORKER_INTEGRATION=1 to run worker integration test")

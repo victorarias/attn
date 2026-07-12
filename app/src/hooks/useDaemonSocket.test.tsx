@@ -2524,6 +2524,126 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('queues sendSetTerminalTheme until initial_state, then flushes it fire-and-forget', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+
+    // Sent before the daemon handshake completes: must queue, not drop.
+    act(() => {
+      result.current.sendSetTerminalTheme({ foreground: '#d4d4d4', background: '#1e1e1e', cursor: '#d4d4d4' });
+    });
+    expect(ws.sent.map((entry) => JSON.parse(entry))).not.toContainEqual(
+      expect.objectContaining({ cmd: 'set_terminal_theme' }),
+    );
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    await waitFor(() => {
+      expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+        cmd: 'set_terminal_theme',
+        foreground: '#d4d4d4',
+        background: '#1e1e1e',
+        cursor: '#d4d4d4',
+      });
+    });
+
+    unmount();
+  });
+
+  it('re-pushes the last terminal theme on reconnect without a new sendSetTerminalTheme call', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    act(() => {
+      result.current.sendSetTerminalTheme({ foreground: '#d4d4d4', background: '#1e1e1e', cursor: '#d4d4d4' });
+    });
+    await waitFor(() => {
+      expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+        cmd: 'set_terminal_theme',
+        foreground: '#d4d4d4',
+        background: '#1e1e1e',
+        cursor: '#d4d4d4',
+      });
+    });
+
+    // Daemon restarts and drops its in-memory theme; the client reconnects.
+    act(() => {
+      ws.close();
+    });
+    await waitFor(() => {
+      expect(FakeWebSocket.instances).toHaveLength(2);
+    }, { timeout: 2000 });
+    const reconnected = FakeWebSocket.instances[1];
+    await waitFor(() => {
+      expect(reconnected.readyState).toBe(FakeWebSocket.OPEN);
+    });
+
+    act(() => {
+      reconnected.emit({
+        event: 'initial_state',
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    // No new sendSetTerminalTheme call — the re-seed must happen on its own.
+    await waitFor(() => {
+      expect(reconnected.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+        cmd: 'set_terminal_theme',
+        foreground: '#d4d4d4',
+        background: '#1e1e1e',
+        cursor: '#d4d4d4',
+      });
+    });
+
+    unmount();
+  });
+
 });
 
 describe('useDaemonSocket workflow runs', () => {

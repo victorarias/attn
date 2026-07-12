@@ -1,12 +1,12 @@
 package pty
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -15,15 +15,20 @@ import (
 	creackpty "github.com/creack/pty"
 )
 
-// Worker-side debug capture and info probes attach transient/non-interactive
-// subscribers before the real interactive terminal is ready. They should not suppress
-// terminal-query fallbacks such as DA1.
-const debugCaptureSubscriberID = "__attn_debug_capture__"
+// TerminalTheme carries the frontend's resolved terminal colors as "#rrggbb"
+// hex strings. Zero-value fields fall back to built-in dark defaults.
+type TerminalTheme struct {
+	Foreground string
+	Background string
+	Cursor     string
+}
 
+// Default OSC 10/11/12 colors, used for any TerminalTheme field that is empty
+// or fails hex validation. These match the frontend's built-in dark theme.
 const (
-	fallbackOSC10Response      = "\x1b]10;rgb:d4d4/d4d4/d4d4\x1b\\"
-	fallbackOSC11Response      = "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\"
-	startupQueryFallbackWindow = 5 * time.Second
+	defaultThemeForeground = "#d4d4d4"
+	defaultThemeBackground = "#1e1e1e"
+	defaultThemeCursor     = "#d4d4d4"
 )
 
 // infoSnapshotHook is a test-only seam invoked inside info() after the replay
@@ -47,17 +52,25 @@ type sessionSubscriber struct {
 }
 
 type terminalQueries struct {
-	da1   bool
-	cpr   bool
-	osc10 bool
-	osc11 bool
+	da1 bool
+	cpr bool
+	// osc10/osc11/osc12 count OCCURRENCES in the chunk, not presence — a chunk
+	// containing three OSC 11 queries (e.g. a TUI probing color support) must
+	// get three replies, or the caller under-answers and the program hangs
+	// waiting for a reply that already went out for an earlier query. Derived
+	// from oscQueryOrder below.
+	osc10 int
+	osc11 int
+	osc12 int
+	// oscQueryOrder lists the OSC color codes (10/11/12) queried in this
+	// chunk in the order they appeared. Real terminals answer OSC queries in
+	// ask order, and a client that writes a burst of mixed OSC10/11/12
+	// queries and pairs replies positionally depends on that order — a
+	// fixed-order reply (e.g. all OSC10 first) would mispair against it.
+	oscQueryOrder []int
 	// da1BeforeCPR records that the chunk asked DA1 before CPR. Query-driven
 	// programs read replies sequentially, so the daemon answers in ask order.
 	da1BeforeCPR bool
-}
-
-func (q terminalQueries) any() bool {
-	return q.da1 || q.cpr || q.osc10 || q.osc11
 }
 
 type stateDetector interface {
@@ -94,10 +107,11 @@ type Session struct {
 
 	writeMu sync.Mutex
 
-	queryMu          sync.Mutex
-	queryResponses   terminalQueries
-	firstAttachMu    sync.Mutex
-	firstAttachClaim bool
+	// themeMu guards theme, which seeds OSC 10/11/12 (fg/bg/cursor color)
+	// replies. Set at spawn (SpawnOptions.Theme) and updated live via SetTheme;
+	// read from the read loop on every OSC color query.
+	themeMu sync.RWMutex
+	theme   TerminalTheme
 
 	// CLI state detection based on PTY output.
 	detector      stateDetector
@@ -138,16 +152,6 @@ func (s *Session) removeSubscriber(subID string) {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
 	delete(s.subscribers, subID)
-}
-
-func hasInteractiveSubscribers(subscribers map[string]*sessionSubscriber) bool {
-	for id := range subscribers {
-		if id == debugCaptureSubscriberID || strings.HasPrefix(id, "info-") {
-			continue
-		}
-		return true
-	}
-	return false
 }
 
 func (s *Session) fanOut(data []byte, seq uint32) {
@@ -281,33 +285,15 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				data := chunk[:boundary]
 				queries := detectTerminalQueries(data)
 
-				// CPR and DA1 are answered directly by the daemon below — it owns
-				// terminal geometry/capabilities (AGENTS.md pattern #7) and replies
-				// always, race-free, regardless of frontend attach/replay timing.
-				// fish blocks its prompt redraw on the resize-triggered CPR+DA1
-				// until both are answered; after a reattach the frontend can be
-				// mid-remount/replay and miss them, stalling the prompt for fish's
-				// ~10 s query timeout. Only the theme-dependent OSC color queries
-				// remain a startup/unattached fallback: the daemon can spawn shell
-				// PTYs before the interactive terminal is ready (only non-interactive
-				// worker subscribers like debug capture are attached), and fish waits
-				// for these replies before its prompt becomes interactive; shell
-				// prompts can re-issue them shortly after the first attach/resize, so
-				// resends are allowed during the startup window — and a virtualized
-				// running TUI can re-issue them repeatedly while no frontend parser
-				// is attached, so unattached resends are always answered. Once a real
-				// terminal is attached it owns the OSC color replies (they depend on
-				// its theme).
-				oscQueries := queries
-				oscQueries.cpr = false
-				oscQueries.da1 = false
-				if oscQueries.any() {
-					s.subMu.RLock()
-					noInteractiveSubs := !hasInteractiveSubscribers(s.subscribers)
-					s.subMu.RUnlock()
-					if enabled, allowResend, source := s.terminalQueryFallbackMode(time.Now(), noInteractiveSubs); enabled {
-						s.writeTerminalQueryResponses(oscQueries, source, allowResend, logf)
-					}
+				// The worker is the single, always-on responder for CPR, DA1, and
+				// OSC 10/11/12 — race-free regardless of frontend attach/replay
+				// timing, and unaffected by whether an interactive subscriber is
+				// attached. CPR and DA1 are answered below from the screen model
+				// / a static capability string (AGENTS.md pattern #7). OSC 10/11/12
+				// (fg/bg/cursor color) are answered here from the daemon-pushed
+				// theme (see SetTheme); the frontend does not answer any of these.
+				if len(queries.oscQueryOrder) > 0 {
+					s.writeOSCColorResponses(queries, logf)
 				}
 
 				seq := s.seqCounter.Add(1)
@@ -737,128 +723,98 @@ func (s *Session) closePTY() {
 func detectTerminalQueries(data []byte) terminalQueries {
 	da1Idx := indexDA1Query(data)
 	cprIdx := indexCPRQuery(data)
+	oscOrder := scanOSCColorQueries(data)
+	var osc10, osc11, osc12 int
+	for _, code := range oscOrder {
+		switch code {
+		case 10:
+			osc10++
+		case 11:
+			osc11++
+		case 12:
+			osc12++
+		}
+	}
 	return terminalQueries{
-		da1:          da1Idx >= 0,
-		cpr:          cprIdx >= 0,
-		da1BeforeCPR: da1Idx >= 0 && cprIdx >= 0 && da1Idx < cprIdx,
-		osc10:        containsOSCColorQuery(data, "10"),
-		osc11:        containsOSCColorQuery(data, "11"),
+		da1:           da1Idx >= 0,
+		cpr:           cprIdx >= 0,
+		da1BeforeCPR:  da1Idx >= 0 && cprIdx >= 0 && da1Idx < cprIdx,
+		osc10:         osc10,
+		osc11:         osc11,
+		osc12:         osc12,
+		oscQueryOrder: oscOrder,
 	}
 }
 
-func (s *Session) claimTerminalQueryResponses(queries terminalQueries) terminalQueries {
-	s.queryMu.Lock()
-	defer s.queryMu.Unlock()
-
-	responses := terminalQueries{}
-	if queries.da1 && !s.queryResponses.da1 {
-		s.queryResponses.da1 = true
-		responses.da1 = true
-	}
-	if queries.cpr && !s.queryResponses.cpr {
-		s.queryResponses.cpr = true
-		responses.cpr = true
-	}
-	if queries.osc10 && !s.queryResponses.osc10 {
-		s.queryResponses.osc10 = true
-		responses.osc10 = true
-	}
-	if queries.osc11 && !s.queryResponses.osc11 {
-		s.queryResponses.osc11 = true
-		responses.osc11 = true
-	}
-	return responses
+// SetTheme replaces the colors used to answer OSC 10/11/12 queries. Safe to
+// call concurrently with the read loop.
+func (s *Session) SetTheme(theme TerminalTheme) {
+	s.themeMu.Lock()
+	s.theme = theme
+	s.themeMu.Unlock()
 }
 
-func (s *Session) markTerminalQueryResponses(queries terminalQueries) {
-	s.queryMu.Lock()
-	defer s.queryMu.Unlock()
-
-	if queries.da1 {
-		s.queryResponses.da1 = true
-	}
-	if queries.cpr {
-		s.queryResponses.cpr = true
-	}
-	if queries.osc10 {
-		s.queryResponses.osc10 = true
-	}
-	if queries.osc11 {
-		s.queryResponses.osc11 = true
-	}
+func (s *Session) currentTheme() TerminalTheme {
+	s.themeMu.RLock()
+	defer s.themeMu.RUnlock()
+	return s.theme
 }
 
-func (s *Session) withinStartupQueryWindow(now time.Time) bool {
-	if s.startedAt.IsZero() {
-		return false
-	}
-	return now.Sub(s.startedAt) <= startupQueryFallbackWindow
-}
+// writeOSCColorResponses answers every OSC 10/11/12 query in queries.oscQueryOrder,
+// one reply per query in the order the chunk asked — real terminals answer OSC
+// queries in ask order, and a client that writes a burst of mixed OSC10/11/12
+// queries and pairs replies positionally depends on that order.
+func (s *Session) writeOSCColorResponses(queries terminalQueries, logf func(string, ...interface{})) {
+	theme := s.currentTheme()
+	fg := hexColorToOSCValue(theme.Foreground, defaultThemeForeground)
+	bg := hexColorToOSCValue(theme.Background, defaultThemeBackground)
+	cursor := hexColorToOSCValue(theme.Cursor, defaultThemeCursor)
 
-func (s *Session) startupQueryFallbackAllowed(now time.Time) bool {
-	return s.agent == "shell" && s.withinStartupQueryWindow(now)
-}
-
-func (s *Session) terminalQueryFallbackMode(now time.Time, noInteractiveSubs bool) (enabled bool, allowResend bool, source string) {
-	startupFallback := s.startupQueryFallbackAllowed(now)
-	switch {
-	case noInteractiveSubs && startupFallback:
-		return true, true, "read_loop_startup_unattached"
-	case noInteractiveSubs:
-		return true, true, "read_loop_unattached"
-	case startupFallback:
-		return true, true, "read_loop_startup_interactive"
-	default:
-		return false, false, ""
-	}
-}
-
-func (s *Session) claimFirstAttach() bool {
-	s.firstAttachMu.Lock()
-	defer s.firstAttachMu.Unlock()
-	if s.firstAttachClaim {
-		return false
-	}
-	s.firstAttachClaim = true
-	return true
-}
-
-func (s *Session) flushStartupQueryResponses(logf func(string, ...interface{})) {
-	if !s.withinStartupQueryWindow(time.Now()) {
-		return
-	}
-	scrollback, _ := s.scrollback.Snapshot()
-	s.writeTerminalQueryResponses(detectTerminalQueries(scrollback), "first_attach_scrollback", true, logf)
-}
-
-func (s *Session) writeTerminalQueryResponses(queries terminalQueries, source string, allowResend bool, logf func(string, ...interface{})) {
-	var responses terminalQueries
-	if allowResend {
-		responses = queries
-		s.markTerminalQueryResponses(queries)
-	} else {
-		responses = s.claimTerminalQueryResponses(queries)
-	}
-	if !responses.any() {
-		return
-	}
-
-	if responses.osc10 {
-		_, _ = s.ptmx.Write([]byte(fallbackOSC10Response))
-	}
-	if responses.osc11 {
-		_, _ = s.ptmx.Write([]byte(fallbackOSC11Response))
+	for _, code := range queries.oscQueryOrder {
+		switch code {
+		case 10:
+			_, _ = fmt.Fprintf(s.ptmx, "\x1b]10;%s\x1b\\", fg)
+		case 11:
+			_, _ = fmt.Fprintf(s.ptmx, "\x1b]11;%s\x1b\\", bg)
+		case 12:
+			_, _ = fmt.Fprintf(s.ptmx, "\x1b]12;%s\x1b\\", cursor)
+		}
 	}
 
 	if logf != nil {
 		logf(
-			"pty terminal-query fallback: session=%s source=%s osc10=%v osc11=%v",
+			"pty terminal-query reply: session=%s osc10=%d osc11=%d osc12=%d",
 			s.id,
-			source,
-			responses.osc10,
-			responses.osc11,
+			queries.osc10,
+			queries.osc11,
+			queries.osc12,
 		)
 	}
+}
+
+// hexColorToOSCValue converts a "#rrggbb" hex color into the "rgb:RRRR/GGGG/BBBB"
+// value XTerm-style OSC color replies use, doubling each 8-bit channel to
+// 16-bit by repeating its hex pair. Falls back to fallbackHex (assumed valid)
+// when value is malformed or empty.
+func hexColorToOSCValue(value, fallbackHex string) string {
+	if !isValidHexColor(value) {
+		value = fallbackHex
+	}
+	r, g, b := value[1:3], value[3:5], value[5:7]
+	return fmt.Sprintf("rgb:%s%s/%s%s/%s%s", r, r, g, g, b, b)
+}
+
+func isValidHexColor(value string) bool {
+	if len(value) != 7 || value[0] != '#' {
+		return false
+	}
+	for i := 1; i < 7; i++ {
+		c := value[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // writeCursorPositionResponse answers a CPR (cursor position report) query from
@@ -931,12 +887,37 @@ func indexCPRQuery(data []byte) int {
 
 func containsCPRQuery(data []byte) bool { return indexCPRQuery(data) >= 0 }
 
-func containsOSCColorQuery(data []byte, code string) bool {
-	prefix := []byte("\x1b]" + code + ";?")
-	for i := 0; i+len(prefix) <= len(data); i++ {
-		if string(data[i:i+len(prefix)]) == string(prefix) {
-			return true
+// oscColorQueryPrefixes are the recognized OSC color query prefixes (ESC ]
+// <code> ; ?, terminated by BEL or ST — the prefix match is sufficient). An
+// OSC color SET (e.g. "\x1b]11;#000000\x1b\\", no "?") never matches: the
+// prefix requires "?" immediately after ";".
+var oscColorQueryPrefixes = [...]struct {
+	code   int
+	prefix []byte
+}{
+	{10, []byte("\x1b]10;?")},
+	{11, []byte("\x1b]11;?")},
+	{12, []byte("\x1b]12;?")},
+}
+
+// scanOSCColorQueries scans data for non-overlapping OSC 10/11/12 color
+// queries and returns their codes in encounter order — the order real
+// terminals answer in, and the order a positional-pairing client depends on.
+func scanOSCColorQueries(data []byte) []int {
+	var codes []int
+	for i := 0; i < len(data); {
+		matched := false
+		for _, p := range oscColorQueryPrefixes {
+			if i+len(p.prefix) <= len(data) && bytes.Equal(data[i:i+len(p.prefix)], p.prefix) {
+				codes = append(codes, p.code)
+				i += len(p.prefix)
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			i++
 		}
 	}
-	return false
+	return codes
 }

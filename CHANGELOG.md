@@ -19,6 +19,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - Terminals that still end up painted outside their pane now self-heal within seconds — the app detects the mismatch and refits the terminal automatically, and records what it repaired.
 - **Undo and redo now work in the Notebook editor.** ⌘Z and ⇧⌘Z were swallowed by the native Edit menu in the packaged app and never reached the editor; they now undo/redo your edits when the editor has focus. ⇧⌘Z still zooms the active pane when you're not in a text field.
 - **⌘⌥N and ⇧⌘⌥N open the Notebook again.** With Option held, macOS reports a dead-key character instead of the letter, so the notebook shortcuts never matched in the installed app and the keystroke fell through into the terminal. They now match on the physical key.
+- **Three Notebook editor interaction fixes.** The "Send to chief" pill now hangs below your selection instead of covering the line above it; typing works immediately after resolving a save conflict, with no extra click needed; and a note's YAML frontmatter no longer shows stray markdown list bullets while you're editing it.
+- **Relative links between notes now work in the Notebook editor.** A link like `[sibling](foo.md)` now resolves against the linking note's own folder instead of being treated as an external URL, and `#heading` links jump the editor to that heading.
+- **Shell panes no longer print `^[]11;rgb:...` garbage or break interactive prompts.** Tools that query the terminal's colors (`gh pr create`'s template chooser, `glow`, and others) now get an instant answer from the session itself, instead of racing the app to respond.
 
 ## [2026-07-11]
 

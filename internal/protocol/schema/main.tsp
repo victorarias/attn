@@ -1513,6 +1513,15 @@ model PtyResizeMessage {
   rows: int32;
 }
 
+// Pushes the app's resolved terminal theme colors to the daemon. Fire-and-forget:
+// no result event.
+model SetTerminalThemeMessage {
+  cmd: "set_terminal_theme";
+  foreground: string; // "#rrggbb"
+  background: string; // "#rrggbb"
+  cursor: string; // "#rrggbb"
+}
+
 model KillSessionMessage {
   cmd: "kill_session";
   id: string;

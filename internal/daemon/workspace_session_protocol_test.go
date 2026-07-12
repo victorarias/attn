@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -780,6 +781,9 @@ func (b *failingSpawnBackend) Attach(context.Context, string, string) (ptybacken
 }
 func (b *failingSpawnBackend) Input(context.Context, string, []byte) error { return nil }
 func (b *failingSpawnBackend) Resize(context.Context, string, uint16, uint16) error {
+	return nil
+}
+func (b *failingSpawnBackend) SetTheme(context.Context, string, pty.TerminalTheme) error {
 	return nil
 }
 func (b *failingSpawnBackend) Kill(context.Context, string, syscall.Signal) error { return nil }

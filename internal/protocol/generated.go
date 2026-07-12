@@ -3086,6 +3086,20 @@ type SetSettingMessage struct {
 	Value string `json:"value"`
 }
 
+type SetTerminalThemeMessage struct {
+	// Background corresponds to the JSON schema field "background".
+	Background string `json:"background"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Cursor corresponds to the JSON schema field "cursor".
+	Cursor string `json:"cursor"`
+
+	// Foreground corresponds to the JSON schema field "foreground".
+	Foreground string `json:"foreground"`
+}
+
 type SetTicketStatusMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`

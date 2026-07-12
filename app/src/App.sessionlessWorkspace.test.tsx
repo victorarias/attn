@@ -258,6 +258,7 @@ describe('tile-only (sessionless) workspace selection and render', () => {
       rateLimit: null,
       warnings: [],
       clearWarnings: fn,
+      sendSetTerminalTheme: fn,
     });
   });
 
@@ -374,6 +375,22 @@ describe('tile-only (sessionless) workspace selection and render', () => {
       expect(screen.getByTestId('grid-view').getAttribute('data-runtime-ids')).toContain('s2');
       expect(screen.getByTestId('workspace-ws-two').getAttribute('data-live')).toBe('1');
       expect(screen.getByTestId('workspace-ws-three').getAttribute('data-live')).toBe('1');
+    });
+  });
+
+  // The daemon-side worker answers OSC 10/11/12 color queries from the theme
+  // the app pushes down, so App must push it once the socket handshake
+  // completes. Unrelated to the sessionless-workspace regression above, but
+  // reuses the same App-rendering harness.
+  it('sends the resolved terminal theme once the daemon handshake completes', async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mockUseDaemonSocket.mock.results[0]?.value.sendSetTerminalTheme).toHaveBeenCalledWith({
+        foreground: '#d4d4d4',
+        background: '#1e1e1e',
+        cursor: '#d4d4d4',
+      });
     });
   });
 });

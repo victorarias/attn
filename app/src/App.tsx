@@ -86,6 +86,7 @@ import { boundTicketForSession } from './utils/tickets';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import { hideBootSplash } from './utils/bootSplash';
+import { getTerminalTheme } from './utils/terminalSizing';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -589,6 +590,7 @@ function App() {
     tileContents,
     requestTileContent,
     sendRuntimeInput,
+    sendSetTerminalTheme,
     isRuntimeAttached,
     getRepoInfo,
     listWorkflowRuns,
@@ -771,6 +773,7 @@ function App() {
         tileContents={tileContents}
         requestTileContent={requestTileContent}
         sendRuntimeInput={sendRuntimeInput}
+        sendSetTerminalTheme={sendSetTerminalTheme}
         isRuntimeAttached={isRuntimeAttached}
         getRepoInfo={getRepoInfo}
         listWorkflowRuns={listWorkflowRuns}
@@ -881,6 +884,7 @@ interface AppContentProps {
   tileContents: ReturnType<typeof useDaemonSocket>['tileContents'];
   requestTileContent: ReturnType<typeof useDaemonSocket>['requestTileContent'];
   sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
+  sendSetTerminalTheme: ReturnType<typeof useDaemonSocket>['sendSetTerminalTheme'];
   isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
   listWorkflowRuns: ReturnType<typeof useDaemonSocket>['listWorkflowRuns'];
@@ -985,6 +989,7 @@ sendFetchPRDetails,
   tileContents,
   requestTileContent,
   sendRuntimeInput,
+  sendSetTerminalTheme,
   isRuntimeAttached,
   getRepoInfo,
   listWorkflowRuns,
@@ -1145,6 +1150,17 @@ sendFetchPRDetails,
   // Theme (dark/light/system)
   const { preference: themePreference, resolved: resolvedTheme, setTheme } = useTheme();
   const keybindings = useKeybindings();
+
+  // Push the resolved terminal theme to the daemon whenever it changes and
+  // shortly after each (re)connect, so the daemon-side worker can answer OSC
+  // 10/11/12 color queries on the frontend's behalf (see
+  // stripDaemonOwnedResponses in terminalQueryResponses.ts). hasReceivedInitialState
+  // flips on every fresh handshake, so it doubles as the reconnect signal here.
+  useEffect(() => {
+    if (!hasReceivedInitialState) return;
+    const theme = getTerminalTheme(resolvedTheme);
+    sendSetTerminalTheme({ foreground: theme.foreground, background: theme.background, cursor: theme.cursor });
+  }, [hasReceivedInitialState, resolvedTheme, sendSetTerminalTheme]);
 
   // Settings modal (lifted from Dashboard for Cmd+, access)
   const [settingsOpen, setSettingsOpen] = useState(false);

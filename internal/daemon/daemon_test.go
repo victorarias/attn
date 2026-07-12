@@ -599,6 +599,9 @@ func (b *fakeWorkerReconcileBackend) Input(context.Context, string, []byte) erro
 func (b *fakeWorkerReconcileBackend) Resize(context.Context, string, uint16, uint16) error {
 	return nil
 }
+func (b *fakeWorkerReconcileBackend) SetTheme(context.Context, string, pty.TerminalTheme) error {
+	return nil
+}
 func (b *fakeWorkerReconcileBackend) Kill(context.Context, string, syscall.Signal) error { return nil }
 func (b *fakeWorkerReconcileBackend) Remove(context.Context, string) error               { return nil }
 func (b *fakeWorkerReconcileBackend) SessionIDs(context.Context) []string {
@@ -658,6 +661,9 @@ func (b *fakeClearSessionsBackend) Attach(context.Context, string, string) (ptyb
 }
 func (b *fakeClearSessionsBackend) Input(context.Context, string, []byte) error { return nil }
 func (b *fakeClearSessionsBackend) Resize(context.Context, string, uint16, uint16) error {
+	return nil
+}
+func (b *fakeClearSessionsBackend) SetTheme(context.Context, string, pty.TerminalTheme) error {
 	return nil
 }
 func (b *fakeClearSessionsBackend) Kill(_ context.Context, sessionID string, _ syscall.Signal) error {
@@ -1586,6 +1592,9 @@ func (b *fakeAttachBackend) Input(context.Context, string, []byte) error { retur
 func (b *fakeAttachBackend) Resize(context.Context, string, uint16, uint16) error {
 	return nil
 }
+func (b *fakeAttachBackend) SetTheme(context.Context, string, pty.TerminalTheme) error {
+	return nil
+}
 func (b *fakeAttachBackend) Kill(context.Context, string, syscall.Signal) error { return nil }
 func (b *fakeAttachBackend) Remove(context.Context, string) error               { return nil }
 func (b *fakeAttachBackend) SessionIDs(context.Context) []string                { return nil }
@@ -1616,14 +1625,18 @@ func (b *fakeAttachBackend) SetAttachInfo(info ptybackend.AttachInfo) {
 }
 
 type fakeSpawnBackend struct {
-	mu        sync.Mutex
-	spawnOpts []ptybackend.SpawnOptions
-	killed    []string
-	removed   []string
-	onSpawn   func(ptybackend.SpawnOptions)
-	onInput   func(string, []byte)
-	onKill    func()
-	killErr   error
+	mu           sync.Mutex
+	spawnOpts    []ptybackend.SpawnOptions
+	killed       []string
+	removed      []string
+	onSpawn      func(ptybackend.SpawnOptions)
+	onInput      func(string, []byte)
+	onKill       func()
+	killErr      error
+	sessionIDs   []string
+	themeCalls   []pty.TerminalTheme
+	themeCallIDs []string
+	setThemeErr  error
 }
 
 func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions) error {
@@ -1649,6 +1662,13 @@ func (b *fakeSpawnBackend) Input(_ context.Context, id string, data []byte) erro
 	return nil
 }
 func (b *fakeSpawnBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
+func (b *fakeSpawnBackend) SetTheme(_ context.Context, id string, theme pty.TerminalTheme) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.themeCallIDs = append(b.themeCallIDs, id)
+	b.themeCalls = append(b.themeCalls, theme)
+	return b.setThemeErr
+}
 func (b *fakeSpawnBackend) Kill(_ context.Context, id string, _ syscall.Signal) error {
 	b.mu.Lock()
 	b.killed = append(b.killed, id)
@@ -1664,7 +1684,11 @@ func (b *fakeSpawnBackend) Remove(_ context.Context, id string) error {
 	b.removed = append(b.removed, id)
 	return nil
 }
-func (b *fakeSpawnBackend) SessionIDs(context.Context) []string { return nil }
+func (b *fakeSpawnBackend) SessionIDs(context.Context) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.sessionIDs...)
+}
 func (b *fakeSpawnBackend) Recover(context.Context) (ptybackend.RecoveryReport, error) {
 	return ptybackend.RecoveryReport{}, nil
 }

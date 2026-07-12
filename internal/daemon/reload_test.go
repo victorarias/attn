@@ -13,6 +13,7 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
@@ -115,6 +116,9 @@ func (b *fakeReloadBackend) Attach(context.Context, string, string) (ptybackend.
 }
 func (b *fakeReloadBackend) Input(context.Context, string, []byte) error          { return nil }
 func (b *fakeReloadBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
+func (b *fakeReloadBackend) SetTheme(context.Context, string, pty.TerminalTheme) error {
+	return nil
+}
 func (b *fakeReloadBackend) Kill(_ context.Context, id string, _ syscall.Signal) error {
 	b.mu.Lock()
 	b.calls = append(b.calls, "kill:"+id)

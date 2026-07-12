@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '158';
+export const PROTOCOL_VERSION = '160';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -819,6 +819,9 @@ export function useDaemonSocket({
   const selectedWorkspaceRef = useRef<string | null>(null);
   const daemonInstanceIDRef = useRef<string>('');
   const hasReceivedInitialStateRef = useRef(false);
+  // The daemon holds the terminal theme in memory only (no persistence), so
+  // every (re)connect must re-seed it — see the initial_state handler below.
+  const lastTerminalThemeRef = useRef<{ foreground: string; background: string; cursor: string } | null>(null);
   // Once we detect a profile mismatch, we refuse to operate forever — the
   // user must quit and launch the matching app. Never clears inside the
   // session.
@@ -1252,6 +1255,18 @@ export function useDaemonSocket({
             setHasReceivedInitialState(true);
             flushQueuedCommands(ws);
             requestTileContentsForWorkspaces(ws, nextWorkspaces);
+            // The daemon's terminal theme is in-memory only, so a restarted
+            // daemon comes back with no theme — re-push it on every
+            // (re)connect rather than relying on the one-time push from App.
+            if (lastTerminalThemeRef.current && ws.readyState === WebSocket.OPEN) {
+              const theme = lastTerminalThemeRef.current;
+              ws.send(JSON.stringify({
+                cmd: 'set_terminal_theme',
+                foreground: theme.foreground,
+                background: theme.background,
+                cursor: theme.cursor,
+              }));
+            }
             if (ws.readyState === WebSocket.OPEN) {
               // Re-attach PTY streams only after recovery barrier has lifted and
               // initial_state has arrived.
@@ -2841,6 +2856,21 @@ export function useDaemonSocket({
     recordPtyCommand('pty_input', id, data.length, source);
     sendOrQueueCommand(
       { cmd: 'pty_input', id, data, ...(source ? { source } : {}) },
+      { waitForInitialState: true },
+    );
+  }, [sendOrQueueCommand]);
+
+  // Pushes the app's resolved terminal theme colors to the daemon, which uses
+  // them to answer OSC 10/11/12 (foreground/background/cursor) color queries
+  // on behalf of every session — see stripDaemonOwnedResponses in
+  // terminalQueryResponses.ts for why the frontend no longer answers these
+  // itself. Fire-and-forget like sendPtyResize: a dropped send just means the
+  // daemon answers with a stale theme until the next push (on reconnect or
+  // theme change), which self-heals.
+  const sendSetTerminalTheme = useCallback((theme: { foreground: string; background: string; cursor: string }) => {
+    lastTerminalThemeRef.current = theme;
+    sendOrQueueCommand(
+      { cmd: 'set_terminal_theme', foreground: theme.foreground, background: theme.background, cursor: theme.cursor },
       { waitForInitialState: true },
     );
   }, [sendOrQueueCommand]);
@@ -4944,6 +4974,7 @@ export function useDaemonSocket({
     tileContents,
     requestTileContent,
     sendRuntimeInput: sendPtyInput,
+    sendSetTerminalTheme,
     isRuntimeAttached,
     sendGetFileDiff,
     getRepoInfo,

@@ -219,6 +219,12 @@ type Daemon struct {
 	loginShellEnvMu sync.RWMutex
 	loginShellEnv   []string
 
+	// terminalTheme is the daemon-global OSC 10/11/12 color set the frontend
+	// pushed via set_terminal_theme. Seeds every new spawn's SpawnOptions.Theme
+	// and is fanned out to already-live sessions on change (ws_pty.go).
+	terminalThemeMu sync.Mutex
+	terminalTheme   pty.TerminalTheme
+
 	// Workspace registry for Tauri and remote clients. Backed by the store for
 	// workspace identity, session membership, and daemon-owned tile
 	// geometry.
@@ -432,6 +438,19 @@ func (d *Daemon) cachedLoginShellEnv() []string {
 	env := d.loginShellEnv
 	d.loginShellEnvMu.RUnlock()
 	return env
+}
+
+func (d *Daemon) currentTerminalTheme() pty.TerminalTheme {
+	d.terminalThemeMu.Lock()
+	theme := d.terminalTheme
+	d.terminalThemeMu.Unlock()
+	return theme
+}
+
+func (d *Daemon) setCurrentTerminalTheme(theme pty.TerminalTheme) {
+	d.terminalThemeMu.Lock()
+	d.terminalTheme = theme
+	d.terminalThemeMu.Unlock()
 }
 
 // ScrubInheritedAgentSessionEnv strips per-session environment variables leaked

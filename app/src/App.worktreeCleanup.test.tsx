@@ -349,6 +349,7 @@ describe('worktree cleanup prompt', () => {
       rateLimit: null,
       warnings: [],
       clearWarnings: fn,
+      sendSetTerminalTheme: fn,
     };
     mockUseDaemonSocket.mockReturnValue(mockDaemonSocketReturn);
   });
@@ -705,6 +706,7 @@ describe('worktree cleanup prompt', () => {
       rateLimit: null,
       warnings: [],
       clearWarnings: fn,
+      sendSetTerminalTheme: fn,
     });
 
     await act(async () => {

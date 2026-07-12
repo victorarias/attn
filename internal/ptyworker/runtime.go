@@ -79,6 +79,10 @@ type Config struct {
 	YoloMode          bool
 	InitialPromptFile string
 
+	ThemeForeground string
+	ThemeBackground string
+	ThemeCursor     string
+
 	Executable string
 
 	ClaudeExecutable  string
@@ -252,6 +256,11 @@ func (r *Runtime) run(ctx context.Context) error {
 		ResumePicker:      r.cfg.ResumePicker,
 		YoloMode:          r.cfg.YoloMode,
 		InitialPromptFile: r.cfg.InitialPromptFile,
+		Theme: pty.TerminalTheme{
+			Foreground: r.cfg.ThemeForeground,
+			Background: r.cfg.ThemeBackground,
+			Cursor:     r.cfg.ThemeCursor,
+		},
 		Executable:        r.cfg.Executable,
 		ClaudeExecutable:  r.cfg.ClaudeExecutable,
 		CodexExecutable:   r.cfg.CodexExecutable,
@@ -839,6 +848,25 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			return
 		}
 		if err := c.runtime.manager.Resize(c.runtime.cfg.SessionID, params.Cols, params.Rows); err != nil {
+			if errors.Is(err, pty.ErrSessionNotFound) {
+				c.sendError(req.ID, ErrSessionNotFound, err.Error())
+				return
+			}
+			c.sendError(req.ID, ErrIO, err.Error())
+			return
+		}
+		c.sendResult(req.ID, map[string]any{"ok": true})
+	case MethodSetTheme:
+		var params SetThemeParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			c.sendError(req.ID, ErrBadRequest, "invalid set_theme params")
+			return
+		}
+		if err := c.runtime.manager.SetTheme(c.runtime.cfg.SessionID, pty.TerminalTheme{
+			Foreground: params.Foreground,
+			Background: params.Background,
+			Cursor:     params.Cursor,
+		}); err != nil {
 			if errors.Is(err, pty.ErrSessionNotFound) {
 				c.sendError(req.ID, ErrSessionNotFound, err.Error())
 				return

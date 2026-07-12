@@ -428,6 +428,15 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if opts.InitialPromptFile != "" {
 		args = append(args, "--initial-prompt-file", opts.InitialPromptFile)
 	}
+	if opts.Theme.Foreground != "" {
+		args = append(args, "--theme-foreground", opts.Theme.Foreground)
+	}
+	if opts.Theme.Background != "" {
+		args = append(args, "--theme-background", opts.Theme.Background)
+	}
+	if opts.Theme.Cursor != "" {
+		args = append(args, "--theme-cursor", opts.Theme.Cursor)
+	}
 	if opts.Executable != "" {
 		args = append(args, "--executable", opts.Executable)
 	}
@@ -684,6 +693,31 @@ func (b *WorkerBackend) Resize(ctx context.Context, sessionID string, cols, rows
 		return err
 	}
 	return b.callSimple(ctx, session, ptyworker.MethodResize, ptyworker.ResizeParams{Cols: cols, Rows: rows})
+}
+
+// SetTheme is best-effort: a worker that predates the set_theme method
+// rejects it with ErrBadRequest ("unknown method"), the same tolerance
+// pattern isLifecycleWatchUnsupported uses for MethodSnapshot/MethodWatch. A
+// stale worker just keeps answering OSC 10/11/12 queries with whatever theme
+// it was spawned with.
+func (b *WorkerBackend) SetTheme(ctx context.Context, sessionID string, theme pty.TerminalTheme) error {
+	session, err := b.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	err = b.callSimple(ctx, session, ptyworker.MethodSetTheme, ptyworker.SetThemeParams{
+		Foreground: theme.Foreground,
+		Background: theme.Background,
+		Cursor:     theme.Cursor,
+	})
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "unknown method") {
+		b.cfg.Logf("worker backend set_theme unsupported by worker (old worker, ignoring): session=%s", sessionID)
+		return nil
+	}
+	return err
 }
 
 func (b *WorkerBackend) Kill(ctx context.Context, sessionID string, sig syscall.Signal) error {

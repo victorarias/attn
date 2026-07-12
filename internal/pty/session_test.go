@@ -3,66 +3,9 @@ package pty
 import (
 	"errors"
 	"io"
-	"os"
 	"testing"
 	"time"
 )
-
-func TestHasInteractiveSubscribers(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		subscribers map[string]*sessionSubscriber
-		want        bool
-	}{
-		{
-			name:        "none",
-			subscribers: map[string]*sessionSubscriber{},
-			want:        false,
-		},
-		{
-			name: "debug capture only",
-			subscribers: map[string]*sessionSubscriber{
-				debugCaptureSubscriberID: {id: debugCaptureSubscriberID},
-			},
-			want: false,
-		},
-		{
-			name: "info probe only",
-			subscribers: map[string]*sessionSubscriber{
-				"info-123": {id: "info-123"},
-			},
-			want: false,
-		},
-		{
-			name: "mixed debug and info only",
-			subscribers: map[string]*sessionSubscriber{
-				debugCaptureSubscriberID: {id: debugCaptureSubscriberID},
-				"info-123":               {id: "info-123"},
-			},
-			want: false,
-		},
-		{
-			name: "interactive subscriber present",
-			subscribers: map[string]*sessionSubscriber{
-				debugCaptureSubscriberID: {id: debugCaptureSubscriberID},
-				"frontend-pane":          {id: "frontend-pane"},
-			},
-			want: true,
-		},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := hasInteractiveSubscribers(tc.subscribers); got != tc.want {
-				t.Fatalf("hasInteractiveSubscribers() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
 
 func TestContainsCPRQuery(t *testing.T) {
 	t.Parallel()
@@ -100,31 +43,31 @@ func TestContainsCPRQuery(t *testing.T) {
 	}
 }
 
-func TestContainsOSCColorQuery(t *testing.T) {
+func TestScanOSCColorQueriesContainsCode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
 		data []byte
-		code string
+		code int
 		want bool
 	}{
 		{
 			name: "contains osc 10 query",
 			data: []byte("\x1b]10;?\x1b\\"),
-			code: "10",
+			code: 10,
 			want: true,
 		},
 		{
 			name: "contains osc 11 query",
 			data: []byte("\x1b]11;?\x07"),
-			code: "11",
+			code: 11,
 			want: true,
 		},
 		{
 			name: "ignores different osc query",
 			data: []byte("\x1b]11;?\x1b\\"),
-			code: "10",
+			code: 10,
 			want: false,
 		},
 	}
@@ -133,8 +76,16 @@ func TestContainsOSCColorQuery(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := containsOSCColorQuery(tc.data, tc.code); got != tc.want {
-				t.Fatalf("containsOSCColorQuery() = %v, want %v", got, tc.want)
+			codes := scanOSCColorQueries(tc.data)
+			got := false
+			for _, c := range codes {
+				if c == tc.code {
+					got = true
+					break
+				}
+			}
+			if got != tc.want {
+				t.Fatalf("scanOSCColorQueries(%q) contains %d = %v, want %v", tc.data, tc.code, got, tc.want)
 			}
 		})
 	}
@@ -143,9 +94,9 @@ func TestContainsOSCColorQuery(t *testing.T) {
 func TestDetectTerminalQueries(t *testing.T) {
 	t.Parallel()
 
-	queries := detectTerminalQueries([]byte("\x1b[6n...\x1b[c...\x1b]10;?\x1b\\...\x1b]11;?\x07"))
-	if !queries.da1 || !queries.cpr || !queries.osc10 || !queries.osc11 {
-		t.Fatalf("detectTerminalQueries() = %+v, want all queries detected", queries)
+	queries := detectTerminalQueries([]byte("\x1b[6n...\x1b[c...\x1b]10;?\x1b\\...\x1b]11;?\x07...\x1b]12;?\x07"))
+	if !queries.da1 || !queries.cpr || queries.osc10 != 1 || queries.osc11 != 1 || queries.osc12 != 1 {
+		t.Fatalf("detectTerminalQueries() = %+v, want all queries detected once", queries)
 	}
 	if queries.da1BeforeCPR {
 		t.Fatalf("detectTerminalQueries() = %+v, want da1BeforeCPR=false for CPR-first chunk", queries)
@@ -155,158 +106,19 @@ func TestDetectTerminalQueries(t *testing.T) {
 	if !reversed.da1BeforeCPR {
 		t.Fatalf("detectTerminalQueries() = %+v, want da1BeforeCPR=true for DA1-first chunk", reversed)
 	}
-}
 
-func TestClaimTerminalQueryResponsesOnlyOnce(t *testing.T) {
-	t.Parallel()
-
-	session := &Session{}
-	initial := session.claimTerminalQueryResponses(terminalQueries{
-		da1:   true,
-		cpr:   true,
-		osc10: true,
-		osc11: true,
-	})
-	if !initial.da1 || !initial.cpr || !initial.osc10 || !initial.osc11 {
-		t.Fatalf("initial claim = %+v, want all true", initial)
+	// A chunk asking the same OSC color repeatedly must be counted, not just
+	// detected — an under-count leaves later queries in the same chunk
+	// unanswered.
+	repeated := detectTerminalQueries([]byte("\x1b]11;?\x07\x1b]11;?\x07\x1b]11;?\x07"))
+	if repeated.osc11 != 3 {
+		t.Fatalf("detectTerminalQueries() osc11 = %d, want 3", repeated.osc11)
 	}
 
-	second := session.claimTerminalQueryResponses(terminalQueries{
-		da1:   true,
-		cpr:   true,
-		osc10: true,
-		osc11: true,
-	})
-	if second.any() {
-		t.Fatalf("second claim = %+v, want all false", second)
-	}
-}
-
-func TestWithinStartupQueryWindow(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	session := &Session{startedAt: now.Add(-startupQueryFallbackWindow / 2)}
-	if !session.withinStartupQueryWindow(now) {
-		t.Fatal("withinStartupQueryWindow() = false, want true for recent session")
-	}
-
-	expired := &Session{startedAt: now.Add(-startupQueryFallbackWindow - time.Millisecond)}
-	if expired.withinStartupQueryWindow(now) {
-		t.Fatal("withinStartupQueryWindow() = true, want false after startup window")
-	}
-}
-
-func TestTerminalQueryFallbackMode(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	tests := []struct {
-		name              string
-		agent             string
-		startedAt         time.Time
-		noInteractiveSubs bool
-		wantEnabled       bool
-		wantAllowResend   bool
-		wantSource        string
-	}{
-		{
-			name:              "shell interactive during startup",
-			agent:             "shell",
-			startedAt:         now.Add(-startupQueryFallbackWindow / 2),
-			noInteractiveSubs: false,
-			wantEnabled:       true,
-			wantAllowResend:   true,
-			wantSource:        "read_loop_startup_interactive",
-		},
-		{
-			name:              "shell unattached during startup",
-			agent:             "shell",
-			startedAt:         now.Add(-startupQueryFallbackWindow / 2),
-			noInteractiveSubs: true,
-			wantEnabled:       true,
-			wantAllowResend:   true,
-			wantSource:        "read_loop_startup_unattached",
-		},
-		{
-			name:              "non shell unattached can resend",
-			agent:             "codex",
-			startedAt:         now.Add(-startupQueryFallbackWindow / 2),
-			noInteractiveSubs: true,
-			wantEnabled:       true,
-			wantAllowResend:   true,
-			wantSource:        "read_loop_unattached",
-		},
-		{
-			name:              "shell interactive after startup window",
-			agent:             "shell",
-			startedAt:         now.Add(-startupQueryFallbackWindow - time.Millisecond),
-			noInteractiveSubs: false,
-			wantEnabled:       false,
-			wantAllowResend:   false,
-			wantSource:        "",
-		},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			session := &Session{
-				agent:     tc.agent,
-				startedAt: tc.startedAt,
-			}
-			gotEnabled, gotAllowResend, gotSource := session.terminalQueryFallbackMode(now, tc.noInteractiveSubs)
-			if gotEnabled != tc.wantEnabled || gotAllowResend != tc.wantAllowResend || gotSource != tc.wantSource {
-				t.Fatalf(
-					"terminalQueryFallbackMode() = (%v, %v, %q), want (%v, %v, %q)",
-					gotEnabled,
-					gotAllowResend,
-					gotSource,
-					tc.wantEnabled,
-					tc.wantAllowResend,
-					tc.wantSource,
-				)
-			}
-		})
-	}
-}
-
-func TestWriteTerminalQueryResponsesAllowResend(t *testing.T) {
-	t.Parallel()
-
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe() failed: %v", err)
-	}
-	defer reader.Close()
-
-	session := &Session{
-		ptmx: writer,
-	}
-
-	// CPR and DA1 are no longer handled here — the daemon answers both directly
-	// from the read loop (writeCursorPositionResponse / writeDeviceAttributesResponse).
-	// This fallback now covers only the theme-dependent OSC10/OSC11 color queries.
-	queries := terminalQueries{
-		osc11: true,
-	}
-	session.writeTerminalQueryResponses(queries, "startup", true, nil)
-	session.writeTerminalQueryResponses(queries, "startup", true, nil)
-
-	if err := writer.Close(); err != nil {
-		t.Fatalf("writer.Close() failed: %v", err)
-	}
-
-	got, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("io.ReadAll() failed: %v", err)
-	}
-
-	wantOnce := fallbackOSC11Response
-	want := wantOnce + wantOnce
-	if string(got) != want {
-		t.Fatalf("writeTerminalQueryResponses() wrote %q, want %q", string(got), want)
+	// An OSC color SET (no "?") must never be detected as a query.
+	set := detectTerminalQueries([]byte("\x1b]11;#000000\x1b\\"))
+	if set.osc11 != 0 {
+		t.Fatalf("detectTerminalQueries() osc11 = %d, want 0 for a color SET", set.osc11)
 	}
 }
 
