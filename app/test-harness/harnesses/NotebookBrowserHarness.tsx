@@ -82,6 +82,10 @@ const x = 1; // note
 ---
 
 After the rule.
+
+| col a | col b |
+| ----- | ----: |
+| one   | two   |
 `,
 };
 

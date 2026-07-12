@@ -15,6 +15,7 @@ import { EditorView, keymap, type KeyBinding, type ViewUpdate } from '@codemirro
 import { brokenLinks, revalidateBrokenLinks, type ExistsCheck } from './brokenLinks';
 import { frontmatterCard } from './frontmatterCard';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
+import { markdownTables } from './tableWidget';
 import { computeMinimalEdit } from './minimalEdit';
 
 // searchKeymap binds its commands with CodeMirror's "Mod-" modifier, which CM
@@ -213,6 +214,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       syntaxHighlighting(classHighlighter),
       EditorView.lineWrapping,
       frontmatterCard(),
+      markdownTables(),
       liveMarkdownPreview({ onFollowLink }),
       brokenLinks({ existsFile }),
       search({ top: true }),
