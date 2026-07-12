@@ -43,6 +43,11 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-notebook-tile-finder'],
   },
   {
+    id: 'notebook-editor-undo',
+    label: 'Notebook editor undo/redo (native Cmd+Z / Shift+Cmd+Z reach CodeMirror)',
+    command: ['pnpm', 'run', 'real-app:scenario-notebook-editor-undo'],
+  },
+  {
     id: 'autoclose-on-exit',
     label: 'Auto-close on clean exit, keep failed exits',
     command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],

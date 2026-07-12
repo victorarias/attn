@@ -6,6 +6,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-12]
+
+### Fixed
+- **Undo and redo now work in the Notebook editor.** ⌘Z and ⇧⌘Z were swallowed by the native Edit menu in the packaged app and never reached the editor; they now undo/redo your edits when the editor has focus. ⇧⌘Z still zooms the active pane when you're not in a text field.
+- **⌘⌥N and ⇧⌘⌥N open the Notebook again.** With Option held, macOS reports a dead-key character instead of the letter, so the notebook shortcuts never matched in the installed app and the keystroke fell through into the terminal. They now match on the physical key.
+
 ## [2026-07-11]
 
 ### Added

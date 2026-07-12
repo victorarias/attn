@@ -163,7 +163,7 @@ async function main() {
     //    the terminal on dock.
     await waitForFinder(client, true, 'fresh notebook tile auto-opens its finder');
     await driver.activateApp();
-    await driver.pressKey('Escape');
+    await driver.pressKeyCode(53); // Esc — InputDriver's --key map only covers printable keys
     await waitForFinder(client, false, 'Esc dismisses the finder, leaving focus in the tile');
 
     // 4. The REAL native ⌘W. In the packaged app this fires the native "Close Pane"

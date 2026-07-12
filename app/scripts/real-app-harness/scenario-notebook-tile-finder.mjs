@@ -42,16 +42,28 @@ function parseArgs(argv) {
   };
 }
 
-const FINDER_SELECTOR = '.notebook-finder';
+// Scope probes to the ACTIVE workspace: inactive workspaces stay mounted but
+// hidden (warm set), so an unscoped selector can match a stale finder/editor
+// left open by a previous run's workspace and poison presence waits.
+const FINDER_SELECTOR = '.terminal-wrapper.active .notebook-finder';
 
 // The finder overlay is tile-scoped DOM, so capture_screenshot_data(selector)
 // resolves when it is mounted and throws ("selector not found") when it is not —
 // a clean presence probe that doubles as a screenshot of the overlay subtree.
 async function finderPresent(client) {
-  return client
-    .request('capture_screenshot_data', { selector: FINDER_SELECTOR })
-    .then(() => true)
-    .catch(() => false);
+  try {
+    await client.request('capture_screenshot_data', { selector: FINDER_SELECTOR });
+    return true;
+  } catch (error) {
+    if (String(error).includes('Screenshot selector not found in DOM')) {
+      return false;
+    }
+    // The selector resolved but the capture itself failed — html-to-image can
+    // throw on some subtrees (e.g. CodeMirror's .cm-content). We asked about
+    // presence, and the bridge only emits the "not found" error when the
+    // element is genuinely absent, so treat any other failure as present.
+    return true;
+  }
 }
 
 async function waitForFinder(client, present, description, timeoutMs = 10_000) {
@@ -185,7 +197,7 @@ async function main() {
     // 4. Esc must CLOSE the finder. If it doesn't, focus was not inside the tile
     //    (e.g. the terminal stole it on dock) — a real bug, surfaced here.
     await driver.activateApp();
-    await driver.pressKey('Escape');
+    await driver.pressKeyCode(53); // Esc — InputDriver's --key map only covers printable keys
     await waitForFinder(client, false, 'Esc dismisses the finder');
 
     // 5. Native ⌘P must RE-SUMMON it. This proves both that ⌘P reaches the WebView
