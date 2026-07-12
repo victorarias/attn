@@ -99,8 +99,14 @@ export const SHORTCUTS = {
   'ui.resetFontSize': { key: '0', meta: true },
 
   // Notebook (meta+alt+N is free — the only meta+alt combos are the pane-focus arrows)
-  'notebook.openTile': { key: 'n', meta: true, alt: true },
-  'notebook.openFullscreen': { key: 'n', meta: true, alt: true, shift: true },
+  // Option-modified letters need a `code` fallback: with ⌥ held, macOS/WebKit
+  // reports the dead-key character ('˜'/'Dead') as e.key, never 'n', so a
+  // key-only match can never fire on a real (or CGEvent) keystroke — the key
+  // falls through into the terminal PTY. matchesShortcut's e.code branch
+  // matches the physical key regardless of that translation. Browser e2e
+  // can't catch the broken state: Playwright synthesizes key:'n' directly.
+  'notebook.openTile': { key: 'n', code: 'KeyN', meta: true, alt: true },
+  'notebook.openFullscreen': { key: 'n', code: 'KeyN', meta: true, alt: true, shift: true },
 
   // Tickets board (fullscreen surface). meta+shift+T parallels meta+T = new workspace.
   'board.open': { key: 't', meta: true, shift: true },

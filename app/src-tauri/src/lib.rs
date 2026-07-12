@@ -542,6 +542,7 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
 
             let is_close_window = text == "Close Window";
             let is_redo = text == "Redo";
+            let is_undo = text == "Undo";
 
             if is_close_window {
                 submenu.remove_at(position)?;
@@ -550,13 +551,16 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
                     submenu.insert(&close_active_pane, position)?;
                     inserted_close_active_pane = true;
                 }
-            } else if is_redo && is_edit_menu {
-                // Drop the predefined Redo item so it stops claiming the ⇧⌘Z key
-                // equivalent. With Redo gone the key reaches the WebView, where the
-                // shortcut resolver routes ⇧⌘Z to terminal.toggleZoom — honoring any
-                // user rebinding, exactly like every other DOM shortcut. The macOS
-                // menu would otherwise swallow ⇧⌘Z and "Zoom active pane" did nothing
-                // in packaged builds.
+            } else if (is_redo || is_undo) && is_edit_menu {
+                // Drop the predefined Undo/Redo items so they stop claiming the ⌘Z/⇧⌘Z
+                // key equivalents. With them gone both keys reach the WebView: inside the
+                // notebook editor CodeMirror's history keymap handles undo/redo (its
+                // contenteditable is an editable target, so the DOM shortcut resolver
+                // yields ⇧⌘Z to it instead of terminal.toggleZoom), WebKit still handles
+                // undo natively in plain inputs/textareas, and outside editable targets
+                // ⇧⌘Z keeps dispatching terminal.toggleZoom through the resolver —
+                // honoring user rebindings. The menu items would otherwise swallow both
+                // keys in packaged builds (editor undo was dead, zoom did nothing).
                 submenu.remove_at(position)?;
             }
         }
