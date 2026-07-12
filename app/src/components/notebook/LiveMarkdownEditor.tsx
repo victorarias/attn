@@ -13,6 +13,7 @@ import { closeSearchPanel, search, searchKeymap, searchPanelOpen } from '@codemi
 import { classHighlighter } from '@lezer/highlight';
 import { EditorView, keymap, type KeyBinding, type ViewUpdate } from '@codemirror/view';
 import { brokenLinks, revalidateBrokenLinks, type ExistsCheck } from './brokenLinks';
+import { formattingKeymap } from './formatting';
 import { frontmatterCard } from './frontmatterCard';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
 import { markdownTables } from './tableWidget';
@@ -219,6 +220,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       brokenLinks({ existsFile }),
       search({ top: true }),
       keymap.of(macSearchKeymap),
+      formattingKeymap(),
       editorTheme,
     ],
     [onFollowLink, existsFile],

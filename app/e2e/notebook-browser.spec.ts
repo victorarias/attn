@@ -284,4 +284,61 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await expect(table).not.toBeVisible();
     await expect(page.locator('.cm-content')).toContainText('| one');
   });
+
+  // CodeMirror renders each line as one text node, so a text-content locator can't
+  // isolate a single word for dblclick; find the word's on-screen rect via a DOM
+  // Range instead and double-click its center.
+  async function dblclickWord(page: import('@playwright/test').Page, word: string) {
+    const wordRect = await page.evaluate((needle) => {
+      const walker = document.createTreeWalker(document.querySelector('.cm-content')!, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const idx = node.textContent?.indexOf(needle) ?? -1;
+        if (idx === -1) continue;
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + needle.length);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      }
+      return null;
+    }, word);
+    if (!wordRect) throw new Error(`could not locate "${word}" in the editor`);
+    await page.mouse.dblclick(wordRect.x, wordRect.y);
+  }
+
+  test('Cmd+B/I/E toggle bold, italic, and inline code on a double-clicked word', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+
+    await page.getByRole('treeitem', { name: 'fences.md' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'fences' })).toBeVisible();
+
+    const content = page.locator('.cm-content');
+
+    await dblclickWord(page, 'fenced');
+    await page.keyboard.press('Meta+b');
+    await expect(content).toContainText('**fenced**');
+    await page.keyboard.press('Meta+b');
+    await expect(content).not.toContainText('**fenced**');
+    await expect(content).toContainText('A fenced code block');
+
+    // Regression coverage for a real bug: basicSetup's defaultKeymap binds Mod-i to
+    // selectParentSyntax with preventDefault, which shadows Cmd-i at default keymap
+    // precedence unless formattingKeymap() is raised via Prec.high. Only a real keydown
+    // through the full extension stack (not a headless-state unit test) can catch this.
+    await dblclickWord(page, 'blockquote');
+    await page.keyboard.press('Meta+i');
+    await expect(page.locator('.cm-md-em')).toBeVisible();
+    await page.keyboard.press('Meta+i');
+    await expect(page.locator('.cm-md-em')).toHaveCount(0);
+    await expect(content).toContainText('a blockquote');
+
+    await dblclickWord(page, 'horizontal');
+    await page.keyboard.press('Meta+e');
+    await expect(page.locator('.cm-md-code')).toBeVisible();
+    await page.keyboard.press('Meta+e');
+    await expect(page.locator('.cm-md-code')).toHaveCount(0);
+    await expect(content).toContainText('a horizontal rule');
+  });
 });

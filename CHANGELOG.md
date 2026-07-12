@@ -12,6 +12,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Find in a note.** ⌘F inside the Notebook editor opens an in-editor search panel (matches highlighted, Enter/⇧Enter to step). Esc closes the panel first; ⌘F still opens terminal search when you're not in a text field.
 - **Richer live-preview rendering in the Notebook editor.** Code fences now get language syntax highlighting, and blockquotes and horizontal rules render styled instead of as raw markers.
 - **Markdown tables in the Notebook editor** now render as real tables, with raw source revealed for editing when the cursor is inside (click a row to edit it).
+- **⌘B/⌘I/⌘E toggle bold, italic, and inline code in the Notebook editor.** Wraps the selection or the word under the cursor; press again to remove.
 
 ### Fixed
 - **Terminal panes no longer get stuck at a stale size.** Some panes could stay rendered at a stale, historical size after a session reattach — bottom or right edges painted outside the pane — until the pane was reopened. They now recover on their own.
