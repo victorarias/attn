@@ -344,3 +344,176 @@ describe('bottom-clip detector', () => {
     expect(ringEventsFor(pane).filter((event) => event.kind === 'incident')).toHaveLength(0);
   });
 });
+
+describe('clip repair watchdog', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('attn:terminal-diagnostics', '1');
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const probeWith = (over: Partial<RenderProbe>): RenderProbe => ({
+    cols: 80,
+    rows: 24,
+    modelPrintable: 100,
+    lastPaintAt: Date.now(),
+    lastPaintQuads: 100,
+    active: true,
+    ...over,
+  });
+
+  // A grid one row taller than its container — 26 rows at 21px, 540px client
+  // height, so floor(540/21)=25 rows fit and there is a persistent 6px spill.
+  const clippingGeometry: Partial<RenderProbe> = {
+    rows: 26, cellHeight: 21, clientHeight: 540, cellWidth: 9, clientWidth: 720,
+    session: 's-repair',
+  };
+  const fittingGeometry: Partial<RenderProbe> = {
+    rows: 25, cellHeight: 21, clientHeight: 525, cellWidth: 9, clientWidth: 720,
+    session: 's-repair',
+  };
+
+  it('waits for the 3rd consecutive clipping sweep before the first repair', () => {
+    const pane = 'pane-repair-persistent';
+    const repair = vi.fn();
+    const unregister = registerRenderProbe(pane, () => probeWith(clippingGeometry), repair);
+    try {
+      vi.advanceTimersByTime(1600);
+      vi.advanceTimersByTime(1600);
+      expect(repair).toHaveBeenCalledTimes(0);
+
+      vi.advanceTimersByTime(1600);
+      expect(repair).toHaveBeenCalledTimes(1);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('never repairs a clip that clears on the 2nd sweep', () => {
+    const pane = 'pane-repair-transient';
+    const repair = vi.fn();
+    let clipping = true;
+    const unregister = registerRenderProbe(
+      pane,
+      () => probeWith(clipping ? clippingGeometry : fittingGeometry),
+      repair,
+    );
+    try {
+      vi.advanceTimersByTime(1600); // sweep 1: clipping
+      clipping = false;
+      vi.advanceTimersByTime(1600); // sweep 2: clear
+      vi.advanceTimersByTime(20000); // long tail, in case a stray timer fires late
+
+      expect(repair).toHaveBeenCalledTimes(0);
+    } finally {
+      unregister();
+    }
+  });
+
+  // Sweep ticks land on multiples of BOTTOM_CLIP_SWEEP_MS (1500ms). A repair
+  // only fires once Date.now() >= nextAttemptAtMs AT a sweep tick, so the
+  // observed delay is the backoff rounded UP to the next tick, never short of it.
+  it('backs off 3000ms before the 2nd repair and 10000ms before the 3rd, with the clip persisting', () => {
+    const pane = 'pane-repair-backoff';
+    const repair = vi.fn();
+    const unregister = registerRenderProbe(pane, () => probeWith(clippingGeometry), repair);
+    try {
+      vi.advanceTimersByTime(4500); // t=4500: 3rd sweep -> 1st repair fires
+      expect(repair).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(1500); // t=6000, only 1500ms after the 1st repair
+      expect(repair).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(1500); // t=7500, 3000ms after the 1st repair
+      expect(repair).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(9000); // t=16500, 9000ms after the 2nd repair (< 10000ms)
+      expect(repair).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(1500); // t=18000, first tick >= 10000ms after the 2nd repair
+      expect(repair).toHaveBeenCalledTimes(3);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('gives up after 3 failed repairs and records exactly one give-up incident', () => {
+    const pane = 'pane-repair-give-up';
+    const repair = vi.fn();
+    const unregister = registerRenderProbe(pane, () => probeWith(clippingGeometry), repair);
+    try {
+      vi.advanceTimersByTime(4500); // t=4500: 1st repair
+      vi.advanceTimersByTime(3000); // t=7500: 2nd repair (3000ms backoff)
+      vi.advanceTimersByTime(10500); // t=18000: first tick >= 10000ms after the 2nd -> 3rd repair
+      expect(repair).toHaveBeenCalledTimes(3);
+
+      vi.advanceTimersByTime(60000); // clip persists well past the 3rd attempt's backoff
+      expect(repair).toHaveBeenCalledTimes(3); // no 4th attempt — the watchdog gave up
+
+      const giveUps = ringEventsFor(pane)
+        .filter((event) => event.kind === 'incident' && event.reason === 'bottom_clip_repair_gave_up');
+      expect(giveUps).toHaveLength(1);
+      expect(giveUps[0]?.attempts).toBe(3);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('carries repairAttempts on the resolution incident after one repair fired', () => {
+    const pane = 'pane-repair-resolved';
+    const repair = vi.fn();
+    let clipping = true;
+    const unregister = registerRenderProbe(
+      pane,
+      () => probeWith(clipping ? clippingGeometry : fittingGeometry),
+      repair,
+    );
+    try {
+      vi.advanceTimersByTime(4500); // 3 sweeps: 1st repair fires
+      expect(repair).toHaveBeenCalledTimes(1);
+      clipping = false;
+      vi.advanceTimersByTime(1600); // clip clears
+
+      const resolved = ringEventsFor(pane)
+        .filter((event) => event.kind === 'incident' && event.reason === 'bottom_clip_resolved');
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]?.repairAttempts).toBe(1);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('never repairs an inactive pane even with overflowing geometry', () => {
+    const pane = 'pane-repair-inactive';
+    const repair = vi.fn();
+    const unregister = registerRenderProbe(
+      pane,
+      () => probeWith({ ...clippingGeometry, active: false }),
+      repair,
+    );
+    try {
+      vi.advanceTimersByTime(20000);
+      expect(repair).toHaveBeenCalledTimes(0);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('still logs bottom_clip incidents (and does not throw) for a pane with no repair handler', () => {
+    const pane = 'pane-repair-none';
+    const unregister = registerRenderProbe(pane, () => probeWith(clippingGeometry));
+    try {
+      expect(() => {
+        vi.advanceTimersByTime(20000);
+      }).not.toThrow();
+
+      const incidents = ringEventsFor(pane).filter((event) => event.kind === 'incident' && event.reason === 'bottom_clip');
+      expect(incidents).toHaveLength(1);
+    } finally {
+      unregister();
+    }
+  });
+});

@@ -1881,6 +1881,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             canvasPixelWidth: activeCanvas?.width ?? null,
             canvasPixelHeight: activeCanvas?.height ?? null,
           };
+        }, () => {
+          // Watchdog repair: re-assert container-truth geometry. fit() self-bails
+          // (sameSize / inactiveSession) so a spurious call is harmless; a fresh
+          // queued replay defers it via the replayPending skip, and the staleness
+          // bound guarantees a lying queue cannot defer it forever.
+          fitRef.current();
         });
         inputRef.current = new InputHandler(
           ghostty,
