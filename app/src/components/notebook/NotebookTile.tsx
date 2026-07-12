@@ -23,6 +23,7 @@ export function NotebookTile({
       readFile={daemon.readFile}
       writeFile={daemon.writeFile}
       existsFile={daemon.existsFile}
+      readAsset={daemon.readAsset}
       backlinksNotebook={daemon.backlinksNotebook}
       sendToChief={daemon.sendToChief}
       changeSignal={daemon.changeSignal}

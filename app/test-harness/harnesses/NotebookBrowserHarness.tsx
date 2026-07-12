@@ -15,12 +15,18 @@ import { NotebookBrowser } from '../../src/components/NotebookBrowser';
 import type {
   FsEntry,
   FsExistsResult,
+  FsReadAssetResult,
   FsReadResult,
   FsWriteResult,
   NotebookEntry,
   NotebookSendToChiefResult,
 } from '../../src/hooks/useDaemonSocket';
 import type { HarnessProps } from '../types';
+
+// A valid, minimal 1x1 transparent PNG — the "resolvable" asset the readAsset mock
+// returns for assets/tiny.png. Any other path is treated as missing.
+const TINY_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 // A small fixture filesystem: a PARA-shaped notebook root with nested folders, a
 // markdown index, a plain text file, and a binary file (placeholder). listDir
@@ -35,6 +41,7 @@ const TREE: Record<string, FsEntry[]> = {
     // out of listFiles/TREE offsets that other tests already depend on (e.g. the Cmd+P
     // finder's fixed option count and index.md's heading/scroll offsets).
     { path: 'fences.md', name: 'fences.md', isDir: false, size: 96 },
+    { path: 'images.md', name: 'images.md', isDir: false, size: 64 },
   ],
   journal: [{ path: 'journal/2026-06-20.md', name: '2026-06-20.md', isDir: false, size: 20 }],
   knowledge: [
@@ -67,6 +74,12 @@ ${INDEX_FILLER}
 ### Subsection detail
 
 ${INDEX_FILLER}
+`,
+  'images.md': `# Images
+
+![tiny](assets/tiny.png)
+
+![gone](assets/missing.png)
 `,
   'notes.txt': 'Plain text scratch file.\nNo markdown affordances here — just edit and autosave.\n',
   'fences.md': `# Fences
@@ -129,6 +142,16 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
     // broken-link flag fires here (broken links have their own dedicated harness).
     return { path, exists: true };
   }, []);
+  // Serves the live editor's inline image widget: assets/tiny.png resolves to a real
+  // (tiny) PNG; anything else — e.g. assets/missing.png — rejects, so the widget
+  // renders its broken placeholder.
+  const readAsset = useCallback(async (path: string): Promise<FsReadAssetResult> => {
+    window.__HARNESS__.recordCall('readAsset', [path]);
+    if (path === 'assets/tiny.png') {
+      return { path, mimeType: 'image/png', dataBase64: TINY_PNG_BASE64 };
+    }
+    throw new Error(`asset not found: ${path}`);
+  }, []);
   const sendToChief = useCallback(async (selection: string, sourcePath?: string): Promise<NotebookSendToChiefResult> => {
     window.__HARNESS__.recordCall('sendToChief', [selection, sourcePath]);
     return { path: 'inbox.md', nudged: false };
@@ -168,6 +191,7 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
       backlinksNotebook={backlinksNotebook}
       writeFile={writeFile}
       existsFile={existsFile}
+      readAsset={readAsset}
       sendToChief={sendToChief}
       listFiles={listFiles}
       changeSignal={changeSignal}

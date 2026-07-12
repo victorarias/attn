@@ -1,4 +1,4 @@
-import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
+import type { FsEntry, FsExistsResult, FsReadAssetResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
 import { NotebookSurface } from './NotebookSurface';
 
 // parseNotebookHref / NotebookHref moved to NotebookSurface with the rest of the
@@ -20,6 +20,8 @@ interface NotebookBrowserProps {
   // Check whether an in-notebook link target exists (no read), to flag broken links
   // in the editor. Only consulted for markdown notes.
   existsFile: (path: string) => Promise<FsExistsResult>;
+  // Read an image asset's bytes (base64) for the live editor's inline image widget.
+  readAsset: (path: string) => Promise<FsReadAssetResult>;
   // Backlinks ("Linked from") for a markdown note. Notebook-specific (walks .md link
   // graphs), so it is only consulted for .md files.
   backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
