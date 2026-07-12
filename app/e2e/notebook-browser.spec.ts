@@ -284,4 +284,40 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await expect(table).not.toBeVisible();
     await expect(page.locator('.cm-content')).toContainText('| one');
   });
+
+  test('Cmd+B toggles bold on the word under a double-clicked selection', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+
+    await page.getByRole('treeitem', { name: 'fences.md' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'fences' })).toBeVisible();
+
+    const content = page.locator('.cm-content');
+    // CodeMirror renders each line as one text node, so a text-content locator can't
+    // isolate a single word for dblclick; find the word's on-screen rect via a DOM
+    // Range instead and double-click its center.
+    const wordRect = await page.evaluate(() => {
+      const walker = document.createTreeWalker(document.querySelector('.cm-content')!, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const idx = node.textContent?.indexOf('fenced') ?? -1;
+        if (idx === -1) continue;
+        const range = document.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + 'fenced'.length);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      }
+      return null;
+    });
+    if (!wordRect) throw new Error('could not locate "fenced" in the editor');
+    await page.mouse.dblclick(wordRect.x, wordRect.y);
+
+    await page.keyboard.press('Meta+b');
+    await expect(content).toContainText('**fenced**');
+
+    await page.keyboard.press('Meta+b');
+    await expect(content).not.toContainText('**fenced**');
+    await expect(content).toContainText('A fenced code block');
+  });
 });
