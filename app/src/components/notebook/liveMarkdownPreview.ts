@@ -51,6 +51,8 @@ const DECORATION_MARGIN = 5000;
 // A line decoration applied to every row of a fenced code block, giving the block a
 // contiguous monospace panel (the fences stay visible but dimmed, so nothing shifts).
 const CODEBLOCK_LINE = Decoration.line({ class: 'cm-md-codeblock' });
+// A line decoration applied to every row of a blockquote, mirroring CODEBLOCK_LINE.
+const BLOCKQUOTE_LINE = Decoration.line({ class: 'cm-md-blockquote' });
 
 function linkMark(href: string): Decoration {
   return Decoration.mark({
@@ -100,6 +102,21 @@ class CheckboxWidget extends WidgetType {
   // Let the mousedown reach the editor-level handler so a click toggles the task.
   ignoreEvent() {
     return false;
+  }
+}
+
+// Replaces a horizontal rule (`---`) with a styled divider. All instances render
+// identically, so there is no state to compare in `eq`.
+class HrWidget extends WidgetType {
+  readonly cls = 'cm-md-hr';
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = this.cls;
+    span.setAttribute('aria-hidden', 'true');
+    return span;
   }
 }
 
@@ -172,6 +189,32 @@ export function buildDecorations(
       if (name === 'CodeInfo') {
         // The language tag after the opening fence (```ts) — dim it like the fence.
         decos.push(CODEINFO.range(node.from, node.to));
+        return;
+      }
+
+      // ---- block: blockquotes ----
+      if (name === 'Blockquote') {
+        // Mirror FencedCode: give every row of the block the quote panel. Do NOT
+        // return here — nested content (including a nested Blockquote) must still be
+        // walked so its own marks and styling apply.
+        const firstLine = doc.lineAt(node.from).number;
+        const lastLine = doc.lineAt(Math.max(node.from, node.to - 1)).number;
+        for (let n = firstLine; n <= lastLine; n += 1) {
+          decos.push(BLOCKQUOTE_LINE.range(doc.line(n).from));
+        }
+      }
+      if (name === 'QuoteMark') {
+        if (onActiveLine(node.from)) return; // reveal the raw '>' for editing
+        let to = node.to;
+        if (doc.sliceString(to, to + 1) === ' ') to += 1;
+        decos.push(HIDE.range(node.from, to));
+        return;
+      }
+
+      // ---- block: horizontal rule ----
+      if (name === 'HorizontalRule') {
+        if (onActiveLine(node.from)) return; // reveal the raw '---' for editing
+        decos.push(Decoration.replace({ widget: new HrWidget() }).range(node.from, node.to));
         return;
       }
 
@@ -309,6 +352,43 @@ const baseTheme = EditorView.baseTheme({
   // The ``` fences and the language tag: quiet chrome, not prose.
   '.cm-md-codefence': { opacity: '0.5' },
   '.cm-md-codeinfo': { opacity: '0.5', fontStyle: 'italic' },
+  // Blockquote: a left rule across its rows, like an Obsidian/GitHub quote panel.
+  '.cm-md-blockquote': {
+    borderLeft: '3px solid var(--accent, #ff6b35)',
+    paddingLeft: '10px',
+    color: 'var(--color-text-secondary, #b8b8b8)',
+  },
+  // Horizontal rule: a full-width divider replacing the raw '---'.
+  '.cm-md-hr': {
+    display: 'inline-block',
+    width: '100%',
+    height: '1px',
+    verticalAlign: 'middle',
+    background: 'var(--color-border, rgba(127,127,127,0.35))',
+  },
+  // classHighlighter's stable tok-* classes, scoped to fenced code blocks only — the
+  // live-preview decorations above own everything outside a fence.
+  '.cm-md-codeblock .tok-keyword': { color: 'var(--syntax-keyword, #c678dd)' },
+  '.cm-md-codeblock .tok-string, .cm-md-codeblock .tok-string2': {
+    color: 'var(--syntax-string, #98c379)',
+  },
+  '.cm-md-codeblock .tok-comment': {
+    color: 'var(--syntax-comment, #7f848e)',
+    fontStyle: 'italic',
+  },
+  '.cm-md-codeblock .tok-number': { color: 'var(--syntax-number, #d19a66)' },
+  '.cm-md-codeblock .tok-bool, .cm-md-codeblock .tok-atom': {
+    color: 'var(--syntax-atom, #56b6c2)',
+  },
+  '.cm-md-codeblock .tok-typeName, .cm-md-codeblock .tok-className, .cm-md-codeblock .tok-namespace': {
+    color: 'var(--syntax-type, #e5c07b)',
+  },
+  '.cm-md-codeblock .tok-propertyName': { color: 'var(--syntax-property, #e06c75)' },
+  '.cm-md-codeblock .tok-variableName2': { color: 'var(--syntax-function, #61afef)' },
+  '.cm-md-codeblock .tok-operator, .cm-md-codeblock .tok-punctuation': {
+    color: 'var(--color-text-secondary, #b8b8b8)',
+  },
+  '.cm-md-codeblock .tok-meta': { opacity: '0.7' },
 });
 
 export function liveMarkdownPreview(options: LiveMarkdownOptions = {}): Extension {

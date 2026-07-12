@@ -186,4 +186,44 @@ describe('liveMarkdownPreview decorations', () => {
     expect(hasClass(decos, 'cm-md-codeinfo')).toBe(true);
     expect(hasClass(decos, 'cm-md-code')).toBe(false);
   });
+
+  it('paints every line of a multi-line blockquote and hides its ">" marks off the active line', () => {
+    const doc = '> line one\n> line two\n\nbody';
+    const decos = decosFor(doc, doc.length); // cursor on "body"
+    // Both quote lines (starts at 0, 11) get the blockquote line deco.
+    expect(decos.filter((d) => d.class === 'cm-md-blockquote').map((d) => d.from)).toEqual([0, 11]);
+    // Both "> " marks (including the following space) are hidden.
+    expect(hideAt(decos, 0, 2)).toBe(true);
+    expect(hideAt(decos, 11, 13)).toBe(true);
+  });
+
+  it('reveals the ">" mark on the active blockquote line while keeping the line styling', () => {
+    const doc = '> line one\n> line two\n\nbody';
+    const decos = decosFor(doc, 2); // cursor inside the first quote line
+    expect(decos.filter((d) => d.class === 'cm-md-blockquote').map((d) => d.from)).toEqual([0, 11]);
+    expect(hideAt(decos, 0, 2)).toBe(false); // revealed on its own line
+    expect(hideAt(decos, 11, 13)).toBe(true); // still hidden on the other line
+  });
+
+  it('hides both marks of a nested blockquote off the active line', () => {
+    const doc = '> > x\n\nbody';
+    const decos = decosFor(doc, doc.length); // cursor on "body"
+    expect(hideAt(decos, 0, 2)).toBe(true); // outer "> "
+    expect(hideAt(decos, 2, 4)).toBe(true); // inner "> "
+  });
+
+  it('replaces a standalone "---" with the hr widget off the active line, and reveals it on its own line', () => {
+    const doc = 'para one\n\n---\n\npara two';
+    const decosOff = decosFor(doc, doc.length); // cursor on "para two"
+    expect(decosOff.some((d) => d.widget === 'cm-md-hr' && d.from === 10 && d.to === 13)).toBe(true);
+
+    const decosOn = decosFor(doc, 10); // cursor on the "---" line
+    expect(hasWidget(decosOn, 'cm-md-hr')).toBe(false);
+  });
+
+  it('does not treat a Setext heading underline as a horizontal rule', () => {
+    const doc = 'title\n---\n\nbody';
+    const decos = decosFor(doc, doc.length); // cursor on "body"
+    expect(hasWidget(decos, 'cm-md-hr')).toBe(false);
+  });
 });

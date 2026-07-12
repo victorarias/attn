@@ -7,7 +7,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { languages } from '@codemirror/language-data';
+import { syntaxHighlighting } from '@codemirror/language';
 import { closeSearchPanel, search, searchKeymap, searchPanelOpen } from '@codemirror/search';
+import { classHighlighter } from '@lezer/highlight';
 import { EditorView, keymap, type KeyBinding, type ViewUpdate } from '@codemirror/view';
 import { brokenLinks, revalidateBrokenLinks, type ExistsCheck } from './brokenLinks';
 import { frontmatterCard } from './frontmatterCard';
@@ -202,7 +205,12 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
 
   const extensions = useMemo(
     () => [
-      markdown({ base: markdownLanguage }),
+      // `languages` from @codemirror/language-data describes each fenced-code
+      // language lazily — the parser itself only loads (and Vite only fetches its
+      // chunk) the first time a fence actually needs it, so importing the full list
+      // here is cheap.
+      markdown({ base: markdownLanguage, codeLanguages: languages }),
+      syntaxHighlighting(classHighlighter),
       EditorView.lineWrapping,
       frontmatterCard(),
       liveMarkdownPreview({ onFollowLink }),

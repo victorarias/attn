@@ -251,4 +251,18 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await page.getByRole('button', { name: 'Show file tree' }).click();
     await expect.poll(() => tree.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(100);
   });
+
+  test('highlights a code fence, and renders a blockquote and a horizontal rule', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+
+    await page.getByRole('treeitem', { name: 'fences.md' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'fences' })).toBeVisible();
+
+    // The JS language parser lazy-loads on demand — give it generous room to arrive.
+    await expect(page.locator('.cm-md-codeblock .tok-keyword')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.cm-md-blockquote')).toHaveCount(1);
+    await expect(page.locator('.cm-md-hr')).toHaveCount(1);
+  });
 });
