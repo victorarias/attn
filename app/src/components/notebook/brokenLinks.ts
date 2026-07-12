@@ -17,6 +17,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view';
+import { resolveNotebookLink } from './linkResolver';
 
 // The outcome of an existence check — the shape of the daemon's FsExistsResult,
 // declared structurally so this module does not depend on the socket hook.
@@ -31,6 +32,9 @@ export interface BrokenLinkOptions {
   // to resolve) leaves the link UNFLAGGED — a link is only ever flagged broken on a
   // conclusive "does not exist", never on an inconclusive check.
   existsFile?: (path: string) => Promise<ExistsCheck>;
+  // The editing note's directory, root-relative ('' at the root) — bare-relative
+  // link targets resolve against this before the existence check.
+  baseDir: string;
 }
 
 // Fired when an async existence check resolves: rebuild so a now-known result paints.
@@ -50,31 +54,28 @@ const BROKEN = Decoration.mark({
 // Resolve a link href to the notebook path whose existence decides whether it is
 // broken, or null when the href is not an in-notebook note reference (and so must
 // never be flagged): an external URL (has a scheme like http:/mailto:), a protocol-
-// relative URL, a pure in-document anchor (#section), or empty. The `#fragment` and
-// `?query` tails are dropped — they address a spot within a note, not a file. Both
-// root-absolute (`/knowledge/x.md`) and bare (`knowledge/x.md`) forms resolve the
-// same, mirroring the daemon's root-relative path handling.
-export function notebookLinkPath(href: string): string | null {
-  const trimmed = href.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith('#')) return null; // in-document anchor
-  if (trimmed.startsWith('//')) return null; // protocol-relative URL
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null; // http:, mailto:, file:, …
-  const path = trimmed.split('#')[0].split('?')[0].trim();
-  return path || null;
+// relative URL, a pure in-document anchor (#section), or empty. A bare-relative
+// target (`sibling.md`) resolves against `baseDir` — the editing note's own
+// directory — before the check; a root-absolute target (`/knowledge/x.md`) ignores
+// it. Resolution (including `..` and the `#fragment`/`?query` tails) happens here,
+// frontend-side, via the shared resolver — the daemon itself still only ever sees
+// and interprets paths root-relative.
+export function notebookLinkPath(href: string, baseDir: string): string | null {
+  const resolved = resolveNotebookLink(href, baseDir);
+  return resolved.kind === 'note' ? resolved.path : null;
 }
 
 // The distinct in-notebook link paths in the document — the set whose existence
 // decides broken-ness. Pure over the parsed state (no view, no daemon) so the
 // plugin's "what do I need to check" logic is unit-testable headlessly.
-export function notebookLinkPaths(state: EditorState): string[] {
+export function notebookLinkPaths(state: EditorState, baseDir: string): string[] {
   const seen = new Set<string>();
   syntaxTree(state).iterate({
     enter: (node) => {
       if (node.name !== 'Link') return;
       const url = node.node.getChild('URL');
       const href = url ? state.doc.sliceString(url.from, url.to) : '';
-      const path = notebookLinkPath(href);
+      const path = notebookLinkPath(href, baseDir);
       if (path) seen.add(path);
     },
   });
@@ -87,6 +88,7 @@ export function notebookLinkPaths(state: EditorState): string[] {
 // shape of liveMarkdownPreview.buildDecorations and frontmatterCardDecorations.
 export function brokenLinkDecorations(
   state: EditorState,
+  baseDir: string,
   missing: (path: string) => boolean,
 ): DecorationSet {
   const decos: Range<Decoration>[] = [];
@@ -95,15 +97,15 @@ export function brokenLinkDecorations(
       if (node.name !== 'Link') return;
       const url = node.node.getChild('URL');
       const href = url ? state.doc.sliceString(url.from, url.to) : '';
-      const path = notebookLinkPath(href);
+      const path = notebookLinkPath(href, baseDir);
       if (path && missing(path)) decos.push(BROKEN.range(node.from, node.to));
     },
   });
   return Decoration.set(decos, true);
 }
 
-export function brokenLinks(options: BrokenLinkOptions = {}): Extension {
-  const { existsFile } = options;
+export function brokenLinks(options: BrokenLinkOptions): Extension {
+  const { existsFile, baseDir } = options;
 
   const plugin = ViewPlugin.fromClass(
     class {
@@ -138,10 +140,10 @@ export function brokenLinks(options: BrokenLinkOptions = {}): Extension {
 
       private build(view: EditorView): DecorationSet {
         if (!existsFile) return Decoration.none;
-        const paths = notebookLinkPaths(view.state);
+        const paths = notebookLinkPaths(view.state, baseDir);
         const toCheck = paths.filter((p) => !this.cache.has(p) && !this.pending.has(p));
         if (toCheck.length) this.scheduleChecks(view, toCheck);
-        return brokenLinkDecorations(view.state, (p) => this.cache.get(p) === false);
+        return brokenLinkDecorations(view.state, baseDir, (p) => this.cache.get(p) === false);
       }
 
       private scheduleChecks(view: EditorView, paths: string[]) {

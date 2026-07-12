@@ -28,9 +28,11 @@ test.describe('LiveMarkdownEditor broken links', () => {
     expect(color).not.toBe(realColor);
 
     // The existence check ran for the in-notebook links but NEVER for the external one.
+    // notebookLinkPath now returns a normalized, no-leading-slash root-relative path
+    // (via resolveNotebookLink) rather than the href's raw leading-slash form.
     const checked = await page.evaluate(() => window.__HARNESS__.getCalls('existsFile').map((c) => c[0]));
-    expect(checked).toContain('/knowledge/areas/missing.md');
-    expect(checked).toContain('/knowledge/areas/real.md');
+    expect(checked).toContain('knowledge/areas/missing.md');
+    expect(checked).toContain('knowledge/areas/real.md');
     expect(checked.some((p: string) => p.includes('example.com'))).toBe(false);
 
     await page.screenshot({ path: 'test-results/broken-links.png' });
@@ -48,6 +50,6 @@ test.describe('LiveMarkdownEditor broken links', () => {
     await expect(page.locator('.cm-md-link-broken')).toHaveCount(2);
 
     const checked = await page.evaluate(() => window.__HARNESS__.getCalls('existsFile').map((c) => c[0]));
-    expect(checked).toContain('/knowledge/areas/missing-extra.md');
+    expect(checked).toContain('knowledge/areas/missing-extra.md');
   });
 });
