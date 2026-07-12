@@ -201,6 +201,34 @@ test.describe('NotebookBrowser (fs surface)', () => {
     expect(await page.evaluate(() => window.__HARNESS__.getCalls('close').length)).toBeGreaterThan(0);
   });
 
+  test('Cmd+F opens the in-editor search panel; Esc closes it before the modal', async ({ page }) => {
+    // The search panel gets its own higher-priority escape-stack entry, pushed only
+    // while it's open — the first Esc must close just the panel, not the modal.
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.waitForSelector('.cm-content');
+
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Meta+f');
+    await expect(page.locator('.cm-panel.cm-search')).toBeVisible();
+    await expect(page.locator('.cm-search input[name="search"]')).toBeFocused();
+
+    // Search for a word that repeats throughout the fixture note; matches highlight.
+    await page.keyboard.type('distilled');
+    await expect(page.locator('.cm-searchMatch').first()).toBeVisible();
+    expect(await page.locator('.cm-searchMatch').count()).toBeGreaterThan(0);
+
+    // First Esc closes only the search panel — the modal stays open (no onClose).
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.cm-panel.cm-search')).toHaveCount(0);
+    await expect(page.locator('.notebook-browser')).toBeVisible();
+    expect(await page.evaluate(() => window.__HARNESS__.getCalls('close').length)).toBe(0);
+
+    // Second Esc (no panel open) closes the modal itself.
+    await page.keyboard.press('Escape');
+    expect(await page.evaluate(() => window.__HARNESS__.getCalls('close').length)).toBeGreaterThan(0);
+  });
+
   test('renders stage-5 chrome and folds the tree to zero width via the edge handle', async ({ page }) => {
     await page.goto('/test-harness/?component=NotebookBrowser');
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);

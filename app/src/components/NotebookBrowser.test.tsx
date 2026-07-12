@@ -40,7 +40,7 @@ vi.mock('./notebook/LiveMarkdownEditor', async () => {
         onSelectionChange?: (sel: { text: string; top: number; left: number } | null) => void;
         ariaLabel?: string;
       },
-      ref: React.Ref<{ scrollToPos: (pos: number) => void; applyExternalContent: (next: string) => void }>,
+      ref: React.Ref<{ scrollToPos: (pos: number) => void; applyExternalContent: (next: string) => void; closeSearchPanel: () => boolean }>,
     ) {
       editorMock.current = { onFollowLink, onSelectionChange };
       useImperativeHandle(ref, () => ({
@@ -51,6 +51,8 @@ vi.mock('./notebook/LiveMarkdownEditor', async () => {
           editorMock.externalApplies.push(next);
           onChange(next);
         },
+        // The mock never opens a search panel, so closing is always a no-op.
+        closeSearchPanel: () => false,
       }), [onChange]);
       return (
         <textarea
