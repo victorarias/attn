@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Find in a note.** ⌘F inside the Notebook editor opens an in-editor search panel (matches highlighted, Enter/⇧Enter to step). Esc closes the panel first; ⌘F still opens terminal search when you're not in a text field.
+- **Richer live-preview rendering in the Notebook editor.** Code fences now get language syntax highlighting, and blockquotes and horizontal rules render styled instead of as raw markers.
 
 ### Fixed
 - **Undo and redo now work in the Notebook editor.** ⌘Z and ⇧⌘Z were swallowed by the native Edit menu in the packaged app and never reached the editor; they now undo/redo your edits when the editor has focus. ⇧⌘Z still zooms the active pane when you're not in a text field.

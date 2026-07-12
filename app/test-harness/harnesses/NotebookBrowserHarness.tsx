@@ -31,6 +31,10 @@ const TREE: Record<string, FsEntry[]> = {
     { path: 'knowledge', name: 'knowledge', isDir: true, size: 0 },
     { path: 'notes.txt', name: 'notes.txt', isDir: false, size: 64 },
     { path: 'cover.png', name: 'cover.png', isDir: false, size: 4096 },
+    // A dedicated fixture note for fence/blockquote/hr live-preview e2e coverage — kept
+    // out of listFiles/TREE offsets that other tests already depend on (e.g. the Cmd+P
+    // finder's fixed option count and index.md's heading/scroll offsets).
+    { path: 'fences.md', name: 'fences.md', isDir: false, size: 96 },
   ],
   journal: [{ path: 'journal/2026-06-20.md', name: '2026-06-20.md', isDir: false, size: 20 }],
   knowledge: [
@@ -65,6 +69,20 @@ ${INDEX_FILLER}
 ${INDEX_FILLER}
 `,
   'notes.txt': 'Plain text scratch file.\nNo markdown affordances here — just edit and autosave.\n',
+  'fences.md': `# Fences
+
+A fenced code block, a blockquote, and a horizontal rule.
+
+\`\`\`javascript
+const x = 1; // note
+\`\`\`
+
+> quoted line
+
+---
+
+After the rule.
+`,
 };
 
 // Drive an external file change the way the daemon's fs_changed would: override a
