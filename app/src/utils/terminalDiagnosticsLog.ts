@@ -58,6 +58,16 @@ const BOTTOM_CLIP_SWEEP_MS = 1500;
 // Pixel slack mirroring geometryOverflowsContainer: ignore sub-pixel container
 // heights so we only act on a genuine extra row.
 const BOTTOM_CLIP_SLACK_PX = 1;
+// Wait this many consecutive clipping sweeps before the first repair
+// (3 sweeps ≈ 4.5s at the sweep cadence) — beyond the longest observed
+// legitimate attach-replay transient, so the watchdog never fights a
+// clip that heals on its own.
+const CLIP_REPAIR_AFTER_SWEEPS = 3;
+// Wall-clock delay before the 2nd and 3rd repair attempts.
+const CLIP_REPAIR_BACKOFF_MS = [3000, 10000];
+// After this many failed repairs, stop and record a give-up incident;
+// the pane is beyond a refit's reach (e.g. dead renderer).
+const CLIP_REPAIR_MAX_ATTEMPTS = 3;
 
 export type DiagKind =
   | 'pane_mount'
@@ -190,10 +200,19 @@ let ringNextIndex = 0;
 let ringWrapped = false;
 const paneHealth = new Map<string, PaneHealth>();
 const renderProbes = new Map<string, () => RenderProbe | null>();
+// Optional per-pane repair callback (a refit) for the bottom-clip watchdog.
+const repairHandlers = new Map<string, () => void>();
 const watchdogTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
 // Per-pane "currently clipping at the bottom" flag so the detector reports the
 // clip's onset (and its resolution) once, not on every sweep tick.
 const clipState = new Map<string, boolean>();
+// Per-pane bottom-clip repair progress: consecutive clipping sweeps, repair
+// attempts made, the earliest wall-clock time the next attempt may fire, and
+// whether the watchdog has given up on this continuous clip.
+const clipRepairState = new Map<
+  string,
+  { clippingSweeps: number; attempts: number; nextAttemptAtMs: number; gaveUp: boolean }
+>();
 let clipSweepTimer: ReturnType<typeof setInterval> | null = null;
 
 let lifecycleBytes = 0;
@@ -438,12 +457,21 @@ export function recordPaint(sample: PaintSample): void {
   }
 }
 
-export function registerRenderProbe(pane: string, probe: () => RenderProbe | null): () => void {
+export function registerRenderProbe(
+  pane: string,
+  probe: () => RenderProbe | null,
+  repair?: () => void,
+): () => void {
   renderProbes.set(pane, probe);
+  if (repair) {
+    repairHandlers.set(pane, repair);
+  }
   ensureClipSweep();
   return () => {
     renderProbes.delete(pane);
+    repairHandlers.delete(pane);
     clipState.delete(pane);
+    clipRepairState.delete(pane);
     stopClipSweepIfIdle();
   };
 }
@@ -645,6 +673,28 @@ function recordBottomClipIncident(pane: string, detail: Record<string, unknown>)
   enqueueWrite('incident', `${JSON.stringify(record)}\n`);
 }
 
+function recordBottomClipRepairIncident(
+  pane: string,
+  reason: 'bottom_clip_repair' | 'bottom_clip_repair_gave_up',
+  detail: Record<string, unknown>,
+  session?: string,
+): void {
+  const now = Date.now();
+  const marker: DiagEvent = { at: now, kind: 'incident', pane, session, reason, ...detail };
+  pushRing(marker);
+  enqueueWrite('lifecycle', `${JSON.stringify(marker)}\n`);
+  const record = {
+    at: now,
+    kind: 'incident',
+    pane,
+    session,
+    reason,
+    detail,
+    context: ringSnapshot().slice(-INCIDENT_CONTEXT_EVENTS),
+  };
+  enqueueWrite('incident', `${JSON.stringify(record)}\n`);
+}
+
 function sweepBottomClip(): void {
   if (typeof window === 'undefined' || !isEnabled()) {
     return;
@@ -663,6 +713,7 @@ function sweepBottomClip(): void {
     // clips re-reports the onset.
     if (!probe || !probe.active) {
       if (wasClipping) clipState.set(pane, false);
+      clipRepairState.delete(pane);
       continue;
     }
     const overflowPx = bottomClipOverflowPx(probe);
@@ -674,6 +725,7 @@ function sweepBottomClip(): void {
       overflowPx == null && domOverflow == null && domOffset == null
       && domOverflowRight == null && domOffsetLeft == null
     ) {
+      clipRepairState.delete(pane);
       continue;
     }
     const trigger: string[] = [];
@@ -683,14 +735,46 @@ function sweepBottomClip(): void {
     if (domOverflowRight != null && domOverflowRight > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_overflow_right');
     if (domOffsetLeft != null && domOffsetLeft > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_offset_left');
     const clipping = trigger.length > 0;
-    if (clipping === wasClipping) {
-      continue;
-    }
-    clipState.set(pane, clipping);
     const cellHeight = probe.cellHeight ?? 0;
     const clientHeight = probe.clientHeight ?? 0;
     const flooredRows = cellHeight > 0 ? Math.floor(clientHeight / cellHeight) : 0;
-    if (clipping) {
+
+    if (!clipping) {
+      // Full reset: the clip is gone (or never started this sweep). Keep the
+      // existing edge-triggered incident/resolve logging as-is, but attach how
+      // many repairs were attempted during the episode that just ended.
+      const priorState = clipRepairState.get(pane);
+      clipRepairState.delete(pane);
+      if (clipping === wasClipping) {
+        continue;
+      }
+      clipState.set(pane, clipping);
+      recordDiag({
+        kind: 'incident',
+        pane,
+        session: probe.session,
+        reason: 'bottom_clip_resolved',
+        rows: probe.rows,
+        cols: probe.cols,
+        flooredRows,
+        overflowPx: overflowPx == null ? null : Math.round(overflowPx),
+        domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
+        domOffsetTopPx: domOffset == null ? null : Math.round(domOffset),
+        domOverflowRightPx: domOverflowRight == null ? null : Math.round(domOverflowRight),
+        domOffsetLeftPx: domOffsetLeft == null ? null : Math.round(domOffsetLeft),
+        cellHeight,
+        clientHeight,
+        repairAttempts: priorState?.attempts ?? 0,
+      });
+      continue;
+    }
+
+    // Clipping is true on this sweep. Edge-triggered incident logging fires
+    // only on the onset (matching the pre-watchdog behavior), but repair
+    // evaluation runs on EVERY clipping sweep so backoff/attempts advance
+    // while the clip persists.
+    clipState.set(pane, clipping);
+    if (clipping !== wasClipping) {
       recordBottomClipIncident(pane, {
         rows: probe.rows,
         cols: probe.cols,
@@ -716,25 +800,50 @@ function sweepBottomClip(): void {
         winInnerWidth: window.innerWidth,
         winInnerHeight: window.innerHeight,
       });
-    } else {
-      // The clip cleared (a remount, a window resize that re-fit, or an
-      // activation refit). Record what fixed it so the trail is self-describing.
-      recordDiag({
-        kind: 'incident',
-        pane,
-        session: probe.session,
-        reason: 'bottom_clip_resolved',
-        rows: probe.rows,
-        cols: probe.cols,
-        flooredRows,
-        overflowPx: overflowPx == null ? null : Math.round(overflowPx),
-        domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
-        domOffsetTopPx: domOffset == null ? null : Math.round(domOffset),
-        domOverflowRightPx: domOverflowRight == null ? null : Math.round(domOverflowRight),
-        domOffsetLeftPx: domOffsetLeft == null ? null : Math.round(domOffsetLeft),
-        cellHeight,
-        clientHeight,
-      });
+    }
+
+    const repair = repairHandlers.get(pane);
+    const state = clipRepairState.get(pane) ?? {
+      clippingSweeps: 0,
+      attempts: 0,
+      nextAttemptAtMs: 0,
+      gaveUp: false,
+    };
+    state.clippingSweeps += 1;
+    clipRepairState.set(pane, state);
+
+    if (
+      repair
+      && document.visibilityState === 'visible'
+      && state.clippingSweeps >= CLIP_REPAIR_AFTER_SWEEPS
+      && !state.gaveUp
+      && Date.now() >= state.nextAttemptAtMs
+    ) {
+      if (state.attempts >= CLIP_REPAIR_MAX_ATTEMPTS) {
+        state.gaveUp = true;
+        recordBottomClipRepairIncident(pane, 'bottom_clip_repair_gave_up', {
+          rows: probe.rows,
+          cols: probe.cols,
+          attempts: state.attempts,
+        }, probe.session);
+      } else {
+        state.attempts += 1;
+        const backoff = CLIP_REPAIR_BACKOFF_MS[state.attempts - 1] ?? CLIP_REPAIR_BACKOFF_MS[CLIP_REPAIR_BACKOFF_MS.length - 1];
+        state.nextAttemptAtMs = Date.now() + backoff;
+        recordBottomClipRepairIncident(pane, 'bottom_clip_repair', {
+          attempt: state.attempts,
+          rows: probe.rows,
+          cols: probe.cols,
+          overflowPx: overflowPx == null ? null : Math.round(overflowPx),
+          domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
+        }, probe.session);
+        try {
+          repair();
+        } catch {
+          // The next sweep re-evaluates; a repair handler throwing must not
+          // break the sweep loop for other panes.
+        }
+      }
     }
   }
 }
@@ -816,7 +925,9 @@ export function disposePaneDiagnostics(pane: string): void {
   clearWatchdog(pane);
   paneHealth.delete(pane);
   renderProbes.delete(pane);
+  repairHandlers.delete(pane);
   clipState.delete(pane);
+  clipRepairState.delete(pane);
   stopClipSweepIfIdle();
 }
 
