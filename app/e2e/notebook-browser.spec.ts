@@ -313,6 +313,20 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await page.locator('.cm-md-image').click();
     await expect(page.locator('.cm-md-image')).toHaveCount(0);
     await expect(page.locator('.cm-content')).toContainText('![tiny](assets/tiny.png)');
+
+    // Regression: the widget's eq() is deliberately position-blind (alt/src only) so
+    // an edit ABOVE it doesn't recreate its DOM (which would flicker/reload the image).
+    // But that means the click handler must read its position from the view at click
+    // time, not from a value captured when the DOM was built — otherwise editing above
+    // the image (shifting it down) leaves a click landing on the stale, pre-edit offset.
+    await page.locator('.cm-content').getByText('Images', { exact: true }).click();
+    await page.keyboard.press('Home');
+    await page.keyboard.type('\n\n');
+    await expect(page.locator('.cm-md-image')).toBeVisible();
+
+    await page.locator('.cm-md-image').click();
+    await expect(page.locator('.cm-md-image')).toHaveCount(0);
+    await expect(page.locator('.cm-content')).toContainText('![tiny](assets/tiny.png)');
   });
 
   // CodeMirror renders each line as one text node, so a text-content locator can't

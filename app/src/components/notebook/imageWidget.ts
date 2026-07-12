@@ -129,11 +129,18 @@ class ImageWidget extends WidgetType {
     // same gotoLine pattern tableWidget uses) rather than relying on CM's default
     // click-to-cursor resolution over a replaced block range, which isn't guaranteed
     // to land inside it.
+    //
+    // eq() is deliberately position-blind (alt/src only) so an edit above the image
+    // doesn't recreate this DOM and cause reload flicker — but that means this DOM can
+    // outlive the lineFrom it was built with. Read the position from the view at click
+    // time via posAtDOM, never from a captured this.target.lineFrom, or a stale click
+    // handler moves the cursor to wherever the image USED to be.
     container.addEventListener('mousedown', (event) => event.preventDefault());
     container.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      view.dispatch({ selection: { anchor: this.target.lineFrom } });
+      const pos = view.posAtDOM(container);
+      if (pos >= 0) view.dispatch({ selection: { anchor: pos } });
       view.focus();
     });
 
