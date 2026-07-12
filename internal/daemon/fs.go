@@ -1,12 +1,37 @@
 package daemon
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
 )
+
+// maxAssetBytes bounds a single fs_read_asset read so a huge binary file can't
+// balloon a WS frame (the whole file is base64-encoded into one JSON message).
+const maxAssetBytes = 10 << 20
+
+// assetMimeTypes is the explicit allowlist of image extensions fs_read_asset will
+// serve. This IS the contract, not a convenience lookup: unlike mime.TypeByExtension
+// it deliberately excludes everything non-image, since this surface exists only to
+// render ![alt](path) images in the notebook editor without widening Tauri's fs
+// permissions.
+var assetMimeTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+	".avif": "image/avif",
+	".bmp":  "image/bmp",
+	".ico":  "image/x-icon",
+}
 
 // fsStoreFor returns the daemon's single generic filesystem Store for the active
 // root. The root is the SAME one the notebook uses (notebook.root): fsdoc is the
@@ -84,6 +109,52 @@ func (d *Daemon) sendFsReadWSResult(client *wsClient, requestID, path string) {
 		msg.Error = protocol.Ptr(err.Error())
 	}
 	d.sendToClient(client, msg)
+}
+
+// sendFsReadAssetWSResult reads one image file's bytes as base64 and replies with
+// an fs_read_asset_result event correlated by requestID. Only extensions in
+// assetMimeTypes are served; the extension is rejected before the file is read.
+func (d *Daemon) sendFsReadAssetWSResult(client *wsClient, requestID, path string) {
+	var result *protocol.FsReadAssetResult
+	mimeType, err := assetMimeTypeFor(path)
+	if err == nil {
+		var store *fsdoc.Store
+		if store, err = d.fsStoreFor(); err == nil {
+			var content []byte
+			if content, _, err = store.Read(path); err == nil {
+				if len(content) > maxAssetBytes {
+					err = fmt.Errorf("asset exceeds the %d byte read cap", maxAssetBytes)
+				} else {
+					result = &protocol.FsReadAssetResult{
+						Path:       path,
+						MimeType:   mimeType,
+						DataBase64: base64.StdEncoding.EncodeToString(content),
+					}
+				}
+			}
+		}
+	}
+	msg := protocol.FsReadAssetResultMessage{
+		Event:     protocol.EventFsReadAssetResult,
+		RequestID: requestID,
+		Success:   err == nil,
+		Result:    result,
+	}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
+}
+
+// assetMimeTypeFor returns the mime type for path's extension, or an error if the
+// extension is not in the image allowlist.
+func assetMimeTypeFor(path string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	mimeType, ok := assetMimeTypes[ext]
+	if !ok {
+		return "", errors.New("not a supported image asset")
+	}
+	return mimeType, nil
 }
 
 // sendFsWriteWSResult performs a hash-CAS write and replies with an

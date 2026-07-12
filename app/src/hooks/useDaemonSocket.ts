@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '163';
+export const PROTOCOL_VERSION = '164';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -399,6 +399,15 @@ export interface FsReadResult {
   path: string;
   content: string;
   hash: string;
+}
+
+// One image asset's bytes, base64-encoded, plus its mime type — for rendering
+// ![alt](path) images in the notebook editor without widening Tauri's fs
+// permissions. Mirrors the daemon's protocol.FsReadAssetResult.
+export interface FsReadAssetResult {
+  path: string;
+  mimeType: string;
+  dataBase64: string;
 }
 
 // The outcome of a filesystem hash-CAS save. conflict=true means the file changed
@@ -1587,6 +1596,29 @@ export function useDaemonSocket({
               pending.resolve(data.result);
             } else {
               pending.reject(new Error(data.error || 'Filesystem read failed'));
+            }
+            break;
+          }
+
+          case 'fs_read_asset_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `fs_read_asset:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.result) {
+              pending.resolve({
+                path: data.result.path,
+                mimeType: data.result.mime_type,
+                dataBase64: data.result.data_base64,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Filesystem asset read failed'));
             }
             break;
           }
@@ -4574,6 +4606,28 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // Read one image asset's bytes as base64, for rendering ![alt](path) images in
+  // the notebook editor without widening Tauri's fs permissions.
+  const sendFsReadAsset = useCallback((path: string): Promise<FsReadAssetResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('fs_read_asset');
+      const key = `fs_read_asset:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'fs_read_asset', request_id: requestId, path }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Filesystem asset read timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // Save one file via the daemon (hash-CAS). Omit baseHash to create-only; pass the
   // file's loaded hash to edit. Resolves with the outcome — including a conflict
   // (resolve, not reject) the editor reconciles; rejects only on a transport error.
@@ -5174,6 +5228,7 @@ export function useDaemonSocket({
     sendNotebookToChief,
     sendFsList,
     sendFsRead,
+    sendFsReadAsset,
     sendFsWrite,
     sendFsRename,
     sendFsDelete,

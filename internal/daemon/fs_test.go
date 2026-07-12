@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -302,5 +305,98 @@ func TestFsChangedExternalEditNotSelfWrite(t *testing.T) {
 	}
 	if slices.Contains(ext, "own.md") {
 		t.Fatalf("external fs_changed %v wrongly included attn's own write own.md", ext)
+	}
+}
+
+// pngHeaderBytes is a minimal valid PNG signature + IHDR-ish prefix. It does not
+// need to decode as a real image: fs_read_asset only serves bytes, it never
+// decodes them.
+var pngHeaderBytes = []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D}
+
+// fsReadAsset reads one asset over the WS fs path and returns the decoded result
+// event.
+func fsReadAsset(t *testing.T, d *Daemon, requestID, path string) protocol.FsReadAssetResultMessage {
+	t.Helper()
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsReadAssetWSResult(client, requestID, path)
+	var res protocol.FsReadAssetResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	return res
+}
+
+// fs_read_asset serves an allowlisted image's bytes as base64 with its mime type,
+// round-tripping the exact bytes written to disk.
+func TestFsReadAssetWSResult(t *testing.T) {
+	d := newFsDaemon(t)
+	if res := fsWriteCAS(t, d, "assets/pic.png", string(pngHeaderBytes), ""); !res.Success || res.Result == nil {
+		t.Fatalf("seed write = %+v", res.Result)
+	}
+
+	got := fsReadAsset(t, d, "a1", "assets/pic.png")
+	if got.Event != protocol.EventFsReadAssetResult || got.RequestID != "a1" || !got.Success || got.Result == nil {
+		t.Fatalf("read asset = %+v", got)
+	}
+	if got.Result.MimeType != "image/png" {
+		t.Fatalf("mime type = %q, want image/png", got.Result.MimeType)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(got.Result.DataBase64)
+	if err != nil {
+		t.Fatalf("base64 decode: %v", err)
+	}
+	if !bytes.Equal(decoded, pngHeaderBytes) {
+		t.Fatalf("decoded bytes = %v, want %v", decoded, pngHeaderBytes)
+	}
+}
+
+// A path that escapes the notebook root is rejected by the same containment guard
+// fs_read uses (fsStoreFor/store.Read), not by any asset-specific path logic.
+func TestFsReadAssetPathEscape(t *testing.T) {
+	d := newFsDaemon(t)
+	got := fsReadAsset(t, d, "a1", "../outside.png")
+	if got.Success {
+		t.Fatalf("read asset(path escape) = %+v, want failure", got)
+	}
+}
+
+// A missing asset is a failed result with an error, not a panic or empty success.
+func TestFsReadAssetMissingFile(t *testing.T) {
+	d := newFsDaemon(t)
+	got := fsReadAsset(t, d, "a1", "assets/nope.png")
+	if got.Success || got.Error == nil {
+		t.Fatalf("read asset(missing) = %+v, want failure with error", got)
+	}
+}
+
+// A file over the per-asset byte cap is rejected with an error mentioning the cap,
+// even though it has a supported extension. Written directly to disk (bypassing
+// fs_write, which has its own smaller 2MiB cap) so the asset cap is what's tested.
+func TestFsReadAssetOversize(t *testing.T) {
+	d := newFsDaemon(t)
+	root := d.store.GetSetting(SettingNotebookRoot)
+	if err := os.MkdirAll(filepath.Join(root, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte{0xFF}, maxAssetBytes+1)
+	if err := os.WriteFile(filepath.Join(root, "assets", "huge.png"), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := fsReadAsset(t, d, "a1", "assets/huge.png")
+	if got.Success || got.Error == nil || !strings.Contains(*got.Error, "cap") {
+		t.Fatalf("read asset(oversize) = %+v, want failure mentioning the cap", got)
+	}
+}
+
+// An extension outside the image allowlist is rejected before the file is even
+// read, regardless of the file's actual content.
+func TestFsReadAssetUnsupportedExtension(t *testing.T) {
+	d := newFsDaemon(t)
+	if res := fsWriteCAS(t, d, "assets/doc.pdf", "not an image", ""); !res.Success || res.Result == nil {
+		t.Fatalf("seed write = %+v", res.Result)
+	}
+
+	got := fsReadAsset(t, d, "a1", "assets/doc.pdf")
+	if got.Success || got.Error == nil || *got.Error != "not a supported image asset" {
+		t.Fatalf("read asset(unsupported ext) = %+v, want \"not a supported image asset\"", got)
 	}
 }
