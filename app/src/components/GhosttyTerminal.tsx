@@ -335,20 +335,33 @@ export function fitShouldBailAsSuspicious(
 // `resizes` counts replay resize operations still on the write chain.
 export interface PendingReplayGeometry extends TerminalDimensions {
   resizes: number;
+  lastQueuedAt: number;
 }
+
+// On a healthy write chain a queued replay resize applies within
+// milliseconds; if it still hasn't applied after this long, the "replay will
+// land there" promise is stale and must no longer suppress live geometry
+// corrections.
+export const REPLAY_GEOMETRY_STALE_MS = 3000;
 
 // Replay segments march the model through historical geometries before
 // landing on the live PTY size. A live fit or daemon resize echo arriving
 // mid-replay would see a transient mismatch and cancel the queued history —
 // but if it targets the geometry replay already ends at, it is not a
 // conflict: skip it and let the replay land there. Only a genuinely
-// different target cancels.
+// different target cancels. If the queued replay has gone stale (its resize
+// never applied — e.g. a generation-mismatch drop), the promise is broken
+// and suppression must not hold forever.
 export function liveResizeConflictsWithQueuedReplay(
   pendingReplay: PendingReplayGeometry | null,
   target: TerminalDimensions,
-): 'skip' | 'cancel' | 'none' {
+  nowMs: number,
+): 'skip' | 'cancel' | 'none' | 'stale' {
   if (!pendingReplay || pendingReplay.resizes <= 0) {
     return 'none';
+  }
+  if (nowMs - pendingReplay.lastQueuedAt > REPLAY_GEOMETRY_STALE_MS) {
+    return 'stale';
   }
   return fitRequiresTerminalResize(pendingReplay, target) ? 'cancel' : 'skip';
 }
@@ -529,6 +542,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Queued historical-replay operations (writes + resizes) not yet applied.
     // Used to detect that a generation bump actually discarded history.
     const pendingReplayOpsRef = useRef(0);
+    // A queued replay resize op was dropped (generation mismatch) without a
+    // later fit to correct the model. Verify geometry once the queue drains.
+    const droppedReplayResizeRef = useRef(false);
     const fitResizeCoalescerRef = useRef<ResizeCoalescer | null>(null);
     // `fit` is defined far below; resizeLocal needs to re-assert local geometry
     // when the daemon's PTY size overflows this window, so reach it via a ref.
@@ -1188,6 +1204,19 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return writeChainRef.current;
     }, []);
 
+    // Coalesce a verification fit into the next animation frame, replacing
+    // any frame already queued. Shared by the overflow-correction path and
+    // the dropped-replay-resize recovery paths below.
+    const scheduleCoalescedRefit = useCallback(() => {
+      if (overflowRefitRafRef.current !== null) {
+        cancelAnimationFrame(overflowRefitRafRef.current);
+      }
+      overflowRefitRafRef.current = requestAnimationFrame(() => {
+        overflowRefitRafRef.current = null;
+        fitRef.current();
+      });
+    }, []);
+
     const write = useCallback((
       data: string | Uint8Array,
       options?: {
@@ -1204,6 +1233,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return enqueueOperation(async () => {
         if (options?.historicalReplay) {
           pendingReplayOpsRef.current = Math.max(0, pendingReplayOpsRef.current - 1);
+          if (pendingReplayOpsRef.current === 0 && droppedReplayResizeRef.current) {
+            // A dropped replay resize means the model may be stranded at a
+            // historical geometry with no later fit coming; verify once the
+            // replay queue drains (fit() no-ops via its sameSize bail when
+            // geometry is already correct).
+            droppedReplayResizeRef.current = false;
+            scheduleCoalescedRefit();
+          }
         }
         if (
           options?.historicalReplay
@@ -1351,7 +1388,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           scheduleSynchronizedOutputRenderFallback();
         }
       });
-    }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleSynchronizedOutputRenderFallback, selectionLineAtBufferRow]);
+    }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleCoalescedRefit, scheduleSynchronizedOutputRenderFallback, selectionLineAtBufferRow]);
 
     // Reconcile the block store with the model's new geometry after a resize.
     //
@@ -1391,6 +1428,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           cols,
           rows,
           resizes: (pendingReplayGeometryRef.current?.resizes ?? 0) + 1,
+          lastQueuedAt: Date.now(),
         };
         pendingReplayOpsRef.current += 1;
       }
@@ -1400,6 +1438,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const replayConflict = liveResizeConflictsWithQueuedReplay(
           pendingReplayGeometryRef.current,
           { cols, rows },
+          Date.now(),
         );
         if (replayConflict === 'skip') {
           // The daemon's resize echo targets the geometry the queued replay
@@ -1411,6 +1450,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             source: 'resizeLocal', bail: 'replayPending', toCols: cols, toRows: rows,
           });
           return Promise.resolve();
+        }
+        if (replayConflict === 'stale') {
+          // The queued replay's promise to land at pendingReplay's geometry
+          // is broken (its resize never applied). `bail: 'replayStale'` is
+          // logged for visibility only — despite the field name, this branch
+          // falls through to the normal resize below instead of bailing.
+          noteResize(diagKeyRef.current, {
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+            source: 'resizeLocal', bail: 'replayStale', toCols: cols, toRows: rows,
+          });
         }
         if (fitRequiresTerminalResize(
           { cols: currentTerminal.cols, rows: currentTerminal.rows },
@@ -1435,10 +1485,32 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             );
           }
         }
+        // Record a drop before checking whether the queue has drained: if
+        // this dropped op is itself the last one queued, the drain check
+        // below must still see the flag it sets.
+        const dropped = Boolean(options?.historicalReplay)
+          && historicalReplayGeneration !== historicalReplayGenerationRef.current;
+        if (dropped) {
+          droppedReplayResizeRef.current = true;
+          noteResize(diagKeyRef.current, {
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+            source: 'resizeLocal', bail: 'staleGeneration', toCols: cols, toRows: rows,
+          });
+        }
         if (
           options?.historicalReplay
-          && historicalReplayGeneration !== historicalReplayGenerationRef.current
+          && pendingReplayOpsRef.current === 0
+          && droppedReplayResizeRef.current
         ) {
+          // A dropped replay resize means the model may be stranded at a
+          // historical geometry with no later fit coming; verify once the
+          // replay queue drains (fit() no-ops via its sameSize bail when
+          // geometry is already correct).
+          droppedReplayResizeRef.current = false;
+          scheduleCoalescedRefit();
+        }
+        if (dropped) {
           return;
         }
         const terminal = terminalRef.current;
@@ -1486,17 +1558,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             container
             && geometryOverflowsContainer(rows, renderer.cellHeight, container.clientHeight)
           ) {
-            if (overflowRefitRafRef.current !== null) {
-              cancelAnimationFrame(overflowRefitRafRef.current);
-            }
-            overflowRefitRafRef.current = requestAnimationFrame(() => {
-              overflowRefitRafRef.current = null;
-              fitRef.current();
-            });
+            scheduleCoalescedRefit();
           }
         }
       });
-    }, [enqueueOperation, reconcileBlocksAfterResize, renderSurface]);
+    }, [enqueueOperation, reconcileBlocksAfterResize, renderSurface, scheduleCoalescedRefit]);
 
     const applyFitDimensions = useCallback((dims: TerminalDimensions) => {
       const terminal = terminalRef.current;
@@ -1533,16 +1599,26 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       // geometry. If it targets the geometry the queued replay ends at, it
       // is not a conflict — skip it and let the replay land there (the PTY
       // is already that size, so there is nothing to notify either).
-      if (liveResizeConflictsWithQueuedReplay(pendingReplayGeometryRef.current, dims) === 'skip') {
+      const replayConflict = liveResizeConflictsWithQueuedReplay(pendingReplayGeometryRef.current, dims, Date.now());
+      if (replayConflict === 'skip') {
         noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'replayPending', toCols: dims.cols, toRows: dims.rows, cw, ch, fromCols: terminal.cols, fromRows: terminal.rows });
         renderSurface(false);
         return;
+      }
+      if (replayConflict === 'stale') {
+        // The queued replay's promise to land at pendingReplay's geometry is
+        // broken (its resize never applied). `bail: 'replayStale'` is logged
+        // for visibility only — despite the field name, this falls through
+        // to the normal fit below instead of bailing.
+        noteResize(diagKeyRef.current, { session, paneKind, source: 'fit', bail: 'replayStale', toCols: dims.cols, toRows: dims.rows, cw, ch, fromCols: terminal.cols, fromRows: terminal.rows });
       }
       // Only a real geometry change conflicts with the queued history; a
       // no-op fit arriving while cooperative replay yields between chunks
       // bails above.
       historicalReplayGenerationRef.current += 1;
       pendingReplayGeometryRef.current = null;
+      // A real fit just ran; nothing owed for any earlier dropped replay resize.
+      droppedReplayResizeRef.current = false;
       if (pendingReplayOpsRef.current > 0) {
         // Queued history was discarded (e.g. a split landed mid-replay); the
         // owner re-requests the attach replay once geometry settles.

@@ -106,29 +106,70 @@ describe('fitShouldBailAsSuspicious', () => {
 });
 
 describe('liveResizeConflictsWithQueuedReplay', () => {
+  const NOW = 1_000_000;
+
   // The relaunch blank-pane regression: replay marches the model through a
   // historical 80x24 segment; a selection fit (and the pre-attach resize echo)
   // target the live 62x27 geometry the replay ends at. Cancelling the queued
   // history for those leaves the pane permanently empty.
   it('skips a live resize that targets the geometry the queued replay ends at', () => {
     expect(liveResizeConflictsWithQueuedReplay(
-      { cols: 62, rows: 27, resizes: 1 },
+      { cols: 62, rows: 27, resizes: 1, lastQueuedAt: NOW },
       { cols: 62, rows: 27 },
+      NOW,
     )).toBe('skip');
   });
 
   it('cancels the queued replay for a genuinely different live geometry', () => {
     expect(liveResizeConflictsWithQueuedReplay(
-      { cols: 62, rows: 27, resizes: 1 },
+      { cols: 62, rows: 27, resizes: 1, lastQueuedAt: NOW },
       { cols: 95, rows: 53 },
+      NOW,
     )).toBe('cancel');
   });
 
   it('does not interfere once all queued replay resizes have applied', () => {
     expect(liveResizeConflictsWithQueuedReplay(
-      { cols: 62, rows: 27, resizes: 0 },
+      { cols: 62, rows: 27, resizes: 0, lastQueuedAt: NOW },
       { cols: 95, rows: 53 },
+      NOW,
     )).toBe('none');
-    expect(liveResizeConflictsWithQueuedReplay(null, { cols: 62, rows: 27 })).toBe('none');
+    expect(liveResizeConflictsWithQueuedReplay(null, { cols: 62, rows: 27 }, NOW)).toBe('none');
+  });
+
+  // The dropped-replay-resize regression: a queued replay resize op can be
+  // silently discarded by a generation mismatch, breaking the "replay will
+  // land there" promise. A stale pending geometry must stop suppressing live
+  // corrections regardless of whether the live target happens to match it.
+  it('treats a stale pending geometry as no-longer-conflicting for a matching target', () => {
+    expect(liveResizeConflictsWithQueuedReplay(
+      { cols: 62, rows: 27, resizes: 1, lastQueuedAt: NOW },
+      { cols: 62, rows: 27 },
+      NOW + 3001,
+    )).toBe('stale');
+  });
+
+  it('treats a stale pending geometry as no-longer-conflicting for a different target', () => {
+    expect(liveResizeConflictsWithQueuedReplay(
+      { cols: 62, rows: 27, resizes: 1, lastQueuedAt: NOW },
+      { cols: 95, rows: 53 },
+      NOW + 3001,
+    )).toBe('stale');
+  });
+
+  it('does not treat exactly the staleness threshold as stale', () => {
+    expect(liveResizeConflictsWithQueuedReplay(
+      { cols: 62, rows: 27, resizes: 1, lastQueuedAt: NOW },
+      { cols: 62, rows: 27 },
+      NOW + 3000,
+    )).toBe('skip');
+  });
+
+  it('returns none for a resolved replay even when the timestamp is stale', () => {
+    expect(liveResizeConflictsWithQueuedReplay(
+      { cols: 62, rows: 27, resizes: 0, lastQueuedAt: NOW },
+      { cols: 95, rows: 53 },
+      NOW + 10_000,
+    )).toBe('none');
   });
 });
