@@ -14,6 +14,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Markdown tables in the Notebook editor** now render as real tables, with raw source revealed for editing when the cursor is inside (click a row to edit it).
 
 ### Fixed
+- **Terminal panes no longer get stuck at a stale size.** Some panes could stay rendered at a stale, historical size after a session reattach — bottom or right edges painted outside the pane — until the pane was reopened. They now recover on their own.
 - **Undo and redo now work in the Notebook editor.** ⌘Z and ⇧⌘Z were swallowed by the native Edit menu in the packaged app and never reached the editor; they now undo/redo your edits when the editor has focus. ⇧⌘Z still zooms the active pane when you're not in a text field.
 - **⌘⌥N and ⇧⌘⌥N open the Notebook again.** With Option held, macOS reports a dead-key character instead of the letter, so the notebook shortcuts never matched in the installed app and the keystroke fell through into the terminal. They now match on the physical key.
 
