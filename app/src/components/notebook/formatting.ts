@@ -4,7 +4,7 @@
 // (adds `*…*`) rather than mistaking the enclosing StrongEmphasis for a match — Emphasis
 // and StrongEmphasis are distinct Lezer node types.
 
-import { EditorSelection, type EditorState, type Extension, type TransactionSpec } from '@codemirror/state';
+import { EditorSelection, Prec, type EditorState, type Extension, type TransactionSpec } from '@codemirror/state';
 import { EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import type { SyntaxNode } from '@lezer/common';
@@ -133,5 +133,9 @@ export function formattingKeymap(): Extension {
     { key: 'Cmd-i', run: toggleCommand('emphasis') },
     { key: 'Cmd-e', run: toggleCommand('code') },
   ];
-  return keymap.of(bindings);
+  // Prec.high: basicSetup's defaultKeymap binds Mod-i to selectParentSyntax with
+  // preventDefault, which at equal precedence runs first (basicSetup is earlier in
+  // LiveMarkdownEditor's extension array) and swallows Cmd-i entirely — it expands the
+  // selection instead of toggling italics. Prec.high makes these bindings win.
+  return Prec.high(keymap.of(bindings));
 }
