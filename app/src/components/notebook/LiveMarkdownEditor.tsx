@@ -8,11 +8,22 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'rea
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { closeSearchPanel, search, searchKeymap, searchPanelOpen } from '@codemirror/search';
-import { EditorView, keymap, type ViewUpdate } from '@codemirror/view';
+import { EditorView, keymap, type KeyBinding, type ViewUpdate } from '@codemirror/view';
 import { brokenLinks, revalidateBrokenLinks, type ExistsCheck } from './brokenLinks';
 import { frontmatterCard } from './frontmatterCard';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
 import { computeMinimalEdit } from './minimalEdit';
+
+// searchKeymap binds its commands with CodeMirror's "Mod-" modifier, which CM
+// resolves to Meta only when it detects a Mac platform (navigator.platform) and
+// to Ctrl everywhere else. attn only ships on macOS (see AGENTS.md), so "Mod"
+// must always mean Cmd — but a Linux CI browser (e.g. headless Chromium on the
+// e2e runners) reports a non-Mac platform and silently rebinds Cmd+F to Ctrl+F,
+// leaving Cmd+F inert. Rewrite every "Mod-" prefix to an explicit "Cmd-" so the
+// binding is platform-independent instead of relying on CM's own detection.
+const macSearchKeymap: readonly KeyBinding[] = searchKeymap.map((binding) =>
+  binding.key?.startsWith('Mod-') ? { ...binding, key: `Cmd-${binding.key.slice(4)}` } : binding,
+);
 
 export interface LiveSelection {
   text: string;
@@ -197,7 +208,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       liveMarkdownPreview({ onFollowLink }),
       brokenLinks({ existsFile }),
       search({ top: true }),
-      keymap.of(searchKeymap),
+      keymap.of(macSearchKeymap),
       editorTheme,
     ],
     [onFollowLink, existsFile],
