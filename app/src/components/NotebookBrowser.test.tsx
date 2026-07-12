@@ -21,6 +21,9 @@ const editorMock = vi.hoisted(() => ({
   // can assert that a live refresh applies a genuine change via the minimal-edit path
   // (which keeps the reader anchored) rather than a full document swap.
   externalApplies: [] as string[],
+  // Count of imperative focus() calls, so a test can assert the conflict-banner
+  // actions restore editor focus.
+  focusCalls: 0,
 }));
 
 vi.mock('./notebook/LiveMarkdownEditor', async () => {
@@ -40,7 +43,7 @@ vi.mock('./notebook/LiveMarkdownEditor', async () => {
         onSelectionChange?: (sel: { text: string; top: number; left: number } | null) => void;
         ariaLabel?: string;
       },
-      ref: React.Ref<{ scrollToPos: (pos: number) => void; applyExternalContent: (next: string) => void; closeSearchPanel: () => boolean }>,
+      ref: React.Ref<{ scrollToPos: (pos: number) => void; applyExternalContent: (next: string) => void; closeSearchPanel: () => boolean; focus: () => void }>,
     ) {
       editorMock.current = { onFollowLink, onSelectionChange };
       useImperativeHandle(ref, () => ({
@@ -53,6 +56,7 @@ vi.mock('./notebook/LiveMarkdownEditor', async () => {
         },
         // The mock never opens a search panel, so closing is always a no-op.
         closeSearchPanel: () => false,
+        focus: () => { editorMock.focusCalls += 1; },
       }), [onChange]);
       return (
         <textarea
@@ -155,6 +159,7 @@ describe('NotebookBrowser', () => {
     editorMock.current = null;
     editorMock.scrollCalls.length = 0;
     editorMock.externalApplies.length = 0;
+    editorMock.focusCalls = 0;
     vi.restoreAllMocks();
   });
 
@@ -566,6 +571,8 @@ describe('NotebookBrowser', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Overwrite anyway' }));
     await waitFor(() => expect(writeFile).toHaveBeenLastCalledWith('knowledge/index.md', '# mine\n', 'hX'));
     await waitFor(() => expect(screen.queryByText(/changed on disk/i)).not.toBeInTheDocument());
+    // Focus returns to the editor so typing works immediately, with no extra click.
+    expect(editorMock.focusCalls).toBeGreaterThan(0);
   });
 
   it('flushes an unsaved buffer when navigating away before autosave fires', async () => {
@@ -810,6 +817,7 @@ describe('NotebookBrowser stage 5 chrome', () => {
     editorMock.current = null;
     editorMock.scrollCalls.length = 0;
     editorMock.externalApplies.length = 0;
+    editorMock.focusCalls = 0;
     vi.restoreAllMocks();
   });
 

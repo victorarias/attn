@@ -57,6 +57,11 @@ export interface LiveMarkdownEditorHandle {
   applyExternalContent: (next: string) => void;
   // Close the in-editor search panel. Returns true if a panel was open.
   closeSearchPanel: () => boolean;
+  // Restore keyboard focus to the editor without moving the cursor or scrolling
+  // (unlike scrollToPos). Used after a chrome control outside the editor — e.g. a
+  // conflict-banner button — steals focus, so typing works immediately again with no
+  // extra click back into the document.
+  focus: () => void;
 }
 
 interface LiveMarkdownEditorProps {
@@ -210,6 +215,9 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       if (!view || !searchPanelOpen(view.state)) return false;
       closeSearchPanel(view);
       return true;
+    },
+    focus: () => {
+      cmRef.current?.view?.focus();
     },
   }), []);
 

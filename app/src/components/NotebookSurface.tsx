@@ -460,6 +460,9 @@ export function NotebookSurface({
       if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
       setNote(fresh);
       setDraft(fresh.content);
+      // The banner's "Reload from disk" button still has focus at this point; pull it
+      // back to the editor so typing works immediately, with no extra click.
+      editorRef.current?.focus();
     } catch (err) {
       if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
       setSaveError(err instanceof Error ? err.message : 'Could not reload this file');
@@ -867,7 +870,18 @@ export function NotebookSurface({
                     <button type="button" onClick={() => void reloadFromDisk()} disabled={saving}>
                       Reload from disk
                     </button>
-                    <button type="button" onClick={() => void writeBuffer(conflict.currentHash ?? '', draft)} disabled={saving}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void (async () => {
+                          await writeBuffer(conflict.currentHash ?? '', draft);
+                          // The button still has focus at this point; pull it back to the
+                          // editor so typing works immediately, with no extra click.
+                          editorRef.current?.focus();
+                        })();
+                      }}
+                      disabled={saving}
+                    >
                       Overwrite anyway
                     </button>
                   </div>
