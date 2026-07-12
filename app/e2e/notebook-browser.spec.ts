@@ -385,4 +385,35 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await expect(page.locator('.cm-md-code')).toHaveCount(0);
     await expect(content).toContainText('a horizontal rule');
   });
+
+  test('anchors the send-to-chief pill below the selection end, not over the line above it', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+
+    await page.getByRole('treeitem', { name: 'fences.md' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'fences' })).toBeVisible();
+
+    await dblclickWord(page, 'quoted');
+
+    const pill = page.getByRole('button', { name: 'Send to chief' });
+    await expect(pill).toBeVisible();
+
+    // The real DOM selection rect (the pill's anchor is computed from CM's own
+    // coordsAtPos, but this is the ground truth the pill must not cover).
+    const selectionBottom = await page.evaluate(() => {
+      const sel = window.getSelection();
+      const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
+      return range ? range.getBoundingClientRect().bottom : null;
+    });
+    expect(selectionBottom).not.toBeNull();
+
+    const pillBox = await pill.boundingBox();
+    expect(pillBox).not.toBeNull();
+    // The pill hangs below the selection end, so its top edge must sit at or below
+    // the selection's bottom edge — never covering the selected text or the line
+    // above it (the old above-anchored transform put the pill's bottom well above
+    // this point, failing this assertion).
+    expect(pillBox!.y).toBeGreaterThanOrEqual(selectionBottom!);
+  });
 });

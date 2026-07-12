@@ -33,7 +33,9 @@ const macSearchKeymap: readonly KeyBinding[] = searchKeymap.map((binding) =>
 
 export interface LiveSelection {
   text: string;
-  // Viewport coordinates of the selection start, for floating UI.
+  // Viewport coordinates for floating UI: top is the bottom edge of the selection's
+  // last char, left is that char's horizontal midpoint — so a pill anchored here hangs
+  // below the selection end and never covers the selected text or the line above it.
   top: number;
   left: number;
 }
@@ -267,12 +269,15 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
           onSelectionChange(null);
           return;
         }
-        const coords = update.view.coordsAtPos(range.from);
+        // Anchor at the selection's END, not its start: a pill placed above the start
+        // covers the line before the selection, and one placed above the end covers the
+        // selection itself. Below the end is the only spot that covers neither.
+        const coords = update.view.coordsAtPos(range.to);
         if (!coords) {
           onSelectionChange(null);
           return;
         }
-        onSelectionChange({ text, top: coords.top, left: (coords.left + coords.right) / 2 });
+        onSelectionChange({ text, top: coords.bottom, left: (coords.left + coords.right) / 2 });
       },
     [onSelectionChange, onSearchOpenChange],
   );
