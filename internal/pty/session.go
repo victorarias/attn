@@ -770,6 +770,7 @@ func (s *Session) writeOSCColorResponses(queries terminalQueries, logf func(stri
 	bg := hexColorToOSCValue(theme.Background, defaultThemeBackground)
 	cursor := hexColorToOSCValue(theme.Cursor, defaultThemeCursor)
 
+	s.writeMu.Lock()
 	for _, code := range queries.oscQueryOrder {
 		switch code {
 		case 10:
@@ -780,6 +781,7 @@ func (s *Session) writeOSCColorResponses(queries terminalQueries, logf func(stri
 			_, _ = fmt.Fprintf(s.ptmx, "\x1b]12;%s\x1b\\", cursor)
 		}
 	}
+	s.writeMu.Unlock()
 
 	if logf != nil {
 		logf(
@@ -832,7 +834,9 @@ func (s *Session) writeCursorPositionResponse(logf func(string, ...any)) {
 			col = int(snapshot.cursorX) + 1
 		}
 	}
+	s.writeMu.Lock()
 	_, _ = fmt.Fprintf(s.ptmx, "\x1b[%d;%dR", row, col)
+	s.writeMu.Unlock()
 	if logf != nil {
 		logf("pty cpr reply: session=%s row=%d col=%d", s.id, row, col)
 	}
@@ -848,7 +852,9 @@ func (s *Session) writeCursorPositionResponse(logf func(string, ...any)) {
 // The frontend deliberately does not answer DA1, so there is no double-reply.
 func (s *Session) writeDeviceAttributesResponse(logf func(string, ...any)) {
 	// DA1 response: VT100 with Advanced Video Option.
+	s.writeMu.Lock()
 	_, _ = s.ptmx.Write([]byte("\x1b[?1;2c"))
+	s.writeMu.Unlock()
 	if logf != nil {
 		logf("pty da1 reply: session=%s", s.id)
 	}

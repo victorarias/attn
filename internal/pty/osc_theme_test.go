@@ -3,6 +3,7 @@ package pty
 import (
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -211,6 +212,84 @@ func TestOSCColorSetIsNeverAnswered(t *testing.T) {
 	if got, ok := readAvailable(peer, 200*time.Millisecond); ok {
 		t.Fatalf("OSC color SET must not be answered; got %q", got)
 	}
+}
+
+// TestOSCColorReplyWaitsForInFlightInput covers 7g: OSC color replies share
+// the PTY master with Session.input (frontend/worker keystrokes), which runs
+// on a different goroutine than the read loop. `s.ptmx` is a concrete
+// *os.File, so `go test -race` cannot observe interleaved writes to its
+// underlying fd — a missing lock here would not show up as a Go data race,
+// only as corrupted bytes on the wire in production. Assert the actual
+// serialization directly: while writeMu is held by an in-flight input() call,
+// the OSC reply triggered by the read loop must block, and it must only land
+// after input() releases the lock.
+func TestOSCColorReplyWaitsForInFlightInput(t *testing.T) {
+	s, peer := newOSCTestSession(t)
+
+	// A single persistent reader for the whole test, not readAvailable /
+	// readReplyUntil: those each start their own goroutine blocked in
+	// peer.Read with no way to cancel it early, so using one for the
+	// negative check and a second for the final read leaves the first
+	// orphaned — it can win the race to consume the reply once writeMu is
+	// released, and the second read then blocks forever on bytes that are
+	// already gone.
+	var bufMu sync.Mutex
+	var buf []byte
+	go func() {
+		tmp := make([]byte, 256)
+		for {
+			n, err := peer.Read(tmp)
+			if n > 0 {
+				bufMu.Lock()
+				buf = append(buf, tmp[:n]...)
+				bufMu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	snapshot := func() []byte {
+		bufMu.Lock()
+		defer bufMu.Unlock()
+		return append([]byte(nil), buf...)
+	}
+
+	inputStarted := make(chan struct{})
+	releaseInput := make(chan struct{})
+	inputDone := make(chan struct{})
+	go func() {
+		s.writeMu.Lock()
+		close(inputStarted)
+		<-releaseInput
+		s.writeMu.Unlock()
+		close(inputDone)
+	}()
+	<-inputStarted
+
+	if _, err := peer.Write([]byte("\x1b]11;?\x07")); err != nil {
+		t.Fatalf("peer write: %v", err)
+	}
+
+	// While writeMu is held by the other writer, the reply must not appear
+	// yet — this is the assertion that catches a missing lock in production.
+	time.Sleep(150 * time.Millisecond)
+	if got := snapshot(); len(got) != 0 {
+		t.Fatalf("OSC reply landed while writeMu was held by another writer: %q", got)
+	}
+
+	close(releaseInput)
+	<-inputDone
+
+	want := "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\"
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if string(snapshot()) == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("reply after lock release = %q, want %q", snapshot(), want)
 }
 
 // readAvailable waits up to timeout for at least one byte to arrive on f. It
