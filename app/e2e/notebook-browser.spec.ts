@@ -265,4 +265,23 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await expect(page.locator('.cm-md-blockquote')).toHaveCount(1);
     await expect(page.locator('.cm-md-hr')).toHaveCount(1);
   });
+
+  test('renders a GFM table as a widget, revealing raw source when clicked', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+
+    await page.getByRole('treeitem', { name: 'fences.md' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'fences' })).toBeVisible();
+
+    const table = page.locator('.cm-md-table');
+    await expect(table).toBeVisible();
+    await expect(table.locator('th', { hasText: 'col a' })).toBeVisible();
+    await expect(table.locator('td', { hasText: 'two' })).toBeVisible();
+    await expect(page.getByText('| one', { exact: false })).not.toBeVisible();
+
+    await table.locator('tbody tr').first().click();
+    await expect(table).not.toBeVisible();
+    await expect(page.locator('.cm-content')).toContainText('| one');
+  });
 });
