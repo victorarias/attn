@@ -48,7 +48,10 @@ const TREE: Record<string, FsEntry[]> = {
     { path: 'knowledge/index.md', name: 'index.md', isDir: false, size: 128 },
     { path: 'knowledge/areas', name: 'areas', isDir: true, size: 0 },
   ],
-  'knowledge/areas': [{ path: 'knowledge/areas/foo.md', name: 'foo.md', isDir: false, size: 30 }],
+  'knowledge/areas': [
+    { path: 'knowledge/areas/foo.md', name: 'foo.md', isDir: false, size: 30 },
+    { path: 'knowledge/areas/bar.md', name: 'bar.md', isDir: false, size: 20 },
+  ],
 };
 
 // A deliberately long body so the second/third headings sit well below the fold —
@@ -82,6 +85,23 @@ ${INDEX_FILLER}
 ![gone](assets/missing.png)
 `,
   'notes.txt': 'Plain text scratch file.\nNo markdown affordances here — just edit and autosave.\n',
+  // Fixture for PR8's link-resolver e2e coverage: a bare-relative link to a sibling
+  // note (resolves against foo.md's own directory, knowledge/areas — not the root),
+  // and a same-note #heading link whose target sits well below the fold.
+  'knowledge/areas/foo.md': `# Foo area
+
+A [sibling link](bar.md) resolved bare-relative, and a jump to [Down Below](#down-below).
+
+${INDEX_FILLER}
+
+## Down Below
+
+${INDEX_FILLER}
+`,
+  'knowledge/areas/bar.md': `# Bar area
+
+Sibling of foo, reached via a bare-relative link.
+`,
   'fences.md': `# Fences
 
 A fenced code block, a blockquote, and a horizontal rule.

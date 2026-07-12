@@ -8,6 +8,7 @@ import { notebookLinkPath } from './notebook/brokenLinks';
 import { FileTree } from './notebook/FileTree';
 import { fileKind, isBinaryPath, isMarkdownPath } from './notebook/fileKind';
 import { parseFrontmatter } from './notebook/frontmatter';
+import { headingSlug, noteDir, resolveNotebookLink } from './notebook/linkResolver';
 import { LiveMarkdownEditor, type LiveMarkdownEditorHandle, type LiveSelection } from './notebook/LiveMarkdownEditor';
 import { NotebookFinder } from './notebook/NotebookFinder';
 import { parseOutline } from './notebook/outline';
@@ -727,14 +728,35 @@ export function NotebookSurface({
     return () => window.clearTimeout(timer);
   }, [justSaved]);
 
-  // Mod-click on a rendered link: in-notebook .md targets navigate; external
-  // targets open in the browser; fragments are ignored (no in-editor anchor jump).
+  // Scroll to the current note's heading whose GitHub-style slug matches `anchor`
+  // (also accepting an exact raw-text case-insensitive match, for a heading that
+  // pre-dates or otherwise doesn't slug-match its own link). No match is a no-op.
+  const scrollToAnchor = useCallback((anchor: string) => {
+    const wanted = headingSlug(anchor);
+    const heading = parseOutline(draftRef.current).find(
+      (h) => headingSlug(h.text) === wanted || h.text.toLowerCase() === anchor.toLowerCase(),
+    );
+    if (heading) editorRef.current?.scrollToPos(heading.pos);
+  }, []);
+
+  // Mod-click on a rendered link: an in-notebook target navigates (resolved against
+  // the current note's directory); a same-note anchor scrolls to the matching
+  // heading; an external target opens in the browser. Cross-note anchors (a link
+  // like `other.md#heading`) are not yet handled — loadFile is a fire-and-forget
+  // navigation with no way to learn when the new note's content has landed without
+  // reshaping it, so a jump there is deferred to a follow-up.
   const handleFollowLink = useCallback((href: string) => {
-    const target = parseNotebookHref(href);
-    if (target.kind === 'note' && target.path) {
-      void loadFile(target.path);
-    } else if (target.kind === 'external' && target.href) {
-      window.open(target.href, '_blank', 'noreferrer');
+    const resolved = resolveNotebookLink(href, noteDir(selectedPathRef.current ?? ''));
+    if (resolved.kind === 'note') {
+      if (resolved.path === selectedPathRef.current && resolved.anchor) {
+        scrollToAnchor(resolved.anchor);
+      } else {
+        void loadFile(resolved.path);
+      }
+    } else if (resolved.kind === 'fragment') {
+      scrollToAnchor(resolved.anchor);
+    } else if (resolved.href) {
+      window.open(resolved.href, '_blank', 'noreferrer');
     }
   }, [loadFile]);
 
@@ -750,7 +772,7 @@ export function NotebookSurface({
   // rejected by notebookLinkPath) or a failed read both resolve to null, which the
   // widget renders as its broken placeholder.
   const resolveImageSrc = useCallback(async (src: string) => {
-    const path = notebookLinkPath(src);
+    const path = notebookLinkPath(src, noteDir(selectedPathRef.current ?? ''));
     if (!path) return null;
     try {
       const asset = await readAsset(path);
@@ -901,6 +923,7 @@ export function NotebookSurface({
                     existsFile={existsFile}
                     resolveImageSrc={resolveImageSrc}
                     revalidateSignal={changeSignal}
+                    notePath={selectedPath ?? ''}
                     ariaLabel="Note"
                     onSearchOpenChange={setSearchOpen}
                   />
@@ -1136,35 +1159,6 @@ export function NotebookSurface({
       </FocusTrap>
     </div>
   );
-}
-
-export interface NotebookHref {
-  kind: 'note' | 'fragment' | 'external';
-  // For 'note': the notebook-relative path (no leading slash, e.g. "knowledge/areas/foo.md").
-  path?: string;
-  // For 'fragment': the bare anchor without '#'. For 'note': an optional anchor.
-  anchor?: string;
-  // For 'external': the original href.
-  href?: string;
-}
-
-// parseNotebookHref classifies a markdown link target. Root-absolute .md targets
-// are in-notebook navigation; '#...' is an in-page anchor; everything else
-// (http(s), mailto, relative) is external and opened in the browser.
-export function parseNotebookHref(href: string): NotebookHref {
-  const trimmed = href.trim();
-  if (trimmed.startsWith('#')) {
-    return { kind: 'fragment', anchor: trimmed.slice(1) };
-  }
-  if (trimmed.startsWith('/')) {
-    const hashIdx = trimmed.indexOf('#');
-    const pathPart = hashIdx === -1 ? trimmed : trimmed.slice(0, hashIdx);
-    const anchor = hashIdx === -1 ? undefined : trimmed.slice(hashIdx + 1);
-    if (pathPart.toLowerCase().endsWith('.md')) {
-      return { kind: 'note', path: pathPart.replace(/^\/+/, ''), anchor };
-    }
-  }
-  return { kind: 'external', href: trimmed };
 }
 
 function basename(path: string): string {

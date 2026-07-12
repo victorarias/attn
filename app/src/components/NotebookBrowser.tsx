@@ -1,10 +1,6 @@
 import type { FsEntry, FsExistsResult, FsReadAssetResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
 import { NotebookSurface } from './NotebookSurface';
 
-// parseNotebookHref / NotebookHref moved to NotebookSurface with the rest of the
-// body; re-exported here so existing importers (and the unit test) are unaffected.
-export { parseNotebookHref, type NotebookHref } from './NotebookSurface';
-
 interface NotebookBrowserProps {
   isOpen: boolean;
   initialPath?: string | null;
