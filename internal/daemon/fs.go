@@ -12,9 +12,20 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// maxAssetBytes bounds a single fs_read_asset read so a huge binary file can't
-// balloon a WS frame (the whole file is base64-encoded into one JSON message).
-const maxAssetBytes = 10 << 20
+// maxAssetMessageBytes bounds the entire marshaled fs_read_asset_result JSON
+// message — the unit that actually hits the WebSocket transport, which has no
+// other outbound cap. The raw read cap below is DERIVED from it, so the bound
+// on the wire is the contract and the file-size cap follows.
+const maxAssetMessageBytes = 8 << 20
+
+// assetEnvelopeSlack reserves room for everything in the message besides the
+// base64 payload: JSON structure, event/request_id fields, mime type, and the
+// asset path (paths are far shorter than this in practice).
+const assetEnvelopeSlack = 4 << 10
+
+// maxAssetBytes bounds a single fs_read_asset read so base64(content) plus the
+// envelope always fits maxAssetMessageBytes (base64 of n bytes is 4*ceil(n/3)).
+const maxAssetBytes = (maxAssetMessageBytes - assetEnvelopeSlack) / 4 * 3
 
 // assetMimeTypes is the explicit allowlist of image extensions fs_read_asset will
 // serve. This IS the contract, not a convenience lookup: unlike mime.TypeByExtension

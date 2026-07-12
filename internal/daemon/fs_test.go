@@ -387,6 +387,36 @@ func TestFsReadAssetOversize(t *testing.T) {
 	}
 }
 
+// A file at exactly the per-asset byte cap is accepted, and the resulting
+// fs_read_asset_result message still fits maxAssetMessageBytes once marshaled.
+// This is the boundary the cap derivation exists to guarantee: it fails if
+// someone raises maxAssetBytes without re-deriving it, or if the base64
+// envelope math is wrong.
+func TestFsReadAssetMaxSizeFitsMessageCap(t *testing.T) {
+	d := newFsDaemon(t)
+	root := d.store.GetSetting(SettingNotebookRoot)
+	if err := os.MkdirAll(filepath.Join(root, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	max := bytes.Repeat([]byte{0xFF}, maxAssetBytes)
+	if err := os.WriteFile(filepath.Join(root, "assets", "max.png"), max, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := fsReadAsset(t, d, "a1", "assets/max.png")
+	if !got.Success || got.Result == nil {
+		t.Fatalf("read asset(max size) = %+v, want success", got)
+	}
+
+	marshaled, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+	if len(marshaled) > maxAssetMessageBytes {
+		t.Fatalf("marshaled message = %d bytes, want <= %d (maxAssetMessageBytes)", len(marshaled), maxAssetMessageBytes)
+	}
+}
+
 // An extension outside the image allowlist is rejected before the file is even
 // read, regardless of the file's actual content.
 func TestFsReadAssetUnsupportedExtension(t *testing.T) {
