@@ -2,7 +2,7 @@ import { EditorSelection, EditorState } from '@codemirror/state';
 import { type DecorationSet } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
 import { frontmatterCardDecorations } from './frontmatterCard';
-import { parseFrontmatter } from './frontmatter';
+import { FRONTMATTER_SCAN_LIMIT, parseFrontmatter } from './frontmatter';
 
 // Pull the card's ranges out of the decoration set so the explicit-edit gate can be
 // asserted without mounting a view (the widget's toDOM never runs headlessly).
@@ -48,6 +48,21 @@ describe('frontmatterCardDecorations', () => {
 
   it('renders nothing for a frontmatter-only note (no body line to keep the cursor on)', () => {
     const got = ranges(frontmatterCardDecorations(stateAt('---\ntype: area\n---\n', 0), false));
+    expect(got).toHaveLength(0);
+  });
+
+  it('still renders the card when the body (not the frontmatter) exceeds the scan limit', () => {
+    const bigBody = '# Body\n' + 'x'.repeat(FRONTMATTER_SCAN_LIMIT * 2);
+    const note = ['---', 'type: area', '---', bigBody].join('\n');
+    const got = ranges(frontmatterCardDecorations(stateAt(note, 0), false));
+    const fm = parseFrontmatter(note.slice(0, FRONTMATTER_SCAN_LIMIT))!;
+    expect(got).toEqual([{ from: 0, to: fm.to, block: true }]);
+  });
+
+  it('treats an opening fence with no closing fence within the scan limit as no frontmatter', () => {
+    const note = '---\n' + 'padding line\n'.repeat(400) + '---\n# Body\n';
+    expect(note.indexOf('\n---\n', 4)).toBeGreaterThan(FRONTMATTER_SCAN_LIMIT);
+    const got = ranges(frontmatterCardDecorations(stateAt(note, 0), false));
     expect(got).toHaveLength(0);
   });
 });

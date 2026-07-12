@@ -1,12 +1,15 @@
 // Parse a note's leading YAML frontmatter block for the in-editor frontmatter card.
-// Pure (no DOM, no CodeMirror), so it runs in headless unit tests; the card widget
-// and its cursor/focus-gated reveal are layered on top in frontmatterCard.ts.
+// No DOM; only a type-only CodeMirror import for parseFrontmatterFromDoc's `Text`
+// parameter, so it still runs in headless unit tests. The card widget and its
+// cursor/focus-gated reveal are layered on top in frontmatterCard.ts.
 //
 // The notebook's frontmatter is keeper-written and structured, so we parse the small
 // YAML subset it actually uses — `key: value`, flow lists `[a, b]`, and block lists
 // (`key:` then indented `- item` lines) — rather than pulling in a full YAML parser.
 // Anything fancier (nested maps, block scalars) is out of scope; escalate to js-yaml
 // if notes ever need it.
+
+import type { Text } from '@codemirror/state';
 
 export type FrontmatterValue = string | string[];
 
@@ -87,4 +90,14 @@ export function parseFrontmatter(doc: string): Frontmatter | null {
   for (let i = 0; i <= close; i += 1) to += lines[i].length + 1;
   to = Math.min(to, doc.length); // no trailing newline after the close → clamp
   return { fields: parseFields(lines.slice(1, close)), from: 0, to };
+}
+
+// Frontmatter always lives in a small leading prefix; materializing the whole
+// document to parse it is wasted work on a large note. The bound is shared by
+// every editor extension so they all agree on what counts as frontmatter — a
+// fence that closes beyond it is treated as not-frontmatter everywhere.
+export const FRONTMATTER_SCAN_LIMIT = 4096;
+
+export function parseFrontmatterFromDoc(doc: Text): Frontmatter | null {
+  return parseFrontmatter(doc.sliceString(0, Math.min(doc.length, FRONTMATTER_SCAN_LIMIT)));
 }
