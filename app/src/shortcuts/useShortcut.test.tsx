@@ -9,12 +9,14 @@ function ShortcutHarness(props: {
   onTerminalClose: () => void;
   onToggleZoom?: () => void;
   onSelectWorkspace?: () => void;
+  onTerminalFind?: () => void;
   terminalEnabled?: boolean;
 }) {
   useShortcut('session.close', props.onSessionClose, true);
   useShortcut('terminal.close', props.onTerminalClose, props.terminalEnabled ?? true);
   useShortcut('terminal.toggleZoom', props.onToggleZoom ?? (() => {}), props.onToggleZoom !== undefined);
   useShortcut('workspace.select1', props.onSelectWorkspace ?? (() => {}), props.onSelectWorkspace !== undefined);
+  useShortcut('terminal.find', props.onTerminalFind ?? (() => {}), props.onTerminalFind !== undefined);
 
   return (
     <div>
@@ -23,6 +25,7 @@ function ShortcutHarness(props: {
       <div className="session-terminal-workspace">
         <input aria-label="Browser address" />
       </div>
+      <div data-testid="editable-target" contentEditable={true} suppressContentEditableWarning />
     </div>
   );
 }
@@ -116,6 +119,30 @@ describe('useShortcut close priority', () => {
 
     expect(allowed).toBe(true);
     expect(onToggleZoom).not.toHaveBeenCalled();
+  });
+
+  it('leaves Cmd+F to the focused editor in editable targets, but fires terminal.find elsewhere', () => {
+    const onTerminalFind = vi.fn();
+
+    render(
+      <ShortcutHarness
+        onSessionClose={vi.fn()}
+        onTerminalClose={vi.fn()}
+        onTerminalFind={onTerminalFind}
+      />,
+    );
+
+    const allowed = fireEvent.keyDown(screen.getByTestId('editable-target'), {
+      key: 'f',
+      metaKey: true,
+    });
+
+    expect(allowed).toBe(true);
+    expect(onTerminalFind).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByTestId('plain-target'), { key: 'f', metaKey: true });
+
+    expect(onTerminalFind).toHaveBeenCalledTimes(1);
   });
 
   it('keeps unrelated app shortcuts active in non-terminal editable controls', () => {

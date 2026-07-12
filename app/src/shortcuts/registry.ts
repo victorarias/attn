@@ -53,8 +53,10 @@ export const SHORTCUTS = {
   'terminal.focusUp': { key: 'ArrowUp', meta: true, alt: true },
   'terminal.focusDown': { key: 'ArrowDown', meta: true, alt: true },
 
-  // Find in terminal scrollback
-  'terminal.find': { key: 'f', meta: true },
+  // Find in terminal scrollback. In editable targets ⌘F belongs to the focused
+  // editor (the notebook editor's CodeMirror search); terminal find only makes
+  // sense when focus isn't in a text field.
+  'terminal.find': { key: 'f', meta: true, editableTarget: 'native' },
 
   // Session management
   'session.new': { key: 'n', meta: true },

@@ -142,6 +142,9 @@ export function NotebookSurface({
   // the outline and backlinks are visible without a click. Local UI state only.
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [backlinksOpen, setBacklinksOpen] = useState(true);
+  // Whether the live editor's in-CodeMirror search panel (⌘F) is currently open.
+  // Drives a dedicated escape-stack entry so the first Esc closes just the panel.
+  const [searchOpen, setSearchOpen] = useState(false);
   // Whole-pane edge-rail folds (manual). Tri-state per side: null = follow the auto
   // default, true/false = an explicit user override. The auto default is a hardcoded
   // `false` here — stage 7 PR3 (tile auto-fold) swaps it for a width-driven value, so
@@ -240,6 +243,11 @@ export function NotebookSurface({
   // handled by the finder input's onKeyDown directly, no stack involved.)
   useEscapeStack(handleEscape, variant === 'modal' && active);
   useEscapeStack(() => setFinderOpen(false), variant === 'modal' && active && finderOpen);
+  // The in-editor search panel (⌘F) gets its own higher-priority Esc entry, pushed
+  // only while it's open — LIFO puts it above the modal-close entry, so the first
+  // Esc closes just the search panel. Not gated on variant: a tile's search panel
+  // also closes via the centralized stack (a tile has no modal-close entry to race).
+  useEscapeStack(() => { editorRef.current?.closeSearchPanel(); }, active && searchOpen);
 
   // Load `path` into the document pane. `prefetched` lets a caller that already read
   // the file (the on-open existence probe) seed the editor without a second read.
@@ -654,6 +662,13 @@ export function NotebookSurface({
     setJustSaved(false);
     setChiefSel(null);
     setChiefStatus(null);
+    // Navigating away can keep the same CodeMirror view alive (the editor is
+    // un-keyed), so an open search panel would survive the switch with no
+    // escape-stack entry. Close the panel itself; the open-change callback
+    // resets searchOpen when the view is still mounted, and the direct reset
+    // covers the unmounted case.
+    editorRef.current?.closeSearchPanel();
+    setSearchOpen(false);
   }, [selectedPath]);
 
   // Debounced autosave: once the buffer diverges from the synced file, persist it
@@ -851,6 +866,7 @@ export function NotebookSurface({
                     existsFile={existsFile}
                     revalidateSignal={changeSignal}
                     ariaLabel="Note"
+                    onSearchOpenChange={setSearchOpen}
                   />
                 ) : (
                   <textarea

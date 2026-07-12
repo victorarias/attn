@@ -7,7 +7,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { EditorView, type ViewUpdate } from '@codemirror/view';
+import { closeSearchPanel, search, searchKeymap, searchPanelOpen } from '@codemirror/search';
+import { EditorView, keymap, type ViewUpdate } from '@codemirror/view';
 import { brokenLinks, revalidateBrokenLinks, type ExistsCheck } from './brokenLinks';
 import { frontmatterCard } from './frontmatterCard';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
@@ -35,6 +36,8 @@ export interface LiveMarkdownEditorHandle {
   // someone is reading. No-op until the view mounts, or when `next` is already current.
   // Does NOT focus or scroll into view (the reader may be elsewhere on the page).
   applyExternalContent: (next: string) => void;
+  // Close the in-editor search panel. Returns true if a panel was open.
+  closeSearchPanel: () => boolean;
 }
 
 interface LiveMarkdownEditorProps {
@@ -51,6 +54,9 @@ interface LiveMarkdownEditorProps {
   revalidateSignal?: number;
   ariaLabel?: string;
   autoFocus?: boolean;
+  // Called with the new open state whenever the in-editor search panel opens or
+  // closes, so the parent can register/unregister an escape-stack entry.
+  onSearchOpenChange?: (open: boolean) => void;
 }
 
 // Themed entirely through the app's CSS variables so it tracks the app's light/dark
@@ -92,6 +98,43 @@ const editorTheme = EditorView.theme({
   '.cm-selectionLayer .cm-selectionBackground': {
     backgroundColor: 'color-mix(in srgb, var(--accent, #ff6b35) 30%, transparent) !important',
   },
+  // Search panel (⌘F): themed to the app's tokens. CM's base theme paints its
+  // buttons with a background-image gradient, so that must be cleared explicitly.
+  '.cm-panels': {
+    color: 'var(--color-text-primary, inherit)',
+    backgroundColor: 'var(--color-bg-elevated, rgba(128, 128, 128, 0.08))',
+  },
+  '.cm-panels.cm-panels-top': {
+    borderBottom: '1px solid var(--color-border, rgba(128, 128, 128, 0.3))',
+  },
+  '.cm-panel.cm-search': {
+    padding: '4px 6px',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontSize: '12px',
+  },
+  '.cm-panel.cm-search input, .cm-panel.cm-search button, .cm-panel.cm-search label': {
+    fontFamily: 'inherit',
+    fontSize: 'inherit',
+    color: 'var(--color-text-primary, inherit)',
+  },
+  '.cm-panel.cm-search input': {
+    backgroundColor: 'var(--color-bg-input, transparent)',
+    border: '1px solid var(--color-border, rgba(128, 128, 128, 0.3))',
+    borderRadius: '3px',
+    padding: '2px 4px',
+  },
+  '.cm-panel.cm-search button': {
+    backgroundImage: 'none',
+    backgroundColor: 'var(--color-bg-button, transparent)',
+    border: '1px solid var(--color-border, rgba(128, 128, 128, 0.3))',
+    borderRadius: '3px',
+  },
+  '.cm-searchMatch': {
+    backgroundColor: 'color-mix(in srgb, var(--accent, #ff6b35) 25%, transparent)',
+  },
+  '.cm-searchMatch-selected': {
+    backgroundColor: 'color-mix(in srgb, var(--accent, #ff6b35) 50%, transparent)',
+  },
 });
 
 export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkdownEditorProps>(function LiveMarkdownEditor({
@@ -103,8 +146,12 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
   revalidateSignal,
   ariaLabel,
   autoFocus,
+  onSearchOpenChange,
 }, ref) {
   const cmRef = useRef<ReactCodeMirrorRef>(null);
+  // Previous search-panel-open value, so handleUpdate only calls onSearchOpenChange
+  // on a genuine transition (not on every unrelated update while the panel is open).
+  const searchOpenRef = useRef(false);
 
   useImperativeHandle(ref, () => ({
     scrollToPos: (pos: number) => {
@@ -134,6 +181,12 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
         scrollIntoView: false,
       });
     },
+    closeSearchPanel: () => {
+      const view = cmRef.current?.view;
+      if (!view || !searchPanelOpen(view.state)) return false;
+      closeSearchPanel(view);
+      return true;
+    },
   }), []);
 
   const extensions = useMemo(
@@ -143,6 +196,8 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       frontmatterCard(),
       liveMarkdownPreview({ onFollowLink }),
       brokenLinks({ existsFile }),
+      search({ top: true }),
+      keymap.of(searchKeymap),
       editorTheme,
     ],
     [onFollowLink, existsFile],
@@ -163,6 +218,13 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
   const handleUpdate = useMemo(
     () =>
       (update: ViewUpdate) => {
+        if (onSearchOpenChange) {
+          const isOpen = searchPanelOpen(update.state);
+          if (isOpen !== searchOpenRef.current) {
+            searchOpenRef.current = isOpen;
+            onSearchOpenChange(isOpen);
+          }
+        }
         if (!onSelectionChange) return;
         if (!update.selectionSet && !update.docChanged && !update.focusChanged) return;
         const range = update.state.selection.main;
@@ -182,7 +244,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
         }
         onSelectionChange({ text, top: coords.top, left: (coords.left + coords.right) / 2 });
       },
-    [onSelectionChange],
+    [onSelectionChange, onSearchOpenChange],
   );
 
   return (
