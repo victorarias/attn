@@ -209,7 +209,11 @@ func TestNotifyDefersPendingApprovalThenFlushesOnWorking(t *testing.T) {
 		t.Fatal("approval-waiting codex agent armed a countdown")
 	}
 
-	d.updateAndBroadcastState(agentID, protocol.StateWorking)
+	d.applyState(sessionStateChange{
+		sessionID: agentID,
+		state:     protocol.StateWorking,
+		cause:     daemonObservation{},
+	})
 	deadline := time.Now().Add(time.Second)
 	for currentNudgeTimer(d, agentID) == nil && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)

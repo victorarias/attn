@@ -366,6 +366,28 @@ func TestStore_Touch(t *testing.T) {
 	}
 }
 
+func TestStore_UpdateStateReportsWhetherSessionWasUpdated(t *testing.T) {
+	s := New()
+	now := protocol.TimestampNow().String()
+	s.Add(&protocol.Session{
+		ID:             "state-result",
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	if !s.UpdateState("state-result", protocol.StateWorking) {
+		t.Fatal("UpdateState(existing) = false, want true")
+	}
+	if got := s.Get("state-result"); got == nil || got.State != protocol.SessionStateWorking {
+		t.Fatalf("state after update = %+v, want working", got)
+	}
+	if s.UpdateState("missing", protocol.StateIdle) {
+		t.Fatal("UpdateState(missing) = true, want false")
+	}
+}
+
 func TestStore_UpdateStateWithTimestamp_SubSecondPrecision(t *testing.T) {
 	s := New()
 

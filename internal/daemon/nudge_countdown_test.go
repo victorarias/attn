@@ -149,7 +149,11 @@ func TestNudgeCountdownSurvivesEligibleStateChange(t *testing.T) {
 		t.Fatal("precondition: no countdown armed")
 	}
 
-	d.updateAndBroadcastState(agentID, protocol.StateWorking)
+	d.applyState(sessionStateChange{
+		sessionID: agentID,
+		state:     protocol.StateWorking,
+		cause:     daemonObservation{},
+	})
 
 	if currentNudgeTimer(d, agentID) == nil {
 		t.Fatal("countdown was canceled when the agent became active")
@@ -162,7 +166,11 @@ func TestNudgeCountdownCancelsOnPendingApproval(t *testing.T) {
 	t.Cleanup(d.stopNudgeCountdowns)
 	agentID, _ := armForTest(t, d)
 
-	d.updateAndBroadcastState(agentID, protocol.StatePendingApproval)
+	d.applyState(sessionStateChange{
+		sessionID: agentID,
+		state:     protocol.StatePendingApproval,
+		cause:     daemonObservation{},
+	})
 
 	if currentNudgeTimer(d, agentID) != nil {
 		t.Fatal("countdown survived a pending approval prompt")
@@ -199,7 +207,11 @@ func TestDoorbellWriteDoesNotInterleaveWithPendingApproval(t *testing.T) {
 
 	stateDone := make(chan struct{})
 	go func() {
-		d.updateAndBroadcastState(sessionID, protocol.StatePendingApproval)
+		d.applyState(sessionStateChange{
+			sessionID: sessionID,
+			state:     protocol.StatePendingApproval,
+			cause:     daemonObservation{},
+		})
 		close(stateDone)
 	}()
 	select {

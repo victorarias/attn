@@ -447,29 +447,32 @@ func (s *Store) RemoveSessionsInDirectory(directory string) {
 	}
 }
 
-// UpdateState updates a session's state
-func (s *Store) UpdateState(id, state string) {
+// UpdateState updates a session's state and reports whether a session was updated.
+func (s *Store) UpdateState(id, state string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
 		session := s.sessions[id]
 		if session == nil {
-			return
+			return false
 		}
 		now := time.Now().Format(time.RFC3339Nano)
 		session.State = protocol.SessionState(state)
 		session.StateSince = now
 		session.StateUpdatedAt = now
-		return
+		return true
 	}
 
 	now := time.Now().Format(time.RFC3339Nano)
-	_, err := s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
+	result, err := s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
 		state, now, now, id)
 	if err != nil {
 		log.Printf("[store] UpdateState: failed for session %s: %v", id, err)
+		return false
 	}
+	updated, err := result.RowsAffected()
+	return err == nil && updated == 1
 }
 
 // UpdateStateWithTimestamp updates a session's state only if the provided timestamp

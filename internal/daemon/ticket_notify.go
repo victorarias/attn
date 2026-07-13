@@ -84,19 +84,3 @@ func (d *Daemon) syncNudgeForState(sessionID, state string) {
 	}
 	go d.notifyTicketSession(sessionID, time.Now())
 }
-
-// applyStateAndSyncNudge serializes an authoritative session-state write with a
-// complete doorbell input. The lock establishes one order when a session reaches an
-// approval prompt at the same time a countdown wants to send Enter: either the
-// eligible doorbell is fully written first, or the approval state is committed first
-// and the doorbell is suppressed. The follow-up reconciliation runs outside the lock
-// because it may read tickets and arm timers.
-func (d *Daemon) applyStateAndSyncNudge(sessionID, state string, apply func() bool) bool {
-	d.doorbellMu.Lock()
-	applied := apply()
-	d.doorbellMu.Unlock()
-	if applied {
-		d.syncNudgeForState(sessionID, state)
-	}
-	return applied
-}

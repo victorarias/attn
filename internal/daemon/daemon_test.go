@@ -5662,7 +5662,7 @@ func TestClassifySessionState_ClaudeConcurrentDuplicateTurnRunsOnce(t *testing.T
 	}
 }
 
-func TestUpdateAndBroadcastStateWithTimestamp_StaleIdleDoesNotClearLongRunTracking(t *testing.T) {
+func TestClassifierStateTransition_StaleIdleDoesNotClearLongRunTracking(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 
 	now := time.Now()
@@ -5683,7 +5683,11 @@ func TestUpdateAndBroadcastStateWithTimestamp_StaleIdleDoesNotClearLongRunTracki
 		needsReview:        true,
 	}
 
-	d.updateAndBroadcastStateWithTimestamp("sess-stale", protocol.StateIdle, now.Add(-1*time.Minute))
+	d.applyState(sessionStateChange{
+		sessionID: "sess-stale",
+		state:     protocol.StateIdle,
+		cause:     classifierObservation{observedAt: now.Add(-1 * time.Minute)},
+	})
 
 	session := d.store.Get("sess-stale")
 	if session == nil {
@@ -5719,7 +5723,11 @@ func TestScheduledClearsLongRunTracking(t *testing.T) {
 	// It has been working for 10 minutes, then parks on a cron.
 	d.longRun["sess-loop"] = longRunSession{workingSince: now.Add(-10 * time.Minute)}
 
-	d.updateAndBroadcastState("sess-loop", protocol.StateScheduled)
+	d.applyState(sessionStateChange{
+		sessionID: "sess-loop",
+		state:     protocol.StateScheduled,
+		cause:     daemonObservation{},
+	})
 
 	d.longRunMu.Lock()
 	_, tracked := d.longRun["sess-loop"]
