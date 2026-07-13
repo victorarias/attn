@@ -144,6 +144,13 @@ function tinyFile(path: string): PresentTourFile {
   return { path, diff: { loading: false, original, modified } };
 }
 
+// Same path shape as tinyFile, but not yet settled — this is what a file
+// looks like before its diff fetch resolves (or after a round reload puts it
+// back in flight). Used to exercise the pending/admission machinery directly.
+function loadingFile(path: string): PresentTourFile {
+  return { path, diff: { loading: true } };
+}
+
 function annotationComment(overrides: Partial<ReviewComment>): ReviewComment {
   return {
     id: 'annot:x',
@@ -165,6 +172,27 @@ async function waitForSettled() {
   });
 }
 
+// CodeView now mounts as soon as there's at least one file (see
+// PresentTour's module doc) — a not-yet-admitted file's item is a zero-hunk
+// placeholder (see the items memo's pending branch), not the real diff. Tests
+// that need the REAL item (annotations, real hunks) must wait for admission;
+// this polls the latest captured `items` array (see codeViewRenders above)
+// until every requested path's item is no longer a placeholder. An error
+// item ('file' type) needs no admission, so it always counts as ready.
+async function awaitAllReady(paths: string[]) {
+  await waitFor(() => {
+    const latest = codeViewRenders.calls[codeViewRenders.calls.length - 1] ?? [];
+    for (const path of paths) {
+      const item = latest.find((i) => (i.id as string) === path) as
+        | { type?: string; fileDiff?: { hunks: unknown[] } }
+        | undefined;
+      expect(item).toBeDefined();
+      if (item!.type === 'file') continue; // error card — renders immediately, no admission
+      expect((item!.fileDiff?.hunks ?? []).length).toBeGreaterThan(0);
+    }
+  });
+}
+
 describe('PresentTour annotations', () => {
   it('renders an annotation as a read-only thread at its line, author shown as Claude', async () => {
     const comment = annotationComment({ id: 'annot:1', content: 'why this line?' });
@@ -179,6 +207,7 @@ describe('PresentTour annotations', () => {
       />
     );
     await waitForSettled();
+    await awaitAllReady(['src/foo.ts']);
 
     const thread = screen.getByTestId('diff-comment-thread');
     expect(thread.textContent).toContain('why this line?');
@@ -212,6 +241,7 @@ describe('PresentTour annotations', () => {
       />
     );
     await waitForSettled();
+    await awaitAllReady(['src/foo.ts']);
 
     const thread = screen.getByTestId('diff-comment-thread');
     const bodies = Array.from(thread.querySelectorAll('.diff-comment-content')).map((el) => el.textContent);
@@ -233,6 +263,7 @@ describe('PresentTour annotations', () => {
       />
     );
     await waitForSettled();
+    await awaitAllReady(['src/foo.ts']);
 
     const replyBtn = screen.getByRole('button', { name: 'Reply' });
     act(() => {
@@ -266,6 +297,7 @@ describe('PresentTour annotations', () => {
       />
     );
     await waitForSettled();
+    await awaitAllReady(['src/foo.ts']);
 
     const thread = screen.getByTestId('diff-comment-thread');
     expect(thread.textContent).toContain('off in the weeds');
@@ -295,6 +327,7 @@ describe('PresentTour annotations', () => {
       />
     );
     await waitForSettled();
+    await awaitAllReady(['src/foo.ts']);
 
     expect(screen.queryByTestId('diff-comment-thread')).toBeNull();
   });
@@ -321,6 +354,7 @@ describe('PresentTour annotations', () => {
       />
     );
     await waitForSettled();
+    await awaitAllReady(['src/foo.ts', 'src/b.ts']);
 
     await waitFor(() => {
       expect(onAnnotationAnchorsChange).toHaveBeenCalled();
@@ -347,6 +381,7 @@ describe('PresentTour annotations', () => {
       />
     );
     await waitForSettled();
+    await awaitAllReady(['src/foo.ts']);
 
     const latestItems = codeViewRenders.calls[codeViewRenders.calls.length - 1];
     const item = latestItems[0] as { annotations: Array<{ metadata: Record<string, unknown> }> };
@@ -374,6 +409,7 @@ describe('PresentTour annotations', () => {
       />
     );
     await waitForSettled();
+    await awaitAllReady(['src/foo.ts']);
 
     await waitFor(() => {
       expect(onAnnotationAnchorsChange).toHaveBeenCalled();
@@ -509,26 +545,24 @@ describe('PresentTour summary fold', () => {
 
 // Regression test for the root-cause bug: the takeover/cold-window-pin
 // listener effect used to have `[]` deps, so it ran once against
-// `containerRef.current === null` while the first render's `allSettled` was
-// still false (diffs load async over the daemon WS in the live app) and then
-// never ran again once CodeView actually mounted. Passive scroll tracking
-// never armed, `handleScroll` returned early forever, and neither the
-// summary fold nor the cold-window scroll pin ever worked outside tests
-// (which, unlike the live app, feed pre-loaded diffs so `allSettled` is true
-// on the very first render). This must fail on the pre-fix `[]` deps and
-// pass once the effect depends on `allSettled`.
+// `containerRef.current === null` while the first render had zero manifest
+// files (the "Loading tour…" branch renders instead of CodeView, and
+// `tourMounted` was still false) and then never ran again once CodeView
+// actually mounted. Passive scroll tracking never armed, `handleScroll`
+// returned early forever, and neither the summary fold nor the cold-window
+// scroll pin ever worked outside tests (which, unlike the live app, usually
+// render with files already present). This must fail on the pre-fix `[]`
+// deps and pass once the effect depends on `tourMounted`.
 describe('PresentTour listener re-attach on deferred load (regression)', () => {
-  it('arms passive scroll tracking once CodeView mounts after starting in the loading state', async () => {
+  it('arms passive scroll tracking once CodeView mounts after starting with zero manifest files', async () => {
     const onActivePathChange = vi.fn();
-    const loadingFile: PresentTourFile = { path: 'src/foo.ts', diff: { loading: true } };
-    const { rerender } = render(
-      <PresentTour {...baseProps({ files: [loadingFile], onActivePathChange })} />
-    );
+    const { rerender } = render(<PresentTour {...baseProps({ files: [], onActivePathChange })} />);
 
     expect(screen.getByText('Loading tour…')).toBeInTheDocument();
 
     rerender(<PresentTour {...baseProps({ files: [tinyFile('src/foo.ts')], onActivePathChange })} />);
     await waitForSettled();
+    await awaitAllReady(['src/foo.ts']);
 
     fireEvent.wheel(screen.getByTestId('mock-codeview'));
     act(() => {
@@ -673,6 +707,7 @@ describe('PresentTour per-file item caching', () => {
     const files = [tinyFile('src/a.ts'), tinyFile('src/b.ts'), tinyFile('src/c.ts')];
     render(<PresentTour {...baseProps({ files })} />);
     await waitForSettled();
+    await awaitAllReady(['src/a.ts', 'src/b.ts', 'src/c.ts']);
 
     openDraftOn('src/a.ts');
     const form = await screen.findByTestId('diff-comment-form');
@@ -698,6 +733,7 @@ describe('PresentTour per-file item caching', () => {
     const files = [tinyFile('src/a.ts'), tinyFile('src/b.ts'), tinyFile('src/c.ts')];
     const { rerender } = render(<PresentTour {...baseProps({ files })} />);
     await waitForSettled();
+    await awaitAllReady(['src/a.ts', 'src/b.ts', 'src/c.ts']);
 
     const parseCountBefore = parseDiffFromFileSpy.fn!.mock.calls.length;
     const itemsBefore = latestItemsByPath();
@@ -718,6 +754,7 @@ describe('PresentTour per-file item caching', () => {
     const files = [tinyFile('src/a.ts'), tinyFile('src/b.ts')];
     render(<PresentTour {...baseProps({ files })} />);
     await waitForSettled();
+    await awaitAllReady(['src/a.ts', 'src/b.ts']);
 
     const itemsBefore = latestItemsByPath();
     openDraftOn('src/a.ts');
@@ -741,6 +778,7 @@ describe('PresentTour per-file item caching', () => {
       />
     );
     await waitForSettled();
+    await awaitAllReady(['src/a.ts', 'src/b.ts']);
 
     const parseCountBefore = parseDiffFromFileSpy.fn!.mock.calls.length;
     const itemsBefore = latestItemsByPath();
@@ -776,6 +814,7 @@ describe('PresentTour per-file item caching', () => {
     const fileB = tinyFile('src/b.ts');
     const { rerender } = render(<PresentTour {...baseProps({ files: [fileA, fileB] })} />);
     await waitForSettled();
+    await awaitAllReady(['src/a.ts', 'src/b.ts']);
 
     openDraftOn('src/a.ts');
     const form = await screen.findByTestId('diff-comment-form');
@@ -794,6 +833,138 @@ describe('PresentTour per-file item caching', () => {
     rerender(<PresentTour {...baseProps({ files: [fileA, fileB] })} />);
     const remountedForm = await screen.findByTestId('diff-comment-form');
     expect(remountedForm.querySelector('textarea')).toHaveValue('typed text');
+  });
+});
+
+// Exercises the progressive-load design itself (see the module doc's
+// "CodeView mounts as soon as..." paragraph): CodeView mounting before every
+// diff settles, placeholder items for not-yet-admitted files, and the
+// frame-budgeted readyPaths admission that swaps them for real items.
+describe('PresentTour progressive load', () => {
+  function latestItemsByPath(): Map<string, Record<string, unknown>> {
+    const latest = codeViewRenders.calls[codeViewRenders.calls.length - 1] ?? [];
+    return new Map(latest.map((item) => [item.id as string, item]));
+  }
+
+  it('mounts CodeView with a zero-hunk placeholder per file before any diff settles', async () => {
+    const files = [loadingFile('src/a.ts'), loadingFile('src/b.ts'), loadingFile('src/c.ts')];
+    render(<PresentTour {...baseProps({ files })} />);
+    await waitForSettled();
+
+    const items = latestItemsByPath();
+    expect(items.size).toBe(3);
+    for (const path of ['src/a.ts', 'src/b.ts', 'src/c.ts']) {
+      const item = items.get(path) as { type: string; fileDiff: { hunks: unknown[] } };
+      expect(item.type).toBe('diff');
+      expect(item.fileDiff.hunks).toHaveLength(0);
+    }
+  });
+
+  it('swaps one file to its real item as it settles, leaving the others as untouched placeholders', async () => {
+    const { rerender } = render(
+      <PresentTour {...baseProps({ files: [loadingFile('src/a.ts'), loadingFile('src/b.ts'), loadingFile('src/c.ts')] })} />
+    );
+    await waitForSettled();
+    const before = latestItemsByPath();
+    const bBefore = before.get('src/b.ts');
+    const cBefore = before.get('src/c.ts');
+
+    rerender(
+      <PresentTour {...baseProps({ files: [tinyFile('src/a.ts'), loadingFile('src/b.ts'), loadingFile('src/c.ts')] })} />
+    );
+    await awaitAllReady(['src/a.ts']);
+
+    const after = latestItemsByPath();
+    const aAfter = after.get('src/a.ts') as { type: string; fileDiff: { hunks: unknown[] }; version: number };
+    expect(aAfter.fileDiff.hunks.length).toBeGreaterThan(0);
+    expect(aAfter.version).not.toBe((before.get('src/a.ts') as { version: number }).version);
+    // b and c never re-settled — their placeholder items must be the exact
+    // same objects, not just equivalent-looking ones (proves admission is
+    // per-file, not a blanket rebuild of every still-loading item).
+    expect(after.get('src/b.ts')).toBe(bBefore);
+    expect(after.get('src/c.ts')).toBe(cBefore);
+  });
+
+  it('parses each settled file exactly once as sliced admission converges on a large batch', async () => {
+    const paths = Array.from({ length: 12 }, (_, i) => `src/file${i}.ts`);
+    const { rerender } = render(<PresentTour {...baseProps({ files: paths.map(loadingFile) })} />);
+    await waitForSettled();
+
+    rerender(<PresentTour {...baseProps({ files: paths.map(tinyFile) })} />);
+    await awaitAllReady(paths);
+
+    const realParseCalls = parseDiffFromFileSpy.fn!.mock.calls.filter(
+      (call) => (call[0] as { contents: string }).contents.length > 0
+    );
+    expect(realParseCalls).toHaveLength(paths.length);
+    for (const path of paths) {
+      const callsForPath = realParseCalls.filter((call) => (call[0] as { name: string }).name === path);
+      expect(callsForPath).toHaveLength(1);
+    }
+  });
+
+  it('leaves a loading file’s placeholder identity and version untouched by an unrelated prop change', async () => {
+    const files = [tinyFile('src/a.ts'), loadingFile('src/b.ts')];
+    const { rerender } = render(<PresentTour {...baseProps({ files })} />);
+    await waitForSettled();
+    await awaitAllReady(['src/a.ts']);
+
+    const before = latestItemsByPath().get('src/b.ts');
+    rerender(<PresentTour {...baseProps({ files, reviewedPaths: new Set(['src/a.ts']) })} />);
+    const after = latestItemsByPath().get('src/b.ts');
+
+    expect(after).toBe(before); // same object — a's reviewed-toggle never touches b's pending item
+  });
+
+  it('renders an error card immediately, with no admission wait, alongside files still loading', async () => {
+    const files = [
+      loadingFile('src/a.ts'),
+      { path: 'src/broken.ts', diff: { loading: false, error: 'boom' } },
+      loadingFile('src/c.ts'),
+    ];
+    render(<PresentTour {...baseProps({ files })} />);
+    await waitForSettled();
+
+    const items = latestItemsByPath();
+    const errored = items.get('src/broken.ts') as { type: string; file: { contents: string } };
+    expect(errored.type).toBe('file');
+    expect(errored.file.contents).toBe('boom');
+    // its siblings are still bare placeholders — the error needed no wait for them.
+    expect((items.get('src/a.ts') as { fileDiff: { hunks: unknown[] } }).fileDiff.hunks).toHaveLength(0);
+  });
+
+  it('re-parsing on a round reload is skipped when the file re-settles with identical content', async () => {
+    const file = tinyFile('src/a.ts');
+    const { rerender } = render(<PresentTour {...baseProps({ files: [file] })} />);
+    await waitForSettled();
+    await awaitAllReady(['src/a.ts']);
+    const parseCountAfterFirstSettle = parseDiffFromFileSpy.fn!.mock.calls.length;
+
+    // Round reload: the file goes back to loading — its item reverts to a
+    // placeholder regardless of its stale readyPaths membership (see the
+    // admission effect's comment on why that membership is kept, not cleared).
+    rerender(<PresentTour {...baseProps({ files: [loadingFile('src/a.ts')] })} />);
+    await waitFor(() => {
+      const item = latestItemsByPath().get('src/a.ts') as { fileDiff: { hunks: unknown[] } };
+      expect(item.fileDiff.hunks).toHaveLength(0);
+    });
+
+    // Re-settles with the exact same (original, modified) pair.
+    rerender(<PresentTour {...baseProps({ files: [file] })} />);
+    await waitFor(() => {
+      const item = latestItemsByPath().get('src/a.ts') as { fileDiff: { hunks: unknown[] } };
+      expect(item.fileDiff.hunks.length).toBeGreaterThan(0);
+    });
+
+    const realParseCallsAfter = parseDiffFromFileSpy.fn!.mock.calls.filter(
+      (call) => (call[0] as { contents: string }).contents.length > 0
+    );
+    expect(realParseCallsAfter).toHaveLength(1); // still just the original settle — parse cache reused, not rebuilt
+    // The reload's placeholder step is a fresh zero-hunk parse (its own cache
+    // entry was evicted when the file left the 'pending' signature on first
+    // settle) — one more call than after the first settle, but no SECOND real
+    // parse of the actual content.
+    expect(parseDiffFromFileSpy.fn!.mock.calls.length).toBe(parseCountAfterFirstSettle + 1);
   });
 });
 

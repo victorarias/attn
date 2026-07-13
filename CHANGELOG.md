@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-13]
 
 ### Fixed
+- **The Present review window opens instantly on large changesets.** The tour used to show "Loading tour…" until every file's diff had been fetched and parsed, which took several seconds on big diffs. It now opens immediately — each file appears as a lightweight card that fills in with its diff as it loads, so you can start reading the first file right away.
 - **The Present review window no longer lags on large changesets.** Typing a comment re-parsed and re-rendered every file's diff on each keystroke, making characters take a second or more to appear and J/K navigation land on the wrong file. Each file now only re-renders when its own content or comments change, so typing echoes instantly and navigation tracks keypresses correctly.
 - **Ticket nudges now submit in Codex instead of stopping in the composer.** The
   bounded inbox prompt is explicitly framed before Enter, so the nudge starts a

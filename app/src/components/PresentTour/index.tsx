@@ -10,19 +10,10 @@
  * comment/draft anchor is `${filepath}:${side}:${start}` instead of just
  * `${side}:${start}`.
  *
- * Two design points called out in the slice-1 brief as "investigate, fall
- * back if unworkable" were resolved toward the documented fallback rather
- * than the preferred option, given the size of this slice:
+ * One design point called out in the slice-1 brief as "investigate, fall
+ * back if unworkable" was resolved toward the documented fallback rather
+ * than the preferred option, given the size of that slice:
  *
- *   - Per-file loading/error state: CodeView's controlled `items` only
- *     accept a real `CodeViewDiffItem` (needs a parsed `FileDiffMetadata`)
- *     or a `CodeViewFileItem` (needs real file contents) — there is no
- *     skeleton/placeholder item type. Rather than synthesize placeholder
- *     diffs, this component renders a single "loading tour…" state until
- *     every file's diff fetch has settled, then builds the full item list
- *     once. A per-file error still gets its own card in-order (rendered as
- *     a plain `type: 'file'` item carrying the error text) rather than
- *     being dropped, but it will not stream in before its siblings.
  *   - Summary placement: CodeView's react wrapper renders its own internal
  *     scroll container (via `containerRef`), not a slot host that's known to
  *     tolerate injected sibling DOM. Rather than risk fighting the library's
@@ -31,6 +22,16 @@
  *     result. Instead it folds away via `summaryVisible` once the caller
  *     reports the user has scrolled past the pinned Summary stop, so it
  *     doesn't permanently steal space from the diff.
+ *
+ * CodeView mounts as soon as the manifest has at least one file — it does not
+ * wait for every diff fetch to settle. A file whose diff hasn't settled yet
+ * renders as a lightweight placeholder item (zero-hunk parse, header-only
+ * card, no annotations or note — see the items memo's pending branch); once
+ * its fetch settles, a frame-budgeted admission effect (see `readyPaths`)
+ * parses it and swaps the real item in, a handful of files per animation
+ * frame so no single pass stalls the main thread on a large changeset. A
+ * per-file error still gets its own card in-order immediately (rendered as a
+ * plain `type: 'file'` item carrying the error text) — it needs no admission.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -240,6 +241,33 @@ function getVisibleLineRangesFromDiff(diff: ReturnType<typeof parseDiffFromFile>
   );
 }
 
+// Shared parse-and-cache logic for one file's (original, modified) pair, used
+// by both the items memo (the rare content-changed-while-ready case) and the
+// admission effect (the primary parse site for newly-settled files) — kept in
+// one place so the cache-entry shape isn't duplicated between them. A hit
+// requires the cached entry's own (original, modified) to match; a miss
+// parses, stores, and returns the fresh entry.
+function ensureParsedFile(
+  cache: Map<string, ParsedFileCacheEntry>,
+  path: string,
+  original: string,
+  modified: string
+): ParsedFileCacheEntry {
+  const cached = cache.get(path);
+  if (cached && cached.original === original && cached.modified === modified) return cached;
+  const oldFile: FileContents = { name: path, contents: original };
+  const newFile: FileContents = { name: path, contents: modified };
+  const fileDiff = parseDiffFromFile(oldFile, newFile);
+  const visibleLineRanges = getVisibleLineRangesFromDiff(fileDiff);
+  const lineCounts = {
+    additions: modified.split('\n').length,
+    deletions: original.split('\n').length,
+  };
+  const entry: ParsedFileCacheEntry = { original, modified, fileDiff, visibleLineRanges, lineCounts };
+  cache.set(path, entry);
+  return entry;
+}
+
 export function PresentTour({
   summary,
   summaryVisible = true,
@@ -339,6 +367,17 @@ export function PresentTour({
   // `syncItemRecord` see a matching version and do nothing at all for that
   // file, not merely a cheap diff.
   const fileItemCacheRef = useRef<Map<string, FileItemCacheEntry>>(new Map());
+  // Paths whose item is currently the pending placeholder rather than the
+  // real diff — reset and repopulated each items-memo run (same lifecycle as
+  // notePlacedPathsRef above), consumed by syncCardClasses below to toggle
+  // `.present-tour-card-pending` on the rendered card.
+  const pendingPathsRef = useRef<Set<string>>(new Set());
+  // Paths whose diff has settled AND been admitted for parsing (see the
+  // admission effect below). A file's item stays the pending placeholder
+  // until its path lands here — admission is deliberately decoupled from
+  // "settled" so a burst of files settling in the same tick still gets
+  // parsed a few at a time per animation frame, not all at once.
+  const [readyPaths, setReadyPaths] = useState<ReadonlySet<string>>(() => new Set());
 
   // Mermaid diagrams (in file notes and annotation bodies) render
   // asynchronously: the item is first measured against a short "loading"
@@ -456,7 +495,54 @@ export function PresentTour({
     return map;
   }, [draftKeys, drafts]);
 
-  const allSettled = files.length > 0 && files.every((f) => !f.diff.loading);
+  // CodeView mounts as soon as there's at least one manifest file — it no
+  // longer waits for every diff to settle (see the module doc). Drives the
+  // effects below that used to gate on "every diff settled": they only need
+  // CodeView to actually be in the DOM, not for its content to be final.
+  const tourMounted = files.length > 0;
+
+  // Frame-budgeted parse admission: the primary site where a newly-settled
+  // file's diff actually gets parsed (the items memo's own parse fallback
+  // below only covers the rarer case of a ready file's content changing).
+  // Runs one rAF-scheduled slice at a time rather than parsing every
+  // just-settled file synchronously, so a changeset where many fetches
+  // resolve in the same tick doesn't stall the main thread in one pass.
+  useEffect(() => {
+    const admittable = files.filter(
+      (f) => !f.diff.loading && !f.diff.error && f.diff.original !== undefined && f.diff.modified !== undefined && !readyPaths.has(f.path)
+    );
+    // Paths readyPaths still holds for files no longer in the manifest at
+    // all — dropped so the set doesn't grow unbounded across rounds. A file
+    // that instead went back to `loading` (a round reload) deliberately
+    // KEEPS its stale readyPaths membership: the items memo already routes
+    // any `diff.loading` file to the pending branch regardless of
+    // readyPaths, and if it re-settles with the same content it's ready
+    // again immediately (no extra admission round-trip needed) — the memo's
+    // own parse-cache check is what keeps that case free of a re-parse.
+    const currentPaths = new Set(files.map((f) => f.path));
+    const stale = Array.from(readyPaths).filter((p) => !currentPaths.has(p));
+    if (admittable.length === 0 && stale.length === 0) return;
+
+    const raf = requestAnimationFrame(() => {
+      const sliceStart = performance.now();
+      const admitted: string[] = [];
+      const SLICE_BUDGET_MS = 8;
+      for (const file of admittable) {
+        ensureParsedFile(parseCacheRef.current, file.path, file.diff.original as string, file.diff.modified as string);
+        admitted.push(file.path);
+        if (performance.now() - sliceStart > SLICE_BUDGET_MS) break; // always admits at least one file per slice
+      }
+      setReadyPaths((current) => {
+        const next = new Set(current);
+        for (const path of admitted) next.add(path);
+        for (const path of stale) next.delete(path);
+        return next;
+      });
+    });
+    return () => cancelAnimationFrame(raf);
+    // Re-running when readyPaths changes is what schedules the NEXT slice —
+    // this effect is its own driver, not a one-shot kickoff.
+  }, [files, readyPaths]);
 
   const handleSaveDraft = useCallback(
     async (key: string, content: string) => {
@@ -544,35 +630,36 @@ export function PresentTour({
     ]
   );
 
-  // Build one CodeViewItem per manifest file, in reading order. Only runs
-  // once every file's diff fetch has settled (see the module doc for why).
-  // Per file, this first computes a cheap "signature" of everything that
-  // affects that file's rendered payload (see fileItemCacheRef above) and
-  // compares it — together with the shown (original, modified) strings — to
-  // what produced the file's last cached item. A match reuses that exact item
-  // object (no re-parse, no new version); a miss rebuilds it, using
-  // parseCacheRef to skip re-parsing if only comments/drafts/review-state
-  // changed rather than the file's own content.
+  // Build one CodeViewItem per manifest file, in reading order — CodeView
+  // mounts as soon as there's at least one file (see the module doc), so this
+  // runs well before every diff has settled. Per file, this first computes a
+  // cheap "signature" of everything that affects that file's rendered
+  // payload (see fileItemCacheRef above) and compares it — together with the
+  // shown (original, modified) strings — to what produced the file's last
+  // cached item. A match reuses that exact item object (no re-parse, no new
+  // version); a miss rebuilds it, using parseCacheRef to skip re-parsing if
+  // only comments/drafts/review-state changed rather than the file's own
+  // content.
   const items = useMemo<CodeViewItem<AnnotationMeta>[]>(() => {
     annotationAnchorsRef.current = [];
     notePlacedPathsRef.current = new Set();
-    if (!allSettled) {
-      // A fresh fetch pass (files went from settled back to loading, e.g. a
-      // round reload) invalidates every cached parse/item — the next settle
-      // starts clean, same lifecycle as the two refs reset just above.
-      parseCacheRef.current.clear();
-      fileItemCacheRef.current.clear();
-      return [];
-    }
+    pendingPathsRef.current = new Set();
 
     const result = files.map((file): CodeViewItem<AnnotationMeta> => {
       const { diff } = file;
       const cached = fileItemCacheRef.current.get(file.path);
 
-      if (diff.error || diff.original === undefined || diff.modified === undefined) {
-        // Discriminator ('error' vs 'diff' below) so a file that flips
-        // between an errored and a settled diff across renders can never
-        // signature-match its own stale cache entry from the other branch.
+      // A still-loading file legitimately has no original/modified yet (see
+      // PresentRoot's initial `{ loading: true }` diff state) — that's the
+      // pending case below, not an error. Only missing content on a file
+      // that ISN'T loading is the anomalous "settled with nothing to show"
+      // case this treats as an error.
+      if (diff.error || (!diff.loading && (diff.original === undefined || diff.modified === undefined))) {
+        // Discriminator ('error' vs 'diff'/'pending' below) so a file that
+        // flips between an errored and a settled diff across renders can
+        // never signature-match its own stale cache entry from the other
+        // branch. An error needs no admission — it renders as soon as this
+        // file settles, regardless of its siblings.
         const signature = JSON.stringify(['error', diff.error ?? 'Failed to load this file’s diff.']);
         if (cached && cached.signature === signature && cached.shownOriginal === undefined && cached.shownModified === undefined) {
           if (cached.notePlaced) notePlacedPathsRef.current.add(file.path);
@@ -589,11 +676,50 @@ export function PresentTour({
         return item;
       }
 
+      if (diff.loading || !readyPaths.has(file.path)) {
+        // Not yet admitted (see the admission effect above) — a cheap
+        // zero-hunk placeholder so the card renders as a header-only shell
+        // rather than blocking the whole tour. Deliberately carries no
+        // annotations: a note or thread here would render through the same
+        // header/annotation paths the real item uses once admitted, and
+        // CodeView would have to re-measure the card's height on the swap —
+        // notes/threads simply wait for the real item, same as the diff body.
+        pendingPathsRef.current.add(file.path);
+        const signature = JSON.stringify(['pending']);
+        if (cached && cached.signature === signature) return cached.item;
+        const emptyFile: FileContents = { name: file.path, contents: '' };
+        const item: CodeViewItem<AnnotationMeta> = {
+          id: file.path,
+          type: 'diff',
+          fileDiff: parseDiffFromFile(emptyFile, emptyFile),
+          annotations: [],
+          version: ++itemsVersionRef.current,
+        };
+        fileItemCacheRef.current.set(file.path, {
+          signature,
+          shownOriginal: undefined,
+          shownModified: undefined,
+          item,
+          anchors: [],
+          notePlaced: false,
+        });
+        return item;
+      }
+
+      // Both branches above already returned for every case where original/
+      // modified could be undefined (not-loading-with-no-content is the
+      // error branch; still-loading is the pending branch just above) — TS
+      // can't follow that across the two separate conditionals, so this
+      // narrows explicitly rather than threading `as string` through every
+      // use below.
+      const original = diff.original as string;
+      const modified = diff.modified as string;
+
       const frozen = frozenRef.current.get(file.path);
       if (formOpenByFile.has(file.path) && !frozen) {
-        frozenRef.current.set(file.path, { original: diff.original, modified: diff.modified });
+        frozenRef.current.set(file.path, { original, modified });
       }
-      const shown = frozenRef.current.get(file.path) ?? { original: diff.original, modified: diff.modified };
+      const shown = frozenRef.current.get(file.path) ?? { original, modified };
 
       const fileComments = commentsByFile.get(file.path) ?? [];
       const fileDraftKeys = draftsByFile.get(file.path) ?? [];
@@ -639,23 +765,10 @@ export function PresentTour({
         return cached.item;
       }
 
-      const parsedCached = parseCacheRef.current.get(file.path);
-      let fileDiff: ReturnType<typeof parseDiffFromFile>;
-      let visibleLineRanges: VisibleLineRanges;
-      let lineCounts: { additions: number; deletions: number };
-      if (parsedCached && parsedCached.original === shown.original && parsedCached.modified === shown.modified) {
-        ({ fileDiff, visibleLineRanges, lineCounts } = parsedCached);
-      } else {
-        const oldFile: FileContents = { name: file.path, contents: shown.original };
-        const newFile: FileContents = { name: file.path, contents: shown.modified };
-        fileDiff = parseDiffFromFile(oldFile, newFile);
-        visibleLineRanges = getVisibleLineRangesFromDiff(fileDiff);
-        lineCounts = {
-          additions: shown.modified.split('\n').length,
-          deletions: shown.original.split('\n').length,
-        };
-        parseCacheRef.current.set(file.path, { original: shown.original, modified: shown.modified, fileDiff, visibleLineRanges, lineCounts });
-      }
+      // Usually already parsed by the admission effect above (this is the
+      // rarer content-changed-while-ready case — e.g. a frozen file's form
+      // closes and its shown content moves back to the live diff).
+      const { fileDiff, visibleLineRanges, lineCounts } = ensureParsedFile(parseCacheRef.current, file.path, shown.original, shown.modified);
 
       const groups = new Map<string, AnnotationMeta>();
       for (const comment of fileComments) {
@@ -797,9 +910,22 @@ export function PresentTour({
     // per-file signature contribution. None of these bump every file's
     // version unconditionally anymore (see fileItemCacheRef's declaration);
     // an unrelated file's signature comes out identical and that file's cache
-    // entry is reused as-is.
+    // entry is reused as-is. readyPaths is included so a file's admission
+    // (see the effect above) re-runs this memo and swaps its placeholder for
+    // the real item.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allSettled, files, commentsByFile, draftsByFile, drafts, formOpenByFile, editingCommentId, reviewedPaths, annotationCommentIds, diagramLayoutTick]);
+  }, [
+    files,
+    commentsByFile,
+    draftsByFile,
+    drafts,
+    formOpenByFile,
+    editingCommentId,
+    reviewedPaths,
+    annotationCommentIds,
+    diagramLayoutTick,
+    readyPaths,
+  ]);
 
   // Notify the parent of the current annotation anchor list once items has
   // committed (annotationAnchorsRef was populated by the memo above). A plain
@@ -837,33 +963,41 @@ export function PresentTour({
   const groupByPath = useMemo(() => new Map(files.map((f) => [f.path, f.group ?? 'tour'])), [files]);
 
   // The library's items don't carry an arbitrary className slot, so the
-  // skip-card de-emphasis (see .present-tour-card-skip in PresentTour.css) is
-  // applied imperatively to each rendered card's root element — the same
-  // `getRenderedItems()` escape hatch handleScroll below already relies on.
-  // CodeView virtualizes: scrolling can mount new item elements without the
-  // `items` array changing, so this also has to re-run on every scroll (see
-  // handleScroll) — this effect alone only covers items already rendered
-  // when the item list settles.
-  const syncSkipClasses = useCallback(() => {
+  // skip-card de-emphasis (see .present-tour-card-skip in PresentTour.css)
+  // and the pending-card dimming (see .present-tour-card-pending, driven by
+  // pendingPathsRef from the items memo) are applied imperatively to each
+  // rendered card's root element — the same `getRenderedItems()` escape hatch
+  // handleScroll below already relies on. CodeView virtualizes: scrolling can
+  // mount new item elements without the `items` array changing, so this also
+  // has to re-run on every scroll (see handleScroll) — this effect alone only
+  // covers items already rendered when the item list settles.
+  const syncCardClasses = useCallback(() => {
     const instance = handleRef.current?.getInstance();
     if (!instance) return;
     for (const rendered of instance.getRenderedItems()) {
       const isSkip = groupByPath.get(rendered.id) === 'skip';
       rendered.element.classList.toggle('present-tour-card-skip', isSkip);
+      rendered.element.classList.toggle('present-tour-card-pending', pendingPathsRef.current.has(rendered.id));
     }
   }, [groupByPath]);
 
   useEffect(() => {
-    if (!allSettled) return;
-    syncSkipClasses();
-  }, [allSettled, items, groupByPath, syncSkipClasses]);
+    if (!tourMounted) return;
+    syncCardClasses();
+  }, [tourMounted, items, groupByPath, syncCardClasses]);
 
   const renderHeaderMetadata = useCallback(
     (item: CodeViewItem<AnnotationMeta>) => {
       // The note already rendered as an annotation for this file (see
       // notePlacedPathsRef) — this header path is only the fallback for
-      // files with no visible diff line to anchor a note annotation to.
-      if (notePlacedPathsRef.current.has(item.id)) return null;
+      // files with no visible diff line to anchor a note annotation to. A
+      // pending (not yet admitted) file is also excluded here even though
+      // it isn't in notePlacedPathsRef either — its placeholder item is
+      // deliberately note-less (see the items memo's pending branch), and
+      // rendering the note here in the meantime would mount its Markdown/
+      // MermaidDiagram early, then remount it again once the real
+      // annotation takes over on admission.
+      if (notePlacedPathsRef.current.has(item.id) || pendingPathsRef.current.has(item.id)) return null;
       const note = noteByPath.get(item.id);
       if (!note) return null;
       return (
@@ -923,11 +1057,11 @@ export function PresentTour({
   // as a ref (not a closure-local variable) because the rail/j-k scrollTo
   // effect below also needs to arm it — see that effect's comment for why.
   const userTookOverRef = useRef(false);
-  // Tracks allSettled as of the previous run of the scroll-replay effect
+  // Tracks tourMounted as of the previous run of the scroll-replay effect
   // below, to detect the specific false->true transition (CodeView just
   // mounted this commit) rather than "a scroll has ever fired". See that
   // effect's comment.
-  const wasSettledRef = useRef(false);
+  const wasMountedRef = useRef(false);
   // True while a programmatic smooth scroll (rail/j-k or N/P) is settling —
   // handleScroll swallows passive reports during this window so the
   // animation's own scroll events can't fight the explicit navigation that
@@ -943,16 +1077,17 @@ export function PresentTour({
   // programmatic scroll started.
   const suppressQuietTimerRef = useRef<number>(0);
   // Must attach once CodeView actually mounts, not just on this component's
-  // own mount: diffs load async over the daemon WS, so on first render
-  // `allSettled` is often still false, the "Loading tour…" branch renders
-  // instead of CodeView, and `containerRef.current` is null — an empty dep
-  // array would run this effect exactly once against that null ref and never
+  // own mount: on first render there may be no manifest files yet, so
+  // `tourMounted` is still false, the "Loading tour…" branch renders instead
+  // of CodeView, and `containerRef.current` is null — an empty dep array
+  // would run this effect exactly once against that null ref and never
   // again, permanently disarming the takeover/cold-window-pin listeners (the
   // summary card would then never fold, since passive scroll reports never
-  // arm `userTookOverRef`). `allSettled` in the deps re-runs the effect the
-  // moment CodeView mounts; the cleanup also re-runs if diffs ever reload
-  // (allSettled true -> false -> true), which is correct since the container
-  // itself may have been swapped out during the loading branch.
+  // arm `userTookOverRef`). `tourMounted` in the deps re-runs the effect the
+  // moment CodeView mounts; the cleanup also re-runs if the manifest ever
+  // drops to zero files and back (tourMounted true -> false -> true), which
+  // is correct since the container itself may have been swapped out during
+  // the loading branch.
   useEffect(() => {
     const scroller = containerRef.current;
     if (!scroller) return;
@@ -977,7 +1112,7 @@ export function PresentTour({
       scroller.removeEventListener('scroll', onNativeScroll);
       window.clearTimeout(suppressQuietTimerRef.current);
     };
-  }, [allSettled]);
+  }, [tourMounted]);
 
   // Rail-driven / j-k-driven scroll: nonce forces a re-scroll even to the
   // same path (e.g. re-pressing j at the last file). A null scrollToPath
@@ -1000,30 +1135,34 @@ export function PresentTour({
   // issued before the user's first raw wheel/touch was silently swallowed.
   // Arm the same flag the pin checks so the pin treats this as real input.
   //
-  // `allSettled` is in the deps so a request that arrives while CodeView isn't
-  // mounted yet (handleRef.current is null / rows aren't laid out) is not lost:
-  // this effect no-ops without touching userTookOverRef while loading, then
-  // re-runs and performs the still-pending scroll once allSettled flips true.
-  // The arming stays here (at actual scroll time), not in a separate
-  // loading-phase branch, so a request that never got to scroll never marks
-  // the pin as taken over.
+  // `tourMounted` is in the deps so a request that arrives while CodeView
+  // isn't mounted yet (handleRef.current is null / rows aren't laid out) is
+  // not lost: this effect no-ops without touching userTookOverRef while
+  // there are no files yet, then re-runs and performs the still-pending
+  // scroll once tourMounted flips true. The arming stays here (at actual
+  // scroll time), not in a separate loading-phase branch, so a request that
+  // never got to scroll never marks the pin as taken over.
   //
-  // wasSettledRef tracks whether the PREVIOUS run of this same effect already
-  // saw allSettled=true. It updates on every run (even the early-return ones,
-  // so a settle that happens with no scroll pending is still recorded) and is
-  // read before that update — so it's true exactly when CodeView had a prior
-  // commit to lay itself out in before this scroll, and false the one time
-  // allSettled just flipped true THIS render (CodeView mounts and this effect
-  // fires in the same commit, before the browser has laid out the fresh
-  // container). CodeView.scrollTo silently no-ops if it can't resolve a
+  // A rail/j-k scroll to a file whose diff hasn't settled yet lands on its
+  // placeholder card; the real content grows in place once admitted — no
+  // special handling needed, same as any other item height change.
+  //
+  // wasMountedRef tracks whether the PREVIOUS run of this same effect already
+  // saw tourMounted=true. It updates on every run (even the early-return
+  // ones, so a mount that happens with no scroll pending is still recorded)
+  // and is read before that update — so it's true exactly when CodeView had a
+  // prior commit to lay itself out in before this scroll, and false the one
+  // time tourMounted just flipped true THIS render (CodeView mounts and this
+  // effect fires in the same commit, before the browser has laid out the
+  // fresh container). CodeView.scrollTo silently no-ops if it can't resolve a
   // destination against an unmeasured layout, so that one case gets a rAF to
   // let layout settle first; every other scroll (rail/j-k on an
   // already-mounted tour) stays perfectly synchronous, unchanged from before.
   useEffect(() => {
-    const wasSettled = wasSettledRef.current;
-    wasSettledRef.current = allSettled;
+    const wasMounted = wasMountedRef.current;
+    wasMountedRef.current = tourMounted;
     const hasRequest = (scrollNonce ?? 0) > 0;
-    if (!hasRequest || !allSettled) return;
+    if (!hasRequest || !tourMounted) return;
     const handle = handleRef.current;
     if (!handle) return;
     userTookOverRef.current = true;
@@ -1036,7 +1175,7 @@ export function PresentTour({
         containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
       }
     };
-    if (!wasSettled) {
+    if (!wasMounted) {
       const raf = requestAnimationFrame(performScroll);
       return () => cancelAnimationFrame(raf);
     }
@@ -1044,7 +1183,7 @@ export function PresentTour({
     // scrollNonce intentionally included so repeat clicks on the same path (or
     // repeat clicks on Summary) re-fire.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollToPath, scrollNonce, allSettled]);
+  }, [scrollToPath, scrollNonce, tourMounted]);
 
   // N/P annotation hop: first get the target file into view via the same
   // item-scroll CodeView uses for the rail/j-k path above, then locate the
@@ -1059,7 +1198,7 @@ export function PresentTour({
   useEffect(() => {
     if (!scrollToAnnotation) return;
     const hasRequest = (annotationScrollNonce ?? 0) > 0;
-    if (!hasRequest || !allSettled) return;
+    if (!hasRequest || !tourMounted) return;
     const handle = handleRef.current;
     if (!handle) return;
     userTookOverRef.current = true;
@@ -1084,7 +1223,7 @@ export function PresentTour({
     // annotationScrollNonce intentionally included so re-hopping to the same
     // anchor (e.g. a round with a single annotation) still re-scrolls.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollToAnnotation, annotationScrollNonce, allSettled]);
+  }, [scrollToAnnotation, annotationScrollNonce, tourMounted]);
 
   // Track the file nearest the top of the viewport so the rail can highlight
   // it. There is no `data-*` attribute on CodeView's rendered item roots to
@@ -1094,7 +1233,7 @@ export function PresentTour({
   // guessed selector.
   const handleScroll = useCallback(
     (_scrollTop: number) => {
-      syncSkipClasses();
+      syncCardClasses();
       if (!onActivePathChange || !containerRef.current) return;
       // Mount/cold-window-pin scroll noise never reports — passive tracking
       // only starts once the user has taken over with a real gesture (see the
@@ -1140,7 +1279,7 @@ export function PresentTour({
       const path = bestPath ?? nearestPath;
       if (path) onActivePathChange(path);
     },
-    [onActivePathChange, syncSkipClasses]
+    [onActivePathChange, syncCardClasses]
   );
 
   return (
@@ -1178,10 +1317,8 @@ export function PresentTour({
         </div>
       )}
 
-      {!allSettled ? (
+      {!tourMounted ? (
         <div className="present-tour-loading">Loading tour…</div>
-      ) : items.length === 0 ? (
-        <div className="present-tour-loading">No files in this round.</div>
       ) : (
         <CodeView<AnnotationMeta>
           ref={handleRef}

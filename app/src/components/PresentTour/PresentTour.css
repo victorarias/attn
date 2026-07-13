@@ -182,3 +182,28 @@
 .present-tour-card-skip:focus-within {
   opacity: 0.85;
 }
+
+/* Pending cards (see PresentTour's pendingPathsRef / readyPaths admission):
+ * a file whose diff hasn't been admitted for parsing yet renders as a
+ * zero-hunk placeholder card. A gentle opacity pulse reads as "in flight"
+ * rather than "broken", distinct from the static dimming skip cards get. */
+.present-tour-card-pending {
+  opacity: 0.55;
+  animation: present-tour-pending-pulse 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes present-tour-pending-pulse {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 0.7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .present-tour-card-pending {
+    animation: none;
+    opacity: 0.55;
+  }
+}
