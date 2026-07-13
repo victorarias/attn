@@ -167,6 +167,57 @@ gotOutput:
 		t.Fatalf("snapshot geometry = %dx%d, want non-zero", snap.ScreenCols, snap.ScreenRows)
 	}
 
+	// SetTheme round-trips over the worker RPC surface and takes effect on the
+	// live session. Verify via a script that reads the OSC11 reply off its own
+	// stdin explicitly (bash's `read` gets whatever bytes were written to the
+	// master regardless of the login shell's tty echo/raw-mode settings —
+	// relying on the attached output stream to show the reply would depend on
+	// that, and fish, this environment's default login shell, disables kernel
+	// echo for its own line editing).
+	if err := backend.SetTheme(context.Background(), sessionID, pty.TerminalTheme{Background: "#ff00ff"}); err != nil {
+		t.Fatalf("SetTheme() error: %v", err)
+	}
+	scriptPath := filepath.Join(cwd, "theme-query.sh")
+	script := "#!/bin/bash\n" +
+		"printf '\\033]11;?\\007'\n" +
+		"IFS= read -r -t 3 -n 25 reply\n" +
+		"printf 'THEME_REPLY_START%sTHEME_REPLY_END\\n' \"$reply\"\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write theme query script: %v", err)
+	}
+	if err := backend.Input(context.Background(), sessionID, []byte("bash "+scriptPath+"\n")); err != nil {
+		t.Fatalf("Input() error: %v", err)
+	}
+
+	wantReply := "\x1b]11;rgb:ffff/0000/ffff\x1b\\"
+	themeDeadline := time.Now().Add(6 * time.Second)
+	var themeOut bytes.Buffer
+	for time.Now().Before(themeDeadline) {
+		select {
+		case evt, ok := <-stream.Events():
+			if !ok {
+				t.Fatal("stream closed before expected theme reply")
+			}
+			if evt.Kind != OutputEventKindOutput {
+				continue
+			}
+			themeOut.Write(evt.Data)
+			s := themeOut.String()
+			idx := strings.Index(s, "THEME_REPLY_START")
+			end := strings.Index(s, "THEME_REPLY_END")
+			if idx != -1 && end != -1 {
+				got := s[idx+len("THEME_REPLY_START") : end]
+				if got != wantReply {
+					t.Fatalf("OSC11 reply after SetTheme = %q, want %q", got, wantReply)
+				}
+				goto gotThemeReply
+			}
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	t.Fatalf("timed out waiting for theme reply marker; got=%q", themeOut.String())
+
+gotThemeReply:
 	if err := backend.Kill(context.Background(), sessionID, syscall.SIGTERM); err != nil {
 		t.Fatalf("Kill() error: %v", err)
 	}

@@ -69,6 +69,11 @@ type SpawnOptions struct {
 	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
 	// that replaces the ReadLoginShellEnv call.
 	LoginShellEnv []string
+
+	// Theme seeds the colors the session answers OSC 10/11/12 queries with,
+	// before the child's first query — set explicitly so a spawn under a
+	// non-default theme never briefly answers with built-in defaults.
+	Theme TerminalTheme
 }
 
 type AttachInfo struct {
@@ -229,6 +234,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		running:     true,
 		exited:      make(chan struct{}),
 		startedAt:   time.Now(),
+		theme:       opts.Theme,
 	}
 	session.screen = newVirtualScreen(opts.Cols, opts.Rows)
 
@@ -282,10 +288,17 @@ func (m *Manager) Attach(sessionID, subscriberID string, send func([]byte, uint3
 		return AttachInfo{}, errors.New("subscriber send callback is required")
 	}
 	session.addSubscriber(subscriberID, send, onDrop)
-	if session.claimFirstAttach() {
-		session.flushStartupQueryResponses(m.logf)
-	}
 	return session.info(), nil
+}
+
+// SetTheme replaces the colors sessionID answers OSC 10/11/12 queries with.
+func (m *Manager) SetTheme(sessionID string, theme TerminalTheme) error {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return err
+	}
+	session.SetTheme(theme)
+	return nil
 }
 
 // Snapshot returns the current rendered screen and sequence watermark for a

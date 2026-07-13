@@ -45,6 +45,7 @@ func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
 		ResumePicker:      opts.ResumePicker,
 		YoloMode:          opts.YoloMode,
 		InitialPromptFile: opts.InitialPromptFile,
+		Theme:             opts.Theme,
 		Executable:        opts.Executable,
 		ClaudeExecutable:  opts.ClaudeExecutable,
 		CodexExecutable:   opts.CodexExecutable,
@@ -142,6 +143,10 @@ func (b *EmbeddedBackend) Input(_ context.Context, sessionID string, data []byte
 
 func (b *EmbeddedBackend) Resize(_ context.Context, sessionID string, cols, rows uint16) error {
 	return b.manager.Resize(sessionID, cols, rows)
+}
+
+func (b *EmbeddedBackend) SetTheme(_ context.Context, sessionID string, theme pty.TerminalTheme) error {
+	return b.manager.SetTheme(sessionID, theme)
 }
 
 func (b *EmbeddedBackend) Kill(_ context.Context, sessionID string, sig syscall.Signal) error {

@@ -62,6 +62,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdDeleteWorktree:                        commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdGetSettings:                           commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSetSetting:                            commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSetTerminalTheme:                      commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdListPlugins:                           commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdInstallPlugin:                         commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdRemovePlugin:                          commandMetadata(ScopeHubLocal, false, true),

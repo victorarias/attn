@@ -24,6 +24,11 @@ const (
 	MethodDetach   = "detach"
 	MethodInput    = "input"
 	MethodResize   = "resize"
+	// MethodSetTheme updates the colors the session answers OSC 10/11/12 color
+	// queries with. Added without an RPC version bump, following the
+	// MethodSnapshot precedent: older workers reject it with ErrBadRequest
+	// ("unknown method"), and callers treat that as non-fatal.
+	MethodSetTheme = "set_theme"
 	MethodSignal   = "signal"
 	MethodRemove   = "remove"
 	MethodHealth   = "health"
@@ -152,6 +157,12 @@ type ResizeParams struct {
 
 type SignalParams struct {
 	Signal string `json:"signal"`
+}
+
+type SetThemeParams struct {
+	Foreground string `json:"foreground"`
+	Background string `json:"background"`
+	Cursor     string `json:"cursor"`
 }
 
 func IsCompatibleVersion(peerMajor, peerMinor int) bool {

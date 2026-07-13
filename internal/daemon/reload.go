@@ -262,6 +262,7 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 		Cols:                    cols,
 		Rows:                    rows,
 		ResumeSessionID:         resumeSessionID,
+		Theme:                   d.currentTerminalTheme(),
 		YoloMode:                params.YoloMode,
 		Executable:              params.Executable,
 		ClaudeExecutable:        params.ClaudeExecutable,

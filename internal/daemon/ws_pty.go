@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -543,6 +544,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		ResumePicker:      protocol.Deref(msg.ResumePicker),
 		YoloMode:          protocol.Deref(msg.YoloMode),
 		InitialPromptFile: initialPromptFile,
+		Theme:             d.currentTerminalTheme(),
 		Executable:        strings.TrimSpace(configuredExecutable),
 		ClaudeExecutable:  protocol.Deref(msg.ClaudeExecutable),
 		CodexExecutable:   protocol.Deref(msg.CodexExecutable),
@@ -1094,6 +1096,40 @@ func (d *Daemon) handlePtyResize(client *wsClient, msg *protocol.PtyResizeMessag
 		Cols:  protocol.Ptr(msg.Cols),
 		Rows:  protocol.Ptr(msg.Rows),
 	})
+}
+
+var hexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// sanitizeThemeColor blanks a field that isn't a valid "#rrggbb" hex color; an
+// empty field makes pty fall back to its built-in default for that channel.
+func sanitizeThemeColor(value string) string {
+	if hexColorPattern.MatchString(value) {
+		return value
+	}
+	return ""
+}
+
+// handleSetTerminalTheme stores the daemon-global terminal theme and fans it
+// out best-effort to every live session so already-running agents answer OSC
+// 10/11/12 color queries with the new colors immediately. Fire-and-forget, no
+// result event — mirrors pty_resize.
+func (d *Daemon) handleSetTerminalTheme(client *wsClient, msg *protocol.SetTerminalThemeMessage) {
+	theme := pty.TerminalTheme{
+		Foreground: sanitizeThemeColor(msg.Foreground),
+		Background: sanitizeThemeColor(msg.Background),
+		Cursor:     sanitizeThemeColor(msg.Cursor),
+	}
+	if theme.Foreground != msg.Foreground || theme.Background != msg.Background || theme.Cursor != msg.Cursor {
+		d.logf("set_terminal_theme: invalid color field(s) blanked, got fg=%q bg=%q cursor=%q", msg.Foreground, msg.Background, msg.Cursor)
+	}
+	d.setCurrentTerminalTheme(theme)
+
+	ctx := context.Background()
+	for _, sessionID := range d.ptyBackend.SessionIDs(ctx) {
+		if err := d.ptyBackend.SetTheme(ctx, sessionID, theme); err != nil {
+			d.logf("set_terminal_theme: SetTheme failed for %s: %v", sessionID, err)
+		}
+	}
 }
 
 func parseSignal(name string) syscall.Signal {

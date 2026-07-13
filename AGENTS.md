@@ -208,7 +208,7 @@ Before changing PTY attach/replay, terminal resize, mobile keyboard viewport han
 - do not use replay as a generic redraw repair tool
 - do not treat local `fit()` or viewport churn as proof the PTY is correct
 - do not let replayed historical terminal queries produce fresh live PTY input
-- the daemon (inside the worker) is the sole responder for CPR and DA1 — answered every time from the read loop; the frontend strips both and must not answer them. Theme-dependent OSC10/11/12 color queries stay frontend-owned. Breaking this split reintroduces the ~10–30s reattach prompt-hang.
+- the daemon (inside the worker) is the sole responder for CPR, DA1, and OSC 10/11/12 color queries — answered every time from the read loop. The frontend answers none of these: it strips CPR, DA1, and OSC color responses from its terminal model's output and only pushes theme changes down via `set_terminal_theme` (the daemon stores the theme globally, fans it out to live sessions, and seeds new spawns). Breaking this split reintroduces the ~10–30s reattach prompt-hang, and late or duplicate color replies surface as stray `^[]11;rgb:...` input in shell panes and crash interactive prompts like `gh pr create`.
 - for mobile or viewport bugs, keep structured instrumentation and prefer transition evidence over screenshots alone
 
 ### 8. macOS Menu Intercepts Cmd+C

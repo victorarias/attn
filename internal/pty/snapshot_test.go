@@ -259,12 +259,9 @@ func TestScreenSnapshot_ReadOnlyAndLean(t *testing.T) {
 		t.Fatalf("snapshot must not carry replay segments, got %d", len(info.ReplaySegments))
 	}
 
-	// Read-only: no subscriber registered and no first-attach side effects.
+	// Read-only: no subscriber registered.
 	if len(session.subscribers) != 0 {
 		t.Fatalf("snapshot must not register a subscriber, got %d", len(session.subscribers))
-	}
-	if session.firstAttachClaim {
-		t.Fatal("snapshot must not claim first attach")
 	}
 }
 
