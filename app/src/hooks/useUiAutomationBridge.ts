@@ -1772,7 +1772,7 @@ export function useUiAutomationBridge({
       }
       case 'dump_terminal_geometry': {
         // Same-moment app-side read of every mounted pane's model grid, cell
-        // metrics, clientWidth/Height, and DOM-truth canvas rects — avoids the
+        // metrics, and clientWidth/Height — avoids the
         // cross-clock ambiguity of comparing a harness screenshot's timestamp
         // against a separately-read disk dump.
         const snapshots = dumpTerminalGeometry();

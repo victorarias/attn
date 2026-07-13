@@ -13,17 +13,16 @@
 //     if the model holds content but the surface drew ~nothing, it writes an
 //     INCIDENT record (with ring context) to a separate file. That captures the
 //     blank automatically, so the user only has to keep using the app.
-//   - A second sweep (the bottom-clip detector) periodically checks each active
-//     pane for a grid that is taller than its container — the "last line cut off
-//     at the bottom of the window" bug. It records a `bottom_clip` incident (with
-//     ring context) when the clip appears and a `bottom_clip_resolved` marker
-//     when it clears, so the trigger sequence is captured in the wild.
+//   - A second sweep periodically checks each active pane for a grid that is
+//     larger than its container. It records a `bottom_clip` incident (the
+//     historical event name) when stale PTY geometry appears and a
+//     `bottom_clip_resolved` marker when it clears.
 //   - Disk writes are async/non-blocking and size-capped, so they never perturb
 //     the render timing we are trying to diagnose.
 //
 // Read the results from:
 //   $APPLOCALDATA/debug/terminal-diagnostics.jsonl   (lifecycle stream)
-//   $APPLOCALDATA/debug/terminal-incidents.jsonl      (auto-captured blanks + bottom clips)
+//   $APPLOCALDATA/debug/terminal-incidents.jsonl      (auto-captured blanks + grid overflow)
 //
 // Dump every mounted pane's live geometry on demand (DevTools console):
 //   window.__ATTN_TERMINAL_GEOMETRY()
@@ -50,10 +49,9 @@ const WATCHDOG_DELAYS_MS = [1200, 3500];
 // Do not emit more than one incident per pane within this window (avoids spam
 // while a pane stays blank across several repaint attempts).
 const INCIDENT_COOLDOWN_MS = 8000;
-// Bottom-clip detector: how often to sweep active panes for a rendered grid
-// taller than its container (the last row(s) clipped below the viewport). Low
-// frequency — the clip persists until a remount, so a slow sweep still catches
-// it, and the cost is one layout read per active pane per tick.
+// Geometry watchdog: how often to sweep active panes for a model grid larger
+// than its container. Low frequency because stale geometry persists until a
+// refit; the probe uses client dimensions and does not force layout.
 const BOTTOM_CLIP_SWEEP_MS = 1500;
 // Pixel slack mirroring geometryOverflowsContainer: ignore sub-pixel container
 // heights so we only act on a genuine extra row.
@@ -119,7 +117,7 @@ export interface RenderProbe {
   // "blank" is meaningless — it will paint on activation via the model's
   // accumulated dirty flag.
   active: boolean;
-  // Geometry for the bottom-clip detector / on-demand dump. Optional so other
+  // Geometry for the overflow detector / on-demand dump. Optional so other
   // probe producers and tests keep compiling; `null` means "not measured yet".
   session?: string;
   isActivePane?: boolean | null;
@@ -128,20 +126,6 @@ export interface RenderProbe {
   cellHeight?: number | null;
   clientWidth?: number | null;
   clientHeight?: number | null;
-  // DOM-truth rects, so the detector can also catch a canvas that disagrees
-  // with the model (offset within its container, or a size mismatch) rather
-  // than only judging the model's own arithmetic.
-  containerTop?: number | null;
-  containerBottom?: number | null;
-  containerLeft?: number | null;
-  containerRight?: number | null;
-  canvasTop?: number | null;
-  canvasBottom?: number | null;
-  canvasLeft?: number | null;
-  canvasRight?: number | null;
-  canvasCssHeight?: number | null;
-  canvasPixelWidth?: number | null;
-  canvasPixelHeight?: number | null;
 }
 
 export interface TerminalGeometrySnapshot {
@@ -159,13 +143,7 @@ export interface TerminalGeometrySnapshot {
   flooredCols: number | null;
   flooredRows: number | null;
   overflowPx: number | null;
-  domOverflowPx: number | null;
-  domOffsetTopPx: number | null;
-  domOverflowRightPx: number | null;
-  domOffsetLeftPx: number | null;
-  canvasCssHeight: number | null;
-  canvasPixelWidth: number | null;
-  canvasPixelHeight: number | null;
+  rightOverflowPx: number | null;
   clipping: boolean;
 }
 
@@ -200,13 +178,13 @@ let ringNextIndex = 0;
 let ringWrapped = false;
 const paneHealth = new Map<string, PaneHealth>();
 const renderProbes = new Map<string, () => RenderProbe | null>();
-// Optional per-pane repair callback (a refit) for the bottom-clip watchdog.
+// Optional per-pane repair callback (a refit) for the grid-overflow watchdog.
 const repairHandlers = new Map<string, () => void>();
 const watchdogTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
-// Per-pane "currently clipping at the bottom" flag so the detector reports the
-// clip's onset (and its resolution) once, not on every sweep tick.
+// Per-pane overflow flag so the detector reports onset and resolution once,
+// not on every sweep tick.
 const clipState = new Map<string, boolean>();
-// Per-pane bottom-clip repair progress: consecutive clipping sweeps, repair
+// Per-pane grid-overflow repair progress: consecutive clipping sweeps, repair
 // attempts made, the earliest wall-clock time the next attempt may fire, and
 // whether the watchdog has given up on this continuous clip.
 const clipRepairState = new Map<
@@ -605,13 +583,12 @@ function maybeFlushIncident(pane: string, reason: string, detail: Record<string,
   enqueueWrite('incident', `${JSON.stringify(record)}\n`);
 }
 
-// --- Bottom-clip detector --------------------------------------------------
-// `fit()` floors rows so it can never overflow, but the daemon's authoritative
-// geometry is applied unfloored and the floor-correction (`fit()`) bails while
-// a pane is inactive — so a pane can end up one or two rows taller than its
-// container with no container resize to re-fire the ResizeObserver, clipping the
-// bottom line below the viewport. This sweep notices that state on any active
-// pane and captures it with full ring context (the resize trail that led there).
+// --- Grid-overflow detector ------------------------------------------------
+// The daemon's authoritative geometry can temporarily outlive the client
+// viewport that produced it, especially while panes are inactive. This sweep
+// notices persistent extra rows or columns after activation, captures the
+// resize trail, and asks `fit()` to reassert container-owned geometry. Event
+// names retain `bottom_clip` for compatibility with existing incident logs.
 
 function bottomClipOverflowPx(probe: RenderProbe): number | null {
   const cellHeight = probe.cellHeight ?? 0;
@@ -622,35 +599,13 @@ function bottomClipOverflowPx(probe: RenderProbe): number | null {
   return probe.rows * cellHeight - clientHeight;
 }
 
-// DOM-truth signals: computed straight from getBoundingClientRect(), so they
-// catch a canvas that is offset or mis-sized within its container even when
-// the model's own row*cellHeight arithmetic looks clean.
-function domOverflowPx(probe: RenderProbe): number | null {
-  if (probe.canvasBottom == null || probe.containerBottom == null) {
+function rightClipOverflowPx(probe: RenderProbe): number | null {
+  const cellWidth = probe.cellWidth ?? 0;
+  const clientWidth = probe.clientWidth ?? 0;
+  if (cellWidth <= 0 || clientWidth <= 0 || probe.cols <= 0) {
     return null;
   }
-  return probe.canvasBottom - probe.containerBottom;
-}
-
-function domOffsetTopPx(probe: RenderProbe): number | null {
-  if (probe.canvasTop == null || probe.containerTop == null) {
-    return null;
-  }
-  return probe.canvasTop - probe.containerTop;
-}
-
-function domOverflowRightPx(probe: RenderProbe): number | null {
-  if (probe.canvasRight == null || probe.containerRight == null) {
-    return null;
-  }
-  return probe.canvasRight - probe.containerRight;
-}
-
-function domOffsetLeftPx(probe: RenderProbe): number | null {
-  if (probe.canvasLeft == null || probe.containerLeft == null) {
-    return null;
-  }
-  return probe.canvasLeft - probe.containerLeft;
+  return probe.cols * cellWidth - clientWidth;
 }
 
 function recordBottomClipIncident(pane: string, detail: Record<string, unknown>): void {
@@ -717,27 +672,21 @@ function sweepBottomClip(): void {
       continue;
     }
     const overflowPx = bottomClipOverflowPx(probe);
-    const domOverflow = domOverflowPx(probe);
-    const domOffset = domOffsetTopPx(probe);
-    const domOverflowRight = domOverflowRightPx(probe);
-    const domOffsetLeft = domOffsetLeftPx(probe);
-    if (
-      overflowPx == null && domOverflow == null && domOffset == null
-      && domOverflowRight == null && domOffsetLeft == null
-    ) {
+    const rightOverflowPx = rightClipOverflowPx(probe);
+    if (overflowPx == null && rightOverflowPx == null) {
       clipRepairState.delete(pane);
       continue;
     }
     const trigger: string[] = [];
     if (overflowPx != null && overflowPx > BOTTOM_CLIP_SLACK_PX) trigger.push('model');
-    if (domOverflow != null && domOverflow > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_overflow');
-    if (domOffset != null && domOffset > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_offset');
-    if (domOverflowRight != null && domOverflowRight > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_overflow_right');
-    if (domOffsetLeft != null && domOffsetLeft > BOTTOM_CLIP_SLACK_PX) trigger.push('dom_offset_left');
+    if (rightOverflowPx != null && rightOverflowPx > BOTTOM_CLIP_SLACK_PX) trigger.push('model_right');
     const clipping = trigger.length > 0;
     const cellHeight = probe.cellHeight ?? 0;
+    const cellWidth = probe.cellWidth ?? 0;
     const clientHeight = probe.clientHeight ?? 0;
+    const clientWidth = probe.clientWidth ?? 0;
     const flooredRows = cellHeight > 0 ? Math.floor(clientHeight / cellHeight) : 0;
+    const flooredCols = cellWidth > 0 ? Math.floor(clientWidth / cellWidth) : 0;
 
     if (!clipping) {
       // Full reset: the clip is gone (or never started this sweep). Keep the
@@ -757,13 +706,13 @@ function sweepBottomClip(): void {
         rows: probe.rows,
         cols: probe.cols,
         flooredRows,
+        flooredCols,
         overflowPx: overflowPx == null ? null : Math.round(overflowPx),
-        domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
-        domOffsetTopPx: domOffset == null ? null : Math.round(domOffset),
-        domOverflowRightPx: domOverflowRight == null ? null : Math.round(domOverflowRight),
-        domOffsetLeftPx: domOffsetLeft == null ? null : Math.round(domOffsetLeft),
+        rightOverflowPx: rightOverflowPx == null ? null : Math.round(rightOverflowPx),
         cellHeight,
+        cellWidth,
         clientHeight,
+        clientWidth,
         repairAttempts: priorState?.attempts ?? 0,
       });
       continue;
@@ -779,19 +728,15 @@ function sweepBottomClip(): void {
         rows: probe.rows,
         cols: probe.cols,
         flooredRows,
+        flooredCols,
         extraRows: probe.rows - flooredRows,
+        extraCols: probe.cols - flooredCols,
         overflowPx: overflowPx == null ? null : Math.round(overflowPx),
-        domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
-        domOffsetTopPx: domOffset == null ? null : Math.round(domOffset),
-        domOverflowRightPx: domOverflowRight == null ? null : Math.round(domOverflowRight),
-        domOffsetLeftPx: domOffsetLeft == null ? null : Math.round(domOffsetLeft),
+        rightOverflowPx: rightOverflowPx == null ? null : Math.round(rightOverflowPx),
         cellHeight,
-        cellWidth: probe.cellWidth ?? null,
+        cellWidth,
         clientHeight,
-        clientWidth: probe.clientWidth ?? null,
-        canvasCssHeight: probe.canvasCssHeight == null ? null : Math.round(probe.canvasCssHeight),
-        canvasPixelWidth: probe.canvasPixelWidth ?? null,
-        canvasPixelHeight: probe.canvasPixelHeight ?? null,
+        clientWidth,
         hasMeasuredSize: probe.hasMeasuredSize ?? null,
         isActivePane: probe.isActivePane ?? null,
         session: probe.session,
@@ -835,7 +780,7 @@ function sweepBottomClip(): void {
           rows: probe.rows,
           cols: probe.cols,
           overflowPx: overflowPx == null ? null : Math.round(overflowPx),
-          domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
+          rightOverflowPx: rightOverflowPx == null ? null : Math.round(rightOverflowPx),
         }, probe.session);
         try {
           repair();
@@ -881,10 +826,7 @@ export function dumpTerminalGeometry(): TerminalGeometrySnapshot[] {
     const clientHeight = probe.clientHeight ?? null;
     const clientWidth = probe.clientWidth ?? null;
     const overflowPx = cellHeight && clientHeight ? probe.rows * cellHeight - clientHeight : null;
-    const domOverflow = domOverflowPx(probe);
-    const domOffset = domOffsetTopPx(probe);
-    const domOverflowRight = domOverflowRightPx(probe);
-    const domOffsetLeft = domOffsetLeftPx(probe);
+    const rightOverflowPx = cellWidth && clientWidth ? probe.cols * cellWidth - clientWidth : null;
     snapshots.push({
       pane,
       session: probe.session,
@@ -900,18 +842,9 @@ export function dumpTerminalGeometry(): TerminalGeometrySnapshot[] {
       flooredCols: cellWidth && clientWidth ? Math.floor(clientWidth / cellWidth) : null,
       flooredRows: cellHeight && clientHeight ? Math.floor(clientHeight / cellHeight) : null,
       overflowPx: overflowPx == null ? null : Math.round(overflowPx),
-      domOverflowPx: domOverflow == null ? null : Math.round(domOverflow),
-      domOffsetTopPx: domOffset == null ? null : Math.round(domOffset),
-      domOverflowRightPx: domOverflowRight == null ? null : Math.round(domOverflowRight),
-      domOffsetLeftPx: domOffsetLeft == null ? null : Math.round(domOffsetLeft),
-      canvasCssHeight: probe.canvasCssHeight == null ? null : Math.round(probe.canvasCssHeight),
-      canvasPixelWidth: probe.canvasPixelWidth ?? null,
-      canvasPixelHeight: probe.canvasPixelHeight ?? null,
+      rightOverflowPx: rightOverflowPx == null ? null : Math.round(rightOverflowPx),
       clipping: (overflowPx != null && overflowPx > BOTTOM_CLIP_SLACK_PX)
-        || (domOverflow != null && domOverflow > BOTTOM_CLIP_SLACK_PX)
-        || (domOffset != null && domOffset > BOTTOM_CLIP_SLACK_PX)
-        || (domOverflowRight != null && domOverflowRight > BOTTOM_CLIP_SLACK_PX)
-        || (domOffsetLeft != null && domOffsetLeft > BOTTOM_CLIP_SLACK_PX),
+        || (rightOverflowPx != null && rightOverflowPx > BOTTOM_CLIP_SLACK_PX),
     });
   }
   enqueueWrite('incident', `${JSON.stringify({ at: Date.now(), kind: 'geometry_dump', snapshots })}\n`);

@@ -498,6 +498,32 @@ test.describe('Ghostty terminal interactions', () => {
     await expectOpenedUrl(page, url);
   });
 
+  test('keeps the canvas anchored when editable flow content appears before it', async ({ page, daemon }) => {
+    const terminal = await openTerminalSession(page, daemon, 's-editable-flow-offset');
+    await writeTerminalOutput(page, 's-editable-flow-offset', '\u001b[2J\u001b[Hanchored');
+
+    const geometry = await terminal.evaluate((element) => {
+      const canvas = element.querySelector('canvas');
+      if (!canvas) {
+        throw new Error('Terminal canvas not found');
+      }
+      const contaminant = document.createElement('div');
+      contaminant.dataset.testid = 'editable-flow-contaminant';
+      contaminant.style.height = '45px';
+      element.insertBefore(contaminant, canvas);
+
+      const terminalRect = element.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      return {
+        offsetTop: canvasRect.top - terminalRect.top,
+        overflowBottom: canvasRect.bottom - terminalRect.bottom,
+      };
+    });
+
+    expect(geometry.offsetTop).toBeLessThanOrEqual(1);
+    expect(geometry.overflowBottom).toBeLessThanOrEqual(1);
+  });
+
   test('cmd+click opens a visible URL while terminal mouse tracking is active', async ({ page, daemon }) => {
     await installOpenerProbe(page);
     const terminal = await openTerminalSession(page, daemon, 's-link-tracked');

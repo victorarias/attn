@@ -143,7 +143,10 @@
   font: 12px var(--font-ui, sans-serif);
 }
 
-.ghostty-terminal canvas {
+.ghostty-terminal > canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: block;
 }
 
