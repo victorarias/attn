@@ -501,6 +501,32 @@ export function PresentTour({
   // CodeView to actually be in the DOM, not for its content to be final.
   const tourMounted = files.length > 0;
 
+  // Distinct from tourMounted: true once every file's item has actually been
+  // admitted into its final, real-content form — not merely once its diff
+  // fetch resolved (`!f.diff.loading`), since a settled-but-not-yet-admitted
+  // file still renders as the zero-hunk pending placeholder (see the items
+  // memo and the admission effect below). A rail/j-k scroll issued while
+  // files are still placeholders can land short or no-op entirely —
+  // placeholder cards are zero-hunk, so the manifest may not even overflow
+  // the viewport yet — and nothing re-scrolls as the real content grows in
+  // above the target. The scroll-replay effect below re-fires once this
+  // flips true so a pending request still resolves to the right place once
+  // the tour has its final layout, matching the pre-progressive-load
+  // behavior for this one case without holding CodeView's mount hostage to
+  // it. An errored file needs no admission (see the items memo's error
+  // branch), so it counts as settled as soon as it's no longer loading.
+  const allSettled =
+    files.length > 0 &&
+    files.every((f) => {
+      if (f.diff.loading) return false;
+      // Mirrors the items memo's error-branch predicate: a file with no
+      // error but also no content is the anomalous "settled with nothing to
+      // show" case, rendered the same way as a genuine error — settled
+      // immediately, no admission needed.
+      const isErrorCard = Boolean(f.diff.error) || f.diff.original === undefined || f.diff.modified === undefined;
+      return isErrorCard || readyPaths.has(f.path);
+    });
+
   // Frame-budgeted parse admission: the primary site where a newly-settled
   // file's diff actually gets parsed (the items memo's own parse fallback
   // below only covers the rarer case of a ready file's content changing).
@@ -1181,9 +1207,11 @@ export function PresentTour({
     }
     performScroll();
     // scrollNonce intentionally included so repeat clicks on the same path (or
-    // repeat clicks on Summary) re-fire.
+    // repeat clicks on Summary) re-fire. `allSettled` is intentionally
+    // included too: it's what re-fires the same still-pending request once
+    // the tour's final layout is in — see the comment above tourMounted.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scrollToPath, scrollNonce, tourMounted]);
+  }, [scrollToPath, scrollNonce, tourMounted, allSettled]);
 
   // N/P annotation hop: first get the target file into view via the same
   // item-scroll CodeView uses for the rail/j-k path above, then locate the

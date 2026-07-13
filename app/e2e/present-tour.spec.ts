@@ -436,13 +436,19 @@ test.describe('PresentTour summary fold', () => {
 
 test.describe('PresentTour deferred-load scroll replay', () => {
   test('a scroll request issued while still loading is replayed once files settle', async ({ page }) => {
-    // `&deferred=1` starts every file `{loading: true}` (no `<diffs-container>`
-    // mounts at all yet) so this exercises the case the rail/j-k effect used
-    // to drop: a scroll request that arrives before CodeView exists.
+    // `&deferred=1` starts every file `{loading: true}`. CodeView now mounts
+    // immediately (see PresentTour's progressive-load module doc) with each
+    // file rendered as a zero-hunk placeholder `<diffs-container>` rather
+    // than waiting for every diff fetch to settle — so this exercises the
+    // case the rail/j-k effect used to drop: a scroll request that arrives
+    // before a file's real diff item has been admitted.
     await page.goto('/test-harness/?component=PresentTour&seed=0&deferred=1');
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);
-    await expect(page.locator('.present-tour-loading')).toBeVisible();
-    expect(await fileContainers(page).count()).toBe(0);
+    await expect.poll(() => fileContainers(page).count()).toBe(3);
+
+    const gammaPlaceholder = await findContainerByTitle(page, 'src/gamma.ts');
+    expect(gammaPlaceholder).not.toBeNull();
+    await expect(gammaPlaceholder!).toHaveClass(/present-tour-card-pending/);
 
     await page.evaluate(() => window.__HARNESS__.scrollToFile('src/gamma.ts'));
 
