@@ -709,15 +709,16 @@ func TestNotebookSendToChiefAppendsAndNudges(t *testing.T) {
 		t.Fatalf("send-to-chief result = %+v, want success inbox.md nudged", res.Result)
 	}
 
-	// Only the bounded doorbell + Enter was typed into the chief PTY as one atomic
-	// write — never the selection content itself (that goes to the inbox note, not
-	// the terminal).
+	// Only the bounded doorbell and its submit input were typed into the chief PTY
+	// as one bracketed, atomic write — never the selection content itself (that
+	// goes to the inbox note, not the terminal).
 	mu.Lock()
 	got := append([]string(nil), inputs...)
 	mu.Unlock()
 	wantNudge := chiefInboxNudgePrompt(d.store.GetSetting(SettingNotebookRoot))
-	if len(got) != 1 || got[0] != wantNudge+"\r" {
-		t.Fatalf("PTY inputs = %q, want one nudge-prompt-plus-Enter write", got)
+	wantInput := bracketedPasteStart + wantNudge + bracketedPasteEnd + "\r"
+	if len(got) != 1 || got[0] != wantInput {
+		t.Fatalf("PTY inputs = %q, want one atomic bracketed nudge-prompt-plus-Enter write", got)
 	}
 
 	body := readInboxNote(t, d)
@@ -776,7 +777,7 @@ func TestNotebookSendToChiefNudgesWorkingChief(t *testing.T) {
 	n := len(inputs)
 	mu.Unlock()
 	if n != 1 {
-		t.Fatalf("PTY inputs = %d, want one prompt-plus-Enter write", n)
+		t.Fatalf("PTY inputs = %d, want one atomic bracketed prompt-plus-Enter write", n)
 	}
 }
 

@@ -214,8 +214,9 @@ func TestDoorbellWriteDoesNotInterleaveWithPendingApproval(t *testing.T) {
 		t.Fatalf("typeDoorbell() error = %v", err)
 	}
 	<-stateDone
-	if got := <-inputs; got != ticketNudgePrompt+"\r" {
-		t.Fatalf("doorbell input = %q, want one atomic prompt+Enter write", got)
+	want := bracketedPasteStart + ticketNudgePrompt + bracketedPasteEnd + "\r"
+	if got := <-inputs; got != want {
+		t.Fatalf("doorbell input = %q, want atomic bracketed prompt+Enter %q", got, want)
 	}
 }
 

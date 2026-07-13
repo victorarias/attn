@@ -15,6 +15,11 @@ var errDoorbellBlockedByApproval = errors.New("doorbell blocked by pending appro
 
 const profileRoleChiefOfStaff = "chief_of_staff"
 
+const (
+	bracketedPasteStart = "\x1b[200~"
+	bracketedPasteEnd   = "\x1b[201~"
+)
+
 func (d *Daemon) chiefOfStaffSessionID() string {
 	if d.store == nil {
 		return ""
@@ -121,19 +126,22 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 	return true
 }
 
-// typeDoorbell types a bounded prompt and its Enter as one PTY write. It serializes
-// that write against authoritative state commits, so a pending_approval report
-// cannot land between the prompt and Enter. It is the shared primitive behind the
-// chief-of-staff doorbells (notebook activation, inbox nudge): a fixed trigger,
-// never arbitrary streamed content.
+// typeDoorbell types a bounded prompt as an explicit bracketed-paste event and
+// follows it with Enter in the same PTY write. The paste terminator gives Codex a
+// semantic boundary before Enter (so the prompt submits instead of remaining in
+// the composer), while the single write keeps the approval-state fence atomic.
+// It is the shared primitive behind the chief-of-staff doorbells (notebook
+// activation, inbox nudge): a fixed trigger, never arbitrary streamed content.
 func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 	d.doorbellMu.Lock()
 	defer d.doorbellMu.Unlock()
 	if session := d.store.Get(sessionID); session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
 		return errDoorbellBlockedByApproval
 	}
-	input := make([]byte, 0, len(prompt)+1)
+	input := make([]byte, 0, len(bracketedPasteStart)+len(prompt)+len(bracketedPasteEnd)+1)
+	input = append(input, bracketedPasteStart...)
 	input = append(input, prompt...)
+	input = append(input, bracketedPasteEnd...)
 	input = append(input, '\r')
 	return d.ptyBackend.Input(context.Background(), sessionID, input)
 }
