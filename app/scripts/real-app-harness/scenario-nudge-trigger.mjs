@@ -12,9 +12,10 @@
  *      session B (a cheap shell) — A is selected, so the daemon arms the nudge
  *      PAUSED (no timer): nudge_fires_at is absent and the paused button renders,
  *   3. assert the doorbell has NOT been injected yet (the gate held), then
- *   4. click the real "deliver now" button and assert the verbatim doorbell prompt
- *      lands in A's pane — exercising the button onClick -> sendTriggerNudge -> WS
- *      -> handleTriggerNudge chain that no unit/tsc check covers.
+ *   4. click the real "deliver now" button and assert Codex starts a turn, consumes
+ *      the ticket inbox, and settles with no doorbell text stranded in its composer
+ *      — exercising the button onClick -> sendTriggerNudge -> WS ->
+ *      handleTriggerNudge chain that no unit/tsc check covers.
  *
  * Because A is selected the nudge is paused with no armed timer, so the single
  * click is structurally the only delivery path — that is the exactly-once
@@ -215,7 +216,8 @@ async function main() {
     note(`author shell ready`, { authorId });
 
     runAttn(['ticket', 'comment', ticketId, '-m', 'Please take a look when you can.', '--session', authorId]);
-    note(`author commented on the ticket -> should notify the target participant`);
+    runAttn(['ticket', 'comment', ticketId, '-m', 'One more related note.', '--session', authorId]);
+    note(`author posted overlapping ticket activity -> should produce one target doorbell`);
 
     // 3) The notify reaches A as unread. A is selected, so the daemon pauses the
     //    nudge: ticket_unread true, nudge_fires_at ABSENT (no armed timer). This
@@ -265,29 +267,101 @@ async function main() {
     assert(clickRes?.clicked === true, `the trigger button was found and clicked (got ${JSON.stringify(clickRes)})`);
     note(`clicked the deliver-now trigger`, { surface: clickRes.surface });
 
-    // 6) The verbatim doorbell prompt must now land in A's pane. A was PAUSED (no
-    //    armed timer), so this single click is structurally the only delivery path
-    //    — that is the exactly-once guarantee, without counting noisy rendered text.
-    let afterText = '';
-    const wantedCore = normalizeWs(DOORBELL_CORE);
-    const delivered = await pollFor(
-      async () => {
-        afterText = (await readPaneText(client, targetId)).text;
-        return normalizeWs(afterText).includes(wantedCore) ? afterText : null;
-      },
-      'the verbatim doorbell prompt to land in the target pane after the click',
-      20_000,
-      500,
+    // 6) Injection is not enough: the regression left the verbatim prompt in the
+    //    composer and the old assertion still passed. Require the real Codex state
+    //    transition into a turn, then wait for it to settle and consume the inbox.
+    const started = await pollFor(
+      () => (observer.getSession(targetId)?.state === 'working' ? true : null),
+      'Codex to start a turn from the delivered doorbell',
+      30_000,
+      100,
     ).catch(() => null);
+
+    let afterText = (await readPaneText(client, targetId)).text;
     fs.writeFileSync(path.join(runDir, 'pane-after-click.txt'), afterText, 'utf8');
     assert(
-      delivered !== null,
-      `the doorbell ("${DOORBELL_CORE}") landed in the target pane after clicking deliver-now (see pane-after-click.txt)`,
+      started === true,
+      'the delivered doorbell started a Codex turn instead of remaining in the composer (see pane-after-click.txt)',
     );
-    note(`doorbell delivered: verbatim prompt present in target pane after the click`);
+    note(`doorbell submitted: Codex entered working state`);
+
+    const settledState = await pollFor(
+      () => {
+        const state = observer.getSession(targetId)?.state;
+        return IDLE_STATES.has(state) ? state : null;
+      },
+      'Codex to finish the nudge turn',
+      90_000,
+      250,
+    );
+    await pollFor(
+      () => (observer.getSession(targetId)?.ticket_unread === true ? null : true),
+      'the submitted nudge turn to consume the ticket inbox',
+      30_000,
+      250,
+    );
+
+    afterText = (await readPaneText(client, targetId)).text;
+    fs.writeFileSync(path.join(runDir, 'pane-after-settle.txt'), afterText, 'utf8');
+    const wantedCore = normalizeWs(DOORBELL_CORE);
+    assert(
+      normalizeWs(afterText).includes(wantedCore),
+      `the submitted transcript contains the complete doorbell message (see pane-after-settle.txt)`,
+    );
+    note(`nudge turn settled with inbox consumed and no stranded composer text`, { state: settledState });
+
+    // 7) Busy delivery uses Codex's queue semantics. Keep a normal turn alive long
+    //    enough to click deliver-now while state is authoritatively `working`, then
+    //    require the queued nudge to run afterward and drain the new ticket event.
+    const busyPrompt = 'Run `sleep 8`, then reply with the exact words: foreground turn finished';
+    await client.request('write_pane', { sessionId: targetId, paneId: beforeClick.paneId, text: busyPrompt, submit: false });
+    await delay(1_200);
+    await client.request('write_pane', { sessionId: targetId, paneId: beforeClick.paneId, text: '\r', submit: false });
+    await pollFor(
+      () => (observer.getSession(targetId)?.state === 'working' ? true : null),
+      'Codex to start the foreground busy turn',
+      30_000,
+      100,
+    );
+
+    runAttn(['ticket', 'comment', ticketId, '-m', 'Busy-state follow-up.', '--session', authorId]);
+    await pollFor(
+      () => (observer.getSession(targetId)?.ticket_unread === true ? true : null),
+      'busy target to show unread ticket activity',
+      30_000,
+      100,
+    );
+    assert(observer.getSession(targetId)?.state === 'working', 'target is still working before busy nudge delivery');
+
+    const busyClick = await client.request('click_nudge_trigger', {});
+    assert(busyClick?.clicked === true, `busy-state trigger button was clicked (got ${JSON.stringify(busyClick)})`);
+    note(`delivered a second nudge while Codex was working`, { surface: busyClick.surface });
+
+    await pollFor(
+      () => (observer.getSession(targetId)?.ticket_unread === true ? null : true),
+      'the busy-state queued nudge to consume the ticket inbox',
+      120_000,
+      250,
+    );
+    const busySettledState = await pollFor(
+      () => {
+        const state = observer.getSession(targetId)?.state;
+        return IDLE_STATES.has(state) ? state : null;
+      },
+      'Codex to settle after the foreground and queued nudge turns',
+      120_000,
+      250,
+    );
+    const afterBusy = (await readPaneText(client, targetId)).text;
+    fs.writeFileSync(path.join(runDir, 'pane-after-busy-nudge.txt'), afterBusy, 'utf8');
+    assert(
+      normalizeWs(afterBusy).includes(normalizeWs('Busy-state follow-up.')),
+      'the queued nudge turn read the busy-state ticket event (see pane-after-busy-nudge.txt)',
+    );
+    note(`busy-state nudge processed through Codex queue semantics`, { state: busySettledState });
 
     saveEvidence('passed');
-    console.log('[nudge-trigger] Nudge trigger scenario passed: gate held, then the real button delivered the doorbell.');
+    console.log('[nudge-trigger] Nudge trigger scenario passed: idle and busy Codex nudges submitted and consumed ticket activity.');
     console.log(JSON.stringify(evidence, null, 2));
   } catch (error) {
     saveEvidence(`error: ${error instanceof Error ? error.message : String(error)}`);

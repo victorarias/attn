@@ -6,6 +6,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-13]
+
+### Fixed
+- **Ticket nudges now submit in Codex instead of stopping in the composer.** The
+  bounded inbox prompt is explicitly framed before Enter, so the nudge starts a
+  turn while retaining the approval-prompt safety fence.
+
 ## [2026-07-12]
 
 ### Added
