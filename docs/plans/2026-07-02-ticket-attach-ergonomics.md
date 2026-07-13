@@ -1,6 +1,21 @@
 # Plan: Attach by ticket id + attach at delegate time
 
-## Goal
+Status: **Not pursuing** (2026-07-13).
+
+## Outcome
+
+The by-ticket-id half shipped through the newer filesystem-backed attachment design as
+`attn ticket attach --ticket <ticket-id>`. That command supports bidirectional attaching:
+the assignee can attach to its bound ticket, while a chief or sibling can attach to any
+known ticket by id.
+
+The remaining `attn delegate --attach` convenience is intentionally declined. Chiefs can
+pass the attachment's canonical Notebook path in the delegation brief, which keeps the
+context durable without coupling delegation to file copying, ticket-mint rollback, and a
+second attachment lifecycle. The complexity is not justified by the remaining ergonomic
+gain. Keep the implementation notes below as historical context; do not execute them.
+
+## Historical Goal
 
 Close the two attach gaps in the ticket loop. (1) `attn ticket attach` only works on the
 calling session's **bound** ticket (`handleTicketAttach` resolves it via

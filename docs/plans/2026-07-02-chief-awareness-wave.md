@@ -21,7 +21,7 @@ exactly one status (`crashed`); doorbells stay content-free.
 
 ## The plans
 
-> Legend: ⬜ not started · 🟡 in progress · ✅ merged.
+> Legend: ⬜ not started · 🟡 in progress · ✅ merged · ⛔ not pursuing.
 
 | plan | scope (one line) | dependencies / seams | wave | status |
 |---|---|---|---|---|
@@ -32,7 +32,7 @@ exactly one status (`crashed`); doorbells stay content-free.
 | [ticket-pane-overlay](2026-07-02-ticket-pane-overlay.md) | Bound-ticket chip on the agent pane header toggling the editable `TicketDetailPanel` as a pane overlay; frontend-only | none; **the access-pattern experiment gating ticket-rich-content** | 1 | ⬜ |
 | [dashboard-state-card](2026-07-02-dashboard-state-card.md) | Deterministic return-digest card on the home dashboard (Waiting on you / In flight / Closed today) + `handleRevealTicketDetail` | imports `waitingOnYouTickets` (counter — STOP if absent); inherits `openBoardSurface`'s new signature (closure required); ships `sessionStateForTicket` seam unwired | 2 | ⬜ |
 | [brief-quality-benchmark](2026-07-02-brief-quality-benchmark.md) | Real-agent harness benchmark scoring a minted brief on four deterministic checks; records chief model + effort | hard-depends on **merged** brief-craft guidance text (marker-phrase gate) | 2 | ⬜ |
-| [ticket-attach-ergonomics](2026-07-02-ticket-attach-ergonomics.md) | By-id `attn ticket attach <ticket-id>` + repeatable `attn delegate --attach` with atomic rollback; one version bump | after brief-craft (shared `delegatedTicketPrompt` + `references/delegation.md` — rebase, keep its assertions green) | 2 | ⬜ |
+| [ticket-attach-ergonomics](2026-07-02-ticket-attach-ergonomics.md) | By-id attach shipped through the newer filesystem-backed design; delegate-time attach declined as unnecessary coupling | superseded by [ticket handover through Notebook files](2026-07-09-design-artifact-handover.md) | — | ⛔ |
 | [ticket-list-context](2026-07-02-ticket-list-context.md) | Durable `tickets.branch` captured at mint; branch/cwd on `ticket list` and board cards (data exposure only) | after brief-craft (one coordinated `ChiefGuidance` clause, outside its budget); board-card line coexists with went-quiet's chip | 2 | ⬜ |
 | [ticket-went-quiet](2026-07-02-ticket-went-quiet.md) | The went-quiet floor: board quiet chip (pure join, owns `app/src/utils/ticketQuiet.ts`) + daemon-authored `went_quiet` activity event | independent; lands after counter's board edits to minimize rebases; **slice 3 wires dashboard's `sessionStateForTicket`** | 2 | ⬜ |
 | [ticket-rich-content](2026-07-02-ticket-rich-content.md) | Markdown, attachment previews, sandboxed HTML — three usage-gated slices inside `TicketDetailPanel` | gated on the pane-overlay experiment showing tickets get read in-app (soak time, not just code precedence) | 3 | ⬜ |
