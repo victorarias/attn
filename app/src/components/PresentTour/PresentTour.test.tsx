@@ -27,6 +27,18 @@ vi.mock('mermaid', () => ({
   },
 }));
 
+// Wraps the real `parseDiffFromFile` in a spy so the per-file item cache's
+// "never re-parses an unchanged file" claim is observable, without faking the
+// parser itself (everything else in @pierre/diffs stays real, same as the
+// react-entry mock below only replaces CodeView).
+const parseDiffFromFileSpy = vi.hoisted(() => ({ fn: null as ReturnType<typeof vi.fn> | null }));
+vi.mock('@pierre/diffs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@pierre/diffs')>();
+  const spy = vi.fn(actual.parseDiffFromFile);
+  parseDiffFromFileSpy.fn = spy;
+  return { ...actual, parseDiffFromFile: spy };
+});
+
 // Every render's `items` array is captured here so tests can assert on the
 // `version` CodeView receives, without CodeView itself needing to be real.
 const codeViewRenders = vi.hoisted(() => ({ calls: [] as Array<Array<Record<string, unknown>>> }));
@@ -634,6 +646,154 @@ describe('PresentTour summary fold vs scroll', () => {
       latestOnScroll()(80);
     });
     expect(onActivePathChange).toHaveBeenCalled();
+  });
+});
+
+// Exercises the per-file item cache added to fix the perf bug: a keystroke or
+// a state change on ONE file must not re-parse or re-version every OTHER
+// file's item. `codeViewRenders.calls` captures every `items` array PresentTour
+// hands to CodeView; `parseDiffFromFileSpy` counts real parses.
+describe('PresentTour per-file item caching', () => {
+  function openDraftOn(path: string, line = 6) {
+    const onGutterUtilityClick = codeViewProps.latest!.options as { onGutterUtilityClick: (range: unknown, ctx: { item: { id: string } } ) => void };
+    act(() => {
+      onGutterUtilityClick.onGutterUtilityClick(
+        { side: 'additions', start: line, end: line },
+        { item: { id: path } }
+      );
+    });
+  }
+
+  function latestItemsByPath(): Map<string, Record<string, unknown>> {
+    const latest = codeViewRenders.calls[codeViewRenders.calls.length - 1];
+    return new Map(latest.map((item) => [item.id as string, item]));
+  }
+
+  it('typing in a draft does not rebuild items or re-parse', async () => {
+    const files = [tinyFile('src/a.ts'), tinyFile('src/b.ts'), tinyFile('src/c.ts')];
+    render(<PresentTour {...baseProps({ files })} />);
+    await waitForSettled();
+
+    openDraftOn('src/a.ts');
+    const form = await screen.findByTestId('diff-comment-form');
+    const textarea = form.querySelector('textarea')!;
+
+    const parseCountBefore = parseDiffFromFileSpy.fn!.mock.calls.length;
+    const itemsBefore = latestItemsByPath();
+
+    fireEvent.change(textarea, { target: { value: 'h' } });
+    fireEvent.change(textarea, { target: { value: 'he' } });
+    fireEvent.change(textarea, { target: { value: 'hel' } });
+    fireEvent.change(textarea, { target: { value: 'hello' } });
+
+    expect(parseDiffFromFileSpy.fn!.mock.calls.length).toBe(parseCountBefore);
+    const itemsAfter = latestItemsByPath();
+    for (const [path, before] of itemsBefore) {
+      expect(itemsAfter.get(path)).toBe(before); // same object reference — no rebuild at all
+    }
+    expect(textarea).toHaveValue('hello');
+  });
+
+  it('reviewed toggle bumps only that file', async () => {
+    const files = [tinyFile('src/a.ts'), tinyFile('src/b.ts'), tinyFile('src/c.ts')];
+    const { rerender } = render(<PresentTour {...baseProps({ files })} />);
+    await waitForSettled();
+
+    const parseCountBefore = parseDiffFromFileSpy.fn!.mock.calls.length;
+    const itemsBefore = latestItemsByPath();
+
+    rerender(<PresentTour {...baseProps({ files, reviewedPaths: new Set(['src/b.ts']) })} />);
+
+    const itemsAfter = latestItemsByPath();
+    expect(itemsAfter.get('src/b.ts')).not.toBe(itemsBefore.get('src/b.ts'));
+    expect((itemsAfter.get('src/b.ts') as { version: number }).version).not.toBe(
+      (itemsBefore.get('src/b.ts') as { version: number }).version
+    );
+    expect(itemsAfter.get('src/a.ts')).toBe(itemsBefore.get('src/a.ts'));
+    expect(itemsAfter.get('src/c.ts')).toBe(itemsBefore.get('src/c.ts'));
+    expect(parseDiffFromFileSpy.fn!.mock.calls.length).toBe(parseCountBefore); // cache hit — no re-parse
+  });
+
+  it('opening a draft bumps only its file', async () => {
+    const files = [tinyFile('src/a.ts'), tinyFile('src/b.ts')];
+    render(<PresentTour {...baseProps({ files })} />);
+    await waitForSettled();
+
+    const itemsBefore = latestItemsByPath();
+    openDraftOn('src/a.ts');
+    const itemsAfter = latestItemsByPath();
+
+    expect(itemsAfter.get('src/a.ts')).not.toBe(itemsBefore.get('src/a.ts'));
+    expect(itemsAfter.get('src/b.ts')).toBe(itemsBefore.get('src/b.ts'));
+  });
+
+  it("editing a comment's content bumps only its file", async () => {
+    const commentB = annotationComment({ id: 'b1', filepath: 'src/b.ts', line_start: 8, line_end: 8, content: 'original' });
+    const files = [tinyFile('src/a.ts'), tinyFile('src/b.ts')];
+    const { rerender } = render(
+      <PresentTour
+        {...baseProps({
+          files,
+          comments: [commentB],
+          readOnlyCommentIds: new Set([commentB.id]),
+          annotationCommentIds: new Set([commentB.id]),
+        })}
+      />
+    );
+    await waitForSettled();
+
+    const parseCountBefore = parseDiffFromFileSpy.fn!.mock.calls.length;
+    const itemsBefore = latestItemsByPath();
+
+    const updatedCommentB = { ...commentB, content: 'changed' };
+    rerender(
+      <PresentTour
+        {...baseProps({
+          files,
+          comments: [updatedCommentB],
+          readOnlyCommentIds: new Set([commentB.id]),
+          annotationCommentIds: new Set([commentB.id]),
+        })}
+      />
+    );
+
+    const itemsAfter = latestItemsByPath();
+    expect(itemsAfter.get('src/b.ts')).not.toBe(itemsBefore.get('src/b.ts'));
+    expect(itemsAfter.get('src/a.ts')).toBe(itemsBefore.get('src/a.ts'));
+    expect(parseDiffFromFileSpy.fn!.mock.calls.length).toBe(parseCountBefore); // only comment metadata changed, not file content
+  });
+
+  it('draft content survives an item rebuild (remount insurance)', async () => {
+    // CodeView's real virtualization can unmount an annotation slot (scroll
+    // far away and back) and remount it later against a fresh item — the
+    // mock's DOM-presence-follows-`items` behavior reproduces exactly that
+    // when a file temporarily leaves and re-enters `files`. This is the
+    // scenario draftContentsRef exists for (see its declaration): the
+    // CommentForm that remounts must re-seed from the ref, not lose the
+    // typed content, even though the draft's own React state (`drafts`) never
+    // depended on `files` and survives the round-trip regardless.
+    const fileA = tinyFile('src/a.ts');
+    const fileB = tinyFile('src/b.ts');
+    const { rerender } = render(<PresentTour {...baseProps({ files: [fileA, fileB] })} />);
+    await waitForSettled();
+
+    openDraftOn('src/a.ts');
+    const form = await screen.findByTestId('diff-comment-form');
+    const textarea = form.querySelector('textarea')!;
+    fireEvent.change(textarea, { target: { value: 'typed text' } });
+    expect(textarea).toHaveValue('typed text');
+
+    // src/a.ts leaves the manifest — its rendered annotation slot (and
+    // CommentForm) unmounts entirely; its file-item cache entry is pruned.
+    rerender(<PresentTour {...baseProps({ files: [fileB] })} />);
+    expect(screen.queryByTestId('diff-comment-form')).toBeNull();
+
+    // src/a.ts returns — a brand new item/annotation/CommentForm mounts for
+    // it (guaranteed cache miss since the entry was pruned), seeded from
+    // draftContentsRef rather than any now-absent React state.
+    rerender(<PresentTour {...baseProps({ files: [fileA, fileB] })} />);
+    const remountedForm = await screen.findByTestId('diff-comment-form');
+    expect(remountedForm.querySelector('textarea')).toHaveValue('typed text');
   });
 });
 

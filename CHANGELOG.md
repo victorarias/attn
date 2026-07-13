@@ -9,6 +9,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-13]
 
 ### Fixed
+- **The Present review window no longer lags on large changesets.** Typing a comment re-parsed and re-rendered every file's diff on each keystroke, making characters take a second or more to appear and J/K navigation land on the wrong file. Each file now only re-renders when its own content or comments change, so typing echoes instantly and navigation tracks keypresses correctly.
 - **Ticket nudges now submit in Codex instead of stopping in the composer.** The
   bounded inbox prompt is explicitly framed before Enter, so the nudge starts a
   turn while retaining the approval-prompt safety fence.
