@@ -1844,9 +1844,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           if (!model) return null;
           const activeRenderer = rendererRef.current;
           const activeContainer = containerRef.current;
-          const activeCanvas = canvasRef.current;
-          const containerRect = activeContainer?.getBoundingClientRect() ?? null;
-          const canvasRect = activeCanvas?.getBoundingClientRect() ?? null;
           return {
             cols: model.cols,
             rows: model.rows,
@@ -1856,12 +1853,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             // Mirrors renderSurface's inactive-session bail: a pane that is
             // not allowed to paint must not be judged blank by the watchdog.
             active: runtimeMetaRef.current ? runtimeMetaRef.current.isActiveSession : true,
-            // Geometry for the bottom-clip detector / on-demand dump. Reads the
-            // container/canvas live (forces a layout via getBoundingClientRect),
-            // so only the low-frequency sweep and the manual dump call this —
-            // never the per-frame paint path. The rects are DOM truth: they
-            // catch a canvas offset or mis-sized within its container even
-            // when the model's own row*cellHeight arithmetic looks clean.
+            // Geometry for the overflow detector / on-demand dump. Client
+            // dimensions are enough to identify stale PTY rows or columns;
+            // canvas placement is guaranteed structurally by CSS.
             session: runtimeMetaRef.current?.sessionId ?? undefined,
             isActivePane: runtimeMetaRef.current?.isActivePane ?? null,
             hasMeasuredSize: hasMeasuredSizeRef.current,
@@ -1869,23 +1863,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             cellHeight: activeRenderer?.cellHeight ?? null,
             clientWidth: activeContainer?.clientWidth ?? null,
             clientHeight: activeContainer?.clientHeight ?? null,
-            containerTop: containerRect?.top ?? null,
-            containerBottom: containerRect?.bottom ?? null,
-            containerLeft: containerRect?.left ?? null,
-            containerRight: containerRect?.right ?? null,
-            canvasTop: canvasRect?.top ?? null,
-            canvasBottom: canvasRect?.bottom ?? null,
-            canvasLeft: canvasRect?.left ?? null,
-            canvasRight: canvasRect?.right ?? null,
-            canvasCssHeight: canvasRect?.height ?? null,
-            canvasPixelWidth: activeCanvas?.width ?? null,
-            canvasPixelHeight: activeCanvas?.height ?? null,
           };
         }, () => {
-          // Watchdog repair: re-assert container-truth geometry. fit() self-bails
-          // (sameSize / inactiveSession) so a spurious call is harmless; a fresh
-          // queued replay defers it via the replayPending skip, and the staleness
-          // bound guarantees a lying queue cannot defer it forever.
+          // Watchdog repair: re-assert container-owned geometry after the model
+          // remains larger than the visible pane across several sweeps.
           fitRef.current();
         });
         inputRef.current = new InputHandler(

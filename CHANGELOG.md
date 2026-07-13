@@ -12,6 +12,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Ticket nudges now submit in Codex instead of stopping in the composer.** The
   bounded inbox prompt is explicitly framed before Enter, so the nudge starts a
   turn while retaining the approval-prompt safety fence.
+- **Terminal content stays inside its pane even when the editable input host gains browser-managed content.** The rendered canvas is now anchored to the pane origin, preventing composition or editing layout from pushing its bottom rows offscreen.
 
 ## [2026-07-12]
 
