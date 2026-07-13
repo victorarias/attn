@@ -157,12 +157,14 @@ interface AnnotationMeta {
   noteMarkdown?: string;
 }
 
-type DraftState = {
+// The anchor identifying a draft (which file/side/line range it's attached
+// to). Deliberately does NOT carry the live textarea content — see
+// draftContentsRef below for why that lives outside React state entirely.
+type DraftAnchor = {
   filepath: string;
   side: AnnotationSide;
   start: number;
   end: number;
-  content: string;
 };
 
 function anchorKeyOf(filepath: string, side: AnnotationSide, start: number): string {
@@ -192,6 +194,39 @@ function nearestVisibleLine(target: number, ranges: Array<[number, number]>): nu
     }
   }
   return best;
+}
+
+// Whether a file's note or any of its comments carries a mermaid fence. Only
+// files that can possibly grow via an async diagram settling need
+// `diagramLayoutTick` in their per-file signature (see the items memo) — for
+// every other file, including the tick would bump its version (and force a
+// wasted re-parse-free-but-still-reconcile pass) on every unrelated diagram
+// elsewhere in the round.
+function fileHasMermaid(file: PresentTourFile, fileComments: ReviewComment[]): boolean {
+  if (file.note?.includes('```mermaid')) return true;
+  return fileComments.some((c) => c.content.includes('```mermaid'));
+}
+
+// Cached parse/derived-data for one file's currently-shown (original,
+// modified) pair — see parseCacheRef's declaration below for why this is kept
+// separate from the item cache.
+interface ParsedFileCacheEntry {
+  original: string;
+  modified: string;
+  fileDiff: ReturnType<typeof parseDiffFromFile>;
+  visibleLineRanges: VisibleLineRanges;
+  lineCounts: { additions: number; deletions: number };
+}
+
+// Cached built CodeViewItem for one file, plus everything the items memo
+// needs to skip rebuilding it — see fileItemCacheRef's declaration below.
+interface FileItemCacheEntry {
+  signature: string;
+  shownOriginal?: string; // undefined for error items (no diff content shown)
+  shownModified?: string;
+  item: CodeViewItem<AnnotationMeta>;
+  anchors: AnnotationAnchor[];
+  notePlaced: boolean;
 }
 
 function getVisibleLineRangesFromDiff(diff: ReturnType<typeof parseDiffFromFile>): VisibleLineRanges {
@@ -277,10 +312,33 @@ export function PresentTour({
   // record", so a brand new `items` array with different annotations but no
   // `version` bump is silently ignored (verified against the real library:
   // annotations built into `items` never reached the DOM without this).
-  // Bumped once per recompute of `items` below and shared by every item in
-  // that pass, since firing on any recompute is correct even though it's
-  // coarser than a per-file version would be.
+  // A single global counter, but no longer bumped once per recompute of the
+  // whole `items` array — that used to mean ANY state change (a keystroke in
+  // one file's draft, a `j` auto-mark on another) re-parsed and re-versioned
+  // EVERY file, which is the perf bug this per-file cache exists to remove.
+  // Instead each file gets its own decision (see the items memo and
+  // fileItemCacheRef below): only a file whose own per-file signature changed
+  // gets `++itemsVersionRef.current`, so an untouched file keeps the exact
+  // same item object (and the exact same version) across the recompute, and
+  // CodeView's `syncItemRecord` skips it entirely. The counter only needs to
+  // keep producing values distinct from whatever a file last held — which
+  // file "owns" which number doesn't matter.
   const itemsVersionRef = useRef(0);
+  // Parsed-diff cache, keyed by file path, independent of the item cache
+  // below: a file's `parseDiffFromFile`/visible-range/line-count derivation
+  // depends only on its shown (original, modified) pair, not on comments,
+  // drafts, or review state — so this cache can serve a hit (skip re-parsing)
+  // even on a signature miss (comments changed but the file's own content
+  // didn't), and vice versa.
+  const parseCacheRef = useRef<Map<string, ParsedFileCacheEntry>>(new Map());
+  // Built-item cache, keyed by file path: holds the last CodeViewItem this
+  // component produced for that file, plus everything needed to decide
+  // whether it can be reused as-is (see the items memo's per-file signature).
+  // A cache hit means the SAME item object goes back into the `items` array
+  // (not just an equal one) — object identity is what lets CodeView's
+  // `syncItemRecord` see a matching version and do nothing at all for that
+  // file, not merely a cheap diff.
+  const fileItemCacheRef = useRef<Map<string, FileItemCacheEntry>>(new Map());
 
   // Mermaid diagrams (in file notes and annotation bodies) render
   // asynchronously: the item is first measured against a short "loading"
@@ -309,25 +367,38 @@ export function PresentTour({
   // Per-anchor draft storage, keyed globally (filepath is already part of the
   // anchor key) so a draft on file A and a draft on file B can be open at once
   // — the multi-draft parity requirement this slice must keep.
-  const [drafts, setDrafts] = useState<Record<string, DraftState>>({});
+  const [drafts, setDrafts] = useState<Record<string, DraftAnchor>>({});
   const draftKeys = useMemo(() => Object.keys(drafts), [drafts]);
+
+  // Live textarea content per draft, deliberately OUTSIDE React state: the
+  // items memo below feeds the file-item cache (see the per-file signature),
+  // and any state a keystroke touched would bump that file's — or worse,
+  // every file's — version on every character typed (the perf bug this slice
+  // fixes). `CommentForm` in DiffCommentThread.tsx owns the live value in its
+  // own local state; this ref exists only as remount insurance — CodeView
+  // virtualizes and portals can unmount/remount an annotation slot (scroll
+  // far away and back, or a version bump), and on remount the form re-seeds
+  // from `draftContent`. Written on every keystroke, read only when a form
+  // (re)mounts.
+  const draftContentsRef = useRef<Map<string, string>>(new Map());
 
   const openDraft = useCallback((filepath: string, side: AnnotationSide, start: number, end: number) => {
     const key = anchorKeyOf(filepath, side, start);
     setDrafts((current) => {
       if (current[key]) return current;
-      return { ...current, [key]: { filepath, side, start, end, content: '' } };
+      draftContentsRef.current.set(key, '');
+      return { ...current, [key]: { filepath, side, start, end } };
     });
   }, []);
 
+  // Stable identity, no setState: a keystroke must never touch PresentTour
+  // state (see draftContentsRef's declaration).
   const updateDraftContent = useCallback((key: string, content: string) => {
-    setDrafts((current) => {
-      if (!current[key]) return current;
-      return { ...current, [key]: { ...current[key], content } };
-    });
+    draftContentsRef.current.set(key, content);
   }, []);
 
   const closeDraft = useCallback((key: string) => {
+    draftContentsRef.current.delete(key);
     setDrafts((current) => {
       if (!(key in current)) return current;
       const { [key]: _removed, ...rest } = current;
@@ -438,7 +509,7 @@ export function PresentTour({
             editingCommentId={editingCommentId}
             readOnlyCommentIds={readOnlyCommentIds}
             showSendToClaude={!!onSendToClaude}
-            draftContent={meta.draft ? drafts[key]?.content : undefined}
+            draftContent={meta.draft ? draftContentsRef.current.get(key) ?? '' : undefined}
             onDraftContentChange={meta.draft ? (content) => updateDraftContent(key, content) : undefined}
             onSaveDraft={(content) => handleSaveDraft(key, content)}
             onCancelDraft={() => closeDraft(key)}
@@ -459,7 +530,6 @@ export function PresentTour({
       editingCommentId,
       readOnlyCommentIds,
       onSendToClaude,
-      drafts,
       updateDraftContent,
       handleSaveDraft,
       closeDraft,
@@ -476,21 +546,47 @@ export function PresentTour({
 
   // Build one CodeViewItem per manifest file, in reading order. Only runs
   // once every file's diff fetch has settled (see the module doc for why).
+  // Per file, this first computes a cheap "signature" of everything that
+  // affects that file's rendered payload (see fileItemCacheRef above) and
+  // compares it — together with the shown (original, modified) strings — to
+  // what produced the file's last cached item. A match reuses that exact item
+  // object (no re-parse, no new version); a miss rebuilds it, using
+  // parseCacheRef to skip re-parsing if only comments/drafts/review-state
+  // changed rather than the file's own content.
   const items = useMemo<CodeViewItem<AnnotationMeta>[]>(() => {
     annotationAnchorsRef.current = [];
     notePlacedPathsRef.current = new Set();
-    if (!allSettled) return [];
-    itemsVersionRef.current += 1;
-    const version = itemsVersionRef.current;
-    return files.map((file): CodeViewItem<AnnotationMeta> => {
+    if (!allSettled) {
+      // A fresh fetch pass (files went from settled back to loading, e.g. a
+      // round reload) invalidates every cached parse/item — the next settle
+      // starts clean, same lifecycle as the two refs reset just above.
+      parseCacheRef.current.clear();
+      fileItemCacheRef.current.clear();
+      return [];
+    }
+
+    const result = files.map((file): CodeViewItem<AnnotationMeta> => {
       const { diff } = file;
+      const cached = fileItemCacheRef.current.get(file.path);
+
       if (diff.error || diff.original === undefined || diff.modified === undefined) {
-        return {
+        // Discriminator ('error' vs 'diff' below) so a file that flips
+        // between an errored and a settled diff across renders can never
+        // signature-match its own stale cache entry from the other branch.
+        const signature = JSON.stringify(['error', diff.error ?? 'Failed to load this file’s diff.']);
+        if (cached && cached.signature === signature && cached.shownOriginal === undefined && cached.shownModified === undefined) {
+          if (cached.notePlaced) notePlacedPathsRef.current.add(file.path);
+          annotationAnchorsRef.current.push(...cached.anchors);
+          return cached.item;
+        }
+        const item: CodeViewItem<AnnotationMeta> = {
           id: file.path,
           type: 'file',
           file: { name: file.path, contents: diff.error ?? 'Failed to load this file’s diff.' },
-          version,
+          version: ++itemsVersionRef.current,
         };
+        fileItemCacheRef.current.set(file.path, { signature, item, anchors: [], notePlaced: false });
+        return item;
       }
 
       const frozen = frozenRef.current.get(file.path);
@@ -499,17 +595,67 @@ export function PresentTour({
       }
       const shown = frozenRef.current.get(file.path) ?? { original: diff.original, modified: diff.modified };
 
-      const oldFile: FileContents = { name: file.path, contents: shown.original };
-      const newFile: FileContents = { name: file.path, contents: shown.modified };
-      const fileDiff = parseDiffFromFile(oldFile, newFile);
-      const visibleLineRanges = getVisibleLineRangesFromDiff(fileDiff);
-      const lineCounts = {
-        additions: shown.modified.split('\n').length,
-        deletions: shown.original.split('\n').length,
-      };
-
       const fileComments = commentsByFile.get(file.path) ?? [];
       const fileDraftKeys = draftsByFile.get(file.path) ?? [];
+      // editingCommentId only ever names a saved comment, never a draft key,
+      // but this checks both sources per the same "does this belong to me"
+      // logic rather than assuming which collection it can appear in.
+      const editingBelongsToFile =
+        fileComments.some((c) => c.id === editingCommentId) || fileDraftKeys.includes(editingCommentId ?? '');
+      const hasMermaid = fileHasMermaid(file, fileComments);
+
+      // Every input that affects this file's built item. Comment content and
+      // resolved state are embedded in the annotation metadata snapshot the
+      // item carries, so any of those changing has to produce a new
+      // signature (and thus a new version) even though the comment's `id`
+      // alone wouldn't. `diagramLayoutTick` is included only when this file
+      // could possibly hold a settling diagram (see fileHasMermaid) so an
+      // unrelated diagram elsewhere in the round never bumps this file.
+      const signature = JSON.stringify([
+        'diff',
+        file.note ?? null,
+        fileComments.map((c) => [
+          c.id,
+          c.content,
+          c.line_start,
+          c.line_end,
+          c.resolved,
+          c.resolved_by ?? null,
+          c.author,
+          annotationCommentIds?.has(c.id) ?? false,
+        ]),
+        fileDraftKeys.map((key) => {
+          const d = drafts[key];
+          return [key, d.side, d.start, d.end];
+        }),
+        editingBelongsToFile ? editingCommentId : null,
+        reviewedPaths.has(file.path),
+        hasMermaid ? diagramLayoutTick : null,
+      ]);
+
+      if (cached && cached.signature === signature && cached.shownOriginal === shown.original && cached.shownModified === shown.modified) {
+        if (cached.notePlaced) notePlacedPathsRef.current.add(file.path);
+        annotationAnchorsRef.current.push(...cached.anchors);
+        return cached.item;
+      }
+
+      const parsedCached = parseCacheRef.current.get(file.path);
+      let fileDiff: ReturnType<typeof parseDiffFromFile>;
+      let visibleLineRanges: VisibleLineRanges;
+      let lineCounts: { additions: number; deletions: number };
+      if (parsedCached && parsedCached.original === shown.original && parsedCached.modified === shown.modified) {
+        ({ fileDiff, visibleLineRanges, lineCounts } = parsedCached);
+      } else {
+        const oldFile: FileContents = { name: file.path, contents: shown.original };
+        const newFile: FileContents = { name: file.path, contents: shown.modified };
+        fileDiff = parseDiffFromFile(oldFile, newFile);
+        visibleLineRanges = getVisibleLineRangesFromDiff(fileDiff);
+        lineCounts = {
+          additions: shown.modified.split('\n').length,
+          deletions: shown.original.split('\n').length,
+        };
+        parseCacheRef.current.set(file.path, { original: shown.original, modified: shown.modified, fileDiff, visibleLineRanges, lineCounts });
+      }
 
       const groups = new Map<string, AnnotationMeta>();
       for (const comment of fileComments) {
@@ -567,9 +713,11 @@ export function PresentTour({
       const fileAnnotationGroups = all
         .filter((g) => g.comments.some((c) => annotationCommentIds?.has(c.id)))
         .sort((a, b) => a.lineNumber - b.lineNumber);
-      for (const g of fileAnnotationGroups) {
-        annotationAnchorsRef.current.push({ path: file.path, anchorKey: g.anchorKey });
-      }
+      // Also the anchor list stashed on this file's cache entry below, so a
+      // future cache hit can replay it into annotationAnchorsRef without
+      // rebuilding `groups`.
+      const fileAnchors: AnnotationAnchor[] = fileAnnotationGroups.map((g) => ({ path: file.path, anchorKey: g.anchorKey }));
+      annotationAnchorsRef.current.push(...fileAnchors);
 
       const hasOpenForm = (g: AnnotationMeta) => g.draft || g.comments.some((c) => c.id === editingCommentId);
       const active = all.filter(hasOpenForm).sort((a, b) => a.anchorKey.localeCompare(b.anchorKey));
@@ -582,6 +730,7 @@ export function PresentTour({
       // case falls back to the header path via notePlacedPathsRef staying
       // empty for it.
       let noteAnnotation: DiffLineAnnotation<AnnotationMeta> | undefined;
+      let notePlaced = false;
       if (file.note) {
         const additionsStart = visibleLineRanges.additions[0]?.[0];
         const deletionsStart = visibleLineRanges.deletions[0]?.[0];
@@ -599,6 +748,7 @@ export function PresentTour({
             anchorKey: `note:${file.path}`,
           };
           noteAnnotation = { side, lineNumber, metadata: noteMeta };
+          notePlaced = true;
           notePlacedPathsRef.current.add(file.path);
         }
       }
@@ -612,18 +762,42 @@ export function PresentTour({
         })),
       ];
 
-      return { id: file.path, type: 'diff', fileDiff, annotations, version };
+      const item: CodeViewItem<AnnotationMeta> = { id: file.path, type: 'diff', fileDiff, annotations, version: ++itemsVersionRef.current };
+      fileItemCacheRef.current.set(file.path, {
+        signature,
+        shownOriginal: shown.original,
+        shownModified: shown.modified,
+        item,
+        anchors: fileAnchors,
+        notePlaced,
+      });
+      return item;
     });
-    // frozenRef is a ref (mutated in-place above); its contents are captured
-    // deliberately as part of this computation and don't need to be a dep.
-    // reviewedPaths is included purely to force a `version` bump on every
-    // reviewed toggle — same reasoning as editingCommentId above: CodeView's
-    // controlled items only re-render on a version bump (see module doc), and
-    // the reviewed indicator is otherwise rendered through renderHeaderPrefix,
-    // which this codebase has not proven re-renders on its own without one.
-    // diagramLayoutTick is included for the identical reason: a mermaid
-    // diagram settling (see handleDiagramLayoutChange above) needs the same
-    // version bump to invalidate CodeView's stale cached item height.
+
+    // Drop cache entries for files no longer in the manifest — otherwise a
+    // path that briefly leaves and later returns with the same signature
+    // would wrongly hit stale cached content, and the caches would grow
+    // unbounded across rounds.
+    const currentPaths = new Set(files.map((f) => f.path));
+    for (const path of Array.from(fileItemCacheRef.current.keys())) {
+      if (!currentPaths.has(path)) fileItemCacheRef.current.delete(path);
+    }
+    for (const path of Array.from(parseCacheRef.current.keys())) {
+      if (!currentPaths.has(path)) parseCacheRef.current.delete(path);
+    }
+
+    return result;
+    // frozenRef, parseCacheRef, and fileItemCacheRef are refs (mutated
+    // in-place above); their contents are captured deliberately as part of
+    // this computation and don't need to be deps. reviewedPaths,
+    // annotationCommentIds, and diagramLayoutTick are included purely so a
+    // change in any of them re-runs this memo and lets the per-file signature
+    // comparison decide which files actually need a new version — the same
+    // reasoning editingCommentId and drafts already need for their own
+    // per-file signature contribution. None of these bump every file's
+    // version unconditionally anymore (see fileItemCacheRef's declaration);
+    // an unrelated file's signature comes out identical and that file's cache
+    // entry is reused as-is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allSettled, files, commentsByFile, draftsByFile, drafts, formOpenByFile, editingCommentId, reviewedPaths, annotationCommentIds, diagramLayoutTick]);
 
