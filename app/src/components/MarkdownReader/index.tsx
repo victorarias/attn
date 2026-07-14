@@ -1,4 +1,4 @@
-import { createElement, isValidElement, useRef } from 'react';
+import { createElement, isValidElement, memo, useRef } from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkFrontmatter from 'remark-frontmatter';
@@ -183,8 +183,18 @@ export interface MarkdownReaderProps {
  * highlighting with a hover copy button, GitHub heading slugs, safe link
  * routing, and a frontmatter metadata card. Shared chat-style surfaces keep
  * using the plain `Markdown` component.
+ *
+ * Memoized: the body creates fresh component closures per render (the heading
+ * slugger's dedup map must reset per document render), which React treats as
+ * new element types and remounts the whole rendered tree — re-running async
+ * shiki highlights and wiping copy-button state. memo blocks identical-prop
+ * parent re-renders so that only happens when the document actually changes.
  */
-export function MarkdownReader({ content, path, allowLocalTargets = true }: MarkdownReaderProps) {
+export const MarkdownReader = memo(function MarkdownReader({
+  content,
+  path,
+  allowLocalTargets = true,
+}: MarkdownReaderProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const frontmatter = extractFrontmatter(content);
   // Fresh components per render: the heading slugger's dedup map must reset
@@ -203,4 +213,4 @@ export function MarkdownReader({ content, path, allowLocalTargets = true }: Mark
       </div>
     </div>
   );
-}
+});

@@ -40,8 +40,13 @@ export function scrollToAnchor(root: HTMLElement | null, hash: string, stickyBar
   if (!id) {
     return false;
   }
-  const target = root.ownerDocument.getElementById(id);
-  if (!target || !root.contains(target)) {
+  // Resolve WITHIN root: multiple markdown tiles can render the same document
+  // (per-document sluggers dedup ids per tile only), so a document-wide
+  // getElementById would find the FIRST tile's heading and leave later tiles'
+  // fragment links dead. The attribute selector handles ids starting with
+  // digits/unicode that a bare `#id` selector would reject.
+  const target = root.querySelector<HTMLElement>(`[id="${CSS.escape(id)}"]`);
+  if (!target) {
     return false;
   }
   const viewport = findScrollContainer(root);
