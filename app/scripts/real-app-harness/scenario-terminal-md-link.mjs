@@ -9,6 +9,7 @@
 // -> Cmd+click the first file again REUSES its tile (no duplicate).
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   createRunContext,
@@ -95,6 +96,14 @@ async function main() {
   // whole window on screen for this scenario.
   if (process.env.ATTN_HARNESS_PARK_VISIBLE_PX === undefined) {
     process.env.ATTN_HARNESS_PARK_VISIBLE_PX = '800';
+  }
+
+  // Path-link detection checks file existence through Tauri's fs scope, which
+  // only allows $HOME/** AND does not match dot-directories — the default
+  // tmpdir session root (or anything under a hidden dir) would make every
+  // detected path fail the existence check and never become a link.
+  if (!process.env.ATTN_REAL_APP_SESSION_ROOT && !process.argv.includes('--session-root-dir')) {
+    options.sessionRootDir = path.join(os.homedir(), 'Library', 'Caches', 'attn-harness', 'real-app-sessions');
   }
 
   const { runId, runDir, sessionDir } = createRunContext(options, 'terminal-md-link');
@@ -280,6 +289,10 @@ async function main() {
         `Re-cmd+click alpha must reuse its tile (expected exactly [${alphaTileId}, ${betaTileId}]), got: ${JSON.stringify(tilesAfterReuse)}`,
       );
     }
+
+    await client.request('capture_native_window_screenshot', {
+      path: path.join(runDir, 'success-window.png'),
+    }).catch(() => {});
 
     const summary = {
       ok: true,
