@@ -12,16 +12,32 @@
   scrollbar-color: var(--color-border) transparent;
   /* Local success token (attn has none): copy-button checkmark tint. */
   --md-success: #3fb950;
+  /* GitHub alert accents (dark palette default, light overridden below). */
+  --md-alert-note: #4493f8;
+  --md-alert-tip: #3fb950;
+  --md-alert-warning: #d29922;
+  --md-alert-caution: #f85149;
+  --md-alert-important: #ab7df8;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) .md-reader {
     --md-success: #1a7f37;
+    --md-alert-note: #0969da;
+    --md-alert-tip: #1a7f37;
+    --md-alert-warning: #9a6700;
+    --md-alert-caution: #cf222e;
+    --md-alert-important: #8250df;
   }
 }
 
 :root[data-theme='light'] .md-reader {
   --md-success: #1a7f37;
+  --md-alert-note: #0969da;
+  --md-alert-tip: #1a7f37;
+  --md-alert-warning: #9a6700;
+  --md-alert-caution: #cf222e;
+  --md-alert-important: #8250df;
 }
 
 .md-reader code,
@@ -145,6 +161,62 @@
   margin: 0.125rem 0;
 }
 
+.md-reader li::marker {
+  color: color-mix(in srgb, var(--color-accent, #5b8cff) 60%, transparent);
+}
+
+/* ---- Task lists (read-only) ----
+   remark-gfm emits <ul class="contains-task-list"> and
+   <li class="task-list-item"><input type="checkbox" disabled>. The native
+   input is kept (semantics + tests) but restyled into plannotator's crisp
+   circle/check look via appearance:none. */
+
+.md-reader ul.contains-task-list {
+  list-style: none;
+  padding-left: 1rem;
+}
+
+.md-reader input[type='checkbox'] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 0 0.5rem 0 0;
+  vertical-align: -3px;
+  position: relative;
+  border: 2px solid color-mix(in srgb, var(--color-text-secondary) 50%, transparent);
+  border-radius: 50%;
+  cursor: default;
+}
+
+.md-reader input[type='checkbox']:checked {
+  border-color: var(--md-success);
+}
+
+.md-reader input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 4px;
+  height: 8px;
+  border: solid var(--md-success);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* Checked item text: struck through + dimmed (loose lists wrap in <p>). */
+.md-reader li.task-list-item:has(> input:checked),
+.md-reader li.task-list-item:has(> p:first-of-type > input:checked) {
+  color: var(--color-text-secondary);
+  text-decoration: line-through;
+}
+
+/* Nested sublists of a checked item keep their own treatment. */
+.md-reader li.task-list-item ul,
+.md-reader li.task-list-item ol {
+  text-decoration: none;
+}
+
 .md-reader blockquote {
   border-left: 2px solid color-mix(in srgb, var(--color-accent, #5b8cff) 50%, transparent);
   padding-left: 1rem;
@@ -155,6 +227,61 @@
 
 .md-reader blockquote p + p {
   margin-top: 0.5rem;
+}
+
+/* ---- GitHub alerts ([!NOTE] etc.) ----
+   Per spec: 3px left border + colored title only — no background tint, no
+   radius. Border and title share the per-kind accent; the icon inherits it
+   via currentColor. */
+
+.md-alert {
+  margin: 1rem 0;
+  padding: 0.5rem 0.75rem 0.5rem 1rem;
+  border-left: 3px solid;
+}
+
+.md-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  font-size: 15px;
+}
+
+.md-alert > :last-child {
+  margin-bottom: 0;
+}
+
+.md-alert-note {
+  border-left-color: var(--md-alert-note);
+}
+.md-alert-note > .md-alert-title {
+  color: var(--md-alert-note);
+}
+.md-alert-tip {
+  border-left-color: var(--md-alert-tip);
+}
+.md-alert-tip > .md-alert-title {
+  color: var(--md-alert-tip);
+}
+.md-alert-warning {
+  border-left-color: var(--md-alert-warning);
+}
+.md-alert-warning > .md-alert-title {
+  color: var(--md-alert-warning);
+}
+.md-alert-caution {
+  border-left-color: var(--md-alert-caution);
+}
+.md-alert-caution > .md-alert-title {
+  color: var(--md-alert-caution);
+}
+.md-alert-important {
+  border-left-color: var(--md-alert-important);
+}
+.md-alert-important > .md-alert-title {
+  color: var(--md-alert-important);
 }
 
 .md-reader hr {
@@ -328,24 +455,49 @@
   font-size: 0.75rem;
 }
 
-/* ---- Tables (default GFM rendering, minimally legible; styling polish is PR3) ---- */
+/* ---- Tables ----
+   Per spec: no outer border, no radius, no zebra — header tint + row hover +
+   horizontal hairlines only. Horizontal overflow scrolls inside the wrapper,
+   never the page. */
+
+.md-table-wrap {
+  margin: 1rem 0;
+  overflow-x: auto;
+}
 
 .md-reader table {
+  min-width: 100%;
   border-collapse: collapse;
-  margin: 1rem 0;
+  margin: 0;
   font-size: 14px;
+}
+
+.md-reader thead tr {
+  border-bottom: 1px solid var(--color-border);
 }
 
 .md-reader th,
 .md-reader td {
-  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
-  padding: 0.375rem 0.75rem;
+  padding: 0.5rem 0.75rem;
   text-align: left;
 }
 
 .md-reader th {
-  background: color-mix(in srgb, var(--color-bg-elevated) 50%, transparent);
   font-weight: 600;
+  color: color-mix(in srgb, var(--color-text-primary) 90%, transparent);
+  background: color-mix(in srgb, var(--color-bg-elevated) 30%, transparent);
+}
+
+.md-reader td {
+  color: color-mix(in srgb, var(--color-text-primary) 80%, transparent);
+}
+
+.md-reader tbody tr {
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+}
+
+.md-reader tbody tr:hover {
+  background: color-mix(in srgb, var(--color-bg-elevated) 20%, transparent);
 }
 
 /* ---- Blocked/local media affordances (moved from WorkspaceDockTile) ---- */

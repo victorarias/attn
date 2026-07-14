@@ -243,3 +243,128 @@ describe('MarkdownReader code blocks', () => {
     expect(shikiMock.codeToHtml).not.toHaveBeenCalled();
   });
 });
+
+describe('MarkdownReader GitHub alerts', () => {
+  const kinds = [
+    ['NOTE', 'note', 'Note'],
+    ['TIP', 'tip', 'Tip'],
+    ['WARNING', 'warning', 'Warning'],
+    ['CAUTION', 'caution', 'Caution'],
+    ['IMPORTANT', 'important', 'Important'],
+  ] as const;
+
+  it.each(kinds)('renders [!%s] as an alert with icon, title, and class', (marker, kind, title) => {
+    const { container } = renderReader(`> [!${marker}]\n> Alert body text.\n`);
+
+    const alert = container.querySelector(`.md-alert.md-alert-${kind}`);
+    expect(alert).toBeInTheDocument();
+    expect(alert).toHaveAttribute('data-alert-kind', kind);
+    expect(alert!.querySelector('.md-alert-title svg path')).toBeInTheDocument();
+    expect(alert!.querySelector('.md-alert-title span')).toHaveTextContent(title);
+    expect(alert).toHaveTextContent('Alert body text.');
+    // The marker line is stripped from the body.
+    expect(alert!.textContent).not.toContain(`[!${marker}]`);
+    // No blockquote element remains for the alert.
+    expect(container.querySelector('blockquote')).toBeNull();
+  });
+
+  it('is case-insensitive and keeps the anchoring attributes on the wrapper', () => {
+    const { container } = renderReader('intro\n\n> [!note]\n> Body.\n');
+
+    const alert = container.querySelector('.md-alert-note');
+    expect(alert).toHaveAttribute('data-block-id', 'b1-blockquote');
+    expect(alert).toHaveAttribute('data-source-line', '3');
+    expect(alert).toHaveAttribute('data-source-line-end', '4');
+  });
+
+  it('keeps list content inside the alert body', () => {
+    const { container } = renderReader('> [!TIP]\n> - item one\n> - item two\n');
+
+    const alert = container.querySelector('.md-alert-tip')!;
+    expect(alert.querySelectorAll('li')).toHaveLength(2);
+  });
+
+  it('leaves non-alert blockquotes untouched', () => {
+    const { container } = renderReader('> Just a quote.\n\n> [!NOTE] trailing words disqualify\n');
+
+    const quotes = container.querySelectorAll('blockquote');
+    expect(quotes).toHaveLength(2);
+    expect(container.querySelector('.md-alert')).toBeNull();
+    // The pseudo-marker stays visible as regular text when not an alert.
+    expect(quotes[1]).toHaveTextContent('[!NOTE] trailing words disqualify');
+  });
+});
+
+describe('MarkdownReader task lists', () => {
+  it('renders read-only checkboxes with correct checked state', () => {
+    const { container } = renderReader('- [x] done thing\n- [ ] open thing\n');
+
+    const boxes = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0].checked).toBe(true);
+    expect(boxes[1].checked).toBe(false);
+    for (const box of boxes) {
+      expect(box).toBeDisabled();
+    }
+    expect(container.querySelectorAll('li.task-list-item')).toHaveLength(2);
+    // Task-list items still anchor individually.
+    expect(container.querySelectorAll('li.task-list-item[data-source-line]')).toHaveLength(2);
+  });
+});
+
+describe('MarkdownReader tables', () => {
+  const table = '| Col A | Col B |\n| --- | --- |\n| a1 | b1 |\n';
+
+  it('wraps tables in an overflow wrapper that carries the anchoring attributes', () => {
+    const { container } = renderReader(table);
+
+    const wrap = container.querySelector('.md-table-wrap');
+    expect(wrap).toBeInTheDocument();
+    expect(wrap).toHaveAttribute('data-block-id', 'b0-table');
+    expect(wrap).toHaveAttribute('data-source-line', '1');
+    expect(wrap).toHaveAttribute('data-source-line-end', '3');
+
+    // The table sits inside the wrapper and does NOT duplicate the anchor
+    // (consumers count blocks by data-block-id).
+    const tableEl = wrap!.querySelector('table');
+    expect(tableEl).toBeInTheDocument();
+    expect(tableEl).not.toHaveAttribute('data-block-id');
+    expect(tableEl).not.toHaveAttribute('data-source-line');
+  });
+
+  it('keeps GFM column alignment', () => {
+    const { container } = renderReader('| L | R |\n| :-- | --: |\n| a | b |\n');
+
+    const cells = container.querySelectorAll('td');
+    expect(cells[1]).toHaveStyle({ textAlign: 'right' });
+  });
+});
+
+describe('MarkdownReader prose transforms', () => {
+  it('applies smart punctuation and emoji to prose but never to code or flags', async () => {
+    const { container } = renderReader(
+      'He said "hello" -- ranges 3--5 work... :rocket:\n\nRun `bun --watch` with --verbose\n\n```sh\necho "raw" 3--5\n```\n',
+    );
+    // Let the fenced block's async shiki hydration settle (avoids act noise).
+    await act(async () => {});
+
+    const text = container.querySelector('.md-reader-card')!.textContent!;
+    expect(text).toContain('“hello”');
+    expect(text).toContain('3–5');
+    expect(text).toContain('…');
+    expect(text).toContain('🚀');
+    // Bare -- between words is never rewritten (narrowed en-dash rule).
+    expect(text).toContain('"hello" -- ranges'.replace('"hello"', '“hello”'));
+    // CLI flags survive, both in prose and in code.
+    expect(text).toContain('--verbose');
+    expect(container.querySelector(':not(pre) > code')).toHaveTextContent('bun --watch');
+    expect(container.querySelector('pre code')).toHaveTextContent('echo "raw" 3--5');
+  });
+
+  it('transforms link labels but not hrefs', () => {
+    renderReader('["quoted label"](https://example.test/a--b)\n');
+
+    const link = screen.getByRole('link', { name: '“quoted label”' });
+    expect(link).toHaveAttribute('href', 'https://example.test/a--b');
+  });
+});
