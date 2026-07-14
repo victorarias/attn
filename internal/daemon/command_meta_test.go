@@ -155,6 +155,18 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			msg:  &protocol.RenameSessionMessage{SessionID: "sess-rename"},
 			want: "sess-rename",
 		},
+		{
+			name: "open_markdown",
+			cmd:  protocol.CmdOpenMarkdown,
+			msg:  &protocol.OpenMarkdownMessage{Path: "/tmp/notes.md", SessionID: protocol.Ptr("sess-open-markdown")},
+			want: "sess-open-markdown",
+		},
+		{
+			name: "open_markdown without session id",
+			cmd:  protocol.CmdOpenMarkdown,
+			msg:  &protocol.OpenMarkdownMessage{Path: "/tmp/notes.md"},
+			want: "",
+		},
 	}
 
 	for _, tc := range cases {

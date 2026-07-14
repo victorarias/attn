@@ -1234,6 +1234,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.RenameSessionMessage); ok {
 			return typed.SessionID
 		}
+	case protocol.CmdOpenMarkdown:
+		if typed, ok := msg.(*protocol.OpenMarkdownMessage); ok {
+			return protocol.Deref(typed.SessionID)
+		}
 	}
 	return ""
 }
