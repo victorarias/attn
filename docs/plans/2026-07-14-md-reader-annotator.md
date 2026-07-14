@@ -356,3 +356,12 @@ Each PR gets live-app verification on a throwaway profile per AGENTS.md.
   limits) — resolved by the PR 4 paint-layer spike; mark-insertion is the
   fallback behind the same anchor interface.
 - Mermaid zoom/pan/fullscreen and table popout as later polish.
+- **Fix md path links inside dot-directories.** Found during PR 1 live
+  verification: the Tauri fs scope (`app/src-tauri/capabilities/default.json`)
+  allows only `$HOME/**`, and its glob does not match dot-directory segments —
+  so the path-link existence check (`exists()` in `GhosttyTerminal`) silently
+  fails for anything under a hidden dir, and cmd+click never linkifies paths
+  like `~/.claude/plan.md` or `~/.config/foo.md`, which agents print all the
+  time. Fix is widening the fs scope (e.g. dot-dir-tolerant glob entries or
+  `require_literal_leading_dot: false`) while keeping it $HOME-bounded, then
+  extending `scenario-terminal-md-link` with a dot-dir fixture.
