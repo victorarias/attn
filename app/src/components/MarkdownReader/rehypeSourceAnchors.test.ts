@@ -284,6 +284,40 @@ describe("rehypeSourceAnchors", () => {
     ]);
   });
 
+  it("skips position-less nodes entirely and does not shift later block ids", () => {
+    // Simulates a plugin-generated node (no source position) inserted between
+    // two real blocks: it must get NO data attributes (not even a block id),
+    // and the following block's id must be identical to a tree without it.
+    const paragraph = (line: number): Element => ({
+      type: "element",
+      tagName: "p",
+      properties: {},
+      children: [],
+      position: {
+        start: { line, column: 1, offset: 0 },
+        end: { line, column: 10, offset: 9 },
+      },
+    });
+    const generated: Element = {
+      type: "element",
+      tagName: "div",
+      properties: {},
+      children: [],
+      // no position
+    };
+    const tree: Root = {
+      type: "root",
+      children: [paragraph(1), generated, paragraph(3)],
+    };
+    rehypeSourceAnchors()(tree);
+
+    expect(generated.properties).toEqual({});
+    expect(collectAnchors(tree)).toEqual([
+      { tag: "p", id: "b0-paragraph", line: 1, lineEnd: 1 },
+      { tag: "p", id: "b1-paragraph", line: 3, lineEnd: 3 },
+    ]);
+  });
+
   it("does not stamp non-anchored descendants (inline code, table cells, links)", async () => {
     const md = [
       "Some `code` and [a link](https://example.com).",

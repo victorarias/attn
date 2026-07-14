@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { extractFrontmatter } from './frontmatter';
 
+const NONE = { entries: [], lineCount: 0 };
+
 describe('extractFrontmatter', () => {
   it('returns no entries for documents without frontmatter', () => {
     expect(extractFrontmatter('# Title\n\nBody')).toEqual({ entries: [], lineCount: 0 });
@@ -51,8 +53,19 @@ describe('extractFrontmatter', () => {
     expect(lineCount).toBe(3);
   });
 
-  it('accepts the YAML document-end marker as a closing fence', () => {
-    const { entries, lineCount } = extractFrontmatter('---\ntitle: x\n...\nBody\n');
+  it('rejects the YAML document-end marker, matching remark-frontmatter', () => {
+    // remark-frontmatter only closes on `---`; with `...` it renders the block
+    // as prose, so extracting a card here would show the frontmatter twice.
+    expect(extractFrontmatter('---\ntitle: x\n...\nBody\n')).toEqual(NONE);
+  });
+
+  it('rejects indented fences, matching remark-frontmatter', () => {
+    expect(extractFrontmatter(' ---\ntitle: x\n ---\nBody\n')).toEqual(NONE);
+    expect(extractFrontmatter('---\ntitle: x\n  ---\nBody\n')).toEqual(NONE);
+  });
+
+  it('accepts fences with trailing whitespace and CRLF line endings', () => {
+    const { entries, lineCount } = extractFrontmatter('--- \r\ntitle: x\r\n---\t\r\nBody\r\n');
     expect(entries).toEqual([{ key: 'title', value: 'x' }]);
     expect(lineCount).toBe(3);
   });

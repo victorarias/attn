@@ -43,19 +43,27 @@ function parseInlineArray(value: string): string[] | null {
   return inner.split(',').map((item) => unquote(item.trim())).filter((item) => item.length > 0);
 }
 
+// Fence rules must match micromark-extension-frontmatter (what
+// remark-frontmatter uses to swallow the block from the rendered tree):
+// `---` at column 1, optionally followed by whitespace only. No indentation,
+// and no YAML `...` document-end closer — micromark rejects those, so if we
+// accepted them the card AND the raw YAML-as-prose would both render.
+const FENCE = /^---[ \t]*$/;
+
 /**
  * Returns the flat entries of a leading `---` YAML frontmatter block, or no
  * entries when the document has none (or the block never closes).
  */
 export function extractFrontmatter(content: string): ExtractedFrontmatter {
-  const lines = content.split('\n');
-  if ((lines[0] ?? '').trim() !== '---') {
+  // Normalize CRLF once so fence/key matching never has to reason about \r
+  // (JS `.` and `$` both stop at a carriage return).
+  const lines = content.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
+  if (!FENCE.test(lines[0] ?? '')) {
     return NONE;
   }
   let closing = -1;
   for (let i = 1; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (trimmed === '---' || trimmed === '...') {
+    if (FENCE.test(lines[i])) {
       closing = i;
       break;
     }

@@ -30,8 +30,15 @@ interface CodeBlockProps {
  * button) + shiki dual-theme highlighting. Unknown languages fall back to
  * plain text with the same chrome.
  */
+interface HighlightedState {
+  /** The inputs the html was generated from — stale results never render. */
+  code: string;
+  language: string;
+  html: string;
+}
+
 export function CodeBlock({ code, language, preProps }: CodeBlockProps) {
-  const [highlighted, setHighlighted] = useState<string | null>(null);
+  const [highlighted, setHighlighted] = useState<HighlightedState | null>(null);
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -53,7 +60,7 @@ export function CodeBlock({ code, language, preProps }: CodeBlockProps) {
           structure: 'inline',
         });
         if (!cancelled) {
-          setHighlighted(html);
+          setHighlighted({ code, language, html });
         }
       } catch {
         // Unknown language: keep plain text, same chrome.
@@ -109,12 +116,16 @@ export function CodeBlock({ code, language, preProps }: CodeBlockProps) {
         </svg>
       </button>
       <pre {...preProps}>
-        {highlighted !== null ? (
+        {/* Only render html generated from the CURRENT props: on a content
+            reload the component re-renders in place with new code, and the
+            previous file version's highlight must not linger while the async
+            re-highlight is in flight. */}
+        {highlighted !== null && highlighted.code === code && highlighted.language === language ? (
           <code
             className="md-shiki"
             // eslint-disable-next-line react/no-danger -- shiki output is
             // library-generated spans over the code text, not document HTML.
-            dangerouslySetInnerHTML={{ __html: highlighted }}
+            dangerouslySetInnerHTML={{ __html: highlighted.html }}
           />
         ) : (
           <code>{code}</code>

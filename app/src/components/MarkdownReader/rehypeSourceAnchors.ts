@@ -11,6 +11,9 @@
  * - `data-source-line`     1-based first line of the block in the RAW file.
  * - `data-source-line-end` 1-based last line of the block in the RAW file.
  *
+ * Nodes without a source position (plugin-generated) get NO data attributes —
+ * skip, don't guess — and don't consume an index slot.
+ *
  * Frontmatter awareness: markdown positions are relative to the string that
  * was parsed. When the caller strips YAML frontmatter (or any prefix) before
  * parsing, it must pass `lineOffset` = number of raw-file lines removed, so
@@ -51,18 +54,28 @@ function blockType(tagName: string): string {
   return BLOCK_TYPE_BY_TAG[tagName] ?? tagName;
 }
 
-function stamp(node: Element, index: number, lineOffset: number): void {
-  const properties = (node.properties ??= {});
-  properties.dataBlockId = `b${index}-${blockType(node.tagName)}`;
+/**
+ * Stamps the node and returns true, or returns false untouched when the node
+ * has no source position (plugin-generated nodes): per the anchoring contract,
+ * "stamped" always means "fully anchored" — a block id without a line range is
+ * an inconsistent state downstream anchor code would have to special-case, and
+ * an unstamped node must not consume an index slot (so its presence never
+ * shifts the ids of real source blocks).
+ */
+function stamp(node: Element, index: number, lineOffset: number): boolean {
   const position = node.position;
   if (
-    position &&
-    typeof position.start?.line === "number" &&
-    typeof position.end?.line === "number"
+    !position ||
+    typeof position.start?.line !== "number" ||
+    typeof position.end?.line !== "number"
   ) {
-    properties.dataSourceLine = position.start.line + lineOffset;
-    properties.dataSourceLineEnd = position.end.line + lineOffset;
+    return false;
   }
+  const properties = (node.properties ??= {});
+  properties.dataBlockId = `b${index}-${blockType(node.tagName)}`;
+  properties.dataSourceLine = position.start.line + lineOffset;
+  properties.dataSourceLineEnd = position.end.line + lineOffset;
+  return true;
 }
 
 function isElement(node: Root | RootContent): node is Element {
@@ -83,8 +96,11 @@ export default function rehypeSourceAnchors(
     let nextIndex = 0;
 
     const walk = (node: Root | RootContent, isTopLevel: boolean): void => {
-      if (isElement(node) && (isTopLevel || node.tagName === "li")) {
-        stamp(node, nextIndex, lineOffset);
+      if (
+        isElement(node) &&
+        (isTopLevel || node.tagName === "li") &&
+        stamp(node, nextIndex, lineOffset)
+      ) {
         nextIndex += 1;
       }
       if ("children" in node) {

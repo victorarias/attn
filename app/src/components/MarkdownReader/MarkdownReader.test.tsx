@@ -128,6 +128,33 @@ describe('MarkdownReader link sanitization', () => {
     expect(scrollTo).toHaveBeenCalledTimes(1);
     expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }));
   });
+
+  it('resolves fragment links inside the OWN tile when another tile has the same heading id', () => {
+    // Two tiles rendering the same document produce duplicate heading ids
+    // (sluggers dedup per document, not per DOM); the second tile's link must
+    // scroll ITS body, not silently die on the first tile's element.
+    const content = '[Jump](#setup)\n\n## Setup\n';
+    const { container } = render(
+      <>
+        <div className="workspace-dock-tile-body" data-testid="tile-1">
+          <MarkdownReader content={content} path="/tmp/project/README.md" />
+        </div>
+        <div className="workspace-dock-tile-body" data-testid="tile-2">
+          <MarkdownReader content={content} path="/tmp/project/README.md" />
+        </div>
+      </>,
+    );
+    const bodies = container.querySelectorAll<HTMLElement>('.workspace-dock-tile-body');
+    const firstScrollTo = vi.fn();
+    const secondScrollTo = vi.fn();
+    bodies[0].scrollTo = firstScrollTo as unknown as HTMLElement['scrollTo'];
+    bodies[1].scrollTo = secondScrollTo as unknown as HTMLElement['scrollTo'];
+
+    fireEvent.click(screen.getAllByRole('link', { name: 'Jump' })[1]);
+
+    expect(secondScrollTo).toHaveBeenCalledTimes(1);
+    expect(firstScrollTo).not.toHaveBeenCalled();
+  });
 });
 
 describe('MarkdownReader code blocks', () => {
@@ -185,6 +212,25 @@ describe('MarkdownReader code blocks', () => {
       vi.advanceTimersByTime(2000);
     });
     expect(screen.getByRole('button', { name: 'Copy code' })).toHaveAttribute('title', 'Copy code');
+  });
+
+  it('does not remount code blocks (re-running shiki) on identical-prop re-renders', async () => {
+    const content = '```ts\nconst x = 1;\n```\n';
+    const { container, rerender } = renderReader(content);
+    await waitFor(() => {
+      expect(container.querySelector('code.md-shiki')).toBeInTheDocument();
+    });
+    expect(shikiMock.codeToHtml).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+    );
+    await act(async () => {});
+
+    // Memoized: the parent re-render never reached react-markdown, so the
+    // highlighted block survived instead of flashing back to plain text.
+    expect(shikiMock.codeToHtml).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('code.md-shiki')).toBeInTheDocument();
   });
 
   it('renders mermaid fences as diagrams without codeblock chrome', async () => {
