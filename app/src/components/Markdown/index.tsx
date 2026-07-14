@@ -13,7 +13,9 @@ const DiagramLayoutChangeContext = createContext<(() => void) | undefined>(undef
 
 // react-markdown v10's `code` component gets no `inline` flag; a fenced block
 // carries a `language-*` className, inline code carries none.
-const CodeRenderer: Components['code'] = ({ className, children, ...props }) => {
+// Exported so MarkdownReader reuses the exact mermaid path (and its stable
+// component identity) instead of forking diagram rendering.
+export const CodeRenderer: Components['code'] = ({ className, children, ...props }) => {
   const onDiagramLayoutChange = useContext(DiagramLayoutChangeContext);
   if (className?.includes('language-mermaid')) {
     return <MermaidDiagram code={String(children).trimEnd()} onLayoutChange={onDiagramLayoutChange} />;
