@@ -1,133 +1,28 @@
-import { createElement, isValidElement, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   FormEvent,
   PointerEvent as ReactPointerEvent,
-  ReactNode,
   Ref,
 } from 'react';
-import type { Components } from 'react-markdown';
-import { invoke } from '@tauri-apps/api/core';
-import { openUrl } from '@tauri-apps/plugin-opener';
 import { browserHostLabel, claimBrowserHostFocus, controlBrowserHost } from '../../browser/host';
 import type { TileContentState, TileLeaf } from '../../types/workspace';
-import { deriveTileTitle, tilePathBasename } from '../../utils/tilePresentation';
+import { deriveTileTitle } from '../../utils/tilePresentation';
 import { BrowserTileBody } from './BrowserTileBody';
-import { Markdown } from '../Markdown';
+import { MarkdownReader } from '../MarkdownReader';
 import { NotebookTile } from '../notebook/NotebookTile';
 import './WorkspaceDockTile.css';
 
-type MarkdownTarget =
-  | { kind: 'external'; value: string }
-  | { kind: 'fragment'; value: string }
-  | { kind: 'local'; value: string };
-
-const safeLocalDocumentExtensions = new Set([
-  '.md',
-  '.markdown',
-  '.pdf',
-  '.rst',
-  '.text',
-  '.txt',
-]);
-
-const safeLocalImageExtensions = new Set([
-  '.bmp',
-  '.gif',
-  '.jpeg',
-  '.jpg',
-  '.png',
-  '.tif',
-  '.tiff',
-  '.webp',
-]);
-
-function localTargetExtension(path: string): string {
-  const trimmed = path.replace(/\/+$/, '');
-  const slash = trimmed.lastIndexOf('/');
-  const dot = trimmed.lastIndexOf('.');
-  return dot > slash ? trimmed.slice(dot).toLowerCase() : '';
-}
-
-function isSafeLocalMarkdownTarget(path: string): boolean {
-  const extension = localTargetExtension(path);
-  return safeLocalDocumentExtensions.has(extension) || safeLocalImageExtensions.has(extension);
-}
-
-function isSafeLocalMarkdownImageTarget(path: string): boolean {
-  return safeLocalImageExtensions.has(localTargetExtension(path));
-}
-
-function decodedPath(url: URL): string {
-  try {
-    return decodeURIComponent(url.pathname);
-  } catch {
-    return url.pathname;
-  }
-}
-
-export function resolveMarkdownTarget(documentPath: string, target: string): MarkdownTarget | null {
-  const trimmed = target.trim();
-  if (!trimmed) {
-    return null;
-  }
-  if (trimmed.startsWith('#')) {
-    return { kind: 'fragment', value: trimmed };
-  }
-  if (trimmed.startsWith('//')) {
-    return null;
-  }
-
-  const scheme = trimmed.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
-  if (scheme) {
-    if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') {
-      return { kind: 'external', value: trimmed };
-    }
-    if (scheme !== 'file') {
-      return null;
-    }
-    try {
-      const url = new URL(trimmed);
-      return url.hostname ? null : { kind: 'local', value: decodedPath(url) };
-    } catch {
-      return null;
-    }
-  }
-
-  if (!documentPath) {
-    return null;
-  }
-  try {
-    const base = new URL('file:///');
-    base.pathname = documentPath;
-    const url = new URL(trimmed, base);
-    return url.hostname ? null : { kind: 'local', value: decodedPath(url) };
-  } catch {
-    return null;
-  }
-}
-
-function openMarkdownTarget(target: MarkdownTarget): void {
-  if (target.kind === 'fragment') {
-    return;
-  }
-  if (target.kind === 'local' && !isSafeLocalMarkdownTarget(target.value)) {
-    console.warn('[WorkspaceDockTile] Blocked unsafe local Markdown target:', target.value);
-    return;
-  }
-  const action = target.kind === 'local'
-    ? invoke('open_safe_markdown_target', { path: target.value })
-    : openUrl(target.value);
-  void action.catch((error) => {
-    console.warn('[WorkspaceDockTile] Failed to open Markdown target:', error);
-  });
-}
+// Link/image target resolution moved to the reader; re-exported here for
+// existing consumers.
+export { resolveMarkdownTarget } from '../MarkdownReader/markdownLinks';
 
 // Browser and notebook tiles manage their own scroll + chrome, so their body
-// drops the markdown padding/overflow and fills the frame. Markdown keeps the
-// default (padded, scrollable) body.
+// drops the padding/overflow and fills the frame. The markdown reader draws
+// its own centered card, so its body only keeps the scroll (no padding).
 function bodyKindModifier(tileKind: string): string {
   if (tileKind === 'browser') return 'workspace-dock-tile-body--browser';
   if (tileKind === 'notebook') return 'workspace-dock-tile-body--notebook';
+  if (tileKind === 'markdown') return 'workspace-dock-tile-body--markdown';
   return '';
 }
 
@@ -136,92 +31,6 @@ export function normalizeBrowserAddress(value: string): string {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
   const localHost = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(trimmed);
   return `${localHost ? 'http' : 'https'}://${trimmed}`;
-}
-
-function markdownText(node: ReactNode): string {
-  if (typeof node === 'string' || typeof node === 'number') {
-    return String(node);
-  }
-  if (Array.isArray(node)) {
-    return node.map(markdownText).join('');
-  }
-  if (isValidElement<{ children?: ReactNode }>(node)) {
-    return markdownText(node.props.children);
-  }
-  return '';
-}
-
-function markdownSlug(text: string): string {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-') || 'section';
-}
-
-function markdownComponents(documentPath: string, allowLocalTargets: boolean): Components {
-  const slugCounts = new Map<string, number>();
-  const heading = (level: number) => ({ children }: { children?: ReactNode }) => {
-    const base = markdownSlug(markdownText(children));
-    const count = slugCounts.get(base) ?? 0;
-    slugCounts.set(base, count + 1);
-    const id = count === 0 ? base : `${base}-${count}`;
-    return createElement(`h${level}`, { id }, children);
-  };
-
-  return {
-    h1: heading(1),
-    h2: heading(2),
-    h3: heading(3),
-    h4: heading(4),
-    h5: heading(5),
-    h6: heading(6),
-    a({ href, children }) {
-      const target = href ? resolveMarkdownTarget(documentPath, href) : null;
-      if (!target) {
-        return <span>{children}</span>;
-      }
-      if (target.kind === 'local' && (!allowLocalTargets || !isSafeLocalMarkdownTarget(target.value))) {
-        return <span title={`Blocked local target: ${target.value}`}>{children}</span>;
-      }
-      if (target.kind === 'fragment') {
-        return <a href={target.value}>{children}</a>;
-      }
-      return (
-        <a
-          href={href}
-          title={target.kind === 'local' ? target.value : undefined}
-          onClick={(event) => {
-            event.preventDefault();
-            openMarkdownTarget(target);
-          }}
-        >
-          {children}
-        </a>
-      );
-    },
-    img({ src, alt }) {
-      const target = src ? resolveMarkdownTarget(documentPath, src) : null;
-      if (!target || target.kind !== 'local' || !allowLocalTargets || !isSafeLocalMarkdownImageTarget(target.value)) {
-        return (
-          <span className="workspace-dock-tile-blocked-image" title={src}>
-            [blocked image: {alt || src || 'unknown source'}]
-          </span>
-        );
-      }
-      return (
-        <button
-          type="button"
-          className="workspace-dock-tile-local-image"
-          title={target.value}
-          onClick={() => openMarkdownTarget(target)}
-        >
-          Open image: {alt || tilePathBasename(target.value)}
-        </button>
-      );
-    },
-  };
 }
 
 interface WorkspaceDockTileProps {
@@ -434,11 +243,10 @@ function MarkdownBody({ content, allowLocalTargets }: { content?: TileContentSta
     return <div className="workspace-dock-tile-message">This file is empty.</div>;
   }
   return (
-    <Markdown
-      className="workspace-dock-tile-markdown"
-      components={markdownComponents(content.path, allowLocalTargets)}
-    >
-      {content.content}
-    </Markdown>
+    <MarkdownReader
+      content={content.content}
+      path={content.path}
+      allowLocalTargets={allowLocalTargets}
+    />
   );
 }
