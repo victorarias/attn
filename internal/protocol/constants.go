@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "160"
+const ProtocolVersion = "161"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -276,6 +276,7 @@ const (
 	EventWorkspaceLayoutUpdated      = "workspace_layout_updated"
 	EventWorkspaceLayoutActionResult = "workspace_layout_action_result"
 	EventWorkspaceTileContent        = "workspace_tile_content"
+	EventOpenMarkdownResult          = "open_markdown_result"
 	EventBrowserControlResponse      = "browser_control_response"
 	EventBrowserControlRequest       = "browser_control_request"
 	EventCommandError                = "command_error"

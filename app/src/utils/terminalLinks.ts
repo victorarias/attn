@@ -162,6 +162,43 @@ export interface DetectedTerminalLink extends ColumnRange {
   column?: number;
 }
 
+// Markdown files cmd+clicked in a terminal open in attn's markdown tile
+// instead of the OS default app.
+export function isMarkdownPath(path: string): boolean {
+  return /\.(md|markdown)$/i.test(path);
+}
+
+export type TerminalLinkOpenAction =
+  | { action: 'open-url'; uri: string }
+  | { action: 'open-path'; path: string }
+  | { action: 'open-markdown'; path: string };
+
+// Decide how a clicked terminal link opens. file:// URIs behave like detected
+// path links (Claude Code emits them via OSC 8 when citing source files).
+// Markdown paths route to the in-app markdown tile; every other path opens in
+// the OS default app.
+export function terminalLinkOpenAction(
+  link: Pick<DetectedTerminalLink, 'kind' | 'uri' | 'absolutePath'>,
+): TerminalLinkOpenAction | null {
+  if (link.kind === 'url' && link.uri) {
+    if (link.uri.startsWith('file://')) {
+      const rest = link.uri.slice('file://'.length);
+      const slashIndex = rest.indexOf('/');
+      const path = decodeURIComponent(slashIndex === -1 ? rest : rest.slice(slashIndex));
+      return isMarkdownPath(path)
+        ? { action: 'open-markdown', path }
+        : { action: 'open-path', path };
+    }
+    return { action: 'open-url', uri: link.uri };
+  }
+  if (link.kind === 'path' && link.absolutePath) {
+    return isMarkdownPath(link.absolutePath)
+      ? { action: 'open-markdown', path: link.absolutePath }
+      : { action: 'open-path', path: link.absolutePath };
+  }
+  return null;
+}
+
 // --- Cross-wrap logical lines ---
 //
 // A path or URL can soft-wrap across visual rows. Joining the rows of a

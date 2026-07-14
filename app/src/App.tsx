@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { Sidebar, type SidebarHeaderAction, type DockItem, WorkflowIcon, EditorIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { AttentionDrawer } from './components/AttentionDrawer';
@@ -583,6 +583,7 @@ function App() {
     sendWorkspaceDockTile,
     sendWorkspaceUndockTile,
     sendWorkspaceUpdateTile,
+    sendOpenMarkdown,
     sendWorkspaceMoveLeaf,
     sendWorkspaceMoveLeafToWorkspace,
     sendWorkspaceMoveLeafToNewWorkspace,
@@ -766,6 +767,7 @@ function App() {
         sendWorkspaceDockTile={sendWorkspaceDockTile}
         sendWorkspaceUndockTile={sendWorkspaceUndockTile}
         sendWorkspaceUpdateTile={sendWorkspaceUpdateTile}
+        sendOpenMarkdown={sendOpenMarkdown}
         sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
         sendWorkspaceMoveLeafToWorkspace={sendWorkspaceMoveLeafToWorkspace}
         sendWorkspaceMoveLeafToNewWorkspace={sendWorkspaceMoveLeafToNewWorkspace}
@@ -877,6 +879,7 @@ interface AppContentProps {
   sendWorkspaceDockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceDockTile'];
   sendWorkspaceUndockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockTile'];
   sendWorkspaceUpdateTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUpdateTile'];
+  sendOpenMarkdown: ReturnType<typeof useDaemonSocket>['sendOpenMarkdown'];
   sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
   sendWorkspaceMoveLeafToWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToWorkspace'];
   sendWorkspaceMoveLeafToNewWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToNewWorkspace'];
@@ -982,6 +985,7 @@ sendFetchPRDetails,
   sendWorkspaceDockTile,
   sendWorkspaceUndockTile,
   sendWorkspaceUpdateTile,
+  sendOpenMarkdown,
   sendWorkspaceMoveLeaf,
   sendWorkspaceMoveLeafToWorkspace,
   sendWorkspaceMoveLeafToNewWorkspace,
@@ -3484,6 +3488,17 @@ sendFetchPRDetails,
                     ticketActions={ticketActions}
                     onTriggerNudge={sendTriggerNudge}
                     onOpenPresentation={handleOpenPresentationWindow}
+                    onOpenMarkdown={(path, sessionId) => {
+                      void sendOpenMarkdown(path, sessionId).catch((error) => {
+                        // Daemon rejected (e.g. remote/hub session with no local
+                        // workspace) or the socket dropped: fall back to the OS
+                        // default app so the click never silently does nothing.
+                        console.error('[Markdown] in-app open failed, falling back to OS open:', error);
+                        void openPath(path).catch((openError) => {
+                          console.error('[Markdown] OS open fallback failed:', openError);
+                        });
+                      });
+                    }}
                     workspace={workspaceState}
                     activePaneId={activePaneId}
                     fontSize={terminalFontSize}

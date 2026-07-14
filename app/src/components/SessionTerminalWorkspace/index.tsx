@@ -152,6 +152,10 @@ interface SessionTerminalWorkspaceProps {
   onRenameSession?: (sessionId: string, label: string) => Promise<void>;
   onTriggerNudge?: (sessionId: string) => void;
   onOpenPresentation?: (presentationId: string) => void;
+  // Cmd+click on a markdown path inside a pane's terminal: dock it as a
+  // markdown tile bound to that pane's session (empty sessionId = let the
+  // daemon use the selected session).
+  onOpenMarkdown?: (path: string, sessionId: string) => void;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
   onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
@@ -197,6 +201,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onRenameSession,
     onTriggerNudge,
     onOpenPresentation,
+    onOpenMarkdown,
     onZoomModeChange,
     onNavigateOutOfSession,
     onResizeSplit,
@@ -889,6 +894,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   debugName={`agent:${paneTitle}:${paneSession?.agent ?? 'shell'}:${agentPane.sessionId}`}
                   runtimeLogMeta={{ sessionId: agentPane.sessionId, paneId: agentPane.id, runtimeId: agentPane.runtimeId, paneKind: 'agent', isActivePane: activePaneId === agentPane.id, isActiveSession, paneCount: paneIds.length }}
                   onInput={runtime.handleTerminalInput(agentPane.id)}
+                  onOpenMarkdown={onOpenMarkdown}
                   onReady={handleGhosttyTerminalReady(agentPane.id)}
                   onResize={runtime.handleTerminalResize(agentPane.id)}
                   onReplayInterrupted={runtime.handleReplayInterrupted(agentPane.id)}
@@ -970,6 +976,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       activePaneId,
       beginLeafDrag,
       effectiveDraggingLeafId,
+      onOpenMarkdown,
       onUndockTile,
       onUpdateTile,
       tileLeafById,

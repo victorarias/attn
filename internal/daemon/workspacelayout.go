@@ -446,15 +446,17 @@ func (d *Daemon) handleWorkspaceLayoutDockTile(client *wsClient, msg *protocol.W
 	if snapshot := d.store.GetWorkspaceLayout(msg.WorkspaceID); snapshot != nil {
 		params, _ = workspacelayout.TileParamsByID(snapshot.Layout, strings.TrimSpace(msg.TileID))
 	}
-	err := d.dockTile(msg.WorkspaceID, msg.AnchorPaneID, msg.TileID, msg.TileKind, params, msg.Edge, msg.Ratio)
+	err := d.dockTile(msg.WorkspaceID, msg.AnchorPaneID, msg.TileID, msg.TileKind, params, "", msg.Edge, msg.Ratio)
 	d.sendWorkspaceLayoutTileActionResult(client, protocol.CmdWorkspaceLayoutDockTile, msg.WorkspaceID, msg.TileID, err)
 }
 
 // dockTile docks (or moves) a tile into a workspace layout and persists it.
 // It is shared by the websocket dock command and the `attn open` unix command.
 // anchorPaneID may be empty — it falls back to the active leaf, then the first
-// pane or tile. tileParams is opaque layout data (the markdown file path, for markdown).
-func (d *Daemon) dockTile(workspaceID, anchorPaneID, tileID, tileKind, tileParams string, edge protocol.WorkspaceLayoutDockEdge, ratio *float64) error {
+// pane or tile. tileParams is opaque layout data (the markdown file path, for
+// markdown). tileSessionID binds the tile to the session it was opened from;
+// empty preserves any existing binding.
+func (d *Daemon) dockTile(workspaceID, anchorPaneID, tileID, tileKind, tileParams, tileSessionID string, edge protocol.WorkspaceLayoutDockEdge, ratio *float64) error {
 	snapshot, err := d.ensureWorkspaceLayout(workspaceID)
 	if err != nil {
 		return err
@@ -502,6 +504,7 @@ func (d *Daemon) dockTile(workspaceID, anchorPaneID, tileID, tileKind, tileParam
 		tileID,
 		tileKind,
 		strings.TrimSpace(tileParams),
+		strings.TrimSpace(tileSessionID),
 		childZeroRatio,
 	)
 	if !ok {

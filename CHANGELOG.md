@@ -6,6 +6,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-14]
+
+### Added
+- **Cmd+click a `.md` path in a session terminal to open it in a markdown tile.** Instead of launching an external app, markdown files now open right in the workspace, docked beside your terminals with live reload.
+- **Multiple markdown tiles.** Each file gets its own tile, so you can keep several documents open side by side. Opening a file that's already showing reuses its tile instead of stacking a duplicate, and every markdown tile remembers which session it was opened from.
+
 ## [2026-07-13]
 
 ### Fixed

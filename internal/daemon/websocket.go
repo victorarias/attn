@@ -1088,6 +1088,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleSetWorkspaceRank(client, msg.(*protocol.SetWorkspaceRankMessage))
 	case protocol.CmdWorkspaceTileContentGet:
 		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
+	case protocol.CmdOpenMarkdown:
+		d.handleOpenMarkdownWS(client, msg.(*protocol.OpenMarkdownMessage))
 	case protocol.CmdBrowserControl:
 		go d.handleRemoteBrowserControl(client, msg.(*protocol.BrowserControlMessage))
 	case protocol.CmdBrowserControlResult:
