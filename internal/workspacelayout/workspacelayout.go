@@ -80,8 +80,8 @@ type Node struct {
 	// travels with the tile, but only tile consumers interpret it.
 	TileSessionID string    `json:"tile_session_id,omitempty"`
 	SplitID       string    `json:"split_id,omitempty"`
-	Direction  Direction `json:"direction,omitempty"`
-	Ratio      float64   `json:"ratio,omitempty"`
+	Direction     Direction `json:"direction,omitempty"`
+	Ratio         float64   `json:"ratio,omitempty"`
 	// RatioLocked marks a split whose ratio the user set explicitly (by
 	// dragging the divider) or that anchors a tile. Locked ratios survive
 	// normalization instead of being rebalanced back to an equal split.
