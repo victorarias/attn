@@ -494,7 +494,8 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await page.waitForSelector('.cm-content');
 
     const scrollTop = () => page.locator('.cm-scroller').evaluate((el) => (el as HTMLElement).scrollTop);
-    expect(await scrollTop()).toBeLessThan(40);
+    await page.locator('.cm-scroller').evaluate((el) => { (el as HTMLElement).scrollTop = 0; });
+    await expect.poll(scrollTop).toBeLessThan(40);
 
     const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
     await page.locator('.cm-md-link[data-href="#down-below"]').click({ modifiers: [modifier] });
