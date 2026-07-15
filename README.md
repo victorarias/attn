@@ -37,6 +37,7 @@ attn fixes the dumbest part of multi-agent workflows: knowing what needs you rig
 | [Claude Code](https://claude.ai/code) | Hooks + classifier | Yes |
 | [Codex](https://developers.openai.com/codex) | Hooks + classifier | No |
 | [Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) | PTY heuristics + transcript classifier | No |
+| OpenCode (installable plugin) | Native events | Yes |
 
 ## Install
 
@@ -119,14 +120,96 @@ Your agents can work as a team, not just side by side:
 
 - **Shared workspace context** — a living brief agents read and keep current, so a new session orients itself without you re-explaining the task.
 - **Delegation** — an agent can spin up a fresh, visible session with a focused brief (`attn delegate`) instead of cramming everything into one context.
-- **Chief of staff** — promote one session to track and hand off work to the agents it delegates; each delegation gets a **ticket** you watch from the dashboard and ticket board.
+- **[Chief of staff](#put-a-manager-in-charge-of-your-agents)** — a manager for your agents. It helps shape the plan and keeps one coherent picture; you choose the handoffs.
 - **In-app browser** — `attn browser open <url>` docks a real browser an agent can drive; log in once and it persists.
 
-## How it works
+### Put a manager in charge of your agents
 
-1. The bundled attn runtime wraps your agent CLI and installs hooks (Claude, Codex) or reads PTY output (Copilot) to detect state — a classifier decides whether a stop means "done" or "waiting for you."
-2. A background daemon tracks every session, local and SSH-remote, in one list; the desktop app connects over WebSocket for real-time updates.
-3. `gh` polls PRs across all your authenticated GitHub hosts.
+Running five agents shouldn't turn you into a full-time dispatcher. The chief of staff is the manager of your agent team: you work with it to shape focused missions, you decide what gets delegated, and the chief keeps the threads connected as the work develops.
+
+Instead of reconciling five conversations yourself, you get one coherent picture. The chief follows what each agent reports, surfaces blockers and collisions, and tees up the decisions that need your judgment. It reduces the coordination load while you remain the person directing the work.
+
+The chief is an awareness layer you work alongside, not a gatekeeper or end-to-end autopilot. You can open any delegated session, talk to the agent, and steer the work directly. The chief keeps the shared picture intact, so you can move between the big picture and the details without becoming the human message bus.
+
+That continuity is not tied to one agent or harness. You might ask Fable in Claude Code to brainstorm and produce a plan, bring that handoff back through the chief, then have the chief prepare a follow-on delegation to GLM 5.2 in OpenCode. You choose each handoff; the chief preserves the context and artifacts between them so every stage can use the specialist that fits it best.
+
+#### Give the chief an office
+
+This home should eventually be built into attn and scaffolded for you. It is not yet, so for now we recommend creating a dedicated coordination folder rather than running your chief from a random code repository. This is where you describe how you work and keep the plans, responsibilities, and knowledge that span all your repos.
+
+```text
+chief-of-staff/
+├── .gitignore            # ignore attn's machine state if this is a private repo
+├── AGENTS.md             # instructions for Codex or another compatible agent
+├── CLAUDE.md             # instructions for Claude Code
+├── projects/
+│   └── index.md          # active initiatives, outcomes, and why they matter
+├── areas/
+│   └── index.md          # ongoing responsibilities and standards to maintain
+├── resources/
+│   └── index.md          # durable reference material
+├── archive/
+│   └── index.md          # finished or inactive material
+└── notebook/             # optional: keep attn's Notebook in the same home
+```
+
+Use `AGENTS.md` / `CLAUDE.md` as the chief's constitution. Capture durable preferences there: what good support looks like, how you make decisions, when to explore versus execute, how the chief should work alongside you, how it should propose and structure delegations, and where your important code and systems live. Keep current project state in the folders, not in the instructions.
+
+Use the guidance file your chosen agent loads. If you use both Codex and Claude, keep both entry points. One simple shared setup is to put the common instructions in `AGENTS.md` and import them from `CLAUDE.md`:
+
+```md
+@AGENTS.md
+```
+
+A useful starter looks like this:
+
+```md
+# My chief of staff
+
+This is my coordination and knowledge workspace. Help me manage my agents and
+act as my thinking partner.
+
+## Working relationship
+
+- Reduce my cognitive load. Surface what matters and make the next move clear.
+- Gather evidence before recommending action.
+- When a choice is ambiguous, frame the decision and its tradeoffs.
+
+## Delegation
+
+- I decide every delegation; a goal is not approval to run it end to end.
+- Propose a delegation, harness, and model when a separate specialist would help.
+- Give each agent a clear outcome, context, constraints, and handoff.
+- Track what the agents report and bring me blockers, collisions, and consequential decisions.
+
+## Organization
+
+- Read projects/index.md before discussing priorities or incoming work.
+- projects/ holds time-bound efforts with a clear outcome.
+- areas/ holds ongoing responsibilities and standards.
+- resources/ holds reference material useful across projects.
+- archive/ holds inactive material. Move completed projects here.
+- Use a short index.md as the entry point for every folder.
+
+## Boundaries
+
+- Planning, research, decisions, and coordination live here.
+- Implementation, tests, commits, and pull requests live in the owning repo.
+```
+
+This is a starting point, not a personality preset. Add your preferred tone, authorship boundaries, recurring responsibilities, delegation defaults, and location map. The more the file captures your working relationship, the more the chief feels like *your* manager rather than a generic agent.
+
+If you want the whole system in one syncable or private git-backed folder, open **Settings → Notebook Folder** and point it at `chief-of-staff/notebook`. attn will keep its journal and durable cross-workspace knowledge there while your top-level folders remain the operating system you and the chief curate together. Add `notebook/.attn/` to `.gitignore`; it is machine state, not knowledge. Changing the Notebook Folder does not move existing notes, so move or sync them separately when adopting this layout later.
+
+1. **Start your manager from its home.** Press **Cmd+T**, choose Claude or Codex, select the `chief-of-staff` folder, and turn **Chief of Staff** on. Or open an existing session in that folder and choose **Make chief of staff** from its session menu.
+2. **Give it a mission.** Describe the outcome, the context, and what matters. For example:
+
+   > We need to ship the new import flow this week. Help me understand what's already in flight, suggest how to break it down, and prepare delegation options. As the agents work, keep the threads connected and bring me the blockers, collisions, and decisions that need my judgment.
+
+3. **Choose the handoffs.** The chief can recommend where a specialist would help and which harness and model fit the stage; you choose every delegation to start. Each one opens a visible session with a focused brief and a durable ticket carrying its progress, decisions, and artifacts.
+4. **Work at any altitude.** Ask the chief for the state of the whole mission, or drop into an agent and work beside it. When something finishes, fails, or needs input, the chief brings back what changed and the natural next step.
+
+The board and Notebook preserve that shared understanding across restarts, workspaces, and even a new chief session. Tomorrow, the chief still knows where everything stands.
 
 ## Build from source
 
