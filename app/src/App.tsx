@@ -1114,12 +1114,18 @@ sendFetchPRDetails,
       await sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
       const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId, options?.chiefOfStaff);
       localCreated = true;
-      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { paneId });
-      paneAdded = true;
+      // Capture spawn args synchronously, before any await that could let a daemon
+      // sessions broadcast prune the just-created local session. At this point its
+      // workspace has no 'spawning' pane yet, so syncFromDaemonSessions' preservation
+      // guard doesn't cover it — taking the args after `sendWorkspaceAddSessionPane`
+      // races the prune and surfaces as "spawn arguments were not prepared". Mirrors
+      // createSplitSession, which already takes the args before adding the pane.
       const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
       if (!spawnArgs) {
         throw new Error('Session spawn arguments were not prepared.');
       }
+      await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { paneId });
+      paneAdded = true;
       await ptySpawn({ args: spawnArgs });
       return createdSessionId;
     } catch (error) {

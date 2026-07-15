@@ -218,6 +218,40 @@ describe('sessions store', () => {
     expect(useSessionStore.getState().activeSessionId).toBe('launching-session');
   });
 
+  // Regression for "Session spawn arguments were not prepared": a just-created
+  // session has an empty workspace (no 'spawning' pane yet — the pane only lands
+  // later via syncFromDaemonWorkspaces once the daemon echoes the layout), so the
+  // launching-session preservation guard does NOT cover it. A daemon sessions
+  // broadcast that arrives in this window prunes it. createWorkspaceSession must
+  // therefore take spawn args synchronously right after createSession, before the
+  // sendWorkspaceAddSessionPane round-trip — otherwise takeSessionSpawnArgs races
+  // the prune and returns null. This test locks the store semantics the fix relies
+  // on: args are available immediately post-create, and gone after a mid-flight prune.
+  it('takeSessionSpawnArgs must be taken before a mid-create sessions broadcast can prune it', async () => {
+    const sessionId = await useSessionStore.getState().createSession(
+      'Racey', '/tmp/racey', 'sess-racey', 'claude', undefined, false, 'workspace-sess-racey',
+    );
+
+    // Freshly created: launching, empty workspace (no spawning pane yet).
+    const created = useSessionStore.getState().sessions.find((s) => s.id === sessionId);
+    expect(created?.state).toBe('launching');
+    expect(created?.workspace.agents).toEqual([]);
+
+    // Taken immediately (the fixed ordering), spawn args are available.
+    const argsBefore = useSessionStore.getState().takeSessionSpawnArgs(sessionId, 80, 24);
+    expect(argsBefore?.id).toBe(sessionId);
+    expect(argsBefore?.cwd).toBe('/tmp/racey');
+
+    // A daemon sessions broadcast lands before the workspace pane does. Because the
+    // session isn't in the daemon list yet and has no spawning pane, it is pruned.
+    useSessionStore.getState().syncFromDaemonSessions([]);
+    expect(useSessionStore.getState().sessions.find((s) => s.id === sessionId)).toBeUndefined();
+
+    // Taking args after the prune (the old post-await ordering) returns null — the
+    // exact condition that surfaced "Session spawn arguments were not prepared".
+    expect(useSessionStore.getState().takeSessionSpawnArgs(sessionId, 80, 24)).toBeNull();
+  });
+
   it('syncFromDaemonSessions removes an exited session with a stale spawning pane', () => {
     useSessionStore.setState({
       activeSessionId: 'exited-session',
