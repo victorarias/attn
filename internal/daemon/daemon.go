@@ -237,6 +237,12 @@ type Daemon struct {
 	selectedSessionID   string
 	selectedWorkspaceID string
 
+	// openMarkdownMu serializes openMarkdownTile's check-then-dock against
+	// itself. Layout saves are last-write-wins snapshots, so two concurrent
+	// opens of different files in one workspace would otherwise both read the
+	// same layout and the second save would silently drop the first tile.
+	openMarkdownMu sync.Mutex
+
 	// lastUserActivityAtNano is the UnixNano timestamp of the most recent
 	// UI-origin websocket command the daemon observed (see
 	// isUserPresenceCommand), a proxy for "the user is at the app right now".

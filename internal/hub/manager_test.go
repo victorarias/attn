@@ -554,6 +554,150 @@ func TestForwardsRawEventIncludesPickerResults(t *testing.T) {
 	}
 }
 
+// The remote daemon rejects every capability-gated command (register_workspace,
+// spawn_session, forwarded client payloads, ...) from a connection that never
+// sent client_hello. The hub's persistent endpoint connection must therefore
+// declare workspace_sessions before anything else is written.
+func TestSendClientHelloDeclaresWorkspaceSessions(t *testing.T) {
+	received := make(chan protocol.ClientHelloMessage, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("Accept() error = %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		_, payload, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("Read() error = %v", err)
+			return
+		}
+		var hello protocol.ClientHelloMessage
+		if err := json.Unmarshal(payload, &hello); err != nil {
+			t.Errorf("Unmarshal() error = %v", err)
+			return
+		}
+		received <- hello
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	if err := sendClientHello(ctx, conn); err != nil {
+		t.Fatalf("sendClientHello() error = %v", err)
+	}
+
+	select {
+	case hello := <-received:
+		if hello.Cmd != protocol.CmdClientHello {
+			t.Errorf("cmd = %q, want %q", hello.Cmd, protocol.CmdClientHello)
+		}
+		if hello.ClientKind != "hub" {
+			t.Errorf("client_kind = %q, want %q", hello.ClientKind, "hub")
+		}
+		if want := "protocol-" + protocol.ProtocolVersion; hello.Version != want {
+			t.Errorf("version = %q, want %q", hello.Version, want)
+		}
+		found := false
+		for _, c := range hello.Capabilities {
+			if c == protocol.CapabilityWorkspaceSessions {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("capabilities = %v, missing %q", hello.Capabilities, protocol.CapabilityWorkspaceSessions)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for client_hello")
+	}
+}
+
+// publishConnectionAndSendHello is what runEndpointLoop calls once the
+// connection is dialed: it must publish the connection and send the hello as
+// a single unit with respect to ForwardEndpointCommand, otherwise a forwarded
+// command racing in right after the connection becomes visible could write
+// before the hello and get rejected by the remote daemon. This drives that
+// race through the real manager/forwarding seam (not just the hello helper in
+// isolation) by hammering ForwardEndpointCommand concurrently with the
+// publish call and asserting the hello is always the first frame the remote
+// sees.
+func TestPublishConnectionAndSendHelloOrdersBeforeForwardedCommands(t *testing.T) {
+	frames := make(chan []byte, 16)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("Accept() error = %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		for {
+			_, payload, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+			frames <- payload
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	manager := NewManager(store.New(), nil, nil, nil, nil)
+	manager.runtimes["endpoint-1"] = &endpointRuntime{}
+
+	// Fire ForwardEndpointCommand in a tight loop from before the connection
+	// exists until well after publish completes, to give it every chance to
+	// win the race against the hello.
+	forwardDone := make(chan struct{})
+	go func() {
+		defer close(forwardDone)
+		for i := 0; i < 500; i++ {
+			_ = manager.ForwardEndpointCommand(ctx, "endpoint-1", []byte(`{"cmd":"forwarded"}`))
+		}
+	}()
+
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	if err := manager.publishConnectionAndSendHello(ctx, "endpoint-1", conn, nil); err != nil {
+		t.Fatalf("publishConnectionAndSendHello() error = %v", err)
+	}
+
+	<-forwardDone
+
+	var first []byte
+	select {
+	case first = <-frames:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for first frame")
+	}
+	// Drain any commands the forwarder managed to send after the hello so the
+	// server goroutine doesn't block on a full channel. Started only after
+	// the first frame is captured above, so it can't race the assertion.
+	go func() {
+		for range frames {
+		}
+	}()
+
+	var hello protocol.ClientHelloMessage
+	if err := json.Unmarshal(first, &hello); err != nil {
+		t.Fatalf("Unmarshal() error = %v; first frame = %s", err, first)
+	}
+	if hello.Cmd != protocol.CmdClientHello {
+		t.Fatalf("first frame cmd = %q, want %q (frame: %s)", hello.Cmd, protocol.CmdClientHello, first)
+	}
+}
+
 func TestManagerForwardBrowserControlReturnsOwningEndpointResult(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)

@@ -73,10 +73,15 @@ type Node struct {
 	// the layout, but the daemon's layout machinery never interprets it. A
 	// consumer (e.g. the markdown content service) reads it — for markdown it
 	// holds the absolute path of the file the tile renders.
-	TileParams string    `json:"tile_params,omitempty"`
-	SplitID    string    `json:"split_id,omitempty"`
-	Direction  Direction `json:"direction,omitempty"`
-	Ratio      float64   `json:"ratio,omitempty"`
+	TileParams string `json:"tile_params,omitempty"`
+	// TileSessionID binds a tile to the session it was opened from (e.g. the
+	// terminal pane whose cmd+click or `attn open` docked a markdown tile).
+	// Like TileParams it is opaque to the layout machinery: it persists and
+	// travels with the tile, but only tile consumers interpret it.
+	TileSessionID string    `json:"tile_session_id,omitempty"`
+	SplitID       string    `json:"split_id,omitempty"`
+	Direction     Direction `json:"direction,omitempty"`
+	Ratio         float64   `json:"ratio,omitempty"`
 	// RatioLocked marks a split whose ratio the user set explicitly (by
 	// dragging the divider) or that anchors a tile. Locked ratios survive
 	// normalization instead of being rebalanced back to an equal split.
@@ -263,10 +268,11 @@ func normalizeNode(node Node, panesByID map[string]Pane) (Node, bool) {
 			return Node{}, true
 		}
 		return Node{
-			Type:       "tile",
-			TileID:     tileID,
-			TileKind:   tileKind,
-			TileParams: node.TileParams,
+			Type:          "tile",
+			TileID:        tileID,
+			TileKind:      tileKind,
+			TileParams:    node.TileParams,
+			TileSessionID: strings.TrimSpace(node.TileSessionID),
 		}, false
 	case "split":
 		children := make([]Node, 0, 2)
@@ -544,6 +550,47 @@ func TileParamsByID(node Node, tileID string) (string, bool) {
 	return "", false
 }
 
+// TileSessionIDByID returns the bound session id of the tile with the given
+// id. The bool reports whether such a tile exists.
+func TileSessionIDByID(node Node, tileID string) (string, bool) {
+	switch node.Type {
+	case "tile":
+		if node.TileID == tileID {
+			return node.TileSessionID, true
+		}
+	case "split":
+		for _, child := range node.Children {
+			if sessionID, ok := TileSessionIDByID(child, tileID); ok {
+				return sessionID, true
+			}
+		}
+	}
+	return "", false
+}
+
+// UpdateTileSessionID rebinds an existing tile to a session. It reports
+// whether a matching tile was found.
+func UpdateTileSessionID(node Node, tileID, sessionID string) (Node, bool) {
+	switch node.Type {
+	case "tile":
+		if node.TileID != tileID {
+			return node, false
+		}
+		node.TileSessionID = strings.TrimSpace(sessionID)
+		return node, true
+	case "split":
+		for index, child := range node.Children {
+			updated, ok := UpdateTileSessionID(child, tileID, sessionID)
+			if !ok {
+				continue
+			}
+			node.Children[index] = updated
+			return node, true
+		}
+	}
+	return node, false
+}
+
 // UpdateTileParams replaces the opaque params for an existing tile.
 func UpdateTileParams(node Node, tileID, tileParams string) (Node, bool) {
 	switch node.Type {
@@ -592,9 +639,10 @@ func TileFractionByID(node Node, tileID string) (float64, bool) {
 // TileLeaf is a flattened view of a docked tile for consumers that need to
 // act on tiles (e.g. the markdown content service) without walking the tree.
 type TileLeaf struct {
-	TileID     string
-	TileKind   string
-	TileParams string
+	TileID        string
+	TileKind      string
+	TileParams    string
+	TileSessionID string
 }
 
 // TileLeaves returns every docked tile in the tree as a flat slice.
@@ -608,9 +656,10 @@ func collectTileLeaves(node Node, leaves *[]TileLeaf) {
 	switch node.Type {
 	case "tile":
 		*leaves = append(*leaves, TileLeaf{
-			TileID:     node.TileID,
-			TileKind:   node.TileKind,
-			TileParams: node.TileParams,
+			TileID:        node.TileID,
+			TileKind:      node.TileKind,
+			TileParams:    node.TileParams,
+			TileSessionID: node.TileSessionID,
 		})
 	case "split":
 		for _, child := range node.Children {
@@ -630,10 +679,15 @@ func collectTileLeaves(node Node, leaves *[]TileLeaf) {
 // be docked between existing panes or next to one another. The new split is
 // RatioLocked so a tile keeps its size instead of being equalized with
 // terminals during normalization.
-func DockTile(node Node, anchorID string, direction Direction, before bool, splitID, tileID, tileKind, tileParams string, ratio float64) (Node, bool) {
+//
+// tileSessionID binds the tile to the session it was opened from. An empty
+// value carries any existing binding forward, so moving a tile never silently
+// drops its session.
+func DockTile(node Node, anchorID string, direction Direction, before bool, splitID, tileID, tileKind, tileParams, tileSessionID string, ratio float64) (Node, bool) {
 	tileID = strings.TrimSpace(tileID)
 	tileKind = strings.TrimSpace(tileKind)
 	anchorID = strings.TrimSpace(anchorID)
+	tileSessionID = strings.TrimSpace(tileSessionID)
 	if tileID == "" || tileKind == "" || anchorID == "" || anchorID == tileID {
 		return node, false
 	}
@@ -650,6 +704,12 @@ func DockTile(node Node, anchorID string, direction Direction, before bool, spli
 		return node, false
 	}
 
+	if tileSessionID == "" {
+		if existing, ok := findLeaf(node, tileID); ok {
+			tileSessionID = existing.TileSessionID
+		}
+	}
+
 	// Move semantics: drop any existing instance so a re-dock relocates rather
 	// than duplicates the tile.
 	cleaned := node
@@ -660,7 +720,7 @@ func DockTile(node Node, anchorID string, direction Direction, before bool, spli
 		return node, false
 	}
 
-	tile := Node{Type: "tile", TileID: tileID, TileKind: tileKind, TileParams: strings.TrimSpace(tileParams)}
+	tile := Node{Type: "tile", TileID: tileID, TileKind: tileKind, TileParams: strings.TrimSpace(tileParams), TileSessionID: tileSessionID}
 	next, ok := insertBesideLeaf(cleaned, anchorID, direction, before, splitID, ratio, tile)
 	if !ok {
 		return node, false

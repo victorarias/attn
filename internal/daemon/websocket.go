@@ -1088,6 +1088,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleSetWorkspaceRank(client, msg.(*protocol.SetWorkspaceRankMessage))
 	case protocol.CmdWorkspaceTileContentGet:
 		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
+	case protocol.CmdOpenMarkdown:
+		d.handleOpenMarkdownWS(client, msg.(*protocol.OpenMarkdownMessage))
 	case protocol.CmdBrowserControl:
 		go d.handleRemoteBrowserControl(client, msg.(*protocol.BrowserControlMessage))
 	case protocol.CmdBrowserControlResult:
@@ -1231,6 +1233,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 	case protocol.CmdRenameSession:
 		if typed, ok := msg.(*protocol.RenameSessionMessage); ok {
 			return typed.SessionID
+		}
+	case protocol.CmdOpenMarkdown:
+		if typed, ok := msg.(*protocol.OpenMarkdownMessage); ok {
+			return protocol.Deref(typed.SessionID)
 		}
 	}
 	return ""

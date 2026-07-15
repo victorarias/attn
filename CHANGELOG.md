@@ -10,6 +10,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Fixed
 - **Copilot sessions no longer get stuck mid-selection or with scroll landing in the wrong place after a reload.** Copilot's TUI independently enables its own mouse tracking, and a dropped mouse-release event (e.g. releasing outside the terminal pane) could leave it believing the button was still held, producing a runaway text selection or desynced scrolling after a refresh. attn now launches Copilot with mouse support disabled since attn already owns selection and scrolling itself.
+- **Commands sent to remote (SSH) endpoints work again.** The hub's connection to a remote endpoint never introduced itself to the remote daemon, which therefore rejected every command forwarded over it — registering workspaces, spawning sessions, and other remote actions failed and dropped the connection. The hub now performs the required handshake as soon as it connects.
+
+## [2026-07-14]
+
+### Added
+- **Cmd+click a `.md` path in a session terminal to open it in a markdown tile.** Instead of launching an external app, markdown files now open right in the workspace, docked beside your terminals with live reload.
+- **Multiple markdown tiles.** Each file gets its own tile, so you can keep several documents open side by side. Opening a file that's already showing reuses its tile instead of stacking a duplicate, and every markdown tile remembers which session it was opened from.
 
 ## [2026-07-13]
 

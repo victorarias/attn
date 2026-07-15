@@ -129,6 +129,9 @@ export async function launchFreshAppAndConnect(client, observer) {
   await client.waitForManifest(20_000);
   await client.waitForReady(20_000);
   await client.waitForFrontendResponsive(20_000);
+  // A fresh profile's first launch shows the one-time What's New modal, which
+  // swallows native HID clicks; dismiss it so scenarios start on a clean UI.
+  await client.request('dismiss_whats_new', {}).catch(() => {});
   await observer.connect();
 }
 
