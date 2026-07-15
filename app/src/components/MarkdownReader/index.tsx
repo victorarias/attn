@@ -392,6 +392,12 @@ export const MarkdownReader = memo(function MarkdownReader({
     <div
       className={`md-reader ${annotationsEnabled ? 'md-reader--annotating' : ''}`.trim()}
       ref={rootRef}
+      // Focusable so a selection gesture can claim keyboard focus for
+      // type-to-comment; WebKit does not move focus when clicking
+      // non-focusable content, which would leave the terminal's hidden
+      // input as document.activeElement (keys leak to the shell and the
+      // toolbar's editable-element guard blocks).
+      tabIndex={annotationsEnabled ? -1 : undefined}
     >
       <div className="md-reader-doc">
         <div className="md-reader-wrap">

@@ -5,6 +5,9 @@
 
 .md-reader {
   container-type: inline-size;
+  /* Focus is claimed programmatically on selection gestures (tabindex=-1);
+     no visible focus ring on the document surface. */
+  outline: none;
   font-family: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-feature-settings: 'ss01', 'ss02', 'cv01';
   color: var(--color-text-primary);

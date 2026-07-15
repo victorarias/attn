@@ -494,6 +494,38 @@ describe('useAnnotations', () => {
     expect(container.querySelector('[data-md-mark="md-pending-selection"]')).toBeNull();
   });
 
+  it('a selection mouseup claims keyboard focus for the reader root (type-to-comment)', async () => {
+    // In macOS WebKit, mousedown on non-focusable content does NOT move
+    // focus, so after a drag-select the terminal's hidden input can remain
+    // document.activeElement — the toolbar's editable-element guard then
+    // swallows type-to-comment. The mouseup path must claim focus itself.
+    const { transport } = makeTransport();
+    const { container, apiRef } = await mount(transport);
+    const root = container.firstElementChild as HTMLElement;
+    root.tabIndex = -1; // the real reader root sets tabIndex via MarkdownReader
+
+    // A decoy editable element holds focus, standing in for the terminal.
+    const decoy = document.createElement('textarea');
+    document.body.appendChild(decoy);
+    decoy.focus();
+    expect(document.activeElement).toBe(decoy);
+
+    const { node, index } = findTextNode(container, 'target words');
+    const range = document.createRange();
+    range.setStart(node, index);
+    range.setEnd(node, index + 'target words'.length);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    act(() => {
+      root.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    });
+
+    expect(apiRef.current!.pending?.anchor.exact).toBe('target words');
+    expect(document.activeElement).toBe(root);
+    decoy.remove();
+  });
+
   it('rejects selections on non-paintable (mermaid) blocks', async () => {
     const mermaidDoc = 'Intro paragraph here.\n\n```mermaid\ngraph TD; A-->B;\n```\n';
     const { transport } = makeTransport();

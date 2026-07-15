@@ -556,6 +556,14 @@ export function useAnnotations({
       paintPending(next);
       pendingRef.current = next;
       setPending(next);
+      // Same focus claim as the mouseup path: macOS WebKit does not focus
+      // buttons on click, so the whole-block gesture must also pull keyboard
+      // focus into the reader for type-to-comment.
+      try {
+        root.focus({ preventScroll: true });
+      } catch {
+        // test DOMs without focus options support
+      }
       return next;
     },
     [paintPending, rootRef],
@@ -589,7 +597,20 @@ export function useAnnotations({
         // not block selection handling here.
         return;
       }
-      handleSelectionChange(window.getSelection());
+      const next = handleSelectionChange(window.getSelection());
+      if (next) {
+        // Claim keyboard focus on an explicit selection gesture: WebKit does
+        // not move focus on mousedown in non-focusable content, so without
+        // this the terminal's hidden input keeps document.activeElement —
+        // type-to-comment keys leak to the shell and the toolbar's
+        // editable-element guard blocks them. Only a real selection steals
+        // focus (terminal focus ownership stays intact for plain clicks).
+        try {
+          root.focus({ preventScroll: true });
+        } catch {
+          // test DOMs without focus options support
+        }
+      }
     };
 
     const onRootClick = (event: MouseEvent) => {
