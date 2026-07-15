@@ -481,13 +481,15 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 			}
 		}
 
-		m.setConnection(id, conn, cmd)
 		// Declare the workspace_sessions capability before anything else: the
 		// remote daemon rejects every gated command (register_workspace,
 		// spawn_session, forwarded client payloads, ...) from a connection
 		// that never sent client_hello, closing it with a policy violation.
+		// publishConnectionAndSendHello holds writeMu across publishing the
+		// connection and sending the hello so ForwardEndpointCommand can never
+		// win the race and write before it.
 		connected := false
-		consumeErr := sendClientHello(ctx, conn)
+		consumeErr := m.publishConnectionAndSendHello(ctx, id, conn, cmd)
 		if consumeErr == nil {
 			connected, consumeErr = m.consumeRemote(ctx, id, conn)
 		}
@@ -1622,15 +1624,28 @@ func (m *Manager) SetEndpointRemoteWeb(ctx context.Context, endpointID string, e
 	}
 }
 
-func (m *Manager) setConnection(id string, conn *websocket.Conn, cmd *exec.Cmd) {
+// publishConnectionAndSendHello publishes the runtime's connection and sends
+// the client_hello over it atomically with respect to ForwardEndpointCommand.
+// It holds runtime.writeMu from before the connection becomes visible (under
+// m.mu) until after the hello write completes, so a forwarded command can
+// never observe the published connection and win the write race against the
+// hello: ForwardEndpointCommand always reads runtime.conn under m.mu first,
+// so it either sees the old (nil or previous) connection, or it sees this
+// connection but then blocks on writeMu until the hello has been sent.
+func (m *Manager) publishConnectionAndSendHello(ctx context.Context, id string, conn *websocket.Conn, cmd *exec.Cmd) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	runtime, ok := m.runtimes[id]
 	if !ok {
-		return
+		m.mu.Unlock()
+		return fmt.Errorf("endpoint not found: %s", id)
 	}
 	runtime.conn = conn
 	runtime.cmd = cmd
+	runtime.writeMu.Lock()
+	m.mu.Unlock()
+	defer runtime.writeMu.Unlock()
+
+	return sendClientHello(ctx, conn)
 }
 
 func (m *Manager) clearConnection(id string) {
