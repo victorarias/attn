@@ -1,5 +1,25 @@
 # Plan: Richer ticket content, staged — markdown, previews, HTML
 
+**Status: SUPERSEDED on 2026-07-13.** Slice (a)'s user-facing goal shipped through
+the shared `Markdown` renderer, which now renders ticket descriptions and comments
+with GFM and Mermaid support. The access-pattern dependency also shipped as the
+ticket chip and in-pane `TicketDetailPanel` overlay.
+
+Slices (b) and (c) were superseded by
+[2026-07-09-design-artifact-handover.md](2026-07-09-design-artifact-handover.md).
+Current ticket artifacts are visible, filesystem-canonical Markdown files under
+`tickets/<ticket-id>/`; ticket detail opens them in the Notebook editor and supports
+attach, rename, and delete. The arbitrary hidden-attachment model, byte-preview
+protocol, and sandboxed HTML attachment server proposed below are no longer the
+product architecture. Revisit non-Markdown ticket artifacts only through a new
+alignment and plan if real usage earns that capability.
+
+One narrow requirement was not carried forward: this plan proposed ticket-specific
+link and image components that block remote image loads and route safe links through
+the app opener. The shared renderer currently uses its default link/image behavior.
+If that boundary still matters, track it as a focused Markdown-hardening change rather
+than resuming this plan.
+
 ## Goal
 
 Make a ticket's content worth reading in-app. Today `TicketDetailPanel` renders the
