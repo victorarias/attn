@@ -550,3 +550,32 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---- Anchor paint layer (anchoring/painter.ts) ----
+   Preferred path: CSS Custom Highlight API — zero DOM mutation. */
+::highlight(attn-md-comment) {
+  background-color: color-mix(in srgb, var(--color-warning, #eab308) 28%, transparent);
+}
+
+::highlight(attn-md-deletion) {
+  background-color: color-mix(in srgb, #ef4444 20%, transparent);
+  text-decoration: line-through;
+}
+
+/* MarkPainter fallback spans (engines without CSS.highlights). The
+   padding/negative-margin pair extends the paint a hair past the glyphs
+   without shifting layout. */
+.md-mark {
+  padding: 0 2px;
+  margin: 0 -2px;
+  border-radius: 2px;
+}
+
+.md-mark-comment {
+  background-color: color-mix(in srgb, var(--color-warning, #eab308) 28%, transparent);
+}
+
+.md-mark-deletion {
+  background-color: color-mix(in srgb, #ef4444 20%, transparent);
+  text-decoration: line-through;
+}
