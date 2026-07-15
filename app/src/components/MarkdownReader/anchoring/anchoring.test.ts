@@ -219,6 +219,26 @@ describe("duplicated paragraphs", () => {
     expectBaselined(result.anchor, EDITED);
   });
 
+  it("does not adopt an inserted sibling that inherits the anchor's old ordinal blockId", () => {
+    // The anchored paragraph is the first block, so its blockId is stable
+    // ordinal position 0. Inserting a new paragraph directly above it means
+    // the NEW paragraph now occupies that same ordinal position — the
+    // same-block tier must not trust a lone hit there without checking it
+    // actually looks like the anchor's original context.
+    const DOC = "Beta before. The shared sentence sits here. Beta after.";
+    const needle = "The shared sentence sits here.";
+    const anchor = anchorFor(DOC, needle);
+    expect(anchor.prefix).toBe("Beta before. ");
+
+    const EDITED = "Intruder before. The shared sentence sits here. Intruder after.\n\n" + DOC;
+    const result = resolveOrRebase(EDITED, anchor);
+    expect(result.state).toBe("rebased");
+    if (result.state !== "rebased") throw new Error("unreachable");
+    expect(result.anchor.prefix).toBe("Beta before. ");
+    expect(result.anchor.exact).toBe(needle);
+    expectBaselined(result.anchor, EDITED);
+  });
+
   it("orphans as ambiguous when duplicates are indistinguishable and both far away", () => {
     const OLD = [
       "Other intro.",
