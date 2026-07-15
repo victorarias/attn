@@ -1,0 +1,38 @@
+[
+  {
+    "name": "direct question",
+    "route": "classifier",
+    "assistantText": "Would you like me to continue?",
+    "expected": "waiting_input"
+  },
+  {
+    "name": "confirmation request",
+    "route": "classifier",
+    "assistantText": "Please confirm whether I should proceed with the migration.",
+    "expected": "waiting_input"
+  },
+  {
+    "name": "completed summary with rhetorical question",
+    "route": "classifier",
+    "assistantText": "Why did the request fail? The token had expired. I refreshed it and verified the request now succeeds.",
+    "expected": "idle"
+  },
+  {
+    "name": "let me know closing",
+    "route": "classifier",
+    "assistantText": "The implementation and tests are complete. Let me know if you need anything else.",
+    "expected": "idle"
+  },
+  {
+    "name": "clean completion",
+    "route": "classifier",
+    "assistantText": "The task is complete and all checks pass.",
+    "expected": "idle"
+  },
+  {
+    "name": "tool-native question",
+    "route": "native_question",
+    "assistantText": "Which environment should I deploy to?",
+    "expected": "waiting_input"
+  }
+]

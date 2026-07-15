@@ -7,11 +7,11 @@ const directoryMode = 0o700;
 const fileMode = 0o600;
 
 type RegistryContents = {
-  schema: 2;
+  schema: 3;
   runs: Record<string, RunRecord>;
 };
 
-type PersistedRegistryContents = Omit<RegistryContents, "schema"> & { schema: 1 | 2 };
+type PersistedRegistryContents = Omit<RegistryContents, "schema"> & { schema: 1 | 2 | 3 };
 
 export function runtimeRootFromSocket(socketPath: string): string {
   return join(dirname(socketPath), "plugins", "attn-opencode");
@@ -41,11 +41,11 @@ export class RunRegistry {
       }
       try {
         const parsed = JSON.parse(await readFile(this.registryPath, "utf8")) as PersistedRegistryContents;
-        if ((parsed.schema !== 1 && parsed.schema !== 2) || !parsed.runs || typeof parsed.runs !== "object") {
+        if ((parsed.schema !== 1 && parsed.schema !== 2 && parsed.schema !== 3) || !parsed.runs || typeof parsed.runs !== "object") {
           throw new Error("invalid run registry schema");
         }
         this.runs = new Map(Object.entries(parsed.runs));
-        if (parsed.schema === 1) await this.persist();
+        if (parsed.schema !== 3) await this.persist();
       } catch (error) {
         if (!isNotFound(error)) throw error;
         await this.persist();
@@ -160,7 +160,7 @@ export class RunRegistry {
 
   private async persist(): Promise<void> {
     const runs = Object.fromEntries(this.runs.entries());
-    await writePrivate(this.registryPath, `${JSON.stringify({ schema: 2, runs } satisfies RegistryContents)}\n`);
+    await writePrivate(this.registryPath, `${JSON.stringify({ schema: 3, runs } satisfies RegistryContents)}\n`);
   }
 
   private async withLock<T>(operation: () => Promise<T> | T): Promise<T> {

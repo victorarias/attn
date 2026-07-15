@@ -1,7 +1,8 @@
 import { createServer } from "node:net";
 import { join } from "node:path";
-import { type EventSubscription, type ServerEvent, OpenCodeHTTP, parseModelPin, sessionModel, sessionModelMatches, variantForEffort } from "./opencode-http";
+import { type EventSubscription, type NativeAttention, type ServerEvent, OpenCodeHTTP, parseModelPin, sessionModel, sessionModelMatches, variantForEffort } from "./opencode-http";
 import { RunRegistry } from "./run-registry";
+import { OpenCodeStopClassifier } from "./stop-classifier";
 import {
   type DriverSpawnParams,
   type DriverSpawnResult,
@@ -11,6 +12,8 @@ import {
   type Report,
   type RunRecord,
   type SessionClosedParams,
+  type StopClassifier,
+  type StopVerdict,
   compareVersion,
   evaluateOpenCodeVersion,
   minimumOpenCodeVersion,
@@ -20,6 +23,7 @@ const startupDeadlineMs = 20_000;
 const reconnectDelayMs = 250;
 const healthRequestTimeoutMs = 2_000;
 const eventReconnectAttempts = 3;
+const classifierTimeoutMs = 30_000;
 
 export type AttnReporter = {
   request<T = unknown>(method: string, params?: unknown): Promise<T>;
@@ -37,6 +41,8 @@ export type OpenCodeDriverOptions = {
   startupDeadline?: number;
   reconnectDelay?: number;
   healthRequestTimeout?: number;
+  classifierTimeout?: number;
+  stopClassifier?: (client: OpenCodeHTTP) => StopClassifier;
 };
 
 type Availability =
@@ -62,6 +68,12 @@ type BufferedSubscription = {
   release: () => Promise<void>;
 };
 
+type ClassificationWork = {
+  generation: number;
+  controller: AbortController;
+  superseded: boolean;
+};
+
 export class OpenCodeDriver {
   private readonly executable: string;
   private readonly runCommand: (argv: string[]) => Promise<CommandResult>;
@@ -70,10 +82,14 @@ export class OpenCodeDriver {
   private readonly startupDeadline: number;
   private readonly reconnectDelay: number;
   private readonly healthRequestTimeout: number;
+  private readonly classifierTimeout: number;
+  private readonly stopClassifier: (client: OpenCodeHTTP) => StopClassifier;
   private availability: Availability = { ok: false, message: "OpenCode has not been checked" };
   private readonly monitors = new Map<string, AbortController>();
   private readonly reportQueues = new Map<string, Promise<void>>();
   private readonly degraded = new Map<string, string>();
+  private readonly classifications = new Map<string, ClassificationWork>();
+  private readonly classificationGenerations = new Map<string, number>();
 
   constructor(private readonly options: OpenCodeDriverOptions) {
     this.executable = options.executable?.trim() || process.env.ATTN_OPENCODE_EXECUTABLE?.trim() || "opencode";
@@ -83,6 +99,8 @@ export class OpenCodeDriver {
     this.startupDeadline = options.startupDeadline ?? startupDeadlineMs;
     this.reconnectDelay = options.reconnectDelay ?? reconnectDelayMs;
     this.healthRequestTimeout = options.healthRequestTimeout ?? healthRequestTimeoutMs;
+    this.classifierTimeout = options.classifierTimeout ?? classifierTimeoutMs;
+    this.stopClassifier = options.stopClassifier ?? ((client) => new OpenCodeStopClassifier(client));
   }
 
   async initialize(): Promise<void> {
@@ -105,7 +123,7 @@ export class OpenCodeDriver {
           resume: true,
           yolo: true,
           initial_prompt: true,
-          classifier: false,
+          classifier: true,
           state_reporting: true,
           pending_approval: true,
           model_pin: true,
@@ -133,11 +151,13 @@ export class OpenCodeDriver {
   }
 
   async sessionClosed(params: SessionClosedParams): Promise<{ ok: true }> {
+    this.cancelClassification(params.run_id);
     const controller = this.monitors.get(params.run_id);
     controller?.abort();
     this.monitors.delete(params.run_id);
     this.reportQueues.delete(params.run_id);
     this.degraded.delete(params.run_id);
+    this.classificationGenerations.delete(params.run_id);
     await this.options.registry.cleanup(params.run_id);
     return { ok: true };
   }
@@ -347,6 +367,7 @@ export class OpenCodeDriver {
         // a disconnected daemon turn error handling into an unhandled rejection.
       }
     } finally {
+      this.cancelClassification(initialRecord.run_id);
       signal.removeEventListener("abort", abortEventsForSession);
       eventController.abort();
     }
@@ -361,7 +382,9 @@ export class OpenCodeDriver {
         if (config.port !== record.port) record = await this.options.registry.update(record.run_id, { port: config.port });
         const password = await this.options.registry.password(record);
         const client = this.http(record.port, password);
-        const health = await this.healthWithin(client, signal, deadline - Date.now());
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        const health = await this.healthWithin(client, signal, remaining);
         if (health.version !== record.opencode_version) {
           throw new Error(`OpenCode server version ${health.version} does not match this run's expected ${record.opencode_version}`);
         }
@@ -381,13 +404,16 @@ export class OpenCodeDriver {
       client.pendingAttentionFor(nativeID, signal),
     ]);
     if (attention === "permission") {
+      this.cancelClassification(record.run_id);
       await this.enqueueReport(record, { kind: "state", state: "pending_approval" });
     } else if (attention === "question") {
+      this.cancelClassification(record.run_id);
       await this.enqueueReport(record, { kind: "state", state: "waiting_input" });
     } else if (status === "busy" || status === "retry") {
+      this.cancelClassification(record.run_id);
       await this.enqueueReport(record, { kind: "state", state: "working" });
     } else if (status === "idle") {
-      await this.enqueueReport(record, { kind: "stop", verdict: "idle" });
+      await this.beginIdleClassification(record, client, nativeID, signal, true);
     }
   }
 
@@ -429,6 +455,9 @@ export class OpenCodeDriver {
     }
     if (parentSignal.aborted || !binding.nativeID || event.sessionID !== binding.nativeID) return;
     const record = binding.record;
+    if (cancelsClassification(event)) {
+      this.cancelClassification(record.run_id);
+    }
     if (event.type === "session.status") {
       if (event.status === "busy" || event.status === "retry") {
         await this.enqueueReport(record, { kind: "state", state: "working" });
@@ -477,7 +506,127 @@ export class OpenCodeDriver {
     nativeID: string,
     parentSignal: AbortSignal,
   ): Promise<void> {
-    await this.reportAttentionWithinDeadline(record, client, nativeID, parentSignal, { kind: "stop", verdict: "idle" });
+    await this.beginIdleClassification(record, client, nativeID, parentSignal, false);
+  }
+
+  private async beginIdleClassification(
+    record: RunRecord,
+    client: OpenCodeHTTP,
+    nativeID: string,
+    parentSignal: AbortSignal | undefined,
+    attentionAlreadyChecked: boolean,
+  ): Promise<void> {
+    this.cancelClassification(record.run_id);
+    if (!attentionAlreadyChecked) {
+      const request = this.requestDeadline(parentSignal);
+      try {
+        let attention: NativeAttention | undefined;
+        try {
+          attention = await client.pendingAttentionFor(nativeID, request.signal);
+        } catch {
+          await this.enqueueReport(record, { kind: "stop", verdict: "unknown" });
+          return;
+        }
+        if (attention === "permission") {
+          await this.enqueueReport(record, { kind: "state", state: "pending_approval" });
+          return;
+        }
+        if (attention === "question") {
+          await this.enqueueReport(record, { kind: "state", state: "waiting_input" });
+          return;
+        }
+      } finally {
+        request.dispose();
+      }
+    }
+    if (parentSignal?.aborted) return;
+
+    const seq = await this.options.registry.reserveSequence(record.run_id);
+    const generation = (this.classificationGenerations.get(record.run_id) ?? 0) + 1;
+    this.classificationGenerations.set(record.run_id, generation);
+    const controller = new AbortController();
+    const work: ClassificationWork = { generation, controller, superseded: false };
+    this.classifications.set(record.run_id, work);
+    const abortForParent = () => {
+      work.superseded = true;
+      controller.abort(parentSignal?.reason);
+    };
+    if (parentSignal?.aborted) abortForParent();
+    else parentSignal?.addEventListener("abort", abortForParent, { once: true });
+    const timer = setTimeout(() => controller.abort(new Error("OpenCode stop classification timed out")), this.classifierTimeout);
+    void this.finishIdleClassification(record, client, nativeID, seq, work).finally(() => {
+      clearTimeout(timer);
+      parentSignal?.removeEventListener("abort", abortForParent);
+      if (this.classifications.get(record.run_id) === work) this.classifications.delete(record.run_id);
+    });
+  }
+
+  private async finishIdleClassification(
+    record: RunRecord,
+    client: OpenCodeHTTP,
+    nativeID: string,
+    seq: number,
+    work: ClassificationWork,
+  ): Promise<void> {
+    let verdict: StopVerdict = "unknown";
+    let turn: Awaited<ReturnType<OpenCodeHTTP["lastAssistantTurn"]>> = undefined;
+    try {
+      turn = await client.lastAssistantTurn(nativeID, work.controller.signal);
+      if (!turn) {
+        verdict = "idle";
+      } else {
+        const current = await this.options.registry.get(record.run_id);
+        const cached = current?.last_classification;
+        if (cached?.messageID === turn.messageID && cached.textHash === turn.textHash) {
+          verdict = cached.verdict;
+        } else {
+          verdict = await this.stopClassifier(client).classify({
+            linkedSessionID: nativeID,
+            model: turn.model,
+            assistantText: turn.text,
+            signal: work.controller.signal,
+          });
+        }
+      }
+    } catch {
+      verdict = "unknown";
+    }
+    if (!this.classificationIsCurrent(record.run_id, work)) return;
+    if (turn) {
+      try {
+        await this.options.registry.update(record.run_id, {
+          last_classification: {
+            messageID: turn.messageID,
+            textHash: turn.textHash,
+            verdict,
+            classifiedAt: new Date().toISOString(),
+          },
+        });
+      } catch {
+        verdict = "unknown";
+      }
+    }
+    if (!this.classificationIsCurrent(record.run_id, work)) return;
+    try {
+      await this.sendReservedReport(record, seq, { kind: "stop", verdict });
+    } catch {
+      // A newer report may already have advanced attn's cursor. A rejected stale
+      // classifier result is expected and must not degrade plugin health.
+    }
+  }
+
+  private cancelClassification(runID: string): void {
+    const work = this.classifications.get(runID);
+    if (!work) return;
+    work.superseded = true;
+    work.controller.abort(new Error("OpenCode stop classification was superseded"));
+    this.classifications.delete(runID);
+  }
+
+  private classificationIsCurrent(runID: string, work: ClassificationWork): boolean {
+    return !work.superseded &&
+      this.classifications.get(runID) === work &&
+      this.classificationGenerations.get(runID) === work.generation;
   }
 
   private async reportAttentionWithinDeadline(
@@ -563,6 +712,10 @@ export class OpenCodeDriver {
 
   private async sendReport(record: RunRecord, report: Report): Promise<void> {
     const seq = await this.options.registry.reserveSequence(record.run_id);
+    await this.sendReservedReport(record, seq, report);
+  }
+
+  private async sendReservedReport(record: RunRecord, seq: number, report: Report): Promise<void> {
     const base = { session_id: record.attn_session_id, run_id: record.run_id, seq };
     switch (report.kind) {
       case "metadata":
@@ -593,6 +746,17 @@ export class OpenCodeDriver {
     if (!this.availability.ok) throw new Error(this.availability.message);
     return this.availability;
   }
+}
+
+function cancelsClassification(event: { type: string; status?: string }): boolean {
+  if (event.type === "session.status") return event.status === "busy" || event.status === "retry";
+  return event.type === "question.asked" ||
+    event.type === "question.replied" ||
+    event.type === "question.rejected" ||
+    event.type === "permission.asked" ||
+    event.type === "permission.replied" ||
+    event.type === "session.error" ||
+    event.type === "session.deleted";
 }
 
 async function runCommand(argv: string[]): Promise<CommandResult> {

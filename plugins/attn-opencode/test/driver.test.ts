@@ -7,7 +7,7 @@ import attnGuidancePlugin from "../src/guidance-plugin";
 import { launch, opencodeConfigForLaunch } from "../src/launcher";
 import { type EventSubscription, type ServerEvent, OpenCodeHTTP } from "../src/opencode-http";
 import { RunRegistry, writePrivate } from "../src/run-registry";
-import type { DriverSpawnParams } from "../src/types";
+import type { ClassifierInput, DriverSpawnParams, StopClassifier, StopVerdict } from "../src/types";
 import { FakeOpenCode, eventually } from "./fake-opencode";
 
 const servers: FakeOpenCode[] = [];
@@ -65,6 +65,39 @@ function params(runID = "run-one"): DriverSpawnParams {
   };
 }
 
+function assistantMessage(id: string, text: string, completed = Date.now(), variant = "max"): unknown {
+  return {
+    info: {
+      id,
+      role: "assistant",
+      time: { completed },
+      model: { providerID: "spotify-glm", modelID: "zai-org/GLM-5.2-FP8", variant },
+    },
+    parts: [{ type: "text", text }],
+  };
+}
+
+class BlockingClassifier implements StopClassifier {
+  readonly inputs: ClassifierInput[] = [];
+  aborted = false;
+  private resolve?: (verdict: StopVerdict) => void;
+
+  classify(input: ClassifierInput): Promise<StopVerdict> {
+    this.inputs.push(input);
+    return new Promise((resolve) => {
+      this.resolve = resolve;
+      input.signal.addEventListener("abort", () => {
+        this.aborted = true;
+        resolve("unknown");
+      }, { once: true });
+    });
+  }
+
+  finish(verdict: StopVerdict): void {
+    this.resolve?.(verdict);
+  }
+}
+
 function driverFor(rpc: RecordingRPC, registry: RunRegistry, target: FakeOpenCode): OpenCodeDriver {
   return new OpenCodeDriver({
     rpc,
@@ -96,6 +129,7 @@ describe("OpenCode server-backed driver", () => {
       await driver.initialize();
       expect(driver.health()).toEqual({ ok: true, message: `OpenCode ${normalized} is ready` });
       expect(rpc.calls[0]?.method).toBe("driver.register");
+      expect((rpc.calls[0]?.params as { capabilities: { classifier: boolean } }).capabilities.classifier).toBe(true);
     }
   });
 
@@ -274,6 +308,7 @@ describe("OpenCode server-backed driver", () => {
       "idle with pending question",
     );
     expect(rpc.calls.some((call) => call.method === "session.report_stop")).toBe(false);
+    expect(target.classifierPrompts).toHaveLength(0);
 
     target.pendingQuestions.clear();
     target.pendingPermissions.set("permission-idle", "native-1");
@@ -283,11 +318,170 @@ describe("OpenCode server-backed driver", () => {
       "idle with pending permission",
     );
     expect(rpc.calls.some((call) => call.method === "session.report_stop")).toBe(false);
+    expect(target.classifierPrompts).toHaveLength(0);
 
     target.pendingPermissions.clear();
     target.emit("session.idle", { sessionID: "native-1" });
     await eventually(() => rpc.calls.at(-1)?.method === "session.report_stop", "idle without pending attention");
     expect((rpc.calls.at(-1)?.params as { verdict: string }).verdict).toBe("idle");
+    expect(target.classifierPrompts).toHaveLength(0);
+  });
+
+  test("classifies prose-only questions and completed answers in deleted hidden sessions", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-prose-verdicts"));
+    await eventually(() => target.prompts.length === 1, "native prompt submission");
+
+    target.messages.set("native-1", [assistantMessage("message-question", "Should I continue?")]);
+    target.classifierReplies.push('{"verdict":"WAITING"}');
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(
+      () => (rpc.calls.at(-1)?.params as { verdict?: string }).verdict === "waiting_input",
+      "prose question verdict",
+    );
+
+    target.messages.set("native-1", [assistantMessage("message-done", "The task is complete.", Date.now() + 1)]);
+    target.classifierReplies.push('{"verdict":"DONE"}');
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(
+      () => rpc.calls.filter((call) => call.method === "session.report_stop").length === 2,
+      "completed prose verdict",
+    );
+
+    expect(rpc.calls.filter((call) => call.method === "session.report_stop").map((call) =>
+      (call.params as { verdict: string }).verdict)).toEqual(["waiting_input", "idle"]);
+    expect(target.classifierPrompts).toHaveLength(2);
+    expect(target.deletedSessions).toEqual(["native-2", "native-3"]);
+    expect(target.requests.filter((request) => request.path === "/tui/select-session").map((request) => request.body)).toEqual([
+      { sessionID: "native-1" },
+    ]);
+  });
+
+  test("reuses a cached message verdict while reserving a fresh report sequence", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-prose-cache"));
+    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    target.messages.set("native-1", [assistantMessage("same-message", "Which option should I use?")]);
+    target.classifierReplies.push('{"verdict":"WAITING"}');
+
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(() => target.classifierPrompts.length === 1 && rpc.calls.at(-1)?.method === "session.report_stop", "initial classification");
+    target.classifierReplies.push('{"verdict":"DONE"}');
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(() => rpc.calls.filter((call) => call.method === "session.report_stop").length === 2, "cached classification");
+
+    const reports = rpc.calls.filter((call) => call.method === "session.report_stop");
+    expect(reports.map((call) => (call.params as { verdict: string }).verdict)).toEqual(["waiting_input", "waiting_input"]);
+    expect(reports.map((call) => (call.params as { seq: number }).seq)).toEqual([2, 3]);
+    expect(target.classifierPrompts).toHaveLength(1);
+    expect((await registry.get("run-prose-cache"))?.last_classification).toEqual(expect.objectContaining({
+      messageID: "same-message",
+      verdict: "waiting_input",
+    }));
+  });
+
+  test("reports unknown for malformed classifier output", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-prose-malformed"));
+    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    target.messages.set("native-1", [assistantMessage("message-malformed", "Can you choose?")]);
+    target.classifierReplies.push("WAITING");
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(() => rpc.calls.at(-1)?.method === "session.report_stop", "unknown prose verdict");
+    expect((rpc.calls.at(-1)?.params as { verdict: string }).verdict).toBe("unknown");
+  });
+
+  test("reports unknown when native-attention reconciliation fails", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-idle-reconcile-failure"));
+    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    target.failPendingLists = true;
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(() => rpc.calls.at(-1)?.method === "session.report_stop", "unknown reconciliation verdict");
+    expect((rpc.calls.at(-1)?.params as { verdict: string }).verdict).toBe("unknown");
+    expect(target.classifierPrompts).toHaveLength(0);
+  });
+
+  for (const newerEvent of ["busy", "permission"] as const) {
+    test(`lets a newer ${newerEvent} event cancel and overtake reserved classification`, async () => {
+      const rpc = new RecordingRPC();
+      const target = server("*");
+      const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+      const classifier = new BlockingClassifier();
+      const driver = new OpenCodeDriver({
+        rpc,
+        registry,
+        runCommand: async () => ({ exitCode: 0, stdout: "1.17.18\n", stderr: "" }),
+        allocatePort: async () => target.port,
+        http: (port, password) => new OpenCodeHTTP({ port, password }),
+        stopClassifier: () => classifier,
+        startupDeadline: 300,
+        reconnectDelay: 5,
+      });
+      await driver.initialize();
+      await driver.spawn(params(`run-cancel-${newerEvent}`));
+      await eventually(() => target.prompts.length === 1, "native prompt submission");
+      target.messages.set("native-1", [assistantMessage("message-blocked", "What next?")]);
+      target.emit("session.idle", { sessionID: "native-1" });
+      await eventually(() => classifier.inputs.length === 1, "classifier started");
+
+      if (newerEvent === "busy") {
+        target.emit("session.status", { sessionID: "native-1", status: { type: "busy" } });
+      } else {
+        target.askPermission("native-1", "newer-permission");
+      }
+      const expectedState = newerEvent === "busy" ? "working" : "pending_approval";
+      await eventually(() => (rpc.calls.at(-1)?.params as { state?: string }).state === expectedState, "newer state report");
+      expect(classifier.aborted).toBe(true);
+      classifier.finish("waiting_input");
+      await Bun.sleep(20);
+      expect(rpc.calls.filter((call) => call.method === "session.report_stop")).toHaveLength(0);
+      expect((rpc.calls.at(-1)?.params as { seq: number }).seq).toBe(3);
+    });
+  }
+
+  test("does not cancel classification for benign linked-session updates after idle", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const classifier = new BlockingClassifier();
+    const driver = new OpenCodeDriver({
+      rpc,
+      registry,
+      runCommand: async () => ({ exitCode: 0, stdout: "1.17.18\n", stderr: "" }),
+      allocatePort: async () => target.port,
+      http: (port, password) => new OpenCodeHTTP({ port, password }),
+      stopClassifier: () => classifier,
+      startupDeadline: 300,
+      reconnectDelay: 5,
+    });
+    await driver.initialize();
+    await driver.spawn(params("run-benign-session-update"));
+    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    target.messages.set("native-1", [assistantMessage("message-benign", "Should I continue?")]);
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(() => classifier.inputs.length === 1, "classifier started");
+    target.emit("session.updated", { sessionID: "native-1", title: "updated" });
+    await Bun.sleep(20);
+    expect(classifier.aborted).toBe(false);
+    classifier.finish("waiting_input");
+    await eventually(() => (rpc.calls.at(-1)?.params as { verdict?: string }).verdict === "waiting_input", "completed classification");
   });
 
   test("reconciles a missed pending question after the SSE stream reconnects", async () => {
@@ -618,6 +812,70 @@ describe("OpenCode server-backed driver", () => {
     expect(await registry.password(low!)).not.toBe(await registry.password(max!));
   });
 
+  test("keeps classifier sessions and equal-looking caches isolated across two runs", async () => {
+    const first = server("*");
+    const second = server("*");
+    const rpc = new RecordingRPC();
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    let nextPort = 0;
+    const driver = new OpenCodeDriver({
+      rpc,
+      registry,
+      runCommand: async () => ({ exitCode: 0, stdout: "1.17.18\n", stderr: "" }),
+      allocatePort: async () => [first.port, second.port][nextPort++]!,
+      http: (port, password) => new OpenCodeHTTP({ port, password }),
+      startupDeadline: 300,
+      reconnectDelay: 5,
+    });
+    await driver.initialize();
+    await Promise.all([driver.spawn(params("run-classifier-first")), driver.spawn(params("run-classifier-second"))]);
+    await eventually(() => first.prompts.length === 1 && second.prompts.length === 1, "both native runs");
+    first.messages.set("native-1", [assistantMessage("same-id", "Same text?")]);
+    second.messages.set("native-1", [assistantMessage("same-id", "Same text?")]);
+    first.classifierReplies.push('{"verdict":"WAITING"}');
+    second.classifierReplies.push('{"verdict":"DONE"}');
+    first.emit("session.idle", { sessionID: "native-1" });
+    second.emit("session.idle", { sessionID: "native-1" });
+    await eventually(() => rpc.calls.filter((call) => call.method === "session.report_stop").length === 2, "both prose verdicts");
+
+    const verdictByRun = Object.fromEntries(rpc.calls.filter((call) => call.method === "session.report_stop").map((call) => {
+      const params = call.params as { run_id: string; verdict: string };
+      return [params.run_id, params.verdict];
+    }));
+    expect(verdictByRun).toEqual({ "run-classifier-first": "waiting_input", "run-classifier-second": "idle" });
+    expect(first.classifierPrompts).toHaveLength(1);
+    expect(second.classifierPrompts).toHaveLength(1);
+    expect(first.deletedSessions).toEqual(["native-2"]);
+    expect(second.deletedSessions).toEqual(["native-2"]);
+    expect((await registry.get("run-classifier-first"))?.last_classification?.verdict).toBe("waiting_input");
+    expect((await registry.get("run-classifier-second"))?.last_classification?.verdict).toBe("idle");
+  });
+
+  test("bounds prose classification and reports unknown on timeout", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const classifier = new BlockingClassifier();
+    const driver = new OpenCodeDriver({
+      rpc,
+      registry,
+      runCommand: async () => ({ exitCode: 0, stdout: "1.17.18\n", stderr: "" }),
+      allocatePort: async () => target.port,
+      http: (port, password) => new OpenCodeHTTP({ port, password }),
+      stopClassifier: () => classifier,
+      classifierTimeout: 5,
+      startupDeadline: 300,
+      reconnectDelay: 5,
+    });
+    await driver.initialize();
+    await driver.spawn(params("run-classifier-timeout"));
+    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    target.messages.set("native-1", [assistantMessage("message-timeout", "Are you there?")]);
+    target.emit("session.idle", { sessionID: "native-1" });
+    await eventually(() => (rpc.calls.at(-1)?.params as { verdict?: string }).verdict === "unknown", "timed-out unknown verdict");
+    expect(classifier.aborted).toBe(true);
+  });
+
   test("reports degraded health and unknown when the authenticated server never becomes ready", async () => {
     const rpc = new RecordingRPC();
     const target = server("*", "1.17.17");
@@ -837,7 +1095,15 @@ test("registry migrates schema 1 without changing existing runs", async () => {
   await writePrivate(join(root, "runs.json"), `${JSON.stringify({ schema: 1, runs: {} })}\n`);
   const registry = new RunRegistry(root);
   await registry.initialize();
-  expect(JSON.parse(await readFile(join(root, "runs.json"), "utf8")).schema).toBe(2);
+  expect(JSON.parse(await readFile(join(root, "runs.json"), "utf8")).schema).toBe(3);
+});
+
+test("registry migrates schema 2 and persists classification caches", async () => {
+  const root = join(await tempRoot(), "runtime");
+  await writePrivate(join(root, "runs.json"), `${JSON.stringify({ schema: 2, runs: {} })}\n`);
+  const registry = new RunRegistry(root);
+  await registry.initialize();
+  expect(JSON.parse(await readFile(join(root, "runs.json"), "utf8")).schema).toBe(3);
 });
 
 test("OpenCode config merge preserves keys and deduplicates the guidance plugin", () => {
