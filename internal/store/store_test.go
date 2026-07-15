@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -170,6 +171,28 @@ func TestStore_AgentDriverRunRejectsWrongRunAndStaleSequence(t *testing.T) {
 	}
 	if s.ApplyAgentDriverState("plugin-run", "run-a", 3, protocol.StateIdle) {
 		t.Fatal("ApplyAgentDriverState() accepted report after run ended")
+	}
+}
+
+func TestStore_ListAgentDriverRunsFiltersByOwnerAndIncludesMetadata(t *testing.T) {
+	s := New()
+	for _, sessionID := range []string{"session-b", "session-a", "other"} {
+		s.Add(&protocol.Session{ID: sessionID, Agent: "external"})
+	}
+	if !s.BeginAgentDriverRun("session-b", "attn-opencode", "run-b") ||
+		!s.BeginAgentDriverRun("session-a", "attn-opencode", "run-a") ||
+		!s.BeginAgentDriverRun("other", "other-plugin", "run-other") {
+		t.Fatal("BeginAgentDriverRun failed")
+	}
+	if !s.ApplyAgentDriverMetadata("session-a", "run-a", 1, `{"native":"one"}`) {
+		t.Fatal("ApplyAgentDriverMetadata failed")
+	}
+
+	if got := s.ListAgentDriverRuns("attn-opencode"); !reflect.DeepEqual(got, []ActiveAgentDriverRun{
+		{SessionID: "session-a", RunID: "run-a", Metadata: `{"native":"one"}`},
+		{SessionID: "session-b", RunID: "run-b"},
+	}) {
+		t.Fatalf("ListAgentDriverRuns()=%+v", got)
 	}
 }
 

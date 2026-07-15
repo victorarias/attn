@@ -79,6 +79,7 @@ type ResolvedAttnPluginClientOptions = {
   socketPath: string;
   name: string;
   version: string;
+  generation: number;
 };
 
 export type PluginHandler<TParams = unknown, TResult = unknown> = (
@@ -119,7 +120,7 @@ type HealthResult = {
   ok: boolean;
 };
 
-const pluginAPIVersion = 3;
+const pluginAPIVersion = 4;
 
 export class AttnPluginClient {
   private socket?: Socket;
@@ -135,6 +136,7 @@ export class AttnPluginClient {
       socketPath: resolvePluginOption(options.socketPath, "ATTN_SOCKET_PATH", "socketPath"),
       name: resolvePluginOption(options.name, "ATTN_PLUGIN_NAME", "name"),
       version: options.version,
+      generation: resolvePluginGeneration(),
     };
   }
 
@@ -166,6 +168,7 @@ export class AttnPluginClient {
         name: this.options.name,
         version: this.options.version,
         attn_api_version: pluginAPIVersion,
+        generation: this.options.generation,
         surfaces: [...this.handlers.keys()].sort(),
       });
       if (!result.ok) {
@@ -337,4 +340,14 @@ function resolvePluginOption(
     throw new Error(`attn plugin ${optionName} is required; pass ${optionName} or set ${envName}`);
   }
   return value;
+}
+
+function resolvePluginGeneration(): number {
+  const raw = process.env.ATTN_PLUGIN_GENERATION?.trim();
+  if (!raw) return 1;
+  const generation = Number(raw);
+  if (!Number.isSafeInteger(generation) || generation <= 0) {
+    throw new Error("ATTN_PLUGIN_GENERATION must be a positive integer");
+  }
+  return generation;
 }

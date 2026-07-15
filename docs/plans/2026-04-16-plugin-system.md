@@ -61,12 +61,12 @@ These were proposed in conversation but not explicitly confirmed:
 
 1. **Bun-only vs Bun-preferred SDK.** Proposed: Bun-only. Simpler, cleaner, bets on Bun. Alternative: Bun-preferred with Node fallback.
 2. **Plugin distribution format.** Proposed: plugins ship TypeScript source + `package.json`, `attn plugin install` runs `bun install`, Bun is a prereq on the user's machine. Alternative: plugins ship `bun build --compile` binaries, no runtime dependency.
-3. **Plugin lifecycle.** Proposed: attn spawns installed plugins at daemon startup and reconciles on plugin-dir change. User-managed plugins (dev mode, ad-hoc scripts) spawn themselves and connect. One-per-plugin vs one-per-session not fully decided.
+3. **Plugin lifecycle.** Landed: attn owns one supervised process per installed plugin. Clean exits, crashes, and connection loss beyond a five-second grace period restart with bounded backoff; 60 seconds continuously connected resets the attempt count. User-managed plugins can still connect independently.
 4. **Remote daemons.** Proposed: plugins are daemon-local. Each daemon has its own plugin set. Install per host (SSH to remote, run `attn plugin install` there). Cross-daemon control plugins are deferred — likely exposing the same JSON-RPC over the hub's existing WebSocket later. User raised this as an open question worth capturing; design sketched but not confirmed.
 5. **SDK shape and timing.** User pushed back on designing SDK top-down. **Revised approach: the first real plugins are written against raw JSON-RPC first. After the provider path proved out, extract a small SDK from those patterns; let richer plugin surfaces wait until their concrete implementations exist.** The protocol must still stay ergonomic enough to consume without a wrapper.
 6. **Manifest format.** Probably TOML — minimal, human-readable, Bun ecosystem-neutral. Alternatives: JSON, YAML. Not confirmed.
 7. **Install sources.** Settings accepts a pasted Git repository URL or local directory. The CLI currently keeps `--path <dir>` for local development; a Git-source CLI form is deferred until it has a concrete use case.
-8. **API versioning discipline.** Installed plugin manifests and the socket hello use a strict, matching `attn_api_version`. Version 3 adds the optional attn-composed `instructions` bundle to driver launch requests (version 2 introduced delegated `model` and `effort`), so daemon and plugin agree on the expanded contract before launch. A wire-shape change must bump this version and update every bundled manifest/client; the daemon-client protocol version changes separately only when its own WebSocket schema changes.
+8. **API versioning discipline.** Installed plugin manifests and the socket hello use a strict, matching `attn_api_version`. Version 4 adds a daemon-issued process `generation` to hello and returns store-authoritative `active_runs` from `driver.register`, allowing stale processes to fail closed and restarted drivers to recover owned runs. Version 3 added the optional attn-composed `instructions` bundle to driver launch requests (version 2 introduced delegated `model` and `effort`). A wire-shape change must bump this version and update every bundled manifest/client; the daemon-client protocol version changes separately only when its own WebSocket schema changes.
 9. **Socket coexistence.** Existing one-message-per-connection hook protocol (claude hooks, whatever remains of the old pi plan's pattern) must keep working. Proposed: detect JSON-RPC handshake by first-message shape and switch the connection's mode. Not confirmed.
 10. **JSON-RPC framing.** Proposed: newline-delimited JSON. Alternative: LSP-style Content-Length headers. Unix socket + JSON makes newline-delimited the simpler choice.
 
@@ -91,15 +91,15 @@ These were proposed in conversation but not explicitly confirmed:
 
 ### Plugin lifecycle — driver flow
 
-1. attn spawns the plugin binary at daemon startup (or user runs it in dev mode).
-2. Plugin connects to `~/.attn/attn.sock`, sends `hello { name, version, attn_api_version, surfaces? }`.
-3. attn replies with accepted capabilities. An agent plugin then calls `driver.register { agent, capabilities }`; the base handshake does not carry a speculative role field.
+1. attn supervises the installed plugin binary from daemon startup, restarting it with bounded backoff after an exit or a connection loss longer than five seconds (or the user runs an unsupervised plugin in dev mode).
+2. Plugin connects to `~/.attn/attn.sock`, sends `hello { name, version, attn_api_version, generation, surfaces? }`. A supervised plugin must echo the exact generation injected into its environment; stale generations are rejected.
+3. attn replies with accepted capabilities. An agent plugin then calls `driver.register { agent, capabilities }`; the result includes the plugin's store-owned active runs so it can reconcile durable monitoring state after a restart. The base handshake does not carry a speculative role field.
 4. When a session starts with agent = the registered name, attn calls `driver.spawn { session_id, run_id, cwd, label, yolo }` on the plugin. On reload of that same session, it calls `driver.resume` with the stored opaque metadata. Capability inputs such as `yolo` express attn-level behavior, not required command-line flag names; each driver returns the agent-specific equivalent argv.
 5. Plugin responds `{ argv, env, cwd }`. attn spawns that command in a PTY under the session. **Attn owns the PTY. Plugin owns agent-specific semantics.**
 6. Plugin stages companion files (extensions, hooks) however it likes. Plugin monitors the agent however it likes.
 7. Plugin reports state via `session.report_state`, `session.report_stop`, `session.report_metadata`. The daemon supplies a fresh `run_id` per launched PTY and persists the spawning plugin as that run's owner; only that owner can report or receive close notification for the run. The plugin sequences reports within that run so asynchronous work cannot overwrite newer status or a replacement run.
 8. When an attn-owned plugin agent PTY exits or has been killed successfully, attn calls `driver.session_closed` on the recorded run owner so the plugin can dispose bridge tokens, watchers, classifiers, and staged launch resources for that run.
-9. Plugin exits when attn shuts down or its own lifecycle ends.
+9. Plugin exits intentionally when attn shuts down or removes it. Unexpected exits are supervised and do not terminate attn-owned agent PTYs.
 
 ### Provider and lifecycle surfaces
 

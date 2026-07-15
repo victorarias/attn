@@ -28,7 +28,14 @@ type pluginDriverRegisterParams struct {
 }
 
 type pluginDriverRegisterResult struct {
-	OK bool `json:"ok"`
+	OK         bool              `json:"ok"`
+	ActiveRuns []activePluginRun `json:"active_runs,omitempty"`
+}
+
+type activePluginRun struct {
+	SessionID string          `json:"session_id"`
+	RunID     string          `json:"run_id"`
+	Metadata  json.RawMessage `json:"metadata,omitempty"`
 }
 
 type pluginDriverSpawnParams struct {
@@ -190,7 +197,16 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 		}
 		d.logf("plugin driver registered plugin=%s agent=%s", plugin.name, normalizePluginAgent(params.Agent))
 		d.broadcastSettings("")
-		return pluginDriverRegisterResult{OK: true}, true, nil
+		active := d.store.ListAgentDriverRuns(plugin.name)
+		runs := make([]activePluginRun, 0, len(active))
+		for _, run := range active {
+			item := activePluginRun{SessionID: run.SessionID, RunID: run.RunID}
+			if json.Valid([]byte(run.Metadata)) {
+				item.Metadata = json.RawMessage(run.Metadata)
+			}
+			runs = append(runs, item)
+		}
+		return pluginDriverRegisterResult{OK: true, ActiveRuns: runs}, true, nil
 	case "session.report_state":
 		var params pluginReportStateParams
 		if err := json.Unmarshal(msg.Params, &params); err != nil {

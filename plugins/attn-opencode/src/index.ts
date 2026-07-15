@@ -5,7 +5,8 @@ import type { DriverSpawnParams, SessionClosedParams } from "./types";
 
 const socketPath = requiredEnvironment("ATTN_SOCKET_PATH");
 const pluginName = requiredEnvironment("ATTN_PLUGIN_NAME");
-const rpc = new AttnRPCClient({ socketPath, name: pluginName, version: "0.1.0" });
+const pluginGeneration = requiredGeneration();
+const rpc = new AttnRPCClient({ socketPath, name: pluginName, version: "0.1.0", generation: pluginGeneration });
 const driver = new OpenCodeDriver({
   rpc,
   registry: new RunRegistry(runtimeRootFromSocket(socketPath)),
@@ -22,5 +23,11 @@ await driver.initialize();
 function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+function requiredGeneration(): number {
+  const value = Number(requiredEnvironment("ATTN_PLUGIN_GENERATION"));
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error("ATTN_PLUGIN_GENERATION must be a positive integer");
   return value;
 }

@@ -257,7 +257,6 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 		longRun:          make(map[string]longRunSession),
 		pendingResumeID:  make(map[string]string),
 		plugins:          newPluginRegistry(),
-		pluginProcesses:  newPluginProcessRegistry(),
 	}
 
 	return &TestHarness{

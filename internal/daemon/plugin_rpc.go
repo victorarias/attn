@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const pluginAPIVersion = 3
+const pluginAPIVersion = 4
 const pluginHealthMethod = "attn.health"
 const pluginHealthInterval = 15 * time.Second
 const pluginHealthTimeout = 2 * time.Second
@@ -32,6 +32,7 @@ type pluginHelloParams struct {
 	Name           string   `json:"name"`
 	Version        string   `json:"version"`
 	AttnAPIVersion int      `json:"attn_api_version"`
+	Generation     uint64   `json:"generation"`
 	Surfaces       []string `json:"surfaces,omitempty"`
 }
 
@@ -246,7 +247,8 @@ func validatePluginSurfaces(values []string) ([]string, error) {
 }
 
 type pluginConnection struct {
-	name string
+	name       string
+	generation uint64
 
 	conn   net.Conn
 	reader *bufio.Reader
@@ -267,6 +269,7 @@ type pluginConnection struct {
 func newPluginConnection(conn net.Conn, reader *bufio.Reader, params pluginHelloParams) *pluginConnection {
 	return &pluginConnection{
 		name:         strings.TrimSpace(params.Name),
+		generation:   params.Generation,
 		conn:         conn,
 		reader:       reader,
 		pending:      make(map[string]chan jsonRPCMessage),
@@ -494,6 +497,9 @@ func parsePluginHello(data []byte) (json.RawMessage, pluginHelloParams, bool, er
 	if params.AttnAPIVersion != pluginAPIVersion {
 		return msg.ID, pluginHelloParams{}, true, fmt.Errorf("unsupported attn_api_version %d", params.AttnAPIVersion)
 	}
+	if params.Generation == 0 {
+		return msg.ID, pluginHelloParams{}, true, errors.New("hello params.generation is required")
+	}
 	return msg.ID, params, true, nil
 }
 
@@ -541,7 +547,17 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 		_ = plugin.send(jsonRPCFailure(helloID, jsonRPCInvalidRequest, err.Error()))
 		return
 	}
+	if !d.ensurePluginSupervisor().NoteConnected(plugin.name, plugin.generation) {
+		registry.unregister(plugin)
+		_ = plugin.send(jsonRPCFailure(helloID, jsonRPCInvalidRequest, "plugin generation is no longer current"))
+		return
+	}
 	defer func() {
+		// Mark this connection gone before making the plugin name available to a
+		// replacement connection. That ordering lets the replacement's
+		// NoteConnected cancel the disconnect grace instead of an old defer
+		// arming the timer after the new connection is already healthy.
+		d.ensurePluginSupervisor().NoteDisconnected(plugin.name, plugin.generation)
 		registry.unregister(plugin)
 		plugin.closePending(io.EOF)
 		d.broadcastPluginsUpdated()

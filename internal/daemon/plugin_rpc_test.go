@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,6 +107,7 @@ func TestDaemon_HandleConnection_PluginHelloCanArriveAcrossWrites(t *testing.T) 
 			Name:           "split-provider",
 			Version:        "0.1.0",
 			AttnAPIVersion: pluginAPIVersion,
+			Generation:     1,
 		}),
 	})
 	if err != nil {
@@ -134,6 +136,99 @@ func TestDaemon_HandleConnection_PluginHelloCanArriveAcrossWrites(t *testing.T) 
 	case <-time.After(2 * time.Second):
 		t.Fatal("fragmented plugin connection did not close after client disconnect")
 	}
+}
+
+func TestParsePluginHelloRejectsOldAPIAndMissingGeneration(t *testing.T) {
+	tests := []struct {
+		name   string
+		params pluginHelloParams
+		want   string
+	}{
+		{
+			name: "old api",
+			params: pluginHelloParams{
+				Name:           "old-provider",
+				Version:        "0.1.0",
+				AttnAPIVersion: pluginAPIVersion - 1,
+				Generation:     1,
+			},
+			want: "unsupported attn_api_version",
+		},
+		{
+			name: "missing generation",
+			params: pluginHelloParams{
+				Name:           "missing-generation",
+				Version:        "0.1.0",
+				AttnAPIVersion: pluginAPIVersion,
+			},
+			want: "hello params.generation is required",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := json.Marshal(jsonRPCMessage{
+				JSONRPC: "2.0",
+				ID:      json.RawMessage("1"),
+				Method:  "hello",
+				Params:  mustMarshalPluginHelloParams(t, tt.params),
+			})
+			if err != nil {
+				t.Fatalf("marshal hello: %v", err)
+			}
+			_, _, matched, err := parsePluginHello(payload)
+			if !matched || err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("matched=%v error=%v, want %q", matched, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestDaemon_PluginConnectionGenerationDrivesDisconnectRecovery(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	clock := newFakePluginClock()
+	launcher := &fakePluginLauncher{}
+	d.pluginSupervisor = newTestPluginSupervisor(clock, launcher)
+	if err := d.pluginSupervisor.Ensure(pluginManifest{Name: "supervised"}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	initial, _ := d.pluginSupervisor.Snapshot("supervised")
+	client, done := startPluginPipeGeneration(t, d, "supervised", nil, initial.Generation)
+	connected, _ := d.pluginSupervisor.Snapshot("supervised")
+	if connected.Phase != pluginPhaseConnected {
+		t.Fatalf("phase=%q after hello, want connected", connected.Phase)
+	}
+	_ = client.Close()
+	<-done
+
+	clock.Advance(pluginDisconnectGrace)
+	waitForSupervisor(t, func() bool {
+		snapshot, _ := d.pluginSupervisor.Snapshot("supervised")
+		return snapshot.Phase == pluginPhaseBackoff
+	})
+	clock.Advance(pluginRestartBackoff[0])
+	waitForSupervisor(t, func() bool { return launcher.count() == 2 })
+	restarted, _ := d.pluginSupervisor.Snapshot("supervised")
+	if restarted.Generation == initial.Generation {
+		t.Fatal("restart did not advance generation")
+	}
+
+	serverConn, staleConn := net.Pipe()
+	staleDone := make(chan struct{})
+	go func() {
+		defer close(staleDone)
+		d.handleConnection(serverConn)
+	}()
+	sendPluginHelloWithGeneration(t, staleConn, "supervised", nil, initial.Generation)
+	if response := decodeJSONRPCMessage(t, staleConn); response.Error == nil {
+		t.Fatal("stale generation hello succeeded")
+	}
+	_ = staleConn.Close()
+	<-staleDone
+
+	current, currentDone := startPluginPipeGeneration(t, d, "supervised", nil, restarted.Generation)
+	d.pluginSupervisor.Stop("supervised", pluginStopRemove)
+	_ = current.Close()
+	<-currentDone
 }
 
 func TestDaemon_HandleConnection_PluginHelloRegistersSurfaces(t *testing.T) {
@@ -395,6 +490,10 @@ func TestDaemon_PluginHealthCheckRecordsStatus(t *testing.T) {
 }
 
 func startPluginPipe(t *testing.T, d *Daemon, name string, surfaces []string) (net.Conn, <-chan struct{}) {
+	return startPluginPipeGeneration(t, d, name, surfaces, 1)
+}
+
+func startPluginPipeGeneration(t *testing.T, d *Daemon, name string, surfaces []string, generation uint64) (net.Conn, <-chan struct{}) {
 	t.Helper()
 	serverConn, clientConn := net.Pipe()
 	done := make(chan struct{})
@@ -403,7 +502,7 @@ func startPluginPipe(t *testing.T, d *Daemon, name string, surfaces []string) (n
 		d.handleConnection(serverConn)
 	}()
 
-	sendPluginHelloWithSurfaces(t, clientConn, name, surfaces)
+	sendPluginHelloWithGeneration(t, clientConn, name, surfaces, generation)
 	helloResp := decodeJSONRPCMessage(t, clientConn)
 	if helloResp.Error != nil {
 		t.Fatalf("hello error = %#v, want nil", helloResp.Error)
@@ -416,11 +515,16 @@ func sendPluginHello(t *testing.T, conn net.Conn, name string) {
 }
 
 func sendPluginHelloWithSurfaces(t *testing.T, conn net.Conn, name string, surfaces []string) {
+	sendPluginHelloWithGeneration(t, conn, name, surfaces, 1)
+}
+
+func sendPluginHelloWithGeneration(t *testing.T, conn net.Conn, name string, surfaces []string, generation uint64) {
 	t.Helper()
 	params, err := json.Marshal(pluginHelloParams{
 		Name:           name,
 		Version:        "0.1.0",
 		AttnAPIVersion: pluginAPIVersion,
+		Generation:     generation,
 		Surfaces:       surfaces,
 	})
 	if err != nil {

@@ -37,6 +37,12 @@ type AgentDriverReportCursor struct {
 	Seq        uint64
 }
 
+type ActiveAgentDriverRun struct {
+	SessionID string
+	RunID     string
+	Metadata  string
+}
+
 // New creates a new in-memory store (backed by SQLite :memory:)
 func New() *Store {
 	db, err := OpenDB(":memory:")
@@ -741,6 +747,55 @@ func (s *Store) GetAgentMetadata(id string) string {
 		return ""
 	}
 	return strings.TrimSpace(metadata)
+}
+
+// ListAgentDriverRuns returns the active external-driver runs owned by a
+// plugin. Session lifetime in this store is authoritative during plugin
+// recovery; private plugin state may only reconnect records returned here.
+func (s *Store) ListAgentDriverRuns(pluginName string) []ActiveAgentDriverRun {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	pluginName = strings.TrimSpace(pluginName)
+	if pluginName == "" {
+		return nil
+	}
+	if s.db == nil {
+		var runs []ActiveAgentDriverRun
+		for sessionID, cursor := range s.agentDriverRuns {
+			if cursor.PluginName != pluginName || strings.TrimSpace(cursor.RunID) == "" || s.sessions[sessionID] == nil {
+				continue
+			}
+			runs = append(runs, ActiveAgentDriverRun{
+				SessionID: sessionID,
+				RunID:     strings.TrimSpace(cursor.RunID),
+				Metadata:  strings.TrimSpace(s.agentMetadata[sessionID]),
+			})
+		}
+		sort.Slice(runs, func(i, j int) bool { return runs[i].SessionID < runs[j].SessionID })
+		return runs
+	}
+
+	rows, err := s.db.Query(`
+		SELECT id, agent_driver_run_id, agent_metadata
+		FROM sessions
+		WHERE agent_driver_plugin_name = ? AND agent_driver_run_id <> ''
+		ORDER BY id`, pluginName)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var runs []ActiveAgentDriverRun
+	for rows.Next() {
+		var run ActiveAgentDriverRun
+		if err := rows.Scan(&run.SessionID, &run.RunID, &run.Metadata); err != nil {
+			return nil
+		}
+		run.RunID = strings.TrimSpace(run.RunID)
+		run.Metadata = strings.TrimSpace(run.Metadata)
+		runs = append(runs, run)
+	}
+	return runs
 }
 
 // BeginAgentDriverRun records ownership and resets the cursor for a newly launched external agent run.
