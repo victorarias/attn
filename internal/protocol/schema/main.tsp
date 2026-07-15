@@ -1659,12 +1659,28 @@ model WorkspaceTileContentGetMessage {
 }
 
 // Open a markdown file into a docked, live-reloading tile. Sent by the
-// `attn open` CLI over the unix socket. When session_id is empty the daemon
-// targets the currently selected session's workspace.
+// `attn open` CLI over the unix socket and by the frontend over the websocket
+// when the user cmd+clicks a markdown path in a session terminal. The tile is
+// bound to session_id (the opener); when empty the daemon falls back to the
+// currently selected session. request_id correlates the websocket reply
+// (OpenMarkdownResultMessage) and is unused on the unix-socket path.
 model OpenMarkdownMessage {
   cmd: "open_markdown";
   path: string;
   session_id?: string;
+  request_id?: string;
+}
+
+// Result of a websocket open_markdown command. On success workspace_id and
+// tile_id identify the docked (or reused) markdown tile.
+model OpenMarkdownResultMessage {
+  event: "open_markdown_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+  path: string;
+  workspace_id?: string;
+  tile_id?: string;
 }
 
 // Open or retarget the docked browser tile. Sent by `attn browser open`.
@@ -2971,4 +2987,5 @@ alias DaemonEvent =
   | PresentSubmitRoundResultMessage
   | PresentCloseResultMessage
   | PresentationAddedMessage
-  | PresentationUpdatedMessage;
+  | PresentationUpdatedMessage
+  | OpenMarkdownResultMessage;

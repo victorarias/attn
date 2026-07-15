@@ -26,6 +26,9 @@ export interface TileLeaf {
   // tiles this is the absolute path of the file the tile renders. Empty when
   // the daemon persisted no params.
   tileParams?: string;
+  // Session the tile was opened from (markdown tiles bind to the session whose
+  // terminal the file was cmd+clicked in). Absent when the tile has no binding.
+  tileSessionId?: string;
 }
 
 export type TerminalLeaf = TerminalPaneLeaf | TileLeaf;
@@ -39,8 +42,9 @@ export interface TileContentState {
   error?: string;
 }
 
-// tileContentKey keys tile content by workspace + tile, since a tile id like
-// `tile-markdown` is reused across workspaces.
+// tileContentKey keys tile content by workspace + tile: tile ids are derived
+// from content (markdown tiles hash the file path), so the same id can appear
+// in more than one workspace.
 export function tileContentKey(workspaceId: string, tileId: string): string {
   return `${workspaceId}::${tileId}`;
 }
@@ -377,6 +381,9 @@ function parseLayoutNode(raw: unknown): TerminalLayoutNode | null {
       tileId: value.tile_id,
       tileKind: value.tile_kind,
       tileParams: typeof value.tile_params === 'string' ? value.tile_params : undefined,
+      tileSessionId: typeof value.tile_session_id === 'string' && value.tile_session_id.length > 0
+        ? value.tile_session_id
+        : undefined,
     };
   }
   if (

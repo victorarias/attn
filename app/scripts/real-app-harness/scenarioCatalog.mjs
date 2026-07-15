@@ -92,6 +92,11 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-terminal-osc8-link'],
   },
   {
+    id: 'terminal-md-link',
+    label: 'Markdown path Cmd+click docks a session-bound markdown tile',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-md-link'],
+  },
+  {
     id: 'terminal-block-resize',
     label: 'Block geometry across fish/bash/zsh through relaunch replay + split/close-split',
     command: ['pnpm', 'run', 'real-app:scenario-terminal-block-resize'],

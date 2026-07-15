@@ -264,7 +264,7 @@ func (d *Daemon) handleOpenBrowser(conn net.Conn, msg *protocol.OpenBrowserMessa
 			return
 		}
 	}
-	if err := d.dockTile(workspaceID, target.anchorLeafID, browserTileID, string(workspacelayout.TileKindBrowser), targetURL, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+	if err := d.dockTile(workspaceID, target.anchorLeafID, browserTileID, string(workspacelayout.TileKindBrowser), targetURL, "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
 		d.sendError(conn, fmt.Sprintf("open_browser: %v", err))
 		return
 	}

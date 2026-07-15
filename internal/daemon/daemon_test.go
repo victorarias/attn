@@ -1223,7 +1223,7 @@ func TestDaemon_PruneSessionsWithoutPTY_KeepsTileOnlyWorkspace(t *testing.T) {
 			Ratio:     workspacelayout.DefaultSplitRatio,
 			Children: []workspacelayout.Node{
 				{Type: "pane", PaneID: "pane-stale"},
-				{Type: "tile", TileID: markdownTileID, TileKind: string(workspacelayout.TileKindMarkdown), TileParams: "/tmp/notes.md"},
+				{Type: "tile", TileID: markdownTileIDForPath("/tmp/notes.md"), TileKind: string(workspacelayout.TileKindMarkdown), TileParams: "/tmp/notes.md"},
 			},
 		},
 		Panes: []workspacelayout.Pane{{

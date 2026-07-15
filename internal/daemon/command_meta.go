@@ -111,6 +111,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace: commandMetadata(ScopeSession, true, true),
 	protocol.CmdSetWorkspaceRank:                      commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdWorkspaceTileContentGet:               commandMetadata(ScopeSession, true, true),
+	protocol.CmdOpenMarkdown:                          commandMetadata(ScopeSession, true, true),
 	protocol.CmdBrowserControl:                        commandMetadata(ScopeSession, true, true),
 	protocol.CmdBrowserControlResult:                  commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdRenameSession:                         commandMetadata(ScopeSession, false, true),

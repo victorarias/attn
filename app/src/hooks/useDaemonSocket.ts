@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '160';
+export const PROTOCOL_VERSION = '161';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -1534,6 +1534,25 @@ export function useDaemonSocket({
               );
             } else {
               pending.reject(new Error(data.error || 'Filesystem list failed'));
+            }
+            break;
+          }
+
+          case 'open_markdown_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `open_markdown:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve({ workspaceId: data.workspace_id, tileId: data.tile_id });
+            } else {
+              pending.reject(new Error(data.error || 'Open markdown failed'));
             }
             break;
           }
@@ -3234,6 +3253,35 @@ export function useDaemonSocket({
       { waitForInitialState: true },
     );
   }, [sendOrQueueCommand]);
+
+  // sendOpenMarkdown docks (or reuses) a markdown tile for the given file and
+  // binds it to the session it was opened from. Empty sessionId lets the
+  // daemon fall back to the currently selected session. Resolves with the
+  // workspace/tile the daemon placed the file in.
+  const sendOpenMarkdown = useCallback((path: string, sessionId: string): Promise<{ workspaceId?: string; tileId?: string }> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('open_markdown');
+      const key = `open_markdown:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({
+        cmd: 'open_markdown',
+        request_id: requestId,
+        path,
+        ...(sessionId ? { session_id: sessionId } : {}),
+      }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Open markdown timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
 
   useEffect(() => {
     setPtyBackend({
@@ -4973,6 +5021,7 @@ export function useDaemonSocket({
     sendSetWorkspaceRank,
     tileContents,
     requestTileContent,
+    sendOpenMarkdown,
     sendRuntimeInput: sendPtyInput,
     sendSetTerminalTheme,
     isRuntimeAttached,

@@ -19,6 +19,7 @@ import {
   pathCandidatesForFragment,
   resolveDetectedPath,
   spanFromLogicalRange,
+  terminalLinkOpenAction,
   urlAtColumn,
   type DetectedTerminalLink,
   type LogicalLine,
@@ -130,6 +131,11 @@ interface GhosttyTerminalProps {
     paneCount: number;
   };
   onInput: (data: string) => void;
+  // Cmd+click on a markdown file path routes here (docking an in-app markdown
+  // tile) instead of opening the OS default app. sessionId is the pane's
+  // session, or '' when the pane has none (the daemon falls back to the
+  // selected session). Absent = markdown paths open like any other path.
+  onOpenMarkdown?: (path: string, sessionId: string) => void;
   onReady: (terminal: GhosttyTerminalHandle) => void;
   onResize: (cols: number, rows: number, options?: { reason?: string }) => void;
   // A live geometry change cancelled queued historical replay (the model
@@ -493,7 +499,7 @@ function cellText(
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
-  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onReady, onResize, onReplayInterrupted }, ref) {
+  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onOpenMarkdown, onReady, onResize, onReplayInterrupted }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const terminalRef = useRef<GhosttyModel | null>(null);
@@ -567,6 +573,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const readyRef = useRef(false);
     const startupRef = useRef(emptyStartup());
     const onInputRef = useRef(onInput);
+    const onOpenMarkdownRef = useRef(onOpenMarkdown);
     const onReadyRef = useRef(onReady);
     const onResizeRef = useRef(onResize);
     const onReplayInterruptedRef = useRef(onReplayInterrupted);
@@ -599,6 +606,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const fontSizeRef = useRef(fontSize);
 
     onInputRef.current = onInput;
+    onOpenMarkdownRef.current = onOpenMarkdown;
     onReadyRef.current = onReady;
     onResizeRef.current = onResize;
     onReplayInterruptedRef.current = onReplayInterrupted;
@@ -2383,19 +2391,24 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     }, [hoverLinkAtCell, hyperlinkUriAtViewportCell, lineAtVisibleRow]);
 
     const openLink = useCallback((link: DetectedTerminalLink) => {
-      if (link.kind === 'url' && link.uri) {
-        // Claude Code emits file:// OSC 8 links for file paths (e.g. citing a
-        // source file); route those through openPath like a detected path link.
-        if (link.uri.startsWith('file://')) {
-          const rest = link.uri.slice('file://'.length);
-          const slashIndex = rest.indexOf('/');
-          const path = slashIndex === -1 ? rest : rest.slice(slashIndex);
-          void openPath(decodeURIComponent(path));
-        } else {
-          void openUrl(link.uri);
-        }
-      } else if (link.kind === 'path' && link.absolutePath) {
-        void openPath(link.absolutePath);
+      const action = terminalLinkOpenAction(link);
+      if (!action) return;
+      switch (action.action) {
+        case 'open-url':
+          void openUrl(action.uri);
+          break;
+        case 'open-markdown':
+          // Markdown opens in an in-app tile bound to this pane's session when
+          // the host wired the callback; otherwise fall through to the OS app.
+          if (onOpenMarkdownRef.current) {
+            onOpenMarkdownRef.current(action.path, runtimeMetaRef.current?.sessionId ?? '');
+            break;
+          }
+          void openPath(action.path);
+          break;
+        case 'open-path':
+          void openPath(action.path);
+          break;
       }
     }, []);
 
