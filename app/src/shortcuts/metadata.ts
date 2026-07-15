@@ -11,7 +11,7 @@
 
 import { ShortcutId } from './registry';
 
-export type ShortcutCategory = 'sessions' | 'panes' | 'review' | 'app';
+export type ShortcutCategory = 'sessions' | 'panes' | 'markdown' | 'review' | 'app';
 
 export interface ShortcutMeta {
   label: string;
@@ -37,6 +37,7 @@ export interface ShortcutMeta {
 export const SHORTCUT_CATEGORY_LABELS: Record<ShortcutCategory, string> = {
   sessions: 'Workspaces & Sessions',
   panes: 'Panes & Terminals',
+  markdown: 'Markdown & Annotations',
   review: 'Review & Git',
   app: 'App',
 };
@@ -45,6 +46,7 @@ export const SHORTCUT_CATEGORY_LABELS: Record<ShortcutCategory, string> = {
 export const SHORTCUT_CATEGORY_ORDER: ShortcutCategory[] = [
   'sessions',
   'panes',
+  'markdown',
   'review',
   'app',
 ];
@@ -84,6 +86,9 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'terminal.focusUp': { label: 'Move focus up', category: 'panes', requiresTerminal: true },
   'terminal.focusDown': { label: 'Move focus down', category: 'panes', requiresTerminal: true },
   'terminal.find': { label: 'Find in terminal', category: 'panes', requiresTerminal: true },
+
+  // Markdown & Annotations
+  'markdown.sendAnnotations': { label: 'Send annotations to session', category: 'markdown', dockLabel: 'send notes' },
 
   // Review & Git
   'dock.attention': { label: 'PRs drawer', category: 'review', dockLabel: 'PRs' },

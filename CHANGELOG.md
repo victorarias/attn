@@ -13,7 +13,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   quick-labels (with keyboard shortcuts), add document-wide comments, and review
   everything in a sidebar. Annotations survive file edits by re-anchoring to the
   moved text (flagged in the sidebar if the text disappears), and drafts persist
-  across tile close and app restart. Sending annotations to an agent lands next.
+  across tile close and app restart.
+- Markdown annotations can now be sent to an agent: every markdown tile is bound
+  to the session it was opened from (shown in the tile header, with a dropdown to
+  retarget to any session in the workspace). "Send" (or Cmd+Enter) formats your
+  comments, redlines, and quick labels into a single feedback message, types it
+  into the target session, and clears the draft. If the target is waiting on an
+  approval prompt, nothing is sent and your annotations are kept so you can retry.
 
 ### Changed
 - **Markdown tiles now render documents on a proper reading surface.** Files open on a centered card with book-quality typography, syntax-highlighted code blocks with a hover copy button, clickable heading anchors that scroll smoothly within the tile, and a metadata card for YAML frontmatter. Dangerous links (`javascript:`, `data:`) render as plain text instead of being clickable.

@@ -92,6 +92,18 @@ export interface UseAnnotationsApi {
   deleteAnnotation(id: string): void;
   clearAll(): void;
 
+  /** Run any armed debounced save now; resolves when it settles (PR6 send).
+      Also awaits a save that already left the debounce window and is
+      mid-round-trip, so a Send can never race past an in-flight save. */
+  flushPendingSave(): Promise<void>;
+  /** True once the daemon draft (or its absence) has been loaded. While
+      false, local edits are NOT persisted (saves are suppressed), so a Send
+      would deliver the daemon's stale draft — callers must gate on this. */
+  isHydrated(): boolean;
+  /** Empty local state after a delivered send WITHOUT a daemon clear (the
+      daemon already tombstoned); seeds the generation counter from `floor`. */
+  applyDeliveredClear(generationFloor: number): void;
+
   selectAnnotation(id: string | null): void;
   /** Select + glow + scroll the highlight into view (sidebar card click). */
   focusAnnotation(id: string): void;
@@ -166,6 +178,11 @@ export function useAnnotations({
   // ---- persistence -------------------------------------------------------
 
   const persistNowRef = useRef<(() => void) | null>(null);
+  /** The save/clear currently on the wire (null when none). flushPendingSave
+      awaits it so a Send after the debounce fired — but before its request
+      settled — cannot read the draft ahead of that save and then tombstone
+      the edit undelivered. */
+  const inFlightPersistRef = useRef<Promise<void> | null>(null);
 
   /** Transport failure: warn (repo logging conventions) and re-arm the save
       timer so the draft re-persists once the socket is back, instead of
@@ -182,42 +199,50 @@ export function useAnnotations({
     }, ANNOTATION_SAVE_RETRY_MS);
   }, []);
 
-  const persistNow = useCallback(() => {
+  /** Returns a promise that settles when the triggered save/clear settles
+      (resolves on failure too — the retry timer handles re-persisting). */
+  const persistNow = useCallback((): Promise<void> => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
     if (!hasHydratedRef.current) {
-      return; // never save over a draft we have not loaded yet
+      return Promise.resolve(); // never save over a draft we have not loaded yet
     }
     const t = getTransport();
     if (!t) {
-      return; // local-only mode
+      return Promise.resolve(); // local-only mode
     }
     const savePath = pathRef.current;
     generationRef.current += 1;
     const generation = generationRef.current;
     const list = annotationsRef.current;
-    if (list.length === 0) {
-      // Last annotation removed: tombstone instead of saving [] so a stale
-      // stored draft can never offer back deleted content (plannotator
-      // remove-on-empty semantics; also the primitive PR6's clear-on-send uses).
-      t.clearMarkdownAnnotations(savePath, generation)
-        .then(({ generation: floor }) => {
-          generationRef.current = Math.max(generationRef.current, floor);
-        })
-        .catch((err: unknown) => schedulePersistRetry(savePath, 'clear', err));
-      return;
-    }
-    t.saveMarkdownAnnotations(savePath, list.map(annotationToWire), generation)
-      .then(({ stale }) => {
-        if (stale && pathRef.current === savePath) {
-          // A tombstone (or newer writer) raced us: drop local pending state
-          // and re-hydrate the authoritative draft.
-          void hydrateRef.current?.();
-        }
-      })
-      .catch((err: unknown) => schedulePersistRetry(savePath, 'save', err));
+    const request = list.length === 0
+      ? // Last annotation removed: tombstone instead of saving [] so a stale
+        // stored draft can never offer back deleted content (plannotator
+        // remove-on-empty semantics; also the primitive PR6's clear-on-send uses).
+        t.clearMarkdownAnnotations(savePath, generation)
+          .then(({ generation: floor }) => {
+            generationRef.current = Math.max(generationRef.current, floor);
+          })
+          .catch((err: unknown) => schedulePersistRetry(savePath, 'clear', err))
+      : t.saveMarkdownAnnotations(savePath, list.map(annotationToWire), generation)
+          .then(({ stale }) => {
+            if (stale && pathRef.current === savePath) {
+              // A tombstone (or newer writer) raced us: drop local pending state
+              // and re-hydrate the authoritative draft.
+              void hydrateRef.current?.();
+            }
+          })
+          .catch((err: unknown) => schedulePersistRetry(savePath, 'save', err));
+    inFlightPersistRef.current = request;
+    const settle = () => {
+      if (inFlightPersistRef.current === request) {
+        inFlightPersistRef.current = null;
+      }
+    };
+    request.then(settle, settle);
+    return request;
   }, [getTransport, schedulePersistRetry]);
   persistNowRef.current = persistNow;
 
@@ -234,13 +259,19 @@ export function useAnnotations({
     }, ANNOTATION_SAVE_DEBOUNCE_MS);
   }, [persistNow]);
 
-  const flushPendingSave = useCallback(() => {
+  /** Run any armed debounced save immediately. Resolves when the flushed
+      save settles (on `stale` too — the daemon has newer truth either way);
+      no-op resolve when nothing is pending. The PR6 send flow awaits this
+      before submitting so the payload includes the last keystroke's edit. */
+  const flushPendingSave = useCallback((): Promise<void> => {
     if (saveTimerRef.current === null) {
-      return;
+      // No armed debounce — but a save whose debounce already fired may still
+      // be mid-round-trip; await it so callers observe a settled draft.
+      return inFlightPersistRef.current ?? Promise.resolve();
     }
     clearTimeout(saveTimerRef.current);
     saveTimerRef.current = null;
-    persistNow();
+    return persistNow();
   }, [persistNow]);
 
   // ---- paint / rebase ----------------------------------------------------
@@ -718,6 +749,10 @@ export function useAnnotations({
         anchor: p.anchor,
         quickLabelId: label.id,
         ...(label.tip !== undefined ? { quickLabelTip: label.tip } : {}),
+        // Display text snapshotted at creation: the daemon-side send-payload
+        // formatter has no copy of the label set, so the wire record carries
+        // what the user saw (falls back to the raw id for older drafts).
+        quickLabelText: `${label.emoji} ${label.text}`,
       })),
     [createFromPending],
   );
@@ -795,6 +830,51 @@ export function useAnnotations({
         .catch((err: unknown) => schedulePersistRetry(clearPath, 'clear', err));
     }
   }, [getTransport, schedulePersistRetry]);
+
+  /**
+   * Local-only mirror of clearAll after a successful PR6 send: the daemon
+   * already tombstone-cleared the draft at delivery time, so this must NOT
+   * issue a second daemon clear — it only empties local state and seeds the
+   * generation counter from the daemon's new floor.
+   *
+   * Resurrection guard: a debounced save scheduled before Send that races
+   * past flushPendingSave cannot resurrect drafts — the daemon clear
+   * tombstoned at the stored generation, so the straggler save comes back
+   * `{stale: true}`, the save path drops pending state and re-hydrates, and
+   * (thanks to the hydrate-token bump below invalidating anything older) the
+   * re-hydrate returns the empty post-clear draft.
+   */
+  const applyDeliveredClear = useCallback((generationFloor: number) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    hydrateTokenRef.current += 1; // invalidate in-flight re-hydrates
+    // The token bump above makes any in-flight/retrying hydrate return early
+    // WITHOUT ever setting hasHydratedRef — but the post-clear empty state IS
+    // the authoritative daemon state at the returned floor, so mark hydrated
+    // here (and stop the failed-hydrate retry loop). Leaving it false would
+    // permanently suppress every subsequent save: silent draft data loss.
+    if (hydrateRetryTimerRef.current) {
+      clearTimeout(hydrateRetryTimerRef.current);
+      hydrateRetryTimerRef.current = null;
+    }
+    hasHydratedRef.current = true;
+    generationRef.current = Math.max(generationRef.current, generationFloor);
+    annotationsRef.current = [];
+    orphansRef.current = new Map();
+    setAnnotations([]);
+    setOrphans(new Map());
+    selectedIdRef.current = null;
+    setSelectedId(null);
+    painterRef.current?.clearAll();
+    rangesRef.current.clear();
+    pendingRef.current = null;
+    setPending(null);
+  }, []);
+
+  /** Call-time read (a ref, not state): the send flow checks this at submit. */
+  const isHydrated = useCallback(() => hasHydratedRef.current, []);
 
   // ---- selection focus -----------------------------------------------------
 
@@ -914,6 +994,9 @@ export function useAnnotations({
       addGlobalComment,
       deleteAnnotation,
       clearAll,
+      flushPendingSave,
+      isHydrated,
+      applyDeliveredClear,
       selectAnnotation,
       focusAnnotation,
       justCreatedIdRef,
@@ -935,6 +1018,9 @@ export function useAnnotations({
       addGlobalComment,
       deleteAnnotation,
       clearAll,
+      flushPendingSave,
+      isHydrated,
+      applyDeliveredClear,
       selectAnnotation,
       focusAnnotation,
     ],

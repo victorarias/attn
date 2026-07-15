@@ -112,6 +112,15 @@ export const SHORTCUTS = {
 
   // Tickets board (fullscreen surface). meta+shift+T parallels meta+T = new workspace.
   'board.open': { key: 't', meta: true, shift: true },
+
+  // Markdown annotations: send the current tile's draft to its bound session.
+  // Plain ⌘Enter is otherwise unbound (terminal.toggleMaximize is ⌘⇧Enter) and
+  // macOS's default menu carries no Enter accelerator. `editableTarget:
+  // 'native'` keeps the capture-phase dispatcher out of inputs/textareas — the
+  // annotation popover's own ⌘Enter (submit comment) must win there. The
+  // handler is additionally registration-gated on tile focus-within so ⌘Enter
+  // still reaches the PTY when a terminal pane is focused.
+  'markdown.sendAnnotations': { key: 'Enter', meta: true, editableTarget: 'native' },
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUTS;

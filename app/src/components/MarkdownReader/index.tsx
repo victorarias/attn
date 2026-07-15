@@ -1,5 +1,5 @@
-import { isValidElement, memo, useCallback, useRef, useState } from 'react';
-import type { HTMLAttributes, ReactNode, RefObject } from 'react';
+import { isValidElement, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import type { HTMLAttributes, ReactNode, Ref, RefObject } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import rehypeRaw from 'rehype-raw';
@@ -286,6 +286,26 @@ function FrontmatterCard({ entries }: { entries: FrontmatterEntry[] }) {
   );
 }
 
+/**
+ * Imperative bridge the tile host (WorkspaceDockTile) uses for the PR6 send
+ * flow. Kept imperative (a handle, not props) so the send button can flush
+ * the debounced save and read the orphan set at click time without threading
+ * annotation state up through the tile chrome on every keystroke.
+ */
+export interface MarkdownAnnotationsSendHandle {
+  /** Flush any armed debounced draft save; resolves when it settles. */
+  flushPendingSave(): Promise<void>;
+  /** False while the daemon draft has not been loaded (initial hydrate in
+      flight or failed-and-retrying). Sends must be refused then: the daemon
+      would format its STORED draft, not the un-persisted local list. */
+  isHydrated(): boolean;
+  /** Empty local annotation state after a delivered send (daemon already
+      tombstone-cleared); `generationFloor` seeds the local counter. */
+  applyDeliveredClear(generationFloor: number): void;
+  /** Ids the client currently shows as orphaned (non-persisted, client-derived). */
+  getOrphanedIds(): string[];
+}
+
 export interface MarkdownReaderProps {
   /** Raw markdown file content (frontmatter included). */
   content: string;
@@ -298,6 +318,10 @@ export interface MarkdownReaderProps {
    * persistence). Markdown TILES pass true; chat-surface readers never see it.
    */
   annotationsEnabled?: boolean;
+  /** Reports the current annotation count (drives the tile header's Send N). */
+  onAnnotationsCountChange?: (count: number) => void;
+  /** PR6 send-flow handle (see MarkdownAnnotationsSendHandle). */
+  annotationsSendRef?: Ref<MarkdownAnnotationsSendHandle | null>;
 }
 
 interface MarkdownReaderBodyProps {
@@ -370,6 +394,8 @@ export const MarkdownReader = memo(function MarkdownReader({
   path,
   allowLocalTargets = true,
   annotationsEnabled = false,
+  onAnnotationsCountChange,
+  annotationsSendRef,
 }: MarkdownReaderProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -387,6 +413,30 @@ export const MarkdownReader = memo(function MarkdownReader({
   // chat-surface readers. The annotation UI (AnnotationLayer: toolbar/
   // popover/picker/sidebar) consumes this API.
   const annotationsApi = useAnnotations({ rootRef, content, path, enabled: annotationsEnabled });
+
+  // Latest-api ref: the send handle below must read call-time state (the
+  // api's memo identity changes whenever annotations change).
+  const annotationsApiRef = useRef(annotationsApi);
+  annotationsApiRef.current = annotationsApi;
+
+  // Tile-header count bridge. Reports 0 on unmount so a tile whose reader
+  // disappears (file emptied / errored) never shows a stale Send N.
+  useEffect(() => {
+    onAnnotationsCountChange?.(annotationsApi.annotations.length);
+  }, [annotationsApi.annotations, onAnnotationsCountChange]);
+  useEffect(() => {
+    return () => {
+      onAnnotationsCountChange?.(0);
+    };
+  }, [onAnnotationsCountChange]);
+
+  useImperativeHandle(annotationsSendRef, () => ({
+    flushPendingSave: () => annotationsApiRef.current.flushPendingSave(),
+    isHydrated: () => annotationsApiRef.current.isHydrated(),
+    applyDeliveredClear: (generationFloor: number) =>
+      annotationsApiRef.current.applyDeliveredClear(generationFloor),
+    getOrphanedIds: () => Array.from(annotationsApiRef.current.orphans.keys()),
+  }), []);
 
   return (
     <div

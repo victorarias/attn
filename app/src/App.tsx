@@ -530,6 +530,7 @@ function App() {
     getMarkdownAnnotations,
     saveMarkdownAnnotations,
     clearMarkdownAnnotations,
+    submitMarkdownAnnotations,
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,
@@ -655,11 +656,12 @@ function App() {
       getMarkdownAnnotations,
       saveMarkdownAnnotations,
       clearMarkdownAnnotations,
+      submitMarkdownAnnotations,
     });
     return () => {
       setMarkdownAnnotationsTransport(null);
     };
-  }, [getMarkdownAnnotations, saveMarkdownAnnotations, clearMarkdownAnnotations]);
+  }, [getMarkdownAnnotations, saveMarkdownAnnotations, clearMarkdownAnnotations, submitMarkdownAnnotations]);
 
   // Seed the notifications unread badge once the socket is up. The
   // notifications_updated broadcast keeps it live thereafter; this one read
@@ -3562,8 +3564,8 @@ sendFetchPRDetails,
                     onUndockTile={(tileId) => {
                       handleCloseTile(workspace.id, tileId);
                     }}
-                    onUpdateTile={(tileId, tileParams) => (
-                      sendWorkspaceUpdateTile(workspace.id, tileId, tileParams)
+                    onUpdateTile={(tileId, tileParams, tileSessionId) => (
+                      sendWorkspaceUpdateTile(workspace.id, tileId, tileParams, tileSessionId)
                     )}
                     onMoveLeaf={(leafId, anchorId, edge, ratio) => {
                       const targetWorkspaceId = activeWorkspaceIdRef.current || workspace.id;

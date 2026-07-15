@@ -29,6 +29,12 @@ export interface Annotation {
   quickLabelId?: string;
   /** Tip text snapshotted at creation so the payload survives label-set edits. */
   quickLabelTip?: string;
+  /**
+   * Display text ("emoji text", e.g. "👍 Looks good") snapshotted at creation.
+   * The daemon-side payload formatter renders this; it falls back to the raw
+   * quickLabelId for older drafts that lack it (mirroring the frontend rule).
+   */
+  quickLabelText?: string;
   createdAt: number; // epoch ms
 }
 
@@ -68,6 +74,7 @@ export function annotationToWire(annotation: Annotation): WireAnnotation {
     ...(annotation.anchor ? { anchor: anchorToWire(annotation.anchor) } : {}),
     ...(annotation.quickLabelId !== undefined ? { quick_label_id: annotation.quickLabelId } : {}),
     ...(annotation.quickLabelTip !== undefined ? { quick_label_tip: annotation.quickLabelTip } : {}),
+    ...(annotation.quickLabelText !== undefined ? { quick_label_text: annotation.quickLabelText } : {}),
     created_at: annotation.createdAt,
   };
 }
@@ -95,6 +102,7 @@ export function annotationFromWire(wire: WireAnnotation): Annotation | null {
     ...(wire.anchor ? { anchor: anchorFromWire(wire.anchor) } : {}),
     ...(typeof wire.quick_label_id === 'string' ? { quickLabelId: wire.quick_label_id } : {}),
     ...(typeof wire.quick_label_tip === 'string' ? { quickLabelTip: wire.quick_label_tip } : {}),
+    ...(typeof wire.quick_label_text === 'string' ? { quickLabelText: wire.quick_label_text } : {}),
     createdAt: wire.created_at,
   };
 }

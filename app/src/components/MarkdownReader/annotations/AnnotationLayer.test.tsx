@@ -69,6 +69,7 @@ function makeTransport() {
       calls.clear.push(generation);
       return { generation };
     },
+    submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
   };
   return { transport, calls };
 }

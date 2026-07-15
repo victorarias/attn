@@ -40,7 +40,7 @@ const REGISTRY_ORDER = Object.keys(SHORTCUTS) as ShortcutId[];
 
 function groupedByCategory(): Record<ShortcutCategory, ShortcutId[]> {
   const groups = {
-    sessions: [], panes: [], review: [], app: [],
+    sessions: [], panes: [], markdown: [], review: [], app: [],
   } as Record<ShortcutCategory, ShortcutId[]>;
   for (const id of REGISTRY_ORDER) {
     groups[SHORTCUT_META[id].category].push(id);
