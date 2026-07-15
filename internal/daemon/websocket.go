@@ -1096,6 +1096,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleMarkdownAnnotationsSave(client, msg.(*protocol.MarkdownAnnotationsSaveMessage))
 	case protocol.CmdMarkdownAnnotationsClear:
 		d.handleMarkdownAnnotationsClear(client, msg.(*protocol.MarkdownAnnotationsClearMessage))
+	case protocol.CmdMarkdownAnnotationsSubmit:
+		d.handleMarkdownAnnotationsSubmit(client, msg.(*protocol.MarkdownAnnotationsSubmitMessage))
 	case protocol.CmdBrowserControl:
 		go d.handleRemoteBrowserControl(client, msg.(*protocol.BrowserControlMessage))
 	case protocol.CmdBrowserControlResult:
@@ -1243,6 +1245,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 	case protocol.CmdOpenMarkdown:
 		if typed, ok := msg.(*protocol.OpenMarkdownMessage); ok {
 			return protocol.Deref(typed.SessionID)
+		}
+	case protocol.CmdMarkdownAnnotationsSubmit:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsSubmitMessage); ok {
+			return typed.TargetSessionID
 		}
 	}
 	return ""

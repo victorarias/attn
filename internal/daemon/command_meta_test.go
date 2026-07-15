@@ -70,6 +70,10 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdWorkspaceLayoutUndockTile,
 		protocol.CmdWorkspaceLayoutUpdateTile,
 		protocol.CmdWorkspaceTileContentGet,
+		protocol.CmdMarkdownAnnotationsGet,
+		protocol.CmdMarkdownAnnotationsSave,
+		protocol.CmdMarkdownAnnotationsClear,
+		protocol.CmdMarkdownAnnotationsSubmit,
 		protocol.CmdRenameSession,
 		protocol.CmdRenameWorkspace,
 		protocol.CmdSetChiefOfStaff,
@@ -166,6 +170,18 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			cmd:  protocol.CmdOpenMarkdown,
 			msg:  &protocol.OpenMarkdownMessage{Path: "/tmp/notes.md"},
 			want: "",
+		},
+		{
+			// Hub→remote regression: Submit's draft-read/format/deliver all run
+			// on whichever daemon handles the command, so it must route by the
+			// SAME target_session_id it delivers to — otherwise a hub would
+			// format-and-clear a draft it never wrote (Get/Save/Clear route by
+			// workspace_id) and try to deliver against a session absent from
+			// its own local store.
+			name: "markdown_annotations_submit",
+			cmd:  protocol.CmdMarkdownAnnotationsSubmit,
+			msg:  &protocol.MarkdownAnnotationsSubmitMessage{Path: "/tmp/notes.md", TargetSessionID: "sess-md-submit"},
+			want: "sess-md-submit",
 		},
 	}
 

@@ -25,6 +25,21 @@
 
 import type { WireAnnotation } from './types';
 
+/**
+ * Result of a submit (send-to-session) request.
+ * - `delivered`: payload typed into the session; drafts tombstone-cleared
+ *   daemon-side (`generation` is the new floor for the client's counter). May
+ *   still carry `error` when delivery succeeded but the draft clear failed.
+ * - `skipped_pending_approval`: target session is waiting on an approval
+ *   prompt; nothing was typed, drafts kept.
+ * A `status: "error"` result REJECTS the promise instead (drafts kept).
+ */
+export interface MarkdownAnnotationsSubmitResult {
+  status: string;
+  generation?: number;
+  error?: string;
+}
+
 export interface MarkdownAnnotationsTransport {
   getMarkdownAnnotations(
     path: string,
@@ -41,6 +56,19 @@ export interface MarkdownAnnotationsTransport {
     workspaceId: string,
     generation: number,
   ): Promise<{ generation: number }>;
+  /**
+   * Format the persisted draft for `path` and deliver it into
+   * `targetSessionId`'s PTY (PR6 send flow). Routed by the target session
+   * (not the workspace): the daemon owning the session also owns the draft
+   * store the submit clears. `orphanedIds` carries the client-derived orphan
+   * set (non-persisted) so the formatter can label those items
+   * "(~line N, moved)".
+   */
+  submitMarkdownAnnotations(
+    path: string,
+    targetSessionId: string,
+    orphanedIds: string[],
+  ): Promise<MarkdownAnnotationsSubmitResult>;
 }
 
 let currentTransport: MarkdownAnnotationsTransport | null = null;

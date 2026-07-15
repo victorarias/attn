@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '162';
+export const PROTOCOL_VERSION = '163';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -2180,6 +2180,34 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'markdown_annotations_submit_result': {
+            // Submit routes by target session, not workspace; the send side
+            // keys its pending entry with workspaceId '' so mirror that here
+            // (daemon echoes workspace_id '' or omits it).
+            const key = `submit:${data.workspace_id ?? ''}:${data.path}`;
+            const pending = mdAnnotationsPendingRef.current.get(key);
+            if (!pending || pending.requestId !== data.request_id) {
+              break; // superseded or timed out — drop the late result
+            }
+            mdAnnotationsPendingRef.current.delete(key);
+            if (data.success || data.status === 'skipped_pending_approval') {
+              // skipped_pending_approval resolves (success:false) so the UI
+              // can message it distinctly from a hard failure; a delivered
+              // result may still carry `error` (delivery succeeded, draft
+              // clear failed) — never re-deliver in that case.
+              pending.resolve({
+                status: typeof data.status === 'string' && data.status !== ''
+                  ? data.status
+                  : 'delivered',
+                ...(typeof data.generation === 'number' ? { generation: data.generation } : {}),
+                ...(typeof data.error === 'string' && data.error !== '' ? { error: data.error } : {}),
+              });
+            } else {
+              pending.reject(new Error(data.error || 'markdown_annotations_submit failed'));
+            }
+            break;
+          }
+
           case 'pty_output': {
             // Local sessions arrive as binary frames instead (the daemon honors
             // our binary_pty_output capability); this JSON event remains for
@@ -3177,7 +3205,15 @@ export function useDaemonSocket({
     );
   }, [sendWorkspaceCommand]);
 
-  const sendWorkspaceUpdateTile = useCallback((workspaceId: string, tileId: string, tileParams: string) => {
+  // tileSessionId, when set, rebinds the tile's session binding (markdown
+  // tiles' Send target) — tile_params keeps its existing meaning and is sent
+  // unchanged alongside a retarget.
+  const sendWorkspaceUpdateTile = useCallback((
+    workspaceId: string,
+    tileId: string,
+    tileParams: string,
+    tileSessionId?: string,
+  ) => {
     const requestId = nextRequestID('workspace_update_tile');
     return sendWorkspaceCommand(
       'workspace_layout_update_tile',
@@ -3187,6 +3223,7 @@ export function useDaemonSocket({
         workspace_id: workspaceId,
         tile_id: tileId,
         tile_params: tileParams,
+        ...(tileSessionId ? { tile_session_id: tileSessionId } : {}),
         request_id: requestId,
       },
       tileId,
@@ -3455,7 +3492,7 @@ export function useDaemonSocket({
   // matched by request_id so a late result for a superseded request can
   // never settle its successor.
   const sendMarkdownAnnotationsCommand = useCallback(<T,>(
-    op: 'get' | 'save' | 'clear',
+    op: 'get' | 'save' | 'clear' | 'submit',
     path: string,
     workspaceId: string,
     extra: Record<string, unknown>,
@@ -3524,6 +3561,23 @@ export function useDaemonSocket({
   const clearMarkdownAnnotations = useCallback((path: string, workspaceId: string, generation: number) =>
     sendMarkdownAnnotationsCommand<{ generation: number }>(
       'clear', path, workspaceId, { generation },
+    ), [sendMarkdownAnnotationsCommand]);
+
+  // PR6 send flow: format the persisted draft and type it into the target
+  // session's PTY. Pending key `submit:<path>` — a second Send for the same
+  // path supersedes the first; the doorbell is one PTY write, so the shared
+  // 10s timeout is ample. Resolves `{status, generation?, error?}` for both
+  // `delivered` and `skipped_pending_approval`; rejects on `status:"error"`.
+  const submitMarkdownAnnotations = useCallback((
+    path: string,
+    targetSessionId: string,
+    orphanedIds: string[],
+  ) =>
+    // Submit routes by the TARGET SESSION (the daemon owning the session also
+    // owns the draft store), so it carries no workspace; '' keys the pending
+    // map and the echoed result the same way.
+    sendMarkdownAnnotationsCommand<{ status: string; generation?: number; error?: string }>(
+      'submit', path, '', { target_session_id: targetSessionId, orphaned_ids: orphanedIds },
     ), [sendMarkdownAnnotationsCommand]);
 
   // Mute a PR with optimistic update
@@ -5072,6 +5126,7 @@ export function useDaemonSocket({
     getMarkdownAnnotations,
     saveMarkdownAnnotations,
     clearMarkdownAnnotations,
+    submitMarkdownAnnotations,
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,

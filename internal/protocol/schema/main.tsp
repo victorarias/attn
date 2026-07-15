@@ -1601,6 +1601,10 @@ model WorkspaceLayoutUpdateTileMessage {
   workspace_id: string;
   tile_id: string;
   tile_params: string;
+  // When present, rebind the tile's session binding (markdown tiles' Send
+  // target). tile_params keeps its existing meaning; markdown tiles accept a
+  // retarget-only update (their params stay immutable).
+  tile_session_id?: string;
   request_id: string;
 }
 
@@ -1711,6 +1715,10 @@ model MarkdownAnnotation {
   anchor?: MarkdownAnnotationAnchor;
   quick_label_id?: string;
   quick_label_tip?: string;
+  // Display text of the quick label snapshotted at creation, e.g.
+  // "👍 Looks good" (emoji + label text). Optional: older drafts lack it;
+  // the payload formatter falls back to quick_label_id.
+  quick_label_text?: string;
   created_at: safeint; // epoch ms (int64 would codegen as string)
 }
 
@@ -1793,6 +1801,38 @@ model MarkdownAnnotationsClearResultMessage {
   error?: string;
   path: string;
   generation: int32;
+}
+
+// Format the persisted annotation draft for `path` into the feedback payload
+// and deliver it into target_session_id's PTY (bracketed paste + Enter).
+// Drafts are tombstone-cleared ONLY on successful delivery.
+model MarkdownAnnotationsSubmitMessage {
+  cmd: "markdown_annotations_submit";
+  path: string;
+  target_session_id: string;
+  // Annotation ids the client currently shows as orphaned (anchor no longer
+  // resolves). Orphanhood is a client-derived, non-persisted property; the
+  // formatter labels these "(~line N, moved)".
+  orphaned_ids?: string[];
+  request_id: string;
+}
+
+// Result of markdown_annotations_submit.
+// status: "delivered" — payload typed into the session; drafts cleared.
+//         "skipped_pending_approval" — target is waiting on an approval
+//           prompt; nothing was typed, drafts kept.
+//         "error" — see error; drafts kept.
+// generation: new generation floor after the clear (delivered only) so the
+// client can seed its counter without a round-trip.
+model MarkdownAnnotationsSubmitResultMessage {
+  event: "markdown_annotations_submit_result";
+  request_id: string;
+  path: string;
+  target_session_id: string;
+  success: boolean;
+  status: string;
+  error?: string;
+  generation?: int32;
 }
 
 // Open or retarget the docked browser tile. Sent by `attn browser open`.
@@ -3103,4 +3143,5 @@ alias DaemonEvent =
   | OpenMarkdownResultMessage
   | MarkdownAnnotationsGetResultMessage
   | MarkdownAnnotationsSaveResultMessage
-  | MarkdownAnnotationsClearResultMessage;
+  | MarkdownAnnotationsClearResultMessage
+  | MarkdownAnnotationsSubmitResultMessage;

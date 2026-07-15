@@ -583,10 +583,43 @@ func (d *Daemon) handleWorkspaceLayoutUpdateTile(client *wsClient, msg *protocol
 		)
 		return
 	}
+	// Session retarget (markdown tiles' Send target): when tile_session_id is
+	// present, rebind the tile's session binding via the same primitive the
+	// open-markdown reuse path uses (persists + broadcasts the layout).
+	if retarget := strings.TrimSpace(protocol.Deref(msg.TileSessionID)); retarget != "" {
+		// Never persist a binding to a session the daemon does not know: a
+		// racing client (target closed between render and click) would
+		// otherwise write a dangling id into the layout.
+		if d.store.Get(retarget) == nil {
+			d.sendWorkspaceLayoutTileActionResultWithRequest(client, protocol.CmdWorkspaceLayoutUpdateTile, msg.WorkspaceID, tileID, requestID, fmt.Errorf("session not found: %s", retarget))
+			return
+		}
+		if err := d.rebindTileSession(msg.WorkspaceID, tileID, retarget); err != nil {
+			d.sendWorkspaceLayoutTileActionResultWithRequest(client, protocol.CmdWorkspaceLayoutUpdateTile, msg.WorkspaceID, tileID, requestID, err)
+			return
+		}
+		// Markdown tile params are immutable (assigned once at dock time), so
+		// a retarget-only update stops here; the client sends the current
+		// params unchanged alongside the retarget.
+		if tileKind == string(workspacelayout.TileKindMarkdown) {
+			d.sendWorkspaceLayoutTileActionResultWithRequest(client, protocol.CmdWorkspaceLayoutUpdateTile, msg.WorkspaceID, tileID, requestID, nil)
+			return
+		}
+		// Non-markdown kinds fall through to the params-update path below,
+		// which saves a whole normalized snapshot — re-fetch it so the save
+		// does not clobber the binding rebindTileSession just persisted (the
+		// snapshot above was captured BEFORE the rebind).
+		if snapshot, err = d.ensureWorkspaceLayout(msg.WorkspaceID); err != nil {
+			d.sendWorkspaceLayoutTileActionResultWithRequest(client, protocol.CmdWorkspaceLayoutUpdateTile, msg.WorkspaceID, tileID, requestID, err)
+			return
+		}
+	}
+
 	// Only tiles whose content is client-retargetable accept param updates.
 	// Browser tiles carry a validated URL; notebook tiles carry an opaque file
 	// path the Notebook surface resolves itself, so it passes through as-is.
-	// Markdown tiles are assigned once at dock time and never updated here.
+	// Markdown tiles are assigned once at dock time and never updated here
+	// (their session binding is, via tile_session_id above).
 	switch tileKind {
 	case string(workspacelayout.TileKindBrowser):
 		tileParams, err = validateBrowserURL(tileParams)

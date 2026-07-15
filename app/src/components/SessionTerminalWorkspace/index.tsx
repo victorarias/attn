@@ -174,7 +174,9 @@ interface SessionTerminalWorkspaceProps {
     ghostPos: { x: number; y: number } | null;
   } | null;
   onUndockTile?: (tileId: string) => void;
-  onUpdateTile?: (tileId: string, tileParams: string) => Promise<unknown> | void;
+  // tileSessionId, when set, rebinds the tile's session binding (markdown
+  // tiles' Send target) alongside the (unchanged) tile_params.
+  onUpdateTile?: (tileId: string, tileParams: string, tileSessionId?: string) => Promise<unknown> | void;
   tileContents?: Record<string, TileContentState>;
   allowLocalTileTargets?: boolean;
   onRequestTileContent?: (workspaceId: string, tileId: string) => void;
@@ -281,6 +283,27 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       () => new Map(agentPanes.map((pane) => [pane.id, pane])),
       [agentPanes],
     );
+
+    // Send-target options for markdown tiles: the workspace's agent sessions
+    // (deduped — a session can own several panes), labeled from the session
+    // list with the pane title as fallback.
+    const tileSessionOptions = useMemo(() => {
+      const seen = new Set<string>();
+      const options: { sessionId: string; label: string; state?: string }[] = [];
+      for (const pane of agentPanes) {
+        if (seen.has(pane.sessionId)) {
+          continue;
+        }
+        seen.add(pane.sessionId);
+        const session = sessionById.get(pane.sessionId);
+        options.push({
+          sessionId: pane.sessionId,
+          label: session?.label || pane.title || pane.sessionId,
+          ...(session?.state ? { state: session.state } : {}),
+        });
+      }
+      return options;
+    }, [agentPanes, sessionById]);
 
     // Docked tiles keyed by tile id, walked from the authoritative layout tree.
     const tileLeafById = useMemo(() => {
@@ -961,8 +984,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 && renamePane === null
                 && effectiveDraggingLeafId === null
               }
+              workspaceSessions={tileSessionOptions}
               onClose={() => onUndockTile?.(tileLeaf.tileId)}
               onUpdateParams={(tileParams) => onUpdateTile?.(tileLeaf.tileId, tileParams)}
+              onRetargetTile={(sessionId) => (
+                onUpdateTile?.(tileLeaf.tileId, tileLeaf.tileParams ?? '', sessionId)
+              )}
               onHeaderPointerDown={(event) => beginLeafDrag(tileLeaf.tileId, event)}
               onRequestContent={onRequestTileContent ?? (() => {})}
               bodyRef={tileLeaf.tileId === firstTileId ? firstTileBodyRef : undefined}
@@ -980,6 +1007,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onUndockTile,
       onUpdateTile,
       tileLeafById,
+      tileSessionOptions,
       firstTileId,
       tileContents,
       allowLocalTileTargets,

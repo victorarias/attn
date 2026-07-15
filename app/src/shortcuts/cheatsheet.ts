@@ -64,6 +64,16 @@ export function buildCheatsheet(): CheatsheetCategory[] {
       ],
     },
     {
+      title: 'Markdown & Annotations',
+      rows: [
+        {
+          label: 'Send annotations to session',
+          combos: [fromId('markdown.sendAnnotations')],
+          note: 'When a markdown tile has focus and annotations exist.',
+        },
+      ],
+    },
+    {
       title: 'Review & Git',
       rows: [
         { label: 'PRs drawer', combos: [fromId('dock.attention')] },

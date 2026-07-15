@@ -115,6 +115,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdMarkdownAnnotationsGet:                commandMetadata(ScopeSession, true, true),
 	protocol.CmdMarkdownAnnotationsSave:               commandMetadata(ScopeSession, true, true),
 	protocol.CmdMarkdownAnnotationsClear:              commandMetadata(ScopeSession, true, true),
+	protocol.CmdMarkdownAnnotationsSubmit:             commandMetadata(ScopeSession, true, true),
 	protocol.CmdBrowserControl:                        commandMetadata(ScopeSession, true, true),
 	protocol.CmdBrowserControlResult:                  commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdRenameSession:                         commandMetadata(ScopeSession, false, true),

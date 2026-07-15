@@ -65,6 +65,75 @@
   border-color: var(--color-border-focus);
 }
 
+/* Markdown annotation send controls (PR6): status + session picker + Send. */
+.workspace-dock-tile-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  cursor: default;
+}
+
+.workspace-dock-tile-send-status {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.workspace-dock-tile-send-status--ok {
+  color: var(--color-status-success, #4ade80);
+}
+
+.workspace-dock-tile-send-status--warn {
+  color: var(--color-status-warning, #facc15);
+}
+
+.workspace-dock-tile-send-status--error {
+  color: var(--color-status-error, #f87171);
+}
+
+.workspace-dock-tile-session-picker {
+  height: 24px;
+  max-width: 160px;
+  padding: 2px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-editor);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  outline: none;
+}
+
+.workspace-dock-tile-session-picker:focus {
+  border-color: var(--color-border-focus);
+}
+
+.workspace-dock-tile-send-button {
+  height: 24px;
+  padding: 2px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-button);
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-dock-tile-send-button:hover:not(:disabled) {
+  border-color: var(--color-border-focus);
+}
+
+.workspace-dock-tile-send-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .workspace-dock-tile-actions {
   display: inline-flex;
   align-items: center;

@@ -786,6 +786,7 @@ func forwardsRawEvent(event string) bool {
 		protocol.EventMarkdownAnnotationsGetResult,
 		protocol.EventMarkdownAnnotationsSaveResult,
 		protocol.EventMarkdownAnnotationsClearResult,
+		protocol.EventMarkdownAnnotationsSubmitResult,
 		protocol.EventCommandError:
 		return true
 	default:

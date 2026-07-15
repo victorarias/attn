@@ -86,6 +86,7 @@ function makeTransport(seed: { annotations: WireAnnotation[]; generation: number
       calls.clear.push({ path, generation });
       return { generation };
     },
+    submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
   };
   return { transport, calls, state };
 }
@@ -398,6 +399,7 @@ describe('useAnnotations', () => {
         return { stale: false };
       },
       clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
+      submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     const { container, apiRef } = await mount(transport);
 
@@ -451,6 +453,9 @@ describe('useAnnotations', () => {
       type: 'comment',
       quickLabelId: label.id,
       quickLabelTip: label.tip,
+      // Display text snapshotted at creation — the PR6 daemon formatter
+      // renders this without needing the frontend label table.
+      quickLabelText: `${label.emoji} ${label.text}`,
     });
     expect(quick!.text).toBeUndefined(); // structured, never baked into text
 
@@ -576,6 +581,7 @@ describe('useAnnotations', () => {
         return { stale: false };
       },
       clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
+      submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { container, apiRef } = await mount(transport);
@@ -629,6 +635,7 @@ describe('useAnnotations', () => {
         return { stale: false };
       },
       clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
+      submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { container, apiRef } = await mount(transport);
@@ -671,6 +678,7 @@ describe('useAnnotations', () => {
         return { stale: false };
       },
       clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
+      submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { container, apiRef } = await mount(transport);
@@ -718,6 +726,196 @@ describe('useAnnotations', () => {
     expect(getMarkdownAnnotationsAutomationHandle()).toBe(b);
     offB();
     expect(getMarkdownAnnotationsAutomationHandle()).toBeNull();
+  });
+
+  // ---- PR6 send-flow primitives (E16/E17) --------------------------------
+
+  it('flushPendingSave persists an armed debounced edit immediately (E16)', async () => {
+    const { transport, calls } = makeTransport({ annotations: [], generation: 0 });
+    const { container, apiRef } = await mount(transport);
+
+    act(() => {
+      apiRef.current!.handleSelectionChange(selectNeedle(container, 'target words'));
+      apiRef.current!.submitComment('last keystroke');
+    });
+    expect(calls.save).toHaveLength(0); // debounce armed, not fired yet
+
+    await act(async () => {
+      await apiRef.current!.flushPendingSave();
+    });
+    expect(calls.save).toHaveLength(1);
+    expect(calls.save[0].annotations[0].text).toBe('last keystroke');
+
+    // Nothing pending: resolves as a no-op, no duplicate save.
+    await act(async () => {
+      await apiRef.current!.flushPendingSave();
+    });
+    expect(calls.save).toHaveLength(1);
+  });
+
+  it('applyDeliveredClear empties locally without a daemon clear and seeds the floor (E16)', async () => {
+    const { transport, calls } = makeTransport({
+      annotations: [storedAnnotation('target words')],
+      generation: 5,
+    });
+    const { container, apiRef } = await mount(transport);
+    expect(apiRef.current!.annotations).toHaveLength(1);
+
+    act(() => {
+      apiRef.current!.applyDeliveredClear(9);
+    });
+    expect(apiRef.current!.annotations).toHaveLength(0);
+    expect(container.querySelector('[data-md-mark]')).toBeNull();
+    // Local-only mirror: the daemon already tombstoned at delivery time.
+    expect(calls.clear).toHaveLength(0);
+    expect(calls.save).toHaveLength(0);
+
+    // The next edit's save counts up from the delivered floor, not the old
+    // hydrated generation.
+    act(() => {
+      apiRef.current!.handleSelectionChange(selectNeedle(container, 'plain prose'));
+      apiRef.current!.submitComment('after send');
+    });
+    await advanceDebounce();
+    expect(calls.save).toHaveLength(1);
+    expect(calls.save[0].generation).toBe(10);
+  });
+
+  it('a straggler stale save after a delivered clear cannot resurrect the draft (E17)', async () => {
+    // Hold the save's resolution so applyDeliveredClear lands mid-flight —
+    // the debounced-save-races-past-Send scenario.
+    let resolveSave: ((r: { stale: boolean }) => void) | null = null;
+    const calls = { get: 0 };
+    const transport: MarkdownAnnotationsTransport = {
+      getMarkdownAnnotations: async () => {
+        calls.get += 1;
+        // Post-tombstone the daemon serves an empty draft.
+        return { annotations: [], generation: calls.get === 1 ? 0 : 4 };
+      },
+      saveMarkdownAnnotations: () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+      clearMarkdownAnnotations: async (_path, _w, generation) => ({ generation }),
+      submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
+    };
+    const { container, apiRef } = await mount(transport);
+
+    act(() => {
+      apiRef.current!.handleSelectionChange(selectNeedle(container, 'target words'));
+      apiRef.current!.submitComment('raced comment');
+    });
+    await advanceDebounce(); // save is now in flight, unresolved
+    expect(resolveSave).not.toBeNull();
+
+    act(() => {
+      apiRef.current!.applyDeliveredClear(3); // Send delivered while the save raced
+    });
+    expect(apiRef.current!.annotations).toHaveLength(0);
+
+    // The daemon tombstoned past the straggler's generation → stale. The
+    // stale path re-hydrates, which returns the empty post-clear draft.
+    await act(async () => {
+      resolveSave!({ stale: true });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiRef.current!.annotations).toHaveLength(0); // no resurrection
+    expect(container.querySelector('[data-md-mark]')).toBeNull();
+  });
+
+  it('flushPendingSave awaits a save that already left the debounce window', async () => {
+    // The debounce fired and the save request is mid-round-trip: a Send in
+    // that window must wait for it, or the daemon reads the draft WITHOUT the
+    // edit and the delivered clear tombstones the late save undelivered.
+    let resolveSave: ((r: { stale: boolean }) => void) | null = null;
+    const transport: MarkdownAnnotationsTransport = {
+      getMarkdownAnnotations: async () => ({ annotations: [], generation: 0 }),
+      saveMarkdownAnnotations: () =>
+        new Promise((resolve) => {
+          resolveSave = resolve;
+        }),
+      clearMarkdownAnnotations: async (_path, _w, generation) => ({ generation }),
+      submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
+    };
+    const { container, apiRef } = await mount(transport);
+
+    act(() => {
+      apiRef.current!.handleSelectionChange(selectNeedle(container, 'target words'));
+      apiRef.current!.submitComment('mid-flight edit');
+    });
+    await advanceDebounce(); // save is now on the wire, unresolved
+    expect(resolveSave).not.toBeNull();
+
+    let flushed = false;
+    await act(async () => {
+      void apiRef.current!.flushPendingSave().then(() => {
+        flushed = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(flushed).toBe(false); // still awaiting the in-flight save
+
+    await act(async () => {
+      resolveSave!({ stale: false });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(flushed).toBe(true);
+  });
+
+  it('applyDeliveredClear marks the hook hydrated and stops the failed-hydrate retry loop', async () => {
+    // Hydrate fails → saves are suppressed while the user can still annotate.
+    // A delivered Send's clear IS authoritative daemon state, so it must
+    // unblock persistence (and cancel the retry), or every later annotation
+    // is silently never saved for the life of the tile.
+    const calls = { get: 0, save: [] as SaveCall[] };
+    const transport: MarkdownAnnotationsTransport = {
+      getMarkdownAnnotations: async () => {
+        calls.get += 1;
+        throw new Error('daemon down');
+      },
+      saveMarkdownAnnotations: async (path, _w, annotations, generation) => {
+        calls.save.push({ path, annotations, generation });
+        return { stale: false };
+      },
+      clearMarkdownAnnotations: async (_path, _w, generation) => ({ generation }),
+      submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
+    };
+    const { container, apiRef } = await mount(transport);
+    expect(calls.get).toBe(1);
+    expect(apiRef.current!.isHydrated()).toBe(false);
+
+    // Annotating still works locally, but the save is suppressed (unhydrated).
+    act(() => {
+      apiRef.current!.handleSelectionChange(selectNeedle(container, 'target words'));
+      apiRef.current!.submitComment('pre-send note');
+    });
+    await advanceDebounce();
+    expect(calls.save).toHaveLength(0);
+
+    act(() => {
+      apiRef.current!.applyDeliveredClear(5);
+    });
+    expect(apiRef.current!.isHydrated()).toBe(true);
+
+    // The failed-hydrate retry was cancelled: no further get fires.
+    await act(async () => {
+      vi.advanceTimersByTime(ANNOTATION_HYDRATE_RETRY_MS * 2);
+    });
+    await flush();
+    expect(calls.get).toBe(1);
+
+    // Persistence is unblocked and counts up from the delivered floor.
+    act(() => {
+      apiRef.current!.handleSelectionChange(selectNeedle(container, 'plain prose'));
+      apiRef.current!.submitComment('post-send note');
+    });
+    await advanceDebounce();
+    expect(calls.save).toHaveLength(1);
+    expect(calls.save[0].generation).toBe(6);
   });
 
   it('works local-only with a null transport (no daemon socket)', async () => {
