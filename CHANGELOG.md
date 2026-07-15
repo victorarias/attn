@@ -8,6 +8,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-15]
 
+### Changed
+- **Markdown tiles now render documents on a proper reading surface.** Files open on a centered card with book-quality typography, syntax-highlighted code blocks with a hover copy button, clickable heading anchors that scroll smoothly within the tile, and a metadata card for YAML frontmatter. Dangerous links (`javascript:`, `data:`) render as plain text instead of being clickable.
+
 ### Fixed
 - **Commands sent to remote (SSH) endpoints work again.** The hub's connection to a remote endpoint never introduced itself to the remote daemon, which therefore rejected every command forwarded over it — registering workspaces, spawning sessions, and other remote actions failed and dropped the connection. The hub now performs the required handshake as soon as it connects.
 
