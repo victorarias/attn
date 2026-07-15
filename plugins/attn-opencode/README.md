@@ -2,9 +2,11 @@
 
 This installable plugin runs an OpenCode TUI in an attn-owned PTY while the
 plugin uses OpenCode's loopback HTTP/SSE server to create and monitor the
-linked native session. It requires OpenCode `1.17.16` or `1.17.18`; versions
-outside that contract-tested set stay visible as an unhealthy plugin and do not
-register the `opencode` agent.
+linked native session. It requires a stable OpenCode release at or above
+`1.17.16`; older, malformed, and prerelease versions stay visible as an
+unhealthy plugin and do not register the `opencode` agent. Newer stable releases
+are attempted against the server contract and surface the specific failing API
+through degraded health if that contract has changed.
 
 Install it into a non-production attn profile while developing:
 

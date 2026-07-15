@@ -11,7 +11,9 @@ import {
   type Report,
   type RunRecord,
   type SessionClosedParams,
-  supportedOpenCodeVersions,
+  compareVersion,
+  evaluateOpenCodeVersion,
+  minimumOpenCodeVersion,
 } from "./types";
 
 const startupDeadlineMs = 20_000;
@@ -206,8 +208,10 @@ export class OpenCodeDriver {
     }
     const metadata = parseMetadata(params.metadata);
     const pinned = metadata.pinned ?? Boolean(metadata.model && metadata.variant);
-    if (metadata.opencode_version !== version) {
-      throw new Error(`OpenCode resume requires version ${metadata.opencode_version}, found ${version}`);
+    const previousVersion = requireSupportedVersion(metadata.opencode_version, "persisted OpenCode version");
+    const installedVersion = requireSupportedVersion(version, "installed OpenCode version");
+    if (compareVersion(installedVersion, previousVersion) < 0) {
+      throw new Error(`OpenCode resume would downgrade ${previousVersion.raw} to ${installedVersion.raw}`);
     }
     if (params.model && (!pinned || !metadata.model || params.model !== metadata.model)) {
       throw new Error("OpenCode resume model pin does not match the persisted native session");
@@ -356,8 +360,8 @@ export class OpenCodeDriver {
         const password = await this.options.registry.password(record);
         const client = this.http(record.port, password);
         const health = await this.healthWithin(client, signal, deadline - Date.now());
-        if (health.version !== record.opencode_version || !supportedOpenCodeVersions.has(health.version)) {
-          throw new Error(`OpenCode server version ${health.version} is not the verified ${record.opencode_version}`);
+        if (health.version !== record.opencode_version) {
+          throw new Error(`OpenCode server version ${health.version} does not match this run's expected ${record.opencode_version}`);
         }
         return client;
       } catch (error) {
@@ -574,12 +578,9 @@ export class OpenCodeDriver {
   private async refreshAvailability(): Promise<void> {
     try {
       const result = await this.runCommand([this.executable, "--version"]);
-      const version = result.stdout.trim().replace(/^v/, "");
       if (result.exitCode !== 0) throw new Error(result.stderr.trim() || `exit ${result.exitCode}`);
-      if (!supportedOpenCodeVersions.has(version)) {
-        throw new Error(`version ${version || "(empty)"} is unsupported; verified versions: ${[...supportedOpenCodeVersions].join(", ")}`);
-      }
-      this.availability = { ok: true, executable: this.executable, version };
+      const version = requireSupportedVersion(result.stdout, "OpenCode executable version");
+      this.availability = { ok: true, executable: this.executable, version: version.raw };
     } catch (error) {
       this.availability = { ok: false, message: `OpenCode executable ${this.executable} is unavailable: ${safeError(error)}` };
     }
@@ -628,6 +629,17 @@ function parseMetadata(value: unknown): OpenCodeMetadata {
     throw new Error("OpenCode resume metadata is incomplete");
   }
   return result as OpenCodeMetadata;
+}
+
+function requireSupportedVersion(value: string, label: string) {
+  const compatibility = evaluateOpenCodeVersion(value);
+  if (compatibility.kind === "invalid") {
+    throw new Error(`${label} is invalid: ${compatibility.reason}`);
+  }
+  if (compatibility.kind === "too_old") {
+    throw new Error(`${label} ${compatibility.installed.raw} is unsupported; requires OpenCode >= ${minimumOpenCodeVersion.raw}`);
+  }
+  return compatibility.installed;
 }
 
 function requireText(value: string | undefined, label: string): string {
