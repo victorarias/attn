@@ -36,6 +36,7 @@ import { NotificationsPanel } from './components/NotificationsPanel';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { ChordLeaderHud } from './components/ChordLeaderHud';
 import { DaemonProvider } from './contexts/DaemonContext';
+import { setMarkdownAnnotationsTransport } from './components/MarkdownReader/annotations/transport';
 import { NotebookSurfaceProvider } from './contexts/NotebookSurfaceContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { KeybindingsProvider, useKeybindings } from './contexts/KeybindingsContext';
@@ -526,6 +527,9 @@ function App() {
   const {
     sendPRAction,
     getScreenSnapshot,
+    getMarkdownAnnotations,
+    saveMarkdownAnnotations,
+    clearMarkdownAnnotations,
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,
@@ -642,6 +646,20 @@ function App() {
 
   // Memoize clearGitStatus to prevent subscription effect from re-running
   const clearGitStatus = useCallback(() => setGitStatus(null), []);
+
+  // Register the markdown-annotation draft transport (module-level seam, the
+  // plannotator DraftTransport pattern): markdown tiles read it at call time
+  // instead of threading three helpers through the whole tile prop chain.
+  useEffect(() => {
+    setMarkdownAnnotationsTransport({
+      getMarkdownAnnotations,
+      saveMarkdownAnnotations,
+      clearMarkdownAnnotations,
+    });
+    return () => {
+      setMarkdownAnnotationsTransport(null);
+    };
+  }, [getMarkdownAnnotations, saveMarkdownAnnotations, clearMarkdownAnnotations]);
 
   // Seed the notifications unread badge once the socket is up. The
   // notifications_updated broadcast keeps it live thereafter; this one read

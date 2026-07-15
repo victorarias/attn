@@ -25,7 +25,8 @@ import rehypeProseTransforms from './proseTransforms';
 import rehypeSourceAnchors from './rehypeSourceAnchors';
 import { readerSanitizeSchema } from './sanitizeSchema';
 import { scrollToAnchor } from './scrollToAnchor';
-import { useAnchorSpike } from './anchoring/spike';
+import { AnnotationLayer } from './annotations/AnnotationLayer';
+import { useAnnotations } from './annotations/useAnnotations';
 import { tilePathBasename } from '../../utils/tilePresentation';
 import './MarkdownReader.css';
 
@@ -292,6 +293,11 @@ export interface MarkdownReaderProps {
   path: string;
   /** False for remote workspaces: local file links/images render blocked. */
   allowLocalTargets?: boolean;
+  /**
+   * Enables the annotation layer (selection → comment/redline, daemon draft
+   * persistence). Markdown TILES pass true; chat-surface readers never see it.
+   */
+  annotationsEnabled?: boolean;
 }
 
 interface MarkdownReaderBodyProps {
@@ -363,6 +369,7 @@ export const MarkdownReader = memo(function MarkdownReader({
   content,
   path,
   allowLocalTargets = true,
+  annotationsEnabled = false,
 }: MarkdownReaderProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
@@ -374,23 +381,30 @@ export const MarkdownReader = memo(function MarkdownReader({
   const handleLightboxClose = useCallback(() => {
     setLightbox(null);
   }, []);
-  // Paint-layer spike (PR4, deleted in PR5): lives OUTSIDE the memoized body
-  // so its content-keyed effect fires exactly when the body remounted — the
-  // same contract as the re-render gate. No-ops for documents without the
-  // spike marker token.
-  useAnchorSpike(rootRef, content);
+  // Annotation engine: lives OUTSIDE the memoized body so its content-keyed
+  // effect fires exactly when the body remounted — the same contract as the
+  // re-render gate. Disabled (no listeners, no paints, no daemon traffic) for
+  // chat-surface readers. The annotation UI (AnnotationLayer: toolbar/
+  // popover/picker/sidebar) consumes this API.
+  const annotationsApi = useAnnotations({ rootRef, content, path, enabled: annotationsEnabled });
 
   return (
-    <div className="md-reader" ref={rootRef}>
-      <div className="md-reader-wrap">
-        <MarkdownReaderBody
-          content={content}
-          path={path}
-          allowLocalTargets={allowLocalTargets}
-          rootRef={rootRef}
-          onImageClick={handleImageClick}
-        />
+    <div
+      className={`md-reader ${annotationsEnabled ? 'md-reader--annotating' : ''}`.trim()}
+      ref={rootRef}
+    >
+      <div className="md-reader-doc">
+        <div className="md-reader-wrap">
+          <MarkdownReaderBody
+            content={content}
+            path={path}
+            allowLocalTargets={allowLocalTargets}
+            rootRef={rootRef}
+            onImageClick={handleImageClick}
+          />
+        </div>
       </div>
+      {annotationsEnabled && <AnnotationLayer api={annotationsApi} rootRef={rootRef} path={path} />}
       {lightbox && (
         <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={handleLightboxClose} />
       )}

@@ -247,6 +247,7 @@ function MarkdownBody({ content, allowLocalTargets }: { content?: TileContentSta
       content={content.content}
       path={content.path}
       allowLocalTargets={allowLocalTargets}
+      annotationsEnabled
     />
   );
 }

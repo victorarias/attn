@@ -9,6 +9,10 @@ import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId, type Combo, isChord, resolveBinding } from '../shortcuts';
 import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid/gridAutomation';
+import {
+  getMarkdownAnnotationsAutomationHandle,
+  INACTIVE_MARKDOWN_ANNOTATIONS_STATE,
+} from '../components/MarkdownReader/annotations/annotationsAutomation';
 import { getSettingsAutomationHandle, INACTIVE_SETTINGS_STATE } from '../components/settingsAutomation';
 import { getTerminalPerfSnapshot } from '../utils/terminalPerf';
 import { readWarmWorkspaceLimit } from '../utils/terminalVirtualization';
@@ -1570,15 +1574,14 @@ export function useUiAutomationBridge({
         }
         return { dismissed: false };
       }
-      case 'markdown_get_anchor_spike_state': {
-        // PR4 anchor-paint spike (deleted with anchoring/spike.ts in PR5):
-        // read-only view of the spike registry so the harness can assert
-        // paint/rebase/orphan without screenshots-only evidence.
-        const spike = window.__attnAnchorSpike;
-        if (!spike) {
-          return { available: false, mode: 'none', anchors: [] };
-        }
-        return { available: true, ...spike.list() };
+      case 'markdown_get_annotations_state': {
+        // Read-only view of the markdown annotation engine (list incl. orphan
+        // flags, painter mode, generation) so the harness can assert
+        // paint/rebase/orphan/persistence without screenshots-only evidence.
+        return (
+          getMarkdownAnnotationsAutomationHandle()?.getState() ??
+          INACTIVE_MARKDOWN_ANNOTATIONS_STATE
+        );
       }
       case 'grid_get_state':
         return getGridAutomationHandle()?.getState() ?? INACTIVE_GRID_STATE;
