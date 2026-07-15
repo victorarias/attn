@@ -232,6 +232,14 @@ func TestCopilotSupportsInitialPrompt(t *testing.T) {
 	}
 }
 
+func TestCopilotBuildCommand_AlwaysDisablesMouse(t *testing.T) {
+	c := &Copilot{}
+	cmd := c.BuildCommand(SpawnOpts{Executable: "copilot"})
+	if !slices.Contains(cmd.Args, "--no-mouse") {
+		t.Fatalf("expected --no-mouse in args, got: %v", cmd.Args)
+	}
+}
+
 func TestCopilotBuildCommandInitialPrompt(t *testing.T) {
 	c := &Copilot{}
 	cmd := c.BuildCommand(SpawnOpts{
