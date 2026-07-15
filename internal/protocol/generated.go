@@ -1551,6 +1551,9 @@ type MarkdownAnnotation struct {
 	// QuickLabelID corresponds to the JSON schema field "quick_label_id".
 	QuickLabelID *string `json:"quick_label_id,omitempty,omitzero"`
 
+	// QuickLabelText corresponds to the JSON schema field "quick_label_text".
+	QuickLabelText *string `json:"quick_label_text,omitempty,omitzero"`
+
 	// QuickLabelTip corresponds to the JSON schema field "quick_label_tip".
 	QuickLabelTip *string `json:"quick_label_tip,omitempty,omitzero"`
 
@@ -1696,6 +1699,49 @@ type MarkdownAnnotationsSaveResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+}
+
+type MarkdownAnnotationsSubmitMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// OrphanedIds corresponds to the JSON schema field "orphaned_ids".
+	OrphanedIds []string `json:"orphaned_ids,omitempty,omitzero"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// TargetSessionID corresponds to the JSON schema field "target_session_id".
+	TargetSessionID string `json:"target_session_id"`
+}
+
+type MarkdownAnnotationsSubmitResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation *int `json:"generation,omitempty,omitzero"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// TargetSessionID corresponds to the JSON schema field "target_session_id".
+	TargetSessionID string `json:"target_session_id"`
 }
 
 type MergePRMessage struct {
@@ -5006,6 +5052,9 @@ type WorkspaceLayoutUpdateTileMessage struct {
 
 	// TileParams corresponds to the JSON schema field "tile_params".
 	TileParams string `json:"tile_params"`
+
+	// TileSessionID corresponds to the JSON schema field "tile_session_id".
+	TileSessionID *string `json:"tile_session_id,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`

@@ -131,7 +131,8 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 // semantic boundary before Enter (so the prompt submits instead of remaining in
 // the composer), while the single write keeps the approval-state fence atomic.
 // It is the shared primitive behind the chief-of-staff doorbells (notebook
-// activation, inbox nudge): a fixed trigger, never arbitrary streamed content.
+// activation, inbox nudge) and the markdown-annotation submit payload: always
+// a bounded, user-initiated single write — never arbitrary streamed content.
 func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 	d.doorbellMu.Lock()
 	defer d.doorbellMu.Unlock()

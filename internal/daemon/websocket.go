@@ -1096,6 +1096,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleMarkdownAnnotationsSave(client, msg.(*protocol.MarkdownAnnotationsSaveMessage))
 	case protocol.CmdMarkdownAnnotationsClear:
 		d.handleMarkdownAnnotationsClear(client, msg.(*protocol.MarkdownAnnotationsClearMessage))
+	case protocol.CmdMarkdownAnnotationsSubmit:
+		d.handleMarkdownAnnotationsSubmit(client, msg.(*protocol.MarkdownAnnotationsSubmitMessage))
 	case protocol.CmdBrowserControl:
 		go d.handleRemoteBrowserControl(client, msg.(*protocol.BrowserControlMessage))
 	case protocol.CmdBrowserControlResult:

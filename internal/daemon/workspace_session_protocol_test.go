@@ -553,6 +553,41 @@ func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 		t.Fatalf("markdown tile params = (%q, %v), want (%q, true)", params, ok, "/tmp/notes.md")
 	}
 
+	// Retargets only bind to sessions the daemon knows: an unknown id is
+	// rejected before anything is persisted.
+	d.store.Add(&protocol.Session{ID: "session-2", Label: "Two", WorkspaceID: workspaceID, Directory: cwd})
+	d.handleWorkspaceLayoutUpdateTile(client, &protocol.WorkspaceLayoutUpdateTileMessage{
+		Cmd:           protocol.CmdWorkspaceLayoutUpdateTile,
+		WorkspaceID:   workspaceID,
+		TileID:        "tile-md",
+		TileParams:    "/tmp/notes.md",
+		TileSessionID: protocol.Ptr("session-unknown"),
+		RequestID:     "request-retarget-unknown-session",
+	})
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutUpdateTile, workspaceID, "", "", "tile-md", "request-retarget-unknown-session", false)
+	if sessionID, ok := workspacelayout.TileSessionIDByID(d.store.GetWorkspaceLayout(workspaceID).Layout, "tile-md"); ok && sessionID == "session-unknown" {
+		t.Fatalf("dangling session binding persisted: %q", sessionID)
+	}
+
+	// A retarget-only update (tile_session_id set, params echoed unchanged)
+	// rebinds the markdown tile's session without touching its params.
+	d.handleWorkspaceLayoutUpdateTile(client, &protocol.WorkspaceLayoutUpdateTileMessage{
+		Cmd:           protocol.CmdWorkspaceLayoutUpdateTile,
+		WorkspaceID:   workspaceID,
+		TileID:        "tile-md",
+		TileParams:    "/tmp/notes.md",
+		TileSessionID: protocol.Ptr("session-2"),
+		RequestID:     "request-retarget-markdown",
+	})
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutUpdateTile, workspaceID, "", "", "tile-md", "request-retarget-markdown", true)
+	retargeted := d.store.GetWorkspaceLayout(workspaceID)
+	if sessionID, ok := workspacelayout.TileSessionIDByID(retargeted.Layout, "tile-md"); !ok || sessionID != "session-2" {
+		t.Fatalf("markdown tile session = (%q, %v), want (%q, true)", sessionID, ok, "session-2")
+	}
+	if params, ok := workspacelayout.TileParamsByID(retargeted.Layout, "tile-md"); !ok || params != "/tmp/notes.md" {
+		t.Fatalf("markdown tile params after retarget = (%q, %v), want unchanged %q", params, ok, "/tmp/notes.md")
+	}
+
 	if err := d.dockTile(workspaceID, "pane-2", "tile-browser", "browser", "https://example.com/", "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
 		t.Fatalf("dock browser tile: %v", err)
 	}
@@ -568,6 +603,26 @@ func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 	if params, ok := workspacelayout.TileParamsByID(updated.Layout, "tile-browser"); !ok || params != "https://example.com/docs" {
 		t.Fatalf("browser tile params = (%q, %v), want (%q, true)", params, ok, "https://example.com/docs")
 	}
+	// A combined retarget + params update on a non-markdown tile must persist
+	// BOTH: the params save works from a snapshot re-fetched after the rebind,
+	// so it cannot clobber the just-persisted session binding.
+	d.handleWorkspaceLayoutUpdateTile(client, &protocol.WorkspaceLayoutUpdateTileMessage{
+		Cmd:           protocol.CmdWorkspaceLayoutUpdateTile,
+		WorkspaceID:   workspaceID,
+		TileID:        "tile-browser",
+		TileParams:    "https://example.com/combined",
+		TileSessionID: protocol.Ptr("session-2"),
+		RequestID:     "request-retarget-and-update-browser",
+	})
+	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutUpdateTile, workspaceID, "", "", "tile-browser", "request-retarget-and-update-browser", true)
+	combined := d.store.GetWorkspaceLayout(workspaceID)
+	if sessionID, ok := workspacelayout.TileSessionIDByID(combined.Layout, "tile-browser"); !ok || sessionID != "session-2" {
+		t.Fatalf("browser tile session after combined update = (%q, %v), want (%q, true) — params save clobbered the rebind", sessionID, ok, "session-2")
+	}
+	if params, ok := workspacelayout.TileParamsByID(combined.Layout, "tile-browser"); !ok || params != "https://example.com/combined" {
+		t.Fatalf("browser tile params after combined update = (%q, %v), want (%q, true)", params, ok, "https://example.com/combined")
+	}
+
 	d.handleWorkspaceLayoutUpdateTile(client, &protocol.WorkspaceLayoutUpdateTileMessage{
 		Cmd:         protocol.CmdWorkspaceLayoutUpdateTile,
 		WorkspaceID: workspaceID,
@@ -577,8 +632,8 @@ func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 	})
 	expectWorkspaceLayoutActionResultIDsAndRequestID(t, client, protocol.CmdWorkspaceLayoutUpdateTile, workspaceID, "", "", "tile-browser", "request-reject-browser-file-url", false)
 	afterRejectedURL := d.store.GetWorkspaceLayout(workspaceID)
-	if params, ok := workspacelayout.TileParamsByID(afterRejectedURL.Layout, "tile-browser"); !ok || params != "https://example.com/docs" {
-		t.Fatalf("browser tile params after rejected URL = (%q, %v), want (%q, true)", params, ok, "https://example.com/docs")
+	if params, ok := workspacelayout.TileParamsByID(afterRejectedURL.Layout, "tile-browser"); !ok || params != "https://example.com/combined" {
+		t.Fatalf("browser tile params after rejected URL = (%q, %v), want (%q, true)", params, ok, "https://example.com/combined")
 	}
 
 	// A notebook tile docks empty (its no-selection picker) and accepts a later
