@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -157,16 +158,15 @@ func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 // check and the notebook-root resolution are independent of the sessions table.
 //
 // It is intentionally conservative: it assigns only on a genuine first launch
-// (existingSession == nil, never a reload/respawn) of a guidance-capable agent
-// (claude/codex — shells and plugin agents have no guidance launch path) and only
-// when no chief exists yet. A create-as-chief request while a chief is already
+// (existingSession == nil, never a reload/respawn) of a guidance-capable built-in
+// or plugin agent and only when no chief exists yet. A create-as-chief request while a chief is already
 // live is logged and ignored, never a silent role transfer. Returns whether it
 // assigned the role so the caller can roll it back if the launch then fails.
 func (d *Daemon) maybeAssignChiefOnSpawn(sessionID, agent string, requested bool, existingSession *protocol.Session) bool {
 	if !requested || existingSession != nil || d.store == nil {
 		return false
 	}
-	if !agentSupportsChiefReload(agent) {
+	if !d.agentSupportsChiefGuidance(agent) {
 		d.logf("create-as-chief: agent %q for session %s has no chief-guidance launch path; ignoring", agent, sessionID)
 		return false
 	}
@@ -190,6 +190,10 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 	}
 
 	previousSessionID := d.chiefOfStaffSessionID()
+	roleChanged := previousSessionID != sessionID
+	if !msg.ChiefOfStaff {
+		roleChanged = previousSessionID == sessionID
+	}
 	if msg.ChiefOfStaff {
 		if !d.sessionExists(sessionID) {
 			d.sendChiefOfStaffResult(
@@ -201,6 +205,60 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 			)
 			return
 		}
+		if session := d.store.Get(sessionID); session != nil {
+			if driver, ok := d.ensurePluginRegistry().driver(string(session.Agent)); ok {
+				switch {
+				case !driver.Capabilities["launch_instructions"]:
+					d.sendChiefOfStaffResult(client, sessionID, true, previousSessionID, fmt.Errorf("agent %q cannot be chief of staff without launch_instructions capability", session.Agent))
+					return
+				case !driver.Capabilities["resume"]:
+					d.sendChiefOfStaffResult(client, sessionID, true, previousSessionID, fmt.Errorf("agent %q cannot apply chief guidance without resume capability", session.Agent))
+					return
+				}
+			}
+		}
+	}
+
+	prepared := make([]*preparedPluginRoleReload, 0, 2)
+	preparedSessions := make(map[string]bool)
+	if roleChanged {
+		desiredRoles := map[string]bool{sessionID: msg.ChiefOfStaff}
+		if msg.ChiefOfStaff && previousSessionID != "" && previousSessionID != sessionID {
+			desiredRoles[previousSessionID] = false
+		}
+		ids := make([]string, 0, len(desiredRoles))
+		for id := range desiredRoles {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			reload, pluginSession, err := d.preparePluginRoleReload(id, desiredRoles[id])
+			if err != nil {
+				for i := len(prepared) - 1; i >= 0; i-- {
+					prepared[i].abort()
+				}
+				d.sendChiefOfStaffResult(client, sessionID, msg.ChiefOfStaff, previousSessionID, fmt.Errorf("prepare chief guidance reload for %s: %w", id, err))
+				return
+			}
+			if pluginSession {
+				preparedSessions[id] = true
+			}
+			if reload != nil {
+				prepared = append(prepared, reload)
+			}
+		}
+	}
+	abortPrepared := true
+	defer func() {
+		if !abortPrepared {
+			return
+		}
+		for i := len(prepared) - 1; i >= 0; i-- {
+			prepared[i].abort()
+		}
+	}()
+
+	if msg.ChiefOfStaff {
 		if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sessionID); err != nil {
 			d.sendChiefOfStaffResult(client, sessionID, true, previousSessionID, err)
 			return
@@ -210,6 +268,14 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 		return
 	}
 
+	var reloadErr error
+	for _, reload := range prepared {
+		if err := reload.execute(); err != nil && reloadErr == nil {
+			reloadErr = err
+		}
+	}
+	abortPrepared = false
+
 	d.broadcastSessionsUpdated()
 	// Reload the agent(s) whose chief status actually changed so the new status reaches
 	// the system prompt: ChiefGuidance is injected only at agent-launch, so a live
@@ -217,29 +283,27 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 	// (kill + resume-respawn), so fire it ONLY on a real role change — a redundant
 	// toggle (re-assigning the current chief, or demoting a session that wasn't chief,
 	// which ClearProfileRole no-ops) must not kill+respawn an innocent agent.
-	// Resume-preserving, fire-and-forget; symmetric — assign injects the guidance,
-	// demote drops it.
-	roleChanged := previousSessionID != sessionID
-	if !msg.ChiefOfStaff {
-		// Demote: changed only if this session actually held the role.
-		roleChanged = previousSessionID == sessionID
-	}
+	// Plugin replacements are preflighted and completed before the success result;
+	// built-in replacements remain resume-preserving and asynchronous. The behavior
+	// is symmetric — assign injects the guidance, demote drops it.
 	if roleChanged {
 		newChiefSessionID := ""
 		if msg.ChiefOfStaff {
 			newChiefSessionID = sessionID
 		}
 		d.retargetChiefTicketDelivery(previousSessionID, newChiefSessionID)
-		go d.reloadSessionAgent(sessionID)
+		if !preparedSessions[sessionID] {
+			go d.reloadSessionAgent(sessionID)
+		}
 		// A role transfer (promote B while A still held it) demotes A via the
 		// single-holder upsert. Reload A too so the displaced chief drops the guidance
 		// now, not whenever it next restarts. Different id → different reload lock, so
 		// this runs concurrently with the promotion reload.
-		if msg.ChiefOfStaff && previousSessionID != "" {
+		if msg.ChiefOfStaff && previousSessionID != "" && !preparedSessions[previousSessionID] {
 			go d.reloadSessionAgent(previousSessionID)
 		}
 	}
-	d.sendChiefOfStaffResult(client, sessionID, msg.ChiefOfStaff, previousSessionID, nil)
+	d.sendChiefOfStaffResult(client, sessionID, msg.ChiefOfStaff, previousSessionID, reloadErr)
 }
 
 // retargetChiefTicketDelivery moves only the live delivery target. Durable role

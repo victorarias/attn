@@ -987,6 +987,8 @@ func (b *WorkerBackend) SessionLaunchParams(ctx context.Context, sessionID strin
 		ClaudeExecutable:  entry.ClaudeExecutable,
 		CodexExecutable:   entry.CodexExecutable,
 		CopilotExecutable: entry.CopilotExecutable,
+		Model:             entry.Model,
+		Effort:            entry.Effort,
 	}, nil
 }
 

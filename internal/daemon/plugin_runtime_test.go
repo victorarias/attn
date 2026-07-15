@@ -50,7 +50,7 @@ func TestDiscoverPluginManifests_ReportsInvalidManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(badDir, pluginManifestName), []byte(`
 name = "bad-plugin"
 version = "0.1.0"
-attn_api_version = 2
+attn_api_version = 3
 `), 0o644); err != nil {
 		t.Fatalf("write bad manifest: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestDiscoverPluginManifests_AllowsRuntimeOnlyManifestNames(t *testing.T) {
 	manifest := []byte(`
 name = "manual/provider"
 version = "0.1.0"
-attn_api_version = 2
+attn_api_version = 3
 
 [plugin]
 entrypoint = "src/index.ts"
@@ -197,7 +197,7 @@ func writeTestPluginManifest(t *testing.T, pluginDir, name string) {
 	manifest := []byte(`
 name = "` + name + `"
 version = "0.1.0"
-attn_api_version = 2
+attn_api_version = 3
 
 [plugin]
 entrypoint = "src/index.ts"

@@ -107,6 +107,25 @@ func TestCreateAsChiefIgnoredForShell(t *testing.T) {
 	}
 }
 
+func TestCreateAsChiefRejectsPluginWithoutLaunchInstructions(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(func() { _ = d.store.Close() })
+	d.ptyBackend = &fakeSpawnBackend{}
+	plugin, done := startPluginPipe(t, d, "fixture-plugin", nil)
+	defer func() {
+		_ = plugin.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, plugin, "fixture", map[string]bool{"resume": true})
+	client := newWorkspaceProtocolTestClient()
+
+	spawnForChiefTest(t, d, client, "ws-plugin", "sess-plugin", "fixture", true)
+	expectSpawnResult(t, client, "sess-plugin", false)
+	if got := d.chiefOfStaffSessionID(); got != "" {
+		t.Fatalf("chief role holder = %q, want empty", got)
+	}
+}
+
 // A spawn that fails after the role was assigned must roll the role back, so a
 // session that never launched never holds the chief role.
 func TestCreateAsChiefRolledBackOnSpawnFailure(t *testing.T) {

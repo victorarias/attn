@@ -325,6 +325,8 @@ func (r *Runtime) run(ctx context.Context) error {
 	entry.ClaudeExecutable = r.cfg.ClaudeExecutable
 	entry.CodexExecutable = r.cfg.CodexExecutable
 	entry.CopilotExecutable = r.cfg.CopilotExecutable
+	entry.Model = strings.TrimSpace(os.Getenv("ATTN_MODEL"))
+	entry.Effort = strings.TrimSpace(os.Getenv("ATTN_EFFORT"))
 	if err := WriteRegistryAtomic(r.cfg.RegistryPath, entry); err != nil {
 		return err
 	}

@@ -9,6 +9,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-15]
 
 ### Added
+- **OpenCode sessions now receive attn's launch guidance.** Ordinary sessions
+  get their workspace context plus workflow and ticket instructions; OpenCode
+  chiefs get Notebook guidance. Promotion, demotion, and resume refresh that
+  guidance without changing the native OpenCode conversation or modifying the
+  user's repository and global OpenCode configuration.
 - Markdown tiles can now be annotated: select text to comment, redline, or apply
   quick-labels (with keyboard shortcuts), add document-wide comments, and review
   everything in a sidebar. Annotations survive file edits by re-anchoring to the

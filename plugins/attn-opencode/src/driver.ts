@@ -110,6 +110,7 @@ export class OpenCodeDriver {
           pending_approval: true,
           model_pin: true,
           effort_pin: true,
+          launch_instructions: true,
         },
       });
     }
@@ -160,7 +161,7 @@ export class OpenCodeDriver {
         variant: selection.model?.variant ?? selection.variant,
         resume,
         created_at: new Date().toISOString(),
-      }, params.initial_prompt ?? "");
+      }, params.initial_prompt ?? "", params.instructions);
       const launchConfig: LaunchConfig = {
         schema: 1,
         run_id: record.run_id,
@@ -170,6 +171,7 @@ export class OpenCodeDriver {
         port,
         yolo: params.yolo === true,
         resume_session_id: selection.nativeSessionID,
+        instruction_ref: record.instruction_ref,
       };
       await this.options.registry.writeLaunchConfig(record, launchConfig);
       const controller = new AbortController();

@@ -87,7 +87,7 @@ mkdir -p "$5/src"
 cat > "$5/attn-plugin.toml" <<'EOF'
 name = "attn-snipe"
 version = "0.1.0"
-attn_api_version = 2
+attn_api_version = 3
 
 [plugin]
 entrypoint = "src/index.ts"
@@ -235,7 +235,7 @@ func TestLoadManifestRejectsEntrypointTraversal(t *testing.T) {
 	manifest := []byte(`
 name = "worktree-provider"
 version = "0.1.0"
-attn_api_version = 2
+attn_api_version = 3
 
 [plugin]
 entrypoint = "../outside.ts"
@@ -259,7 +259,7 @@ func writeTestPlugin(t *testing.T, root, name string) {
 	manifest := []byte(`
 name = "` + name + `"
 version = "0.1.0"
-attn_api_version = 2
+attn_api_version = 3
 
 [plugin]
 entrypoint = "src/index.ts"

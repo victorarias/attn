@@ -1,10 +1,12 @@
 import { createServer } from "node:net";
 import { chmod, open, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { randomBytes } from "node:crypto";
 import type { LaunchConfig } from "./types";
 
 const maxPortAttempts = 3;
+const guidancePluginRef = pathToFileURL(join(import.meta.dir, "guidance-plugin.ts")).href;
 
 if (import.meta.main) {
   const configPath = process.argv[2];
@@ -14,6 +16,7 @@ if (import.meta.main) {
 
 export async function launch(path: string): Promise<number> {
   let config = await readConfig(path);
+  const opencodeConfig = opencodeConfigForLaunch(process.env.OPENCODE_CONFIG_CONTENT, config.instruction_ref, guidancePluginRef);
   for (let attempt = 1; attempt <= maxPortAttempts; attempt += 1) {
     const password = (await readFile(config.password_ref, "utf8")).trim();
     const args = [config.executable, "--hostname", "127.0.0.1", "--port", String(config.port)];
@@ -21,7 +24,16 @@ export async function launch(path: string): Promise<number> {
     if (config.yolo) args.push("--yolo");
     const child = Bun.spawn(args, {
       cwd: config.cwd,
-      env: { ...process.env, OPENCODE_SERVER_PASSWORD: password },
+      env: {
+        ...process.env,
+        OPENCODE_SERVER_PASSWORD: password,
+        ...(config.instruction_ref
+          ? {
+              ATTN_OPENCODE_INSTRUCTION_REF: config.instruction_ref,
+              OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig),
+            }
+          : {}),
+      },
       stdin: "inherit",
       stdout: "inherit",
       stderr: "pipe",
@@ -39,6 +51,41 @@ export async function launch(path: string): Promise<number> {
     await writeConfig(path, config);
   }
   return 1;
+}
+
+export function opencodeConfigForLaunch(
+  existingJSON: string | undefined,
+  instructionRef?: string,
+  pluginRef = guidancePluginRef,
+): Record<string, unknown> {
+  let parsed: unknown = {};
+  if (existingJSON !== undefined && existingJSON.trim() !== "") {
+    try {
+      parsed = JSON.parse(existingJSON);
+    } catch (error) {
+      throw new Error(`invalid inherited OPENCODE_CONFIG_CONTENT: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("invalid inherited OPENCODE_CONFIG_CONTENT: expected a JSON object");
+  }
+  const base = parsed as Record<string, unknown>;
+  if (!instructionRef) return base;
+  const inheritedInstructions = base.instructions ?? [];
+  if (!Array.isArray(inheritedInstructions) || !inheritedInstructions.every((value) => typeof value === "string")) {
+    throw new Error("invalid inherited OPENCODE_CONFIG_CONTENT.instructions: expected an array of strings");
+  }
+  const inheritedPlugins = base.plugin ?? [];
+  if (!Array.isArray(inheritedPlugins)) {
+    throw new Error("invalid inherited OPENCODE_CONFIG_CONTENT.plugin: expected an array");
+  }
+  const hasGuidancePlugin = inheritedPlugins.some((value) =>
+    value === pluginRef || (Array.isArray(value) && value[0] === pluginRef)
+  );
+  return {
+    ...base,
+    plugin: hasGuidancePlugin ? inheritedPlugins : [...inheritedPlugins, pluginRef],
+  };
 }
 
 async function readConfig(path: string): Promise<LaunchConfig> {

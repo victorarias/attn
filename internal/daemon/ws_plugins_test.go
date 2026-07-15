@@ -90,7 +90,7 @@ mkdir -p "$5/src"
 cat > "$5/attn-plugin.toml" <<'EOF'
 name = "attn-snipe"
 version = "0.1.0"
-attn_api_version = 2
+attn_api_version = 3
 
 [plugin]
 entrypoint = "src/index.ts"

@@ -29,14 +29,16 @@ type RegistryEntry struct {
 	// re-spawns the agent in place. LaunchParamsRecorded distinguishes a worker that
 	// records them from an older one that does not (Version stays 1 so recovery,
 	// which hard-requires Version==1, keeps accepting the entry); when it is false
-	// the daemon must NOT trust YoloMode/Executable and must abort the reload rather
-	// than respawn with defaulted launch flags.
+	// the daemon must NOT trust yolo, executable, model, or effort and must abort
+	// the reload rather than respawn with defaulted launch flags.
 	LaunchParamsRecorded bool   `json:"launch_params_recorded,omitempty"`
 	YoloMode             bool   `json:"yolo_mode,omitempty"`
 	Executable           string `json:"executable,omitempty"`
 	ClaudeExecutable     string `json:"claude_executable,omitempty"`
 	CodexExecutable      string `json:"codex_executable,omitempty"`
 	CopilotExecutable    string `json:"copilot_executable,omitempty"`
+	Model                string `json:"model,omitempty"`
+	Effort               string `json:"effort,omitempty"`
 }
 
 func WriteRegistryAtomic(path string, entry RegistryEntry) error {
