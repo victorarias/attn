@@ -2,21 +2,27 @@
  * rebaseAnchor — one fuzzy re-anchor per content change, then re-baseline.
  *
  * Runs only when the content hash changed (resolve handles the exact path).
- * Three tiers; the first tier with ≥1 candidate wins, no cross-tier mixing:
+ * Two tiers; the first tier with ≥1 candidate wins:
  *
- *  (a) same-block exact search — all occurrences of `exact` in the block
- *      still carrying `anchor.blockId`.
- *  (b) document-wide exact search — all occurrences across all blocks,
+ *  (a) exact search — every occurrence of `exact` across every block,
  *      re-attributed to the deepest stamped owner (avoids ul/li duplicate
- *      candidates).
- *  (c) whitespace-normalized search — needle and haystacks collapsed with
+ *      candidates), scored together as one pool. `blockId` is an ordinal
+ *      position reassigned on every edit, so it is used only to prefer a
+ *      same-block match when scores are close — never to accept a lone
+ *      same-block hit unchecked. An inserted sibling that happens to inherit
+ *      the anchor's old ordinal `blockId` and also contains the exact quote
+ *      must still lose to the real match on prefix/suffix/proximity.
+ *  (b) whitespace-normalized search — needle and haystacks collapsed with
  *      `\s+ → ' '`; the only lossy tier (rewrapped paragraphs).
  *
  * Candidates are scored by prefix/suffix similarity (Levenshtein over the
- * 32-char context windows) plus source-line proximity. The winning match is
- * RE-BASELINED: the returned record is rebuilt from scratch against
- * `newContent` (fresh blockId/offsets/lines/context/hash) so fuzz never
- * compounds across successive edits.
+ * 32-char context windows) plus source-line proximity — a genuine unedited
+ * match keeps near-identical context and wins on that alone, no identity
+ * shortcut needed. The winning match is RE-BASELINED: the returned record is
+ * rebuilt from scratch against `newContent` (fresh blockId/offsets/lines/
+ * context/hash) so fuzz never compounds across successive edits. The
+ * reported tier is `'same-block'` when the winner's block still carries the
+ * anchor's ordinal `blockId`, `'document'` otherwise.
  */
 
 import { buildAnchor, CONTEXT_CHARS } from './create';
@@ -105,19 +111,6 @@ function dedupeToOwners(blocks: BlockText[], raw: Candidate[]): Candidate[] {
   return out;
 }
 
-function sameBlockCandidates(blocks: BlockText[], anchor: AnchorRecord): Candidate[] {
-  const block = blocks.find((b) => b.blockId === anchor.blockId);
-  if (!block) {
-    return [];
-  }
-  const raw = occurrences(block.text, anchor.exact).map((start) => ({
-    block,
-    start,
-    end: start + anchor.exact.length,
-  }));
-  return dedupeToOwners(blocks, raw);
-}
-
 function documentCandidates(blocks: BlockText[], anchor: AnchorRecord): Candidate[] {
   const raw: Candidate[] = [];
   for (const block of blocks) {
@@ -177,9 +170,12 @@ function normalizedCandidates(blocks: BlockText[], anchor: AnchorRecord): Candid
   return dedupeToOwners(blocks, raw);
 }
 
+const CONFIDENCE_THRESHOLD = 0.5;
+
 function pickWinner(candidates: Candidate[], anchor: AnchorRecord): Candidate | 'ambiguous' {
   if (candidates.length === 1) {
-    // The text itself matched exactly — accept unconditionally.
+    // The text itself matched exactly, nowhere else in the document — accept
+    // unconditionally (identity of the containing block is irrelevant here).
     return candidates[0];
   }
   const scored = candidates
@@ -187,7 +183,7 @@ function pickWinner(candidates: Candidate[], anchor: AnchorRecord): Candidate | 
     .sort((a, b) => b.score - a.score);
   const best = scored[0];
   const second = scored[1];
-  if (best.score - second.score >= 0.05 || best.score >= 0.5) {
+  if (best.score - second.score >= 0.05 || best.score >= CONFIDENCE_THRESHOLD) {
     return best.candidate;
   }
   return 'ambiguous';
@@ -209,13 +205,15 @@ export function rebaseAnchor(
   const blocks = preExtracted ?? extractBlockTexts(newContent);
   const contentHash = fnv1a32(newContent);
 
-  const tiers: Array<{ tier: RebaseTier; candidates: Candidate[] }> = [
-    { tier: 'same-block', candidates: sameBlockCandidates(blocks, anchor) },
-    { tier: 'document', candidates: documentCandidates(blocks, anchor) },
-    { tier: 'normalized', candidates: normalizedCandidates(blocks, anchor) },
+  const passes: Array<{ candidates: Candidate[]; deriveTier: (winner: Candidate) => RebaseTier }> = [
+    {
+      candidates: documentCandidates(blocks, anchor),
+      deriveTier: (winner) => (winner.block.blockId === anchor.blockId ? 'same-block' : 'document'),
+    },
+    { candidates: normalizedCandidates(blocks, anchor), deriveTier: () => 'normalized' },
   ];
 
-  for (const { tier, candidates } of tiers) {
+  for (const { candidates, deriveTier } of passes) {
     if (candidates.length === 0) {
       continue;
     }
@@ -234,7 +232,7 @@ export function rebaseAnchor(
       // Whitespace-only match after normalization edge cases — treat as miss.
       continue;
     }
-    return { state: 'rebased', anchor: rebased, tier };
+    return { state: 'rebased', anchor: rebased, tier: deriveTier(winner) };
   }
 
   return { state: 'orphan', reason: 'text-not-found' };
