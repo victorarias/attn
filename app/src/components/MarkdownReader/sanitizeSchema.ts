@@ -6,10 +6,23 @@
  * list, `kbd`, `sub`, `sup`, `br`, task-list `input[type=checkbox][disabled]`,
  * `language-*` class on `code`, GFM table `align`, footnote plumbing, and
  * id-clobbering with the `user-content-` prefix). Extended with plannotator's
- * remaining tags (`mark`, `small`, `abbr`, `video`/`source`/`picture`,
- * sectioning elements) and their media attributes — deliberately NO
- * `autoplay`, no `style` attribute, no event handlers, and `script`/`style`
- * elements are stripped with their content.
+ * remaining inline/sectioning tags (`mark`, `small`, `abbr`, article/aside/
+ * header/footer) — deliberately NO `style` attribute, no event handlers, and
+ * `script`/`style` elements are stripped with their content.
+ *
+ * NO-NETWORK INVARIANT: the reader never fetches the network for document
+ * media. Every fetchable URL attribute must either be gated by a component
+ * renderer (img `src`, a `href` — routed through resolveMarkdownTarget +
+ * convertFileSrc) or be absent from this schema. That is why:
+ * - `srcSet`/`sizes` are NOT allowed on `img`: hast-util-sanitize's
+ *   `protocols` map is keyed by property name, so `srcSet` would get no
+ *   protocol check at all, and browsers prefer srcset over the gated src —
+ *   a remote srcset would silently exfiltrate (tracking pixel) past the gate.
+ * - `video` is not whitelisted and defaultSchema's `picture`/`source` are
+ *   removed: none of them has a component renderer, so a remote `poster`,
+ *   `src`, or `source srcset` would fetch with no gate. Re-adding any of them
+ *   requires a renderer applying the same local-only resolve + convertFileSrc
+ *   gate the img renderer uses.
  *
  * Ordering contract: this runs BEFORE rehypeSourceAnchors/rehypeAlerts, so the
  * reader's own `data-block-id`/`data-source-line`/`data-alert-kind` attributes
@@ -19,10 +32,13 @@
 
 import { defaultSchema, type Options } from 'rehype-sanitize';
 
+// Ungated media containers (see the no-network invariant above).
+const REMOVED_DEFAULT_TAGS = new Set(['picture', 'source']);
+
 export const readerSanitizeSchema: Options = {
   ...defaultSchema,
   tagNames: [
-    ...(defaultSchema.tagNames ?? []),
+    ...(defaultSchema.tagNames ?? []).filter((tag) => !REMOVED_DEFAULT_TAGS.has(tag)),
     'abbr',
     'small',
     'mark',
@@ -30,14 +46,7 @@ export const readerSanitizeSchema: Options = {
     'aside',
     'header',
     'footer',
-    'video',
   ],
-  attributes: {
-    ...defaultSchema.attributes,
-    video: ['src', 'controls', 'poster', 'muted', 'loop', 'playsInline'],
-    source: [...(defaultSchema.attributes?.source ?? []), 'src', 'srcSet', 'type', 'sizes'],
-    img: [...(defaultSchema.attributes?.img ?? []), 'srcSet', 'sizes'],
-  },
   protocols: {
     ...defaultSchema.protocols,
     // `file:` targets stay allowed at this layer; the img/a component

@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useEscapeStack } from '../../hooks/useEscapeStack';
 
 export interface ImageLightboxProps {
   src: string;
@@ -14,22 +14,15 @@ export interface ImageLightboxProps {
  * and unmounts instantly (no enter/exit motion), which is trivially
  * reduced-motion-safe.
  *
- * The Escape listener runs in the capture phase and stops propagation so an
- * open lightbox consumes the key before tile/workspace shortcuts (closing the
- * lightbox must not also close the tile).
+ * Escape goes through useEscapeStack (the app-wide LIFO dismiss stack): the
+ * lightbox only mounts while open, so it sits on top of the stack for its
+ * whole lifetime and one Escape press closes ONLY the lightbox — never the
+ * overlay/tile underneath. (A hand-rolled window listener cannot do this:
+ * stopPropagation does not shield other listeners on the same node, so it
+ * would dismiss the stack-top overlay simultaneously.)
  */
 export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [onClose]);
+  useEscapeStack(onClose, true);
 
   return createPortal(
     <div className="md-lightbox" role="dialog" aria-modal="true" onClick={onClose}>

@@ -113,6 +113,15 @@ describe('MarkdownReader link sanitization', () => {
     ]);
   });
 
+  it('computes heading slugs from pre-transform text (emoji shortcodes keep their letters)', () => {
+    renderReader('## Deploy :rocket:\n');
+
+    const heading = screen.getByRole('heading');
+    // Rendered text shows the emoji, but the id anchors like GitHub's.
+    expect(heading).toHaveTextContent('Deploy 🚀');
+    expect(heading.id).toBe('deploy-rocket');
+  });
+
   it('scrolls the tile body to a fragment target instead of navigating', () => {
     const { container } = render(
       <div className="workspace-dock-tile-body">
@@ -443,6 +452,24 @@ describe('MarkdownReader raw HTML sanitization', () => {
     // Sanitize runs before the anchoring pass, so raw HTML blocks anchor too.
     expect(details).toHaveAttribute('data-block-id');
     expect(details).toHaveAttribute('data-source-line', '1');
+  });
+
+  it('never lets raw HTML reach the network: img srcset, video, picture>source are stripped', () => {
+    const { container } = renderReader(
+      '<img src="docs/pic.png" srcset="https://evil.example/pixel.png 1x">\n\n' +
+        '<video src="https://evil.example/v.mp4" poster="https://evil.example/p.png" controls></video>\n\n' +
+        '<picture><source srcset="https://evil.example/s.png"><img src="docs/pic.png"></picture>\n',
+    );
+
+    const card = container.querySelector('.md-reader-card')!;
+    // No fetchable remote URL survives anywhere in the rendered DOM.
+    expect(card.innerHTML).not.toContain('evil.example');
+    expect(card.querySelector('video')).toBeNull();
+    expect(card.querySelector('source')).toBeNull();
+    for (const img of card.querySelectorAll('img')) {
+      expect(img).not.toHaveAttribute('srcset');
+      expect(img.getAttribute('src')).toMatch(/^asset:\/\/localhost\//);
+    }
   });
 
   it('cannot forge the reader anchoring attributes from author HTML', () => {

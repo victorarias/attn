@@ -74,24 +74,37 @@ export function replaceEmojiShortcodes(text: string): string {
 /**
  * Smart punctuation. Exact replacement chain, in this order (plannotator's
  * smartypants): ellipsis, em dash, narrowed en dash, curly quotes.
+ *
+ * `prevChar` is the rendered character immediately BEFORE `text` (empty string
+ * when `text` starts its block). hast splits prose at inline-element
+ * boundaries, so a quote at position 0 of a text node is NOT necessarily an
+ * opening quote — `He said "**hi**".` puts `".` in its own node right after
+ * `</strong>`. A start-of-node quote opens only when prevChar is empty or an
+ * opener context ([\s([{]); otherwise it closes, matching what the same
+ * characters produce when transformed as one unsplit string (the PR4
+ * `transformText(sourceSlice) === renderedText` contract depends on this).
  */
-export function applySmartPunctuation(text: string): string {
+export function applySmartPunctuation(text: string, prevChar = ""): string {
+  const opensAtStart = prevChar === "" || /[\s([{]/.test(prevChar);
+  const openOrKeep = (match: string, pre: string, open: string): string =>
+    pre === "" && !opensAtStart ? match : pre + open;
   return text
     .replace(/\.{3}/g, "…")
     .replace(/---/g, "—") // em dash
     .replace(/(\d)--(?=\d)/g, "$1–") // en dash: NUMERIC RANGES ONLY — never --flags
-    .replace(/(^|[\s([{])"/g, "$1“") // opening double quote
+    .replace(/(^|[\s([{])"/g, (m, pre: string) => openOrKeep(m, pre, "“")) // opening double quote
     .replace(/"/g, "”") // remaining doubles close
-    .replace(/(^|[\s([{])'/g, "$1‘") // opening single quote
+    .replace(/(^|[\s([{])'/g, (m, pre: string) => openOrKeep(m, pre, "‘")) // opening single quote
     .replace(/'/g, "’"); // remaining singles close / apostrophe
 }
 
 /**
  * The full prose transform: emoji shortcodes first, then smart punctuation.
  * Pure and idempotent — `transformText(transformText(s)) === transformText(s)`.
+ * `prevChar` (optional) disambiguates a leading quote; see applySmartPunctuation.
  */
-export function transformText(text: string): string {
-  return applySmartPunctuation(replaceEmojiShortcodes(text));
+export function transformText(text: string, prevChar = ""): string {
+  return applySmartPunctuation(replaceEmojiShortcodes(text), prevChar);
 }
 
 /**
@@ -134,15 +147,45 @@ function isText(node: RootContent): node is Text {
 }
 
 /**
+ * Last rendered character inside a node, for the prev-char quote context:
+ * skipped subtrees (inline code, kbd, …) still contribute their trailing
+ * character, so `` `foo`" `` closes. `<br>` counts as a newline.
+ */
+function trailingTextChar(node: RootContent): string | null {
+  if (isText(node)) {
+    return node.value.length > 0 ? node.value.slice(-1) : null;
+  }
+  if (isElement(node)) {
+    if (node.tagName === "br") {
+      return "\n";
+    }
+    for (let i = node.children.length - 1; i >= 0; i--) {
+      const char = trailingTextChar(node.children[i]);
+      if (char !== null) {
+        return char;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Rehype plugin. Usable directly in react-markdown's `rehypePlugins`:
  *
  *   rehypePlugins={[rehypeProseTransforms]}
  *
  * Mutates text-node values in place; never touches element properties (so
  * hrefs, srcs, and anchoring data attributes are untouched by construction).
+ *
+ * The walk threads the previous rendered character through the whole tree so
+ * a quote that starts a text node (i.e. directly follows an inline element)
+ * still curls the right way. Block boundaries need no special-casing:
+ * mdast-util-to-hast emits `\n` text nodes between block elements, which
+ * reset the context to whitespace (= opening).
  */
 export default function rehypeProseTransforms() {
   return (tree: Root): void => {
+    const ctx = { prev: "" };
     const walk = (node: Root | RootContent): void => {
       if (isElement(node) && (SKIP_TAGS.has(node.tagName) || isMathLike(node))) {
         return;
@@ -150,9 +193,16 @@ export default function rehypeProseTransforms() {
       if ("children" in node) {
         for (const child of node.children) {
           if (isText(child)) {
-            child.value = transformText(child.value);
+            child.value = transformText(child.value, ctx.prev);
+            if (child.value.length > 0) {
+              ctx.prev = child.value.slice(-1);
+            }
           } else {
             walk(child);
+            const char = trailingTextChar(child);
+            if (char !== null) {
+              ctx.prev = char;
+            }
           }
         }
       }

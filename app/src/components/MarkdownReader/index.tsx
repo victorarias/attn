@@ -1,4 +1,4 @@
-import { createElement, isValidElement, memo, useCallback, useRef, useState } from 'react';
+import { isValidElement, memo, useCallback, useRef, useState } from 'react';
 import type { HTMLAttributes, ReactNode, RefObject } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { convertFileSrc } from '@tauri-apps/api/core';
@@ -20,11 +20,11 @@ import {
   sanitizeLinkUrl,
 } from './markdownLinks';
 import rehypeAlerts, { type AlertKind } from './rehypeAlerts';
+import rehypeHeadingSlugs from './rehypeHeadingSlugs';
 import rehypeProseTransforms from './proseTransforms';
 import rehypeSourceAnchors from './rehypeSourceAnchors';
 import { readerSanitizeSchema } from './sanitizeSchema';
 import { scrollToAnchor } from './scrollToAnchor';
-import { createSlugger } from './slugify';
 import { tilePathBasename } from '../../utils/tilePresentation';
 import './MarkdownReader.css';
 
@@ -41,13 +41,15 @@ const rehypePlugins: PluggableList = [
   // Anchors run AFTER sanitize so the anchoring data-* attributes never need
   // whitelisting (and author HTML can't forge them); anchors before alerts so
   // alert blockquotes keep bN-blockquote ids and line ranges that include the
-  // marker line; prose transforms last (text-only mutation). Heading ids are
-  // assigned later still, in the React heading renderers — sanitize never
-  // sees them.
+  // marker line; heading slugs BEFORE prose transforms so ids come from the
+  // pre-transform text (emoji shortcodes delete letters — `## Deploy :rocket:`
+  // must keep the id `deploy-rocket` that authors link against); prose
+  // transforms last (text-only mutation).
   rehypeRaw,
   [rehypeSanitize, readerSanitizeSchema],
   [rehypeSourceAnchors, { lineOffset: 0 }],
   rehypeAlerts,
+  rehypeHeadingSlugs,
   rehypeProseTransforms,
 ];
 
@@ -126,17 +128,9 @@ function readerComponents(
   rootRef: { current: HTMLDivElement | null },
   onImageClick: (src: string, alt: string) => void,
 ): Components {
-  const slugger = createSlugger();
-  const heading = (level: number): Components['h1'] => ({ node: _node, children, ...props }) =>
-    createElement(`h${level}`, { ...props, id: slugger(textOf(children)) }, children);
-
   return {
-    h1: heading(1),
-    h2: heading(2),
-    h3: heading(3),
-    h4: heading(4),
-    h5: heading(5),
-    h6: heading(6),
+    // Heading ids come from the rehypeHeadingSlugs pass (pre-prose-transform
+    // text) and flow through the default heading renderers as plain props.
     code: CodeRenderer,
     pre({ node: _node, children, ref: _ref, ...preProps }) {
       const { text, language, isMermaid } = codeMeta(children);
@@ -218,6 +212,12 @@ function readerComponents(
       );
     },
     img({ node: _node, src, alt, ...props }) {
+      // Defense in depth for the no-network invariant: srcSet/sizes are not
+      // in the sanitize allowlist, but if they ever slipped through, spreading
+      // them would let a remote srcset override the gated local src (browsers
+      // prefer srcset). Never spread them.
+      const { srcSet: _srcSet, sizes: _sizes, ...safeProps } = props as Record<string, unknown> &
+        HTMLAttributes<HTMLImageElement>;
       const imgSrc = typeof src === 'string' ? src : undefined;
       // resolveMarkdownTarget joins relative srcs against the doc directory
       // and percent-decodes the URL path (`%20` etc.), yielding an absolute
@@ -238,7 +238,7 @@ function readerComponents(
       const altText = alt ?? tilePathBasename(target.value);
       return (
         <img
-          {...(props as HTMLAttributes<HTMLImageElement>)}
+          {...safeProps}
           className="md-reader-image"
           src={resolvedSrc}
           alt={altText}
@@ -328,8 +328,10 @@ const MarkdownReaderBody = memo(function MarkdownReaderBody({
   onImageClick,
 }: MarkdownReaderBodyProps) {
   const frontmatter = extractFrontmatter(content);
-  // Fresh components per render: the heading slugger's dedup map must reset
-  // on every document render (same reason the dock tile rebuilt its map).
+  // Fresh components per render is fine: this body only renders when the
+  // document changed (memo gate), so the whole tree remounts anyway. Per-run
+  // state (the heading slug dedup map) lives in the rehype passes, which
+  // react-markdown re-runs per parse.
   const components = readerComponents(path, allowLocalTargets, rootRef, onImageClick);
 
   return (

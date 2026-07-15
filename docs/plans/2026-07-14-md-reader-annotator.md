@@ -178,7 +178,14 @@ add deliberately:
   ordered markers (read-only in v1 — no write-back).
 - **Tables**: `overflow-x-auto` wrapper + header/hover tinting (popout dialog
   deferred).
-- **Images**: lightbox (portal, Escape/click-out, alt caption).
+- **Images**: lightbox (portal, Escape/click-out, alt caption). DELIBERATE
+  DIVERGENCE from plannotator: remote images (`http(s):`/`data:`/`blob:`)
+  render as a `[blocked image: …]` fallback instead of passing through.
+  The reader never fetches the network for document media (no read-receipt /
+  tracking-pixel exfil from merely opening a doc, and `csp` is null so the
+  sanitize layer + renderer gates are the only defense). Applies to raw-HTML
+  media too (`img srcset`, `video`, `picture>source` are not allowed
+  ungated). Revisit only as an explicit opt-in setting.
 - **HTML blocks**: rehype-raw + rehype-sanitize; `<details>` open-state must
   survive live reload (see re-render gating below).
 - **Typography**: the exact plannotator values (832px card, 15px/1.55 body,

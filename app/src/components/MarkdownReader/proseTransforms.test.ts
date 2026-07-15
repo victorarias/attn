@@ -223,6 +223,25 @@ describe("rehypeProseTransforms plugin", () => {
     expect(collectText(mathSpan)).toBe('x -- y "raw"');
   });
 
+  it("closes a quote that starts a text node right after an inline element", async () => {
+    // hast splits at inline boundaries: `".` lands in its own text node after
+    // </strong>; it must close, not open.
+    const tree = await render('He said "**hi**". And \'*word*\' too.');
+    expect(collectText(tree)).toBe("He said “hi”. And ‘word’ too.");
+  });
+
+  it("still opens a quote at the start of a new block after inline-heavy prose", async () => {
+    const tree = await render('End **bold**\n\n"New paragraph"');
+    expect(collectText(tree)).toContain("“New paragraph”");
+  });
+
+  it("closes a quote directly after inline code (skipped subtrees still set context)", async () => {
+    const tree = await render('Run `foo`" done');
+    expect(collectText(tree)).toContain("”" + " done");
+    const [code] = findElements(tree, "code");
+    expect(collectText(code)).toBe("foo");
+  });
+
   it("is idempotent when run twice over the same tree", async () => {
     const tree = await render('"quotes" --- 3--5 :tada: and `code "x"`');
     const once = collectText(tree);
