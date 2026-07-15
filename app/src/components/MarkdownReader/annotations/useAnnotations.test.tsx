@@ -74,15 +74,15 @@ function makeTransport(seed: { annotations: WireAnnotation[]; generation: number
   };
   const state = { seed, saveResult: { stale: false } };
   const transport: MarkdownAnnotationsTransport = {
-    getMarkdownAnnotations: async (path) => {
+    getMarkdownAnnotations: async (path, _workspaceId) => {
       calls.get.push(path);
       return { annotations: state.seed.annotations, generation: state.seed.generation };
     },
-    saveMarkdownAnnotations: async (path, annotations, generation) => {
+    saveMarkdownAnnotations: async (path, _workspaceId, annotations, generation) => {
       calls.save.push({ path, annotations, generation });
       return state.saveResult;
     },
-    clearMarkdownAnnotations: async (path, generation) => {
+    clearMarkdownAnnotations: async (path, _workspaceId, generation) => {
       calls.clear.push({ path, generation });
       return { generation };
     },
@@ -104,7 +104,7 @@ function Harness({
   apiRef: { current: UseAnnotationsApi | null };
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  apiRef.current = useAnnotations({ rootRef, content, path, enabled: true, transport });
+  apiRef.current = useAnnotations({ rootRef, content, path, workspaceId: 'ws-test', enabled: true, transport });
   return (
     <div ref={rootRef}>
       <MarkdownReader content={content} path={path} allowLocalTargets />
@@ -382,7 +382,7 @@ describe('useAnnotations', () => {
     expect(calls.save[0].annotations[0].text).toBe('almost lost');
   });
 
-  it('never saves before hydration has completed', async () => {
+  it('never saves before hydration has completed, then keeps pre-hydration annotations', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -397,7 +397,7 @@ describe('useAnnotations', () => {
         calls.save += 1;
         return { stale: false };
       },
-      clearMarkdownAnnotations: async (_p, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
     };
     const { container, apiRef } = await mount(transport);
 
@@ -410,9 +410,11 @@ describe('useAnnotations', () => {
 
     release();
     await flush();
-    // The annotation created pre-hydration was replaced by the authoritative
-    // (empty) draft — hydration is the source of truth.
-    expect(apiRef.current!.annotations).toHaveLength(0);
+    // The annotation created before the slow hydrate resolved is merged into
+    // the (empty) authoritative draft, not wiped, and now persists.
+    expect(apiRef.current!.annotations.map((a) => a.text)).toEqual(['too early']);
+    await advanceDebounce();
+    expect(calls.save).toBe(1);
   });
 
   it('builds the right shapes for deletion, quick-label, and global annotations', async () => {
@@ -569,11 +571,11 @@ describe('useAnnotations', () => {
         }
         return { annotations: [], generation: 9 };
       },
-      saveMarkdownAnnotations: async (path, annotations, generation) => {
+      saveMarkdownAnnotations: async (path, _w, annotations, generation) => {
         saves.push({ path, annotations, generation });
         return { stale: false };
       },
-      clearMarkdownAnnotations: async (_p, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
     };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { container, apiRef } = await mount(transport);
@@ -602,6 +604,58 @@ describe('useAnnotations', () => {
     await advanceDebounce();
     expect(saves).toHaveLength(1);
     expect(saves[0].generation).toBe(10); // seeded past the stored floor of 9
+    // The outage-created comment survived the successful hydrate and is part
+    // of the persisted list — recovery must never erase it.
+    const texts = saves[0].annotations.map((a) => a.text);
+    expect(texts).toContain('made during outage');
+    expect(texts).toContain('after recovery');
+  });
+
+  it('merges outage-created annotations into the successful hydrate and persists the union', async () => {
+    // Regression: initial `get` fails, the user annotates during the outage,
+    // then the retry succeeds with a non-empty daemon snapshot. The snapshot
+    // must not replace the local list — both must survive and be saved.
+    let failNext = true;
+    const saves: SaveCall[] = [];
+    const transport: MarkdownAnnotationsTransport = {
+      getMarkdownAnnotations: async () => {
+        if (failNext) {
+          throw new Error('WebSocket not connected');
+        }
+        return { annotations: [storedAnnotation('target words')], generation: 4 };
+      },
+      saveMarkdownAnnotations: async (path, _w, annotations, generation) => {
+        saves.push({ path, annotations, generation });
+        return { stale: false };
+      },
+      clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
+    };
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { container, apiRef } = await mount(transport);
+
+    act(() => {
+      apiRef.current!.handleSelectionChange(selectNeedle(container, 'plain prose'));
+      apiRef.current!.submitComment('made during outage');
+    });
+    await advanceDebounce();
+    expect(saves).toHaveLength(0); // still locked
+
+    failNext = false;
+    await act(async () => {
+      vi.advanceTimersByTime(ANNOTATION_HYDRATE_RETRY_MS);
+    });
+    await flush();
+
+    // Both the daemon snapshot and the outage-created record are present.
+    const texts = apiRef.current!.annotations.map((a) => a.text).sort();
+    expect(texts).toEqual(['made during outage', 'stored comment']);
+
+    // The merge alone (no further edits) persists the union.
+    await advanceDebounce();
+    expect(saves).toHaveLength(1);
+    expect(saves[0].generation).toBe(5); // past the hydrated floor of 4
+    const savedTexts = saves[0].annotations.map((a) => a.text).sort();
+    expect(savedTexts).toEqual(['made during outage', 'stored comment']);
   });
 
   it('retries a failed save instead of silently dropping the draft', async () => {
@@ -609,14 +663,14 @@ describe('useAnnotations', () => {
     const saves: SaveCall[] = [];
     const transport: MarkdownAnnotationsTransport = {
       getMarkdownAnnotations: async () => ({ annotations: [], generation: 0 }),
-      saveMarkdownAnnotations: async (path, annotations, generation) => {
+      saveMarkdownAnnotations: async (path, _w, annotations, generation) => {
         saves.push({ path, annotations, generation });
         if (fail) {
           throw new Error('WebSocket not connected');
         }
         return { stale: false };
       },
-      clearMarkdownAnnotations: async (_p, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
     };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { container, apiRef } = await mount(transport);

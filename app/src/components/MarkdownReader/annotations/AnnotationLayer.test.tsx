@@ -61,11 +61,11 @@ function makeTransport() {
   };
   const transport: MarkdownAnnotationsTransport = {
     getMarkdownAnnotations: async () => ({ annotations: [], generation: 0 }),
-    saveMarkdownAnnotations: async (_p, annotations, generation) => {
+    saveMarkdownAnnotations: async (_p, _w, annotations, generation) => {
       calls.save.push({ annotations, generation });
       return { stale: false };
     },
-    clearMarkdownAnnotations: async (_p, generation) => {
+    clearMarkdownAnnotations: async (_p, _w, generation) => {
       calls.clear.push(generation);
       return { generation };
     },
@@ -85,7 +85,7 @@ function Harness({
   apiRef: { current: UseAnnotationsApi | null };
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const api = useAnnotations({ rootRef, content, path, enabled: true, transport });
+  const api = useAnnotations({ rootRef, content, path, workspaceId: 'ws-test', enabled: true, transport });
   apiRef.current = api;
   return (
     <div ref={rootRef}>

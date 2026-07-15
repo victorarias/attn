@@ -1602,6 +1602,9 @@ type MarkdownAnnotationsClearMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type MarkdownAnnotationsClearResultMessage struct {
@@ -1622,6 +1625,9 @@ type MarkdownAnnotationsClearResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type MarkdownAnnotationsGetMessage struct {
@@ -1633,6 +1639,9 @@ type MarkdownAnnotationsGetMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type MarkdownAnnotationsGetResultMessage struct {
@@ -1656,6 +1665,9 @@ type MarkdownAnnotationsGetResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type MarkdownAnnotationsSaveMessage struct {
@@ -1673,6 +1685,9 @@ type MarkdownAnnotationsSaveMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type MarkdownAnnotationsSaveResultMessage struct {
@@ -1696,6 +1711,9 @@ type MarkdownAnnotationsSaveResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
 }
 
 type MergePRMessage struct {

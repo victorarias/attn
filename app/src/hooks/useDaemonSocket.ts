@@ -2153,7 +2153,7 @@ export function useDaemonSocket({
             const op = data.event === 'markdown_annotations_get_result'
               ? 'get'
               : data.event === 'markdown_annotations_save_result' ? 'save' : 'clear';
-            const key = `${op}:${data.path}`;
+            const key = `${op}:${data.workspace_id ?? ''}:${data.path}`;
             const pending = mdAnnotationsPendingRef.current.get(key);
             if (!pending || pending.requestId !== data.request_id) {
               break; // superseded or timed out — drop the late result
@@ -3457,6 +3457,7 @@ export function useDaemonSocket({
   const sendMarkdownAnnotationsCommand = useCallback(<T,>(
     op: 'get' | 'save' | 'clear',
     path: string,
+    workspaceId: string,
     extra: Record<string, unknown>,
   ): Promise<T> => {
     return new Promise<T>((resolve, reject) => {
@@ -3465,13 +3466,16 @@ export function useDaemonSocket({
         reject(new Error('WebSocket not connected'));
         return;
       }
-      const key = `${op}:${path}`;
+      // workspace-scoped: the same path open in two workspaces (possibly on
+      // two different endpoints) must not supersede each other's requests.
+      const key = `${op}:${workspaceId}:${path}`;
       const requestId = crypto.randomUUID();
       mdAnnotationsPendingRef.current.get(key)?.reject(new Error('Superseded by a newer request'));
       mdAnnotationsPendingRef.current.set(key, { requestId, resolve: resolve as (value: unknown) => void, reject });
       ws.send(JSON.stringify({
         cmd: `markdown_annotations_${op}`,
         path,
+        workspace_id: workspaceId,
         request_id: requestId,
         ...extra,
       }));
@@ -3485,35 +3489,41 @@ export function useDaemonSocket({
     });
   }, []);
 
-  const getMarkdownAnnotations = useCallback((path: string) => {
-    const inflight = mdAnnotationsGetInflightRef.current.get(path);
+  // workspace_id is the requesting tile's owning workspace: on a hub it routes
+  // the command (and therefore the draft storage) to the endpoint daemon that
+  // owns the workspace, so identical absolute paths on different endpoints
+  // never share a draft/generation/tombstone row.
+  const getMarkdownAnnotations = useCallback((path: string, workspaceId: string) => {
+    const inflightKey = `${workspaceId}\0${path}`;
+    const inflight = mdAnnotationsGetInflightRef.current.get(inflightKey);
     if (inflight) {
       return inflight; // share the round-trip (see ref comment)
     }
     const promise: Promise<{ annotations: MarkdownAnnotation[]; generation: number }> =
       sendMarkdownAnnotationsCommand<{ annotations: MarkdownAnnotation[]; generation: number }>(
-        'get', path, {},
+        'get', path, workspaceId, {},
       ).finally(() => {
-        if (mdAnnotationsGetInflightRef.current.get(path) === promise) {
-          mdAnnotationsGetInflightRef.current.delete(path);
+        if (mdAnnotationsGetInflightRef.current.get(inflightKey) === promise) {
+          mdAnnotationsGetInflightRef.current.delete(inflightKey);
         }
       });
-    mdAnnotationsGetInflightRef.current.set(path, promise);
+    mdAnnotationsGetInflightRef.current.set(inflightKey, promise);
     return promise;
   }, [sendMarkdownAnnotationsCommand]);
 
   const saveMarkdownAnnotations = useCallback((
     path: string,
+    workspaceId: string,
     annotations: MarkdownAnnotation[],
     generation: number,
   ) =>
     sendMarkdownAnnotationsCommand<{ stale: boolean }>(
-      'save', path, { annotations, generation },
+      'save', path, workspaceId, { annotations, generation },
     ), [sendMarkdownAnnotationsCommand]);
 
-  const clearMarkdownAnnotations = useCallback((path: string, generation: number) =>
+  const clearMarkdownAnnotations = useCallback((path: string, workspaceId: string, generation: number) =>
     sendMarkdownAnnotationsCommand<{ generation: number }>(
-      'clear', path, { generation },
+      'clear', path, workspaceId, { generation },
     ), [sendMarkdownAnnotationsCommand]);
 
   // Mute a PR with optimistic update

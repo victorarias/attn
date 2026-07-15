@@ -753,6 +753,9 @@ func forwardsRawEvent(event string) bool {
 		protocol.EventSessionExited,
 		protocol.EventWorkspaceLayoutActionResult,
 		protocol.EventWorkspaceTileContent,
+		protocol.EventMarkdownAnnotationsGetResult,
+		protocol.EventMarkdownAnnotationsSaveResult,
+		protocol.EventMarkdownAnnotationsClearResult,
 		protocol.EventCommandError:
 		return true
 	default:

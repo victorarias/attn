@@ -10,9 +10,14 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// Markdown annotation drafts are keyed by absolute file path only (no
-// workspace): annotations are a property of the document, not the view, so
-// the same file docked in two workspaces shows the same drafts. The path is
+// Markdown annotation drafts are keyed by absolute file path on the daemon
+// that OWNS the document: on a hub, remote-workspace commands never reach
+// these handlers — websocket.go routes them by workspace_id to the owning
+// endpoint (remoteCommandWorkspaceID), so identical absolute paths on
+// different endpoints never share a draft/generation/tombstone row. Within
+// one daemon the key is the path alone: annotations are a property of the
+// document, not the view, so the same file docked in two of this daemon's
+// workspaces shows the same drafts. The path is
 // normalized exactly like tilecontent's markdown tiles (TrimSpace; the daemon
 // already receives absolute paths).
 //
@@ -33,6 +38,7 @@ func (d *Daemon) handleMarkdownAnnotationsGet(client *wsClient, msg *protocol.Ma
 		Event:       protocol.EventMarkdownAnnotationsGetResult,
 		RequestID:   msg.RequestID,
 		Path:        path,
+		WorkspaceID: msg.WorkspaceID,
 		Annotations: []protocol.MarkdownAnnotation{},
 	}
 	if path == "" {
@@ -67,10 +73,11 @@ func (d *Daemon) handleMarkdownAnnotationsGet(client *wsClient, msg *protocol.Ma
 func (d *Daemon) handleMarkdownAnnotationsSave(client *wsClient, msg *protocol.MarkdownAnnotationsSaveMessage) {
 	path := strings.TrimSpace(msg.Path)
 	result := protocol.MarkdownAnnotationsSaveResultMessage{
-		Event:      protocol.EventMarkdownAnnotationsSaveResult,
-		RequestID:  msg.RequestID,
-		Path:       path,
-		Generation: msg.Generation,
+		Event:       protocol.EventMarkdownAnnotationsSaveResult,
+		RequestID:   msg.RequestID,
+		Path:        path,
+		WorkspaceID: msg.WorkspaceID,
+		Generation:  msg.Generation,
 	}
 	if path == "" {
 		result.Error = protocol.Ptr("markdown_annotations_save: path is required")
@@ -107,10 +114,11 @@ func (d *Daemon) handleMarkdownAnnotationsSave(client *wsClient, msg *protocol.M
 func (d *Daemon) handleMarkdownAnnotationsClear(client *wsClient, msg *protocol.MarkdownAnnotationsClearMessage) {
 	path := strings.TrimSpace(msg.Path)
 	result := protocol.MarkdownAnnotationsClearResultMessage{
-		Event:      protocol.EventMarkdownAnnotationsClearResult,
-		RequestID:  msg.RequestID,
-		Path:       path,
-		Generation: msg.Generation,
+		Event:       protocol.EventMarkdownAnnotationsClearResult,
+		RequestID:   msg.RequestID,
+		Path:        path,
+		WorkspaceID: msg.WorkspaceID,
+		Generation:  msg.Generation,
 	}
 	if path == "" {
 		result.Error = protocol.Ptr("markdown_annotations_clear: path is required")

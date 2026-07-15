@@ -1306,6 +1306,18 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {
 			return typed.WorkspaceID
 		}
+	case protocol.CmdMarkdownAnnotationsGet:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsGetMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdMarkdownAnnotationsSave:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsSaveMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdMarkdownAnnotationsClear:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsClearMessage); ok {
+			return typed.WorkspaceID
+		}
 	case protocol.CmdRenameWorkspace:
 		if typed, ok := msg.(*protocol.RenameWorkspaceMessage); ok {
 			return typed.WorkspaceID
