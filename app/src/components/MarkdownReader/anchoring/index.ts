@@ -13,7 +13,7 @@ export { extractBlockTexts, ownerBlockFor, runReaderPipeline } from './extractBl
 export { buildAnchor, createAnchor, CONTEXT_CHARS } from './create';
 export { resolveAnchor, resolveOrRebase } from './resolve';
 export { rebaseAnchor } from './rebase';
-export { resolveDomRange, blockDomText } from './domRange';
+export { resolveDomRange, blockDomText, domPointToOffset } from './domRange';
 export {
   createHighlightPainter,
   supportsCustomHighlights,
