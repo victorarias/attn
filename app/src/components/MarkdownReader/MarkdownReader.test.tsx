@@ -340,6 +340,178 @@ describe('MarkdownReader tables', () => {
   });
 });
 
+describe('MarkdownReader images + lightbox', () => {
+  it('renders a relative local image inline through the asset protocol', () => {
+    const { container } = renderReader('![diagram](docs/pic%20name.png)');
+
+    const img = container.querySelector<HTMLImageElement>('img.md-reader-image')!;
+    // Resolved against the doc dir, percent-decoded, then convertFileSrc'd.
+    expect(img).toHaveAttribute('src', 'asset://localhost//tmp/project/docs/pic name.png');
+    expect(img).toHaveAttribute('alt', 'diagram');
+    expect(img).toHaveAttribute('loading', 'lazy');
+  });
+
+  it('keeps the blocked fallback for remote and unsafe images', () => {
+    const { container } = renderReader(
+      '![remote](https://example.test/pixel.png)\n\n![script](../evil.sh)\n',
+    );
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('[blocked image: remote]')).toBeInTheDocument();
+    expect(screen.getByText('[blocked image: script]')).toBeInTheDocument();
+  });
+
+  it('blocks local images when local targets are disallowed (remote workspace)', () => {
+    const { container } = renderReader('![diagram](docs/pic.png)', false);
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('[blocked image: diagram]')).toBeInTheDocument();
+  });
+
+  it('opens a lightbox on click, closes on Escape and backdrop click, not on image click', () => {
+    const { container } = renderReader('![the diagram](docs/pic.png)');
+
+    fireEvent.click(container.querySelector('img.md-reader-image')!);
+    // Portal to document.body: it escapes the tile subtree.
+    const lightbox = document.body.querySelector('.md-lightbox')!;
+    expect(lightbox).toBeInTheDocument();
+    expect(lightbox.parentElement).toBe(document.body);
+    expect(lightbox.querySelector('.md-lightbox-img')).toHaveAttribute(
+      'src',
+      'asset://localhost//tmp/project/docs/pic.png',
+    );
+    expect(lightbox.querySelector('.md-lightbox-caption')).toHaveTextContent('the diagram');
+
+    // Clicking the image itself does NOT close.
+    fireEvent.click(lightbox.querySelector('.md-lightbox-img')!);
+    expect(document.body.querySelector('.md-lightbox')).toBeInTheDocument();
+
+    // Escape closes.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(document.body.querySelector('.md-lightbox')).toBeNull();
+
+    // Reopen, backdrop click closes.
+    fireEvent.click(container.querySelector('img.md-reader-image')!);
+    fireEvent.click(document.body.querySelector('.md-lightbox')!);
+    expect(document.body.querySelector('.md-lightbox')).toBeNull();
+  });
+
+  it('omits the caption when the image has no alt text', () => {
+    const { container } = renderReader('![](docs/pic.png)');
+
+    fireEvent.click(container.querySelector('img.md-reader-image')!);
+    expect(document.body.querySelector('.md-lightbox')).toBeInTheDocument();
+    expect(document.body.querySelector('.md-lightbox-caption')).toBeNull();
+    fireEvent.keyDown(window, { key: 'Escape' });
+  });
+});
+
+describe('MarkdownReader raw HTML sanitization', () => {
+  it('strips scripts, styles, and event handlers but keeps allowed elements', () => {
+    const { container } = renderReader(
+      'before\n\n<script>window.pwned = true;</script>\n\n<style>body { display: none; }</style>\n\n<div onclick="window.pwned = true" title="ok">clickable</div>\n\nUse <kbd>Cmd</kbd>+<kbd>C</kbd>, H<sub>2</sub>O and x<sup>2</sup>.<br>done\n',
+    );
+
+    const card = container.querySelector('.md-reader-card')!;
+    expect(card.querySelector('script')).toBeNull();
+    expect(card.querySelector('style')).toBeNull();
+    // Stripped WITH their content — nothing leaks into prose.
+    expect(card.textContent).not.toContain('pwned');
+    expect(card.textContent).not.toContain('display: none');
+
+    const div = screen.getByText('clickable');
+    expect(div).not.toHaveAttribute('onclick');
+    expect(div).toHaveAttribute('title', 'ok');
+
+    expect(card.querySelectorAll('kbd')).toHaveLength(2);
+    expect(card.querySelector('sub')).toHaveTextContent('2');
+    expect(card.querySelector('sup')).toHaveTextContent('2');
+    expect(card.querySelector('br')).toBeInTheDocument();
+  });
+
+  it('keeps <details>/<summary> (with open) and anchors them like any block', () => {
+    const { container } = renderReader(
+      '<details open>\n<summary>More</summary>\n\nHidden **body** text.\n\n</details>\n',
+    );
+
+    const details = container.querySelector('details')!;
+    expect(details).toBeInTheDocument();
+    expect(details.open).toBe(true);
+    expect(details.querySelector('summary')).toHaveTextContent('More');
+    // Markdown between the tags still renders as markdown (rehype-raw).
+    expect(details.querySelector('strong')).toHaveTextContent('body');
+    // Sanitize runs before the anchoring pass, so raw HTML blocks anchor too.
+    expect(details).toHaveAttribute('data-block-id');
+    expect(details).toHaveAttribute('data-source-line', '1');
+  });
+
+  it('cannot forge the reader anchoring attributes from author HTML', () => {
+    const { container } = renderReader('<p data-block-id="b999-fake" data-source-line="999">spoof</p>\n');
+
+    const spoof = screen.getByText('spoof');
+    expect(spoof).not.toHaveAttribute('data-block-id', 'b999-fake');
+    expect(spoof).not.toHaveAttribute('data-source-line', '999');
+    // The real pass stamped it instead.
+    expect(container.querySelector('[data-block-id="b0-p"], [data-block-id="b0-paragraph"]')).toBeInTheDocument();
+  });
+});
+
+describe('MarkdownReader content re-render gate', () => {
+  it('same content: no remount — user-toggled <details> stays open on identical re-render', () => {
+    const content = '<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n';
+    const { container, rerender } = render(
+      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+    );
+
+    const details = container.querySelector('details')!;
+    expect(details.open).toBe(false);
+    // User toggles it open: DOM-owned state React knows nothing about.
+    details.open = true;
+
+    rerender(
+      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+    );
+
+    const after = container.querySelector('details')!;
+    expect(after.isSameNode(details)).toBe(true);
+    expect(after.open).toBe(true);
+  });
+
+  it('opening the lightbox does not re-render (or remount) the document subtree', () => {
+    const { container } = renderReader('![pic](docs/pic.png)\n\n<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n');
+
+    const details = container.querySelector('details')!;
+    details.open = true;
+
+    fireEvent.click(container.querySelector('img.md-reader-image')!);
+    expect(document.body.querySelector('.md-lightbox')).toBeInTheDocument();
+
+    const after = container.querySelector('details')!;
+    expect(after.isSameNode(details)).toBe(true);
+    expect(after.open).toBe(true);
+    fireEvent.keyDown(window, { key: 'Escape' });
+  });
+
+  it('changed content: the subtree re-renders (and resets DOM state)', () => {
+    const content = '<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n';
+    const { container, rerender } = render(
+      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+    );
+    const details = container.querySelector('details')!;
+    details.open = true;
+
+    rerender(
+      <MarkdownReader
+        content={`${content}\nNew paragraph.\n`}
+        path="/tmp/project/README.md"
+        allowLocalTargets={true}
+      />,
+    );
+
+    expect(screen.getByText('New paragraph.')).toBeInTheDocument();
+  });
+});
+
 describe('MarkdownReader prose transforms', () => {
   it('applies smart punctuation and emoji to prose but never to code or flags', async () => {
     const { container } = renderReader(

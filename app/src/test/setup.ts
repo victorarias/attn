@@ -6,6 +6,9 @@ import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from '../hooks/useWhatsNew';
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
   isTauri: vi.fn(() => false),
+  // Mirrors Tauri's real behavior closely enough for assertions: an absolute
+  // path becomes an asset-protocol URL.
+  convertFileSrc: vi.fn((filePath: string) => `asset://localhost/${filePath}`),
 }));
 
 vi.mock('@tauri-apps/api/app', () => ({

@@ -1,6 +1,9 @@
-import { createElement, isValidElement, memo, useRef } from 'react';
-import type { HTMLAttributes, ReactNode } from 'react';
+import { createElement, isValidElement, memo, useCallback, useRef, useState } from 'react';
+import type { HTMLAttributes, ReactNode, RefObject } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import type { PluggableList } from 'unified';
@@ -8,6 +11,7 @@ import '@fontsource-variable/inter';
 import { CodeRenderer } from '../Markdown';
 import { CodeBlock } from './CodeBlock';
 import { extractFrontmatter, type FrontmatterEntry } from './frontmatter';
+import { ImageLightbox } from './ImageLightbox';
 import {
   isSafeLocalMarkdownImageTarget,
   isSafeLocalMarkdownTarget,
@@ -18,6 +22,7 @@ import {
 import rehypeAlerts, { type AlertKind } from './rehypeAlerts';
 import rehypeProseTransforms from './proseTransforms';
 import rehypeSourceAnchors from './rehypeSourceAnchors';
+import { readerSanitizeSchema } from './sanitizeSchema';
 import { scrollToAnchor } from './scrollToAnchor';
 import { createSlugger } from './slugify';
 import { tilePathBasename } from '../../utils/tilePresentation';
@@ -32,8 +37,15 @@ import './MarkdownReader.css';
 // for the memoization contract to hold.
 const remarkPlugins = [remarkGfm, remarkFrontmatter];
 const rehypePlugins: PluggableList = [
-  // Anchors first so alert blockquotes keep bN-blockquote ids and line ranges
-  // that include the marker line; prose transforms last (text-only mutation).
+  // Raw HTML first (turns `raw` nodes into real elements), then sanitize.
+  // Anchors run AFTER sanitize so the anchoring data-* attributes never need
+  // whitelisting (and author HTML can't forge them); anchors before alerts so
+  // alert blockquotes keep bN-blockquote ids and line ranges that include the
+  // marker line; prose transforms last (text-only mutation). Heading ids are
+  // assigned later still, in the React heading renderers — sanitize never
+  // sees them.
+  rehypeRaw,
+  [rehypeSanitize, readerSanitizeSchema],
   [rehypeSourceAnchors, { lineOffset: 0 }],
   rehypeAlerts,
   rehypeProseTransforms,
@@ -112,6 +124,7 @@ function readerComponents(
   documentPath: string,
   allowLocalTargets: boolean,
   rootRef: { current: HTMLDivElement | null },
+  onImageClick: (src: string, alt: string) => void,
 ): Components {
   const slugger = createSlugger();
   const heading = (level: number): Components['h1'] => ({ node: _node, children, ...props }) =>
@@ -204,8 +217,13 @@ function readerComponents(
         </a>
       );
     },
-    img({ src, alt }) {
+    img({ node: _node, src, alt, ...props }) {
       const imgSrc = typeof src === 'string' ? src : undefined;
+      // resolveMarkdownTarget joins relative srcs against the doc directory
+      // and percent-decodes the URL path (`%20` etc.), yielding an absolute
+      // filesystem path for local targets. Remote (http/https) and unsafe
+      // targets keep the blocked-image fallback: the reader never fetches
+      // the network for document images.
       const target = imgSrc ? resolveMarkdownTarget(documentPath, imgSrc) : null;
       if (!target || target.kind !== 'local' || !allowLocalTargets || !isSafeLocalMarkdownImageTarget(target.value)) {
         return (
@@ -214,15 +232,23 @@ function readerComponents(
           </span>
         );
       }
+      // convertFileSrc serves the file over Tauri's asset protocol (enabled
+      // with $HOME scope in tauri.conf.json).
+      const resolvedSrc = convertFileSrc(target.value);
+      const altText = alt ?? tilePathBasename(target.value);
       return (
-        <button
-          type="button"
-          className="md-reader-local-image"
+        <img
+          {...(props as HTMLAttributes<HTMLImageElement>)}
+          className="md-reader-image"
+          src={resolvedSrc}
+          alt={altText}
           title={target.value}
-          onClick={() => openMarkdownTarget(target)}
-        >
-          Open image: {alt || tilePathBasename(target.value)}
-        </button>
+          loading="lazy"
+          onClick={(event) => {
+            event.stopPropagation();
+            onImageClick(resolvedSrc, alt ?? '');
+          }}
+        />
       );
     },
   };
@@ -265,18 +291,68 @@ export interface MarkdownReaderProps {
   allowLocalTargets?: boolean;
 }
 
+interface MarkdownReaderBodyProps {
+  content: string;
+  path: string;
+  allowLocalTargets: boolean;
+  rootRef: RefObject<HTMLDivElement | null>;
+  onImageClick: (src: string, alt: string) => void;
+}
+
+/**
+ * The rendered document subtree, behind the content re-render gate.
+ *
+ * GATE CONTRACT: this component re-renders only when the document identity
+ * (`content`/`path`/`allowLocalTargets`) changes — `memo`'s shallow compare on
+ * the content STRING is the "content hash": string equality is the degenerate
+ * perfect hash, and the live-reload poller re-reads the file every 750ms, so
+ * an unchanged file must produce zero re-renders here. `rootRef` and
+ * `onImageClick` are referentially stable for the life of the reader (ref
+ * object + useCallback([])), so they never defeat the compare.
+ *
+ * Why zero re-renders matters: the body creates fresh component closures per
+ * render (the heading slugger's dedup map must reset per document render),
+ * which React treats as new element types and remounts the whole rendered
+ * tree — snapping user-toggled `<details>` shut, re-running async shiki
+ * highlights, and wiping copy-button state. DOM-owned state survives no-op
+ * reloads precisely because this subtree never re-renders for them; when the
+ * content DID change, one full re-render (and a details reset) is accepted.
+ * Parent state changes (e.g. the lightbox opening) re-render only the outer
+ * shell, never this subtree.
+ */
+const MarkdownReaderBody = memo(function MarkdownReaderBody({
+  content,
+  path,
+  allowLocalTargets,
+  rootRef,
+  onImageClick,
+}: MarkdownReaderBodyProps) {
+  const frontmatter = extractFrontmatter(content);
+  // Fresh components per render: the heading slugger's dedup map must reset
+  // on every document render (same reason the dock tile rebuilt its map).
+  const components = readerComponents(path, allowLocalTargets, rootRef, onImageClick);
+
+  return (
+    <article className="md-reader-card">
+      <FrontmatterCard entries={frontmatter.entries} />
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+        {content}
+      </ReactMarkdown>
+    </article>
+  );
+});
+
 /**
  * Document reader for markdown tiles: plannotator typography on a centered
  * card, source-line anchoring (data-block-id/data-source-line), syntax
  * highlighting with a hover copy button, GitHub heading slugs, safe link
- * routing, and a frontmatter metadata card. Shared chat-style surfaces keep
- * using the plain `Markdown` component.
+ * routing, sanitized raw HTML, inline local images with a lightbox, and a
+ * frontmatter metadata card. Shared chat-style surfaces keep using the plain
+ * `Markdown` component.
  *
- * Memoized: the body creates fresh component closures per render (the heading
- * slugger's dedup map must reset per document render), which React treats as
- * new element types and remounts the whole rendered tree — re-running async
- * shiki highlights and wiping copy-button state. memo blocks identical-prop
- * parent re-renders so that only happens when the document actually changes.
+ * State (the lightbox) lives here, OUTSIDE the memoized body, so opening or
+ * closing it never re-renders the document subtree (see MarkdownReaderBody's
+ * gate contract).
  */
 export const MarkdownReader = memo(function MarkdownReader({
   content,
@@ -284,21 +360,30 @@ export const MarkdownReader = memo(function MarkdownReader({
   allowLocalTargets = true,
 }: MarkdownReaderProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const frontmatter = extractFrontmatter(content);
-  // Fresh components per render: the heading slugger's dedup map must reset
-  // on every document render (same reason the dock tile rebuilt its map).
-  const components = readerComponents(path, allowLocalTargets, rootRef);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  // Stable identities: these are props of the memoized body and must never
+  // change across renders (see the gate contract above).
+  const handleImageClick = useCallback((src: string, alt: string) => {
+    setLightbox({ src, alt });
+  }, []);
+  const handleLightboxClose = useCallback(() => {
+    setLightbox(null);
+  }, []);
 
   return (
     <div className="md-reader" ref={rootRef}>
       <div className="md-reader-wrap">
-        <article className="md-reader-card">
-          <FrontmatterCard entries={frontmatter.entries} />
-          <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
-            {content}
-          </ReactMarkdown>
-        </article>
+        <MarkdownReaderBody
+          content={content}
+          path={path}
+          allowLocalTargets={allowLocalTargets}
+          rootRef={rootRef}
+          onImageClick={handleImageClick}
+        />
       </div>
+      {lightbox && (
+        <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={handleLightboxClose} />
+      )}
     </div>
   );
 });
