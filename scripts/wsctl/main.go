@@ -18,7 +18,7 @@
 //
 //	go run ./scripts/wsctl add-workspace --title T --dir D [--id I]
 //	go run ./scripts/wsctl rm-workspace --id I
-//	go run ./scripts/wsctl add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24] [--no-pane]
+//	go run ./scripts/wsctl add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24]
 //	go run ./scripts/wsctl rm-session --id I
 //	go run ./scripts/wsctl kill-session --id I [--reload]
 //	go run ./scripts/wsctl screen --id I
@@ -95,7 +95,7 @@ URL: %s (ATTN_WS_URL > ATTN_PROFILE-derived port > dev; prod needs an explicit A
 Commands:
   add-workspace --title T --dir D [--id I]
   rm-workspace --id I
-  add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24] [--no-pane]
+  add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24]
   rm-session --id I
   kill-session --id I [--reload]
   screen --id I
@@ -185,7 +185,6 @@ func addSession(args []string) error {
 	id := fs.String("id", "", "session id (defaults to a generated one)")
 	cols := fs.Int("cols", 80, "initial PTY cols")
 	rows := fs.Int("rows", 24, "initial PTY rows")
-	noPane := fs.Bool("no-pane", false, "skip the workspace layout pane (session will not render in the app)")
 	fs.Parse(args)
 
 	if *workspace == "" || *cwd == "" {
@@ -203,31 +202,9 @@ func addSession(args []string) error {
 		sessID = newUUID()
 	}
 
-	// The app only renders sessions that own a workspace layout pane; the
-	// normal app flow persists the pane BEFORE spawn_session (which then
-	// flips it to ready). Mirror that order here, or the session exists in
-	// the daemon but the workspace shows a blank main area.
-	if !*noPane {
-		paneResp, err := sendAndWaitMatch(map[string]any{
-			"cmd":          "workspace_layout_add_session_pane",
-			"workspace_id": *workspace,
-			"session_id":   sessID,
-		}, "workspace_layout_action_result", func(ev map[string]any) bool {
-			action, _ := ev["action"].(string)
-			wsID, _ := ev["workspace_id"].(string)
-			return action == "workspace_layout_add_session_pane" && wsID == *workspace
-		}, 10*time.Second)
-		if err != nil {
-			return fmt.Errorf("add layout pane: %w", err)
-		}
-		if success, _ := paneResp["success"].(bool); !success {
-			errMsg, _ := paneResp["error"].(string)
-			return fmt.Errorf("daemon rejected layout pane: %s", errMsg)
-		}
-		paneID, _ := paneResp["pane_id"].(string)
-		fmt.Printf("layout pane created: pane_id=%s\n", paneID)
-	}
-
+	// The daemon guarantees a workspace layout pane for every spawned session
+	// (spawn_session ensures one, adopting a pre-created pane when present),
+	// so a bare spawn is all a script needs for the session to render.
 	msg := map[string]any{
 		"cmd":          "spawn_session",
 		"id":           sessID,
@@ -254,7 +231,9 @@ func addSession(args []string) error {
 	// Spawn replies with a SpawnResult — wait briefly for it so we
 	// can surface failures (bad cwd, unknown agent, etc.) instead of
 	// printing "ok" and leaving the user to wonder why nothing
-	// appeared.
+	// appeared. The pane only exists once spawn succeeds (the daemon
+	// ensures it on the success path), so a failure here leaves nothing
+	// to roll back.
 	resp, err := sendAndWait(msg, "spawn_result", sessID, 30*time.Second)
 	if err != nil {
 		return err

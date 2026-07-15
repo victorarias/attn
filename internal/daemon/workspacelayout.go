@@ -1037,21 +1037,29 @@ func (d *Daemon) recomputeAndBroadcastWorkspace(workspaceID string) {
 }
 
 func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *protocol.WorkspaceLayoutAddSessionPaneMessage) {
+	paneID, err := d.addWorkspaceSessionPane(msg)
+	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, paneID, err)
+}
+
+// addWorkspaceSessionPane adds (or adopts) a layout pane for a session. It is the
+// single mechanism behind both the explicit workspace_layout_add_session_pane
+// command and the spawn-time pane guarantee (ensureWorkspaceSessionPane), so a
+// session can never exist in a workspace without a pane the app can render.
+// Idempotent per session: if the session already owns a pane, that pane is
+// returned unchanged.
+func (d *Daemon) addWorkspaceSessionPane(msg *protocol.WorkspaceLayoutAddSessionPaneMessage) (*string, error) {
 	snapshot, err := d.currentOrEmptyWorkspaceLayout(msg.WorkspaceID)
 	if err != nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, msg.PaneID, err)
-		return
+		return msg.PaneID, err
 	}
 
 	sessionID := strings.TrimSpace(msg.SessionID)
 	if sessionID == "" {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, nil, fmt.Errorf("session_id is required"))
-		return
+		return nil, fmt.Errorf("session_id is required")
 	}
 	for _, pane := range snapshot.Panes {
 		if pane.SessionID == sessionID {
-			d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(pane.PaneID), nil)
-			return
+			return protocol.Ptr(pane.PaneID), nil
 		}
 	}
 
@@ -1061,17 +1069,14 @@ func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *prot
 	}
 	for _, pane := range snapshot.Panes {
 		if pane.PaneID == paneID {
-			d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(paneID), fmt.Errorf("pane already exists: %s", paneID))
-			return
+			return protocol.Ptr(paneID), fmt.Errorf("pane already exists: %s", paneID)
 		}
 	}
 	if workspacelayout.HasPane(snapshot.Layout, paneID) {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(paneID), fmt.Errorf("pane already exists: %s", paneID))
-		return
+		return protocol.Ptr(paneID), fmt.Errorf("pane already exists: %s", paneID)
 	}
 	if workspacelayout.HasTile(snapshot.Layout, paneID) {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(paneID), fmt.Errorf("tile already exists: %s", paneID))
-		return
+		return protocol.Ptr(paneID), fmt.Errorf("tile already exists: %s", paneID)
 	}
 	title := strings.TrimSpace(protocol.Deref(msg.Title))
 	if title == "" {
@@ -1089,8 +1094,7 @@ func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *prot
 	targetPaneID := strings.TrimSpace(protocol.Deref(msg.TargetPaneID))
 	if len(snapshot.Panes) == 0 || snapshot.Layout.Type == "" {
 		if targetPaneID != "" {
-			d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(targetPaneID), fmt.Errorf("cannot target pane in empty layout"))
-			return
+			return protocol.Ptr(targetPaneID), fmt.Errorf("cannot target pane in empty layout")
 		}
 		snapshot.Layout = workspacelayout.DefaultLayout(paneID)
 	} else {
@@ -1101,8 +1105,7 @@ func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *prot
 			targetPaneID = firstWorkspaceLayoutPaneID(*snapshot)
 		}
 		if targetPaneID == "" {
-			d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, nil, fmt.Errorf("workspace has no target pane"))
-			return
+			return nil, fmt.Errorf("workspace has no target pane")
 		}
 		layout, changed := workspacelayout.Split(
 			snapshot.Layout,
@@ -1113,8 +1116,7 @@ func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *prot
 			workspacelayout.DefaultSplitRatio,
 		)
 		if !changed {
-			d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(targetPaneID), fmt.Errorf("pane not found: %s", targetPaneID))
-			return
+			return protocol.Ptr(targetPaneID), fmt.Errorf("pane not found: %s", targetPaneID)
 		}
 		snapshot.Layout = layout
 	}
@@ -1123,11 +1125,28 @@ func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *prot
 	snapshot.Panes = append(snapshot.Panes, nextPane)
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
 	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
-		d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(paneID), err)
-		return
+		return protocol.Ptr(paneID), err
 	}
 	d.broadcastWorkspaceLayoutUpdated(msg.WorkspaceID)
-	d.sendWorkspaceLayoutActionResult(client, protocol.CmdWorkspaceLayoutAddSessionPane, msg.WorkspaceID, protocol.Ptr(paneID), nil)
+	return protocol.Ptr(paneID), nil
+}
+
+// ensureWorkspaceSessionPane guarantees a workspace layout pane exists for a
+// freshly spawned session. Clients that pre-create a pane (the app's optimistic
+// UI, delegate, ticket resume) hit the adopt path; bare spawn_session callers
+// (wsctl, scripts) get a pane with default placement so the session always
+// renders in the app.
+func (d *Daemon) ensureWorkspaceSessionPane(workspaceID, sessionID, title string) (string, error) {
+	msg := &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID: workspaceID,
+		SessionID:   sessionID,
+	}
+	if strings.TrimSpace(title) != "" {
+		msg.Title = protocol.Ptr(title)
+	}
+	paneID, err := d.addWorkspaceSessionPane(msg)
+	return protocol.Deref(paneID), err
 }
 
 func (d *Daemon) handleWorkspaceLayoutClosePane(client *wsClient, msg *protocol.WorkspaceLayoutClosePaneMessage) {

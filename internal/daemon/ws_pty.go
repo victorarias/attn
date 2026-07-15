@@ -763,6 +763,15 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 		d.store.UpsertRecentLocation(cwd)
 		d.associateSessionWithWorkspace(session.ID, workspaceID)
+		// Single mechanism: spawn_session guarantees the session has a layout
+		// pane. Clients that pre-created one (app, delegate, ticket resume) hit
+		// the adopt path; bare spawns (wsctl, scripts) get default placement.
+		// A pane failure must not fail the spawn — the session is already live.
+		if workspaceID != "" {
+			if _, err := d.ensureWorkspaceSessionPane(workspaceID, session.ID, session.Label); err != nil {
+				d.logf("ensure workspace pane for session %s: %v", session.ID, err)
+			}
+		}
 		d.setWorkspacePaneStatusForSession(session.ID, workspacelayout.PaneStatusReady, "")
 		eventType := protocol.EventSessionRegistered
 		if existingSession != nil {
