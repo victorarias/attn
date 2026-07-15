@@ -545,6 +545,91 @@ func TestReloadSessionAgentLeavesPluginWorkerAliveWhenResumeCannotBePrepared(t *
 	}
 }
 
+func TestSetChiefOfStaffRejectsPluginRoleChangeWhenResumePreflightFails(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		promote      bool
+		initialChief string
+		wantChief    string
+		wantKind     string
+	}{
+		{name: "promotion", promote: true, wantKind: pluginInstructionKindChief},
+		{name: "demotion", promote: false, initialChief: "plugin-chief", wantChief: "plugin-chief", wantKind: pluginInstructionKindWorkspace},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			backend := &fakeReloadBackend{
+				liveIDs: []string{"plugin-chief"},
+				info:    ptybackend.SessionInfo{Cols: 100, Rows: 32},
+				params:  ptybackend.SessionLaunchParams{Recorded: true},
+			}
+			d := newReloadTestDaemon(t, backend)
+			addTestWorkspace(d, "ws-plugin-chief", t.TempDir())
+			addReloadSession(d, "plugin-chief", protocol.SessionAgent("opencode"), protocol.SessionStateIdle)
+			d.store.SetSetting(SettingNotebookRoot, t.TempDir())
+			if test.initialChief != "" {
+				if err := d.store.SetProfileRole(profileRoleChiefOfStaff, test.initialChief); err != nil {
+					t.Fatalf("seed chief role: %v", err)
+				}
+			}
+			if !d.store.BeginAgentDriverRun("plugin-chief", "opencode-plugin", "run-live") {
+				t.Fatal("begin live plugin run")
+			}
+
+			plugin, done := startPluginPipe(t, d, "opencode-plugin", nil)
+			defer func() {
+				_ = plugin.Close()
+				<-done
+			}()
+			registerTestPluginDriver(t, plugin, "opencode", map[string]bool{"resume": true, "launch_instructions": true})
+			closed := make(chan struct{})
+			go func() {
+				request := decodeJSONRPCMessage(t, plugin)
+				if request.Method != "driver.resume" {
+					t.Errorf("method=%q, want driver.resume", request.Method)
+					return
+				}
+				var params pluginDriverSpawnParams
+				if err := json.Unmarshal(request.Params, &params); err != nil {
+					t.Errorf("decode resume params: %v", err)
+					return
+				}
+				if params.Instructions == nil || params.Instructions.Kind != test.wantKind {
+					t.Errorf("instructions=%+v, want kind %q", params.Instructions, test.wantKind)
+					return
+				}
+				_ = json.NewEncoder(plugin).Encode(jsonRPCMessage{
+					JSONRPC: "2.0",
+					ID:      request.ID,
+					Error:   &jsonRPCError{Code: jsonRPCInternalError, Message: "native resume unavailable"},
+				})
+				request = decodeJSONRPCMessage(t, plugin)
+				respondPluginRequest(t, plugin, request, pluginDriverSessionClosedResult{OK: true})
+				close(closed)
+			}()
+
+			client := newRenameTestClient()
+			d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
+				Cmd: protocol.CmdSetChiefOfStaff, SessionID: "plugin-chief", ChiefOfStaff: test.promote,
+			})
+			result := readChiefOfStaffResult(t, client)
+			if result.Success || !strings.Contains(protocol.Deref(result.Error), "native resume unavailable") {
+				t.Fatalf("result=%+v, want resume preflight failure", result)
+			}
+			if got := d.chiefOfStaffSessionID(); got != test.wantChief {
+				t.Fatalf("persisted chief role=%q, want %q", got, test.wantChief)
+			}
+			if order := backend.callOrder(); len(order) != 0 {
+				t.Fatalf("failed preflight touched live worker: %v", order)
+			}
+			select {
+			case <-closed:
+			case <-time.After(time.Second):
+				t.Fatal("failed prepared run was not cleaned up")
+			}
+		})
+	}
+}
+
 // A respawn that fails after the kill must never leave a live-looking pane over a
 // dead session: emit the real session_exited so the UI degrades to a dead pane.
 func TestReloadSessionAgentRespawnFailureBroadcastsSessionExited(t *testing.T) {

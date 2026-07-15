@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -189,6 +190,10 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 	}
 
 	previousSessionID := d.chiefOfStaffSessionID()
+	roleChanged := previousSessionID != sessionID
+	if !msg.ChiefOfStaff {
+		roleChanged = previousSessionID == sessionID
+	}
 	if msg.ChiefOfStaff {
 		if !d.sessionExists(sessionID) {
 			d.sendChiefOfStaffResult(
@@ -212,6 +217,48 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 				}
 			}
 		}
+	}
+
+	prepared := make([]*preparedPluginRoleReload, 0, 2)
+	preparedSessions := make(map[string]bool)
+	if roleChanged {
+		desiredRoles := map[string]bool{sessionID: msg.ChiefOfStaff}
+		if msg.ChiefOfStaff && previousSessionID != "" && previousSessionID != sessionID {
+			desiredRoles[previousSessionID] = false
+		}
+		ids := make([]string, 0, len(desiredRoles))
+		for id := range desiredRoles {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			reload, pluginSession, err := d.preparePluginRoleReload(id, desiredRoles[id])
+			if err != nil {
+				for i := len(prepared) - 1; i >= 0; i-- {
+					prepared[i].abort()
+				}
+				d.sendChiefOfStaffResult(client, sessionID, msg.ChiefOfStaff, previousSessionID, fmt.Errorf("prepare chief guidance reload for %s: %w", id, err))
+				return
+			}
+			if pluginSession {
+				preparedSessions[id] = true
+			}
+			if reload != nil {
+				prepared = append(prepared, reload)
+			}
+		}
+	}
+	abortPrepared := true
+	defer func() {
+		if !abortPrepared {
+			return
+		}
+		for i := len(prepared) - 1; i >= 0; i-- {
+			prepared[i].abort()
+		}
+	}()
+
+	if msg.ChiefOfStaff {
 		if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sessionID); err != nil {
 			d.sendChiefOfStaffResult(client, sessionID, true, previousSessionID, err)
 			return
@@ -221,6 +268,14 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 		return
 	}
 
+	var reloadErr error
+	for _, reload := range prepared {
+		if err := reload.execute(); err != nil && reloadErr == nil {
+			reloadErr = err
+		}
+	}
+	abortPrepared = false
+
 	d.broadcastSessionsUpdated()
 	// Reload the agent(s) whose chief status actually changed so the new status reaches
 	// the system prompt: ChiefGuidance is injected only at agent-launch, so a live
@@ -228,29 +283,27 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 	// (kill + resume-respawn), so fire it ONLY on a real role change — a redundant
 	// toggle (re-assigning the current chief, or demoting a session that wasn't chief,
 	// which ClearProfileRole no-ops) must not kill+respawn an innocent agent.
-	// Resume-preserving, fire-and-forget; symmetric — assign injects the guidance,
-	// demote drops it.
-	roleChanged := previousSessionID != sessionID
-	if !msg.ChiefOfStaff {
-		// Demote: changed only if this session actually held the role.
-		roleChanged = previousSessionID == sessionID
-	}
+	// Plugin replacements are preflighted and completed before the success result;
+	// built-in replacements remain resume-preserving and asynchronous. The behavior
+	// is symmetric — assign injects the guidance, demote drops it.
 	if roleChanged {
 		newChiefSessionID := ""
 		if msg.ChiefOfStaff {
 			newChiefSessionID = sessionID
 		}
 		d.retargetChiefTicketDelivery(previousSessionID, newChiefSessionID)
-		go d.reloadSessionAgent(sessionID)
+		if !preparedSessions[sessionID] {
+			go d.reloadSessionAgent(sessionID)
+		}
 		// A role transfer (promote B while A still held it) demotes A via the
 		// single-holder upsert. Reload A too so the displaced chief drops the guidance
 		// now, not whenever it next restarts. Different id → different reload lock, so
 		// this runs concurrently with the promotion reload.
-		if msg.ChiefOfStaff && previousSessionID != "" {
+		if msg.ChiefOfStaff && previousSessionID != "" && !preparedSessions[previousSessionID] {
 			go d.reloadSessionAgent(previousSessionID)
 		}
 	}
-	d.sendChiefOfStaffResult(client, sessionID, msg.ChiefOfStaff, previousSessionID, nil)
+	d.sendChiefOfStaffResult(client, sessionID, msg.ChiefOfStaff, previousSessionID, reloadErr)
 }
 
 // retargetChiefTicketDelivery moves only the live delivery target. Durable role

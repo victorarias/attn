@@ -184,15 +184,20 @@ func (d *Daemon) reloadSessionAgent(sessionID string) {
 		d.logf("reload: cannot reconstruct launch params for %s: %v; aborting (live worker preserved)", sessionID, err)
 		return
 	}
-	pluginReload, err := d.preparePluginReload(session, &opts)
+	pluginReload, err := d.preparePluginReload(session, &opts, d.isChiefOfStaffSession(sessionID))
 	if err != nil {
 		d.logf("reload: cannot reconstruct plugin launch for %s: %v; aborting (live worker preserved)", sessionID, err)
 		return
 	}
+	if err := d.executePreparedSessionReload(sessionID, opts, pluginReload); err != nil {
+		d.logf("reload: %v", err)
+	}
+}
+
+func (d *Daemon) executePreparedSessionReload(sessionID string, opts ptybackend.SpawnOptions, pluginReload *preparedPluginReload) error {
 	if pluginReload != nil {
 		defer pluginReload.abort()
 	}
-
 	ctx := context.Background()
 	// Mark BEFORE kill so the killed worker's async exit is suppressed no matter how
 	// quickly it fires relative to the kill returning.
@@ -216,7 +221,7 @@ func (d *Daemon) reloadSessionAgent(sessionID string) {
 		d.logf("reload: respawn failed for %s: %v; finalizing as exited", sessionID, spawnErr)
 		d.clearReloading(sessionID)
 		d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 1})
-		return
+		return fmt.Errorf("respawn failed for %s: %w", sessionID, spawnErr)
 	}
 	if pluginReload != nil {
 		if commitErr := pluginReload.commit(); commitErr != nil {
@@ -226,9 +231,8 @@ func (d *Daemon) reloadSessionAgent(sessionID string) {
 			d.clearReloading(sessionID)
 			d.closePluginDriverSession(sessionID, "reload_failed", nil, "")
 			d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 1})
-			return
+			return fmt.Errorf("activate plugin run failed for %s: %w", sessionID, commitErr)
 		}
-		pluginReload = nil
 	}
 
 	// Success. Do NOT clear the flag here — the killed worker's exit consumes it.
@@ -239,6 +243,7 @@ func (d *Daemon) reloadSessionAgent(sessionID string) {
 		ID:    protocol.Ptr(sessionID),
 	})
 	d.logf("reload: respawned %s (agent=%s resume=%t yolo=%t)", sessionID, opts.Agent, opts.ResumeSessionID != "", opts.YoloMode)
+	return nil
 }
 
 // buildReloadSpawnOptions reconstructs the SpawnOptions for an in-place re-spawn of
@@ -358,7 +363,7 @@ func (p *preparedPluginReload) commit() error {
 // worker is killed. That preserves the reload path's fail-safe: an unavailable
 // plugin, invalid metadata, or instruction preparation error leaves the current
 // runtime untouched.
-func (d *Daemon) preparePluginReload(session *protocol.Session, opts *ptybackend.SpawnOptions) (*preparedPluginReload, error) {
+func (d *Daemon) preparePluginReload(session *protocol.Session, opts *ptybackend.SpawnOptions, isChief bool) (*preparedPluginReload, error) {
 	reg, ok := d.ensurePluginRegistry().driver(string(session.Agent))
 	if !ok {
 		return nil, nil
@@ -368,7 +373,7 @@ func (d *Daemon) preparePluginReload(session *protocol.Session, opts *ptybackend
 	}
 	runID := uuid.NewString()
 	d.beginPluginSessionLaunch(session.ID, reg.PluginName, runID)
-	instructions, rollback, err := d.preparePluginLaunchInstructions(session.ID, session.WorkspaceID, d.isChiefOfStaffSession(session.ID))
+	instructions, rollback, err := d.preparePluginLaunchInstructions(session.ID, session.WorkspaceID, isChief)
 	if err != nil {
 		d.finishPluginSessionLaunch(session.ID, false)
 		return nil, err
@@ -406,4 +411,85 @@ func (d *Daemon) preparePluginReload(session *protocol.Session, opts *ptybackend
 	opts.ExternalEnv = commandEnv
 	opts.ExternalCWD = strings.TrimSpace(result.CWD)
 	return prepared, nil
+}
+
+type preparedPluginRoleReload struct {
+	d         *Daemon
+	sessionID string
+	opts      ptybackend.SpawnOptions
+	plugin    *preparedPluginReload
+	lock      *sync.Mutex
+	completed bool
+}
+
+func (p *preparedPluginRoleReload) abort() {
+	if p == nil || p.completed {
+		return
+	}
+	p.completed = true
+	p.plugin.abort()
+	p.lock.Unlock()
+}
+
+func (p *preparedPluginRoleReload) execute() error {
+	if p == nil || p.completed {
+		return nil
+	}
+	p.completed = true
+	defer p.lock.Unlock()
+	return p.d.executePreparedSessionReload(p.sessionID, p.opts, p.plugin)
+}
+
+// preparePluginRoleReload runs driver.resume before a public chief-role change
+// is persisted. A failure leaves both the role and the live worker untouched.
+func (d *Daemon) preparePluginRoleReload(sessionID string, desiredChief bool) (*preparedPluginRoleReload, bool, error) {
+	session := d.store.Get(sessionID)
+	if session == nil {
+		return nil, false, nil
+	}
+	reg, registered := d.ensurePluginRegistry().driver(string(session.Agent))
+	activeRun := d.store.GetAgentDriverRun(sessionID)
+	pluginSession := registered || activeRun.RunID != ""
+	if !pluginSession {
+		return nil, false, nil
+	}
+	if !d.sessionHasLiveWorker(sessionID) {
+		return nil, true, nil
+	}
+	if !registered {
+		return nil, true, fmt.Errorf("agent %q plugin driver is unavailable", session.Agent)
+	}
+	if !reg.Capabilities["launch_instructions"] || !reg.Capabilities["resume"] {
+		return nil, true, fmt.Errorf("agent %q requires launch_instructions and resume capabilities", reg.Agent)
+	}
+
+	lock := d.reloadLockFor(sessionID)
+	lock.Lock()
+	if !d.sessionHasLiveWorker(sessionID) {
+		lock.Unlock()
+		return nil, true, nil
+	}
+	session = d.store.Get(sessionID)
+	if session == nil {
+		lock.Unlock()
+		return nil, true, nil
+	}
+	opts, err := d.buildReloadSpawnOptions(session)
+	if err != nil {
+		lock.Unlock()
+		return nil, true, err
+	}
+	opts.ChiefContextWindowCap = d.chiefContextWindowCap(desiredChief)
+	pluginReload, err := d.preparePluginReload(session, &opts, desiredChief)
+	if err != nil {
+		lock.Unlock()
+		return nil, true, err
+	}
+	if pluginReload == nil {
+		lock.Unlock()
+		return nil, true, fmt.Errorf("agent %q plugin driver became unavailable", session.Agent)
+	}
+	return &preparedPluginRoleReload{
+		d: d, sessionID: sessionID, opts: opts, plugin: pluginReload, lock: lock,
+	}, true, nil
 }
