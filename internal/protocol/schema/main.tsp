@@ -1729,6 +1729,11 @@ model MarkdownAnnotation {
 model MarkdownAnnotationsGetMessage {
   cmd: "markdown_annotations_get";
   path: string;
+  // Owning workspace of the requesting markdown tile. On a hub this routes
+  // the command to the endpoint that owns the workspace, so drafts live on
+  // (and are keyed by) the daemon that owns the document — identical paths
+  // on different endpoints never share a draft/generation/tombstone row.
+  workspace_id: string;
   request_id: string;
 }
 
@@ -1737,6 +1742,8 @@ model MarkdownAnnotationsGetMessage {
 model MarkdownAnnotationsGetResultMessage {
   event: "markdown_annotations_get_result";
   request_id: string;
+  // Echo of the request's workspace_id (client correlation key).
+  workspace_id: string;
   success: boolean;
   error?: string;
   path: string;
@@ -1750,6 +1757,8 @@ model MarkdownAnnotationsGetResultMessage {
 model MarkdownAnnotationsSaveMessage {
   cmd: "markdown_annotations_save";
   path: string;
+  // See MarkdownAnnotationsGetMessage.workspace_id (hub endpoint routing).
+  workspace_id: string;
   annotations: MarkdownAnnotation[];
   generation: int32;
   request_id: string;
@@ -1761,6 +1770,8 @@ model MarkdownAnnotationsSaveMessage {
 model MarkdownAnnotationsSaveResultMessage {
   event: "markdown_annotations_save_result";
   request_id: string;
+  // Echo of the request's workspace_id (client correlation key).
+  workspace_id: string;
   success: boolean;
   stale?: boolean;
   error?: string;
@@ -1774,6 +1785,8 @@ model MarkdownAnnotationsSaveResultMessage {
 model MarkdownAnnotationsClearMessage {
   cmd: "markdown_annotations_clear";
   path: string;
+  // See MarkdownAnnotationsGetMessage.workspace_id (hub endpoint routing).
+  workspace_id: string;
   generation: int32;
   request_id: string;
 }
@@ -1782,6 +1795,8 @@ model MarkdownAnnotationsClearMessage {
 model MarkdownAnnotationsClearResultMessage {
   event: "markdown_annotations_clear_result";
   request_id: string;
+  // Echo of the request's workspace_id (client correlation key).
+  workspace_id: string;
   success: boolean;
   error?: string;
   path: string;

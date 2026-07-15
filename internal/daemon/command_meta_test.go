@@ -171,6 +171,18 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			msg:  &protocol.OpenMarkdownMessage{Path: "/tmp/notes.md"},
 			want: "",
 		},
+		{
+			// Hub→remote regression: Submit's draft-read/format/deliver all run
+			// on whichever daemon handles the command, so it must route by the
+			// SAME target_session_id it delivers to — otherwise a hub would
+			// format-and-clear a draft it never wrote (Get/Save/Clear route by
+			// workspace_id) and try to deliver against a session absent from
+			// its own local store.
+			name: "markdown_annotations_submit",
+			cmd:  protocol.CmdMarkdownAnnotationsSubmit,
+			msg:  &protocol.MarkdownAnnotationsSubmitMessage{Path: "/tmp/notes.md", TargetSessionID: "sess-md-submit"},
+			want: "sess-md-submit",
+		},
 	}
 
 	for _, tc := range cases {
@@ -183,6 +195,27 @@ func TestRemoteCommandSessionID(t *testing.T) {
 func TestRemoteCommandWorkspaceID_IncludesTileContentGet(t *testing.T) {
 	msg := &protocol.WorkspaceTileContentGetMessage{WorkspaceID: "workspace-remote"}
 	if got := remoteCommandWorkspaceID(protocol.CmdWorkspaceTileContentGet, msg); got != msg.WorkspaceID {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	}
+}
+
+func TestRemoteCommandWorkspaceID_IncludesMarkdownAnnotationsGet(t *testing.T) {
+	msg := &protocol.MarkdownAnnotationsGetMessage{WorkspaceID: "workspace-md-get"}
+	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsGet, msg); got != msg.WorkspaceID {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	}
+}
+
+func TestRemoteCommandWorkspaceID_IncludesMarkdownAnnotationsSave(t *testing.T) {
+	msg := &protocol.MarkdownAnnotationsSaveMessage{WorkspaceID: "workspace-md-save"}
+	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsSave, msg); got != msg.WorkspaceID {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	}
+}
+
+func TestRemoteCommandWorkspaceID_IncludesMarkdownAnnotationsClear(t *testing.T) {
+	msg := &protocol.MarkdownAnnotationsClearMessage{WorkspaceID: "workspace-md-clear"}
+	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsClear, msg); got != msg.WorkspaceID {
 		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
 	}
 }

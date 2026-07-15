@@ -376,7 +376,7 @@ function globalNote(id = 'g1'): WireAnnotation {
 function makeSendTransport(seed: WireAnnotation[] = [globalNote()]) {
   const getSpy = vi.fn(async () => ({ annotations: seed, generation: 5 }));
   const saveSpy = vi.fn(async () => ({ stale: false }));
-  const clearSpy = vi.fn(async (_path: string, generation: number) => ({ generation }));
+  const clearSpy = vi.fn(async (_path: string, _workspaceId: string, generation: number) => ({ generation }));
   const submitSpy = vi.fn(
     async (): Promise<MarkdownAnnotationsSubmitResult> => ({ status: 'delivered', generation: 6 }),
   );

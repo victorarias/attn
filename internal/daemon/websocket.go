@@ -1246,6 +1246,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.OpenMarkdownMessage); ok {
 			return protocol.Deref(typed.SessionID)
 		}
+	case protocol.CmdMarkdownAnnotationsSubmit:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsSubmitMessage); ok {
+			return typed.TargetSessionID
+		}
 	}
 	return ""
 }
@@ -1306,6 +1310,18 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWorkspaceTileContentGet:
 		if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdMarkdownAnnotationsGet:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsGetMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdMarkdownAnnotationsSave:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsSaveMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdMarkdownAnnotationsClear:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsClearMessage); ok {
 			return typed.WorkspaceID
 		}
 	case protocol.CmdRenameWorkspace:

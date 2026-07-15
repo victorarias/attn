@@ -547,6 +547,10 @@ func TestForwardsRawEventIncludesPickerResults(t *testing.T) {
 		protocol.EventBrowseDirectoryResult,
 		protocol.EventInspectPathResult,
 		protocol.EventWorkspaceTileContent,
+		protocol.EventMarkdownAnnotationsGetResult,
+		protocol.EventMarkdownAnnotationsSaveResult,
+		protocol.EventMarkdownAnnotationsClearResult,
+		protocol.EventMarkdownAnnotationsSubmitResult,
 	} {
 		if !forwardsRawEvent(event) {
 			t.Fatalf("forwardsRawEvent(%q) = false, want true", event)

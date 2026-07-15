@@ -459,6 +459,7 @@ export function WorkspaceDockTile({
         {tile.tileKind === 'markdown' ? (
           <MarkdownBody
             content={content}
+            workspaceId={workspaceId}
             allowLocalTargets={allowLocalTargets}
             onAnnotationsCountChange={setAnnotationCount}
             annotationsSendRef={annotationsSendRef}
@@ -493,11 +494,13 @@ export function WorkspaceDockTile({
 
 function MarkdownBody({
   content,
+  workspaceId,
   allowLocalTargets,
   onAnnotationsCountChange,
   annotationsSendRef,
 }: {
   content?: TileContentState;
+  workspaceId: string;
   allowLocalTargets: boolean;
   onAnnotationsCountChange: (count: number) => void;
   annotationsSendRef: RefObject<MarkdownAnnotationsSendHandle | null>;
@@ -517,6 +520,7 @@ function MarkdownBody({
       path={content.path}
       allowLocalTargets={allowLocalTargets}
       annotationsEnabled
+      workspaceId={workspaceId}
       onAnnotationsCountChange={onAnnotationsCountChange}
       annotationsSendRef={annotationsSendRef}
     />

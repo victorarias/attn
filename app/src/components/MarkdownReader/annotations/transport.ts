@@ -8,6 +8,11 @@
  * local-only annotations: hydration resolves empty and saves no-op. Tests
  * pass a transport directly into the hook instead of using this registry.
  *
+ * Every call carries the tile's owning workspaceId: on a hub the daemon
+ * routes annotation commands to the endpoint that owns the workspace, so
+ * drafts live on the daemon that owns the document (identical paths on two
+ * endpoints never collide).
+ *
  * CONTRACT (mirrors the daemon store's generation tombstoning — see
  * internal/store/markdown_annotations.go):
  * - every save carries a client generation, pre-incremented before each save;
@@ -38,18 +43,26 @@ export interface MarkdownAnnotationsSubmitResult {
 export interface MarkdownAnnotationsTransport {
   getMarkdownAnnotations(
     path: string,
+    workspaceId: string,
   ): Promise<{ annotations: WireAnnotation[]; generation: number }>;
   saveMarkdownAnnotations(
     path: string,
+    workspaceId: string,
     annotations: WireAnnotation[],
     generation: number,
   ): Promise<{ stale: boolean }>;
-  clearMarkdownAnnotations(path: string, generation: number): Promise<{ generation: number }>;
+  clearMarkdownAnnotations(
+    path: string,
+    workspaceId: string,
+    generation: number,
+  ): Promise<{ generation: number }>;
   /**
    * Format the persisted draft for `path` and deliver it into
-   * `targetSessionId`'s PTY (PR6 send flow). `orphanedIds` carries the
-   * client-derived orphan set (non-persisted) so the formatter can label
-   * those items "(~line N, moved)".
+   * `targetSessionId`'s PTY (PR6 send flow). Routed by the target session
+   * (not the workspace): the daemon owning the session also owns the draft
+   * store the submit clears. `orphanedIds` carries the client-derived orphan
+   * set (non-persisted) so the formatter can label those items
+   * "(~line N, moved)".
    */
   submitMarkdownAnnotations(
     path: string,

@@ -1987,10 +1987,11 @@ export interface MarkdownAnnotationAnchor {
 }
 
 export interface MarkdownAnnotationsClearMessage {
-    cmd:        MarkdownAnnotationsClearMessageCmd;
-    generation: number;
-    path:       string;
-    request_id: string;
+    cmd:          MarkdownAnnotationsClearMessageCmd;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    workspace_id: string;
     [property: string]: any;
 }
 
@@ -1999,12 +2000,13 @@ export enum MarkdownAnnotationsClearMessageCmd {
 }
 
 export interface MarkdownAnnotationsClearResultMessage {
-    error?:     string;
-    event:      MarkdownAnnotationsClearResultMessageEvent;
-    generation: number;
-    path:       string;
-    request_id: string;
-    success:    boolean;
+    error?:       string;
+    event:        MarkdownAnnotationsClearResultMessageEvent;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    success:      boolean;
+    workspace_id: string;
     [property: string]: any;
 }
 
@@ -2013,9 +2015,10 @@ export enum MarkdownAnnotationsClearResultMessageEvent {
 }
 
 export interface MarkdownAnnotationsGetMessage {
-    cmd:        MarkdownAnnotationsGetMessageCmd;
-    path:       string;
-    request_id: string;
+    cmd:          MarkdownAnnotationsGetMessageCmd;
+    path:         string;
+    request_id:   string;
+    workspace_id: string;
     [property: string]: any;
 }
 
@@ -2024,13 +2027,14 @@ export enum MarkdownAnnotationsGetMessageCmd {
 }
 
 export interface MarkdownAnnotationsGetResultMessage {
-    annotations: AnnotationObject[];
-    error?:      string;
-    event:       MarkdownAnnotationsGetResultMessageEvent;
-    generation:  number;
-    path:        string;
-    request_id:  string;
-    success:     boolean;
+    annotations:  AnnotationObject[];
+    error?:       string;
+    event:        MarkdownAnnotationsGetResultMessageEvent;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    success:      boolean;
+    workspace_id: string;
     [property: string]: any;
 }
 
@@ -2051,11 +2055,12 @@ export enum MarkdownAnnotationsGetResultMessageEvent {
 }
 
 export interface MarkdownAnnotationsSaveMessage {
-    annotations: AnnotationObject[];
-    cmd:         MarkdownAnnotationsSaveMessageCmd;
-    generation:  number;
-    path:        string;
-    request_id:  string;
+    annotations:  AnnotationObject[];
+    cmd:          MarkdownAnnotationsSaveMessageCmd;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    workspace_id: string;
     [property: string]: any;
 }
 
@@ -2064,13 +2069,14 @@ export enum MarkdownAnnotationsSaveMessageCmd {
 }
 
 export interface MarkdownAnnotationsSaveResultMessage {
-    error?:     string;
-    event:      MarkdownAnnotationsSaveResultMessageEvent;
-    generation: number;
-    path:       string;
-    request_id: string;
-    stale?:     boolean;
-    success:    boolean;
+    error?:       string;
+    event:        MarkdownAnnotationsSaveResultMessageEvent;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    stale?:       boolean;
+    success:      boolean;
+    workspace_id: string;
     [property: string]: any;
 }
 
@@ -8637,6 +8643,7 @@ const typeMap: any = {
         { json: "generation", js: "generation", typ: 0 },
         { json: "path", js: "path", typ: "" },
         { json: "request_id", js: "request_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "MarkdownAnnotationsClearResultMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -8645,11 +8652,13 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "success", js: "success", typ: true },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "MarkdownAnnotationsGetMessage": o([
         { json: "cmd", js: "cmd", typ: r("MarkdownAnnotationsGetMessageCmd") },
         { json: "path", js: "path", typ: "" },
         { json: "request_id", js: "request_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "MarkdownAnnotationsGetResultMessage": o([
         { json: "annotations", js: "annotations", typ: a(r("AnnotationObject")) },
@@ -8659,6 +8668,7 @@ const typeMap: any = {
         { json: "path", js: "path", typ: "" },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "success", js: "success", typ: true },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "AnnotationObject": o([
         { json: "anchor", js: "anchor", typ: u(undefined, r("Anchor")) },
@@ -8676,6 +8686,7 @@ const typeMap: any = {
         { json: "generation", js: "generation", typ: 0 },
         { json: "path", js: "path", typ: "" },
         { json: "request_id", js: "request_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "MarkdownAnnotationsSaveResultMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -8685,6 +8696,7 @@ const typeMap: any = {
         { json: "request_id", js: "request_id", typ: "" },
         { json: "stale", js: "stale", typ: u(undefined, true) },
         { json: "success", js: "success", typ: true },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "MarkdownAnnotationsSubmitMessage": o([
         { json: "cmd", js: "cmd", typ: r("MarkdownAnnotationsSubmitMessageCmd") },

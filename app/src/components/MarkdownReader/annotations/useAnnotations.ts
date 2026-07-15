@@ -65,6 +65,9 @@ export interface UseAnnotationsOptions {
   content: string;
   /** Absolute document path — the daemon draft key. */
   path: string;
+  /** Owning workspace of the tile. Routes draft persistence to the endpoint
+      daemon that owns the workspace on hub setups (see transport.ts). */
+  workspaceId: string;
   /** False disables everything (chat-surface readers never annotate). */
   enabled: boolean;
   /** Test seam. Defaults to the module-registered app transport. */
@@ -127,6 +130,7 @@ export function useAnnotations({
   rootRef,
   content,
   path,
+  workspaceId,
   enabled,
   transport,
 }: UseAnnotationsOptions): UseAnnotationsApi {
@@ -146,6 +150,8 @@ export function useAnnotations({
   // Written by the hydrate effect (not render) so its CLEANUP still sees the
   // previous path and can flush the old document's pending save.
   const pathRef = useRef(path);
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
   const generationRef = useRef(0);
   const hasHydratedRef = useRef(false);
   const hydrateTokenRef = useRef(0);
@@ -214,6 +220,7 @@ export function useAnnotations({
       return Promise.resolve(); // local-only mode
     }
     const savePath = pathRef.current;
+    const saveWorkspaceId = workspaceIdRef.current;
     generationRef.current += 1;
     const generation = generationRef.current;
     const list = annotationsRef.current;
@@ -221,12 +228,12 @@ export function useAnnotations({
       ? // Last annotation removed: tombstone instead of saving [] so a stale
         // stored draft can never offer back deleted content (plannotator
         // remove-on-empty semantics; also the primitive PR6's clear-on-send uses).
-        t.clearMarkdownAnnotations(savePath, generation)
+        t.clearMarkdownAnnotations(savePath, saveWorkspaceId, generation)
           .then(({ generation: floor }) => {
             generationRef.current = Math.max(generationRef.current, floor);
           })
           .catch((err: unknown) => schedulePersistRetry(savePath, 'clear', err))
-      : t.saveMarkdownAnnotations(savePath, list.map(annotationToWire), generation)
+      : t.saveMarkdownAnnotations(savePath, saveWorkspaceId, list.map(annotationToWire), generation)
           .then(({ stale }) => {
             if (stale && pathRef.current === savePath) {
               // A tombstone (or newer writer) raced us: drop local pending state
@@ -419,6 +426,9 @@ export function useAnnotations({
       clearTimeout(hydrateRetryTimerRef.current);
       hydrateRetryTimerRef.current = null;
     }
+    // Distinguishes initial hydration from a re-sync (stale save): only the
+    // initial one may merge locally created records into the snapshot below.
+    const wasHydrated = hasHydratedRef.current;
     hasHydratedRef.current = false;
     const t = getTransport();
     if (!t) {
@@ -426,19 +436,40 @@ export function useAnnotations({
       return;
     }
     try {
-      const result = await t.getMarkdownAnnotations(pathRef.current);
+      const result = await t.getMarkdownAnnotations(pathRef.current, workspaceIdRef.current);
       if (hydrateTokenRef.current !== token) {
         return; // superseded by a newer hydrate (path change / stale re-sync)
       }
+      let mergedOutageRecords = false;
       generationRef.current = Math.max(generationRef.current, result.generation);
       const list = result.annotations
         .map(annotationFromWire)
         .filter((a): a is Annotation => a !== null);
+      if (!wasHydrated) {
+        // Initial hydration succeeded after one or more failures: anything in
+        // the local list was created DURING the outage (the path effect reset
+        // the list before the first attempt) and must survive the snapshot —
+        // assigning it verbatim would erase the user's notes. A re-sync after
+        // a stale save must NOT do this: there the authoritative store just
+        // tombstoned/superseded our pending list (e.g. send-clear), and
+        // merging would resurrect it.
+        const known = new Set(list.map((a) => a.id));
+        const createdDuringOutage = annotationsRef.current.filter((a) => !known.has(a.id));
+        if (createdDuringOutage.length > 0) {
+          list.push(...createdDuringOutage);
+          mergedOutageRecords = true;
+        }
+      }
       annotationsRef.current = list;
       hasHydratedRef.current = true;
       // Anchors resolve/rebase against the CURRENT content (records carry
       // contentHash, so a file edited while closed rebases exactly once here).
       refreshAndPaint(contentRef.current);
+      if (mergedOutageRecords) {
+        // The merged records only existed locally — persist the union now
+        // that saves are unlocked (creation during the outage could not).
+        scheduleSave();
+      }
     } catch (err) {
       if (hydrateTokenRef.current !== token) {
         return;
@@ -455,7 +486,7 @@ export function useAnnotations({
         }
       }, ANNOTATION_HYDRATE_RETRY_MS);
     }
-  }, [getTransport, refreshAndPaint]);
+  }, [getTransport, refreshAndPaint, scheduleSave]);
   const hydrateRef = useRef<typeof hydrate | null>(null);
   hydrateRef.current = hydrate;
 
@@ -823,7 +854,7 @@ export function useAnnotations({
       hydrateTokenRef.current += 1;
       const clearPath = pathRef.current;
       generationRef.current += 1;
-      t.clearMarkdownAnnotations(clearPath, generationRef.current)
+      t.clearMarkdownAnnotations(clearPath, workspaceIdRef.current, generationRef.current)
         .then(({ generation: floor }) => {
           generationRef.current = Math.max(generationRef.current, floor);
         })

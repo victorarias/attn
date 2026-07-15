@@ -318,6 +318,12 @@ export interface MarkdownReaderProps {
    * persistence). Markdown TILES pass true; chat-surface readers never see it.
    */
   annotationsEnabled?: boolean;
+  /**
+   * Owning workspace of the hosting tile — routes draft persistence to the
+   * endpoint daemon that owns the workspace on hub setups. Required whenever
+   * annotationsEnabled is true; chat-surface readers omit it.
+   */
+  workspaceId?: string;
   /** Reports the current annotation count (drives the tile header's Send N). */
   onAnnotationsCountChange?: (count: number) => void;
   /** PR6 send-flow handle (see MarkdownAnnotationsSendHandle). */
@@ -394,6 +400,7 @@ export const MarkdownReader = memo(function MarkdownReader({
   path,
   allowLocalTargets = true,
   annotationsEnabled = false,
+  workspaceId = '',
   onAnnotationsCountChange,
   annotationsSendRef,
 }: MarkdownReaderProps) {
@@ -412,7 +419,13 @@ export const MarkdownReader = memo(function MarkdownReader({
   // re-render gate. Disabled (no listeners, no paints, no daemon traffic) for
   // chat-surface readers. The annotation UI (AnnotationLayer: toolbar/
   // popover/picker/sidebar) consumes this API.
-  const annotationsApi = useAnnotations({ rootRef, content, path, enabled: annotationsEnabled });
+  const annotationsApi = useAnnotations({
+    rootRef,
+    content,
+    path,
+    workspaceId,
+    enabled: annotationsEnabled,
+  });
 
   // Latest-api ref: the send handle below must read call-time state (the
   // api's memo identity changes whenever annotations change).
