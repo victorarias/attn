@@ -113,6 +113,15 @@ describe('MarkdownReader link sanitization', () => {
     ]);
   });
 
+  it('computes heading slugs from pre-transform text (emoji shortcodes keep their letters)', () => {
+    renderReader('## Deploy :rocket:\n');
+
+    const heading = screen.getByRole('heading');
+    // Rendered text shows the emoji, but the id anchors like GitHub's.
+    expect(heading).toHaveTextContent('Deploy 🚀');
+    expect(heading.id).toBe('deploy-rocket');
+  });
+
   it('scrolls the tile body to a fragment target instead of navigating', () => {
     const { container } = render(
       <div className="workspace-dock-tile-body">
@@ -241,5 +250,320 @@ describe('MarkdownReader code blocks', () => {
     });
     expect(container.querySelector('.md-codeblock')).toBeNull();
     expect(shikiMock.codeToHtml).not.toHaveBeenCalled();
+  });
+});
+
+describe('MarkdownReader GitHub alerts', () => {
+  const kinds = [
+    ['NOTE', 'note', 'Note'],
+    ['TIP', 'tip', 'Tip'],
+    ['WARNING', 'warning', 'Warning'],
+    ['CAUTION', 'caution', 'Caution'],
+    ['IMPORTANT', 'important', 'Important'],
+  ] as const;
+
+  it.each(kinds)('renders [!%s] as an alert with icon, title, and class', (marker, kind, title) => {
+    const { container } = renderReader(`> [!${marker}]\n> Alert body text.\n`);
+
+    const alert = container.querySelector(`.md-alert.md-alert-${kind}`);
+    expect(alert).toBeInTheDocument();
+    expect(alert).toHaveAttribute('data-alert-kind', kind);
+    expect(alert!.querySelector('.md-alert-title svg path')).toBeInTheDocument();
+    expect(alert!.querySelector('.md-alert-title span')).toHaveTextContent(title);
+    expect(alert).toHaveTextContent('Alert body text.');
+    // The marker line is stripped from the body.
+    expect(alert!.textContent).not.toContain(`[!${marker}]`);
+    // No blockquote element remains for the alert.
+    expect(container.querySelector('blockquote')).toBeNull();
+  });
+
+  it('is case-insensitive and keeps the anchoring attributes on the wrapper', () => {
+    const { container } = renderReader('intro\n\n> [!note]\n> Body.\n');
+
+    const alert = container.querySelector('.md-alert-note');
+    expect(alert).toHaveAttribute('data-block-id', 'b1-blockquote');
+    expect(alert).toHaveAttribute('data-source-line', '3');
+    expect(alert).toHaveAttribute('data-source-line-end', '4');
+  });
+
+  it('keeps list content inside the alert body', () => {
+    const { container } = renderReader('> [!TIP]\n> - item one\n> - item two\n');
+
+    const alert = container.querySelector('.md-alert-tip')!;
+    expect(alert.querySelectorAll('li')).toHaveLength(2);
+  });
+
+  it('leaves non-alert blockquotes untouched', () => {
+    const { container } = renderReader('> Just a quote.\n\n> [!NOTE] trailing words disqualify\n');
+
+    const quotes = container.querySelectorAll('blockquote');
+    expect(quotes).toHaveLength(2);
+    expect(container.querySelector('.md-alert')).toBeNull();
+    // The pseudo-marker stays visible as regular text when not an alert.
+    expect(quotes[1]).toHaveTextContent('[!NOTE] trailing words disqualify');
+  });
+});
+
+describe('MarkdownReader task lists', () => {
+  it('renders read-only checkboxes with correct checked state', () => {
+    const { container } = renderReader('- [x] done thing\n- [ ] open thing\n');
+
+    const boxes = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect(boxes).toHaveLength(2);
+    expect(boxes[0].checked).toBe(true);
+    expect(boxes[1].checked).toBe(false);
+    for (const box of boxes) {
+      expect(box).toBeDisabled();
+    }
+    expect(container.querySelectorAll('li.task-list-item')).toHaveLength(2);
+    // Task-list items still anchor individually.
+    expect(container.querySelectorAll('li.task-list-item[data-source-line]')).toHaveLength(2);
+  });
+});
+
+describe('MarkdownReader tables', () => {
+  const table = '| Col A | Col B |\n| --- | --- |\n| a1 | b1 |\n';
+
+  it('wraps tables in an overflow wrapper that carries the anchoring attributes', () => {
+    const { container } = renderReader(table);
+
+    const wrap = container.querySelector('.md-table-wrap');
+    expect(wrap).toBeInTheDocument();
+    expect(wrap).toHaveAttribute('data-block-id', 'b0-table');
+    expect(wrap).toHaveAttribute('data-source-line', '1');
+    expect(wrap).toHaveAttribute('data-source-line-end', '3');
+
+    // The table sits inside the wrapper and does NOT duplicate the anchor
+    // (consumers count blocks by data-block-id).
+    const tableEl = wrap!.querySelector('table');
+    expect(tableEl).toBeInTheDocument();
+    expect(tableEl).not.toHaveAttribute('data-block-id');
+    expect(tableEl).not.toHaveAttribute('data-source-line');
+  });
+
+  it('keeps GFM column alignment', () => {
+    const { container } = renderReader('| L | R |\n| :-- | --: |\n| a | b |\n');
+
+    const cells = container.querySelectorAll('td');
+    expect(cells[1]).toHaveStyle({ textAlign: 'right' });
+  });
+});
+
+describe('MarkdownReader images + lightbox', () => {
+  it('renders a relative local image inline through the asset protocol', () => {
+    const { container } = renderReader('![diagram](docs/pic%20name.png)');
+
+    const img = container.querySelector<HTMLImageElement>('img.md-reader-image')!;
+    // Resolved against the doc dir, percent-decoded, then convertFileSrc'd.
+    expect(img).toHaveAttribute('src', 'asset://localhost//tmp/project/docs/pic name.png');
+    expect(img).toHaveAttribute('alt', 'diagram');
+    expect(img).toHaveAttribute('loading', 'lazy');
+  });
+
+  it('keeps the blocked fallback for remote and unsafe images', () => {
+    const { container } = renderReader(
+      '![remote](https://example.test/pixel.png)\n\n![script](../evil.sh)\n',
+    );
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('[blocked image: remote]')).toBeInTheDocument();
+    expect(screen.getByText('[blocked image: script]')).toBeInTheDocument();
+  });
+
+  it('blocks local images when local targets are disallowed (remote workspace)', () => {
+    const { container } = renderReader('![diagram](docs/pic.png)', false);
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('[blocked image: diagram]')).toBeInTheDocument();
+  });
+
+  it('opens a lightbox on click, closes on Escape and backdrop click, not on image click', () => {
+    const { container } = renderReader('![the diagram](docs/pic.png)');
+
+    fireEvent.click(container.querySelector('img.md-reader-image')!);
+    // Portal to document.body: it escapes the tile subtree.
+    const lightbox = document.body.querySelector('.md-lightbox')!;
+    expect(lightbox).toBeInTheDocument();
+    expect(lightbox.parentElement).toBe(document.body);
+    expect(lightbox.querySelector('.md-lightbox-img')).toHaveAttribute(
+      'src',
+      'asset://localhost//tmp/project/docs/pic.png',
+    );
+    expect(lightbox.querySelector('.md-lightbox-caption')).toHaveTextContent('the diagram');
+
+    // Clicking the image itself does NOT close.
+    fireEvent.click(lightbox.querySelector('.md-lightbox-img')!);
+    expect(document.body.querySelector('.md-lightbox')).toBeInTheDocument();
+
+    // Escape closes.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(document.body.querySelector('.md-lightbox')).toBeNull();
+
+    // Reopen, backdrop click closes.
+    fireEvent.click(container.querySelector('img.md-reader-image')!);
+    fireEvent.click(document.body.querySelector('.md-lightbox')!);
+    expect(document.body.querySelector('.md-lightbox')).toBeNull();
+  });
+
+  it('omits the caption when the image has no alt text', () => {
+    const { container } = renderReader('![](docs/pic.png)');
+
+    fireEvent.click(container.querySelector('img.md-reader-image')!);
+    expect(document.body.querySelector('.md-lightbox')).toBeInTheDocument();
+    expect(document.body.querySelector('.md-lightbox-caption')).toBeNull();
+    fireEvent.keyDown(window, { key: 'Escape' });
+  });
+});
+
+describe('MarkdownReader raw HTML sanitization', () => {
+  it('strips scripts, styles, and event handlers but keeps allowed elements', () => {
+    const { container } = renderReader(
+      'before\n\n<script>window.pwned = true;</script>\n\n<style>body { display: none; }</style>\n\n<div onclick="window.pwned = true" title="ok">clickable</div>\n\nUse <kbd>Cmd</kbd>+<kbd>C</kbd>, H<sub>2</sub>O and x<sup>2</sup>.<br>done\n',
+    );
+
+    const card = container.querySelector('.md-reader-card')!;
+    expect(card.querySelector('script')).toBeNull();
+    expect(card.querySelector('style')).toBeNull();
+    // Stripped WITH their content — nothing leaks into prose.
+    expect(card.textContent).not.toContain('pwned');
+    expect(card.textContent).not.toContain('display: none');
+
+    const div = screen.getByText('clickable');
+    expect(div).not.toHaveAttribute('onclick');
+    expect(div).toHaveAttribute('title', 'ok');
+
+    expect(card.querySelectorAll('kbd')).toHaveLength(2);
+    expect(card.querySelector('sub')).toHaveTextContent('2');
+    expect(card.querySelector('sup')).toHaveTextContent('2');
+    expect(card.querySelector('br')).toBeInTheDocument();
+  });
+
+  it('keeps <details>/<summary> (with open) and anchors them like any block', () => {
+    const { container } = renderReader(
+      '<details open>\n<summary>More</summary>\n\nHidden **body** text.\n\n</details>\n',
+    );
+
+    const details = container.querySelector('details')!;
+    expect(details).toBeInTheDocument();
+    expect(details.open).toBe(true);
+    expect(details.querySelector('summary')).toHaveTextContent('More');
+    // Markdown between the tags still renders as markdown (rehype-raw).
+    expect(details.querySelector('strong')).toHaveTextContent('body');
+    // Sanitize runs before the anchoring pass, so raw HTML blocks anchor too.
+    expect(details).toHaveAttribute('data-block-id');
+    expect(details).toHaveAttribute('data-source-line', '1');
+  });
+
+  it('never lets raw HTML reach the network: img srcset, video, picture>source are stripped', () => {
+    const { container } = renderReader(
+      '<img src="docs/pic.png" srcset="https://evil.example/pixel.png 1x">\n\n' +
+        '<video src="https://evil.example/v.mp4" poster="https://evil.example/p.png" controls></video>\n\n' +
+        '<picture><source srcset="https://evil.example/s.png"><img src="docs/pic.png"></picture>\n',
+    );
+
+    const card = container.querySelector('.md-reader-card')!;
+    // No fetchable remote URL survives anywhere in the rendered DOM.
+    expect(card.innerHTML).not.toContain('evil.example');
+    expect(card.querySelector('video')).toBeNull();
+    expect(card.querySelector('source')).toBeNull();
+    for (const img of card.querySelectorAll('img')) {
+      expect(img).not.toHaveAttribute('srcset');
+      expect(img.getAttribute('src')).toMatch(/^asset:\/\/localhost\//);
+    }
+  });
+
+  it('cannot forge the reader anchoring attributes from author HTML', () => {
+    const { container } = renderReader('<p data-block-id="b999-fake" data-source-line="999">spoof</p>\n');
+
+    const spoof = screen.getByText('spoof');
+    expect(spoof).not.toHaveAttribute('data-block-id', 'b999-fake');
+    expect(spoof).not.toHaveAttribute('data-source-line', '999');
+    // The real pass stamped it instead.
+    expect(container.querySelector('[data-block-id="b0-p"], [data-block-id="b0-paragraph"]')).toBeInTheDocument();
+  });
+});
+
+describe('MarkdownReader content re-render gate', () => {
+  it('same content: no remount — user-toggled <details> stays open on identical re-render', () => {
+    const content = '<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n';
+    const { container, rerender } = render(
+      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+    );
+
+    const details = container.querySelector('details')!;
+    expect(details.open).toBe(false);
+    // User toggles it open: DOM-owned state React knows nothing about.
+    details.open = true;
+
+    rerender(
+      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+    );
+
+    const after = container.querySelector('details')!;
+    expect(after.isSameNode(details)).toBe(true);
+    expect(after.open).toBe(true);
+  });
+
+  it('opening the lightbox does not re-render (or remount) the document subtree', () => {
+    const { container } = renderReader('![pic](docs/pic.png)\n\n<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n');
+
+    const details = container.querySelector('details')!;
+    details.open = true;
+
+    fireEvent.click(container.querySelector('img.md-reader-image')!);
+    expect(document.body.querySelector('.md-lightbox')).toBeInTheDocument();
+
+    const after = container.querySelector('details')!;
+    expect(after.isSameNode(details)).toBe(true);
+    expect(after.open).toBe(true);
+    fireEvent.keyDown(window, { key: 'Escape' });
+  });
+
+  it('changed content: the subtree re-renders (and resets DOM state)', () => {
+    const content = '<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n';
+    const { container, rerender } = render(
+      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+    );
+    const details = container.querySelector('details')!;
+    details.open = true;
+
+    rerender(
+      <MarkdownReader
+        content={`${content}\nNew paragraph.\n`}
+        path="/tmp/project/README.md"
+        allowLocalTargets={true}
+      />,
+    );
+
+    expect(screen.getByText('New paragraph.')).toBeInTheDocument();
+  });
+});
+
+describe('MarkdownReader prose transforms', () => {
+  it('applies smart punctuation and emoji to prose but never to code or flags', async () => {
+    const { container } = renderReader(
+      'He said "hello" -- ranges 3--5 work... :rocket:\n\nRun `bun --watch` with --verbose\n\n```sh\necho "raw" 3--5\n```\n',
+    );
+    // Let the fenced block's async shiki hydration settle (avoids act noise).
+    await act(async () => {});
+
+    const text = container.querySelector('.md-reader-card')!.textContent!;
+    expect(text).toContain('“hello”');
+    expect(text).toContain('3–5');
+    expect(text).toContain('…');
+    expect(text).toContain('🚀');
+    // Bare -- between words is never rewritten (narrowed en-dash rule).
+    expect(text).toContain('"hello" -- ranges'.replace('"hello"', '“hello”'));
+    // CLI flags survive, both in prose and in code.
+    expect(text).toContain('--verbose');
+    expect(container.querySelector(':not(pre) > code')).toHaveTextContent('bun --watch');
+    expect(container.querySelector('pre code')).toHaveTextContent('echo "raw" 3--5');
+  });
+
+  it('transforms link labels but not hrefs', () => {
+    renderReader('["quoted label"](https://example.test/a--b)\n');
+
+    const link = screen.getByRole('link', { name: '“quoted label”' });
+    expect(link).toHaveAttribute('href', 'https://example.test/a--b');
   });
 });

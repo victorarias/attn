@@ -70,14 +70,12 @@ describe('WorkspaceDockTile Markdown rendering', () => {
     expect(opener.openUrl).not.toHaveBeenCalled();
   });
 
-  it('opens relative local images only after an explicit click', () => {
-    renderMarkdown('![diagram](docs/diagram.png)');
+  it('renders relative local images inline via the asset protocol', () => {
+    const { container } = renderMarkdown('![diagram](docs/diagram.png)');
 
+    const img = container.querySelector('img.md-reader-image');
+    expect(img).toHaveAttribute('src', 'asset://localhost//tmp/project/docs/diagram.png');
     expect(invokeMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Open image: diagram' }));
-    expect(invokeMock).toHaveBeenCalledWith('open_safe_markdown_target', {
-      path: '/tmp/project/docs/diagram.png',
-    });
   });
 
   it('opens relative and external links through the Tauri opener', () => {
@@ -97,7 +95,7 @@ describe('WorkspaceDockTile Markdown rendering', () => {
 
     expect(screen.queryByRole('link', { name: 'guide' })).toBeNull();
     expect(screen.getByText('[blocked image: diagram]')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Open image: diagram' })).toBeNull();
+    expect(document.querySelector('img.md-reader-image')).toBeNull();
 
     fireEvent.click(screen.getByRole('link', { name: 'site' }));
     expect(invokeMock).not.toHaveBeenCalled();

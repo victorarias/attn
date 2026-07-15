@@ -1570,6 +1570,16 @@ export function useUiAutomationBridge({
         }
         return { dismissed: false };
       }
+      case 'markdown_get_anchor_spike_state': {
+        // PR4 anchor-paint spike (deleted with anchoring/spike.ts in PR5):
+        // read-only view of the spike registry so the harness can assert
+        // paint/rebase/orphan without screenshots-only evidence.
+        const spike = window.__attnAnchorSpike;
+        if (!spike) {
+          return { available: false, mode: 'none', anchors: [] };
+        }
+        return { available: true, ...spike.list() };
+      }
       case 'grid_get_state':
         return getGridAutomationHandle()?.getState() ?? INACTIVE_GRID_STATE;
       case 'grid_get_tile_text': {
