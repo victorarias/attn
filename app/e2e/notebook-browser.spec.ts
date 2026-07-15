@@ -7,6 +7,7 @@ declare global {
     __NB_HARNESS__?: {
       fsChanged: (path?: string, content?: string, hash?: string) => void;
       getContent: (path: string) => string;
+      forceConflict: (on: boolean) => void;
     };
   }
 }
@@ -384,5 +385,64 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await page.keyboard.press('Meta+e');
     await expect(page.locator('.cm-md-code')).toHaveCount(0);
     await expect(content).toContainText('a horizontal rule');
+  });
+
+  test('anchors the send-to-chief pill below the selection end, not over the line above it', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+
+    await page.getByRole('treeitem', { name: 'fences.md' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'fences' })).toBeVisible();
+
+    await dblclickWord(page, 'quoted');
+
+    const pill = page.getByRole('button', { name: 'Send to chief' });
+    await expect(pill).toBeVisible();
+
+    // The real DOM selection rect (the pill's anchor is computed from CM's own
+    // coordsAtPos, but this is the ground truth the pill must not cover).
+    const selectionBottom = await page.evaluate(() => {
+      const sel = window.getSelection();
+      const range = sel?.rangeCount ? sel.getRangeAt(0) : null;
+      return range ? range.getBoundingClientRect().bottom : null;
+    });
+    expect(selectionBottom).not.toBeNull();
+
+    const pillBox = await pill.boundingBox();
+    expect(pillBox).not.toBeNull();
+    // The pill hangs below the selection end, so its top edge must sit at or below
+    // the selection's bottom edge — never covering the selected text or the line
+    // above it (the old above-anchored transform put the pill's bottom well above
+    // this point, failing this assertion).
+    expect(pillBox!.y).toBeGreaterThanOrEqual(selectionBottom!);
+  });
+
+  test('restores editor focus after resolving a save conflict via "Reload from disk"', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+    await page.waitForSelector('.cm-content');
+
+    // Force the next autosave to report a CAS conflict, then dirty the buffer so the
+    // debounced autosave fires and the banner appears.
+    await page.evaluate(() => window.__NB_HARNESS__!.forceConflict(true));
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type(' more', { delay: 8 });
+
+    const banner = page.locator('.notebook-browser-editor-conflict');
+    await expect(banner).toBeVisible({ timeout: 4000 });
+
+    // Stop forcing conflicts so the reload's own read succeeds normally, then reload —
+    // this is the button click that steals focus.
+    await page.evaluate(() => window.__NB_HARNESS__!.forceConflict(false));
+    await banner.getByRole('button', { name: 'Reload from disk' }).click();
+    await expect(banner).toHaveCount(0);
+
+    // Type WITHOUT clicking back into the editor. Without the focus() fix, focus is
+    // stuck on the (now-removed) button and this text never reaches the document.
+    await page.keyboard.type('typed after reload', { delay: 8 });
+    await expect(page.locator('.cm-content')).toContainText('typed after reload');
   });
 });

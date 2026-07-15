@@ -19,6 +19,24 @@ import {
   WidgetType,
 } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
+import { parseFrontmatter } from './frontmatter';
+
+// A note's leading frontmatter is YAML, not markdown — no inline-preview decoration
+// (bullets, bold, etc.) is ever correct there; it renders raw or as the frontmatterCard
+// widget (a separate extension). Returns 0 when the doc has no frontmatter, else the
+// region's end offset. Parses only a BOUNDED prefix (frontmatter is always small, and a
+// full doc.toString() per keystroke is wasted work on a large note).
+function frontmatterEnd(state: EditorState): number {
+  const prefix = state.doc.sliceString(0, Math.min(state.doc.length, 4096));
+  const fm = parseFrontmatter(prefix);
+  // Must agree with frontmatterCard's own notion of "is this frontmatter" — an opening
+  // `---` with no closing fence (still being typed, malformed, or truncated past the
+  // bounded prefix) is treated as NOT frontmatter by both extensions, matching
+  // parseFrontmatter's null return. The alternative — suppressing every decoration in
+  // the whole note while the user is mid-typing frontmatter — is worse than a
+  // transient bullet on a YAML list line.
+  return fm ? fm.to : 0;
+}
 
 export interface LiveMarkdownOptions {
   // Invoked when the user mod-clicks (⌘/Ctrl) a rendered link. Receives the raw href.
@@ -157,6 +175,7 @@ export function buildDecorations(
   // arbitrarily large note synchronously.
   const tree = parsedTree ?? ensureSyntaxTree(state, doc.length, 100) ?? syntaxTree(state);
   const scanRange = range ?? { from: 0, to: doc.length };
+  const fmEnd = frontmatterEnd(state);
 
   const onActiveLine = (pos: number) => active.has(doc.lineAt(pos).number);
 
@@ -164,6 +183,10 @@ export function buildDecorations(
     from: scanRange.from,
     to: scanRange.to,
     enter: (node) => {
+      // The frontmatter block is YAML, not markdown — no preview decoration there is
+      // ever right (it's either shown raw or replaced whole by frontmatterCard).
+      if (node.from < fmEnd) return;
+
       const name = node.name;
 
       // ---- block: ATX headings ----

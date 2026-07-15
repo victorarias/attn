@@ -524,11 +524,12 @@
   color: var(--color-danger, #e5534b);
 }
 
-/* Floating action over a rendered-markdown text selection. Fixed to the viewport
-   at the selection rect, centered above it, and above the modal chrome. */
+/* Floating action over a rendered-markdown text selection. Fixed to the viewport,
+   hanging below the selection end (centered on its last char), above the modal
+   chrome — never over the selection or the line above it. */
 .notebook-browser-send-chief {
   position: fixed;
-  transform: translate(-50%, calc(-100% - 8px));
+  transform: translate(-50%, 8px);
   z-index: 500;
   padding: 6px 12px;
   font-size: 12px;

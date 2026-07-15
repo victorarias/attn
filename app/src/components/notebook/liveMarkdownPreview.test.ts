@@ -226,4 +226,26 @@ describe('liveMarkdownPreview decorations', () => {
     const decos = decosFor(doc, doc.length); // cursor on "body"
     expect(hasWidget(decos, 'cm-md-hr')).toBe(false);
   });
+
+  it('does not decorate a YAML list inside frontmatter, but still decorates a body list', () => {
+    const doc = '---\ntags:\n  - one\n  - two\n---\n\n- item\n\nbody';
+    const fmEnd = doc.indexOf('---\n\n') + '---\n'.length; // end of the closing fence line
+    const decos = decosFor(doc, doc.length); // cursor on "body", away from both lists
+
+    // No bullet widget anywhere inside the frontmatter block.
+    expect(decos.some((d) => d.widget === 'cm-md-bullet' && d.from < fmEnd)).toBe(false);
+    // The body list still gets its bullet.
+    expect(decos.some((d) => d.widget === 'cm-md-bullet' && d.from >= fmEnd)).toBe(true);
+  });
+
+  it('treats an unclosed frontmatter fence as ordinary markdown, matching frontmatterCard', () => {
+    // Opened with "---" but never closed — parseFrontmatter (and frontmatterCard) treat
+    // this as NOT frontmatter at all, so the list lines are plain markdown and still get
+    // their bullet. A transient bullet while the fence is mid-typing beats suppressing
+    // every decoration in the note.
+    const doc = '---\ntags:\n  - one\n  - two\n- item';
+    expect(() => decosFor(doc, doc.length)).not.toThrow();
+    const decos = decosFor(doc, doc.length);
+    expect(hasWidget(decos, 'cm-md-bullet')).toBe(true);
+  });
 });

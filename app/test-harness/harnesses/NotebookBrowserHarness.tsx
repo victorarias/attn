@@ -112,6 +112,10 @@ interface NotebookHarnessControls {
   // The bytes a path currently reads as, so the e2e can derive a minimally-edited
   // version (an agent appending a line) rather than guessing the fixture body.
   getContent: (path: string) => string;
+  // Force every writeFile call to report a CAS conflict (simulating an out-of-band
+  // disk change) until toggled off, so e2e can drive the conflict-banner flow
+  // without racing a real write.
+  forceConflict: (on: boolean) => void;
 }
 declare global {
   interface Window {
@@ -123,6 +127,8 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
   const [changeSignal, setChangeSignal] = useState(0);
   // Per-path byte/hash overrides the e2e stages to simulate an on-disk change.
   const overridesRef = useRef<Record<string, { content: string; hash: string }>>({});
+  // See NotebookHarnessControls.forceConflict.
+  const forceConflictRef = useRef(false);
 
   const listDir = useCallback(async (path: string): Promise<FsEntry[]> => TREE[path] ?? [], []);
   const readFile = useCallback(async (path: string): Promise<FsReadResult> => {
@@ -135,6 +141,9 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
   ], []);
   const writeFile = useCallback(async (path: string, content: string, baseHash?: string): Promise<FsWriteResult> => {
     window.__HARNESS__.recordCall('writeFile', [path, content, baseHash]);
+    if (forceConflictRef.current) {
+      return { path, hash: 'h1', conflict: true, currentHash: 'h-disk' };
+    }
     return { path, hash: 'h2', conflict: false };
   }, []);
   const existsFile = useCallback(async (path: string): Promise<FsExistsResult> => {
@@ -178,6 +187,9 @@ export function NotebookBrowserHarness({ onReady, setTriggerRerender }: HarnessP
       },
       getContent: (path: string) =>
         overridesRef.current[path]?.content ?? CONTENT[path] ?? `# ${path}\n\nSample body.`,
+      forceConflict: (on: boolean) => {
+        forceConflictRef.current = on;
+      },
     };
     onReady();
   }, [onReady, setTriggerRerender]);
