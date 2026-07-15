@@ -509,6 +509,23 @@
   cursor: zoom-in;
 }
 
+/* ---- Blocked/local media affordances (moved from WorkspaceDockTile) ---- */
+
+.md-reader-local-image {
+  display: inline-flex;
+  padding: 3px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-button);
+  color: var(--color-accent, #5b8cff);
+  font: inherit;
+  cursor: pointer;
+}
+
+.md-reader-local-image:hover {
+  border-color: var(--color-border-focus);
+}
+
 .md-reader-blocked-image {
   color: var(--color-text-tertiary);
   font-style: italic;
