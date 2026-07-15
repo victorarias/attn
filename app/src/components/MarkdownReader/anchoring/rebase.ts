@@ -18,7 +18,11 @@
  * Candidates are scored by prefix/suffix similarity (Levenshtein over the
  * 32-char context windows) plus source-line proximity — a genuine unedited
  * match keeps near-identical context and wins on that alone, no identity
- * shortcut needed. The winning match is RE-BASELINED: the returned record is
+ * shortcut needed. With multiple candidates the winner must clear an absolute
+ * confidence floor AND lead the runner-up by a meaningful margin — an exact
+ * or near tie (identical duplicate blocks) orphans as ambiguous instead of
+ * silently painting whichever copy sorts first. The winning match is
+ * RE-BASELINED: the returned record is
  * rebuilt from scratch against `newContent` (fresh blockId/offsets/lines/
  * context/hash) so fuzz never compounds across successive edits. The
  * reported tier is `'same-block'` when the winner's block still carries the
@@ -171,6 +175,13 @@ function normalizedCandidates(blocks: BlockText[], anchor: AnchorRecord): Candid
 }
 
 const CONFIDENCE_THRESHOLD = 0.5;
+// With multiple candidates the winner must lead the runner-up by this much.
+// A tie (or near-tie) means the document genuinely contains indistinguishable
+// copies — e.g. two identical whole-block paragraphs, whose empty context
+// windows both score similarity 1 — and picking one via sort order would be
+// a silent wrong-paint. Proximity can still decide, but only when decisive:
+// at 0.2 weight this margin needs a line-distance gap of roughly 10+ lines.
+const AMBIGUITY_MARGIN = 0.05;
 
 function pickWinner(candidates: Candidate[], anchor: AnchorRecord): Candidate | 'ambiguous' {
   if (candidates.length === 1) {
@@ -183,7 +194,7 @@ function pickWinner(candidates: Candidate[], anchor: AnchorRecord): Candidate | 
     .sort((a, b) => b.score - a.score);
   const best = scored[0];
   const second = scored[1];
-  if (best.score - second.score >= 0.05 || best.score >= CONFIDENCE_THRESHOLD) {
+  if (best.score >= CONFIDENCE_THRESHOLD && best.score - second.score >= AMBIGUITY_MARGIN) {
     return best.candidate;
   }
   return 'ambiguous';

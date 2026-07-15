@@ -189,7 +189,7 @@ describe("duplicated paragraphs", () => {
     expectBaselined(result.anchor, EDITED);
   });
 
-  it("breaks a dead tie between identical duplicates by line proximity", () => {
+  it("orphans identical duplicates when line proximity is not decisive", () => {
     const DOC = [
       "Intro.",
       "",
@@ -203,7 +203,8 @@ describe("duplicated paragraphs", () => {
       "Tail.",
     ].join("\n");
     // Whole-block anchor on the SECOND duplicate: prefix and suffix are both
-    // empty, so candidate scores differ only by startLine proximity.
+    // empty, so candidate scores differ only by startLine proximity — and a
+    // 2-vs-3-line difference is noise, not evidence. Orphan over wrong-paint.
     const blocks = extractBlockTexts(DOC);
     const second = blocks.filter((b) => b.text === "Same duplicated paragraph text.")[1];
     expect(second.startLine).toBe(8);
@@ -212,11 +213,93 @@ describe("duplicated paragraphs", () => {
     expect(anchor.suffix).toBe("");
 
     const EDITED = "Inserted at the very top.\n\n" + DOC; // dups now at 5 and 10
+    expect(resolveOrRebase(EDITED, anchor)).toEqual({ state: "orphan", reason: "ambiguous" });
+  });
+
+  it("breaks a tie between identical duplicates when proximity IS decisive", () => {
+    const DOC = [
+      "Intro.",
+      "",
+      "Same duplicated paragraph text.",
+      "",
+      "Same duplicated paragraph text.",
+      "",
+      "Tail.",
+    ].join("\n");
+    // Whole-block anchor on the SECOND duplicate (line 5).
+    const blocks = extractBlockTexts(DOC);
+    const second = blocks.filter((b) => b.text === "Same duplicated paragraph text.")[1];
+    expect(second.startLine).toBe(5);
+    const anchor = createAnchor(DOC, second.blockId, 0, second.text.length)!;
+    expect(anchor.prefix).toBe("");
+    expect(anchor.suffix).toBe("");
+
+    // One copy stays where the anchor was; the other moves ~40 lines down.
+    // The proximity gap is large enough to clear the ambiguity margin.
+    const EDITED = [
+      "Intro.",
+      "",
+      "Filler paragraph.",
+      "",
+      "Same duplicated paragraph text.",
+      "",
+      ...Array.from({ length: 40 }, () => ""),
+      "Same duplicated paragraph text.",
+      "",
+      "Tail.",
+    ].join("\n");
     const result = resolveOrRebase(EDITED, anchor);
     expect(result.state).toBe("rebased");
     if (result.state !== "rebased") throw new Error("unreachable");
-    expect(result.anchor.startLine).toBe(10); // |10-8| = 2 beats |5-8| = 3
+    expect(result.anchor.startLine).toBe(5); // the near copy, not the far one
     expectBaselined(result.anchor, EDITED);
+  });
+
+  it("orphans on an exact score tie between identical duplicates (equidistant copies)", () => {
+    // Regression for the review blocker on PR #552: two identical whole-block
+    // paragraphs at EQUAL line distance from the old anchor produce equal
+    // scores; the old rule (margin OR absolute floor) accepted whichever the
+    // stable sort put first. Equal evidence must orphan as ambiguous.
+    const DOC = [
+      "Intro.",
+      "",
+      "One filler paragraph.",
+      "",
+      "Another filler paragraph.",
+      "",
+      "Same duplicated paragraph text.",
+      "",
+      "Same duplicated paragraph text.",
+      "",
+      "Tail.",
+    ].join("\n");
+    const blocks = extractBlockTexts(DOC);
+    const second = blocks.filter((b) => b.text === "Same duplicated paragraph text.")[1];
+    expect(second.startLine).toBe(9);
+    const anchor = createAnchor(DOC, second.blockId, 0, second.text.length)!;
+    expect(anchor.prefix).toBe("");
+    expect(anchor.suffix).toBe("");
+
+    // Copies land at lines 5 and 13 — both exactly 4 lines from the old
+    // startLine 9, so their scores tie to the last bit.
+    const EDITED = [
+      "Intro.",
+      "",
+      "One filler paragraph.",
+      "",
+      "Same duplicated paragraph text.",
+      "",
+      ...Array.from({ length: 6 }, () => ""),
+      "Same duplicated paragraph text.",
+      "",
+      "Tail.",
+    ].join("\n");
+    const editedBlocks = extractBlockTexts(EDITED);
+    const dupLines = editedBlocks
+      .filter((b) => b.text === "Same duplicated paragraph text.")
+      .map((b) => b.startLine);
+    expect(dupLines.map((l) => Math.abs(l - anchor.startLine))).toEqual([4, 4]);
+    expect(resolveOrRebase(EDITED, anchor)).toEqual({ state: "orphan", reason: "ambiguous" });
   });
 
   it("does not adopt an inserted sibling that inherits the anchor's old ordinal blockId", () => {
