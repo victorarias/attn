@@ -3,6 +3,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -53,7 +54,7 @@ func setupSessionWorkspaceWithTile(t *testing.T) (d *Daemon, client *wsClient, w
 	if err := os.WriteFile(file, []byte("# Notes\n"), 0o644); err != nil {
 		t.Fatalf("write tile file: %v", err)
 	}
-	if err := d.dockTile(workspaceID, paneID, markdownTileID, string(workspacelayout.TileKindMarkdown), file, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+	if err := d.dockTile(workspaceID, paneID, markdownTileIDForPath(file), string(workspacelayout.TileKindMarkdown), file, "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
 		t.Fatalf("dock tile: %v", err)
 	}
 	return d, client, workspaceID, sessionID, paneID
@@ -74,8 +75,8 @@ func assertTileOnlyWorkspaceAlive(t *testing.T, d *Daemon, workspaceID, sessionI
 	if snapshot == nil {
 		t.Fatal("workspace layout was removed even though a docked tile remained")
 	}
-	if tiles := workspacelayout.TileIDs(snapshot.Layout); len(tiles) != 1 || tiles[0] != markdownTileID {
-		t.Fatalf("layout tiles = %v, want [%s]", tiles, markdownTileID)
+	if tiles := workspacelayout.TileIDs(snapshot.Layout); len(tiles) != 1 || !strings.HasPrefix(tiles[0], markdownTileIDPrefix) {
+		t.Fatalf("layout tiles = %v, want a single %s* tile", tiles, markdownTileIDPrefix)
 	}
 	if panes := workspacelayout.PaneIDs(snapshot.Layout); len(panes) != 0 {
 		t.Fatalf("layout panes = %v, want none after the session pane closed", panes)

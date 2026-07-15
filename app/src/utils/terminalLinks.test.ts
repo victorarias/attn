@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   fragmentAtColumn,
   hyperlinkRangeAt,
+  isMarkdownPath,
   logicalIndexForCell,
   logicalLineAt,
   MAX_WRAP_JOIN_ROWS,
   pathCandidatesForFragment,
   resolveDetectedPath,
   spanFromLogicalRange,
+  terminalLinkOpenAction,
   urlAtColumn,
 } from './terminalLinks';
 
@@ -244,5 +246,54 @@ describe('resolveDetectedPath', () => {
   it('refuses relative paths without cwd and escapes above root', () => {
     expect(resolveDetectedPath('src/x.go')).toBeNull();
     expect(resolveDetectedPath('../../../../x', '/a')).toBeNull();
+  });
+});
+
+describe('isMarkdownPath', () => {
+  it('matches .md and .markdown case-insensitively', () => {
+    expect(isMarkdownPath('/docs/README.md')).toBe(true);
+    expect(isMarkdownPath('/docs/NOTES.MD')).toBe(true);
+    expect(isMarkdownPath('/docs/spec.markdown')).toBe(true);
+    expect(isMarkdownPath('/docs/Spec.Markdown')).toBe(true);
+  });
+
+  it('rejects other extensions and lookalikes', () => {
+    expect(isMarkdownPath('/src/main.go')).toBe(false);
+    expect(isMarkdownPath('/notes/file.mdx')).toBe(false);
+    expect(isMarkdownPath('/notes/md')).toBe(false);
+    expect(isMarkdownPath('/notes/file.md.bak')).toBe(false);
+  });
+});
+
+describe('terminalLinkOpenAction', () => {
+  it('routes markdown path links to the in-app tile', () => {
+    expect(terminalLinkOpenAction({ kind: 'path', absolutePath: '/repo/README.md' }))
+      .toEqual({ action: 'open-markdown', path: '/repo/README.md' });
+    expect(terminalLinkOpenAction({ kind: 'path', absolutePath: '/repo/plan.MARKDOWN' }))
+      .toEqual({ action: 'open-markdown', path: '/repo/plan.MARKDOWN' });
+  });
+
+  it('routes non-markdown paths to the OS opener', () => {
+    expect(terminalLinkOpenAction({ kind: 'path', absolutePath: '/repo/main.go' }))
+      .toEqual({ action: 'open-path', path: '/repo/main.go' });
+  });
+
+  it('routes web urls to the browser', () => {
+    expect(terminalLinkOpenAction({ kind: 'url', uri: 'https://example.test/x.md' }))
+      .toEqual({ action: 'open-url', uri: 'https://example.test/x.md' });
+  });
+
+  it('treats file:// uris as paths, including markdown routing and decoding', () => {
+    expect(terminalLinkOpenAction({ kind: 'url', uri: 'file:///repo/main.go' }))
+      .toEqual({ action: 'open-path', path: '/repo/main.go' });
+    expect(terminalLinkOpenAction({ kind: 'url', uri: 'file://localhost/repo/README.md' }))
+      .toEqual({ action: 'open-markdown', path: '/repo/README.md' });
+    expect(terminalLinkOpenAction({ kind: 'url', uri: 'file:///repo/my%20notes.md' }))
+      .toEqual({ action: 'open-markdown', path: '/repo/my notes.md' });
+  });
+
+  it('returns null for links without a usable target', () => {
+    expect(terminalLinkOpenAction({ kind: 'path' })).toBeNull();
+    expect(terminalLinkOpenAction({ kind: 'url' })).toBeNull();
   });
 });

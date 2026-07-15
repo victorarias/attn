@@ -1558,6 +1558,18 @@ export function useUiAutomationBridge({
           gridActive: typeof document !== 'undefined' && document.querySelector('.grid-view') != null,
           sessions: sessions.map((session) => serializeSession(session, getActivePaneIdForSession)),
         };
+      case 'dismiss_whats_new': {
+        // A fresh profile shows the one-time What's New modal on first launch,
+        // which sits above the workspace and swallows native HID clicks.
+        // Dismiss it the way a user can: a backdrop click (persists "seen").
+        const overlay = document.querySelector('.whats-new-overlay');
+        if (overlay instanceof HTMLElement) {
+          clickElement(overlay);
+          await settleUi();
+          return { dismissed: true };
+        }
+        return { dismissed: false };
+      }
       case 'grid_get_state':
         return getGridAutomationHandle()?.getState() ?? INACTIVE_GRID_STATE;
       case 'grid_get_tile_text': {

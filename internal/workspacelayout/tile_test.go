@@ -16,6 +16,7 @@ func TestDockTileAfterPaneCreatesLockedSplit(t *testing.T) {
 		"tile-md",
 		string(TileKindMarkdown),
 		"",
+		"",
 		0.68,
 	)
 	if !ok {
@@ -37,7 +38,7 @@ func TestDockTileAfterPaneCreatesLockedSplit(t *testing.T) {
 }
 
 func TestDockTileBeforePaneLandsOnLeft(t *testing.T) {
-	root, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, true, "split-md", "tile-md", "markdown", "", 0.32)
+	root, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, true, "split-md", "tile-md", "markdown", "", "", 0.32)
 	if !ok {
 		t.Fatal("DockTile did not change layout")
 	}
@@ -47,7 +48,7 @@ func TestDockTileBeforePaneLandsOnLeft(t *testing.T) {
 }
 
 func TestTileFractionByIDReturnsTileShare(t *testing.T) {
-	right, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-right", "tile-right", "markdown", "", 0.68)
+	right, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-right", "tile-right", "markdown", "", "", 0.68)
 	if !ok {
 		t.Fatal("right dock failed")
 	}
@@ -55,7 +56,7 @@ func TestTileFractionByIDReturnsTileShare(t *testing.T) {
 		t.Fatalf("right tile fraction = (%v, %v), want (0.32, true)", fraction, ok)
 	}
 
-	left, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, true, "split-left", "tile-left", "markdown", "", 0.32)
+	left, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, true, "split-left", "tile-left", "markdown", "", "", 0.32)
 	if !ok {
 		t.Fatal("left dock failed")
 	}
@@ -113,7 +114,7 @@ func TestDockTileBetweenPanes(t *testing.T) {
 			{Type: "pane", PaneID: "pane-b"},
 		},
 	}
-	next, ok := DockTile(tree, "pane-a", DirectionVertical, false, "split-md", "tile-md", "markdown", "", 0.6)
+	next, ok := DockTile(tree, "pane-a", DirectionVertical, false, "split-md", "tile-md", "markdown", "", "", 0.6)
 	if !ok {
 		t.Fatal("DockTile did not change layout")
 	}
@@ -127,7 +128,7 @@ func TestDockTileBetweenPanes(t *testing.T) {
 }
 
 func TestDockTileHorizontalStacks(t *testing.T) {
-	root, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionHorizontal, false, "split-md", "tile-md", "markdown", "", 0.7)
+	root, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionHorizontal, false, "split-md", "tile-md", "markdown", "", "", 0.7)
 	if !ok {
 		t.Fatal("DockTile did not change layout")
 	}
@@ -147,11 +148,11 @@ func TestDockTileMovesExistingInstance(t *testing.T) {
 			{Type: "pane", PaneID: "pane-b"},
 		},
 	}
-	docked, ok := DockTile(tree, "pane-a", DirectionVertical, false, "split-md", "tile-md", "markdown", "", 0.6)
+	docked, ok := DockTile(tree, "pane-a", DirectionVertical, false, "split-md", "tile-md", "markdown", "", "", 0.6)
 	if !ok {
 		t.Fatal("first dock failed")
 	}
-	moved, ok := DockTile(docked, "pane-b", DirectionVertical, false, "split-md2", "tile-md", "markdown", "", 0.6)
+	moved, ok := DockTile(docked, "pane-b", DirectionVertical, false, "split-md2", "tile-md", "markdown", "", "", 0.6)
 	if !ok {
 		t.Fatal("re-dock (move) failed")
 	}
@@ -170,7 +171,7 @@ func TestDockTileMovesExistingInstance(t *testing.T) {
 
 func TestDockTileUnknownAnchorFails(t *testing.T) {
 	tree := DefaultLayout("pane-root")
-	next, ok := DockTile(tree, "pane-missing", DirectionVertical, false, "split-md", "tile-md", "markdown", "", 0.6)
+	next, ok := DockTile(tree, "pane-missing", DirectionVertical, false, "split-md", "tile-md", "markdown", "", "", 0.6)
 	if ok {
 		t.Fatal("dock against a missing anchor should fail")
 	}
@@ -181,13 +182,13 @@ func TestDockTileUnknownAnchorFails(t *testing.T) {
 
 func TestDockTileRejectsSelfAnchorAndEmptyFields(t *testing.T) {
 	tree := DefaultLayout("pane-root")
-	if _, ok := DockTile(tree, "tile-md", DirectionVertical, false, "split-md", "tile-md", "markdown", "", 0.6); ok {
+	if _, ok := DockTile(tree, "tile-md", DirectionVertical, false, "split-md", "tile-md", "markdown", "", "", 0.6); ok {
 		t.Fatal("anchoring a tile to itself must fail")
 	}
-	if _, ok := DockTile(tree, "pane-root", DirectionVertical, false, "split-md", "", "markdown", "", 0.6); ok {
+	if _, ok := DockTile(tree, "pane-root", DirectionVertical, false, "split-md", "", "markdown", "", "", 0.6); ok {
 		t.Fatal("empty tile id must fail")
 	}
-	if _, ok := DockTile(tree, "pane-root", DirectionVertical, false, "split-md", "tile-md", "", "", 0.6); ok {
+	if _, ok := DockTile(tree, "pane-root", DirectionVertical, false, "split-md", "tile-md", "", "", "", 0.6); ok {
 		t.Fatal("empty tile kind must fail")
 	}
 }
@@ -203,7 +204,7 @@ func TestDockTileRejectsPaneIDCollision(t *testing.T) {
 			{Type: "pane", PaneID: "pane-b"},
 		},
 	}
-	next, ok := DockTile(tree, "pane-a", DirectionVertical, false, "split-md", "pane-b", "markdown", "", 0.6)
+	next, ok := DockTile(tree, "pane-a", DirectionVertical, false, "split-md", "pane-b", "markdown", "", "", 0.6)
 	if ok {
 		t.Fatal("tile id matching a terminal pane must be rejected")
 	}
@@ -214,7 +215,7 @@ func TestDockTileRejectsPaneIDCollision(t *testing.T) {
 
 func TestDockTilePersistsTileParams(t *testing.T) {
 	path := "/Users/me/project/README.md"
-	docked, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", path, 0.68)
+	docked, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", path, "", 0.68)
 	if !ok {
 		t.Fatal("dock failed")
 	}
@@ -247,7 +248,7 @@ func TestDockTilePersistsTileParams(t *testing.T) {
 	}
 
 	// Re-docking (move) with new params retargets the same tile.
-	moved, ok := DockTile(decoded, "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "/other/notes.md", 0.5)
+	moved, ok := DockTile(decoded, "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "/other/notes.md", "", 0.5)
 	if !ok {
 		t.Fatal("re-dock failed")
 	}
@@ -269,6 +270,7 @@ func TestUpdateTileParamsPreservesLayout(t *testing.T) {
 		"tile-browser",
 		"browser",
 		"https://first.example",
+		"",
 		0.68,
 	)
 	if !ok {
@@ -296,7 +298,7 @@ func TestUpdateTileParamsPreservesLayout(t *testing.T) {
 }
 
 func TestUndockTileCollapsesSplit(t *testing.T) {
-	docked, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "", 0.68)
+	docked, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "", "", 0.68)
 	if !ok {
 		t.Fatal("dock failed")
 	}
@@ -316,7 +318,7 @@ func TestUndockTileCollapsesSplit(t *testing.T) {
 }
 
 func TestNormalizeWorkspaceLayoutPreservesTileLeaf(t *testing.T) {
-	docked, _ := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "", 0.68)
+	docked, _ := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "", "", 0.68)
 	snapshot := WorkspaceLayout{
 		WorkspaceID:  "workspace-1",
 		ActivePaneID: "pane-root",
@@ -367,7 +369,7 @@ func TestNormalizeDropsMalformedTile(t *testing.T) {
 }
 
 func TestDockedTileRatioSurvivesEncodeDecode(t *testing.T) {
-	docked, _ := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "", 0.71)
+	docked, _ := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "", "", 0.71)
 	encoded, err := EncodeLayout(docked)
 	if err != nil {
 		t.Fatalf("EncodeLayout: %v", err)
@@ -388,7 +390,7 @@ func TestDockedTileRatioSurvivesEncodeDecode(t *testing.T) {
 func TestDockedTileIsOpaqueToTerminalRebalance(t *testing.T) {
 	// A tile docked into a chain must not be redistributed when a sibling
 	// terminal split rebalances. Build pane-a | md, then split pane-a in two.
-	docked, _ := DockTile(DefaultLayout("pane-a"), "pane-a", DirectionVertical, false, "split-md", "tile-md", "markdown", "", 0.7)
+	docked, _ := DockTile(DefaultLayout("pane-a"), "pane-a", DirectionVertical, false, "split-md", "tile-md", "markdown", "", "", 0.7)
 	withSecond, changed := Split(docked, "pane-a", "pane-b", "split-terminals", DirectionVertical, DefaultSplitRatio)
 	if !changed {
 		t.Fatal("splitting the terminal pane failed")
@@ -405,5 +407,77 @@ func TestDockedTileIsOpaqueToTerminalRebalance(t *testing.T) {
 	normalized := NormalizeWorkspaceLayout(snapshot)
 	if !normalized.Layout.RatioLocked || math.Abs(normalized.Layout.Ratio-0.7) > 1e-9 {
 		t.Fatalf("tile split ratio = %v (locked=%v), want preserved 0.7", normalized.Layout.Ratio, normalized.Layout.RatioLocked)
+	}
+}
+
+func TestDockTileSessionBinding(t *testing.T) {
+	docked, ok := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "/tmp/doc.md", "session-1", 0.68)
+	if !ok {
+		t.Fatal("dock failed")
+	}
+	if sessionID, ok := TileSessionIDByID(docked, "tile-md"); !ok || sessionID != "session-1" {
+		t.Fatalf("tile session = (%q, %v), want session-1", sessionID, ok)
+	}
+
+	// A move (re-dock with an empty session) carries the binding forward.
+	moved, ok := DockTile(docked, "pane-root", DirectionHorizontal, false, "split-md2", "tile-md", "markdown", "/tmp/doc.md", "", 0.5)
+	if !ok {
+		t.Fatal("re-dock failed")
+	}
+	if sessionID, _ := TileSessionIDByID(moved, "tile-md"); sessionID != "session-1" {
+		t.Fatalf("move dropped session binding: %q", sessionID)
+	}
+
+	// An explicit session rebinds on re-dock.
+	rebound, ok := DockTile(moved, "pane-root", DirectionVertical, false, "split-md3", "tile-md", "markdown", "/tmp/doc.md", "session-2", 0.5)
+	if !ok {
+		t.Fatal("rebinding re-dock failed")
+	}
+	if sessionID, _ := TileSessionIDByID(rebound, "tile-md"); sessionID != "session-2" {
+		t.Fatalf("explicit re-dock session = %q, want session-2", sessionID)
+	}
+}
+
+func TestUpdateTileSessionID(t *testing.T) {
+	docked, _ := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "/tmp/doc.md", "session-1", 0.68)
+	updated, ok := UpdateTileSessionID(docked, "tile-md", " session-2 ")
+	if !ok {
+		t.Fatal("update failed")
+	}
+	if sessionID, _ := TileSessionIDByID(updated, "tile-md"); sessionID != "session-2" {
+		t.Fatalf("session after update = %q, want session-2", sessionID)
+	}
+	if _, ok := UpdateTileSessionID(updated, "tile-missing", "session-3"); ok {
+		t.Fatal("missing tile update unexpectedly succeeded")
+	}
+}
+
+func TestTileSessionIDSurvivesNormalizeAndEncode(t *testing.T) {
+	docked, _ := DockTile(DefaultLayout("pane-root"), "pane-root", DirectionVertical, false, "split-md", "tile-md", "markdown", "/tmp/doc.md", "session-1", 0.68)
+	snapshot := NormalizeWorkspaceLayout(WorkspaceLayout{
+		WorkspaceID:  "workspace-1",
+		ActivePaneID: "pane-root",
+		Layout:       docked,
+		Panes: []Pane{
+			{PaneID: "pane-root", RuntimeID: "sess-a", SessionID: "sess-a", Kind: PaneKindAgent, Title: "A"},
+		},
+	})
+	if sessionID, _ := TileSessionIDByID(snapshot.Layout, "tile-md"); sessionID != "session-1" {
+		t.Fatalf("session lost in normalization: %q", sessionID)
+	}
+	encoded, err := EncodeLayout(snapshot.Layout)
+	if err != nil {
+		t.Fatalf("EncodeLayout: %v", err)
+	}
+	decoded, err := DecodeLayout(encoded)
+	if err != nil {
+		t.Fatalf("DecodeLayout: %v", err)
+	}
+	if sessionID, _ := TileSessionIDByID(decoded, "tile-md"); sessionID != "session-1" {
+		t.Fatalf("session lost in encode/decode round-trip: %q", sessionID)
+	}
+	leaves := TileLeaves(decoded)
+	if len(leaves) != 1 || leaves[0].TileSessionID != "session-1" {
+		t.Fatalf("TileLeaves = %+v, want the bound session on the leaf", leaves)
 	}
 }

@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -14,10 +16,19 @@ import (
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
-// markdownTileID is the stable id of the single markdown tile per workspace.
-// `attn open` re-docks this id, so opening another file retargets the existing
-// tile rather than stacking up new ones.
-const markdownTileID = "tile-markdown"
+// markdownTileIDPrefix prefixes every markdown tile id. The full id is derived
+// from the file path (see markdownTileIDForPath), so each open file gets its
+// own tile and multiple markdown tiles can coexist in one workspace.
+const markdownTileIDPrefix = "tile-markdown-"
+
+// markdownTileIDForPath derives the stable tile id for a markdown file:
+// the prefix plus the first 16 hex chars of sha256 over the absolute path.
+// Reopening the same path lands on the same id, which is what makes
+// open-markdown reuse an existing tile instead of stacking duplicates.
+func markdownTileIDForPath(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return markdownTileIDPrefix + hex.EncodeToString(sum[:8])
+}
 
 // markdownPollInterval is how often the content watcher restats open markdown
 // files to detect on-disk changes. Sub-second keeps live reload feeling instant
@@ -418,38 +429,132 @@ func (d *Daemon) handleWorkspaceTileContentGet(client *wsClient, msg *protocol.W
 	d.sendCommandError(client, protocol.CmdWorkspaceTileContentGet, "tile changed while content was loading; retry")
 }
 
-// handleOpenMarkdown docks (or retargets) the markdown tile for a file. Sent by
+// openMarkdownTile docks (or reuses) the markdown tile for a file in the
+// workspace that owns sessionID, binding the tile to that session. Shared by
+// the `attn open` unix-socket path and the websocket cmd+click path. When the
+// file is already open in the workspace the existing tile keeps its position
+// and is rebound to the requesting session instead of being re-docked.
+func (d *Daemon) openMarkdownTile(path, sessionID string) (workspaceID, tileID string, err error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", "", fmt.Errorf("path is required")
+	}
+	// The tile id contract is sha256(absolute path): reject relative paths
+	// (they would resolve against the daemon's cwd) and Clean so spellings
+	// like /a/./b.md, /a//b.md, and /a/x/../b.md all land on one tile.
+	if !filepath.IsAbs(path) {
+		return "", "", fmt.Errorf("path must be absolute: %s", path)
+	}
+	path = filepath.Clean(path)
+	if sessionID == "" {
+		return "", "", fmt.Errorf("no session selected; open a session in attn or pass --session")
+	}
+	workspaceID, paneID, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID)
+	if !ok {
+		return "", "", fmt.Errorf("no workspace found for session %s", sessionID)
+	}
+
+	// Serialize check-then-dock: concurrent opens of different files share
+	// last-write-wins layout snapshots, so an unserialized second dock would
+	// silently drop the first tile.
+	d.openMarkdownMu.Lock()
+	defer d.openMarkdownMu.Unlock()
+
+	tileID = markdownTileIDForPath(path)
+	alreadyOpen := false
+	if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot != nil {
+		alreadyOpen = workspacelayout.HasTile(snapshot.Layout, tileID)
+		if !alreadyOpen {
+			// Layouts persisted before per-path tile ids used the fixed id
+			// "tile-markdown". Match legacy tiles by kind+path so reopening
+			// their file reuses them instead of docking a duplicate.
+			for _, leaf := range workspacelayout.TileLeaves(snapshot.Layout) {
+				if leaf.TileKind == string(workspacelayout.TileKindMarkdown) && leaf.TileParams == path {
+					tileID = leaf.TileID
+					alreadyOpen = true
+					break
+				}
+			}
+		}
+	}
+	if alreadyOpen {
+		if err := d.rebindTileSession(workspaceID, tileID, sessionID); err != nil {
+			return "", "", err
+		}
+	} else if err := d.dockTile(workspaceID, paneID, tileID, string(workspacelayout.TileKindMarkdown), path, sessionID, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		return "", "", err
+	}
+	d.broadcastTileContentNow(workspaceID, tileID)
+	return workspaceID, tileID, nil
+}
+
+// rebindTileSession points an existing tile's session binding at sessionID,
+// persisting and broadcasting the layout when the binding actually changes.
+func (d *Daemon) rebindTileSession(workspaceID, tileID, sessionID string) error {
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil {
+		return fmt.Errorf("workspace not found: %s", workspaceID)
+	}
+	if current, ok := workspacelayout.TileSessionIDByID(snapshot.Layout, tileID); ok && current == sessionID {
+		return nil
+	}
+	layout, ok := workspacelayout.UpdateTileSessionID(snapshot.Layout, tileID, sessionID)
+	if !ok {
+		return fmt.Errorf("tile not found: %s", tileID)
+	}
+	snapshot.Layout = layout
+	if err := d.store.SaveWorkspaceLayout(*snapshot); err != nil {
+		return err
+	}
+	d.broadcastWorkspaceLayoutUpdated(workspaceID)
+	return nil
+}
+
+// handleOpenMarkdown docks (or reuses) a markdown tile for a file. Sent by
 // the `attn open` CLI over the unix socket. With no session it targets the
 // currently selected session's workspace.
 func (d *Daemon) handleOpenMarkdown(conn net.Conn, msg *protocol.OpenMarkdownMessage) {
-	path := strings.TrimSpace(msg.Path)
-	if path == "" {
-		d.sendError(conn, "open_markdown: path is required")
-		return
-	}
-
 	sessionID := strings.TrimSpace(protocol.Deref(msg.SessionID))
 	if sessionID == "" {
 		sessionID = d.currentlySelectedSession()
 	}
-	if sessionID == "" {
-		d.sendError(conn, "open_markdown: no session selected; open a session in attn or pass --session")
-		return
-	}
-
-	workspaceID, paneID, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID)
-	if !ok {
-		d.sendError(conn, fmt.Sprintf("open_markdown: no workspace found for session %s", sessionID))
-		return
-	}
-
-	if err := d.dockTile(workspaceID, paneID, markdownTileID, string(workspacelayout.TileKindMarkdown), path, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+	workspaceID, tileID, err := d.openMarkdownTile(msg.Path, sessionID)
+	if err != nil {
 		d.sendError(conn, fmt.Sprintf("open_markdown: %v", err))
 		return
 	}
-	d.broadcastTileContentNow(workspaceID, markdownTileID)
-	d.logf("open_markdown: docked %s into workspace %s (session %s)", path, workspaceID, sessionID)
+	d.logf("open_markdown: docked %s as %s into workspace %s (session %s)", strings.TrimSpace(msg.Path), tileID, workspaceID, sessionID)
 	d.sendOK(conn)
+}
+
+// handleOpenMarkdownWS is the websocket flavor of open_markdown, used by the
+// frontend when the user cmd+clicks a markdown path in a session terminal.
+// The clicked pane's session id rides in the message and becomes the tile's
+// session binding.
+func (d *Daemon) handleOpenMarkdownWS(client *wsClient, msg *protocol.OpenMarkdownMessage) {
+	result := protocol.OpenMarkdownResultMessage{
+		Event:   protocol.EventOpenMarkdownResult,
+		Success: true,
+		Path:    strings.TrimSpace(msg.Path),
+	}
+	if requestID := strings.TrimSpace(protocol.Deref(msg.RequestID)); requestID != "" {
+		result.RequestID = protocol.Ptr(requestID)
+	}
+	sessionID := strings.TrimSpace(protocol.Deref(msg.SessionID))
+	if sessionID == "" {
+		sessionID = d.currentlySelectedSession()
+	}
+	workspaceID, tileID, err := d.openMarkdownTile(msg.Path, sessionID)
+	if err != nil {
+		result.Success = false
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+	result.WorkspaceID = protocol.Ptr(workspaceID)
+	result.TileID = protocol.Ptr(tileID)
+	d.logf("open_markdown(ws): docked %s as %s into workspace %s (session %s)", result.Path, tileID, workspaceID, sessionID)
+	d.sendToClient(client, result)
 }
 
 // runMarkdownContentWatcher polls open markdown files for changes and broadcasts

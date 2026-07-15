@@ -475,7 +475,7 @@ func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 
 	// The trusted open-markdown path assigns the file. WebSocket docking can
 	// move the tile later, but cannot retarget it.
-	if err := d.dockTile(workspaceID, "pane-1", "tile-md", "markdown", "/tmp/notes.md", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+	if err := d.dockTile(workspaceID, "pane-1", "tile-md", "markdown", "/tmp/notes.md", "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
 		t.Fatalf("dockTile: %v", err)
 	}
 
@@ -553,7 +553,7 @@ func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 		t.Fatalf("markdown tile params = (%q, %v), want (%q, true)", params, ok, "/tmp/notes.md")
 	}
 
-	if err := d.dockTile(workspaceID, "pane-2", "tile-browser", "browser", "https://example.com/", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+	if err := d.dockTile(workspaceID, "pane-2", "tile-browser", "browser", "https://example.com/", "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
 		t.Fatalf("dock browser tile: %v", err)
 	}
 	d.handleWorkspaceLayoutUpdateTile(client, &protocol.WorkspaceLayoutUpdateTileMessage{
@@ -583,7 +583,7 @@ func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 
 	// A notebook tile docks empty (its no-selection picker) and accepts a later
 	// file-path update through the same client path the user's file pick uses.
-	if err := d.dockTile(workspaceID, "pane-1", "tile-notebook", string(workspacelayout.TileKindNotebook), "", protocol.WorkspaceLayoutDockEdgeLeft, nil); err != nil {
+	if err := d.dockTile(workspaceID, "pane-1", "tile-notebook", string(workspacelayout.TileKindNotebook), "", "", protocol.WorkspaceLayoutDockEdgeLeft, nil); err != nil {
 		t.Fatalf("dock notebook tile: %v", err)
 	}
 	if params, ok := workspacelayout.TileParamsByID(d.store.GetWorkspaceLayout(workspaceID).Layout, "tile-notebook"); !ok || params != "" {
