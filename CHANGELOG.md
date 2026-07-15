@@ -25,6 +25,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Markdown tiles now render documents on a proper reading surface.** Files open on a centered card with book-quality typography, syntax-highlighted code blocks with a hover copy button, clickable heading anchors that scroll smoothly within the tile, and a metadata card for YAML frontmatter. Dangerous links (`javascript:`, `data:`) render as plain text instead of being clickable.
 - **Markdown tiles got the full GitHub-flavored polish.** `[!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]` callouts render as tinted alert blocks with icons, task lists show real checkboxes, wide tables scroll in place with header and hover tinting, and images referenced by relative paths load inline — click one for a full-screen lightbox (Escape or click-out to close). Prose gets smart quotes, dashes, and `:emoji:` shortcodes (command-line `--flags` are left alone), inline HTML like collapsible `<details>` blocks renders safely, and live reload no longer re-renders a document whose content hasn't changed.
 
+### Fixed
+- **Copilot sessions no longer get stuck mid-selection or with scroll landing in the wrong place after a reload.** Copilot's TUI independently enables its own mouse tracking, and a dropped mouse-release event (e.g. releasing outside the terminal pane) could leave it believing the button was still held, producing a runaway text selection or desynced scrolling after a refresh. attn now launches Copilot with mouse support disabled since attn already owns selection and scrolling itself.
+- **Commands sent to remote (SSH) endpoints work again.** The hub's connection to a remote endpoint never introduced itself to the remote daemon, which therefore rejected every command forwarded over it — registering workspaces, spawning sessions, and other remote actions failed and dropped the connection. The hub now performs the required handshake as soon as it connects.
+
 ## [2026-07-14]
 
 ### Added

@@ -2181,7 +2181,10 @@ export function useDaemonSocket({
           }
 
           case 'markdown_annotations_submit_result': {
-            const key = `submit:${data.path}`;
+            // Submit routes by target session, not workspace; the send side
+            // keys its pending entry with workspaceId '' so mirror that here
+            // (daemon echoes workspace_id '' or omits it).
+            const key = `submit:${data.workspace_id ?? ''}:${data.path}`;
             const pending = mdAnnotationsPendingRef.current.get(key);
             if (!pending || pending.requestId !== data.request_id) {
               break; // superseded or timed out — drop the late result
