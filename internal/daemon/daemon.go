@@ -918,7 +918,11 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 			continue
 		}
 		if d.recoverOnMissingPTY(session) {
-			d.store.UpdateState(session.ID, protocol.StateIdle)
+			d.applyState(sessionStateChange{
+				sessionID: session.ID,
+				state:     protocol.StateIdle,
+				cause:     startupRecovery{},
+			})
 			d.store.SetRecoverable(session.ID, true)
 			recoverable++
 			continue
@@ -1204,7 +1208,11 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			}
 			nextState := sessionStateFromRecoveredInfo(info)
 			if existing.State != nextState {
-				d.store.UpdateState(sessionID, string(nextState))
+				d.applyState(sessionStateChange{
+					sessionID: sessionID,
+					state:     string(nextState),
+					cause:     startupRecovery{},
+				})
 				report.StateUpdated++
 				report.Changed = true
 			}
@@ -1215,7 +1223,11 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			// Preserve interactive waiting/approval states during recovery.
 		default:
 			if existing.State != protocol.SessionStateLaunching {
-				d.store.UpdateState(sessionID, protocol.StateLaunching)
+				d.applyState(sessionStateChange{
+					sessionID: sessionID,
+					state:     protocol.StateLaunching,
+					cause:     startupRecovery{},
+				})
 				report.StateUpdated++
 				report.Changed = true
 			}
@@ -1250,7 +1262,11 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			continue
 		}
 		if d.recoverOnMissingPTY(session) {
-			d.store.UpdateState(session.ID, protocol.StateIdle)
+			d.applyState(sessionStateChange{
+				sessionID: session.ID,
+				state:     protocol.StateIdle,
+				cause:     startupRecovery{},
+			})
 			d.store.SetRecoverable(session.ID, true)
 			report.StateUpdated++
 			report.MarkedRecoverable++
@@ -1486,16 +1502,11 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		} else {
 			d.reconcileTicketsOnSessionEnd(info.ID, string(session.State))
 		}
-		d.store.Touch(info.ID)
-		d.store.UpdateState(info.ID, protocol.StateIdle)
-		updated := d.sessionForBroadcast(d.store.Get(info.ID))
-		if updated != nil {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:   protocol.EventSessionStateChanged,
-				Session: updated,
-			})
-			d.recomputeAndBroadcastWorkspaceForSession(info.ID)
-		}
+		d.applyState(sessionStateChange{
+			sessionID: info.ID,
+			state:     protocol.StateIdle,
+			cause:     processExit{},
+		})
 	}
 
 	event := &protocol.WebSocketEvent{
@@ -1627,26 +1638,11 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 	}
 
 	d.logf("pty state update: session=%s agent=%s state=%s", sessionID, agent, state)
-	switch state {
-	case protocol.StateWorking:
-		d.markRunStartedIfNeeded(sessionID)
-	case protocol.StateIdle, protocol.StateScheduled:
-		d.clearLongRunTracking(sessionID)
-	}
-	d.applyStateAndSyncNudge(sessionID, state, func() bool {
-		d.store.UpdateState(sessionID, state)
-		d.store.Touch(sessionID)
-		return true
+	d.applyState(sessionStateChange{
+		sessionID: sessionID,
+		state:     state,
+		cause:     liveSignal{},
 	})
-	updated := d.sessionForBroadcast(d.store.Get(sessionID))
-	if updated == nil {
-		return
-	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:   protocol.EventSessionStateChanged,
-		Session: updated,
-	})
-	d.recomputeAndBroadcastWorkspaceForSession(sessionID)
 }
 
 // initHTTPServer creates the HTTP server synchronously to avoid race with Stop().
@@ -2209,37 +2205,12 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.logf("state update: id=%s state=%s", msg.ID, msg.State)
-	switch msg.State {
-	case protocol.StateWorking:
-		d.markRunStartedIfNeeded(msg.ID)
-	case protocol.StateIdle, protocol.StateScheduled:
-		// Both end the current run for long-run-review purposes: idle is
-		// terminal, and scheduled parks until a future cron fires (the resumed
-		// turn is a fresh run). Leaving stale tracking would mis-fire a long-run
-		// review on the next short resumed turn.
-		d.clearLongRunTracking(msg.ID)
-	}
-	d.applyStateAndSyncNudge(msg.ID, msg.State, func() bool {
-		d.store.UpdateState(msg.ID, msg.State)
-		d.store.Touch(msg.ID)
-		return true
+	d.applyState(sessionStateChange{
+		sessionID: msg.ID,
+		state:     msg.State,
+		cause:     liveSignal{},
 	})
-	// The hook is the authoritative state path for Codex and Claude; the shared
-	// state helper also reconciles a nudge deferred by an approval prompt.
 	d.sendOK(conn)
-
-	// Broadcast to WebSocket clients
-	session := d.sessionForBroadcast(d.store.Get(msg.ID))
-	if session != nil {
-		d.logf("broadcasting state change (from hook): session=%s state=%s clients=%d", msg.ID, msg.State, d.wsHub.ClientCount())
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:   protocol.EventSessionStateChanged,
-			Session: session,
-		})
-		d.recomputeAndBroadcastWorkspaceForSession(msg.ID)
-	} else {
-		d.logf("handleState: session %s not found, no broadcast", msg.ID)
-	}
 }
 
 func (d *Daemon) handleSetSessionResumeID(conn net.Conn, msg *protocol.SetSessionResumeIDMessage) {
@@ -2365,7 +2336,11 @@ func (d *Daemon) classifyOrDeferAfterStop(sessionID, transcriptPath string) {
 		if session.State == protocol.SessionStatePendingApproval || session.State == protocol.SessionStateWaitingInput {
 			d.broadcastSessionStateChanged(sessionID)
 		} else {
-			d.updateAndBroadcastState(sessionID, protocol.StateWaitingInput)
+			d.applyState(sessionStateChange{
+				sessionID: sessionID,
+				state:     protocol.StateWaitingInput,
+				cause:     daemonObservation{},
+			})
 		}
 		return
 	}
@@ -2420,19 +2395,31 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	d.logf("classifySessionState: session %s has %d total todos, %d pending", sessionID, len(session.Todos), pendingCount)
 	if pendingCount > 0 {
 		d.logf("classifySessionState: session %s has pending todos, setting waiting_input", sessionID)
-		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateWaitingInput, classificationStartTime)
+		d.applyState(sessionStateChange{
+			sessionID: sessionID,
+			state:     protocol.StateWaitingInput,
+			cause:     classifierObservation{observedAt: classificationStartTime},
+		})
 		return
 	}
 
 	if !transcriptEnabled {
 		d.logf("classifySessionState: transcript disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
-		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateIdle, classificationStartTime)
+		d.applyState(sessionStateChange{
+			sessionID: sessionID,
+			state:     protocol.StateIdle,
+			cause:     classifierObservation{observedAt: classificationStartTime},
+		})
 		return
 	}
 
 	if !classifierEnabled {
 		d.logf("classifySessionState: classifier disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
-		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateIdle, classificationStartTime)
+		d.applyState(sessionStateChange{
+			sessionID: sessionID,
+			state:     protocol.StateIdle,
+			cause:     classifierObservation{observedAt: classificationStartTime},
+		})
 		return
 	}
 
@@ -2456,7 +2443,11 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		}
 		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
 		d.logf("classifySessionState: unknown reason=transcript_parse_error session=%s transcript=%s", sessionID, resolvedTranscriptPath)
-		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateUnknown, classificationStartTime)
+		d.applyState(sessionStateChange{
+			sessionID: sessionID,
+			state:     protocol.StateUnknown,
+			cause:     classifierObservation{observedAt: classificationStartTime},
+		})
 		return
 	}
 	if strings.TrimSpace(assistantTurnID) != "" {
@@ -2466,7 +2457,11 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	lastMessage = strings.TrimSpace(lastMessage)
 	if lastMessage == "" {
 		d.logf("classifySessionState: empty last message for session %s, setting idle", sessionID)
-		d.updateAndBroadcastStateWithTimestamp(sessionID, protocol.StateIdle, classificationStartTime)
+		d.applyState(sessionStateChange{
+			sessionID: sessionID,
+			state:     protocol.StateIdle,
+			cause:     classifierObservation{observedAt: classificationStartTime},
+		})
 		return
 	}
 
@@ -2493,7 +2488,11 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	if strings.TrimSpace(assistantTurnID) != "" {
 		d.setClassifiedTurnID(sessionID, assistantTurnID)
 	}
-	d.updateAndBroadcastStateWithTimestamp(sessionID, state, classificationStartTime)
+	d.applyState(sessionStateChange{
+		sessionID: sessionID,
+		state:     state,
+		cause:     classifierObservation{observedAt: classificationStartTime},
+	})
 }
 
 func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout time.Duration) (string, error) {
@@ -2853,59 +2852,6 @@ func (d *Daemon) broadcastSessionStateChanged(sessionID string) {
 		Session: decorated,
 	})
 	d.recomputeAndBroadcastWorkspaceForSession(sessionID)
-}
-
-func (d *Daemon) updateAndBroadcastState(sessionID, state string) {
-	switch state {
-	case protocol.StateWorking:
-		d.markRunStartedIfNeeded(sessionID)
-	case protocol.StateIdle, protocol.StateScheduled:
-		d.clearLongRunTracking(sessionID)
-	}
-	d.applyStateAndSyncNudge(sessionID, state, func() bool {
-		d.store.UpdateState(sessionID, state)
-		return true
-	})
-	// Broadcast to WebSocket clients
-	session := d.sessionForBroadcast(d.store.Get(sessionID))
-	if session != nil {
-		d.logf("broadcasting state change: session=%s state=%s clients=%d", sessionID, state, d.wsHub.ClientCount())
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:   protocol.EventSessionStateChanged,
-			Session: session,
-		})
-		d.recomputeAndBroadcastWorkspaceForSession(sessionID)
-	}
-}
-
-// updateAndBroadcastStateWithTimestamp updates state only if the timestamp is newer
-// than the current state. Used by classifier to prevent stale results from overwriting
-// newer state updates that arrived during classification.
-func (d *Daemon) updateAndBroadcastStateWithTimestamp(sessionID, state string, updatedAt time.Time) bool {
-	if d.applyStateAndSyncNudge(sessionID, state, func() bool {
-		return d.store.UpdateStateWithTimestamp(sessionID, state, updatedAt)
-	}) {
-		switch state {
-		case protocol.StateWorking:
-			d.markRunStartedIfNeeded(sessionID)
-		case protocol.StateIdle, protocol.StateScheduled:
-			d.clearLongRunTracking(sessionID)
-		}
-		// Broadcast to WebSocket clients
-		session := d.sessionForBroadcast(d.store.Get(sessionID))
-		if session != nil {
-			d.logf("broadcasting state change (timestamped): session=%s state=%s clients=%d", sessionID, state, d.wsHub.ClientCount())
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:   protocol.EventSessionStateChanged,
-				Session: session,
-			})
-			d.recomputeAndBroadcastWorkspaceForSession(sessionID)
-		}
-		return true
-	} else {
-		d.logf("state update discarded: session=%s state=%s (newer state exists)", sessionID, state)
-	}
-	return false
 }
 
 // broadcastRateLimited broadcasts a rate limit event to WebSocket clients

@@ -276,26 +276,16 @@ func validatePluginReportCursor(runID string, seq uint64) error {
 
 func (d *Daemon) applyPluginReportedState(params pluginReportStateParams) bool {
 	state := strings.TrimSpace(params.State)
-	if !d.applyStateAndSyncNudge(params.SessionID, state, func() bool {
-		return d.store.ApplyAgentDriverState(params.SessionID, params.RunID, params.Seq, state)
+	if !d.applyState(sessionStateChange{
+		sessionID: params.SessionID,
+		state:     state,
+		cause: pluginReport{
+			runID: params.RunID,
+			seq:   params.Seq,
+		},
 	}) {
 		d.logf("plugin state report discarded: session=%s run=%s seq=%d state=%s", params.SessionID, params.RunID, params.Seq, state)
 		return false
-	}
-	switch state {
-	case protocol.StateWorking:
-		d.markRunStartedIfNeeded(params.SessionID)
-	case protocol.StateIdle:
-		d.clearLongRunTracking(params.SessionID)
-	}
-	d.store.Touch(params.SessionID)
-	session := d.sessionForBroadcast(d.store.Get(params.SessionID))
-	if session != nil {
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:   protocol.EventSessionStateChanged,
-			Session: session,
-		})
-		d.recomputeAndBroadcastWorkspaceForSession(params.SessionID)
 	}
 	return true
 }

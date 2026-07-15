@@ -162,7 +162,11 @@ Canonical example: `sendPRAction` in `app/src/hooks/useDaemonSocket.ts`.
 
 ### 3. Classifier Timestamp Protection
 
-Classifier work is asynchronous and can be slow. Capture the timestamp before classification starts and update state via `UpdateStateWithTimestamp()` so stale classifier results cannot overwrite fresher runtime state.
+Every persisted daemon session-state transition must go through `applyState` in
+`internal/daemon/session_state.go`; direct store state writes bypass required
+effects and are structurally forbidden. Classifier work is asynchronous and can
+be slow, so capture its observation timestamp before classification starts and
+pass it through `classifierObservation` so the door rejects stale results.
 
 ### 4. Review Comment Fan-Out
 

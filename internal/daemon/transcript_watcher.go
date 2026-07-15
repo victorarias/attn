@@ -244,7 +244,11 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 					d.logf("%s session=%s", lineResult.Log, w.sessionID)
 				}
 				if lineResult.State != "" && protocol.SessionState(lineResult.State) != sessionState {
-					d.updateAndBroadcastState(w.sessionID, lineResult.State)
+					d.applyState(sessionStateChange{
+						sessionID: w.sessionID,
+						state:     lineResult.State,
+						cause:     daemonObservation{},
+					})
 					sessionState = protocol.SessionState(lineResult.State)
 				}
 
@@ -282,7 +286,11 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 			d.logf("%s session=%s", tickResult.Log, w.sessionID)
 		}
 		if tickResult.State != "" && protocol.SessionState(tickResult.State) != sessionState {
-			d.updateAndBroadcastState(w.sessionID, tickResult.State)
+			d.applyState(sessionStateChange{
+				sessionID: w.sessionID,
+				state:     tickResult.State,
+				cause:     daemonObservation{},
+			})
 			sessionState = protocol.SessionState(tickResult.State)
 		}
 		if tickResult.BlockClassification {

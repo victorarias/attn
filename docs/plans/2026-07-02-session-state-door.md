@@ -1,185 +1,327 @@
-# Plan: One door for session state (`applyState`)
+# Plan: One daemon door for session state
 
-From the 2026-07-01 architecture review (top recommendation). Line references are
-as of commit `80c62f6b` — always re-anchor by symbol name, not line number.
+Re-anchored on 2026-07-13 at `7d3cb647`. The original 2026-07-02 diagnosis is
+still correct, but its proposed single timestamp-CAS store method predates the
+ticket-doorbell fence and sequenced plugin state reports.
 
-## Goal
+## Why / Alignment
 
-Session state writes are smeared across four copy-pasted choreographies plus five
-raw `store.UpdateState` calls, each applying a *different subset* of guards and
-side effects. The stale-classifier guard (`UpdateStateWithTimestamp`) is a
-convention with exactly one caller, documented as AGENTS.md Critical Pattern #3
-instead of being enforced by an interface.
+Session state is a daemon-level transition, not merely a store field update. A
+successful transition may update long-run tracking, refresh `last_seen`, fence
+ticket-doorbell delivery, broadcast the decorated session, and recompute its
+workspace. Those responsibilities are still spread across several callers, so
+new invariants have had to be patched into each choreography by convention.
 
-Deepen this into one module: every session state transition goes through a single
-`applyState` door that owns the guards, side effects, and broadcast. A bug fixed
-there is fixed for every writer. AGENTS.md #3 stops being tribal knowledge.
+We are aligned on preserving the original one-door goal with these corrections:
 
-**This is a behavior-preserving refactor.** No state transition, guard, or
-broadcast may change observably. The per-source differences below are the spec.
+- The door lives in `internal/daemon/session_state.go` and is the only daemon
+  module allowed to invoke a store session-state mutation.
+- Callers identify a closed semantic cause rather than assembling a bag of
+  boolean options. The cause selects one valid commit rule and effect profile.
+- The store keeps its distinct atomic primitives: unconditional state write,
+  classifier timestamp CAS, and plugin run/sequence CAS. They protect different
+  invariants and must not be collapsed into a timestamp fiction.
+- `applyStateAndSyncNudge` is absorbed into the door. For nudge-aware causes,
+  the state commit remains serialized with the complete doorbell write via
+  `doorbellMu`; nudge reconciliation still runs after releasing the lock.
+- Startup recovery remains silent and process exit preserves its pre-clobber
+  ticket reconciliation. Centralization must not homogenize intentionally
+  different lifecycle behavior.
+
+This chunk is a behavior-preserving daemon refactor. It does not change state
+semantics, nudge eligibility, plugin sequencing, recovery broadcasts, or exit
+classification. Typed store change events, the broader daemon broadcast pump,
+and extraction of classifier decision logic are deferred.
 
 ## Architecture Map
 
 ```text
-Current (4 choreographies + 5 raw writes, all converging on store.UpdateState):
+Current:
+hook / PTY
+  -> duplicated run tracking
+  -> applyStateAndSyncNudge(UpdateState + Touch)
+  -> duplicated session broadcast + workspace recompute
 
-hook/socket path      -> handleState (daemon.go ~2104)
-                           markRunStartedIfNeeded/clearLongRunTracking
-                           store.UpdateState + store.Touch
-                           cancelNudgeOnLeaveIdle, sendOK
-                           broadcast + recomputeAndBroadcastWorkspaceForSession
-PTY detector          -> handlePTYState (daemon.go ~1513)
-                           guard: GetAgentDriverRun + pluginDriverReportsState
-                           guard: agentdriver.ShouldApplyPTYState
-                           same as above + go notifyTicketSessionWentIdle (on idle)
-classifier            -> updateAndBroadcastStateWithTimestamp (daemon.go ~2775)
-                           store.UpdateStateWithTimestamp (CAS)  <- the ONLY guarded door
-transcript watcher    -> updateAndBroadcastState (daemon.go ~2750)
-                           same but NO store.Touch
-startup recovery      -> raw store.UpdateState (daemon.go ~844, ~1121, ~1132, ~1167)
-session exit          -> raw store.UpdateState (daemon.go ~1398) + Touch + broadcast
+transcript / long-run review
+  -> updateAndBroadcastState
+  -> duplicated run tracking
+  -> applyStateAndSyncNudge(UpdateState)
+  -> duplicated broadcast
+
+classifier
+  -> updateAndBroadcastStateWithTimestamp
+  -> applyStateAndSyncNudge(UpdateStateWithTimestamp)
+  -> duplicated accepted-only effects
+
+plugin report
+  -> applyStateAndSyncNudge(ApplyAgentDriverState)
+  -> duplicated accepted-only tracking + Touch + broadcast
+
+startup recovery -> five raw UpdateState calls -> later batch workspace reseed
+process exit      -> pre-clobber ticket reconcile -> raw UpdateState + broadcast
 
 Target:
+source-specific trust / lifecycle guard
+  -> d.applyState(sessionStateChange{cause: <closed cause>})
+       -> select the cause's atomic store commit
+       -> if nudge-aware: commit under doorbellMu
+       -> reject? stop; no side effects
+       -> accepted effect profile
+            Touch (where current source does)
+            long-run tracking (for live observations)
+            syncNudgeForState (for live/nudge-aware sources)
+            broadcastSessionStateChanged + workspace recompute (unless recovery)
 
-every writer
-  -> d.applyState(sessionID, state, stateChangeOpts{...})   // one module: session_state.go
-       -> guards (per opts)
-       -> run-tracking side effects
-       -> store write (always timestamp-CAS)
-       -> nudge cancel, ticket doorbell (per opts)
-       -> broadcast + workspace recompute (per opts)
-grep proof: store.UpdateState( appears ONLY inside session_state.go
+Tests:
+session_state_test.go
+  -> real in-memory SQLite store + daemon broadcast recorder
+  -> table of causes x accepted/rejected commit
+  -> existing concurrency, recovery, plugin, classifier, and lifecycle tests
 ```
 
-## Data Model / Interfaces
+## Transition Model
 
-New file `internal/daemon/session_state.go`:
+Use package-private cause variants so callers can express only meaningful
+combinations. Exact names may move slightly during implementation, but preserve
+this shape:
 
 ```go
-// stateChangeOpts encodes the (small, deliberate) differences between writers.
-// The defaults reproduce updateAndBroadcastState. Every field maps 1:1 to a
-// behavior in the Current tree above — do not invent new combinations.
-type stateChangeOpts struct {
-    observedAt   time.Time // zero => time.Now(); classifier passes its captured start time
-    touch        bool      // hook, PTY, session-exit paths set true
-    broadcast    bool      // default true; some recovery writes set false
-    ticketNudge  bool      // PTY path only: go notifyTicketSessionWentIdle on idle
+type sessionStateChange struct {
+    sessionID string
+    state     string
+    cause     sessionStateCause
 }
 
-// applyState is the ONLY place allowed to call store.UpdateState*.
-// Returns false when the CAS rejects a stale write.
-func (d *Daemon) applyState(sessionID, state string, opts stateChangeOpts) bool
+type sessionStateCause interface { isSessionStateCause() }
+
+type liveSignal struct{}                         // hook or trusted PTY signal
+type daemonObservation struct{}                  // transcript watcher / long-run handoff
+type classifierObservation struct{ observedAt time.Time }
+type pluginReport struct{ runID string; seq uint64 }
+type startupRecovery struct{}
+type processExit struct{}
+
+// applyState is the only daemon door for a persisted session-state transition.
+// It returns false when the session is missing or the cause-specific CAS rejects.
+func (d *Daemon) applyState(change sessionStateChange) bool
 ```
 
-Store side: `UpdateState(id, state)` becomes a thin wrapper over
-`UpdateStateWithTimestamp(id, state, time.Now())` (a fresh timestamp always wins,
-so current callers keep identical behavior), then delete the wrapper once the
-daemon only calls the timestamped method through `applyState`.
+The variants are a Go sum-type approximation. Do not replace them with exported
+flags such as `touch`, `broadcast`, or `ticketNudge`; allowing callers to invent
+new combinations recreates the problem this module is meant to solve.
 
-The PTY-specific guards (`GetAgentDriverRun`/`pluginDriverReportsState`,
-`ShouldApplyPTYState`) stay in `handlePTYState` *before* the `applyState` call —
-they are about whether the PTY observation is trustworthy, not about how a state
-write happens. `handlePTYState` shrinks to guards + one `applyState` call.
+### Cause policy
+
+| Cause | Current producers | Atomic store commit | Touch | Run tracking | Nudge fence + sync | State/workspace broadcast |
+| --- | --- | --- | --- | --- | --- | --- |
+| `liveSignal` | hook, trusted PTY | unconditional | yes | yes | yes | yes |
+| `daemonObservation` | transcript watcher, immediate long-run-review handoff | unconditional | no | yes | yes | yes |
+| `classifierObservation` | slow classifier result | timestamp CAS at `observedAt` | no | accepted only | accepted only | accepted only |
+| `pluginReport` | authorized plugin state/stop report | active-run + increasing-sequence CAS | yes | accepted only | accepted only | accepted only |
+| `startupRecovery` | prune and worker reconciliation | unconditional | no | no | no | no; batch reseed remains authoritative |
+| `processExit` | PTY exit idle-clobber | unconditional | yes | no; exit cleanup already owns it | no; do not re-arm a dead PTY | yes |
+
+`working` starts long-run tracking when needed. `idle` and `scheduled` clear it.
+Other states leave it unchanged, matching current behavior. Effects occur only
+after an accepted commit; a stale classifier result, stale plugin sequence, or
+missing session produces no touch, tracking, nudge, or broadcast effects.
+
+### Apply order and concurrency
+
+```text
+derive commit + effect profile from cause
+if cause is nudge-aware:
+    doorbellMu.Lock
+commit state using the cause-specific store primitive
+if cause is nudge-aware:
+    doorbellMu.Unlock
+if rejected: return false
+
+Touch if required
+update long-run tracking if required
+syncNudgeForState if required       # outside doorbellMu; may inspect tickets/arm timer
+broadcastSessionStateChanged if required
+return true
+```
+
+Only the state commit participates in the doorbell fence. Once
+`pending_approval` is committed, a competing `typeDoorbell` acquires the same
+lock, observes the new state, and refuses to type the prompt. Touch, tracking,
+ticket reads, timer work, and broadcasts stay outside the critical section.
+
+Change `store.UpdateState(id, state)` to return `bool`: true when a row was
+updated, false for a missing session or database error. Existing callers may
+ignore the result, while the state door can guarantee that rejected/missing
+writes have no follow-on effects. Keep `UpdateStateWithTimestamp` and
+`ApplyAgentDriverState` as separate bool-returning atomic primitives.
 
 ## Boundaries
 
-- `session_state.go` owns: run tracking (`markRunStartedIfNeeded`,
-  `clearLongRunTracking`), the store write, `cancelNudgeOnLeaveIdle`, the ticket
-  doorbell dispatch, the `EventSessionStateChanged` broadcast, and
-  `recomputeAndBroadcastWorkspaceForSession`.
-- Callers own: source-specific guards (PTY trust checks), transport replies
-  (`sendOK` stays in `handleState`), and *when* to capture `observedAt`
-  (classifier captures before slow work — keep `classificationStartTime` at the
-  top of `classifySessionState`).
-- Nothing outside `session_state.go` may call `d.store.UpdateState` or
-  `d.store.UpdateStateWithTimestamp`. Reads (`store.Get`) are unrestricted.
-- Hook-authoritative states must survive: do not weaken `ShouldApplyPTYState`
-  (see AGENTS.md; the per-agent policy seam in `internal/agent/daemon_policy.go`
-  is correct and stays).
+- `session_state.go` owns cause-to-policy mapping, store state mutation,
+  transition-derived long-run effects, nudge fencing/reconciliation, Touch, and
+  invocation of the normal state/workspace broadcast.
+- `handlePTYState` keeps `GetAgentDriverRun` / `pluginDriverReportsState` and
+  `agentdriver.ShouldApplyPTYState` guards. They decide whether a PTY observation
+  is trustworthy, before a transition exists.
+- Plugin handlers keep connection authorization, run ownership validation, and
+  payload validation. `pluginReport` carries the already-validated run/sequence
+  cursor into the atomic commit.
+- `classifySessionState` captures `classificationStartTime` before slow work and
+  passes it as `classifierObservation.observedAt`.
+- `handleState` keeps socket logging and `sendOK`; transport concerns do not
+  enter the state module.
+- `handlePTYExit` keeps teardown and `reconcileTicketsOnSessionEnd` before the
+  idle transition, because ticket outcome depends on the pre-clobber state. Its
+  unconditional lifecycle cleanup may clear long-run state independently of
+  whether a session row still exists.
+- Startup recovery still calls `reseedWorkspaceStatuses` after silent state
+  rewrites and before clients cross the recovery barrier. Per-session recovery
+  broadcasts remain forbidden.
+- `broadcastSessionStateChanged` remains reusable by nudge-indicator changes;
+  the state door owns calling it for accepted state transitions, not the helper
+  itself.
+- Tests may call store primitives directly to construct state. Non-test daemon
+  code outside `session_state.go` may not call `UpdateState`,
+  `UpdateStateWithTimestamp`, or `ApplyAgentDriverState`.
 
 ## Implementation Steps
 
-- [ ] PR 1 — the door. Add `session_state.go` with `applyState` + `stateChangeOpts`.
-      Rewrite the four choreographies as calls into it (`handleState`,
-      `handlePTYState`, `updateAndBroadcastState`,
-      `updateAndBroadcastStateWithTimestamp` — keep the last two as one-line
-      deprecated wrappers if that shrinks the diff, then inline them in PR 2).
-      Add table-driven tests for `applyState` itself: per-source option sets ×
-      (fresh timestamp, stale timestamp) asserting store state, broadcast
-      emission (use `BroadcastRecorder` from `testharness.go`), touch, and
-      nudge-cancel calls.
-- [ ] PR 2 — fold the stragglers. Convert the five raw sites (recovery writes at
-      daemon.go ~844/~1121/~1132/~1167 — keep `broadcast:false` to match today;
-      session-exit at ~1398 with `touch:true`) and the transcript-watcher calls.
-      Delete the wrapper methods. Add the structural guard: a test asserting
-      `store.UpdateState` has no non-test callers outside `session_state.go`.
-      While folding, grep the whole daemon package for other writers you may
-      have missed (`grep -rn 'store\.UpdateState' internal/daemon`) — fold every
-      hit, don't leave stragglers.
-- [ ] PR 3 — shrink AGENTS.md #3. Replace the "Classifier Timestamp Protection"
-      pattern text with two sentences pointing at `applyState` as the invariant
-      owner.
-- [ ] Optional PR 4 — `stopdecision`. Extract the non-LLM parts of
-      `classifySessionState` (pending-todo fast path, capability gates,
-      empty-message → idle, parse-error → unknown) into a pure
-      `Decide(session, transcriptText, classifier) (state, ok)` module so the
-      WAITING/DONE decision is unit-testable without driving the 110-line daemon
-      method.
+- [x] Before changing production code, add characterization tests through the
+      existing hook, PTY, long-run handoff, classifier, plugin, and exit entry
+      points. Assert the full stored/effect outcome and make this suite pass on
+      the pre-refactor implementation. During migration, do not weaken or
+      rewrite these expectations to fit `applyState`.
+- [x] Make `store.UpdateState` return whether it updated a session. Cover a
+      successful write and a missing-session rejection without changing its
+      unconditional timestamp semantics.
+- [x] Add `internal/daemon/session_state.go` with the cause variants, one
+      `applyState` entry point, cause-specific commits, accepted-only effects,
+      and concise source-aware logging for rejected guarded writes.
+- [x] Add `internal/daemon/session_state_test.go` with table-driven coverage for
+      every cause profile. Assert stored state, `LastSeen`, long-run tracking,
+      session/workspace broadcasts, and that rejected classifier/plugin writes
+      produce no effects.
+- [x] Fold the nudge-aware producers through the door:
+  - [x] `handleState` and `handlePTYState` use `liveSignal`; the PTY path keeps
+        only its trust guards before the call, while duplicated transition
+        effects move into the door.
+  - [x] Transcript-watcher line/tick results and the immediate long-run-review
+        handoff use `daemonObservation`.
+  - [x] Every classifier outcome uses `classifierObservation` with the captured
+        start time.
+  - [x] Plugin state and stop reports use `pluginReport`; preserve stale
+        sequence/run rejection and handler return behavior.
+- [x] Delete `updateAndBroadcastState`,
+      `updateAndBroadcastStateWithTimestamp`, and
+      `applyStateAndSyncNudge` once their last production callers are gone.
+      Keep `syncNudgeForState` as the ticket-policy seam called by the door.
+- [x] Fold lifecycle stragglers through explicit causes:
+  - [x] All prune/recovery writes use `startupRecovery` and remain silent.
+  - [x] The PTY-exit idle write uses `processExit` after pre-clobber ticket
+        reconciliation and backend teardown.
+- [x] Add a structural test using `go/parser`/`go/ast` that scans non-test Go
+      files in `internal/daemon` and rejects calls to the three store state
+      mutation methods outside `session_state.go`. This catches the plugin CAS
+      path that the original grep proof missed.
+- [x] Replace AGENTS.md "Classifier Timestamp Protection" with the stronger
+      invariant: all daemon state transitions use `applyState`; classifier
+      callers must still capture and pass the observation timestamp.
+- [x] Run automated verification and packaged-app process lifecycle verification.
+      The Codex nudge scenario reached `working` twice but could not complete
+      because Codex emitted `task_complete` with `last_agent_message: null`, so
+      no normal stop hook existed for attn to observe. No changelog entry is
+      expected because the refactor has no intended user-visible behavior change.
+
+Implement this as one PR with reviewable commits rather than landing a partial
+door across several PRs. The invariant is only real once every production writer
+and the structural guard land together.
 
 ## Decisions
 
-- Store keeps ONE write method (timestamped CAS); "un-guarded" callers pass a
-  fresh `time.Now()`, which is semantically identical to today's unguarded write.
-  Rejected: keeping two store methods — that is exactly the two-doors bug source.
-- The recovery-path writes keep their no-broadcast behavior (`broadcast:false`)
-  rather than being "fixed" to broadcast: startup reconcile runs before clients
-  attach and batch-reports via its own path. Do not change it in this refactor.
-- `sendOK`/transport replies stay out of `applyState` — the door is
-  transport-agnostic.
+- One daemon authority, multiple store commit primitives. Timestamp ordering and
+  plugin run/sequence ordering are different concurrency models; forcing both
+  through one store method would weaken correctness.
+- Closed causes over caller-supplied effect flags. The source semantics choose
+  the effect profile, so future writers must make an explicit architectural
+  choice instead of copying a nearby boolean combination.
+- Recovery and exit are first-class causes, not exceptions hidden in raw store
+  calls. Their intentionally reduced effects are documented policy.
+- The doorbell mutex protects only the state commit. A committed approval state
+  is sufficient to block a competing doorbell; holding the mutex during DB
+  Touch, ticket reads, timers, or broadcasts adds contention without safety.
+- Accepted-only effects are the module invariant. Guarded writes already behave
+  this way; making unconditional writes report missing-session failure prevents
+  ghost tracking or broadcasts for a transition that never existed.
 
 ## Verification
 
-Run after each PR:
-
 ```bash
 go build ./...
-go test ./internal/daemon -run 'TestSessionStateDoor|State|Classif|Nudge|Recover|Reconcile' -count=1
-go test ./internal/daemon -count=1          # full package; do NOT use -race on the
-                                            # whole package (known pre-existing race
-                                            # in TestGitStatusScheduler; scope -race
-                                            # with -run if you need it)
+go test ./internal/store -run 'UpdateState|ApplyAgentDriverState' -count=1
+go test ./internal/daemon -run 'SessionStateDoor|DoorbellWrite|NudgeCountdown|Plugin.*State|StateWithTimestamp|ScheduledClears|Recover|Reseed|PTYState' -count=1
+go test ./internal/daemon -count=1
 go test ./internal/store ./internal/classifier ./internal/transcript -count=1
+make test
 ```
 
-Structural asserts (all must hold when PR 2 lands):
+Structural proof after migration:
 
 ```bash
-# the door is the only writer:
-grep -rn 'store\.UpdateState' internal/daemon --include='*.go' | grep -v _test | grep -v session_state.go
-# -> no output
-# the old choreographies are gone:
-grep -rn 'updateAndBroadcastState' internal/daemon --include='*.go' | grep -v _test
+rg -n 'd\.store\.(UpdateState|UpdateStateWithTimestamp|ApplyAgentDriverState)\(' \
+  internal/daemon --glob '*.go' --glob '!*_test.go'
+# -> only internal/daemon/session_state.go
+
+rg -n 'updateAndBroadcastState|applyStateAndSyncNudge' \
+  internal/daemon --glob '*.go' --glob '!*_test.go'
 # -> no output
 ```
 
-Behaviors that must survive (spot-check via existing tests + manual `make dev`):
+Behaviors that must survive:
 
-1. Stale classifier result never overwrites a fresher state (existing
-   classifier tests must stay green unmodified — if one needs editing, the
-   refactor changed behavior).
-2. PTY detector still refuses to clobber hook-authoritative states
-   (`ShouldApplyPTYState` tests unmodified).
-3. Ticket doorbell still fires when a PTY-observed session goes idle, and only
-   on that path.
-4. Nudge countdown still cancels on leaving idle for hook AND PTY paths.
-5. Long-run tracking: `working` starts a run; `idle`/`scheduled` clears it, on
-   every path that did so before.
-6. Manual: `make dev`, run a Claude session, confirm the sidebar state flow
-   launching → working → waiting_input/idle behaves normally, and approval
-   (pending_approval) still clears.
+1. A stale classifier result cannot overwrite a newer hook, PTY, transcript, or
+   plugin state and cannot clear long-run-review tracking.
+2. A stale/wrong-run plugin report changes neither state nor sequence and emits
+   no transition effects.
+3. A `pending_approval` commit cannot interleave into the middle of a complete
+   bracketed-paste + Enter doorbell write; after commit, new doorbells are
+   blocked. Leaving approval rechecks unread activity.
+4. PTY detection still cannot clobber hook- or plugin-authoritative states.
+5. Hook/PTY/plugin signals still Touch; transcript/classifier/recovery do not.
+6. Recovery changes appear in the first corrected workspace snapshot without
+   per-session recovery broadcasts.
+7. PTY exit reconciles tickets from the pre-idle state, then broadcasts idle and
+   `session_exited` in the existing lifecycle.
+8. `working` starts long-run tracking; `idle`/`scheduled` clear it on the same
+   live paths as today.
+
+Live verification (non-prod profile):
+
+1. Run `make dev` outside the sandbox.
+2. Exercise a hook-backed Codex or Claude session through
+   `launching -> working -> waiting_input/idle`, including an approval prompt.
+3. Exercise an OpenCode/plugin-backed session and confirm sequenced native state
+   reports update the sidebar while PTY-derived noise remains ignored.
+4. Arm a ticket nudge, enter/leave approval, and confirm the countdown cancels
+   and re-arms without typing into the approval prompt.
+5. Restart the dev daemon and confirm recovery produces the correct initial
+   session/workspace state without transient per-session recovery churn.
+
+Recorded verification on 2026-07-13:
+
+- `go build ./...`, the targeted store/daemon suites, the full daemon/store/
+  classifier/transcript suites, repeated characterization/door tests, the
+  scoped race suite, and `make test` passed.
+- `make dev` built, signed, installed, and launched the isolated dev app.
+- `real-app:scenario-workspace-shell-lifecycle` passed against the packaged dev
+  app, covering live workspace panes and process-exit cleanup.
+- `real-app:scenario-nudge-trigger` reached the live `working` transition on two
+  runs. Both stopped before the nudge assertions because the spawned Codex CLI
+  recorded `task_complete` with no assistant message; this is retained as an
+  explicit live-verification gap rather than treated as passing evidence.
 
 ## Follow-ups
 
-- The store change-event candidate (see
-  `2026-07-02-store-single-implementation.md` follow-ups) generalizes this
-  one-door pattern to all entities; `applyState` becomes its first client.
+- Typed store change events plus a single daemon broadcast pump remain a separate
+  design problem after the store single-implementation cleanup.
+- Extracting the pure, non-LLM part of `classifySessionState` into a
+  `stopdecision` module remains independent of the state door.
