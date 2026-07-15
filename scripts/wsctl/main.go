@@ -4,8 +4,15 @@
 // canvas spike (attn-spike5) has no way to create the workspaces or
 // workspace-bound sessions it consumes. This script fills that gap.
 //
-// Defaults to the dev daemon (ws://localhost:29849/ws). Override with
-// ATTN_WS_URL.
+// Target daemon resolution, in priority order:
+//
+//  1. ATTN_WS_URL — explicit URL, used verbatim (the only way to reach prod).
+//  2. ATTN_PROFILE — the profile's derived WS port (same resolution as every
+//     other attn entrypoint).
+//  3. Fallback: the dev daemon (ws://localhost:29849/ws). wsctl never targets
+//     prod implicitly.
+//
+// The resolved target is printed to stderr on every invocation.
 //
 // Usage:
 //
@@ -29,8 +36,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"nhooyr.io/websocket"
 )
@@ -44,6 +53,7 @@ func main() {
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
+	fmt.Fprintf(os.Stderr, "[wsctl → %s]\n", wsURL())
 
 	var err error
 	switch cmd {
@@ -80,7 +90,7 @@ func main() {
 func usage() {
 	fmt.Fprintf(os.Stderr, `wsctl — dev helper for driving the attn daemon over WebSocket.
 
-URL: %s (override with ATTN_WS_URL)
+URL: %s (ATTN_WS_URL > ATTN_PROFILE-derived port > dev; prod needs an explicit ATTN_WS_URL)
 
 Commands:
   add-workspace --title T --dir D [--id I]
@@ -95,8 +105,20 @@ Commands:
 }
 
 func wsURL() string {
-	if u := os.Getenv("ATTN_WS_URL"); u != "" {
+	return resolveWSURL(os.Getenv("ATTN_WS_URL"), os.Getenv("ATTN_PROFILE"))
+}
+
+// resolveWSURL picks the daemon to talk to. An explicit ATTN_WS_URL always
+// wins (and is the only way to target prod). Otherwise a named ATTN_PROFILE
+// resolves to that profile's derived WS port, and with no profile at all we
+// fall back to the dev daemon — never prod.
+func resolveWSURL(explicitURL, profile string) string {
+	if u := strings.TrimSpace(explicitURL); u != "" {
 		return u
+	}
+	p := strings.ToLower(strings.TrimSpace(profile))
+	if p != "" && p != "default" {
+		return "ws://localhost:" + config.WSPortForProfile(p) + "/ws"
 	}
 	return defaultWSURL
 }
@@ -180,6 +202,9 @@ func addSession(args []string) error {
 		sessID = newUUID()
 	}
 
+	// The daemon guarantees a workspace layout pane for every spawned session
+	// (spawn_session ensures one, adopting a pre-created pane when present),
+	// so a bare spawn is all a script needs for the session to render.
 	msg := map[string]any{
 		"cmd":          "spawn_session",
 		"id":           sessID,
@@ -206,7 +231,9 @@ func addSession(args []string) error {
 	// Spawn replies with a SpawnResult — wait briefly for it so we
 	// can surface failures (bad cwd, unknown agent, etc.) instead of
 	// printing "ok" and leaving the user to wonder why nothing
-	// appeared.
+	// appeared. The pane only exists once spawn succeeds (the daemon
+	// ensures it on the success path), so a failure here leaves nothing
+	// to roll back.
 	resp, err := sendAndWait(msg, "spawn_result", sessID, 30*time.Second)
 	if err != nil {
 		return err
@@ -398,6 +425,19 @@ func send(payload map[string]any) error {
 // event of the given type (filtered by id when provided) or the
 // timeout elapses. Other frames are silently dropped.
 func sendAndWait(payload map[string]any, expectedEvent, expectedID string, timeout time.Duration) (map[string]any, error) {
+	return sendAndWaitMatch(payload, expectedEvent, func(ev map[string]any) bool {
+		if expectedID == "" {
+			return true
+		}
+		id, _ := ev["id"].(string)
+		return id == expectedID
+	}, timeout)
+}
+
+// sendAndWaitMatch is sendAndWait with an arbitrary predicate over events of
+// the expected type, for results that carry no top-level "id" field (e.g.
+// workspace_layout_action_result).
+func sendAndWaitMatch(payload map[string]any, expectedEvent string, match func(map[string]any) bool, timeout time.Duration) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout+3*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, wsURL(), nil)
@@ -445,13 +485,8 @@ func sendAndWait(payload map[string]any, expectedEvent, expectedID string, timeo
 			}
 			fmt.Fprintf(os.Stderr, "<- %s\n", snippet)
 		}
-		if event["event"] == expectedEvent {
-			if expectedID == "" {
-				return event, nil
-			}
-			if id, _ := event["id"].(string); id == expectedID {
-				return event, nil
-			}
+		if event["event"] == expectedEvent && match(event) {
+			return event, nil
 		}
 	}
 }

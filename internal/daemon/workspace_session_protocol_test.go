@@ -77,6 +77,140 @@ func TestWorkspaceSessionProtocolLifecycleMatchesAppOrder(t *testing.T) {
 	}
 }
 
+// Bare spawn_session (no pre-created pane — wsctl, scripts) must still yield a
+// rendered session: the daemon ensures a layout pane on the spawn success path.
+func TestWorkspaceSessionProtocolBareSpawnEnsuresLayoutPane(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-bare-spawn"
+	sessionID := "session-bare-spawn"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        workspaceID,
+		Title:     "Bare Spawn",
+		Directory: cwd,
+	})
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd:         protocol.CmdSpawnSession,
+		ID:          sessionID,
+		Label:       protocol.Ptr("bare shell"),
+		Cwd:         cwd,
+		Agent:       protocol.AgentShellValue,
+		WorkspaceID: workspaceID,
+		Cols:        80,
+		Rows:        24,
+	})
+	expectSpawnResult(t, client, sessionID, true)
+
+	gotWorkspaceID, paneID, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID)
+	if !ok {
+		t.Fatalf("bare spawn did not create a workspace layout pane for %s", sessionID)
+	}
+	if gotWorkspaceID != workspaceID {
+		t.Fatalf("ensured pane workspace = %q, want %q", gotWorkspaceID, workspaceID)
+	}
+	expectPaneStatus(t, d, workspaceID, paneID, workspacelayout.PaneStatusReady, "")
+
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if len(snapshot.Panes) != 1 {
+		t.Fatalf("panes = %+v, want exactly the ensured pane", snapshot.Panes)
+	}
+	if snapshot.Panes[0].Title != "bare shell" {
+		t.Fatalf("ensured pane title = %q, want the session label", snapshot.Panes[0].Title)
+	}
+}
+
+// A bare spawn (no pre-created pane) that fails must not leave a ghost pane
+// behind: ensureWorkspaceSessionPane only runs on the spawn success path, so a
+// rejected/timed-out spawn has nothing to roll back.
+func TestWorkspaceSessionProtocolBareSpawnFailureCreatesNoPane(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &failingSpawnBackend{err: errors.New("boom")}
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-bare-spawn-fails"
+	sessionID := "session-bare-spawn-fails"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        workspaceID,
+		Title:     "Bare Spawn Fails",
+		Directory: cwd,
+	})
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd:         protocol.CmdSpawnSession,
+		ID:          sessionID,
+		Label:       protocol.Ptr("bare shell"),
+		Cwd:         cwd,
+		Agent:       protocol.AgentShellValue,
+		WorkspaceID: workspaceID,
+		Cols:        80,
+		Rows:        24,
+	})
+	expectSpawnResult(t, client, sessionID, false)
+
+	if session := d.store.Get(sessionID); session != nil {
+		t.Fatalf("failed bare spawn registered session %s", sessionID)
+	}
+	if _, _, ok := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID); ok {
+		t.Fatalf("failed bare spawn left a ghost pane for session %s", sessionID)
+	}
+	if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot != nil && len(snapshot.Panes) != 0 {
+		t.Fatalf("workspace layout has panes after failed bare spawn: %+v", snapshot.Panes)
+	}
+}
+
+// The app pre-creates the pane before spawning; the spawn-time ensure must adopt
+// that pane instead of splitting a duplicate next to it.
+func TestWorkspaceSessionProtocolSpawnAdoptsPreCreatedPane(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &fakeSpawnBackend{}
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-adopt"
+	sessionID := "session-adopt"
+	paneID := "pane-session-adopt"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        workspaceID,
+		Title:     "Adopt",
+		Directory: cwd,
+	})
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID: workspaceID,
+		PaneID:      protocol.Ptr(paneID),
+		SessionID:   sessionID,
+		Title:       protocol.Ptr("custom title"),
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, paneID, true)
+
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd:         protocol.CmdSpawnSession,
+		ID:          sessionID,
+		Label:       protocol.Ptr("different label"),
+		Cwd:         cwd,
+		Agent:       protocol.AgentShellValue,
+		WorkspaceID: workspaceID,
+		Cols:        80,
+		Rows:        24,
+	})
+	expectSpawnResult(t, client, sessionID, true)
+
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if len(snapshot.Panes) != 1 {
+		t.Fatalf("panes = %+v, want the single pre-created pane adopted", snapshot.Panes)
+	}
+	if snapshot.Panes[0].PaneID != paneID || snapshot.Panes[0].Title != "custom title" {
+		t.Fatalf("adopted pane = %+v, want id %q with its original title", snapshot.Panes[0], paneID)
+	}
+	expectPaneStatus(t, d, workspaceID, paneID, workspacelayout.PaneStatusReady, "")
+}
+
 func TestWorkspaceLayoutAddSessionPaneCorrelatesSetupFailure(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := newWorkspaceProtocolTestClient()
