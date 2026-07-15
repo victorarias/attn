@@ -20,6 +20,7 @@ import type {
   Task as GeneratedTask,
   Notification as GeneratedNotification,
   Ticket as GeneratedTicket,
+  MarkdownAnnotation,
   Presentation,
   PresentationRound,
   PresentationComment,
@@ -169,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '161';
+export const PROTOCOL_VERSION = '162';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -806,6 +807,20 @@ export function useDaemonSocket({
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
   const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
+  // Markdown-annotation drafts: keyed `<op>:<path>`, request_id-correlated
+  // (see sendMarkdownAnnotationsCommand).
+  const mdAnnotationsPendingRef = useRef<Map<string, {
+    requestId: string;
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+  }>>(new Map());
+  // In-flight `get` promises shared per path: two tiles hydrating the same
+  // document must share one round-trip, not supersede-reject each other
+  // (a rejected hydrate would leave that tile's saves locked until retry).
+  const mdAnnotationsGetInflightRef = useRef<Map<string, Promise<{
+    annotations: MarkdownAnnotation[];
+    generation: number;
+  }>>>(new Map());
   const requestSequenceRef = useRef(0);
   const pendingOutboundCommandsRef = useRef<string[]>([]);
   const recoveryNoticeTimeoutRef = useRef<number | null>(null);
@@ -2132,6 +2147,39 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'markdown_annotations_get_result':
+          case 'markdown_annotations_save_result':
+          case 'markdown_annotations_clear_result': {
+            const op = data.event === 'markdown_annotations_get_result'
+              ? 'get'
+              : data.event === 'markdown_annotations_save_result' ? 'save' : 'clear';
+            const key = `${op}:${data.path}`;
+            const pending = mdAnnotationsPendingRef.current.get(key);
+            if (!pending || pending.requestId !== data.request_id) {
+              break; // superseded or timed out — drop the late result
+            }
+            mdAnnotationsPendingRef.current.delete(key);
+            if (op === 'save' && !data.success && data.stale) {
+              // Stale generation (tombstone / newer writer) is a protocol
+              // outcome the client handles, not an error.
+              pending.resolve({ stale: true });
+            } else if (!data.success) {
+              pending.reject(new Error(data.error || `markdown_annotations_${op} failed`));
+            } else if (op === 'get') {
+              pending.resolve({
+                annotations: Array.isArray(data.annotations) ? data.annotations : [],
+                generation: typeof data.generation === 'number' ? data.generation : 0,
+              });
+            } else if (op === 'save') {
+              pending.resolve({ stale: false });
+            } else {
+              pending.resolve({
+                generation: typeof data.generation === 'number' ? data.generation : 0,
+              });
+            }
+            break;
+          }
+
           case 'pty_output': {
             // Local sessions arrive as binary frames instead (the daemon honors
             // our binary_pty_output capability); this JSON event remains for
@@ -3399,6 +3447,74 @@ export function useDaemonSocket({
       }, 10000);
     });
   }, []);
+
+  // Markdown annotation drafts (request/result pattern; save/clear can fail —
+  // stale-generation rejection — so no fire-and-forget). Pending entries are
+  // keyed `<op>:<path>` in a dedicated map: a newer request for the same
+  // path+op supersedes the in-flight one (rejects it), and results are
+  // matched by request_id so a late result for a superseded request can
+  // never settle its successor.
+  const sendMarkdownAnnotationsCommand = useCallback(<T,>(
+    op: 'get' | 'save' | 'clear',
+    path: string,
+    extra: Record<string, unknown>,
+  ): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `${op}:${path}`;
+      const requestId = crypto.randomUUID();
+      mdAnnotationsPendingRef.current.get(key)?.reject(new Error('Superseded by a newer request'));
+      mdAnnotationsPendingRef.current.set(key, { requestId, resolve: resolve as (value: unknown) => void, reject });
+      ws.send(JSON.stringify({
+        cmd: `markdown_annotations_${op}`,
+        path,
+        request_id: requestId,
+        ...extra,
+      }));
+      setTimeout(() => {
+        const pending = mdAnnotationsPendingRef.current.get(key);
+        if (pending?.requestId === requestId) {
+          mdAnnotationsPendingRef.current.delete(key);
+          reject(new Error('Timeout'));
+        }
+      }, 10000);
+    });
+  }, []);
+
+  const getMarkdownAnnotations = useCallback((path: string) => {
+    const inflight = mdAnnotationsGetInflightRef.current.get(path);
+    if (inflight) {
+      return inflight; // share the round-trip (see ref comment)
+    }
+    const promise: Promise<{ annotations: MarkdownAnnotation[]; generation: number }> =
+      sendMarkdownAnnotationsCommand<{ annotations: MarkdownAnnotation[]; generation: number }>(
+        'get', path, {},
+      ).finally(() => {
+        if (mdAnnotationsGetInflightRef.current.get(path) === promise) {
+          mdAnnotationsGetInflightRef.current.delete(path);
+        }
+      });
+    mdAnnotationsGetInflightRef.current.set(path, promise);
+    return promise;
+  }, [sendMarkdownAnnotationsCommand]);
+
+  const saveMarkdownAnnotations = useCallback((
+    path: string,
+    annotations: MarkdownAnnotation[],
+    generation: number,
+  ) =>
+    sendMarkdownAnnotationsCommand<{ stale: boolean }>(
+      'save', path, { annotations, generation },
+    ), [sendMarkdownAnnotationsCommand]);
+
+  const clearMarkdownAnnotations = useCallback((path: string, generation: number) =>
+    sendMarkdownAnnotationsCommand<{ generation: number }>(
+      'clear', path, { generation },
+    ), [sendMarkdownAnnotationsCommand]);
 
   // Mute a PR with optimistic update
   const sendMutePR = useCallback((prId: string) => {
@@ -4943,6 +5059,9 @@ export function useDaemonSocket({
     retryConnection,
     sendPRAction,
     getScreenSnapshot,
+    getMarkdownAnnotations,
+    saveMarkdownAnnotations,
+    clearMarkdownAnnotations,
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,

@@ -1538,6 +1538,166 @@ type ListWorktreesMessage struct {
 	MainRepo string `json:"main_repo"`
 }
 
+type MarkdownAnnotation struct {
+	// Anchor corresponds to the JSON schema field "anchor".
+	Anchor *MarkdownAnnotationAnchor `json:"anchor,omitempty,omitzero"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt int `json:"created_at"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// QuickLabelID corresponds to the JSON schema field "quick_label_id".
+	QuickLabelID *string `json:"quick_label_id,omitempty,omitzero"`
+
+	// QuickLabelTip corresponds to the JSON schema field "quick_label_tip".
+	QuickLabelTip *string `json:"quick_label_tip,omitempty,omitzero"`
+
+	// Text corresponds to the JSON schema field "text".
+	Text *string `json:"text,omitempty,omitzero"`
+
+	// Type corresponds to the JSON schema field "type".
+	Type string `json:"type"`
+}
+
+type MarkdownAnnotationAnchor struct {
+	// BlockID corresponds to the JSON schema field "block_id".
+	BlockID string `json:"block_id"`
+
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash string `json:"content_hash"`
+
+	// End corresponds to the JSON schema field "end".
+	End int `json:"end"`
+
+	// EndLine corresponds to the JSON schema field "end_line".
+	EndLine int `json:"end_line"`
+
+	// Exact corresponds to the JSON schema field "exact".
+	Exact string `json:"exact"`
+
+	// Prefix corresponds to the JSON schema field "prefix".
+	Prefix string `json:"prefix"`
+
+	// Start corresponds to the JSON schema field "start".
+	Start int `json:"start"`
+
+	// StartLine corresponds to the JSON schema field "start_line".
+	StartLine int `json:"start_line"`
+
+	// Suffix corresponds to the JSON schema field "suffix".
+	Suffix string `json:"suffix"`
+}
+
+type MarkdownAnnotationsClearMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
+type MarkdownAnnotationsClearResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type MarkdownAnnotationsGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
+type MarkdownAnnotationsGetResultMessage struct {
+	// Annotations corresponds to the JSON schema field "annotations".
+	Annotations []MarkdownAnnotation `json:"annotations"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type MarkdownAnnotationsSaveMessage struct {
+	// Annotations corresponds to the JSON schema field "annotations".
+	Annotations []MarkdownAnnotation `json:"annotations"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
+type MarkdownAnnotationsSaveResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Stale corresponds to the JSON schema field "stale".
+	Stale *bool `json:"stale,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type MergePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
