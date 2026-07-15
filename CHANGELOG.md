@@ -10,6 +10,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Changed
 - **Markdown tiles now render documents on a proper reading surface.** Files open on a centered card with book-quality typography, syntax-highlighted code blocks with a hover copy button, clickable heading anchors that scroll smoothly within the tile, and a metadata card for YAML frontmatter. Dangerous links (`javascript:`, `data:`) render as plain text instead of being clickable.
+- **Markdown tiles got the full GitHub-flavored polish.** `[!NOTE]`/`[!TIP]`/`[!IMPORTANT]`/`[!WARNING]`/`[!CAUTION]` callouts render as tinted alert blocks with icons, task lists show real checkboxes, wide tables scroll in place with header and hover tinting, and images referenced by relative paths load inline — click one for a full-screen lightbox (Escape or click-out to close). Prose gets smart quotes, dashes, and `:emoji:` shortcodes (command-line `--flags` are left alone), inline HTML like collapsible `<details>` blocks renders safely, and live reload no longer re-renders a document whose content hasn't changed.
 
 ## [2026-07-14]
 
