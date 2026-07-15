@@ -4,14 +4,21 @@
 // canvas spike (attn-spike5) has no way to create the workspaces or
 // workspace-bound sessions it consumes. This script fills that gap.
 //
-// Defaults to the dev daemon (ws://localhost:29849/ws). Override with
-// ATTN_WS_URL.
+// Target daemon resolution, in priority order:
+//
+//  1. ATTN_WS_URL — explicit URL, used verbatim (the only way to reach prod).
+//  2. ATTN_PROFILE — the profile's derived WS port (same resolution as every
+//     other attn entrypoint).
+//  3. Fallback: the dev daemon (ws://localhost:29849/ws). wsctl never targets
+//     prod implicitly.
+//
+// The resolved target is printed to stderr on every invocation.
 //
 // Usage:
 //
 //	go run ./scripts/wsctl add-workspace --title T --dir D [--id I]
 //	go run ./scripts/wsctl rm-workspace --id I
-//	go run ./scripts/wsctl add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24]
+//	go run ./scripts/wsctl add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24] [--no-pane]
 //	go run ./scripts/wsctl rm-session --id I
 //	go run ./scripts/wsctl kill-session --id I [--reload]
 //	go run ./scripts/wsctl screen --id I
@@ -29,8 +36,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 	"nhooyr.io/websocket"
 )
@@ -44,6 +53,7 @@ func main() {
 	}
 	cmd := os.Args[1]
 	args := os.Args[2:]
+	fmt.Fprintf(os.Stderr, "[wsctl → %s]\n", wsURL())
 
 	var err error
 	switch cmd {
@@ -80,12 +90,12 @@ func main() {
 func usage() {
 	fmt.Fprintf(os.Stderr, `wsctl — dev helper for driving the attn daemon over WebSocket.
 
-URL: %s (override with ATTN_WS_URL)
+URL: %s (ATTN_WS_URL > ATTN_PROFILE-derived port > dev; prod needs an explicit ATTN_WS_URL)
 
 Commands:
   add-workspace --title T --dir D [--id I]
   rm-workspace --id I
-  add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24]
+  add-session --workspace W --cwd D [--agent claude] [--label L] [--initial-prompt-file P] [--yolo] [--id I] [--cols 80] [--rows 24] [--no-pane]
   rm-session --id I
   kill-session --id I [--reload]
   screen --id I
@@ -95,8 +105,20 @@ Commands:
 }
 
 func wsURL() string {
-	if u := os.Getenv("ATTN_WS_URL"); u != "" {
+	return resolveWSURL(os.Getenv("ATTN_WS_URL"), os.Getenv("ATTN_PROFILE"))
+}
+
+// resolveWSURL picks the daemon to talk to. An explicit ATTN_WS_URL always
+// wins (and is the only way to target prod). Otherwise a named ATTN_PROFILE
+// resolves to that profile's derived WS port, and with no profile at all we
+// fall back to the dev daemon — never prod.
+func resolveWSURL(explicitURL, profile string) string {
+	if u := strings.TrimSpace(explicitURL); u != "" {
 		return u
+	}
+	p := strings.ToLower(strings.TrimSpace(profile))
+	if p != "" && p != "default" {
+		return "ws://localhost:" + config.WSPortForProfile(p) + "/ws"
 	}
 	return defaultWSURL
 }
@@ -163,6 +185,7 @@ func addSession(args []string) error {
 	id := fs.String("id", "", "session id (defaults to a generated one)")
 	cols := fs.Int("cols", 80, "initial PTY cols")
 	rows := fs.Int("rows", 24, "initial PTY rows")
+	noPane := fs.Bool("no-pane", false, "skip the workspace layout pane (session will not render in the app)")
 	fs.Parse(args)
 
 	if *workspace == "" || *cwd == "" {
@@ -178,6 +201,31 @@ func addSession(args []string) error {
 		// ids — the agent CLI uses them directly as its own session
 		// identifier, which must be UUID-shaped.
 		sessID = newUUID()
+	}
+
+	// The app only renders sessions that own a workspace layout pane; the
+	// normal app flow persists the pane BEFORE spawn_session (which then
+	// flips it to ready). Mirror that order here, or the session exists in
+	// the daemon but the workspace shows a blank main area.
+	if !*noPane {
+		paneResp, err := sendAndWaitMatch(map[string]any{
+			"cmd":          "workspace_layout_add_session_pane",
+			"workspace_id": *workspace,
+			"session_id":   sessID,
+		}, "workspace_layout_action_result", func(ev map[string]any) bool {
+			action, _ := ev["action"].(string)
+			wsID, _ := ev["workspace_id"].(string)
+			return action == "workspace_layout_add_session_pane" && wsID == *workspace
+		}, 10*time.Second)
+		if err != nil {
+			return fmt.Errorf("add layout pane: %w", err)
+		}
+		if success, _ := paneResp["success"].(bool); !success {
+			errMsg, _ := paneResp["error"].(string)
+			return fmt.Errorf("daemon rejected layout pane: %s", errMsg)
+		}
+		paneID, _ := paneResp["pane_id"].(string)
+		fmt.Printf("layout pane created: pane_id=%s\n", paneID)
 	}
 
 	msg := map[string]any{
@@ -398,6 +446,19 @@ func send(payload map[string]any) error {
 // event of the given type (filtered by id when provided) or the
 // timeout elapses. Other frames are silently dropped.
 func sendAndWait(payload map[string]any, expectedEvent, expectedID string, timeout time.Duration) (map[string]any, error) {
+	return sendAndWaitMatch(payload, expectedEvent, func(ev map[string]any) bool {
+		if expectedID == "" {
+			return true
+		}
+		id, _ := ev["id"].(string)
+		return id == expectedID
+	}, timeout)
+}
+
+// sendAndWaitMatch is sendAndWait with an arbitrary predicate over events of
+// the expected type, for results that carry no top-level "id" field (e.g.
+// workspace_layout_action_result).
+func sendAndWaitMatch(payload map[string]any, expectedEvent string, match func(map[string]any) bool, timeout time.Duration) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout+3*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, wsURL(), nil)
@@ -445,13 +506,8 @@ func sendAndWait(payload map[string]any, expectedEvent, expectedID string, timeo
 			}
 			fmt.Fprintf(os.Stderr, "<- %s\n", snippet)
 		}
-		if event["event"] == expectedEvent {
-			if expectedID == "" {
-				return event, nil
-			}
-			if id, _ := event["id"].(string); id == expectedID {
-				return event, nil
-			}
+		if event["event"] == expectedEvent && match(event) {
+			return event, nil
 		}
 	}
 }
