@@ -157,16 +157,15 @@ func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 // check and the notebook-root resolution are independent of the sessions table.
 //
 // It is intentionally conservative: it assigns only on a genuine first launch
-// (existingSession == nil, never a reload/respawn) of a guidance-capable agent
-// (claude/codex — shells and plugin agents have no guidance launch path) and only
-// when no chief exists yet. A create-as-chief request while a chief is already
+// (existingSession == nil, never a reload/respawn) of a guidance-capable built-in
+// or plugin agent and only when no chief exists yet. A create-as-chief request while a chief is already
 // live is logged and ignored, never a silent role transfer. Returns whether it
 // assigned the role so the caller can roll it back if the launch then fails.
 func (d *Daemon) maybeAssignChiefOnSpawn(sessionID, agent string, requested bool, existingSession *protocol.Session) bool {
 	if !requested || existingSession != nil || d.store == nil {
 		return false
 	}
-	if !agentSupportsChiefReload(agent) {
+	if !d.agentSupportsChiefGuidance(agent) {
 		d.logf("create-as-chief: agent %q for session %s has no chief-guidance launch path; ignoring", agent, sessionID)
 		return false
 	}
@@ -200,6 +199,18 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 				fmt.Errorf("session not found: %s", sessionID),
 			)
 			return
+		}
+		if session := d.store.Get(sessionID); session != nil {
+			if driver, ok := d.ensurePluginRegistry().driver(string(session.Agent)); ok {
+				switch {
+				case !driver.Capabilities["launch_instructions"]:
+					d.sendChiefOfStaffResult(client, sessionID, true, previousSessionID, fmt.Errorf("agent %q cannot be chief of staff without launch_instructions capability", session.Agent))
+					return
+				case !driver.Capabilities["resume"]:
+					d.sendChiefOfStaffResult(client, sessionID, true, previousSessionID, fmt.Errorf("agent %q cannot apply chief guidance without resume capability", session.Agent))
+					return
+				}
+			}
 		}
 		if err := d.store.SetProfileRole(profileRoleChiefOfStaff, sessionID); err != nil {
 			d.sendChiefOfStaffResult(client, sessionID, true, previousSessionID, err)

@@ -1,4 +1,4 @@
-export const pluginAPIVersion = 2;
+export const pluginAPIVersion = 3;
 
 export type StableVersion = {
   raw: string;
@@ -53,6 +53,15 @@ export function evaluateOpenCodeVersion(value: string): VersionCompatibility {
 
 export type DriverCapabilities = Record<string, boolean>;
 
+export type PluginLaunchInstructions = {
+  kind: "workspace" | "chief";
+  content: string;
+  workspace_id?: string;
+  context_path?: string;
+  context_revision?: number;
+  notebook_root?: string;
+};
+
 export type DriverSpawnParams = {
   session_id: string;
   run_id: string;
@@ -63,6 +72,7 @@ export type DriverSpawnParams = {
   effort?: string;
   initial_prompt?: string;
   metadata?: unknown;
+  instructions?: PluginLaunchInstructions;
 };
 
 export type DriverSpawnResult = {
@@ -104,6 +114,8 @@ export type RunRecord = {
   port: number;
   password_ref: string;
   prompt_ref?: string;
+  instruction_ref?: string;
+  instruction_kind?: "workspace" | "chief";
   launch_config_ref: string;
   opencode_session_id?: string;
   opencode_version: string;
@@ -123,6 +135,7 @@ export type LaunchConfig = {
   port: number;
   yolo: boolean;
   resume_session_id?: string;
+  instruction_ref?: string;
 };
 
 export type ReportState = "working" | "waiting_input" | "pending_approval" | "idle" | "unknown";

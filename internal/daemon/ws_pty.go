@@ -559,7 +559,23 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 	// The frontend sets chief_of_staff only on initial creation, not on
 	// reconnect/resume spawns after a daemon restart. Fall back to the
 	// persisted profile-roles table so chief settings survive respawns.
-	isChief := protocol.Deref(msg.ChiefOfStaff) || d.isChiefOfStaffSession(msg.ID)
+	requestedChief := protocol.Deref(msg.ChiefOfStaff)
+	if hasPluginDriver && requestedChief && !pluginDriver.Capabilities["launch_instructions"] {
+		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q cannot be chief of staff without launch_instructions capability", agent))
+		return
+	}
+	if hasPluginDriver && requestedChief && !pluginDriver.Capabilities["resume"] {
+		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q cannot be chief of staff without resume capability", agent))
+		return
+	}
+	chiefAssigned := d.maybeAssignChiefOnSpawn(msg.ID, agent, requestedChief, existingSession)
+	chiefAssignmentCommitted := false
+	defer func() {
+		if chiefAssigned && !chiefAssignmentCommitted {
+			d.clearChiefOfStaffIfSession(msg.ID)
+		}
+	}()
+	isChief := d.isChiefOfStaffSession(msg.ID)
 	if spawnOpts.Model == "" {
 		// No per-spawn pin (delegation); a chief launch falls back to the
 		// chief_model_<agent> setting.
@@ -587,6 +603,13 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		}
 	}
 	pluginRunID := ""
+	instructionsRollback := func() {}
+	instructionsCommitted := false
+	defer func() {
+		if !instructionsCommitted {
+			instructionsRollback()
+		}
+	}()
 	if hasPluginDriver {
 		pluginRunID = uuid.NewString()
 		spawnOpts.LifecycleID = pluginRunID
@@ -604,6 +627,15 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		if metadata := strings.TrimSpace(d.store.GetAgentMetadata(msg.ID)); metadata != "" && json.Valid([]byte(metadata)) {
 			params.Metadata = json.RawMessage(metadata)
 		}
+		if pluginDriver.Capabilities["launch_instructions"] {
+			var instructionErr error
+			params.Instructions, instructionsRollback, instructionErr = d.preparePluginLaunchInstructions(msg.ID, workspaceID, isChief)
+			if instructionErr != nil {
+				d.finishPluginSessionLaunch(msg.ID, false)
+				d.sendSpawnFailure(client, msg.ID, instructionErr)
+				return
+			}
+		}
 		result, err := d.resolvePluginDriverLaunch(pluginDriver, params, existingSession != nil && pluginDriver.Capabilities["resume"])
 		if err != nil {
 			d.finishPluginSessionLaunch(msg.ID, false)
@@ -620,12 +652,6 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		spawnOpts.ExternalEnv = commandEnv
 		spawnOpts.ExternalCWD = strings.TrimSpace(result.CWD)
 	}
-
-	// Assign the chief role BEFORE Spawn so the agent's launch path (and its async
-	// notebook-guide query) sees chief=true and injects the guidance on the first
-	// boot. Rolled back below if the launch fails, so a never-launched session
-	// never holds the role.
-	chiefAssigned := d.maybeAssignChiefOnSpawn(msg.ID, agent, protocol.Deref(msg.ChiefOfStaff), existingSession)
 
 	if err := d.ptyBackend.Spawn(context.Background(), spawnOpts); err != nil {
 		if hasPluginDriver {
@@ -788,6 +814,8 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 			d.handlePTYExit(*exit)
 		}
 	}
+	chiefAssignmentCommitted = true
+	instructionsCommitted = true
 
 	d.sendToClient(client, protocol.SpawnResultMessage{
 		Event:   protocol.EventSpawnResult,

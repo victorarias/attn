@@ -187,6 +187,8 @@ type SessionLaunchParams struct {
 	ClaudeExecutable  string
 	CodexExecutable   string
 	CopilotExecutable string
+	Model             string
+	Effort            string
 }
 
 // SessionLaunchParamsProvider is implemented by backends that can return the

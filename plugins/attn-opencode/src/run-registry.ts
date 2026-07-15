@@ -1,15 +1,17 @@
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { LaunchConfig, RunRecord } from "./types";
+import type { LaunchConfig, PluginLaunchInstructions, RunRecord } from "./types";
 
 const directoryMode = 0o700;
 const fileMode = 0o600;
 
 type RegistryContents = {
-  schema: 1;
+  schema: 2;
   runs: Record<string, RunRecord>;
 };
+
+type PersistedRegistryContents = Omit<RegistryContents, "schema"> & { schema: 1 | 2 };
 
 export function runtimeRootFromSocket(socketPath: string): string {
   return join(dirname(socketPath), "plugins", "attn-opencode");
@@ -19,6 +21,7 @@ export class RunRegistry {
   private readonly registryPath: string;
   private readonly secretsDir: string;
   private readonly promptsDir: string;
+  private readonly instructionsDir: string;
   private readonly launchDir: string;
   private runs = new Map<string, RunRecord>();
   private work = Promise.resolve();
@@ -27,20 +30,22 @@ export class RunRegistry {
     this.registryPath = join(root, "runs.json");
     this.secretsDir = join(root, "secrets");
     this.promptsDir = join(root, "prompts");
+    this.instructionsDir = join(root, "instructions");
     this.launchDir = join(root, "launch");
   }
 
   async initialize(): Promise<void> {
     await this.withLock(async () => {
-      for (const path of [this.root, this.secretsDir, this.promptsDir, this.launchDir]) {
+      for (const path of [this.root, this.secretsDir, this.promptsDir, this.instructionsDir, this.launchDir]) {
         await ensurePrivateDirectory(path);
       }
       try {
-        const parsed = JSON.parse(await readFile(this.registryPath, "utf8")) as RegistryContents;
-        if (parsed.schema !== 1 || !parsed.runs || typeof parsed.runs !== "object") {
+        const parsed = JSON.parse(await readFile(this.registryPath, "utf8")) as PersistedRegistryContents;
+        if ((parsed.schema !== 1 && parsed.schema !== 2) || !parsed.runs || typeof parsed.runs !== "object") {
           throw new Error("invalid run registry schema");
         }
         this.runs = new Map(Object.entries(parsed.runs));
+        if (parsed.schema === 1) await this.persist();
       } catch (error) {
         if (!isNotFound(error)) throw error;
         await this.persist();
@@ -48,15 +53,29 @@ export class RunRegistry {
     });
   }
 
-  async create(record: Omit<RunRecord, "password_ref" | "prompt_ref" | "launch_config_ref">, prompt: string): Promise<RunRecord> {
+  async create(
+    record: Omit<RunRecord, "password_ref" | "prompt_ref" | "instruction_ref" | "instruction_kind" | "launch_config_ref">,
+    prompt: string,
+    instructions?: PluginLaunchInstructions,
+  ): Promise<RunRecord> {
     return this.withLock(async () => {
       if (this.runs.has(record.run_id)) throw new Error(`run ${record.run_id} already exists`);
       const passwordRef = join(this.secretsDir, `${safeRunID(record.run_id)}.secret`);
       const promptRef = prompt === "" ? undefined : join(this.promptsDir, `${safeRunID(record.run_id)}.prompt`);
+      const instructionRef = instructions ? join(this.instructionsDir, `${safeRunID(record.run_id)}.md`) : undefined;
+      const instructionContents = instructions ? requireInstructionContent(instructions) : undefined;
       const launchConfigRef = join(this.launchDir, `${safeRunID(record.run_id)}.json`);
       await writePrivate(passwordRef, randomBytes(32).toString("base64url"));
       if (promptRef) await writePrivate(promptRef, prompt);
-      const full: RunRecord = { ...record, password_ref: passwordRef, prompt_ref: promptRef, launch_config_ref: launchConfigRef };
+      if (instructionRef && instructionContents) await writePrivate(instructionRef, instructionContents);
+      const full: RunRecord = {
+        ...record,
+        password_ref: passwordRef,
+        prompt_ref: promptRef,
+        instruction_ref: instructionRef,
+        instruction_kind: instructions?.kind,
+        launch_config_ref: launchConfigRef,
+      };
       this.runs.set(full.run_id, full);
       await this.persist();
       return structuredClone(full);
@@ -126,6 +145,7 @@ export class RunRegistry {
       await Promise.all([
         rm(record.password_ref, { force: true }),
         record.prompt_ref ? rm(record.prompt_ref, { force: true }) : Promise.resolve(),
+        record.instruction_ref ? rm(record.instruction_ref, { force: true }) : Promise.resolve(),
         rm(record.launch_config_ref, { force: true }),
       ]);
     });
@@ -140,7 +160,7 @@ export class RunRegistry {
 
   private async persist(): Promise<void> {
     const runs = Object.fromEntries(this.runs.entries());
-    await writePrivate(this.registryPath, `${JSON.stringify({ schema: 1, runs } satisfies RegistryContents)}\n`);
+    await writePrivate(this.registryPath, `${JSON.stringify({ schema: 2, runs } satisfies RegistryContents)}\n`);
   }
 
   private async withLock<T>(operation: () => Promise<T> | T): Promise<T> {
@@ -151,6 +171,16 @@ export class RunRegistry {
     );
     return next;
   }
+}
+
+function requireInstructionContent(instructions: PluginLaunchInstructions | undefined): string {
+  if (!instructions || (instructions.kind !== "workspace" && instructions.kind !== "chief")) {
+    throw new Error("launch instructions require a supported kind");
+  }
+  if (typeof instructions.content !== "string" || instructions.content.trim() === "") {
+    throw new Error("launch instructions require non-empty content");
+  }
+  return instructions.content;
 }
 
 export async function writePrivate(path: string, contents: string): Promise<void> {

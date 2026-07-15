@@ -66,7 +66,7 @@ These were proposed in conversation but not explicitly confirmed:
 5. **SDK shape and timing.** User pushed back on designing SDK top-down. **Revised approach: the first real plugins are written against raw JSON-RPC first. After the provider path proved out, extract a small SDK from those patterns; let richer plugin surfaces wait until their concrete implementations exist.** The protocol must still stay ergonomic enough to consume without a wrapper.
 6. **Manifest format.** Probably TOML — minimal, human-readable, Bun ecosystem-neutral. Alternatives: JSON, YAML. Not confirmed.
 7. **Install sources.** Settings accepts a pasted Git repository URL or local directory. The CLI currently keeps `--path <dir>` for local development; a Git-source CLI form is deferred until it has a concrete use case.
-8. **API versioning discipline.** Installed plugin manifests and the socket hello use a strict, matching `attn_api_version`. Version 2 introduced optional delegated `model` and `effort` fields on the driver launch request, so daemon and plugin agree on the expanded driver contract before launch. A wire-shape change must bump this version and update every bundled manifest/client; the daemon-client protocol version changes separately only when its own WebSocket schema changes.
+8. **API versioning discipline.** Installed plugin manifests and the socket hello use a strict, matching `attn_api_version`. Version 3 adds the optional attn-composed `instructions` bundle to driver launch requests (version 2 introduced delegated `model` and `effort`), so daemon and plugin agree on the expanded contract before launch. A wire-shape change must bump this version and update every bundled manifest/client; the daemon-client protocol version changes separately only when its own WebSocket schema changes.
 9. **Socket coexistence.** Existing one-message-per-connection hook protocol (claude hooks, whatever remains of the old pi plan's pattern) must keep working. Proposed: detect JSON-RPC handshake by first-message shape and switch the connection's mode. Not confirmed.
 10. **JSON-RPC framing.** Proposed: newline-delimited JSON. Alternative: LSP-style Content-Length headers. Unix socket + JSON makes newline-delimited the simpler choice.
 
@@ -185,7 +185,7 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 ```json
 → {"jsonrpc":"2.0","id":1,"method":"hello","params":{
     "name":"example-driver","version":"0.1.0",
-    "attn_api_version":2}}
+   "attn_api_version":3}}
 ← {"jsonrpc":"2.0","id":1,"result":{"ok":true}}
 ```
 
@@ -194,8 +194,8 @@ Extend the daemon's existing unix socket handler to recognize a JSON-RPC 2.0 han
 | Method                        | Direction       | Purpose                                                                 |
 |-------------------------------|-----------------|-------------------------------------------------------------------------|
 | `driver.register`             | plugin → attn   | Declare `{ agent, capabilities }`                                       |
-| `driver.spawn`                | attn → plugin   | Request `{ session_id, run_id, ... }`, returning `{ argv, env, cwd }` for a new session |
-| `driver.resume`               | attn → plugin   | Same, for resume; receives a fresh `run_id` for the replacement PTY      |
+| `driver.spawn`                | attn → plugin   | Request `{ session_id, run_id, ..., instructions? }`, returning `{ argv, env, cwd }` for a new session |
+| `driver.resume`               | attn → plugin   | Same, for resume; receives a fresh `run_id` and freshly composed optional instructions for the replacement PTY |
 | `driver.session_closed`       | attn → plugin   | `{ session_id, run_id, reason, exit_code?, signal? }`; dispose resources for the ended PTY run |
 | `session.report_state`        | plugin → attn   | `{ session_id, run_id, seq, state }`; stale or ended-run status is discarded |
 | `session.report_stop`         | plugin → attn   | `{ session_id, run_id, seq, verdict }`; classification reuses the `seq` assigned when stop was observed |
@@ -238,7 +238,7 @@ Manifest (`attn-plugin.toml` at repo root):
 ```toml
 name = "example-driver"
 version = "0.1.0"
-attn_api_version = 2
+attn_api_version = 3
 description = "Example external coding agent driver for attn"
 
 [plugin]

@@ -32,15 +32,16 @@ type pluginDriverRegisterResult struct {
 }
 
 type pluginDriverSpawnParams struct {
-	SessionID     string          `json:"session_id"`
-	RunID         string          `json:"run_id"`
-	CWD           string          `json:"cwd"`
-	Label         string          `json:"label,omitempty"`
-	Yolo          bool            `json:"yolo,omitempty"`
-	Model         string          `json:"model,omitempty"`
-	Effort        string          `json:"effort,omitempty"`
-	InitialPrompt string          `json:"initial_prompt,omitempty"`
-	Metadata      json.RawMessage `json:"metadata,omitempty"`
+	SessionID     string                    `json:"session_id"`
+	RunID         string                    `json:"run_id"`
+	CWD           string                    `json:"cwd"`
+	Label         string                    `json:"label,omitempty"`
+	Yolo          bool                      `json:"yolo,omitempty"`
+	Model         string                    `json:"model,omitempty"`
+	Effort        string                    `json:"effort,omitempty"`
+	InitialPrompt string                    `json:"initial_prompt,omitempty"`
+	Metadata      json.RawMessage           `json:"metadata,omitempty"`
+	Instructions  *pluginLaunchInstructions `json:"instructions,omitempty"`
 }
 
 type pluginDriverSpawnResult struct {
@@ -156,14 +157,15 @@ func normalizePluginAgent(value string) string {
 
 func validatePluginDriverCapabilities(values map[string]bool) (map[string]bool, error) {
 	allowed := map[string]struct{}{
-		"resume":           {},
-		"yolo":             {},
-		"initial_prompt":   {},
-		"classifier":       {},
-		"state_reporting":  {},
-		"pending_approval": {},
-		"model_pin":        {},
-		"effort_pin":       {},
+		"resume":              {},
+		"yolo":                {},
+		"initial_prompt":      {},
+		"classifier":          {},
+		"state_reporting":     {},
+		"pending_approval":    {},
+		"model_pin":           {},
+		"effort_pin":          {},
+		"launch_instructions": {},
 	}
 	out := make(map[string]bool, len(values))
 	for name, enabled := range values {

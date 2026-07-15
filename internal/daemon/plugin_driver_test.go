@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,10 +24,11 @@ func TestPluginDriverRegister_PublishesDynamicAgentSettings(t *testing.T) {
 	}()
 
 	registerTestPluginDriver(t, client, "snipe", map[string]bool{
-		"resume":     true,
-		"yolo":       true,
-		"model_pin":  true,
-		"effort_pin": true,
+		"resume":              true,
+		"yolo":                true,
+		"model_pin":           true,
+		"effort_pin":          true,
+		"launch_instructions": true,
 	})
 
 	settings := d.settingsWithAgentAvailability()
@@ -38,6 +40,9 @@ func TestPluginDriverRegister_PublishesDynamicAgentSettings(t *testing.T) {
 	}
 	if got := settings["snipe_cap_model_pin"]; got != "true" {
 		t.Fatalf("snipe_cap_model_pin=%v, want true", got)
+	}
+	if got := settings["snipe_cap_launch_instructions"]; got != "true" {
+		t.Fatalf("snipe_cap_launch_instructions=%v, want true", got)
 	}
 	if err := d.validateNewSessionAgent("snipe"); err != nil {
 		t.Fatalf("validateNewSessionAgent(snipe) error=%v", err)
@@ -53,7 +58,7 @@ func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {
 		_ = client.Close()
 		<-done
 	}()
-	registerTestPluginDriver(t, client, "snipe", map[string]bool{"yolo": true, "model_pin": true, "effort_pin": true})
+	registerTestPluginDriver(t, client, "snipe", map[string]bool{"yolo": true, "model_pin": true, "effort_pin": true, "launch_instructions": true})
 
 	requestDone := make(chan struct{})
 	go func() {
@@ -74,6 +79,14 @@ func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {
 		}
 		if params.RunID == "" {
 			t.Error("spawn run_id is empty, want daemon-assigned run identity")
+			return
+		}
+		if params.Instructions == nil || params.Instructions.Kind != pluginInstructionKindWorkspace || !strings.Contains(params.Instructions.Content, "attn tracks work as tickets") {
+			t.Errorf("spawn instructions=%+v, want workspace guidance", params.Instructions)
+			return
+		}
+		if params.Instructions.ContextPath == "" || params.Instructions.WorkspaceID != "workspace-snipe" {
+			t.Errorf("spawn instruction provenance=%+v, want workspace checkout", params.Instructions)
 			return
 		}
 		respondPluginRequest(t, client, request, pluginDriverSpawnResult{
@@ -138,7 +151,7 @@ func TestHandleSpawnSession_PluginDriverClosesRunWhenPTYSpawnFails(t *testing.T)
 		_ = client.Close()
 		<-done
 	}()
-	registerTestPluginDriver(t, client, "snipe", map[string]bool{})
+	registerTestPluginDriver(t, client, "snipe", map[string]bool{"launch_instructions": true})
 
 	closed := make(chan pluginDriverSessionClosedParams, 1)
 	go func() {
@@ -172,6 +185,9 @@ func TestHandleSpawnSession_PluginDriverClosesRunWhenPTYSpawnFails(t *testing.T)
 		Cols:        80,
 		Rows:        24,
 	})
+	if _, err := os.Stat(workspaceContextCheckoutDir(d.dataRoot, "snipe-failed-spawn")); !os.IsNotExist(err) {
+		t.Fatalf("failed plugin spawn left workspace checkout behind: %v", err)
+	}
 
 	params := <-closed
 	if params.SessionID != "snipe-failed-spawn" || params.RunID == "" || params.Reason != "launch_failed" {

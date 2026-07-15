@@ -28,9 +28,18 @@ bound to the selected native session. Other effort labels remain intentionally
 unsupported until they have the same adapter and live-app evidence.
 
 Each run gets a separate loopback port and random Basic-auth password. The
-password and staged prompt live in private files under the active profile's
-attn data directory (`plugins/attn-opencode/`), are never included in metadata
-or argv, and are deleted when attn reports that the PTY run has closed.
+password, staged prompt, and attn-composed launch instructions live in private
+files under the active profile's attn data directory
+(`plugins/attn-opencode/`), are never included in metadata or argv, and are
+deleted when attn reports that the PTY run has closed. A private per-process
+OpenCode system hook rereads that file for every prompt, so resumed sessions
+receive role and context changes without modifying repository or global
+OpenCode configuration.
+
+Ordinary sessions receive the same workspace-context, workflow, and ticket
+guidance as built-in attn agents. Chiefs receive Notebook guidance instead.
+Resuming a session, including a chief promotion or demotion, recomposes the
+current guidance while retaining the same native OpenCode session.
 
 The plugin reports OpenCode `busy` and `retry` as `working`. Native question
 requests become `waiting_input`, and native permission requests become

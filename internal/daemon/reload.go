@@ -2,11 +2,14 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/google/uuid"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
@@ -116,16 +119,25 @@ func (d *Daemon) sessionHasLiveWorker(sessionID string) bool {
 }
 
 // agentSupportsChiefReload reports whether an agent's launch path injects chief
-// guidance (claude via --append-system-prompt, codex via developer_instructions).
-// Only those agents gain anything from a reload; plugin-driver agents (e.g.
-// copilot) and shells do not, so reloading them would be a pointless kill+resume.
-func agentSupportsChiefReload(agent string) bool {
+// guidance (claude via --append-system-prompt, codex via developer_instructions,
+// or a plugin driver that advertises launch_instructions).
+func (d *Daemon) agentSupportsChiefGuidance(agent string) bool {
 	switch strings.TrimSpace(strings.ToLower(agent)) {
 	case string(protocol.SessionAgentClaude), string(protocol.SessionAgentCodex):
 		return true
-	default:
+	}
+	driver, ok := d.ensurePluginRegistry().driver(agent)
+	return ok && driver.Capabilities["launch_instructions"]
+}
+
+func (d *Daemon) agentSupportsChiefReload(agent string) bool {
+	if !d.agentSupportsChiefGuidance(agent) {
 		return false
 	}
+	if driver, ok := d.ensurePluginRegistry().driver(agent); ok {
+		return driver.Capabilities["resume"]
+	}
+	return true
 }
 
 // reloadSessionAgent kills a live session's agent worker and re-spawns it in place
@@ -153,7 +165,7 @@ func (d *Daemon) reloadSessionAgent(sessionID string) {
 		return
 	}
 	agent := string(session.Agent)
-	if !agentSupportsChiefReload(agent) {
+	if !d.agentSupportsChiefReload(agent) {
 		d.logf("reload: agent %q for session %s has no chief-guidance launch path; skipping", agent, sessionID)
 		return
 	}
@@ -171,6 +183,14 @@ func (d *Daemon) reloadSessionAgent(sessionID string) {
 		// loses yolo/executable.
 		d.logf("reload: cannot reconstruct launch params for %s: %v; aborting (live worker preserved)", sessionID, err)
 		return
+	}
+	pluginReload, err := d.preparePluginReload(session, &opts)
+	if err != nil {
+		d.logf("reload: cannot reconstruct plugin launch for %s: %v; aborting (live worker preserved)", sessionID, err)
+		return
+	}
+	if pluginReload != nil {
+		defer pluginReload.abort()
 	}
 
 	ctx := context.Background()
@@ -197,6 +217,18 @@ func (d *Daemon) reloadSessionAgent(sessionID string) {
 		d.clearReloading(sessionID)
 		d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 1})
 		return
+	}
+	if pluginReload != nil {
+		if commitErr := pluginReload.commit(); commitErr != nil {
+			d.logf("reload: activate plugin run failed for %s: %v; finalizing as exited", sessionID, commitErr)
+			_ = d.ptyBackend.Kill(ctx, sessionID, syscall.SIGTERM)
+			_ = d.ptyBackend.Remove(ctx, sessionID)
+			d.clearReloading(sessionID)
+			d.closePluginDriverSession(sessionID, "reload_failed", nil, "")
+			d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 1})
+			return
+		}
+		pluginReload = nil
 	}
 
 	// Success. Do NOT clear the flag here — the killed worker's exit consumes it.
@@ -241,6 +273,9 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 	}
 
 	agent := normalizeSpawnAgent(string(session.Agent))
+	if pluginDriver, ok := d.ensurePluginRegistry().driver(string(session.Agent)); ok {
+		agent = pluginDriver.Agent
+	}
 	driver := agentdriver.Get(agent)
 	resumeSessionID := agentdriver.ResolveSpawnResumeSessionID(driver, sessionID, "", d.store.GetResumeSessionID(sessionID))
 	// Fresh-spawn when there is nothing to resume. A session is assigned its own
@@ -268,6 +303,8 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 		ClaudeExecutable:        params.ClaudeExecutable,
 		CodexExecutable:         params.CodexExecutable,
 		CopilotExecutable:       params.CopilotExecutable,
+		Model:                   params.Model,
+		Effort:                  params.Effort,
 		LoginShellEnv:           d.cachedLoginShellEnv(),
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
 		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
@@ -279,4 +316,94 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 		// to 0 (uncapped), matching delegated/ordinary reloads.
 		ChiefContextWindowCap: d.chiefContextWindowCap(d.isChiefOfStaffSession(sessionID)),
 	}, nil
+}
+
+type preparedPluginReload struct {
+	d          *Daemon
+	sessionID  string
+	pluginName string
+	runID      string
+	rollback   func()
+	completed  bool
+}
+
+func (p *preparedPluginReload) abort() {
+	if p == nil || p.completed {
+		return
+	}
+	p.completed = true
+	p.rollback()
+	p.d.abortPluginSessionLaunch(p.sessionID, "launch_failed")
+}
+
+func (p *preparedPluginReload) commit() error {
+	if p == nil || p.completed {
+		return nil
+	}
+	oldRun := p.d.store.GetAgentDriverRun(p.sessionID)
+	if !p.d.store.BeginAgentDriverRun(p.sessionID, p.pluginName, p.runID) {
+		return fmt.Errorf("initialize plugin driver run cursor")
+	}
+	p.completed = true
+	if exit := p.d.finishPluginSessionLaunch(p.sessionID, true); exit != nil {
+		go p.d.handlePTYExit(*exit)
+	}
+	if oldRun.RunID != "" && oldRun.RunID != p.runID {
+		p.d.notifyPluginDriverSessionClosed(oldRun.PluginName, p.sessionID, oldRun.RunID, "reloaded", nil, "")
+	}
+	return nil
+}
+
+// preparePluginReload resolves the replacement plugin command before the live
+// worker is killed. That preserves the reload path's fail-safe: an unavailable
+// plugin, invalid metadata, or instruction preparation error leaves the current
+// runtime untouched.
+func (d *Daemon) preparePluginReload(session *protocol.Session, opts *ptybackend.SpawnOptions) (*preparedPluginReload, error) {
+	reg, ok := d.ensurePluginRegistry().driver(string(session.Agent))
+	if !ok {
+		return nil, nil
+	}
+	if !reg.Capabilities["launch_instructions"] || !reg.Capabilities["resume"] {
+		return nil, fmt.Errorf("agent %q requires launch_instructions and resume capabilities", reg.Agent)
+	}
+	runID := uuid.NewString()
+	d.beginPluginSessionLaunch(session.ID, reg.PluginName, runID)
+	instructions, rollback, err := d.preparePluginLaunchInstructions(session.ID, session.WorkspaceID, d.isChiefOfStaffSession(session.ID))
+	if err != nil {
+		d.finishPluginSessionLaunch(session.ID, false)
+		return nil, err
+	}
+	prepared := &preparedPluginReload{
+		d: d, sessionID: session.ID, pluginName: reg.PluginName, runID: runID, rollback: rollback,
+	}
+	params := pluginDriverSpawnParams{
+		SessionID:    session.ID,
+		RunID:        runID,
+		CWD:          session.Directory,
+		Label:        session.Label,
+		Yolo:         opts.YoloMode,
+		Model:        opts.Model,
+		Effort:       opts.Effort,
+		Instructions: instructions,
+	}
+	if metadata := strings.TrimSpace(d.store.GetAgentMetadata(session.ID)); metadata != "" && json.Valid([]byte(metadata)) {
+		params.Metadata = json.RawMessage(metadata)
+	}
+	result, err := d.resolvePluginDriverLaunch(reg, params, true)
+	if err != nil {
+		prepared.abort()
+		return nil, err
+	}
+	commandEnv, err := pluginCommandEnv(result.Env)
+	if err != nil {
+		prepared.abort()
+		return nil, err
+	}
+	opts.Agent = reg.Agent
+	opts.ResumeSessionID = ""
+	opts.LifecycleID = runID
+	opts.ExternalCommand = append([]string(nil), result.Argv...)
+	opts.ExternalEnv = commandEnv
+	opts.ExternalCWD = strings.TrimSpace(result.CWD)
+	return prepared, nil
 }

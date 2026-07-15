@@ -144,6 +144,20 @@ func (d *Daemon) checkoutWorkspaceContext(msg *protocol.WorkspaceContextCheckout
 	if err != nil {
 		return nil, err
 	}
+	return d.checkoutWorkspaceContextForSession(session, protocol.Deref(msg.Force))
+}
+
+// checkoutWorkspaceContextForSession performs the checkout for an explicit
+// session/workspace identity. Unlike checkoutWorkspaceContext it does not require
+// the session row to exist, which lets plugin launch preparation stage guidance
+// before a successful PTY spawn is persisted.
+func (d *Daemon) checkoutWorkspaceContextForSession(session *protocol.Session, force bool) (*protocol.WorkspaceContextResult, error) {
+	if session == nil || strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.WorkspaceID) == "" {
+		return nil, errors.New("workspace context checkout requires session and workspace ids")
+	}
+	if d.store.GetWorkspace(session.WorkspaceID) == nil {
+		return nil, errors.New("source session has no local workspace")
+	}
 	canonical, err := d.store.GetWorkspaceContext(session.WorkspaceID)
 	if err != nil {
 		return nil, err
@@ -156,20 +170,20 @@ func (d *Daemon) checkoutWorkspaceContext(msg *protocol.WorkspaceContextCheckout
 	if contentErr != nil && !os.IsNotExist(contentErr) {
 		return nil, fmt.Errorf("read workspace context checkout: %w", contentErr)
 	}
-	if metadataErr != nil && !os.IsNotExist(metadataErr) && !protocol.Deref(msg.Force) {
+	if metadataErr != nil && !os.IsNotExist(metadataErr) && !force {
 		return nil, fmt.Errorf("workspace context checkout metadata is invalid; local file preserved; use `show --force` to replace it: %w", metadataErr)
 	}
 	validCheckout := contentErr == nil &&
 		metadataErr == nil &&
 		metadata.SessionID == session.ID &&
 		metadata.WorkspaceID == session.WorkspaceID
-	if !protocol.Deref(msg.Force) &&
+	if !force &&
 		(contentErr == nil || metadataErr == nil) &&
 		!validCheckout {
 		return nil, errors.New("workspace context checkout is incomplete or belongs to another session; local files preserved; use `show --force` to replace them")
 	}
 
-	if validCheckout && !protocol.Deref(msg.Force) {
+	if validCheckout && !force {
 		modified := contextContentHash(localContent) != metadata.CanonicalHash
 		if modified {
 			return workspaceContextResult(session, canonical, contextPath, metadata, localContent), nil

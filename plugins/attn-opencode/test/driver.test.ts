@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { OpenCodeDriver } from "../src/driver";
-import { launch } from "../src/launcher";
+import attnGuidancePlugin from "../src/guidance-plugin";
+import { launch, opencodeConfigForLaunch } from "../src/launcher";
 import { type EventSubscription, type ServerEvent, OpenCodeHTTP } from "../src/opencode-http";
 import { RunRegistry, writePrivate } from "../src/run-registry";
 import type { DriverSpawnParams } from "../src/types";
@@ -806,16 +807,109 @@ test("registry persists atomically with private files and cleans them after sess
   const registry = new RunRegistry(root);
   const driver = driverFor(rpc, registry, target);
   await driver.initialize();
-  await driver.spawn(params("run-cleanup"));
+  await driver.spawn({
+    ...params("run-cleanup"),
+    instructions: {
+      kind: "workspace",
+      content: "Private attn workspace guidance",
+      workspace_id: "workspace-a",
+      context_revision: 3,
+    },
+  });
   await eventually(() => target.prompts.length === 1, "run creation");
   const record = await registry.get("run-cleanup");
   expect(record).toBeDefined();
   expect((await stat(record!.password_ref)).mode & 0o077).toBe(0);
   expect((await stat(record!.prompt_ref!)).mode & 0o077).toBe(0);
+  expect((await stat(record!.instruction_ref!)).mode & 0o077).toBe(0);
+  expect(await readFile(record!.instruction_ref!, "utf8")).toBe("Private attn workspace guidance");
+  expect(record!.instruction_kind).toBe("workspace");
+  expect((await registry.readLaunchConfig(record!)).instruction_ref).toBe(record!.instruction_ref);
   expect(JSON.parse(await readFile(join(root, "runs.json"), "utf8")).runs["run-cleanup"].password_ref).toBe(record!.password_ref);
   await driver.sessionClosed({ session_id: "attn-run-cleanup", run_id: "run-cleanup", reason: "exited" });
   expect(await registry.get("run-cleanup")).toBeUndefined();
   await expect(stat(record!.password_ref)).rejects.toThrow();
+  await expect(stat(record!.instruction_ref!)).rejects.toThrow();
+});
+
+test("registry migrates schema 1 without changing existing runs", async () => {
+  const root = join(await tempRoot(), "runtime");
+  await writePrivate(join(root, "runs.json"), `${JSON.stringify({ schema: 1, runs: {} })}\n`);
+  const registry = new RunRegistry(root);
+  await registry.initialize();
+  expect(JSON.parse(await readFile(join(root, "runs.json"), "utf8")).schema).toBe(2);
+});
+
+test("OpenCode config merge preserves keys and deduplicates the guidance plugin", () => {
+  const pluginRef = "file:///tmp/attn-guidance.ts";
+  expect(opencodeConfigForLaunch(JSON.stringify({
+    theme: "dark",
+    instructions: ["repo.md"],
+    plugin: ["user-plugin", pluginRef],
+  }), "/tmp/attn.md", pluginRef)).toEqual({
+    theme: "dark",
+    instructions: ["repo.md"],
+    plugin: ["user-plugin", pluginRef],
+  });
+  expect(opencodeConfigForLaunch(undefined, "/tmp/attn.md", pluginRef)).toEqual({ plugin: [pluginRef] });
+});
+
+test("OpenCode config merge rejects malformed inherited config", () => {
+  expect(() => opencodeConfigForLaunch("{", "/tmp/attn.md")).toThrow("invalid inherited OPENCODE_CONFIG_CONTENT");
+  expect(() => opencodeConfigForLaunch(JSON.stringify({ instructions: [1] }), "/tmp/attn.md")).toThrow("array of strings");
+  expect(() => opencodeConfigForLaunch(JSON.stringify({ plugin: "bad" }), "/tmp/attn.md")).toThrow("expected an array");
+});
+
+test("guidance plugin reads the current private instruction file for every prompt", async () => {
+  const root = await tempRoot();
+  const instructionRef = join(root, "instructions.md");
+  await writePrivate(instructionRef, "workspace guidance one");
+  const previous = process.env.ATTN_OPENCODE_INSTRUCTION_REF;
+  process.env.ATTN_OPENCODE_INSTRUCTION_REF = instructionRef;
+  try {
+    const hooks = await attnGuidancePlugin();
+    const transform = hooks["experimental.chat.system.transform"];
+    const first = { system: ["base"] };
+    await transform({}, first);
+    expect(first.system).toEqual(["base", "attn launch instructions:\nworkspace guidance one"]);
+
+    await writePrivate(instructionRef, "chief guidance two");
+    const second = { system: ["base"] };
+    await transform({}, second);
+    expect(second.system).toEqual(["base", "attn launch instructions:\nchief guidance two"]);
+  } finally {
+    if (previous === undefined) delete process.env.ATTN_OPENCODE_INSTRUCTION_REF;
+    else process.env.ATTN_OPENCODE_INSTRUCTION_REF = previous;
+  }
+});
+
+test("launcher rejects malformed inherited config before starting OpenCode", async () => {
+  const root = await tempRoot();
+  const marker = join(root, "started");
+  const executable = join(root, "fake-opencode");
+  await writeFile(executable, `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+  const password = join(root, "password");
+  await writePrivate(password, "secret");
+  const config = join(root, "launch.json");
+  await writePrivate(config, JSON.stringify({
+    schema: 1,
+    run_id: "launch-invalid-config",
+    executable,
+    cwd: root,
+    password_ref: password,
+    instruction_ref: join(root, "instructions.md"),
+    port: 12345,
+    yolo: false,
+  }));
+  const previous = process.env.OPENCODE_CONFIG_CONTENT;
+  process.env.OPENCODE_CONFIG_CONTENT = "{";
+  try {
+    await expect(launch(config)).rejects.toThrow("invalid inherited OPENCODE_CONFIG_CONTENT");
+  } finally {
+    if (previous === undefined) delete process.env.OPENCODE_CONFIG_CONTENT;
+    else process.env.OPENCODE_CONFIG_CONTENT = previous;
+  }
+  await expect(stat(marker)).rejects.toThrow();
 });
 
 test("session close aborts the active SSE subscription", async () => {

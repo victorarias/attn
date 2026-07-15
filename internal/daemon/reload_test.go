@@ -2,10 +2,12 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -412,6 +414,134 @@ func TestReloadSessionAgentSkipsUnsupportedAgent(t *testing.T) {
 
 	if order := backend.callOrder(); len(order) != 0 {
 		t.Fatalf("expected no reload for an agent without a chief-guidance launch path, got %v", order)
+	}
+}
+
+func TestReloadSessionAgentRecomposesPluginChiefInstructionsBeforeKill(t *testing.T) {
+	backend := &fakeReloadBackend{
+		liveIDs: []string{"plugin-chief"},
+		info:    ptybackend.SessionInfo{Cols: 100, Rows: 32},
+		params: ptybackend.SessionLaunchParams{
+			Recorded: true,
+			YoloMode: true,
+			Model:    "provider/model",
+			Effort:   "high",
+		},
+	}
+	d := newReloadTestDaemon(t, backend)
+	addTestWorkspace(d, "ws-plugin-chief", t.TempDir())
+	addReloadSession(d, "plugin-chief", protocol.SessionAgent("opencode"), protocol.SessionStateIdle)
+	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "plugin-chief"); err != nil {
+		t.Fatalf("assign chief role: %v", err)
+	}
+	if !d.store.BeginAgentDriverRun("plugin-chief", "opencode-plugin", "run-old") {
+		t.Fatal("begin old plugin run")
+	}
+	if !d.store.ApplyAgentDriverMetadata("plugin-chief", "run-old", 1, `{"native_id":"same-session"}`) {
+		t.Fatal("seed plugin metadata")
+	}
+	plugin, done := startPluginPipe(t, d, "opencode-plugin", nil)
+	defer func() {
+		_ = plugin.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, plugin, "opencode", map[string]bool{
+		"resume": true, "yolo": true, "model_pin": true, "effort_pin": true, "launch_instructions": true,
+	})
+	closed := make(chan pluginDriverSessionClosedParams, 1)
+	go func() {
+		request := decodeJSONRPCMessage(t, plugin)
+		if request.Method != "driver.resume" {
+			t.Errorf("method=%q, want driver.resume", request.Method)
+			return
+		}
+		var params pluginDriverSpawnParams
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			t.Errorf("decode resume params: %v", err)
+			return
+		}
+		if params.Instructions == nil || params.Instructions.Kind != pluginInstructionKindChief || !strings.Contains(params.Instructions.Content, "You are the chief of staff") {
+			t.Errorf("resume instructions=%+v, want current chief guidance", params.Instructions)
+			return
+		}
+		if params.Model != "provider/model" || params.Effort != "high" || !params.Yolo || string(params.Metadata) != `{"native_id":"same-session"}` {
+			t.Errorf("resume params=%+v, want preserved flags and metadata", params)
+			return
+		}
+		respondPluginRequest(t, plugin, request, pluginDriverSpawnResult{Argv: []string{"opencode-launcher"}})
+		request = decodeJSONRPCMessage(t, plugin)
+		var closeParams pluginDriverSessionClosedParams
+		if err := json.Unmarshal(request.Params, &closeParams); err != nil {
+			t.Errorf("decode session_closed params: %v", err)
+			return
+		}
+		respondPluginRequest(t, plugin, request, pluginDriverSessionClosedResult{OK: true})
+		closed <- closeParams
+	}()
+
+	d.reloadSessionAgent("plugin-chief")
+
+	if order := backend.callOrder(); !reflect.DeepEqual(order, []string{"kill:plugin-chief", "remove:plugin-chief", "spawn:plugin-chief"}) {
+		t.Fatalf("orchestration order=%v", order)
+	}
+	spawn, ok := backend.lastSpawn()
+	if !ok || !reflect.DeepEqual(spawn.ExternalCommand, []string{"opencode-launcher"}) || spawn.LifecycleID == "" {
+		t.Fatalf("plugin respawn=%+v", spawn)
+	}
+	if active := d.store.GetAgentDriverRun("plugin-chief"); active.RunID != spawn.LifecycleID || active.PluginName != "opencode-plugin" {
+		t.Fatalf("active plugin run=%+v, want replacement", active)
+	}
+	select {
+	case params := <-closed:
+		if params.RunID != "run-old" || params.Reason != "reloaded" {
+			t.Fatalf("closed old run=%+v", params)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("old plugin run was not closed after replacement")
+	}
+}
+
+func TestReloadSessionAgentLeavesPluginWorkerAliveWhenResumeCannotBePrepared(t *testing.T) {
+	backend := &fakeReloadBackend{
+		liveIDs: []string{"plugin-chief"},
+		params:  ptybackend.SessionLaunchParams{Recorded: true},
+	}
+	d := newReloadTestDaemon(t, backend)
+	addTestWorkspace(d, "ws-plugin-chief", t.TempDir())
+	addReloadSession(d, "plugin-chief", protocol.SessionAgent("opencode"), protocol.SessionStateIdle)
+	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "plugin-chief"); err != nil {
+		t.Fatalf("assign chief role: %v", err)
+	}
+	plugin, done := startPluginPipe(t, d, "opencode-plugin", nil)
+	defer func() {
+		_ = plugin.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, plugin, "opencode", map[string]bool{"resume": true, "launch_instructions": true})
+	closed := make(chan struct{})
+	go func() {
+		request := decodeJSONRPCMessage(t, plugin)
+		_ = json.NewEncoder(plugin).Encode(jsonRPCMessage{
+			JSONRPC: "2.0",
+			ID:      request.ID,
+			Error:   &jsonRPCError{Code: jsonRPCInternalError, Message: "native resume unavailable"},
+		})
+		request = decodeJSONRPCMessage(t, plugin)
+		respondPluginRequest(t, plugin, request, pluginDriverSessionClosedResult{OK: true})
+		close(closed)
+	}()
+
+	d.reloadSessionAgent("plugin-chief")
+
+	if order := backend.callOrder(); len(order) != 0 {
+		t.Fatalf("failed preflight touched live worker: %v", order)
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("failed replacement run was not cleaned up")
 	}
 }
 
