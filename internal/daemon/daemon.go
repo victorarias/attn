@@ -213,6 +213,7 @@ type Daemon struct {
 	pluginReports      map[string][]pendingPluginReport
 	pluginExits        map[string]ptybackend.ExitInfo
 	pluginDir          string
+	removePlugin       func(pluginDir, name string) error
 
 	worktreePluginCallTimeout         time.Duration
 	worktreeCreateProviderCallTimeout time.Duration

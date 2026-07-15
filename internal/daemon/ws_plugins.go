@@ -45,11 +45,15 @@ func (d *Daemon) handleRemovePluginWS(client *wsClient, msg *protocol.RemovePlug
 		d.sendPluginActionResult(client, "remove", "", false, "plugin name is required")
 		return
 	}
-	d.stopInstalledPlugin(name)
-	if err := plugins.Remove(d.pluginDir, name); err != nil {
+	remove := d.removePlugin
+	if remove == nil {
+		remove = plugins.Remove
+	}
+	if err := remove(d.pluginDir, name); err != nil {
 		d.sendPluginActionResult(client, "remove", name, false, err.Error())
 		return
 	}
+	d.stopInstalledPlugin(name)
 
 	d.broadcastPluginsUpdated()
 	d.sendPluginActionResult(client, "remove", name, true, "")
