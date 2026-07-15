@@ -1683,6 +1683,118 @@ model OpenMarkdownResultMessage {
   tile_id?: string;
 }
 
+// A resilient anchor into a markdown document: block-scoped offsets plus
+// enough context (exact/prefix/suffix, content hash) to re-locate the text
+// after the file changes. Mirrors the frontend anchoring core's AnchorRecord.
+model MarkdownAnnotationAnchor {
+  block_id: string;
+  start_line: int32;
+  end_line: int32;
+  exact: string;
+  prefix: string;
+  suffix: string;
+  start: int32;
+  end: int32;
+  content_hash: string;
+}
+
+// One markdown annotation draft entry. `anchor` is absent only for
+// type "global" (document-wide comments). A quick-label annotation is a
+// "comment" carrying quick_label_id (+ tip snapshotted at creation).
+model MarkdownAnnotation {
+  id: string;
+  // "comment" | "deletion" | "global". Plain string, like PresentationRound's
+  // verdict, so codegen yields string on both sides (a literal union becomes
+  // anyOf -> Go interface{}).
+  `type`: string;
+  text?: string;
+  anchor?: MarkdownAnnotationAnchor;
+  quick_label_id?: string;
+  quick_label_tip?: string;
+  created_at: safeint; // epoch ms (int64 would codegen as string)
+}
+
+// Fetch the persisted annotation draft for an absolute markdown file path.
+// The reply's generation is the current generation floor —
+// max(stored generation, tombstone) — so a re-mounting client seeds its
+// counter past any tombstone even when the draft is empty.
+model MarkdownAnnotationsGetMessage {
+  cmd: "markdown_annotations_get";
+  path: string;
+  // Owning workspace of the requesting markdown tile. On a hub this routes
+  // the command to the endpoint that owns the workspace, so drafts live on
+  // (and are keyed by) the daemon that owns the document — identical paths
+  // on different endpoints never share a draft/generation/tombstone row.
+  workspace_id: string;
+  request_id: string;
+}
+
+// Result of markdown_annotations_get. annotations may be empty; generation is
+// the floor the client must exceed on its next save.
+model MarkdownAnnotationsGetResultMessage {
+  event: "markdown_annotations_get_result";
+  request_id: string;
+  // Echo of the request's workspace_id (client correlation key).
+  workspace_id: string;
+  success: boolean;
+  error?: string;
+  path: string;
+  annotations: MarkdownAnnotation[];
+  generation: int32;
+}
+
+// Persist the full annotation list for a path (debounced full-list save, not
+// per-op CRUD). generation must be strictly greater than both the stored
+// generation and the tombstone generation or the save is rejected as stale.
+model MarkdownAnnotationsSaveMessage {
+  cmd: "markdown_annotations_save";
+  path: string;
+  // See MarkdownAnnotationsGetMessage.workspace_id (hub endpoint routing).
+  workspace_id: string;
+  annotations: MarkdownAnnotation[];
+  generation: int32;
+  request_id: string;
+}
+
+// Result of markdown_annotations_save. stale=true (with success=false) means
+// the save lost to a tombstone or a newer generation — the client should drop
+// its pending list and re-hydrate; it is benign, not an error.
+model MarkdownAnnotationsSaveResultMessage {
+  event: "markdown_annotations_save_result";
+  request_id: string;
+  // Echo of the request's workspace_id (client correlation key).
+  workspace_id: string;
+  success: boolean;
+  stale?: boolean;
+  error?: string;
+  path: string;
+  generation: int32;
+}
+
+// Tombstone the draft for a path at the given generation: empties the list and
+// rejects any later save carrying generation <= tombstone (stops a debounced
+// save that fires after clear from resurrecting ghost drafts). Idempotent.
+model MarkdownAnnotationsClearMessage {
+  cmd: "markdown_annotations_clear";
+  path: string;
+  // See MarkdownAnnotationsGetMessage.workspace_id (hub endpoint routing).
+  workspace_id: string;
+  generation: int32;
+  request_id: string;
+}
+
+// Result of markdown_annotations_clear; generation is the new floor.
+model MarkdownAnnotationsClearResultMessage {
+  event: "markdown_annotations_clear_result";
+  request_id: string;
+  // Echo of the request's workspace_id (client correlation key).
+  workspace_id: string;
+  success: boolean;
+  error?: string;
+  path: string;
+  generation: int32;
+}
+
 // Open or retarget the docked browser tile. Sent by `attn browser open`.
 // When session_id is empty the daemon targets the currently selected session.
 model OpenBrowserMessage {
@@ -2988,4 +3100,7 @@ alias DaemonEvent =
   | PresentCloseResultMessage
   | PresentationAddedMessage
   | PresentationUpdatedMessage
-  | OpenMarkdownResultMessage;
+  | OpenMarkdownResultMessage
+  | MarkdownAnnotationsGetResultMessage
+  | MarkdownAnnotationsSaveResultMessage
+  | MarkdownAnnotationsClearResultMessage;

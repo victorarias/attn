@@ -24,14 +24,14 @@
  * chrome text (it would mutate chrome), so its walker rejects chrome subtrees.
  */
 
-export type HighlightKind = 'comment' | 'deletion';
+export type HighlightKind = 'comment' | 'deletion' | 'focus';
 
 export interface HighlightPainter {
   /** Idempotent per id: painting an existing id replaces its range. */
   paint(id: string, range: Range, kind: HighlightKind): void;
   clear(id: string): void;
   clearAll(): void;
-  /** Which strategy this painter uses (surfaced by the spike bridge state). */
+  /** Which strategy this painter uses (surfaced by the annotations bridge state). */
   readonly mode: 'custom-highlight' | 'mark';
 }
 
@@ -39,9 +39,13 @@ export interface HighlightPainter {
 const HIGHLIGHT_NAMES: Record<HighlightKind, string> = {
   comment: 'attn-md-comment',
   deletion: 'attn-md-deletion',
+  // Transient sidebar-focus glow, painted OVER an annotation's range for a
+  // couple of seconds — a separate registry entry so it stacks with the
+  // annotation's own comment/deletion paint.
+  focus: 'attn-md-focus',
 };
 
-const KINDS: HighlightKind[] = ['comment', 'deletion'];
+const KINDS: HighlightKind[] = ['comment', 'deletion', 'focus'];
 
 export function supportsCustomHighlights(): boolean {
   return typeof CSS !== 'undefined' && 'highlights' in CSS && CSS.highlights != null;

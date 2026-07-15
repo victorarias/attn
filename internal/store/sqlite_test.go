@@ -158,7 +158,7 @@ func TestMigration67RenamesTicketArtifactRecords(t *testing.T) {
 		VALUES ('artifact-ticket', 'handover', 'agent', '2026-07-10T00:00:00Z');
 		INSERT INTO ticket_events (ticket_id, kind, author, detail, created_at)
 		VALUES ('artifact-ticket', 'handover_submitted', 'agent', 'fingerprint', '2026-07-10T00:00:00Z');
-		DELETE FROM schema_migrations WHERE version = 67;
+		DELETE FROM schema_migrations WHERE version >= 67;
 	`); err != nil {
 		db.Close()
 		t.Fatalf("seed legacy artifact records: %v", err)

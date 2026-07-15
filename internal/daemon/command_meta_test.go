@@ -183,6 +183,27 @@ func TestRemoteCommandWorkspaceID_IncludesTileContentGet(t *testing.T) {
 	}
 }
 
+func TestRemoteCommandWorkspaceID_IncludesMarkdownAnnotationsGet(t *testing.T) {
+	msg := &protocol.MarkdownAnnotationsGetMessage{WorkspaceID: "workspace-md-get"}
+	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsGet, msg); got != msg.WorkspaceID {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	}
+}
+
+func TestRemoteCommandWorkspaceID_IncludesMarkdownAnnotationsSave(t *testing.T) {
+	msg := &protocol.MarkdownAnnotationsSaveMessage{WorkspaceID: "workspace-md-save"}
+	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsSave, msg); got != msg.WorkspaceID {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	}
+}
+
+func TestRemoteCommandWorkspaceID_IncludesMarkdownAnnotationsClear(t *testing.T) {
+	msg := &protocol.MarkdownAnnotationsClearMessage{WorkspaceID: "workspace-md-clear"}
+	if got := remoteCommandWorkspaceID(protocol.CmdMarkdownAnnotationsClear, msg); got != msg.WorkspaceID {
+		t.Fatalf("remoteCommandWorkspaceID() = %q, want %q", got, msg.WorkspaceID)
+	}
+}
+
 func TestRemoteCommandWorkspaceID_IncludesRenameWorkspace(t *testing.T) {
 	msg := &protocol.RenameWorkspaceMessage{WorkspaceID: "workspace-rename"}
 	if got := remoteCommandWorkspaceID(protocol.CmdRenameWorkspace, msg); got != msg.WorkspaceID {

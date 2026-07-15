@@ -188,6 +188,30 @@ export class MacOSDriver {
     await delay(this.actionDelayMs);
   }
 
+  // Press-drag-release from (relativeX, relativeY) to (toRelativeX,
+  // toRelativeY), interpolated in opts.steps leftMouseDragged events — the
+  // shape WebKit requires for text selection (same 0..1 semantics as
+  // clickWindow).
+  async dragWindow(relativeX, relativeY, toRelativeX, toRelativeY, opts = {}) {
+    const args = [
+      'drag',
+      '--relative-x',
+      String(relativeX),
+      '--relative-y',
+      String(relativeY),
+      '--to-relative-x',
+      String(toRelativeX),
+      '--to-relative-y',
+      String(toRelativeY),
+      '--prompt-accessibility',
+    ];
+    if (opts.steps !== undefined) {
+      args.push('--steps', String(opts.steps));
+    }
+    await this.runInputDriver(withWindowTitleArgs(args, opts));
+    await delay(this.actionDelayMs);
+  }
+
   async rightClickWindow(relativeX, relativeY, opts = {}) {
     const args = [
       'right_click',

@@ -34,6 +34,8 @@ struct Options {
     var keyCode: Int?
     var relativeX: Double?
     var relativeY: Double?
+    var toRelativeX: Double?
+    var toRelativeY: Double?
     var modifiers = [String]()
     var menuPath = [String]()
     var visiblePx: Int?
@@ -51,7 +53,7 @@ func parseOptions() throws -> Options {
     while index < args.count {
         let arg = args[index]
         switch arg {
-        case "activate", "activate_background", "frontmost", "windowid", "windowlist", "text", "key", "keycode", "click", "right_click", "menu", "window_park", "scroll":
+        case "activate", "activate_background", "frontmost", "windowid", "windowlist", "text", "key", "keycode", "click", "right_click", "drag", "menu", "window_park", "scroll":
             options.command = arg
         case "--window-title":
             index += 1
@@ -130,6 +132,18 @@ func parseOptions() throws -> Options {
                 throw DriverError.invalidArgument("Missing or invalid value for --relative-y")
             }
             options.relativeY = value
+        case "--to-relative-x":
+            index += 1
+            guard index < args.count, let value = Double(args[index]) else {
+                throw DriverError.invalidArgument("Missing or invalid value for --to-relative-x")
+            }
+            options.toRelativeX = value
+        case "--to-relative-y":
+            index += 1
+            guard index < args.count, let value = Double(args[index]) else {
+                throw DriverError.invalidArgument("Missing or invalid value for --to-relative-y")
+            }
+            options.toRelativeY = value
         case "--path":
             index += 1
             guard index < args.count else {
@@ -680,6 +694,52 @@ func clickWindow(bundleId: String, relativeX: Double, relativeY: Double, right: 
     up.post(tap: .cghidEventTap)
 }
 
+// Presses the left button at (relativeX, relativeY), drags to
+// (toRelativeX, toRelativeY) in `steps` interpolated leftMouseDragged events
+// ~16ms apart (WebKit ignores teleporting drags for text selection), and
+// releases. Same 0..1 window-relative semantics as clickWindow.
+func dragWindow(
+    bundleId: String,
+    relativeX: Double,
+    relativeY: Double,
+    toRelativeX: Double,
+    toRelativeY: Double,
+    steps: Int,
+    titleSubstring: String? = nil
+) throws {
+    let bounds = try mainWindowBounds(bundleId: bundleId, titleSubstring: titleSubstring)
+    func point(_ rx: Double, _ ry: Double) -> CGPoint {
+        CGPoint(
+            x: bounds.origin.x + bounds.width * min(max(rx, 0), 1),
+            y: bounds.origin.y + bounds.height * min(max(ry, 0), 1)
+        )
+    }
+    let from = point(relativeX, relativeY)
+    let to = point(toRelativeX, toRelativeY)
+    let stepCount = max(steps, 2)
+
+    guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: from, mouseButton: .left),
+          let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left),
+          let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left) else {
+        throw DriverError.eventCreationFailed("Failed to create mouse events.")
+    }
+    move.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.02)
+    down.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.05)
+    for i in 1...stepCount {
+        let t = Double(i) / Double(stepCount)
+        let p = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
+        guard let dragEvent = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: p, mouseButton: .left) else {
+            throw DriverError.eventCreationFailed("Failed to create drag event.")
+        }
+        dragEvent.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.016)
+    }
+    Thread.sleep(forTimeInterval: 0.05)
+    up.post(tap: .cghidEventTap)
+}
+
 // Warps the cursor into the resolved window at (relativeX, relativeY) — same
 // 0..1 window-relative semantics as clickWindow — then posts a pixel-unit
 // scroll wheel event, split into `steps` events ~16ms apart so content that
@@ -805,6 +865,21 @@ do {
             throw DriverError.invalidArgument("Missing --relative-x/--relative-y for right_click")
         }
         try clickWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, right: true, titleSubstring: options.windowTitle, flags: modifierFlags(options.modifiers))
+    case "drag":
+        try ensureAccessibility(prompt: options.promptAccessibility)
+        guard let relativeX = options.relativeX, let relativeY = options.relativeY,
+              let toRelativeX = options.toRelativeX, let toRelativeY = options.toRelativeY else {
+            throw DriverError.invalidArgument("Missing --relative-x/--relative-y/--to-relative-x/--to-relative-y for drag")
+        }
+        try dragWindow(
+            bundleId: options.bundleId,
+            relativeX: relativeX,
+            relativeY: relativeY,
+            toRelativeX: toRelativeX,
+            toRelativeY: toRelativeY,
+            steps: max(options.steps, 12),
+            titleSubstring: options.windowTitle
+        )
     case "window_park":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let visiblePx = options.visiblePx else {

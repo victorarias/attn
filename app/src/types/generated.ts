@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PresentAnnotation, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSListMessage, FSListResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PresentAnnotation, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
@@ -108,6 +108,14 @@
 //   const listRemoteBranchesMessage = Convert.toListRemoteBranchesMessage(json);
 //   const listRemoteBranchesResultMessage = Convert.toListRemoteBranchesResultMessage(json);
 //   const listWorktreesMessage = Convert.toListWorktreesMessage(json);
+//   const markdownAnnotation = Convert.toMarkdownAnnotation(json);
+//   const markdownAnnotationAnchor = Convert.toMarkdownAnnotationAnchor(json);
+//   const markdownAnnotationsClearMessage = Convert.toMarkdownAnnotationsClearMessage(json);
+//   const markdownAnnotationsClearResultMessage = Convert.toMarkdownAnnotationsClearResultMessage(json);
+//   const markdownAnnotationsGetMessage = Convert.toMarkdownAnnotationsGetMessage(json);
+//   const markdownAnnotationsGetResultMessage = Convert.toMarkdownAnnotationsGetResultMessage(json);
+//   const markdownAnnotationsSaveMessage = Convert.toMarkdownAnnotationsSaveMessage(json);
+//   const markdownAnnotationsSaveResultMessage = Convert.toMarkdownAnnotationsSaveResultMessage(json);
 //   const mergePRMessage = Convert.toMergePRMessage(json);
 //   const muteAuthorMessage = Convert.toMuteAuthorMessage(json);
 //   const mutePRMessage = Convert.toMutePRMessage(json);
@@ -1936,6 +1944,140 @@ export interface ListWorktreesMessage {
 
 export enum ListWorktreesMessageCmd {
     ListWorktrees = "list_worktrees",
+}
+
+export interface MarkdownAnnotation {
+    anchor?:          Anchor;
+    created_at:       number;
+    id:               string;
+    quick_label_id?:  string;
+    quick_label_tip?: string;
+    text?:            string;
+    type:             string;
+    [property: string]: any;
+}
+
+export interface Anchor {
+    block_id:     string;
+    content_hash: string;
+    end:          number;
+    end_line:     number;
+    exact:        string;
+    prefix:       string;
+    start:        number;
+    start_line:   number;
+    suffix:       string;
+    [property: string]: any;
+}
+
+export interface MarkdownAnnotationAnchor {
+    block_id:     string;
+    content_hash: string;
+    end:          number;
+    end_line:     number;
+    exact:        string;
+    prefix:       string;
+    start:        number;
+    start_line:   number;
+    suffix:       string;
+    [property: string]: any;
+}
+
+export interface MarkdownAnnotationsClearMessage {
+    cmd:          MarkdownAnnotationsClearMessageCmd;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export enum MarkdownAnnotationsClearMessageCmd {
+    MarkdownAnnotationsClear = "markdown_annotations_clear",
+}
+
+export interface MarkdownAnnotationsClearResultMessage {
+    error?:       string;
+    event:        MarkdownAnnotationsClearResultMessageEvent;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    success:      boolean;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export enum MarkdownAnnotationsClearResultMessageEvent {
+    MarkdownAnnotationsClearResult = "markdown_annotations_clear_result",
+}
+
+export interface MarkdownAnnotationsGetMessage {
+    cmd:          MarkdownAnnotationsGetMessageCmd;
+    path:         string;
+    request_id:   string;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export enum MarkdownAnnotationsGetMessageCmd {
+    MarkdownAnnotationsGet = "markdown_annotations_get",
+}
+
+export interface MarkdownAnnotationsGetResultMessage {
+    annotations:  AnnotationObject[];
+    error?:       string;
+    event:        MarkdownAnnotationsGetResultMessageEvent;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    success:      boolean;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export interface AnnotationObject {
+    anchor?:          Anchor;
+    created_at:       number;
+    id:               string;
+    quick_label_id?:  string;
+    quick_label_tip?: string;
+    text?:            string;
+    type:             string;
+    [property: string]: any;
+}
+
+export enum MarkdownAnnotationsGetResultMessageEvent {
+    MarkdownAnnotationsGetResult = "markdown_annotations_get_result",
+}
+
+export interface MarkdownAnnotationsSaveMessage {
+    annotations:  AnnotationObject[];
+    cmd:          MarkdownAnnotationsSaveMessageCmd;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export enum MarkdownAnnotationsSaveMessageCmd {
+    MarkdownAnnotationsSave = "markdown_annotations_save",
+}
+
+export interface MarkdownAnnotationsSaveResultMessage {
+    error?:       string;
+    event:        MarkdownAnnotationsSaveResultMessageEvent;
+    generation:   number;
+    path:         string;
+    request_id:   string;
+    stale?:       boolean;
+    success:      boolean;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export enum MarkdownAnnotationsSaveResultMessageEvent {
+    MarkdownAnnotationsSaveResult = "markdown_annotations_save_result",
 }
 
 export interface MergePRMessage {
@@ -5518,6 +5660,70 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ListWorktreesMessage")), null, 2);
     }
 
+    public static toMarkdownAnnotation(json: string): MarkdownAnnotation {
+        return cast(JSON.parse(json), r("MarkdownAnnotation"));
+    }
+
+    public static markdownAnnotationToJson(value: MarkdownAnnotation): string {
+        return JSON.stringify(uncast(value, r("MarkdownAnnotation")), null, 2);
+    }
+
+    public static toMarkdownAnnotationAnchor(json: string): MarkdownAnnotationAnchor {
+        return cast(JSON.parse(json), r("MarkdownAnnotationAnchor"));
+    }
+
+    public static markdownAnnotationAnchorToJson(value: MarkdownAnnotationAnchor): string {
+        return JSON.stringify(uncast(value, r("MarkdownAnnotationAnchor")), null, 2);
+    }
+
+    public static toMarkdownAnnotationsClearMessage(json: string): MarkdownAnnotationsClearMessage {
+        return cast(JSON.parse(json), r("MarkdownAnnotationsClearMessage"));
+    }
+
+    public static markdownAnnotationsClearMessageToJson(value: MarkdownAnnotationsClearMessage): string {
+        return JSON.stringify(uncast(value, r("MarkdownAnnotationsClearMessage")), null, 2);
+    }
+
+    public static toMarkdownAnnotationsClearResultMessage(json: string): MarkdownAnnotationsClearResultMessage {
+        return cast(JSON.parse(json), r("MarkdownAnnotationsClearResultMessage"));
+    }
+
+    public static markdownAnnotationsClearResultMessageToJson(value: MarkdownAnnotationsClearResultMessage): string {
+        return JSON.stringify(uncast(value, r("MarkdownAnnotationsClearResultMessage")), null, 2);
+    }
+
+    public static toMarkdownAnnotationsGetMessage(json: string): MarkdownAnnotationsGetMessage {
+        return cast(JSON.parse(json), r("MarkdownAnnotationsGetMessage"));
+    }
+
+    public static markdownAnnotationsGetMessageToJson(value: MarkdownAnnotationsGetMessage): string {
+        return JSON.stringify(uncast(value, r("MarkdownAnnotationsGetMessage")), null, 2);
+    }
+
+    public static toMarkdownAnnotationsGetResultMessage(json: string): MarkdownAnnotationsGetResultMessage {
+        return cast(JSON.parse(json), r("MarkdownAnnotationsGetResultMessage"));
+    }
+
+    public static markdownAnnotationsGetResultMessageToJson(value: MarkdownAnnotationsGetResultMessage): string {
+        return JSON.stringify(uncast(value, r("MarkdownAnnotationsGetResultMessage")), null, 2);
+    }
+
+    public static toMarkdownAnnotationsSaveMessage(json: string): MarkdownAnnotationsSaveMessage {
+        return cast(JSON.parse(json), r("MarkdownAnnotationsSaveMessage"));
+    }
+
+    public static markdownAnnotationsSaveMessageToJson(value: MarkdownAnnotationsSaveMessage): string {
+        return JSON.stringify(uncast(value, r("MarkdownAnnotationsSaveMessage")), null, 2);
+    }
+
+    public static toMarkdownAnnotationsSaveResultMessage(json: string): MarkdownAnnotationsSaveResultMessage {
+        return cast(JSON.parse(json), r("MarkdownAnnotationsSaveResultMessage"));
+    }
+
+    public static markdownAnnotationsSaveResultMessageToJson(value: MarkdownAnnotationsSaveResultMessage): string {
+        return JSON.stringify(uncast(value, r("MarkdownAnnotationsSaveResultMessage")), null, 2);
+    }
+
     public static toMergePRMessage(json: string): MergePRMessage {
         return cast(JSON.parse(json), r("MergePRMessage"));
     }
@@ -8350,6 +8556,96 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("ListWorktreesMessageCmd") },
         { json: "main_repo", js: "main_repo", typ: "" },
     ], "any"),
+    "MarkdownAnnotation": o([
+        { json: "anchor", js: "anchor", typ: u(undefined, r("Anchor")) },
+        { json: "created_at", js: "created_at", typ: 0 },
+        { json: "id", js: "id", typ: "" },
+        { json: "quick_label_id", js: "quick_label_id", typ: u(undefined, "") },
+        { json: "quick_label_tip", js: "quick_label_tip", typ: u(undefined, "") },
+        { json: "text", js: "text", typ: u(undefined, "") },
+        { json: "type", js: "type", typ: "" },
+    ], "any"),
+    "Anchor": o([
+        { json: "block_id", js: "block_id", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "end", js: "end", typ: 0 },
+        { json: "end_line", js: "end_line", typ: 0 },
+        { json: "exact", js: "exact", typ: "" },
+        { json: "prefix", js: "prefix", typ: "" },
+        { json: "start", js: "start", typ: 0 },
+        { json: "start_line", js: "start_line", typ: 0 },
+        { json: "suffix", js: "suffix", typ: "" },
+    ], "any"),
+    "MarkdownAnnotationAnchor": o([
+        { json: "block_id", js: "block_id", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "end", js: "end", typ: 0 },
+        { json: "end_line", js: "end_line", typ: 0 },
+        { json: "exact", js: "exact", typ: "" },
+        { json: "prefix", js: "prefix", typ: "" },
+        { json: "start", js: "start", typ: 0 },
+        { json: "start_line", js: "start_line", typ: 0 },
+        { json: "suffix", js: "suffix", typ: "" },
+    ], "any"),
+    "MarkdownAnnotationsClearMessage": o([
+        { json: "cmd", js: "cmd", typ: r("MarkdownAnnotationsClearMessageCmd") },
+        { json: "generation", js: "generation", typ: 0 },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "MarkdownAnnotationsClearResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("MarkdownAnnotationsClearResultMessageEvent") },
+        { json: "generation", js: "generation", typ: 0 },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "MarkdownAnnotationsGetMessage": o([
+        { json: "cmd", js: "cmd", typ: r("MarkdownAnnotationsGetMessageCmd") },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "MarkdownAnnotationsGetResultMessage": o([
+        { json: "annotations", js: "annotations", typ: a(r("AnnotationObject")) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("MarkdownAnnotationsGetResultMessageEvent") },
+        { json: "generation", js: "generation", typ: 0 },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "success", js: "success", typ: true },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "AnnotationObject": o([
+        { json: "anchor", js: "anchor", typ: u(undefined, r("Anchor")) },
+        { json: "created_at", js: "created_at", typ: 0 },
+        { json: "id", js: "id", typ: "" },
+        { json: "quick_label_id", js: "quick_label_id", typ: u(undefined, "") },
+        { json: "quick_label_tip", js: "quick_label_tip", typ: u(undefined, "") },
+        { json: "text", js: "text", typ: u(undefined, "") },
+        { json: "type", js: "type", typ: "" },
+    ], "any"),
+    "MarkdownAnnotationsSaveMessage": o([
+        { json: "annotations", js: "annotations", typ: a(r("AnnotationObject")) },
+        { json: "cmd", js: "cmd", typ: r("MarkdownAnnotationsSaveMessageCmd") },
+        { json: "generation", js: "generation", typ: 0 },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "MarkdownAnnotationsSaveResultMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("MarkdownAnnotationsSaveResultMessageEvent") },
+        { json: "generation", js: "generation", typ: 0 },
+        { json: "path", js: "path", typ: "" },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "stale", js: "stale", typ: u(undefined, true) },
+        { json: "success", js: "success", typ: true },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
     "MergePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("MergePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -10256,6 +10552,24 @@ const typeMap: any = {
     ],
     "ListWorktreesMessageCmd": [
         "list_worktrees",
+    ],
+    "MarkdownAnnotationsClearMessageCmd": [
+        "markdown_annotations_clear",
+    ],
+    "MarkdownAnnotationsClearResultMessageEvent": [
+        "markdown_annotations_clear_result",
+    ],
+    "MarkdownAnnotationsGetMessageCmd": [
+        "markdown_annotations_get",
+    ],
+    "MarkdownAnnotationsGetResultMessageEvent": [
+        "markdown_annotations_get_result",
+    ],
+    "MarkdownAnnotationsSaveMessageCmd": [
+        "markdown_annotations_save",
+    ],
+    "MarkdownAnnotationsSaveResultMessageEvent": [
+        "markdown_annotations_save_result",
     ],
     "MergePRMessageCmd": [
         "merge_pr",

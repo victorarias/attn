@@ -203,7 +203,7 @@ export function WorkspaceDockTile({
         tabIndex={-1}
       >
         {tile.tileKind === 'markdown' ? (
-          <MarkdownBody content={content} allowLocalTargets={allowLocalTargets} />
+          <MarkdownBody content={content} workspaceId={workspaceId} allowLocalTargets={allowLocalTargets} />
         ) : tile.tileKind === 'browser' ? (
           <BrowserTileBody
             workspaceId={workspaceId}
@@ -232,7 +232,15 @@ export function WorkspaceDockTile({
   );
 }
 
-function MarkdownBody({ content, allowLocalTargets }: { content?: TileContentState; allowLocalTargets: boolean }) {
+function MarkdownBody({
+  content,
+  workspaceId,
+  allowLocalTargets,
+}: {
+  content?: TileContentState;
+  workspaceId: string;
+  allowLocalTargets: boolean;
+}) {
   if (content === undefined) {
     return <div className="workspace-dock-tile-message">Loading…</div>;
   }
@@ -247,6 +255,8 @@ function MarkdownBody({ content, allowLocalTargets }: { content?: TileContentSta
       content={content.content}
       path={content.path}
       allowLocalTargets={allowLocalTargets}
+      annotationsEnabled
+      workspaceId={workspaceId}
     />
   );
 }

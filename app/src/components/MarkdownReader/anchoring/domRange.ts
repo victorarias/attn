@@ -52,6 +52,60 @@ export function blockDomText(blockEl: Element): string {
 }
 
 /**
+ * Map a DOM point (node, offset) — the shape Selection/Range boundaries come
+ * in — to a UTF-16 offset into the block's rendered text (the inverse of
+ * `resolveDomRange`). Handles both boundary shapes:
+ *
+ * - Text-node boundary: offset is a character index inside that node.
+ * - Element boundary: offset is a child index; the point sits before the
+ *   `offset`-th child (or at the element's end when offset === childCount,
+ *   e.g. triple-click paragraph selections).
+ *
+ * Returns null when the node is outside `blockEl` or inside a chrome subtree
+ * (chrome text has no counterpart in anchor text-space).
+ */
+export function domPointToOffset(blockEl: Element, node: Node, offset: number): number | null {
+  if (node !== blockEl && !blockEl.contains(node)) {
+    return null;
+  }
+  if (node.nodeType === Node.TEXT_NODE) {
+    const walker = chromeSkippingTextWalker(blockEl);
+    let acc = 0;
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      const len = t.nodeValue?.length ?? 0;
+      if (t === node) {
+        return acc + Math.min(offset, len);
+      }
+      acc += len;
+    }
+    return null; // text node exists but the walker never emitted it: chrome
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return null;
+  }
+  const el = node as Element;
+  if (el !== blockEl && el.closest(`[${CHROME_ATTR}]`)) {
+    return null;
+  }
+  // The point sits before `anchor` (or at el's end when anchor is null).
+  const anchor = el.childNodes[offset] ?? null;
+  const walker = chromeSkippingTextWalker(blockEl);
+  let acc = 0;
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    const isAtOrAfterPoint = anchor
+      ? anchor === t ||
+        anchor.contains(t) ||
+        (anchor.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+      : !el.contains(t) && (el.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    if (isAtOrAfterPoint) {
+      return acc;
+    }
+    acc += t.nodeValue?.length ?? 0;
+  }
+  return acc; // point lies after every text node in the block
+}
+
+/**
  * Resolve `[start, end)` (UTF-16 offsets into the block's rendered text) to a
  * DOM Range within `blockEl` (the element matching `[data-block-id="..."]`;
  * scoping the querySelector is the caller's job). Returns null when the range

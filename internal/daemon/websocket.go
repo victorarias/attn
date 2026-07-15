@@ -1090,6 +1090,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
 	case protocol.CmdOpenMarkdown:
 		d.handleOpenMarkdownWS(client, msg.(*protocol.OpenMarkdownMessage))
+	case protocol.CmdMarkdownAnnotationsGet:
+		d.handleMarkdownAnnotationsGet(client, msg.(*protocol.MarkdownAnnotationsGetMessage))
+	case protocol.CmdMarkdownAnnotationsSave:
+		d.handleMarkdownAnnotationsSave(client, msg.(*protocol.MarkdownAnnotationsSaveMessage))
+	case protocol.CmdMarkdownAnnotationsClear:
+		d.handleMarkdownAnnotationsClear(client, msg.(*protocol.MarkdownAnnotationsClearMessage))
 	case protocol.CmdBrowserControl:
 		go d.handleRemoteBrowserControl(client, msg.(*protocol.BrowserControlMessage))
 	case protocol.CmdBrowserControlResult:
@@ -1298,6 +1304,18 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWorkspaceTileContentGet:
 		if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdMarkdownAnnotationsGet:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsGetMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdMarkdownAnnotationsSave:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsSaveMessage); ok {
+			return typed.WorkspaceID
+		}
+	case protocol.CmdMarkdownAnnotationsClear:
+		if typed, ok := msg.(*protocol.MarkdownAnnotationsClearMessage); ok {
 			return typed.WorkspaceID
 		}
 	case protocol.CmdRenameWorkspace:

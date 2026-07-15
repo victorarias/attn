@@ -647,6 +647,13 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		UPDATE ticket_activity SET kind = 'attach' WHERE kind = 'handover';
 		UPDATE ticket_events SET kind = 'attach_submitted' WHERE kind = 'handover_submitted';
 	`},
+	{68, "create markdown annotation drafts table", `CREATE TABLE IF NOT EXISTS markdown_annotation_drafts (
+		path TEXT PRIMARY KEY,
+		annotations_json TEXT NOT NULL,
+		generation INTEGER NOT NULL,
+		tombstone_generation INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL
+	)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
