@@ -25,6 +25,7 @@ import rehypeProseTransforms from './proseTransforms';
 import rehypeSourceAnchors from './rehypeSourceAnchors';
 import { readerSanitizeSchema } from './sanitizeSchema';
 import { scrollToAnchor } from './scrollToAnchor';
+import { useAnchorSpike } from './anchoring/spike';
 import { tilePathBasename } from '../../utils/tilePresentation';
 import './MarkdownReader.css';
 
@@ -155,7 +156,9 @@ function readerComponents(
           data-alert-kind={alertKind}
           className={`md-alert md-alert-${alertKind}`}
         >
-          <div className="md-alert-title">
+          {/* data-md-chrome: React-added text with no hast counterpart — the
+              anchoring DOM walker skips these subtrees (see anchoring/domRange). */}
+          <div className="md-alert-title" data-md-chrome="1">
             <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
               <path d={ALERT_ICON_PATHS[alertKind]} />
             </svg>
@@ -227,7 +230,7 @@ function readerComponents(
       const target = imgSrc ? resolveMarkdownTarget(documentPath, imgSrc) : null;
       if (!target || target.kind !== 'local' || !allowLocalTargets || !isSafeLocalMarkdownImageTarget(target.value)) {
         return (
-          <span className="md-reader-blocked-image" title={imgSrc}>
+          <span className="md-reader-blocked-image" title={imgSrc} data-md-chrome="1">
             [blocked image: {alt || imgSrc || 'unknown source'}]
           </span>
         );
@@ -371,6 +374,11 @@ export const MarkdownReader = memo(function MarkdownReader({
   const handleLightboxClose = useCallback(() => {
     setLightbox(null);
   }, []);
+  // Paint-layer spike (PR4, deleted in PR5): lives OUTSIDE the memoized body
+  // so its content-keyed effect fires exactly when the body remounted — the
+  // same contract as the re-render gate. No-ops for documents without the
+  // spike marker token.
+  useAnchorSpike(rootRef, content);
 
   return (
     <div className="md-reader" ref={rootRef}>

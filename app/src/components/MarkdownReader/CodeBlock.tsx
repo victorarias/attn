@@ -53,12 +53,19 @@ export function CodeBlock({ code, language, preProps }: CodeBlockProps) {
         return;
       }
       try {
-        const html = await shiki.codeToHtml(code, {
+        const raw = await shiki.codeToHtml(code, {
           lang: language,
           themes: { light: 'github-light-default', dark: 'github-dark-default' },
           defaultColor: false,
           structure: 'inline',
         });
+        // Shiki's inline structure renders line breaks as <br> ELEMENTS, so
+        // the hydrated DOM would contain no '\n' text — shifting every
+        // anchoring offset past line 1 (see anchoring/domRange.ts, which
+        // requires DOM text-node parity with extractBlockTexts). Restore real
+        // newline text nodes; <pre> renders them identically. Code content is
+        // HTML-escaped by shiki, so a literal `<br` in code can't match.
+        const html = raw.replace(/<br\s*\/?>/g, '\n');
         if (!cancelled) {
           setHighlighted({ code, language, html });
         }
@@ -94,8 +101,11 @@ export function CodeBlock({ code, language, preProps }: CodeBlockProps) {
 
   return (
     <div className="md-codeblock">
+      {/* data-md-chrome: React-added chrome with no hast counterpart — the
+          anchoring DOM walker skips these subtrees (see anchoring/domRange). */}
       <button
         type="button"
+        data-md-chrome="1"
         className={`md-copy-btn ${copied ? 'md-copy-btn--copied' : ''}`.trim()}
         title={copied ? 'Copied!' : 'Copy code'}
         aria-label={copied ? 'Copied!' : 'Copy code'}
