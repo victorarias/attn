@@ -1,6 +1,55 @@
 export const pluginAPIVersion = 2;
 
-export const supportedOpenCodeVersions = new Set(["1.17.16", "1.17.18"]);
+export type StableVersion = {
+  raw: string;
+  major: number;
+  minor: number;
+  patch: number;
+};
+
+export type VersionCompatibility =
+  | { kind: "supported"; installed: StableVersion; minimum: StableVersion }
+  | { kind: "too_old"; installed: StableVersion; minimum: StableVersion }
+  | { kind: "invalid"; raw: string; reason: string };
+
+export const minimumOpenCodeVersion = parseStableVersion("1.17.16");
+
+export function parseStableVersion(value: string): StableVersion {
+  const candidate = value.trim();
+  const match = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(candidate);
+  if (!match) {
+    throw new Error(`expected a stable MAJOR.MINOR.PATCH release, got ${candidate || "(empty)"}`);
+  }
+  const [major, minor, patch] = match.slice(1).map(Number);
+  if (![major, minor, patch].every(Number.isSafeInteger)) {
+    throw new Error(`version components must be safe integers, got ${candidate}`);
+  }
+  return { raw: `${major}.${minor}.${patch}`, major, minor, patch };
+}
+
+export function compareVersion(a: StableVersion, b: StableVersion): -1 | 0 | 1 {
+  for (const key of ["major", "minor", "patch"] as const) {
+    if (a[key] < b[key]) return -1;
+    if (a[key] > b[key]) return 1;
+  }
+  return 0;
+}
+
+export function evaluateOpenCodeVersion(value: string): VersionCompatibility {
+  let installed: StableVersion;
+  try {
+    installed = parseStableVersion(value);
+  } catch (error) {
+    return {
+      kind: "invalid",
+      raw: value,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return compareVersion(installed, minimumOpenCodeVersion) < 0
+    ? { kind: "too_old", installed, minimum: minimumOpenCodeVersion }
+    : { kind: "supported", installed, minimum: minimumOpenCodeVersion };
+}
 
 export type DriverCapabilities = Record<string, boolean>;
 

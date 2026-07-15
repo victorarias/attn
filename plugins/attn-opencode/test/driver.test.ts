@@ -77,8 +77,14 @@ function driverFor(rpc: RecordingRPC, registry: RunRegistry, target: FakeOpenCod
 }
 
 describe("OpenCode server-backed driver", () => {
-  test("accepts both explicitly contract-tested OpenCode versions", async () => {
-    for (const version of ["1.17.16", "1.17.18"]) {
+  test("accepts the minimum and newer stable OpenCode versions", async () => {
+    for (const [version, normalized] of [
+      ["1.17.16", "1.17.16"],
+      ["v1.17.16", "1.17.16"],
+      ["1.17.18", "1.17.18"],
+      ["1.18.0", "1.18.0"],
+      ["2.0.0", "2.0.0"],
+    ]) {
       const rpc = new RecordingRPC();
       const registry = new RunRegistry(join(await tempRoot(), "runtime"));
       const driver = new OpenCodeDriver({
@@ -87,8 +93,28 @@ describe("OpenCode server-backed driver", () => {
         runCommand: async () => ({ exitCode: 0, stdout: `${version}\n`, stderr: "" }),
       });
       await driver.initialize();
-      expect(driver.health()).toEqual({ ok: true, message: `OpenCode ${version} is ready` });
+      expect(driver.health()).toEqual({ ok: true, message: `OpenCode ${normalized} is ready` });
       expect(rpc.calls[0]?.method).toBe("driver.register");
+    }
+  });
+
+  test("rejects old, malformed, and prerelease OpenCode versions before registering", async () => {
+    for (const [version, message] of [
+      ["1.17.15", "requires OpenCode >= 1.17.16"],
+      ["1.17", "expected a stable MAJOR.MINOR.PATCH release"],
+      ["1.18.0-beta.1", "expected a stable MAJOR.MINOR.PATCH release"],
+    ]) {
+      const rpc = new RecordingRPC();
+      const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+      const driver = new OpenCodeDriver({
+        rpc,
+        registry,
+        runCommand: async () => ({ exitCode: 0, stdout: `${version}\n`, stderr: "" }),
+      });
+      await driver.initialize();
+      expect(driver.health()).toEqual(expect.objectContaining({ ok: false }));
+      expect(driver.health().message).toContain(message);
+      expect(rpc.calls).toHaveLength(0);
     }
   });
 
@@ -422,6 +448,89 @@ describe("OpenCode server-backed driver", () => {
         variant: "low",
       },
     })).rejects.toThrow("effort pin does not match");
+  });
+
+  test("resumes after a forward OpenCode upgrade and records the new run version", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*", "1.18.0");
+    target.sessions.set("native-upgrade", {
+      id: "native-upgrade",
+      model: { providerID: "spotify-glm", id: "zai-org/GLM-5.2-FP8", variant: "low" },
+    });
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = new OpenCodeDriver({
+      rpc,
+      registry,
+      runCommand: async () => ({ exitCode: 0, stdout: "1.18.0\n", stderr: "" }),
+      allocatePort: async () => target.port,
+      http: (port, password) => new OpenCodeHTTP({ port, password }),
+      startupDeadline: 300,
+      reconnectDelay: 5,
+    });
+    await driver.initialize();
+    await driver.resume({
+      ...params("run-forward-upgrade"),
+      effort: "low",
+      initial_prompt: "",
+      metadata: {
+        schema: 1,
+        opencode_session_id: "native-upgrade",
+        opencode_version: "1.17.18",
+        model: "spotify-glm/zai-org/GLM-5.2-FP8",
+        variant: "low",
+      },
+    });
+    await eventually(() => target.requests.some((request) => request.path === "/tui/select-session"), "upgraded resume selection");
+    expect(await registry.get("run-forward-upgrade")).toEqual(expect.objectContaining({
+      opencode_session_id: "native-upgrade",
+      opencode_version: "1.18.0",
+      resume: true,
+    }));
+  });
+
+  test("rejects an OpenCode downgrade before creating a run", async () => {
+    const rpc = new RecordingRPC();
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = new OpenCodeDriver({
+      rpc,
+      registry,
+      runCommand: async () => ({ exitCode: 0, stdout: "1.17.18\n", stderr: "" }),
+    });
+    await driver.initialize();
+    await expect(driver.resume({
+      ...params("run-downgrade"),
+      initial_prompt: "",
+      metadata: {
+        schema: 1,
+        opencode_session_id: "native-newer",
+        opencode_version: "1.18.0",
+        model: "spotify-glm/zai-org/GLM-5.2-FP8",
+        variant: "max",
+      },
+    })).rejects.toThrow("OpenCode resume would downgrade 1.18.0 to 1.17.18");
+    expect(await registry.get("run-downgrade")).toBeUndefined();
+  });
+
+  test("keeps exact per-run server version identity on newer releases", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*", "1.18.1");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = new OpenCodeDriver({
+      rpc,
+      registry,
+      runCommand: async () => ({ exitCode: 0, stdout: "1.18.0\n", stderr: "" }),
+      allocatePort: async () => target.port,
+      http: (port, password) => new OpenCodeHTTP({ port, password }),
+      startupDeadline: 40,
+      reconnectDelay: 5,
+    });
+    await driver.initialize();
+    await driver.spawn({ session_id: "attn-version-mismatch", run_id: "run-version-mismatch", cwd: "/tmp" });
+    await eventually(
+      () => rpc.calls.some((call) => (call.params as { state?: string }).state === "unknown"),
+      "version identity failure report",
+    );
+    expect(driver.health().message).toContain("server version 1.18.1 does not match this run's expected 1.18.0");
   });
 
   test("resumes an interactive OpenCode session without imposing pins", async () => {
