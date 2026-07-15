@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-15]
+
+### Fixed
+- **Copilot sessions no longer get stuck mid-selection or with scroll landing in the wrong place after a reload.** Copilot's TUI independently enables its own mouse tracking, and a dropped mouse-release event (e.g. releasing outside the terminal pane) could leave it believing the button was still held, producing a runaway text selection or desynced scrolling after a refresh. attn now launches Copilot with mouse support disabled since attn already owns selection and scrolling itself.
+
 ## [2026-07-13]
 
 ### Fixed

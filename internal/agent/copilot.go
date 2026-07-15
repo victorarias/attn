@@ -46,7 +46,18 @@ func (c *Copilot) Capabilities() Capabilities {
 }
 
 func (c *Copilot) BuildCommand(opts SpawnOpts) *exec.Cmd {
-	args := []string{}
+	// attn owns text selection and scroll handling itself (see GhosttyTerminal's
+	// selection-drag and wheel logic). Copilot's TUI independently enables SGR
+	// mouse tracking (DECSET 1000/1002/1003) in alt-screen mode, and attn's
+	// "forward mouse to app" path has no fail-safe for a release event that
+	// lands outside the terminal's own DOM node (unlike the hardened
+	// text-selection path). When that happens, the dropped release leaves
+	// Copilot's TUI believing the button is still held, producing a stuck
+	// selection/drag, plus post-refresh scroll desync (see attn issue: stuck
+	// selection / scroll-in-textarea after refresh, Copilot-only). Disabling
+	// mouse support avoids the whole class of bug; attn's own mouse handling
+	// covers selection and scrolling regardless.
+	args := []string{"--no-mouse"}
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	} else if opts.ResumePicker {
