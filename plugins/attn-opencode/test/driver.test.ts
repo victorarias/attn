@@ -17,9 +17,11 @@ afterEach(() => {
 
 class RecordingRPC {
   readonly calls: Array<{ method: string; params: unknown }> = [];
-  async request(method: string, params?: unknown): Promise<unknown> {
+  constructor(readonly activeRuns: Array<{ session_id: string; run_id: string; metadata?: unknown }> = []) {}
+
+  async request<T = unknown>(method: string, params?: unknown): Promise<T> {
     this.calls.push({ method, params });
-    return { ok: true };
+    return { ok: true, active_runs: method === "driver.register" ? this.activeRuns : undefined } as T;
   }
 }
 
@@ -810,6 +812,73 @@ describe("OpenCode server-backed driver", () => {
     expect(low?.port).not.toBe(max?.port);
     expect(low?.password_ref).not.toBe(max?.password_ref);
     expect(await registry.password(low!)).not.toBe(await registry.password(max!));
+  });
+
+  test("recovers only attn-owned runs and resumes monitoring without creating a native session", async () => {
+    const target = server("*");
+    target.sessions.set("native-recovery", {
+      id: "native-recovery",
+      model: { providerID: "spotify-glm", id: "zai-org/GLM-5.2-FP8", variant: "max" },
+    });
+    target.statuses.set("native-recovery", "busy");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    await registry.initialize();
+
+    const seed = async (runID: string, sessionID: string, nativeID: string) => {
+      const record = await registry.create({
+        schema: 1,
+        attn_session_id: sessionID,
+        run_id: runID,
+        next_seq: 7,
+        port: target.port,
+        opencode_session_id: nativeID,
+        opencode_version: "1.17.18",
+        pinned: true,
+        model: "spotify-glm/zai-org/GLM-5.2-FP8",
+        variant: "max",
+        resume: false,
+        created_at: new Date().toISOString(),
+      }, "");
+      await registry.writeLaunchConfig(record, {
+        schema: 1,
+        run_id: runID,
+        executable: "opencode",
+        cwd: "/tmp",
+        password_ref: record.password_ref,
+        port: target.port,
+        yolo: false,
+        resume_session_id: nativeID,
+      });
+    };
+    await seed("run-recovery", "attn-recovery", "native-recovery");
+    await seed("run-orphan", "attn-orphan", "native-orphan");
+
+    const rpc = new RecordingRPC([{
+      session_id: "attn-recovery",
+      run_id: "run-recovery",
+      metadata: { schema: 1, opencode_session_id: "native-recovery", opencode_version: "1.17.18", pinned: true },
+    }]);
+    const driver = new OpenCodeDriver({
+      rpc,
+      registry,
+      runCommand: async () => ({ exitCode: 0, stdout: "1.17.18\n", stderr: "" }),
+      http: (port, password) => new OpenCodeHTTP({ port, password }),
+      startupDeadline: 300,
+      reconnectDelay: 5,
+    });
+    await driver.initialize();
+
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_state" && (call.params as { seq?: number }).seq === 7),
+      "recovered ordered state report",
+    );
+    expect(await registry.get("run-orphan")).toBeUndefined();
+    expect(await registry.get("run-recovery")).toBeDefined();
+    expect([...target.sessions.keys()]).toEqual(["native-recovery"]);
+    expect(target.requests.filter((request) => request.path === "/tui/select-session").map((request) => request.body)).toEqual([
+      { sessionID: "native-recovery" },
+    ]);
+    await driver.sessionClosed({ session_id: "attn-recovery", run_id: "run-recovery", reason: "test cleanup" });
   });
 
   test("keeps classifier sessions and equal-looking caches isolated across two runs", async () => {

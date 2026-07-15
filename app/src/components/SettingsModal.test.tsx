@@ -240,6 +240,7 @@ describe('SettingsModal', () => {
       priority: 0,
       connected: false,
       running: true,
+      runtime_phase: 'starting',
       health_status: 'unknown',
     };
 
@@ -256,7 +257,26 @@ describe('SettingsModal', () => {
     rerender(
       <SettingsModal
         {...baseProps}
-        plugins={[{ ...startingPlugin, connected: true, health_status: 'healthy' }]}
+        plugins={[{
+          ...startingPlugin,
+          running: false,
+          runtime_phase: 'backoff',
+          restart_attempt: 2,
+          next_restart_at: '2026-07-15T22:20:00Z',
+          last_exit: '2026-07-15T22:19:59Z: exit code 1',
+        }]}
+      />,
+    );
+
+    expect(await screen.findByText('backoff')).toBeInTheDocument();
+    expect(screen.getByText('Restart attempt')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText(/Last exit: 2026-07-15T22:19:59Z: exit code 1/)).toBeInTheDocument();
+
+    rerender(
+      <SettingsModal
+        {...baseProps}
+        plugins={[{ ...startingPlugin, connected: true, runtime_phase: 'connected', health_status: 'healthy' }]}
       />,
     );
 

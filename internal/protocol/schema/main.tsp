@@ -423,6 +423,12 @@ model PluginInfo {
   priority: int32;
   connected: boolean;
   running: boolean;
+  // "starting" | "connected" | "backoff" | "stopped". Plain string keeps
+  // generated Go/TypeScript consumers aligned with other runtime status fields.
+  runtime_phase?: string;
+  restart_attempt?: int32;
+  next_restart_at?: string;
+  last_exit?: string;
   health_status?: string;
   health_message?: string;
   last_health_at?: string;

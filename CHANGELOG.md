@@ -9,6 +9,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-15]
 
 ### Added
+- **Installed plugins now recover automatically after crashes and lost connections.**
+  Attn restarts them with bounded backoff, shows their recovery state in
+  Settings, and lets OpenCode resume monitoring the same native sessions without
+  launching replacement TUIs.
 - **OpenCode prose questions now surface as waiting for input.** Native question
   and permission requests remain authoritative, while an explicit idle turn can
   also distinguish ordinary assistant questions from completed answers without

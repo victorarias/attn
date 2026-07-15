@@ -1,4 +1,4 @@
-export const pluginAPIVersion = 3;
+export const pluginAPIVersion = 4;
 
 export type StableVersion = {
   raw: string;
@@ -52,6 +52,17 @@ export function evaluateOpenCodeVersion(value: string): VersionCompatibility {
 }
 
 export type DriverCapabilities = Record<string, boolean>;
+
+export type ActivePluginRun = {
+  session_id: string;
+  run_id: string;
+  metadata?: unknown;
+};
+
+export type DriverRegisterResult = {
+  ok: boolean;
+  active_runs?: ActivePluginRun[];
+};
 
 export type PluginLaunchInstructions = {
   kind: "workspace" | "chief";

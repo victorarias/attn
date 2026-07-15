@@ -45,12 +45,16 @@ func (d *Daemon) handleRemovePluginWS(client *wsClient, msg *protocol.RemovePlug
 		d.sendPluginActionResult(client, "remove", "", false, "plugin name is required")
 		return
 	}
-	if err := plugins.Remove(d.pluginDir, name); err != nil {
+	remove := d.removePlugin
+	if remove == nil {
+		remove = plugins.Remove
+	}
+	if err := remove(d.pluginDir, name); err != nil {
 		d.sendPluginActionResult(client, "remove", name, false, err.Error())
 		return
 	}
-
 	d.stopInstalledPlugin(name)
+
 	d.broadcastPluginsUpdated()
 	d.sendPluginActionResult(client, "remove", name, true, "")
 }
@@ -80,6 +84,7 @@ func (d *Daemon) pluginsUpdatedMessage() *protocol.PluginsUpdatedMessage {
 	pluginInfos := make([]protocol.PluginInfo, 0, len(manifests))
 	for _, manifest := range manifests {
 		connection := d.ensurePluginRegistry().get(manifest.Name)
+		runtime, supervised := d.ensurePluginSupervisor().Snapshot(manifest.Name)
 		healthStatus := "unknown"
 		var healthMessage string
 		var lastHealthAt string
@@ -97,8 +102,24 @@ func (d *Daemon) pluginsUpdatedMessage() *protocol.PluginsUpdatedMessage {
 			Dir:          manifest.Dir,
 			Priority:     priorities[manifest.Name],
 			Connected:    connection != nil,
-			Running:      d.ensurePluginProcessRegistry().isRunning(manifest.Name),
+			Running:      runtime.Running,
 			HealthStatus: protocol.Ptr(healthStatus),
+		}
+		runtimePhase := pluginPhaseStopped
+		if supervised {
+			runtimePhase = runtime.Phase
+		} else if connection != nil {
+			runtimePhase = pluginPhaseConnected
+		}
+		info.RuntimePhase = protocol.Ptr(string(runtimePhase))
+		if runtime.RestartAttempt > 0 {
+			info.RestartAttempt = protocol.Ptr(runtime.RestartAttempt)
+		}
+		if !runtime.NextRestartAt.IsZero() {
+			info.NextRestartAt = protocol.Ptr(runtime.NextRestartAt.Format(time.RFC3339Nano))
+		}
+		if runtime.LastExit != nil {
+			info.LastExit = protocol.Ptr(runtime.LastExit.String())
 		}
 		if manifest.Description != "" {
 			info.Description = protocol.Ptr(manifest.Description)

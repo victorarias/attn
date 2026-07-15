@@ -36,6 +36,13 @@ OpenCode system hook rereads that file for every prompt, so resumed sessions
 receive role and context changes without modifying repository or global
 OpenCode configuration.
 
+If the plugin process exits or loses its daemon connection, attn restarts it
+with bounded backoff. On reconnect, the plugin intersects its private run
+records with the daemon's active-run ownership and rebuilds monitoring only for
+surviving runs. It reconnects to the same authenticated OpenCode server and
+native session; it does not launch another TUI. Orphaned or malformed private
+records are removed.
+
 Ordinary sessions receive the same workspace-context, workflow, and ticket
 guidance as built-in attn agents. Chiefs receive Notebook guidance instead.
 Resuming a session, including a chief promotion or demotion, recomposes the

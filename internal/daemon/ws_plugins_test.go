@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -74,6 +76,46 @@ func TestDaemon_HandleListPluginsWS_ReturnsInstalledPlugins(t *testing.T) {
 	}
 }
 
+func TestDaemon_PluginsUpdatedMessageIncludesSupervisorBackoff(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "plugins")
+	writeTestPluginManifest(t, d.pluginDir, "recovering-provider")
+	manifest, err := loadPluginManifest(filepath.Join(d.pluginDir, "recovering-provider", pluginManifestName))
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+
+	clock := newFakePluginClock()
+	launcher := &fakePluginLauncher{}
+	d.pluginSupervisor = newTestPluginSupervisor(clock, launcher)
+	if err := d.pluginSupervisor.Ensure(manifest); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	launcher.handle(0).exit(pluginExit{ExitCode: intPtr(17)})
+	waitForSupervisor(t, func() bool {
+		snapshot, _ := d.pluginSupervisor.Snapshot(manifest.Name)
+		return snapshot.Phase == pluginPhaseBackoff
+	})
+
+	plugins := d.pluginsUpdatedMessage().Plugins
+	if len(plugins) != 1 {
+		t.Fatalf("plugin count=%d, want 1", len(plugins))
+	}
+	plugin := plugins[0]
+	if got := protocol.Deref(plugin.RuntimePhase); got != string(pluginPhaseBackoff) {
+		t.Fatalf("runtime phase=%q, want backoff", got)
+	}
+	if got := protocol.Deref(plugin.RestartAttempt); got != 1 {
+		t.Fatalf("restart attempt=%d, want 1", got)
+	}
+	if plugin.NextRestartAt == nil || *plugin.NextRestartAt != clock.Now().Add(pluginRestartBackoff[0]).Format(time.RFC3339Nano) {
+		t.Fatalf("next restart=%v, want first backoff deadline", plugin.NextRestartAt)
+	}
+	if plugin.LastExit == nil || !strings.Contains(*plugin.LastExit, "exit code 17") {
+		t.Fatalf("last exit=%v, want exit code 17", plugin.LastExit)
+	}
+}
+
 func TestDaemon_HandleInstallPluginWS_InstallsGitSource(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
 	d.pluginDir = filepath.Join(t.TempDir(), "plugins")
@@ -90,7 +132,7 @@ mkdir -p "$5/src"
 cat > "$5/attn-plugin.toml" <<'EOF'
 name = "attn-snipe"
 version = "0.1.0"
-attn_api_version = 3
+attn_api_version = 4
 
 [plugin]
 entrypoint = "src/index.ts"
@@ -119,5 +161,75 @@ EOF
 	}
 	if _, err := os.Stat(filepath.Join(d.pluginDir, "attn-snipe", "attn-plugin.toml")); err != nil {
 		t.Fatalf("installed plugin manifest missing: %v", err)
+	}
+}
+
+func TestDaemon_HandleRemovePluginWSStopsSupervisorAfterDeletingFiles(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "plugins")
+	writeTestPluginManifest(t, d.pluginDir, "removable")
+	manifest, err := loadPluginManifest(filepath.Join(d.pluginDir, "removable", pluginManifestName))
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	clock := newFakePluginClock()
+	launcher := &fakePluginLauncher{}
+	d.pluginSupervisor = newTestPluginSupervisor(clock, launcher)
+	if err := d.pluginSupervisor.Ensure(manifest); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 1)}
+	d.handleRemovePluginWS(client, &protocol.RemovePluginMessage{Name: "removable"})
+	event := readOutboundEvent(t, client)
+	if event["success"] != true {
+		t.Fatalf("remove event=%v", event)
+	}
+	if _, err := os.Stat(manifest.Dir); !os.IsNotExist(err) {
+		t.Fatalf("plugin dir still exists: %v", err)
+	}
+	clock.Advance(time.Hour)
+	if got := launcher.count(); got != 1 {
+		t.Fatalf("start count after remove=%d, want 1", got)
+	}
+	snapshot, _ := d.pluginSupervisor.Snapshot("removable")
+	if snapshot.Desired != pluginDesiredStopped || snapshot.Running {
+		t.Fatalf("snapshot after remove=%+v", snapshot)
+	}
+}
+
+func TestDaemon_HandleRemovePluginWSKeepsSupervisorRunningWhenDeletionFails(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "plugins")
+	writeTestPluginManifest(t, d.pluginDir, "removable")
+	manifest, err := loadPluginManifest(filepath.Join(d.pluginDir, "removable", pluginManifestName))
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	clock := newFakePluginClock()
+	launcher := &fakePluginLauncher{}
+	d.pluginSupervisor = newTestPluginSupervisor(clock, launcher)
+	if err := d.pluginSupervisor.Ensure(manifest); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	d.removePlugin = func(pluginDir, name string) error {
+		return os.ErrPermission
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 1)}
+	d.handleRemovePluginWS(client, &protocol.RemovePluginMessage{Name: "removable"})
+	event := readOutboundEvent(t, client)
+	if event["success"] != false {
+		t.Fatalf("remove event=%v, want failure", event)
+	}
+	if _, err := os.Stat(manifest.Dir); err != nil {
+		t.Fatalf("installed plugin missing after failed remove: %v", err)
+	}
+	snapshot, _ := d.pluginSupervisor.Snapshot("removable")
+	if snapshot.Desired != pluginDesiredRunning || !snapshot.Running {
+		t.Fatalf("snapshot after failed remove=%+v", snapshot)
+	}
+	if got := launcher.count(); got != 1 {
+		t.Fatalf("start count after failed remove=%d, want 1", got)
 	}
 }

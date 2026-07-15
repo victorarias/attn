@@ -59,6 +59,8 @@ describe("AttnPluginClient", () => {
 
     expect(server.requests.map((request) => request.method)).toEqual(["hello"]);
     expect(server.requests[0]?.params).toMatchObject({
+      attn_api_version: 4,
+      generation: 1,
       surfaces: ["worktree.after_create", "worktree.create"],
     });
 
@@ -74,8 +76,10 @@ describe("AttnPluginClient", () => {
     });
     const previousSocketPath = process.env.ATTN_SOCKET_PATH;
     const previousPluginName = process.env.ATTN_PLUGIN_NAME;
+    const previousGeneration = process.env.ATTN_PLUGIN_GENERATION;
     process.env.ATTN_SOCKET_PATH = server.socketPath;
     process.env.ATTN_PLUGIN_NAME = "sdk-env-provider";
+    process.env.ATTN_PLUGIN_GENERATION = "9";
 
     let client: AttnPluginClient | undefined;
     try {
@@ -87,12 +91,28 @@ describe("AttnPluginClient", () => {
 
       expect(server.requests[0]?.params).toMatchObject({
         name: "sdk-env-provider",
+        generation: 9,
       });
     } finally {
       client?.close();
       restoreEnv("ATTN_SOCKET_PATH", previousSocketPath);
       restoreEnv("ATTN_PLUGIN_NAME", previousPluginName);
+      restoreEnv("ATTN_PLUGIN_GENERATION", previousGeneration);
       await server.close();
+    }
+  });
+
+  test("rejects an invalid daemon-provided generation", () => {
+    const previousGeneration = process.env.ATTN_PLUGIN_GENERATION;
+    process.env.ATTN_PLUGIN_GENERATION = "stale";
+    try {
+      expect(() => new AttnPluginClient({
+        socketPath: "/tmp/unused.sock",
+        name: "sdk-provider",
+        version: "0.1.0",
+      })).toThrow("ATTN_PLUGIN_GENERATION must be a positive integer");
+    } finally {
+      restoreEnv("ATTN_PLUGIN_GENERATION", previousGeneration);
     }
   });
 

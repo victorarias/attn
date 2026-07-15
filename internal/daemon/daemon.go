@@ -199,19 +199,21 @@ type Daemon struct {
 	// fsStore is the generic filesystem view over the SAME root as the notebook
 	// (notebook.root). It is the raw layer beneath the curated notebook surface;
 	// both share the one root watcher started by ensureNotebookWatcher.
-	fsMu             sync.Mutex
-	fsStore          *fsdoc.Store
-	pendingInitialWS map[*wsClient]struct{}
-	startedOnce      sync.Once
-	startedCh        chan struct{}
-	tailscale        *tailscaleRuntime
-	plugins          *pluginRegistry
-	pluginProcesses  *pluginProcessRegistry
-	pluginDriverMu   sync.Mutex
-	pluginLaunching  map[string]pluginSessionLaunch
-	pluginReports    map[string][]pendingPluginReport
-	pluginExits      map[string]ptybackend.ExitInfo
-	pluginDir        string
+	fsMu               sync.Mutex
+	fsStore            *fsdoc.Store
+	pendingInitialWS   map[*wsClient]struct{}
+	startedOnce        sync.Once
+	startedCh          chan struct{}
+	tailscale          *tailscaleRuntime
+	plugins            *pluginRegistry
+	pluginSupervisorMu sync.Mutex
+	pluginSupervisor   *pluginSupervisor
+	pluginDriverMu     sync.Mutex
+	pluginLaunching    map[string]pluginSessionLaunch
+	pluginReports      map[string][]pendingPluginReport
+	pluginExits        map[string]ptybackend.ExitInfo
+	pluginDir          string
+	removePlugin       func(pluginDir, name string) error
 
 	worktreePluginCallTimeout         time.Duration
 	worktreeCreateProviderCallTimeout time.Duration
@@ -563,7 +565,6 @@ func New(socketPath string) *Daemon {
 		pendingResumeID:    make(map[string]string),
 		tailscale:          newTailscaleRuntime(),
 		plugins:            newPluginRegistry(),
-		pluginProcesses:    newPluginProcessRegistry(),
 		pluginDir:          pluginDirForSocket(socketPath),
 		workspaces:         newWorkspaceRegistry(),
 	}
@@ -601,7 +602,6 @@ func NewForTesting(socketPath string) *Daemon {
 		pendingResumeID:    make(map[string]string),
 		tailscale:          newTailscaleRuntime(),
 		plugins:            newPluginRegistry(),
-		pluginProcesses:    newPluginProcessRegistry(),
 		pluginDir:          pluginDirForSocket(socketPath),
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
@@ -645,7 +645,6 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		pendingResumeID:    make(map[string]string),
 		tailscale:          newTailscaleRuntime(),
 		plugins:            newPluginRegistry(),
-		pluginProcesses:    newPluginProcessRegistry(),
 		pluginDir:          pluginDirForSocket(socketPath),
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
@@ -692,9 +691,7 @@ func (d *Daemon) Start() error {
 	if d.plugins == nil {
 		d.plugins = newPluginRegistry()
 	}
-	if d.pluginProcesses == nil {
-		d.pluginProcesses = newPluginProcessRegistry()
-	}
+	d.ensurePluginSupervisor()
 	// Push the headless context-window cap into the agent package's process-global
 	// before any headless run can start, so the default (or configured) cap
 	// applies from the first keeper/narration/reconcile run.

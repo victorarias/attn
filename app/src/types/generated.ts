@@ -2576,16 +2576,20 @@ export enum PluginActionResultMessageEvent {
 }
 
 export interface PluginInfo {
-    connected:       boolean;
-    description?:    string;
-    dir:             string;
-    health_message?: string;
-    health_status?:  string;
-    last_health_at?: string;
-    name:            string;
-    priority:        number;
-    running:         boolean;
-    version:         string;
+    connected:        boolean;
+    description?:     string;
+    dir:              string;
+    health_message?:  string;
+    health_status?:   string;
+    last_exit?:       string;
+    last_health_at?:  string;
+    name:             string;
+    next_restart_at?: string;
+    priority:         number;
+    restart_attempt?: number;
+    running:          boolean;
+    runtime_phase?:   string;
+    version:          string;
     [property: string]: any;
 }
 
@@ -9043,10 +9047,14 @@ const typeMap: any = {
         { json: "dir", js: "dir", typ: "" },
         { json: "health_message", js: "health_message", typ: u(undefined, "") },
         { json: "health_status", js: "health_status", typ: u(undefined, "") },
+        { json: "last_exit", js: "last_exit", typ: u(undefined, "") },
         { json: "last_health_at", js: "last_health_at", typ: u(undefined, "") },
         { json: "name", js: "name", typ: "" },
+        { json: "next_restart_at", js: "next_restart_at", typ: u(undefined, "") },
         { json: "priority", js: "priority", typ: 0 },
+        { json: "restart_attempt", js: "restart_attempt", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: true },
+        { json: "runtime_phase", js: "runtime_phase", typ: u(undefined, "") },
         { json: "version", js: "version", typ: "" },
     ], "any"),
     "PluginIssue": o([

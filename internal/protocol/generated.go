@@ -2403,17 +2403,29 @@ type PluginInfo struct {
 	// HealthStatus corresponds to the JSON schema field "health_status".
 	HealthStatus *string `json:"health_status,omitempty,omitzero"`
 
+	// LastExit corresponds to the JSON schema field "last_exit".
+	LastExit *string `json:"last_exit,omitempty,omitzero"`
+
 	// LastHealthAt corresponds to the JSON schema field "last_health_at".
 	LastHealthAt *string `json:"last_health_at,omitempty,omitzero"`
 
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
 
+	// NextRestartAt corresponds to the JSON schema field "next_restart_at".
+	NextRestartAt *string `json:"next_restart_at,omitempty,omitzero"`
+
 	// Priority corresponds to the JSON schema field "priority".
 	Priority int `json:"priority"`
 
+	// RestartAttempt corresponds to the JSON schema field "restart_attempt".
+	RestartAttempt *int `json:"restart_attempt,omitempty,omitzero"`
+
 	// Running corresponds to the JSON schema field "running".
 	Running bool `json:"running"`
+
+	// RuntimePhase corresponds to the JSON schema field "runtime_phase".
+	RuntimePhase *string `json:"runtime_phase,omitempty,omitzero"`
 
 	// Version corresponds to the JSON schema field "version".
 	Version string `json:"version"`

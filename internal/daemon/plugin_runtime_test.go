@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func TestDiscoverPluginManifests_ReportsInvalidManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(badDir, pluginManifestName), []byte(`
 name = "bad-plugin"
 version = "0.1.0"
-attn_api_version = 3
+attn_api_version = 4
 `), 0o644); err != nil {
 		t.Fatalf("write bad manifest: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestDiscoverPluginManifests_AllowsRuntimeOnlyManifestNames(t *testing.T) {
 	manifest := []byte(`
 name = "manual/provider"
 version = "0.1.0"
-attn_api_version = 3
+attn_api_version = 4
 
 [plugin]
 entrypoint = "src/index.ts"
@@ -132,6 +133,61 @@ func TestDaemon_StartInstalledPlugins_SpawnsProviderPlugin(t *testing.T) {
 	}
 }
 
+func TestDaemon_StartInstalledPlugins_RestartsCleanExitWithNewGeneration(t *testing.T) {
+	t.Setenv("ATTN_WS_PORT", "19972")
+	t.Setenv("ATTN_PLUGIN_HELPER", "1")
+	t.Setenv("ATTN_TEST_HELPER_BINARY", os.Args[0])
+
+	tmpDir := shortTempDir(t)
+	t.Setenv("ATTN_PLUGIN_EXIT_ONCE_MARKER", filepath.Join(tmpDir, "first-generation-exited"))
+	sockPath := filepath.Join(tmpDir, "plugin-runtime.sock")
+	pluginDir := filepath.Join(tmpDir, "plugins")
+	writeTestPluginManifest(t, pluginDir, "restarted-provider")
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir fake bun dir: %v", err)
+	}
+	bunPath := filepath.Join(binDir, "bun")
+	if err := os.WriteFile(bunPath, []byte("#!/bin/sh\nexec \"$ATTN_TEST_HELPER_BINARY\" -test.run '^TestDaemonPluginProcessHelper$'\n"), 0o755); err != nil {
+		t.Fatalf("write fake bun: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	d := NewForTesting(sockPath)
+	d.pluginDir = pluginDir
+	// Isolate process launching from the daemon's asynchronous login-shell env
+	// prewarm so every generation resolves the same fake bun fixture.
+	d.pluginSupervisor = newPluginSupervisor(
+		execPluginProcessLauncher{},
+		realPluginSupervisorClock{},
+		func(manifest pluginManifest, generation uint64) []string {
+			return mergePluginEnvironment(os.Environ(), []string{
+				"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+				"ATTN_SOCKET_PATH=" + sockPath,
+				"ATTN_PLUGIN_NAME=" + manifest.Name,
+				"ATTN_PLUGIN_GENERATION=" + strconv.FormatUint(generation, 10),
+			})
+		},
+		d.broadcastPluginsUpdated,
+	)
+	go d.Start()
+	defer d.Stop()
+	waitForSocket(t, sockPath, 5*time.Second)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, ok := d.ensurePluginSupervisor().Snapshot("restarted-provider")
+		if ok && snapshot.Generation >= 2 && snapshot.Phase == pluginPhaseConnected {
+			if len(d.plugins.handlersForSurface("worktree.create")) != 1 {
+				t.Fatal("restarted plugin did not restore its surface")
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snapshot, _ := d.ensurePluginSupervisor().Snapshot("restarted-provider")
+	t.Fatalf("plugin did not reconnect after clean exit: %+v", snapshot)
+}
+
 func TestPluginCommandEnv_UsesLoginShellEnvironment(t *testing.T) {
 	t.Setenv("PATH", "/daemon/bin")
 
@@ -166,9 +222,23 @@ func TestDaemonPluginProcessHelper(t *testing.T) {
 	defer conn.Close()
 
 	name := os.Getenv("ATTN_PLUGIN_NAME")
-	sendPluginHelloWithSurfaces(t, conn, name, []string{"worktree.create", "worktree.delete"})
+	generation, err := strconv.ParseUint(os.Getenv("ATTN_PLUGIN_GENERATION"), 10, 64)
+	if err != nil || generation == 0 {
+		t.Fatalf("invalid plugin generation %q", os.Getenv("ATTN_PLUGIN_GENERATION"))
+	}
+	sendPluginHelloWithGeneration(t, conn, name, []string{"worktree.create", "worktree.delete"}, generation)
 	if resp := decodeJSONRPCMessage(t, conn); resp.Error != nil {
 		t.Fatalf("helper hello error=%#v", resp.Error)
+	}
+	if marker := os.Getenv("ATTN_PLUGIN_EXIT_ONCE_MARKER"); marker != "" {
+		file, err := os.OpenFile(marker, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_ = file.Close()
+			return
+		}
+		if !os.IsExist(err) {
+			t.Fatalf("create one-shot exit marker: %v", err)
+		}
 	}
 
 	time.Sleep(30 * time.Second)
@@ -197,7 +267,7 @@ func writeTestPluginManifest(t *testing.T, pluginDir, name string) {
 	manifest := []byte(`
 name = "` + name + `"
 version = "0.1.0"
-attn_api_version = 3
+attn_api_version = 4
 
 [plugin]
 entrypoint = "src/index.ts"

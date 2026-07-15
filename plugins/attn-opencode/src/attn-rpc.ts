@@ -36,6 +36,7 @@ export class AttnRPCClient {
       socketPath: string;
       name: string;
       version: string;
+      generation: number;
     },
   ) {}
 
@@ -70,6 +71,7 @@ export class AttnRPCClient {
         name: this.options.name,
         version: this.options.version,
         attn_api_version: pluginAPIVersion,
+        generation: this.options.generation,
       });
       if (!result.ok) throw new Error("attn rejected plugin hello");
     } catch (error) {

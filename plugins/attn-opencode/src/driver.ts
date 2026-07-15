@@ -6,6 +6,8 @@ import { OpenCodeStopClassifier } from "./stop-classifier";
 import {
   type DriverSpawnParams,
   type DriverSpawnResult,
+  type ActivePluginRun,
+  type DriverRegisterResult,
   type LaunchConfig,
   type OpenCodeMetadata,
   type OpenCodeModel,
@@ -105,19 +107,9 @@ export class OpenCodeDriver {
 
   async initialize(): Promise<void> {
     await this.options.registry.initialize();
-    await this.options.registry.pruneDead(async (record) => {
-      try {
-        const config = await this.options.registry.readLaunchConfig(record);
-        const password = await this.options.registry.password(record);
-        await this.healthWithin(this.http(config.port, password));
-        return true;
-      } catch {
-        return false;
-      }
-    });
     await this.refreshAvailability();
     if (this.availability.ok) {
-      await this.options.rpc.request("driver.register", {
+      const result = await this.options.rpc.request<DriverRegisterResult>("driver.register", {
         agent: "opencode",
         capabilities: {
           resume: true,
@@ -131,6 +123,8 @@ export class OpenCodeDriver {
           launch_instructions: true,
         },
       });
+      if (!result.ok) throw new Error("attn rejected OpenCode driver registration");
+      await this.recover(result.active_runs ?? []);
     }
   }
 
@@ -194,9 +188,7 @@ export class OpenCodeDriver {
         instruction_ref: record.instruction_ref,
       };
       await this.options.registry.writeLaunchConfig(record, launchConfig);
-      const controller = new AbortController();
-      this.monitors.set(record.run_id, controller);
-      void this.monitor(record, selection, controller.signal);
+      this.startMonitor(record, selection);
       return {
         argv: [process.execPath, "run", join(import.meta.dir, "launcher.ts"), record.launch_config_ref],
         cwd: params.cwd,
@@ -205,6 +197,36 @@ export class OpenCodeDriver {
       if (record) await this.options.registry.cleanup(record.run_id);
       throw error;
     }
+  }
+
+  private async recover(activeRuns: ActivePluginRun[]): Promise<void> {
+    const owned = new Map(activeRuns.map((run) => [run.run_id, run]));
+    for (const record of await this.options.registry.list()) {
+      const active = owned.get(record.run_id);
+      if (!active || !activeRunMatchesRecord(active, record)) {
+        await this.options.registry.cleanup(record.run_id);
+        continue;
+      }
+      let selection: LaunchSelection;
+      try {
+        const config = await this.options.registry.readLaunchConfig(record);
+        const password = await this.options.registry.password(record);
+        const health = await this.healthWithin(this.http(config.port, password));
+        if (health.version !== record.opencode_version) throw new Error("OpenCode recovery server version changed");
+        selection = selectionFromRecord(record);
+      } catch {
+        await this.options.registry.cleanup(record.run_id);
+        continue;
+      }
+      this.startMonitor(record, selection);
+    }
+  }
+
+  private startMonitor(record: RunRecord, selection: LaunchSelection): void {
+    this.monitors.get(record.run_id)?.abort(new Error("OpenCode monitor was replaced"));
+    const controller = new AbortController();
+    this.monitors.set(record.run_id, controller);
+    void this.monitor(record, selection, controller.signal);
   }
 
   private freshSelection(params: DriverSpawnParams): LaunchSelection {
@@ -757,6 +779,31 @@ function cancelsClassification(event: { type: string; status?: string }): boolea
     event.type === "permission.replied" ||
     event.type === "session.error" ||
     event.type === "session.deleted";
+}
+
+function activeRunMatchesRecord(active: ActivePluginRun, record: RunRecord): boolean {
+  if (active.session_id !== record.attn_session_id || active.run_id !== record.run_id) return false;
+  if (active.metadata === undefined || active.metadata === null || active.metadata === "") return true;
+  try {
+    const metadata = parseMetadata(active.metadata);
+    return Boolean(record.opencode_session_id) && metadata.opencode_session_id === record.opencode_session_id;
+  } catch {
+    return false;
+  }
+}
+
+function selectionFromRecord(record: RunRecord): LaunchSelection {
+  if (!record.pinned) {
+    return { mode: "interactive", nativeSessionID: record.opencode_session_id };
+  }
+  if (!record.model || !record.variant) throw new Error("pinned OpenCode recovery record is missing model metadata");
+  return {
+    mode: "pinned",
+    modelText: record.model,
+    model: { ...parseModelPin(record.model), variant: record.variant },
+    variant: record.variant,
+    nativeSessionID: record.opencode_session_id,
+  };
 }
 
 async function runCommand(argv: string[]): Promise<CommandResult> {

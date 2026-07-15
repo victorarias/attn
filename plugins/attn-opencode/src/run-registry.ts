@@ -89,6 +89,10 @@ export class RunRegistry {
     });
   }
 
+  async list(): Promise<RunRecord[]> {
+    return this.withLock(() => [...this.runs.values()].map((run) => structuredClone(run)));
+  }
+
   async update(runID: string, changes: Partial<RunRecord>): Promise<RunRecord> {
     return this.withLock(async () => {
       const current = this.runs.get(runID);

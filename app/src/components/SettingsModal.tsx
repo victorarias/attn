@@ -1542,14 +1542,15 @@ export function SettingsModal({
               const busy = pluginActionName === plugin.name;
               const draftPriority = pluginPriorityDrafts[plugin.name] ?? String(plugin.priority);
               const healthStatus = plugin.health_status || 'unknown';
+              const runtimePhase = plugin.runtime_phase || (plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped');
               return (
                 <div key={plugin.name} className="plugin-card">
                   <div className="plugin-card-header">
                     <div className="plugin-card-title">
                       <span className="endpoint-name">{plugin.name}</span>
                       <span className="settings-pill">v{plugin.version}</span>
-                      <span className={`plugin-status-badge ${plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped'}`}>
-                        {plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped'}
+                      <span className={`plugin-status-badge ${runtimePhase}`}>
+                        {runtimePhase}
                       </span>
                       <span className={`plugin-health-badge ${healthStatus}`}>
                         {healthStatus}
@@ -1565,11 +1566,28 @@ export function SettingsModal({
                       Healthcheck: {plugin.health_message}
                     </div>
                   )}
+                  {plugin.last_exit && (
+                    <div className="settings-warning">
+                      Last exit: {plugin.last_exit}
+                    </div>
+                  )}
                   <div className="plugin-meta-grid">
                     <div className="settings-meta-row">
                       <span className="settings-meta-label">Path</span>
                       <code>{plugin.dir}</code>
                     </div>
+                    {plugin.restart_attempt !== undefined && (
+                      <div className="settings-meta-row">
+                        <span className="settings-meta-label">Restart attempt</span>
+                        <code>{plugin.restart_attempt}</code>
+                      </div>
+                    )}
+                    {plugin.next_restart_at && (
+                      <div className="settings-meta-row">
+                        <span className="settings-meta-label">Next restart</span>
+                        <code>{plugin.next_restart_at}</code>
+                      </div>
+                    )}
                     <label className="plugin-priority-control">
                       <span className="settings-meta-label">Priority</span>
                       <input

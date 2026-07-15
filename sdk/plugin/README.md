@@ -42,8 +42,14 @@ await client.connect();
 `client.handle(...)` is the declaration point. `connect()` includes every
 registered surface in the daemon handshake, so plugin code does not maintain a
 second registration list. Managed plugins get `ATTN_SOCKET_PATH` and
-`ATTN_PLUGIN_NAME` from attn; manually-launched plugins can still pass
-`socketPath` or `name` explicitly.
+`ATTN_PLUGIN_NAME` from attn, plus an `ATTN_PLUGIN_GENERATION` token that the SDK
+returns in the handshake. Manually launched plugins can still pass `socketPath`
+or `name` explicitly and use generation 1.
+
+Attn supervises installed plugin processes. A clean exit, crash, or connection
+loss longer than five seconds triggers a restart with bounded backoff. Plugin
+code should therefore rebuild registrations and in-memory state from durable
+sources each time `connect()` succeeds.
 
 The SDK handles `attn.health` internally and returns `{ ok: true }`. Plugin
 authors do not need to register a health handler for the daemon to distinguish a

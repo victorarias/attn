@@ -326,7 +326,8 @@
 .settings-pill.warn,
 .endpoint-status-badge.status-connecting,
 .endpoint-status-badge.status-bootstrapping,
-.plugin-status-badge.starting {
+.plugin-status-badge.starting,
+.plugin-status-badge.backoff {
   color: #f59b4a;
   border-color: rgba(245, 155, 74, 0.42);
   background: rgba(245, 155, 74, 0.11);

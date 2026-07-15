@@ -49,6 +49,42 @@ func TestPluginDriverRegister_PublishesDynamicAgentSettings(t *testing.T) {
 	}
 }
 
+func TestPluginDriverRegister_ReturnsOnlyActiveRunsOwnedByPlugin(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := protocol.TimestampNow().String()
+	for _, sessionID := range []string{"owned", "other"} {
+		d.store.Add(&protocol.Session{ID: sessionID, Agent: "external", State: protocol.SessionStateWorking, StateSince: now, LastSeen: now})
+	}
+	if !d.store.BeginAgentDriverRun("owned", "snipe-plugin", "run-owned") ||
+		!d.store.BeginAgentDriverRun("other", "other-plugin", "run-other") {
+		t.Fatal("BeginAgentDriverRun failed")
+	}
+	if !d.store.ApplyAgentDriverMetadata("owned", "run-owned", 1, `{"native_id":"abc"}`) {
+		t.Fatal("ApplyAgentDriverMetadata failed")
+	}
+
+	client, done := startPluginPipe(t, d, "snipe-plugin", nil)
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+	response := sendPluginMethodResponse(t, client, 2, "driver.register", pluginDriverRegisterParams{Agent: "snipe"})
+	if response.Error != nil {
+		t.Fatalf("driver.register error=%#v", response.Error)
+	}
+	var result pluginDriverRegisterResult
+	if err := json.Unmarshal(response.Result, &result); err != nil {
+		t.Fatalf("decode register result: %v", err)
+	}
+	if !result.OK || len(result.ActiveRuns) != 1 {
+		t.Fatalf("result=%+v, want one active run", result)
+	}
+	run := result.ActiveRuns[0]
+	if run.SessionID != "owned" || run.RunID != "run-owned" || string(run.Metadata) != `{"native_id":"abc"}` {
+		t.Fatalf("active run=%+v", run)
+	}
+}
+
 func TestHandleSpawnSession_PluginDriverLaunchesReturnedCommand(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
