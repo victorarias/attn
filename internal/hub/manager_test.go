@@ -554,6 +554,70 @@ func TestForwardsRawEventIncludesPickerResults(t *testing.T) {
 	}
 }
 
+// The remote daemon rejects every capability-gated command (register_workspace,
+// spawn_session, forwarded client payloads, ...) from a connection that never
+// sent client_hello. The hub's persistent endpoint connection must therefore
+// declare workspace_sessions before anything else is written.
+func TestSendClientHelloDeclaresWorkspaceSessions(t *testing.T) {
+	received := make(chan protocol.ClientHelloMessage, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("Accept() error = %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		_, payload, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("Read() error = %v", err)
+			return
+		}
+		var hello protocol.ClientHelloMessage
+		if err := json.Unmarshal(payload, &hello); err != nil {
+			t.Errorf("Unmarshal() error = %v", err)
+			return
+		}
+		received <- hello
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	if err := sendClientHello(ctx, conn); err != nil {
+		t.Fatalf("sendClientHello() error = %v", err)
+	}
+
+	select {
+	case hello := <-received:
+		if hello.Cmd != protocol.CmdClientHello {
+			t.Errorf("cmd = %q, want %q", hello.Cmd, protocol.CmdClientHello)
+		}
+		if hello.ClientKind != "hub" {
+			t.Errorf("client_kind = %q, want %q", hello.ClientKind, "hub")
+		}
+		if want := "protocol-" + protocol.ProtocolVersion; hello.Version != want {
+			t.Errorf("version = %q, want %q", hello.Version, want)
+		}
+		found := false
+		for _, c := range hello.Capabilities {
+			if c == protocol.CapabilityWorkspaceSessions {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("capabilities = %v, missing %q", hello.Capabilities, protocol.CapabilityWorkspaceSessions)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for client_hello")
+	}
+}
+
 func TestManagerForwardBrowserControlReturnsOwningEndpointResult(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)

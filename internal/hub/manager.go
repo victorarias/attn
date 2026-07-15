@@ -482,7 +482,15 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		}
 
 		m.setConnection(id, conn, cmd)
-		connected, consumeErr := m.consumeRemote(ctx, id, conn)
+		// Declare the workspace_sessions capability before anything else: the
+		// remote daemon rejects every gated command (register_workspace,
+		// spawn_session, forwarded client payloads, ...) from a connection
+		// that never sent client_hello, closing it with a policy violation.
+		connected := false
+		consumeErr := sendClientHello(ctx, conn)
+		if consumeErr == nil {
+			connected, consumeErr = m.consumeRemote(ctx, id, conn)
+		}
 		m.clearConnection(id)
 		if m.clearRemoteSessions(id) {
 			m.publishSessionsChanged()
@@ -547,6 +555,26 @@ func versionMismatchStatus(e *VersionMismatchError) (string, string) {
 		"remote v%s, this client v%s — remote needs update",
 		e.RemoteVersion, e.LocalVersion,
 	)
+}
+
+// sendClientHello identifies the hub connection to the remote daemon. The
+// hello is fire-and-forget (the daemon never replies to it), but without the
+// workspace_sessions capability it declares, the daemon rejects every gated
+// command later forwarded over this connection.
+func sendClientHello(ctx context.Context, conn *websocket.Conn) error {
+	payload, err := json.Marshal(protocol.ClientHelloMessage{
+		Cmd:          protocol.CmdClientHello,
+		ClientKind:   "hub",
+		Version:      "protocol-" + protocol.ProtocolVersion,
+		Capabilities: []string{protocol.CapabilityWorkspaceSessions},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal client_hello: %w", err)
+	}
+	if err := conn.Write(ctx, websocket.MessageText, payload); err != nil {
+		return fmt.Errorf("send client_hello: %w", err)
+	}
+	return nil
 }
 
 func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.Conn) (bool, error) {
