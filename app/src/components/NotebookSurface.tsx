@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
-import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
+import type { FsEntry, FsExistsResult, FsReadAssetResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { useNotebookFileIndex } from '../hooks/useNotebookFileIndex';
 import { useTileAutoFold } from '../hooks/useTileAutoFold';
+import { notebookLinkPath } from './notebook/brokenLinks';
 import { FileTree } from './notebook/FileTree';
 import { fileKind, isBinaryPath, isMarkdownPath } from './notebook/fileKind';
 import { parseFrontmatter } from './notebook/frontmatter';
@@ -50,6 +51,9 @@ export interface NotebookSurfaceProps {
   // Check whether an in-notebook link target exists (no read), to flag broken links
   // in the editor. Only consulted for markdown notes.
   existsFile: (path: string) => Promise<FsExistsResult>;
+  // Read an image asset's bytes (base64) for the live editor's inline image widget.
+  // Only consulted for a non-direct src (not http(s)/data:/protocol-relative).
+  readAsset: (path: string) => Promise<FsReadAssetResult>;
   // Backlinks ("Linked from") for a markdown note. Notebook-specific (walks .md link
   // graphs), so it is only consulted for .md files.
   backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
@@ -97,6 +101,7 @@ export function NotebookSurface({
   readFile,
   writeFile,
   existsFile,
+  readAsset,
   backlinksNotebook,
   sendToChief,
   changeSignal = 0,
@@ -736,6 +741,22 @@ export function NotebookSurface({
     setChiefSel(selection);
   }, []);
 
+  // Resolve an inline image's src for the live editor's image widget: strip any
+  // #fragment/?query tail (notebookLinkPath — same rule brokenLinks uses), then read
+  // the asset's bytes and hand back a data: URI. A non-notebook path (already
+  // rejected by notebookLinkPath) or a failed read both resolve to null, which the
+  // widget renders as its broken placeholder.
+  const resolveImageSrc = useCallback(async (src: string) => {
+    const path = notebookLinkPath(src);
+    if (!path) return null;
+    try {
+      const asset = await readAsset(path);
+      return `data:${asset.mimeType};base64,${asset.dataBase64}`;
+    } catch {
+      return null;
+    }
+  }, [readAsset]);
+
   // The outline is a markdown affordance only, derived from the LIVE buffer so it
   // tracks edits as you type. Indexing into `draft` keeps heading positions aligned
   // with what the editor holds, so a jump lands on the right line. (Hook: must run
@@ -864,6 +885,7 @@ export function NotebookSurface({
                     onFollowLink={handleFollowLink}
                     onSelectionChange={handleSelectionChange}
                     existsFile={existsFile}
+                    resolveImageSrc={resolveImageSrc}
                     revalidateSignal={changeSignal}
                     ariaLabel="Note"
                     onSearchOpenChange={setSearchOpen}

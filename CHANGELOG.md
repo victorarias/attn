@@ -58,6 +58,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Richer live-preview rendering in the Notebook editor.** Code fences now get language syntax highlighting, and blockquotes and horizontal rules render styled instead of as raw markers.
 - **Markdown tables in the Notebook editor** now render as real tables, with raw source revealed for editing when the cursor is inside (click a row to edit it).
 - **⌘B/⌘I/⌘E toggle bold, italic, and inline code in the Notebook editor.** Wraps the selection or the word under the cursor; press again to remove.
+- **Images now render inline in the Notebook editor.** A `![alt](path)` on its own line shows the picture itself, with a "not found" placeholder if the file can't be located; click the image to see (and edit) its raw markdown.
 
 ### Fixed
 - **Terminal panes no longer get stuck at a stale size.** Some panes could stay rendered at a stale, historical size after a session reattach — bottom or right edges painted outside the pane — until the pane was reopened. They now recover on their own.

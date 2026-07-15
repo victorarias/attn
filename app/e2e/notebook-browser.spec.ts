@@ -285,6 +285,50 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await expect(page.locator('.cm-content')).toContainText('| one');
   });
 
+  test('renders an inline image as a widget wired to readAsset, shows a broken placeholder for a missing asset, and reveals raw source on click', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+
+    await page.getByRole('treeitem', { name: 'images.md' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'images' })).toBeVisible();
+
+    // The resolvable image renders as a real <img>, sourced from readAsset's bytes as
+    // a data: URI (never a bare notebook-relative path — the editor has no fs perms).
+    const img = page.locator('.cm-md-image img');
+    await expect(img).toBeVisible();
+    await expect(img).toHaveAttribute('src', /^data:image\/png;base64,/);
+    const checked = await page.evaluate(() => window.__HARNESS__.getCalls('readAsset').map((c) => c[0]));
+    expect(checked).toContain('assets/tiny.png');
+
+    // The missing asset shows the broken placeholder, not a blank/broken <img>.
+    const broken = page.locator('.cm-md-image-broken');
+    await expect(broken).toBeVisible();
+    await expect(broken).toContainText('gone');
+    await expect(broken).toContainText('image not found');
+
+    // Clicking the rendered widget's line reveals its raw markdown — the
+    // regression-prone part: if the selection-intersection reveal rule breaks, the
+    // widget never yields back to raw text.
+    await page.locator('.cm-md-image').click();
+    await expect(page.locator('.cm-md-image')).toHaveCount(0);
+    await expect(page.locator('.cm-content')).toContainText('![tiny](assets/tiny.png)');
+
+    // Regression: the widget's eq() is deliberately position-blind (alt/src only) so
+    // an edit ABOVE it doesn't recreate its DOM (which would flicker/reload the image).
+    // But that means the click handler must read its position from the view at click
+    // time, not from a value captured when the DOM was built — otherwise editing above
+    // the image (shifting it down) leaves a click landing on the stale, pre-edit offset.
+    await page.locator('.cm-content').getByText('Images', { exact: true }).click();
+    await page.keyboard.press('Home');
+    await page.keyboard.type('\n\n');
+    await expect(page.locator('.cm-md-image')).toBeVisible();
+
+    await page.locator('.cm-md-image').click();
+    await expect(page.locator('.cm-md-image')).toHaveCount(0);
+    await expect(page.locator('.cm-content')).toContainText('![tiny](assets/tiny.png)');
+  });
+
   // CodeMirror renders each line as one text node, so a text-content locator can't
   // isolate a single word for dblclick; find the word's on-screen rect via a DOM
   // Range instead and double-click its center.

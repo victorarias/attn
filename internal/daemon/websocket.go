@@ -930,6 +930,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdFsRead:
 		fsRead := msg.(*protocol.FsReadMessage)
 		go d.sendFsReadWSResult(client, protocol.Deref(fsRead.RequestID), fsRead.Path)
+	case protocol.CmdFsReadAsset:
+		fsReadAsset := msg.(*protocol.FsReadAssetMessage)
+		go d.sendFsReadAssetWSResult(client, protocol.Deref(fsReadAsset.RequestID), fsReadAsset.Path)
 	case protocol.CmdFsWrite:
 		fsWrite := msg.(*protocol.FsWriteMessage)
 		go d.sendFsWriteWSResult(client, protocol.Deref(fsWrite.RequestID), fsWrite.Path, fsWrite.Content, protocol.Deref(fsWrite.BaseHash))

@@ -563,6 +563,7 @@ function App() {
     sendFsRename,
     sendFsDelete,
     sendFsExists,
+    sendFsReadAsset,
     sendTaskList,
     sendTaskRetry,
     sendNotificationList,
@@ -758,6 +759,7 @@ function App() {
         sendFsRename={sendFsRename}
         sendFsDelete={sendFsDelete}
         sendFsExists={sendFsExists}
+        sendFsReadAsset={sendFsReadAsset}
         sendTaskList={sendTaskList}
         sendTaskRetry={sendTaskRetry}
         sendNotificationList={sendNotificationList}
@@ -870,6 +872,7 @@ interface AppContentProps {
   sendFsRename: ReturnType<typeof useDaemonSocket>['sendFsRename'];
   sendFsDelete: ReturnType<typeof useDaemonSocket>['sendFsDelete'];
   sendFsExists: ReturnType<typeof useDaemonSocket>['sendFsExists'];
+  sendFsReadAsset: ReturnType<typeof useDaemonSocket>['sendFsReadAsset'];
   sendTaskList: ReturnType<typeof useDaemonSocket>['sendTaskList'];
   sendTaskRetry: ReturnType<typeof useDaemonSocket>['sendTaskRetry'];
   sendNotificationList: ReturnType<typeof useDaemonSocket>['sendNotificationList'];
@@ -976,6 +979,7 @@ function AppContent({
   sendFsRename,
   sendFsDelete,
   sendFsExists,
+  sendFsReadAsset,
   sendTaskList,
   sendTaskRetry,
   sendNotificationList,
@@ -3326,6 +3330,7 @@ sendFetchPRDetails,
     readFile: sendFsRead,
     writeFile: sendFsWrite,
     existsFile: sendFsExists,
+    readAsset: sendFsReadAsset,
     backlinksNotebook: sendNotebookBacklinks,
     sendToChief: sendNotebookToChief,
     // Argless walk = empty prefix = the whole vault, for the in-tile finder index.
@@ -3336,6 +3341,7 @@ sendFetchPRDetails,
     sendFsRead,
     sendFsWrite,
     sendFsExists,
+    sendFsReadAsset,
     sendNotebookBacklinks,
     sendNotebookToChief,
     sendNotebookList,
@@ -3757,6 +3763,7 @@ sendFetchPRDetails,
         readFile={sendFsRead}
         writeFile={sendFsWrite}
         existsFile={sendFsExists}
+        readAsset={sendFsReadAsset}
         backlinksNotebook={sendNotebookBacklinks}
         sendToChief={sendNotebookToChief}
         listFiles={sendNotebookList}

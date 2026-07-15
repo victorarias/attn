@@ -1106,6 +1106,15 @@ model FsReadMessage {
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
+// Read one image file's bytes as base64, for the notebook editor to render
+// ![alt](path) images without widening Tauri's fs permissions. Only a fixed
+// allowlist of image extensions is served; anything else is an error.
+model FsReadAssetMessage {
+  cmd: "fs_read_asset";
+  path: string;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
 model FsWriteMessage {
   cmd: "fs_write";
   path: string;
@@ -2847,6 +2856,12 @@ model FsReadResult {
   hash: string;
 }
 
+model FsReadAssetResult {
+  path: string;
+  mime_type: string;
+  data_base64: string;
+}
+
 // Result of fs_write. When conflict is true the write did not apply; current_hash
 // is the hash now on disk (empty if the target is gone). Same contract as
 // NotebookWriteResult.
@@ -2880,6 +2895,14 @@ model FsReadResultMessage {
   success: boolean;
   error?: string;
   result?: FsReadResult;
+}
+
+model FsReadAssetResultMessage {
+  event: "fs_read_asset_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  result?: FsReadAssetResult;
 }
 
 model FsRenameResultMessage {
@@ -3113,6 +3136,7 @@ alias DaemonEvent =
   | NotebookSendToChiefResultMessage
   | FsListResultMessage
   | FsReadResultMessage
+  | FsReadAssetResultMessage
   | FsWriteResultMessage
   | FsRenameResultMessage
   | FsDeleteResultMessage

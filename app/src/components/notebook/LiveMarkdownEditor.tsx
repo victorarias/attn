@@ -15,6 +15,7 @@ import { EditorView, keymap, type KeyBinding, type ViewUpdate } from '@codemirro
 import { brokenLinks, revalidateBrokenLinks, type ExistsCheck } from './brokenLinks';
 import { formattingKeymap } from './formatting';
 import { frontmatterCard } from './frontmatterCard';
+import { imageWidget } from './imageWidget';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
 import { markdownTables } from './tableWidget';
 import { computeMinimalEdit } from './minimalEdit';
@@ -64,6 +65,10 @@ interface LiveMarkdownEditorProps {
   // Check whether an in-notebook link target exists, to flag broken links. Omit to
   // disable the flagging (e.g. the test harness, which has no daemon).
   existsFile?: (path: string) => Promise<ExistsCheck>;
+  // Resolve an in-notebook image src to a displayable src (typically a data: URI) for
+  // the inline image widget. Omit to disable resolution — non-direct image srcs (not
+  // http(s)/data:/protocol-relative) then always render the broken placeholder.
+  resolveImageSrc?: (src: string) => Promise<string | null>;
   // Bumped whenever the notebook changed on disk; clears the broken-link cache's
   // "missing" verdicts so a link to a just-created note re-checks. (A change counter,
   // not data — only its identity change matters.)
@@ -159,6 +164,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
   onFollowLink,
   onSelectionChange,
   existsFile,
+  resolveImageSrc,
   revalidateSignal,
   ariaLabel,
   autoFocus,
@@ -216,6 +222,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       EditorView.lineWrapping,
       frontmatterCard(),
       markdownTables(),
+      imageWidget({ resolveSrc: resolveImageSrc }),
       liveMarkdownPreview({ onFollowLink }),
       brokenLinks({ existsFile }),
       search({ top: true }),
@@ -223,7 +230,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       formattingKeymap(),
       editorTheme,
     ],
-    [onFollowLink, existsFile],
+    [onFollowLink, existsFile, resolveImageSrc],
   );
 
   // When the notebook changed on disk, ask the broken-link checker to re-verify any

@@ -2,6 +2,7 @@ import { createContext, useContext, type ReactNode } from 'react';
 import type {
   FsEntry,
   FsExistsResult,
+  FsReadAssetResult,
   FsReadResult,
   FsWriteResult,
   NotebookEntry,
@@ -17,6 +18,7 @@ export interface NotebookSurfaceDaemon {
   readFile: (path: string) => Promise<FsReadResult>;
   writeFile: (path: string, content: string, baseHash?: string) => Promise<FsWriteResult>;
   existsFile: (path: string) => Promise<FsExistsResult>;
+  readAsset: (path: string) => Promise<FsReadAssetResult>;
   backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
   sendToChief: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
   // Walk the whole vault (flat list of notes, with titles) for a tile's fuzzy finder.

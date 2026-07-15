@@ -1,12 +1,50 @@
 package daemon
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
 )
+
+// maxAssetMessageBytes bounds the entire marshaled fs_read_asset_result JSON
+// message — the unit that actually hits the WebSocket transport, which has no
+// other outbound cap. The raw read cap below is DERIVED from it, so the bound
+// on the wire is the contract and the file-size cap follows.
+const maxAssetMessageBytes = 8 << 20
+
+// assetEnvelopeSlack sizes the PREFLIGHT file-size cap only: a fast reject
+// before reading or encoding a file that's obviously too large. It is not the
+// wire bound — assetMessageFits below computes that exactly per request,
+// including arbitrarily long paths.
+const assetEnvelopeSlack = 4 << 10
+
+// maxAssetBytes bounds a single fs_read_asset read so base64(content) plus the
+// envelope always fits maxAssetMessageBytes (base64 of n bytes is 4*ceil(n/3)).
+const maxAssetBytes = (maxAssetMessageBytes - assetEnvelopeSlack) / 4 * 3
+
+// assetMimeTypes is the explicit allowlist of image extensions fs_read_asset will
+// serve. This IS the contract, not a convenience lookup: unlike mime.TypeByExtension
+// it deliberately excludes everything non-image, since this surface exists only to
+// render ![alt](path) images in the notebook editor without widening Tauri's fs
+// permissions.
+var assetMimeTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+	".avif": "image/avif",
+	".bmp":  "image/bmp",
+	".ico":  "image/x-icon",
+}
 
 // fsStoreFor returns the daemon's single generic filesystem Store for the active
 // root. The root is the SAME one the notebook uses (notebook.root): fsdoc is the
@@ -84,6 +122,77 @@ func (d *Daemon) sendFsReadWSResult(client *wsClient, requestID, path string) {
 		msg.Error = protocol.Ptr(err.Error())
 	}
 	d.sendToClient(client, msg)
+}
+
+// sendFsReadAssetWSResult reads one image file's bytes as base64 and replies with
+// an fs_read_asset_result event correlated by requestID. Only extensions in
+// assetMimeTypes are served; the extension is rejected before the file is read.
+func (d *Daemon) sendFsReadAssetWSResult(client *wsClient, requestID, path string) {
+	var result *protocol.FsReadAssetResult
+	mimeType, err := assetMimeTypeFor(path)
+	if err == nil {
+		var store *fsdoc.Store
+		if store, err = d.fsStoreFor(); err == nil {
+			var content []byte
+			if content, _, err = store.Read(path); err == nil {
+				if len(content) > maxAssetBytes {
+					err = fmt.Errorf("asset exceeds the %d byte read cap", maxAssetBytes)
+				} else if fits, ferr := assetMessageFits(requestID, path, mimeType, len(content)); ferr != nil {
+					err = ferr
+				} else if !fits {
+					err = fmt.Errorf("asset response exceeds the %d byte message cap", maxAssetMessageBytes)
+				} else {
+					result = &protocol.FsReadAssetResult{
+						Path:       path,
+						MimeType:   mimeType,
+						DataBase64: base64.StdEncoding.EncodeToString(content),
+					}
+				}
+			}
+		}
+	}
+	msg := protocol.FsReadAssetResultMessage{
+		Event:     protocol.EventFsReadAssetResult,
+		RequestID: requestID,
+		Success:   err == nil,
+		Result:    result,
+	}
+	if err != nil {
+		msg.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, msg)
+}
+
+// assetMimeTypeFor returns the mime type for path's extension, or an error if the
+// extension is not in the image allowlist.
+func assetMimeTypeFor(path string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	mimeType, ok := assetMimeTypes[ext]
+	if !ok {
+		return "", errors.New("not a supported image asset")
+	}
+	return mimeType, nil
+}
+
+// assetMessageFits reports whether the complete fs_read_asset_result message for
+// this request would marshal within maxAssetMessageBytes once rawLen content
+// bytes are base64-encoded into it. The size is exact, not an estimate: base64
+// output never needs JSON escaping, so the full message length is the marshaled
+// empty-payload envelope plus EncodedLen(rawLen). This — not the preflight file
+// cap — is the authoritative transport bound, and it accounts for the real
+// (arbitrarily long) path.
+func assetMessageFits(requestID, path, mimeType string, rawLen int) (bool, error) {
+	probe := protocol.FsReadAssetResultMessage{
+		Event:     protocol.EventFsReadAssetResult,
+		RequestID: requestID,
+		Success:   true,
+		Result:    &protocol.FsReadAssetResult{Path: path, MimeType: mimeType},
+	}
+	envelope, err := json.Marshal(probe)
+	if err != nil {
+		return false, err
+	}
+	return len(envelope)+base64.StdEncoding.EncodedLen(rawLen) <= maxAssetMessageBytes, nil
 }
 
 // sendFsWriteWSResult performs a hash-CAS write and replies with an
