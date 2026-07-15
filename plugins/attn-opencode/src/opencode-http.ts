@@ -65,8 +65,11 @@ export class OpenCodeHTTP {
       .map(assistantCompletion)
       .filter((candidate): candidate is { value: unknown; completedAt: number } => candidate !== undefined)
       .sort((left, right) => right.completedAt - left.completedAt);
-    if (candidates.length === 0) return undefined;
-    return normalizeAssistantTurn(candidates[0]!.value, candidates[0]!.completedAt);
+    for (const candidate of candidates) {
+      const turn = normalizeAssistantTurn(candidate.value, candidate.completedAt);
+      if (turn) return turn;
+    }
+    return undefined;
   }
 
   async listMessages(sessionID: string, limit: number, signal?: AbortSignal): Promise<unknown[]> {

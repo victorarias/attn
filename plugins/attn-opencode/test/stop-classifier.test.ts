@@ -67,6 +67,19 @@ describe("OpenCode assistant message normalization", () => {
     ]);
     await expect(http.lastAssistantTurn("malformed")).rejects.toThrow("missing identity or model metadata");
   });
+
+  test("skips a newer completed tool-only assistant message without hiding older prose", async () => {
+    const server = target();
+    server.messages.set("linked", [
+      { info: { id: "question", role: "assistant", time: { completed: 10 }, model }, parts: [{ type: "text", text: "Should I continue?" }] },
+      { info: { id: "tool-only", role: "assistant", time: { completed: 20 }, model }, parts: [{ type: "tool", input: "opaque" }] },
+    ]);
+
+    await expect(client(server).lastAssistantTurn("linked")).resolves.toEqual(expect.objectContaining({
+      messageID: "question",
+      text: "Should I continue?",
+    }));
+  });
 });
 
 describe("isolated OpenCode stop classifier", () => {
