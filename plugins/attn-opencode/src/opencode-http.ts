@@ -1,4 +1,5 @@
-import type { OpenCodeModel } from "./types";
+import { createHash } from "node:crypto";
+import type { AssistantTurn, OpenCodeModel } from "./types";
 
 export type ServerEvent = {
   type: string;
@@ -7,6 +8,13 @@ export type ServerEvent = {
 };
 
 export type NativeAttention = "question" | "permission";
+
+export type PromptInput = {
+  model: OpenCodeModel;
+  system: string;
+  tools: Record<string, false>;
+  parts: Array<{ type: "text"; text: string }>;
+};
 
 export type EventSubscription = {
   ready: Promise<void>;
@@ -49,6 +57,59 @@ export class OpenCodeHTTP {
 
   async getSession(sessionID: string, signal?: AbortSignal): Promise<unknown> {
     return this.request(`/session/${encodeURIComponent(sessionID)}`, { signal });
+  }
+
+  async lastAssistantTurn(sessionID: string, signal?: AbortSignal): Promise<AssistantTurn | undefined> {
+    const messages = await this.listMessages(sessionID, 20, signal);
+    const candidates = messages
+      .map(assistantCompletion)
+      .filter((candidate): candidate is { value: unknown; completedAt: number } => candidate !== undefined)
+      .sort((left, right) => right.completedAt - left.completedAt);
+    for (const candidate of candidates) {
+      const turn = normalizeAssistantTurn(candidate.value, candidate.completedAt);
+      if (turn) return turn;
+    }
+    return undefined;
+  }
+
+  async listMessages(sessionID: string, limit: number, signal?: AbortSignal): Promise<unknown[]> {
+    const body = await this.request<unknown>(
+      `/session/${encodeURIComponent(sessionID)}/message?limit=${encodeURIComponent(String(limit))}`,
+      { signal },
+    );
+    if (Array.isArray(body)) return body;
+    const root = asObject(body);
+    if (Array.isArray(root?.messages)) return root.messages;
+    if (Array.isArray(root?.data)) return root.data;
+    throw new Error("OpenCode message list response was invalid");
+  }
+
+  async listToolIDs(signal?: AbortSignal): Promise<string[]> {
+    const body = await this.request<unknown>("/experimental/tool/ids", { signal });
+    const root = asObject(body);
+    const values = Array.isArray(body) ? body : Array.isArray(root?.ids) ? root.ids : Array.isArray(root?.data) ? root.data : undefined;
+    if (!values || values.some((value) => typeof value !== "string" || value.trim() === "")) {
+      throw new Error("OpenCode tool id response was invalid");
+    }
+    return [...new Set(values)];
+  }
+
+  async prompt(sessionID: string, input: PromptInput, signal?: AbortSignal): Promise<unknown> {
+    return this.request(`/session/${encodeURIComponent(sessionID)}/message`, {
+      method: "POST",
+      body: {
+        system: input.system,
+        tools: input.tools,
+        parts: input.parts,
+        model: { providerID: input.model.providerID, modelID: input.model.id },
+        variant: input.model.variant,
+      },
+      signal,
+    });
+  }
+
+  async deleteSession(sessionID: string, signal?: AbortSignal): Promise<void> {
+    await this.request(`/session/${encodeURIComponent(sessionID)}`, { method: "DELETE", signal });
   }
 
   async selectSession(sessionID: string, signal?: AbortSignal): Promise<void> {
@@ -188,6 +249,56 @@ export class OpenCodeHTTP {
   private headers(): HeadersInit {
     return { authorization: this.authorization };
   }
+}
+
+export function assistantTextFromMessage(value: unknown): string {
+  const root = asObject(value);
+  const parts = Array.isArray(root?.parts) ? root.parts : [];
+  return parts.flatMap((part) => {
+    const item = asObject(part);
+    if (item?.type !== "text" || item.ignored === true || item.synthetic === true || typeof item.text !== "string") return [];
+    return [item.text];
+  }).join("").trim();
+}
+
+function assistantCompletion(value: unknown): { value: unknown; completedAt: number } | undefined {
+  const root = asObject(value);
+  const info = asObject(root?.info) ?? root;
+  if (info?.role !== "assistant" || info.error != null) return undefined;
+  const completedAt = completedTime(info);
+  if (completedAt === undefined) return undefined;
+  return { value, completedAt };
+}
+
+function normalizeAssistantTurn(value: unknown, completedAt: number): AssistantTurn | undefined {
+  const root = asObject(value);
+  const info = asObject(root?.info) ?? root;
+  const messageID = asString(info.id) ?? asString(root?.id);
+  const model = assistantModel(info);
+  const text = assistantTextFromMessage(root);
+  if (!text) return undefined;
+  if (!messageID || !model) throw new Error("OpenCode completed assistant message was missing identity or model metadata");
+  return {
+    messageID,
+    completedAt,
+    model,
+    text,
+    textHash: createHash("sha256").update(text).digest("hex"),
+  };
+}
+
+function completedTime(info: Record<string, unknown>): number | undefined {
+  const time = asObject(info.time);
+  const value = info.completedAt ?? info.completed_at ?? time?.completed;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function assistantModel(info: Record<string, unknown>): OpenCodeModel | undefined {
+  const model = asObject(info.model);
+  const providerID = asString(model?.providerID) ?? asString(info.providerID);
+  const id = asString(model?.id) ?? asString(model?.modelID) ?? asString(info.modelID);
+  const variant = asString(model?.variant) ?? asString(info.variant);
+  return providerID && id && variant ? { providerID, id, variant } : undefined;
 }
 
 export function parseModelPin(value: string): Omit<OpenCodeModel, "variant"> {

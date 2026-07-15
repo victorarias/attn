@@ -95,6 +95,34 @@ export type OpenCodeModel = {
   variant: string;
 };
 
+export type AssistantTurn = {
+  messageID: string;
+  completedAt?: number;
+  model: OpenCodeModel;
+  text: string;
+  textHash: string;
+};
+
+export type StopVerdict = "idle" | "waiting_input" | "unknown";
+
+export type StopClassification = {
+  messageID: string;
+  textHash: string;
+  verdict: StopVerdict;
+  classifiedAt: string;
+};
+
+export type ClassifierInput = {
+  linkedSessionID: string;
+  model: OpenCodeModel;
+  assistantText: string;
+  signal: AbortSignal;
+};
+
+export interface StopClassifier {
+  classify(input: ClassifierInput): Promise<StopVerdict>;
+}
+
 export type OpenCodeMetadata = {
   schema: 1;
   opencode_session_id: string;
@@ -123,6 +151,7 @@ export type RunRecord = {
   model?: string;
   variant?: string;
   resume: boolean;
+  last_classification?: StopClassification;
   created_at: string;
 };
 
@@ -143,4 +172,4 @@ export type ReportState = "working" | "waiting_input" | "pending_approval" | "id
 export type Report =
   | { kind: "metadata"; metadata: OpenCodeMetadata }
   | { kind: "state"; state: ReportState }
-  | { kind: "stop"; verdict: "idle" | "waiting_input" | "unknown" };
+  | { kind: "stop"; verdict: StopVerdict };

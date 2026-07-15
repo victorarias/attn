@@ -46,5 +46,10 @@ requests become `waiting_input`, and native permission requests become
 `pending_approval`; answering either returns the session to `working`. On
 startup, reconnect, and explicit idle events, the plugin checks OpenCode's
 pending request lists before reporting `idle`, so a missed SSE event cannot hide
-a session that needs attention. It intentionally does not classify ordinary
-prose questions that did not use OpenCode's question tool.
+a session that needs attention. When an explicit idle turn has no native
+attention request, the plugin classifies the newest completed assistant prose
+using the same OpenCode model in a temporary, tool-disabled session. Ordinary
+prose questions then become `waiting_input`, completed answers become `idle`,
+and uncertain extraction or classification becomes `unknown`. The temporary
+session is deleted without selecting it in the TUI, and duplicate idle events
+reuse a verdict cached against the exact native message text.

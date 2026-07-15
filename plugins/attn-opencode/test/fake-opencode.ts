@@ -1,6 +1,7 @@
 type RequestRecord = {
   method: string;
   path: string;
+  search?: string;
   body?: unknown;
   authorization?: string | null;
 };
@@ -11,6 +12,14 @@ export class FakeOpenCode {
   readonly sessions = new Map<string, unknown>();
   readonly pendingQuestions = new Map<string, string>();
   readonly pendingPermissions = new Map<string, string>();
+  readonly messages = new Map<string, unknown[]>();
+  toolIDs: unknown = ["bash", "read", "write"];
+  readonly classifierReplies: string[] = [];
+  readonly classifierPrompts: Array<{ sessionID: string; body: unknown }> = [];
+  readonly deletedSessions: string[] = [];
+  failClassifierPrompt = false;
+  failDeleteSession = false;
+  failPendingLists = false;
   pendingListBarrier?: Promise<void>;
   readonly hangingSessionReads = new Set<string>();
   readonly prompts: Array<{ sessionID: string; body: unknown }> = [];
@@ -72,10 +81,11 @@ export class FakeOpenCode {
 
   private async handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const body = request.method === "GET" ? undefined : await request.json();
+    const body = request.method === "GET" || request.method === "DELETE" ? undefined : await request.json();
     this.requests.push({
       method: request.method,
       path: url.pathname,
+      search: url.search || undefined,
       body,
       authorization: request.headers.get("authorization"),
     });
@@ -104,11 +114,13 @@ export class FakeOpenCode {
     }
     if (url.pathname === "/session/status") return Response.json(Object.fromEntries(this.statuses));
     if (url.pathname === "/question") {
+      if (this.failPendingLists) return Response.json({ error: "question list failed" }, { status: 500 });
       const snapshot = [...this.pendingQuestions].map(([id, sessionID]) => ({ id, sessionID, questions: [] }));
       await this.pendingListBarrier;
       return Response.json(snapshot);
     }
     if (url.pathname === "/permission") {
+      if (this.failPendingLists) return Response.json({ error: "permission list failed" }, { status: 500 });
       const snapshot = [...this.pendingPermissions].map(([id, sessionID]) => ({
         id,
         sessionID,
@@ -120,6 +132,7 @@ export class FakeOpenCode {
       await this.pendingListBarrier;
       return Response.json(snapshot);
     }
+    if (url.pathname === "/experimental/tool/ids") return Response.json(this.toolIDs);
     if (url.pathname.startsWith("/session/") && url.pathname.endsWith("/prompt_async")) {
       const sessionID = decodeURIComponent(url.pathname.slice("/session/".length, -"/prompt_async".length));
       const prompt = body as {
@@ -135,6 +148,39 @@ export class FakeOpenCode {
       }
       this.prompts.push({ sessionID, body });
       return new Response(null, { status: 204 });
+    }
+    if (url.pathname.startsWith("/session/") && url.pathname.endsWith("/message") && request.method === "GET") {
+      const sessionID = decodeURIComponent(url.pathname.slice("/session/".length, -"/message".length));
+      return Response.json(this.messages.get(sessionID) ?? []);
+    }
+    if (url.pathname.startsWith("/session/") && url.pathname.endsWith("/message") && request.method === "POST") {
+      const sessionID = decodeURIComponent(url.pathname.slice("/session/".length, -"/message".length));
+      const prompt = body as {
+        model?: { providerID?: unknown; modelID?: unknown };
+        variant?: unknown;
+      };
+      this.classifierPrompts.push({ sessionID, body });
+      if (this.failClassifierPrompt) return Response.json({ error: "classifier failed" }, { status: 500 });
+      return Response.json({
+        info: {
+          id: `classifier-reply-${this.classifierPrompts.length}`,
+          role: "assistant",
+          time: { completed: Date.now() },
+          model: {
+            providerID: prompt.model?.providerID,
+            modelID: prompt.model?.modelID,
+            variant: prompt.variant,
+          },
+        },
+        parts: [{ type: "text", text: this.classifierReplies.shift() ?? '{"verdict":"DONE"}' }],
+      });
+    }
+    if (url.pathname.startsWith("/session/") && request.method === "DELETE") {
+      const sessionID = decodeURIComponent(url.pathname.slice("/session/".length));
+      if (this.failDeleteSession) return Response.json({ error: "delete failed" }, { status: 500 });
+      this.sessions.delete(sessionID);
+      this.deletedSessions.push(sessionID);
+      return Response.json(true);
     }
     if (url.pathname.startsWith("/session/") && request.method === "GET") {
       const sessionID = decodeURIComponent(url.pathname.slice("/session/".length));

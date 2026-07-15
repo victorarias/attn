@@ -9,6 +9,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-15]
 
 ### Added
+- **OpenCode prose questions now surface as waiting for input.** Native question
+  and permission requests remain authoritative, while an explicit idle turn can
+  also distinguish ordinary assistant questions from completed answers without
+  changing the visible OpenCode conversation.
 - **OpenCode sessions now receive attn's launch guidance.** Ordinary sessions
   get their workspace context plus workflow and ticket instructions; OpenCode
   chiefs get Notebook guidance. Promotion, demotion, and resume refresh that
