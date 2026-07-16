@@ -104,6 +104,8 @@ PluginInfo (daemon -> UI/CLI)
 - `bun test --cwd plugins/attn-opencode` (64 tests, 179 assertions)
 - Shell syntax checks for the app, bundled-plugin, and source-fingerprint build
   scripts.
+- `cargo test` (25 tests), including validation of the tracked Tauri resource
+  root used before generated bundled artifacts exist in a clean checkout.
 - Built and signed isolated `bundle-a` and `bundle-b` app profiles. A fresh
   `bundle-b` listed OpenCode as Available and stopped without launching it.
 - In `bundle-a`, installed OpenCode from the signed app resource, completed a
