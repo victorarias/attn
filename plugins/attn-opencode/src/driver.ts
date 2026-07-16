@@ -45,6 +45,8 @@ export type OpenCodeDriverOptions = {
   healthRequestTimeout?: number;
   classifierTimeout?: number;
   stopClassifier?: (client: OpenCodeHTTP) => StopClassifier;
+  standaloneLauncher?: boolean;
+  guidancePluginRef?: string;
 };
 
 type Availability =
@@ -190,7 +192,12 @@ export class OpenCodeDriver {
       await this.options.registry.writeLaunchConfig(record, launchConfig);
       this.startMonitor(record, selection);
       return {
-        argv: [process.execPath, "run", join(import.meta.dir, "launcher.ts"), record.launch_config_ref],
+        argv: this.options.standaloneLauncher
+          ? [process.execPath, "--attn-opencode-launcher", record.launch_config_ref]
+          : [process.execPath, "run", join(import.meta.dir, "launcher.ts"), record.launch_config_ref],
+        ...(this.options.guidancePluginRef
+          ? { env: { ATTN_OPENCODE_GUIDANCE_PLUGIN_REF: this.options.guidancePluginRef } }
+          : {}),
         cwd: params.cwd,
       };
     } catch (error) {

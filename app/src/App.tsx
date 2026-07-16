@@ -549,6 +549,8 @@ function App() {
     sendDeleteWorktree,
     sendListPlugins,
     sendInstallPlugin,
+    sendInstallBundledPlugin,
+    sendUninstallPlugin,
     sendRemovePlugin,
     sendSetPluginPriority,
     sendAddEndpoint,
@@ -745,6 +747,8 @@ function App() {
         sendDeleteWorktree={sendDeleteWorktree}
         sendListPlugins={sendListPlugins}
         sendInstallPlugin={sendInstallPlugin}
+        sendInstallBundledPlugin={sendInstallBundledPlugin}
+        sendUninstallPlugin={sendUninstallPlugin}
         sendRemovePlugin={sendRemovePlugin}
         sendSetPluginPriority={sendSetPluginPriority}
         sendAddEndpoint={sendAddEndpoint}
@@ -858,6 +862,8 @@ interface AppContentProps {
   sendDeleteWorktree: ReturnType<typeof useDaemonSocket>['sendDeleteWorktree'];
   sendListPlugins: ReturnType<typeof useDaemonSocket>['sendListPlugins'];
   sendInstallPlugin: ReturnType<typeof useDaemonSocket>['sendInstallPlugin'];
+  sendInstallBundledPlugin: ReturnType<typeof useDaemonSocket>['sendInstallBundledPlugin'];
+  sendUninstallPlugin: ReturnType<typeof useDaemonSocket>['sendUninstallPlugin'];
   sendRemovePlugin: ReturnType<typeof useDaemonSocket>['sendRemovePlugin'];
   sendSetPluginPriority: ReturnType<typeof useDaemonSocket>['sendSetPluginPriority'];
   sendAddEndpoint: ReturnType<typeof useDaemonSocket>['sendAddEndpoint'];
@@ -965,6 +971,8 @@ function AppContent({
   sendDeleteWorktree,
   sendListPlugins,
   sendInstallPlugin,
+  sendInstallBundledPlugin,
+  sendUninstallPlugin,
   sendRemovePlugin,
   sendSetPluginPriority,
   sendAddEndpoint,
@@ -3830,6 +3838,8 @@ sendFetchPRDetails,
         onSetEndpointRemoteWeb={sendSetEndpointRemoteWeb}
         onListPlugins={sendListPlugins}
         onInstallPlugin={sendInstallPlugin}
+        onInstallBundledPlugin={sendInstallBundledPlugin}
+        onUninstallPlugin={sendUninstallPlugin}
         onRemovePlugin={sendRemovePlugin}
         onSetPluginPriority={sendSetPluginPriority}
         onSetSetting={sendSetSetting}

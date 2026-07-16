@@ -93,6 +93,16 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdInstallPlugin,
 		},
 		{
+			name:    "install bundled plugin message",
+			input:   `{"cmd":"install_bundled_plugin","name":"attn-opencode"}`,
+			wantCmd: CmdInstallBundledPlugin,
+		},
+		{
+			name:    "uninstall plugin message",
+			input:   `{"cmd":"uninstall_plugin","name":"attn-opencode"}`,
+			wantCmd: CmdUninstallPlugin,
+		},
+		{
 			name:    "remove plugin message",
 			input:   `{"cmd":"remove_plugin","name":"demo"}`,
 			wantCmd: CmdRemovePlugin,

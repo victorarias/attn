@@ -152,6 +152,53 @@ describe('SettingsModal', () => {
     expect(onListPlugins).toHaveBeenCalled();
   });
 
+  it('installs an available bundled plugin', async () => {
+    const onInstallBundledPlugin = vi.fn().mockResolvedValue({ success: true });
+    const bundled = {
+      name: 'attn-opencode', version: '0.1.0', dir: '/Applications/attn.app/Contents/Resources/plugins/attn-opencode',
+      priority: 0, connected: false, running: false, availability: 'bundled', installation_state: 'available',
+      runtime_state: 'stopped', can_install: true, can_uninstall: false,
+    };
+    render(
+      <SettingsModal
+        isOpen onClose={vi.fn()} mutedRepos={[]} githubHosts={[]} onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]} onUnmuteAuthor={vi.fn()} settings={{}} endpoints={[]} plugins={[bundled]} pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })} onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })} onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [bundled], issues: [] })} onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onInstallBundledPlugin={onInstallBundledPlugin} onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })} onSetSetting={vi.fn()} themePreference="system" onSetTheme={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('settings-nav-plugins'));
+    expect(await screen.findByText('Bundled')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Install', { selector: 'button' }));
+    await waitFor(() => expect(onInstallBundledPlugin).toHaveBeenCalledWith('attn-opencode'));
+  });
+
+  it('uninstalls an installed bundled plugin', async () => {
+    const onUninstallPlugin = vi.fn().mockResolvedValue({ success: true });
+    const bundled = {
+      name: 'attn-opencode', version: '0.1.0', dir: '/Applications/attn.app/Contents/Resources/plugins/attn-opencode',
+      priority: 0, connected: true, running: true, availability: 'bundled', installation_state: 'installed',
+      runtime_state: 'connected', can_install: false, can_uninstall: true,
+    };
+    render(
+      <SettingsModal
+        isOpen onClose={vi.fn()} mutedRepos={[]} githubHosts={[]} onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]} onUnmuteAuthor={vi.fn()} settings={{}} endpoints={[]} plugins={[bundled]} pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })} onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })} onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [bundled], issues: [] })} onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onUninstallPlugin={onUninstallPlugin} onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })} onSetSetting={vi.fn()} themePreference="system" onSetTheme={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('settings-nav-plugins'));
+    fireEvent.click(await screen.findByText('Uninstall', { selector: 'button' }));
+    await waitFor(() => expect(onUninstallPlugin).toHaveBeenCalledWith('attn-opencode'));
+  });
+
   it('updates provider priority for an installed plugin', async () => {
     const onSetPluginPriority = vi.fn().mockResolvedValue({ success: true });
 
@@ -173,6 +220,11 @@ describe('SettingsModal', () => {
           priority: 10,
           connected: true,
           running: true,
+          availability: 'user',
+          installation_state: 'installed',
+          runtime_state: 'connected',
+          can_install: false,
+          can_uninstall: true,
         }]}
         pluginIssues={[]}
         onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
@@ -241,7 +293,12 @@ describe('SettingsModal', () => {
       connected: false,
       running: true,
       runtime_phase: 'starting',
+      runtime_state: 'starting',
       health_status: 'unknown',
+      availability: 'user',
+      installation_state: 'installed',
+      can_install: false,
+      can_uninstall: true,
     };
 
     const { rerender } = render(
@@ -261,6 +318,7 @@ describe('SettingsModal', () => {
           ...startingPlugin,
           running: false,
           runtime_phase: 'backoff',
+          runtime_state: 'degraded',
           restart_attempt: 2,
           next_restart_at: '2026-07-15T22:20:00Z',
           last_exit: '2026-07-15T22:19:59Z: exit code 1',
@@ -268,7 +326,7 @@ describe('SettingsModal', () => {
       />,
     );
 
-    expect(await screen.findByText('backoff')).toBeInTheDocument();
+    expect(await screen.findByText('degraded')).toBeInTheDocument();
     expect(screen.getByText('Restart attempt')).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
     expect(screen.getByText(/Last exit: 2026-07-15T22:19:59Z: exit code 1/)).toBeInTheDocument();
@@ -276,7 +334,7 @@ describe('SettingsModal', () => {
     rerender(
       <SettingsModal
         {...baseProps}
-        plugins={[{ ...startingPlugin, connected: true, runtime_phase: 'connected', health_status: 'healthy' }]}
+        plugins={[{ ...startingPlugin, connected: true, runtime_phase: 'connected', runtime_state: 'connected', health_status: 'healthy' }]}
       />,
     );
 

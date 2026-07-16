@@ -248,6 +248,70 @@ entrypoint = "../outside.ts"
 	}
 }
 
+func TestLoadManifestNormalizesLegacyBunEntrypoint(t *testing.T) {
+	sourceDir := filepath.Join(t.TempDir(), "source")
+	writeTestPlugin(t, sourceDir, "worktree-provider")
+	manifest, err := LoadManifest(filepath.Join(sourceDir, ManifestName))
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+	if manifest.Plugin.Kind != EntrypointBun || manifest.Plugin.Path != "src/index.ts" {
+		t.Fatalf("entrypoint=%+v, want normalized bun path", manifest.Plugin)
+	}
+}
+
+func TestLoadManifestAcceptsExecutableEntrypoint(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "provider"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 4\n\n[plugin]\nkind = \"executable\"\npath = \"bin/provider\"\n")
+	if err := os.WriteFile(filepath.Join(root, ManifestName), manifestData, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := LoadManifest(filepath.Join(root, ManifestName))
+	if err != nil {
+		t.Fatalf("LoadManifest failed: %v", err)
+	}
+	if manifest.Plugin.Kind != EntrypointExecutable || manifest.Plugin.Path != "bin/provider" {
+		t.Fatalf("entrypoint=%+v", manifest.Plugin)
+	}
+}
+
+func TestLoadManifestRejectsNonExecutableEntrypoint(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bin", "provider"), []byte("binary"), 0o644); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 4\n\n[plugin]\nkind = \"executable\"\npath = \"bin/provider\"\n")
+	if err := os.WriteFile(filepath.Join(root, ManifestName), manifestData, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if _, err := LoadManifest(filepath.Join(root, ManifestName)); err == nil || !strings.Contains(err.Error(), "must be executable") {
+		t.Fatalf("LoadManifest error=%v, want executable-bit rejection", err)
+	}
+}
+
+func TestLoadManifestRejectsUnsupportedAPIVersion(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "entry.ts"), []byte("// entrypoint\n"), 0o644); err != nil {
+		t.Fatalf("write entrypoint: %v", err)
+	}
+	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 3\n\n[plugin]\nentrypoint = \"entry.ts\"\n")
+	if err := os.WriteFile(filepath.Join(root, ManifestName), manifestData, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if _, err := LoadManifest(filepath.Join(root, ManifestName)); err == nil || !strings.Contains(err.Error(), "unsupported attn_api_version") {
+		t.Fatalf("LoadManifest error=%v, want API-version rejection", err)
+	}
+}
+
 func writeTestPlugin(t *testing.T, root, name string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {

@@ -8,15 +8,32 @@ unhealthy plugin and do not register the `opencode` agent. Newer stable releases
 are attempted against the server contract and surface the specific failing API
 through degraded health if that contract has changed.
 
-Install it into a non-production attn profile while developing:
+Attn distributes this plugin as a standalone executable in the app bundle. It
+is available but inactive by default for every profile. Install it from
+Settings > Plugins, or with:
+
+```sh
+attn plugin install-bundled attn-opencode
+```
+
+Installation is profile-specific, starts the plugin immediately, and does not
+require Bun or a daemon restart. Uninstalling stops the plugin and preserves its
+private run data outside the user-plugin install directory; attn refuses to
+uninstall while the plugin owns an active delegated run.
+
+To run the source checkout as a development override, first uninstall the
+bundled entry for that profile and then install the local directory:
 
 ```sh
 attn plugin install --path /path/to/attn/plugins/attn-opencode
 ```
 
-Restart that profile's daemon after installation. The plugin resolves
-`ATTN_OPENCODE_EXECUTABLE` first, then `opencode` from the daemon's login-shell
-`PATH`.
+The source form requires Bun. CLI installation runs through the active profile's
+daemon, starts immediately, and enforces the same bundled-name collision and
+active-run removal guards as Settings. A same-name source plugin occupies the
+catalog ID and blocks bundled installation until it is removed. Both forms
+resolve `ATTN_OPENCODE_EXECUTABLE` first, then `opencode` from the daemon's
+login-shell `PATH`.
 
 An ordinary promptless OpenCode session launches the TUI with OpenCode's own
 model and variant defaults. The plugin observes the native session OpenCode

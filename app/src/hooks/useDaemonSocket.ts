@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '165';
+export const PROTOCOL_VERSION = '166';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -4021,6 +4021,44 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const sendInstallBundledPlugin = useCallback((name: string): Promise<PluginActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `plugin_action:install_bundled:${name}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'install_bundled_plugin', name }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Install bundled plugin timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
+  const sendUninstallPlugin = useCallback((name: string): Promise<PluginActionResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const key = `plugin_action:uninstall:${name}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'uninstall_plugin', name }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Uninstall plugin timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
   const sendRemovePlugin = useCallback((name: string): Promise<PluginActionResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -5202,6 +5240,8 @@ export function useDaemonSocket({
     sendSetSetting,
     sendListPlugins,
     sendInstallPlugin,
+    sendInstallBundledPlugin,
+    sendUninstallPlugin,
     sendRemovePlugin,
     sendSetPluginPriority,
     sendAddEndpoint,

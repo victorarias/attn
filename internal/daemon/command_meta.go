@@ -65,6 +65,8 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdSetTerminalTheme:                      commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdListPlugins:                           commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdInstallPlugin:                         commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdInstallBundledPlugin:                  commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdUninstallPlugin:                       commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdRemovePlugin:                          commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSetPluginPriority:                     commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdAddEndpoint:                           commandMetadata(ScopeHubLocal, false, true),

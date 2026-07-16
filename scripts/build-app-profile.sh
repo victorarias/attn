@@ -39,6 +39,10 @@ echo ">>> Building $label app: $app_name.app (id=$bundle_id, port=$ws_port)"
 mkdir -p app/src-tauri/binaries
 cp "$attn" "app/src-tauri/binaries/attn-aarch64-apple-darwin"
 
+# Compile first-party plugins before Tauri collects resources. Bundled means
+# available in the catalog; the daemon still requires a per-profile opt-in.
+bash ./scripts/build-bundled-plugins.sh
+
 cd app
 pnpm install
 
@@ -86,6 +90,9 @@ if [ "$(uname -s)" = "Darwin" ]; then
   identity="${MACOS_CODESIGN_IDENTITY:-}"
   if [ -z "$identity" ]; then identity="$(bash ./scripts/macos-codesign-identity.sh find)"; fi
   if [ -z "$identity" ]; then identity="-"; fi
+  while IFS= read -r executable; do
+    codesign --force --sign "$identity" "$executable"
+  done < <(find "${bundle_dir}/Contents/Resources/plugins" -type f -perm -111 2>/dev/null | sort)
   codesign --force --sign "$identity" "${bundle_dir}/Contents/MacOS/attn"
   codesign --force --sign "$identity" "${bundle_dir}"
 fi

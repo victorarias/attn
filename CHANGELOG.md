@@ -9,6 +9,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-15]
 
 ### Added
+- **OpenCode is now an opt-in plugin included with the app.** Each profile can
+  install it from Settings or the CLI without an attn checkout, Bun, or a daemon
+  restart. Uninstalling preserves OpenCode run data and is blocked while the
+  plugin owns an active session.
 - **Installed plugins now recover automatically after crashes and lost connections.**
   Attn restarts them with bounded backoff, shows their recovery state in
   Settings, and lets OpenCode resume monitoring the same native sessions without

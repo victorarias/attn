@@ -174,7 +174,8 @@ describe("OpenCode server-backed driver", () => {
     await driver.initialize();
     expect(rpc.calls[0]?.method).toBe("driver.register");
 
-    await driver.spawn(params());
+    const launch = await driver.spawn(params());
+    expect(launch.argv.slice(0, 3)).toEqual([process.execPath, "run", expect.stringContaining("launcher.ts")]);
     await eventually(
       () => target.prompts.length === 1,
       () => `staged prompt submission; health=${JSON.stringify(driver.health())}; requests=${JSON.stringify(target.requests)}; calls=${JSON.stringify(rpc.calls)}`,
@@ -203,6 +204,33 @@ describe("OpenCode server-backed driver", () => {
     ]);
     const sequences = rpc.calls.slice(1).map((call) => (call.params as { seq: number }).seq);
     expect(sequences).toEqual([1, 2, 3, 4]);
+  });
+
+  test("uses the standalone executable as its launcher without requiring Bun", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = new OpenCodeDriver({
+      rpc,
+      registry,
+      runCommand: async () => ({ exitCode: 0, stdout: "1.17.18\n", stderr: "" }),
+      allocatePort: async () => target.port,
+      http: (port, password) => new OpenCodeHTTP({ port, password }),
+      standaloneLauncher: true,
+      guidancePluginRef: "file:///Applications/attn.app/Contents/Resources/plugins/attn-opencode/guidance-plugin.js",
+    });
+    await driver.initialize();
+
+    const launch = await driver.spawn(params("run-standalone-launcher"));
+    expect(launch.argv).toEqual([
+      process.execPath,
+      "--attn-opencode-launcher",
+      expect.stringContaining("run-standalone-launcher.json"),
+    ]);
+    expect(launch.argv).not.toContain("run");
+    expect(launch.env).toEqual({
+      ATTN_OPENCODE_GUIDANCE_PLUGIN_REF: "file:///Applications/attn.app/Contents/Resources/plugins/attn-opencode/guidance-plugin.js",
+    });
   });
 
   test("maps native question and permission events for only the linked session", async () => {

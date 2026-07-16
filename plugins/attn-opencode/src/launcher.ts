@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import type { LaunchConfig } from "./types";
 
 const maxPortAttempts = 3;
-const guidancePluginRef = pathToFileURL(join(import.meta.dir, "guidance-plugin.ts")).href;
+const sourceGuidancePluginRef = pathToFileURL(join(import.meta.dir, "guidance-plugin.ts")).href;
 
 if (import.meta.main) {
   const configPath = process.argv[2];
@@ -16,6 +16,7 @@ if (import.meta.main) {
 
 export async function launch(path: string): Promise<number> {
   let config = await readConfig(path);
+  const guidancePluginRef = process.env.ATTN_OPENCODE_GUIDANCE_PLUGIN_REF?.trim() || sourceGuidancePluginRef;
   const opencodeConfig = opencodeConfigForLaunch(process.env.OPENCODE_CONFIG_CONTENT, config.instruction_ref, guidancePluginRef);
   for (let attempt = 1; attempt <= maxPortAttempts; attempt += 1) {
     const password = (await readFile(config.password_ref, "utf8")).trim();
@@ -56,7 +57,7 @@ export async function launch(path: string): Promise<number> {
 export function opencodeConfigForLaunch(
   existingJSON: string | undefined,
   instructionRef?: string,
-  pluginRef = guidancePluginRef,
+  pluginRef = sourceGuidancePluginRef,
 ): Record<string, unknown> {
   let parsed: unknown = {};
   if (existingJSON !== undefined && existingJSON.trim() !== "") {

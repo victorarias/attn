@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/victorarias/attn/internal/plugins"
 )
 
 type pluginDesiredState string
@@ -112,11 +115,19 @@ func (realPluginSupervisorClock) AfterFunc(delay time.Duration, fn func()) plugi
 type execPluginProcessLauncher struct{}
 
 func (execPluginProcessLauncher) Start(manifest pluginManifest, env []string) (pluginProcessHandle, error) {
-	cmd := exec.Command("/usr/bin/env", "bun", "run", manifest.Plugin.Entrypoint)
+	var cmd *exec.Cmd
+	switch manifest.Plugin.Kind {
+	case plugins.EntrypointExecutable:
+		cmd = exec.Command(filepath.Join(manifest.Dir, manifest.Plugin.Path))
+	case plugins.EntrypointBun:
+		cmd = exec.Command("/usr/bin/env", "bun", "run", manifest.Plugin.Path)
+	default:
+		return nil, fmt.Errorf("start plugin %q: unsupported entrypoint kind %q", manifest.Name, manifest.Plugin.Kind)
+	}
 	cmd.Dir = manifest.Dir
 	cmd.Env = env
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start bun process: %w", err)
+		return nil, fmt.Errorf("start %s plugin process: %w", manifest.Plugin.Kind, err)
 	}
 	return &execPluginProcess{cmd: cmd}, nil
 }

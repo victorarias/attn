@@ -20,13 +20,22 @@ const (
 	ManifestName = "attn-plugin.toml"
 )
 
+type EntrypointKind string
+
+const (
+	EntrypointBun        EntrypointKind = "bun"
+	EntrypointExecutable EntrypointKind = "executable"
+)
+
 type Manifest struct {
 	Name           string `toml:"name" json:"name"`
 	Version        string `toml:"version" json:"version"`
 	AttnAPIVersion int    `toml:"attn_api_version" json:"attn_api_version"`
 	Description    string `toml:"description" json:"description,omitempty"`
 	Plugin         struct {
-		Entrypoint string `toml:"entrypoint" json:"entrypoint"`
+		Entrypoint string         `toml:"entrypoint" json:"entrypoint,omitempty"`
+		Kind       EntrypointKind `toml:"kind" json:"kind"`
+		Path       string         `toml:"path" json:"path"`
 	} `toml:"plugin" json:"plugin"`
 
 	Dir string `toml:"-" json:"dir"`
@@ -55,7 +64,16 @@ func LoadManifest(path string) (Manifest, error) {
 	manifest.Version = strings.TrimSpace(manifest.Version)
 	manifest.Description = strings.TrimSpace(manifest.Description)
 	manifest.Plugin.Entrypoint = strings.TrimSpace(manifest.Plugin.Entrypoint)
+	manifest.Plugin.Kind = EntrypointKind(strings.TrimSpace(string(manifest.Plugin.Kind)))
+	manifest.Plugin.Path = strings.TrimSpace(manifest.Plugin.Path)
 	manifest.Dir = filepath.Dir(path)
+	if manifest.Plugin.Entrypoint != "" {
+		if manifest.Plugin.Kind != "" || manifest.Plugin.Path != "" {
+			return Manifest{}, errors.New("plugin.entrypoint cannot be combined with plugin.kind or plugin.path")
+		}
+		manifest.Plugin.Kind = EntrypointBun
+		manifest.Plugin.Path = manifest.Plugin.Entrypoint
+	}
 
 	switch {
 	case manifest.Name == "":
@@ -64,18 +82,27 @@ func LoadManifest(path string) (Manifest, error) {
 		return Manifest{}, errors.New("version is required")
 	case manifest.AttnAPIVersion != APIVersion:
 		return Manifest{}, fmt.Errorf("unsupported attn_api_version %d", manifest.AttnAPIVersion)
-	case manifest.Plugin.Entrypoint == "":
-		return Manifest{}, errors.New("plugin.entrypoint is required")
-	case filepath.IsAbs(manifest.Plugin.Entrypoint):
-		return Manifest{}, errors.New("plugin.entrypoint must be relative to the plugin directory")
+	case manifest.Plugin.Kind != EntrypointBun && manifest.Plugin.Kind != EntrypointExecutable:
+		return Manifest{}, errors.New(`plugin.kind must be "bun" or "executable"`)
+	case manifest.Plugin.Path == "":
+		return Manifest{}, errors.New("plugin.path is required")
+	case filepath.IsAbs(manifest.Plugin.Path):
+		return Manifest{}, errors.New("plugin.path must be relative to the plugin directory")
 	}
 
-	entrypointPath := filepath.Clean(filepath.Join(manifest.Dir, manifest.Plugin.Entrypoint))
+	entrypointPath := filepath.Clean(filepath.Join(manifest.Dir, manifest.Plugin.Path))
 	if !pathWithinDir(manifest.Dir, entrypointPath) {
-		return Manifest{}, errors.New("plugin.entrypoint must stay within the plugin directory")
+		return Manifest{}, errors.New("plugin.path must stay within the plugin directory")
 	}
-	if _, err := os.Stat(entrypointPath); err != nil {
-		return Manifest{}, fmt.Errorf("plugin.entrypoint %q: %w", manifest.Plugin.Entrypoint, err)
+	info, err := os.Stat(entrypointPath)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("plugin.path %q: %w", manifest.Plugin.Path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return Manifest{}, fmt.Errorf("plugin.path %q must be a regular file", manifest.Plugin.Path)
+	}
+	if manifest.Plugin.Kind == EntrypointExecutable && info.Mode().Perm()&0o111 == 0 {
+		return Manifest{}, fmt.Errorf("plugin.path %q must be executable", manifest.Plugin.Path)
 	}
 	return manifest, nil
 }

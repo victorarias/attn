@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -13,6 +15,19 @@ const pluginManifestName = plugins.ManifestName
 
 type pluginManifest = plugins.Manifest
 type pluginManifestIssue = plugins.ManifestIssue
+
+type pluginAvailability string
+
+const (
+	pluginAvailabilityBundled pluginAvailability = "bundled"
+	pluginAvailabilityUser    pluginAvailability = "user"
+)
+
+type pluginCatalogItem struct {
+	Manifest     pluginManifest
+	Availability pluginAvailability
+	Installed    bool
+}
 
 func discoverPluginManifests(pluginDir string) ([]pluginManifest, []pluginManifestIssue) {
 	return plugins.Discover(pluginDir)
@@ -29,6 +44,22 @@ func pluginDirForSocket(socketPath string) string {
 	return filepath.Join(filepath.Dir(socketPath), "plugins")
 }
 
+func bundledPluginDirForExecutable() string {
+	if override := strings.TrimSpace(os.Getenv("ATTN_BUNDLED_PLUGIN_DIR")); override != "" {
+		return override
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	macOSDir := filepath.Dir(executable)
+	contentsDir := filepath.Dir(macOSDir)
+	if filepath.Base(macOSDir) != "MacOS" || filepath.Base(contentsDir) != "Contents" {
+		return ""
+	}
+	return filepath.Join(contentsDir, "Resources", "plugins")
+}
+
 func loadPluginManifest(path string) (pluginManifest, error) {
 	return plugins.LoadManifest(path)
 }
@@ -41,11 +72,17 @@ func (d *Daemon) ensurePluginSupervisor() *pluginSupervisor {
 			execPluginProcessLauncher{},
 			realPluginSupervisorClock{},
 			func(manifest pluginManifest, generation uint64) []string {
-				return d.pluginCommandEnv(
-					"ATTN_SOCKET_PATH="+d.socketPath,
-					"ATTN_PLUGIN_NAME="+manifest.Name,
-					"ATTN_PLUGIN_GENERATION="+strconv.FormatUint(generation, 10),
-				)
+				overrides := []string{
+					"ATTN_SOCKET_PATH=" + d.socketPath,
+					"ATTN_PLUGIN_NAME=" + manifest.Name,
+					"ATTN_PLUGIN_GENERATION=" + strconv.FormatUint(generation, 10),
+					"ATTN_PLUGIN_ENTRYPOINT_KIND=" + string(manifest.Plugin.Kind),
+					"ATTN_PLUGIN_ROOT=" + manifest.Dir,
+				}
+				if manifest.Plugin.Kind == plugins.EntrypointExecutable {
+					overrides = append(overrides, "ATTN_PLUGIN_DATA_ROOT="+pluginDataDirForSocket(d.socketPath, manifest.Name))
+				}
+				return d.pluginCommandEnv(overrides...)
 			},
 			d.broadcastPluginsUpdated,
 		)
@@ -53,17 +90,109 @@ func (d *Daemon) ensurePluginSupervisor() *pluginSupervisor {
 	return d.pluginSupervisor
 }
 
+func pluginDataDirForSocket(socketPath, pluginName string) string {
+	return filepath.Join(filepath.Dir(socketPath), "plugin-data", pluginName)
+}
+
 func (d *Daemon) startInstalledPlugins() {
-	manifests, issues := discoverPluginManifests(d.pluginDir)
-	d.logf("plugin discovery dir=%s manifests=%d issues=%d", d.pluginDir, len(manifests), len(issues))
+	catalog, issues := d.pluginCatalog()
+	d.logf("plugin discovery user_dir=%s bundled_dir=%s catalog=%d issues=%d", d.pluginDir, d.bundledPluginDir, len(catalog), len(issues))
 	for _, issue := range issues {
 		d.logf("plugin manifest skipped: %v", issue)
 	}
-	for _, manifest := range manifests {
-		if err := d.startInstalledPlugin(manifest); err != nil {
-			d.logf("plugin %s failed to start: %v", manifest.Name, err)
+	for _, item := range catalog {
+		if !item.Installed {
+			continue
+		}
+		if err := d.startInstalledPlugin(item.Manifest); err != nil {
+			d.logf("plugin %s failed to start: %v", item.Manifest.Name, err)
 		}
 	}
+}
+
+func (d *Daemon) pluginCatalog() ([]pluginCatalogItem, []pluginManifestIssue) {
+	bundled, bundledIssues := discoverPluginManifests(d.bundledPluginDir)
+	user, userIssues := discoverPluginManifests(d.pluginDir)
+	installedBundled := d.installedBundledPlugins()
+	userNames := make(map[string]struct{}, len(user))
+	items := make([]pluginCatalogItem, 0, len(bundled)+len(user))
+	for _, manifest := range user {
+		userNames[manifest.Name] = struct{}{}
+		items = append(items, pluginCatalogItem{Manifest: manifest, Availability: pluginAvailabilityUser, Installed: true})
+	}
+	for _, manifest := range bundled {
+		if _, collision := userNames[manifest.Name]; collision {
+			continue
+		}
+		_, installed := installedBundled[manifest.Name]
+		items = append(items, pluginCatalogItem{Manifest: manifest, Availability: pluginAvailabilityBundled, Installed: installed})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Manifest.Name < items[j].Manifest.Name })
+	issues := append([]pluginManifestIssue(nil), bundledIssues...)
+	issues = append(issues, userIssues...)
+	return items, issues
+}
+
+func (d *Daemon) installedBundledPlugins() map[string]struct{} {
+	d.bundledPluginMu.Lock()
+	defer d.bundledPluginMu.Unlock()
+	d.loadInstalledBundledPluginsLocked()
+	result := make(map[string]struct{}, len(d.bundledPluginSet))
+	for name := range d.bundledPluginSet {
+		result[name] = struct{}{}
+	}
+	return result
+}
+
+func (d *Daemon) loadInstalledBundledPluginsLocked() {
+	if d.bundledPluginLoaded {
+		return
+	}
+	d.bundledPluginLoaded = true
+	d.bundledPluginSet = make(map[string]struct{})
+	raw := strings.TrimSpace(d.store.GetSetting(SettingInstalledBundledPlugins))
+	if raw == "" {
+		return
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(raw), &names); err != nil {
+		d.logf("failed to decode installed bundled plugins: %v", err)
+		return
+	}
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" {
+			d.bundledPluginSet[name] = struct{}{}
+		}
+	}
+}
+
+func (d *Daemon) setBundledPluginInstalled(name string, installed bool) error {
+	d.bundledPluginMu.Lock()
+	defer d.bundledPluginMu.Unlock()
+	d.loadInstalledBundledPluginsLocked()
+	next := make(map[string]struct{}, len(d.bundledPluginSet)+1)
+	for installedName := range d.bundledPluginSet {
+		next[installedName] = struct{}{}
+	}
+	if installed {
+		next[name] = struct{}{}
+	} else {
+		delete(next, name)
+	}
+	names := make([]string, 0, len(next))
+	for installedName := range next {
+		names = append(names, installedName)
+	}
+	sort.Strings(names)
+	encoded, err := json.Marshal(names)
+	if err != nil {
+		return err
+	}
+	if err := d.store.SetSettingChecked(SettingInstalledBundledPlugins, string(encoded)); err != nil {
+		return err
+	}
+	d.bundledPluginSet = next
+	return nil
 }
 
 func (d *Daemon) startInstalledPlugin(manifest pluginManifest) error {
