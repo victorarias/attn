@@ -72,18 +72,26 @@ func (d *Daemon) ensurePluginSupervisor() *pluginSupervisor {
 			execPluginProcessLauncher{},
 			realPluginSupervisorClock{},
 			func(manifest pluginManifest, generation uint64) []string {
-				return d.pluginCommandEnv(
-					"ATTN_SOCKET_PATH="+d.socketPath,
-					"ATTN_PLUGIN_NAME="+manifest.Name,
-					"ATTN_PLUGIN_GENERATION="+strconv.FormatUint(generation, 10),
-					"ATTN_PLUGIN_ENTRYPOINT_KIND="+string(manifest.Plugin.Kind),
-					"ATTN_PLUGIN_ROOT="+manifest.Dir,
-				)
+				overrides := []string{
+					"ATTN_SOCKET_PATH=" + d.socketPath,
+					"ATTN_PLUGIN_NAME=" + manifest.Name,
+					"ATTN_PLUGIN_GENERATION=" + strconv.FormatUint(generation, 10),
+					"ATTN_PLUGIN_ENTRYPOINT_KIND=" + string(manifest.Plugin.Kind),
+					"ATTN_PLUGIN_ROOT=" + manifest.Dir,
+				}
+				if manifest.Plugin.Kind == plugins.EntrypointExecutable {
+					overrides = append(overrides, "ATTN_PLUGIN_DATA_ROOT="+pluginDataDirForSocket(d.socketPath, manifest.Name))
+				}
+				return d.pluginCommandEnv(overrides...)
 			},
 			d.broadcastPluginsUpdated,
 		)
 	}
 	return d.pluginSupervisor
+}
+
+func pluginDataDirForSocket(socketPath, pluginName string) string {
+	return filepath.Join(filepath.Dir(socketPath), "plugin-data", pluginName)
 }
 
 func (d *Daemon) startInstalledPlugins() {

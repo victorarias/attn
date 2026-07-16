@@ -24,10 +24,11 @@ async function runPlugin(): Promise<void> {
   const pluginGeneration = requiredGeneration();
   const standalone = requiredEnvironment("ATTN_PLUGIN_ENTRYPOINT_KIND") === "executable";
   const pluginRoot = requiredEnvironment("ATTN_PLUGIN_ROOT");
+  const runtimeRoot = process.env.ATTN_PLUGIN_DATA_ROOT?.trim() || runtimeRootFromSocket(socketPath);
   const rpc = new AttnRPCClient({ socketPath, name: pluginName, version: pluginVersion, generation: pluginGeneration });
   const driver = new OpenCodeDriver({
     rpc,
-    registry: new RunRegistry(runtimeRootFromSocket(socketPath)),
+    registry: new RunRegistry(runtimeRoot),
     standaloneLauncher: standalone,
     guidancePluginRef: standalone
       ? pathToFileURL(join(pluginRoot, "guidance-plugin.js")).href

@@ -114,6 +114,12 @@ PluginInfo (daemon -> UI/CLI)
   closed and uninstalled it while preserving its run registry and app resource.
 - Reinstalled the `bundle-a` app while OpenCode was opted in and verified that
   the profile retained its installation choice and reconnected the plugin.
+- In a fresh `bundle-c` profile, verified legacy CLI mutations share the daemon
+  safety path: source install was rejected while bundled OpenCode was opted in,
+  legacy remove was rejected while a real OpenCode run was active, and after
+  closing/uninstalling the bundled entry, source install started healthy without
+  a restart and legacy remove succeeded. Bundled run data remained under the
+  separate profile `plugin-data` root throughout.
 
 ## Follow-ups
 

@@ -72,17 +72,12 @@ func runPluginInstall() {
 		fmt.Fprintf(os.Stderr, "plugin install: %v\n", err)
 		os.Exit(1)
 	}
-	manifest, err := plugins.InstallPath(sourcePath, config.PluginDir())
+	result, err := installPluginViaDaemon(sourcePath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "plugin install: %v\n", err)
 		os.Exit(1)
 	}
-	printJSON(pluginCommandResult{
-		OK:              true,
-		Plugin:          &manifest,
-		PluginDir:       config.PluginDir(),
-		RestartRequired: true,
-	})
+	printJSON(result)
 }
 
 func runPluginList() {
@@ -132,15 +127,51 @@ func runPluginRemove() {
 		os.Exit(1)
 	}
 	name := strings.TrimSpace(os.Args[3])
-	if err := plugins.Remove(config.PluginDir(), name); err != nil {
+	result, err := removePluginViaDaemon(name)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "plugin remove: %v\n", err)
 		os.Exit(1)
 	}
-	printJSON(pluginCommandResult{
-		OK:              true,
-		PluginDir:       config.PluginDir(),
-		RestartRequired: true,
-	})
+	printJSON(result)
+}
+
+func installPluginViaDaemon(sourcePath string) (pluginCommandResult, error) {
+	event, err := pluginDaemonRequest(
+		map[string]any{"cmd": protocol.CmdInstallPlugin, "source": sourcePath},
+		protocol.EventPluginActionResult,
+		"install",
+		30*time.Second,
+	)
+	if err != nil {
+		return pluginCommandResult{}, err
+	}
+	name, _ := event["name"].(string)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return pluginCommandResult{}, fmt.Errorf("daemon returned no installed plugin name")
+	}
+	manifest, err := plugins.LoadManifest(filepath.Join(config.PluginDir(), name, plugins.ManifestName))
+	if err != nil {
+		return pluginCommandResult{}, fmt.Errorf("load installed plugin %q: %w", name, err)
+	}
+	return pluginCommandResult{
+		OK:        true,
+		Plugin:    &manifest,
+		PluginDir: config.PluginDir(),
+		Name:      name,
+	}, nil
+}
+
+func removePluginViaDaemon(name string) (pluginCommandResult, error) {
+	if _, err := pluginDaemonRequest(
+		map[string]any{"cmd": protocol.CmdRemovePlugin, "name": name},
+		protocol.EventPluginActionResult,
+		"remove",
+		30*time.Second,
+	); err != nil {
+		return pluginCommandResult{}, err
+	}
+	return pluginCommandResult{OK: true, PluginDir: config.PluginDir(), Name: name}, nil
 }
 
 func resolveCLIPath(path string) (string, error) {
