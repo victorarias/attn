@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { recordUiDiag } from '../utils/uiDiagnosticsLog';
 
 export const MAX_BROWSER_CONTROL_RESULT_BYTES = 24 * 1024 * 1024;
 
@@ -7,6 +8,20 @@ export interface BrowserHostRect {
   y: number;
   width: number;
   height: number;
+}
+
+const tracedBrowserHostState = new Map<string, { visible: boolean; suspicious: boolean }>();
+
+function shouldTraceBrowserUpdate(label: string, rect: BrowserHostRect, visible: boolean): boolean {
+  const suspicious = visible && (
+    rect.width >= window.innerWidth * 0.9
+    || rect.height >= window.innerHeight * 0.9
+    || rect.width <= 1
+    || rect.height <= 1
+  );
+  const previous = tracedBrowserHostState.get(label);
+  tracedBrowserHostState.set(label, { visible, suspicious });
+  return !previous || previous.visible !== visible || suspicious !== previous.suspicious;
 }
 
 export function serializeBrowserControlResultMessage(
@@ -46,17 +61,41 @@ export async function mountBrowserHost(
   if (!isTauri()) {
     throw new Error('In-app browser hosting requires the Tauri app');
   }
-  await invoke('browser_host_mount', { label, url, ...rect, visible });
+  recordUiDiag({ kind: 'browser_host_request', action: 'mount', label, rect, visible });
+  tracedBrowserHostState.set(label, { visible, suspicious: false });
+  try {
+    await invoke('browser_host_mount', { label, url, ...rect, visible });
+    recordUiDiag({ kind: 'browser_host_result', action: 'mount', label, rect, visible });
+  } catch (error) {
+    recordUiDiag({ kind: 'browser_host_error', action: 'mount', label, rect, visible, error: String(error) });
+    throw error;
+  }
 }
 
 export async function updateBrowserHost(label: string, rect: BrowserHostRect, visible: boolean): Promise<void> {
   if (!isTauri()) return;
-  await invoke('browser_host_update', { label, ...rect, visible });
+  const trace = shouldTraceBrowserUpdate(label, rect, visible);
+  if (trace) recordUiDiag({ kind: 'browser_host_request', action: 'update', label, rect, visible });
+  try {
+    await invoke('browser_host_update', { label, ...rect, visible });
+    if (trace) recordUiDiag({ kind: 'browser_host_result', action: 'update', label, rect, visible });
+  } catch (error) {
+    recordUiDiag({ kind: 'browser_host_error', action: 'update', label, rect, visible, error: String(error) });
+    throw error;
+  }
 }
 
 export async function unmountBrowserHost(label: string): Promise<void> {
   if (!isTauri()) return;
-  await invoke('browser_host_unmount', { label });
+  recordUiDiag({ kind: 'browser_host_request', action: 'unmount', label });
+  try {
+    await invoke('browser_host_unmount', { label });
+    tracedBrowserHostState.delete(label);
+    recordUiDiag({ kind: 'browser_host_result', action: 'unmount', label });
+  } catch (error) {
+    recordUiDiag({ kind: 'browser_host_error', action: 'unmount', label, error: String(error) });
+    throw error;
+  }
 }
 
 export function clearBrowserHostFocus(): void {

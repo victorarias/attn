@@ -190,6 +190,29 @@ html, body, #root {
   overflow: clip;
 }
 
+.app-fatal-error {
+  height: 100%;
+  width: 100%;
+  padding: 48px;
+  background: var(--color-bg-app, #17181c);
+  color: var(--color-text, #f3f3f4);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.app-fatal-error h1 {
+  margin-bottom: 12px;
+  font-size: 24px;
+}
+
+.app-fatal-error p {
+  margin-bottom: 16px;
+  color: var(--color-text-muted, #b6b8bf);
+}
+
+.app-fatal-error code {
+  white-space: pre-wrap;
+}
+
 /* Custom scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;
