@@ -24,7 +24,7 @@ import (
 
 // MaxFileSize bounds a single fs_write so a runaway write cannot balloon the
 // root. It mirrors notebook.MaxFileSize: the same root, the same sync-friendly
-// goal. (Reads are not yet size-capped — that lands with the non-text handling.)
+// goal. Reads use the same cap before allocating file contents for the WebSocket.
 const MaxFileSize = 2 << 20 // 2 MiB
 
 // Store is the generic filesystem store for one root directory. Writes serialize
@@ -156,6 +156,19 @@ func (s *Store) Read(p string) (content []byte, hash string, err error) {
 	abs, err := s.abs(rel)
 	if err != nil {
 		return nil, "", err
+	}
+	info, statErr := os.Lstat(abs)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, "", &NotFoundError{Path: p}
+		}
+		return nil, "", statErr
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, "", fmt.Errorf("fsdoc: %q is not a regular file", p)
+	}
+	if info.Size() > MaxFileSize {
+		return nil, "", fmt.Errorf("fsdoc: %q exceeds %d byte read cap", p, MaxFileSize)
 	}
 	content, err = os.ReadFile(abs)
 	if err != nil {
