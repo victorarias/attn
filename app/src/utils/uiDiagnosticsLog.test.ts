@@ -67,4 +67,3 @@ describe('UI diagnostics', () => {
     expect(events.filter((event) => event.sessionId === 'second' && event.kind === 'switch_probe')).toHaveLength(3);
   });
 });
-

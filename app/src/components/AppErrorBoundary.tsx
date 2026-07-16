@@ -25,4 +25,3 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, { error
     return this.props.children;
   }
 }
-
