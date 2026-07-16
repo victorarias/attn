@@ -60,7 +60,7 @@ func TicketAttachmentsDir(root, ticketID string) string {
 }
 
 // TicketArtifactsDir returns the visible Notebook directory whose direct
-// Markdown children are the current artifacts for one ticket.
+// file children are the current artifacts for one ticket.
 func TicketArtifactsDir(root, ticketID string) string {
 	return filepath.Join(root, "tickets", ticketID)
 }

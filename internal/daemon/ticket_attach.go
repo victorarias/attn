@@ -173,9 +173,9 @@ func stageTicketAttachFiles(dir string, files []protocol.TicketAttachFile) ([]*s
 	staged := make([]*stagedAttachFile, 0, len(files))
 	for _, input := range files {
 		filename := filepath.Base(strings.TrimSpace(input.Filename))
-		if filename == "" || filename == "." || filename == ".." || strings.HasPrefix(filename, ".") || filepath.Ext(filename) != ".md" {
+		if filename == "" || filename == "." || filename == ".." || strings.HasPrefix(filename, ".") {
 			removeAttachStages(staged)
-			return nil, fmt.Errorf("%q is not a visible Markdown filename", input.Filename)
+			return nil, fmt.Errorf("%q is not a visible filename", input.Filename)
 		}
 		if _, exists := seen[filename]; exists {
 			removeAttachStages(staged)

@@ -63,7 +63,7 @@ delegation.
 
 ## Hand Over Durable Artifacts
 
-When tracked work produces a plan, design, or other Markdown artifact that must
+When tracked work produces a plan, design, or other artifact that must
 outlive this session, hand it over to the ticket:
 
     "$ATTN_WRAPPER_PATH" ticket attach \
@@ -78,7 +78,7 @@ attach event, and returns the canonical paths. A matching retry returns the same
 receipt; a same-name file with different bytes is preserved and must be renamed
 before retrying.
 
-After success, edit the returned files directly. They are ordinary Markdown files
+After success, edit the returned files directly. They are ordinary files
 and the filesystem is the current artifact index. When you make a meaningful edit,
 rename, or deletion, report it with `ticket status --comment` or `ticket comment`
 so the chief knows to re-read the ticket.

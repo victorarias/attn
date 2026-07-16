@@ -417,8 +417,8 @@ describe('TicketDetailPanel', () => {
     expect(screen.queryByTestId('ticket-edit-description')).toBeNull();
   });
 
-  it('hands over selected Markdown files with optional state and comment', async () => {
-    vi.mocked(open).mockResolvedValue(['/tmp/design.md', '/tmp/rollout.md']);
+  it('hands over files of any type with optional state and comment', async () => {
+    vi.mocked(open).mockResolvedValue(['/tmp/design.md', '/tmp/prototype.html', '/tmp/results.zip']);
     const fetchTicket = vi.fn().mockResolvedValue(makeTicket());
     const onAttach = vi.fn().mockResolvedValue(undefined);
     render(
@@ -439,10 +439,11 @@ describe('TicketDetailPanel', () => {
     fireEvent.click(screen.getByTestId('ticket-submit-attach'));
     await waitFor(() => expect(onAttach).toHaveBeenCalledWith(
       'store-migration',
-      ['/tmp/design.md', '/tmp/rollout.md'],
+      ['/tmp/design.md', '/tmp/prototype.html', '/tmp/results.zip'],
       'ready_for_review',
       'Chosen approach',
     ));
+    expect(open).toHaveBeenCalledWith({ multiple: true });
   });
 
   it('opens, renames, and deletes a current artifact', async () => {
@@ -468,11 +469,11 @@ describe('TicketDetailPanel', () => {
     expect(onOpenArtifact).toHaveBeenCalledWith('tickets/store-migration/report.md');
 
     fireEvent.click(screen.getByText('Rename'));
-    fireEvent.change(screen.getByLabelText('Rename report.md'), { target: { value: 'implementation.md' } });
+    fireEvent.change(screen.getByLabelText('Rename report.md'), { target: { value: 'implementation.html' } });
     fireEvent.click(screen.getByText('Save'));
     await waitFor(() => expect(onRenameArtifact).toHaveBeenCalledWith(
       'tickets/store-migration/report.md',
-      'tickets/store-migration/implementation.md',
+      'tickets/store-migration/implementation.html',
     ));
 
     fireEvent.click(screen.getByText('Delete'));

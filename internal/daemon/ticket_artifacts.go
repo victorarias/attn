@@ -12,7 +12,7 @@ import (
 )
 
 // ticketArtifacts enumerates the filesystem-canonical artifact index for one
-// ticket. Only direct, regular, visible Markdown files are current artifacts.
+// ticket. Only direct, regular, visible files are current artifacts.
 func (d *Daemon) ticketArtifacts(ticketID string) ([]protocol.TicketArtifact, error) {
 	root, err := d.notebookRoot()
 	if err != nil {
@@ -32,7 +32,7 @@ func (d *Daemon) ticketArtifacts(ticketID string) ([]protocol.TicketArtifact, er
 	artifacts := make([]protocol.TicketArtifact, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		if strings.HasPrefix(name, ".") || filepath.Ext(name) != ".md" || entry.Type()&os.ModeSymlink != 0 {
+		if strings.HasPrefix(name, ".") || entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		info, infoErr := entry.Info()

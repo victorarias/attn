@@ -241,7 +241,7 @@ func (c *Client) SetTicketStatus(sourceSessionID, workState, comment, ticketID s
 	return resp.TicketStatusResult, nil
 }
 
-// AttachTicket copies one or more Markdown files into a ticket's canonical
+// AttachTicket copies one or more files into a ticket's canonical
 // Notebook directory and returns its durable receipt.
 func (c *Client) AttachTicket(sourceSessionID string, files []protocol.TicketAttachFile, ticketID, state, comment string) (*protocol.TicketAttachResult, error) {
 	msg := protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: sourceSessionID, Files: files}

@@ -826,7 +826,7 @@ func parseTicketAttachArgs(args []string) (ticketAttachArgs, error) {
 	fs := flag.NewFlagSet("ticket attach", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var files stringListFlag
-	fs.Var(&files, "file", "path to a Markdown artifact (repeatable)")
+	fs.Var(&files, "file", "path to an artifact file (repeatable)")
 	ticketID := fs.String("ticket", "", "attach to this ticket instead of the session's bound ticket")
 	state := fs.String("state", "", "optional resulting work state")
 	comment := fs.String("comment", "", "optional context recorded with the attachment")
@@ -880,8 +880,8 @@ func runTicketAttach(args []string) {
 			fmt.Fprintf(os.Stderr, "ticket attach: %v\n", statErr)
 			os.Exit(1)
 		}
-		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || filepath.Ext(absPath) != ".md" {
-			fmt.Fprintf(os.Stderr, "ticket attach: %q is not a regular Markdown file\n", absPath)
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			fmt.Fprintf(os.Stderr, "ticket attach: %q is not a regular file\n", absPath)
 			os.Exit(1)
 		}
 		files = append(files, protocol.TicketAttachFile{SourcePath: absPath, Filename: filepath.Base(absPath)})
@@ -1533,7 +1533,7 @@ commands:
         cursor
   attach --file <path> [--file <path> ...] [--ticket <id>]
         [--state <work-state>] [--comment <text>] [--session <id>] [--json]
-        copy Markdown artifacts into a ticket's canonical Notebook directory,
+		copy artifact files into a ticket's canonical Notebook directory,
         record one durable attachment, and optionally change ticket state
   new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]
         create an unbound backlog ticket in todo (no agent, no session)

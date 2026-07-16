@@ -150,7 +150,7 @@ func TestTicketArtifactsFollowFilesystemAtReadTime(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "nested"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for name, content := range map[string]string{"b.md": "b", "a.md": "a", ".hidden.md": "hidden", "notes.txt": "text"} {
+	for name, content := range map[string]string{"b.md": "b", "a.md": "a", ".hidden.md": "hidden", "notes.txt": "text", "prototype.html": "<h1>prototype</h1>"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func TestTicketArtifactsFollowFilesystemAtReadTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if names := artifactNames(first.Artifacts); !reflect.DeepEqual(names, []string{"a.md", "b.md"}) {
+	if names := artifactNames(first.Artifacts); !reflect.DeepEqual(names, []string{"a.md", "b.md", "notes.txt", "prototype.html"}) {
 		t.Fatalf("artifact names = %v", names)
 	}
 	if err := os.Rename(filepath.Join(dir, "a.md"), filepath.Join(dir, "implementation.md")); err != nil {
@@ -180,7 +180,7 @@ func TestTicketArtifactsFollowFilesystemAtReadTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if names := artifactNames(second.Artifacts); !reflect.DeepEqual(names, []string{"implementation.md"}) {
+	if names := artifactNames(second.Artifacts); !reflect.DeepEqual(names, []string{"implementation.md", "notes.txt", "prototype.html"}) {
 		t.Fatalf("artifacts after rename/delete = %v", names)
 	}
 }

@@ -338,7 +338,7 @@ model TicketActivity {
   created_at: string;
 }
 
-// TicketArtifact is a current Markdown file in the ticket's visible Notebook
+// TicketArtifact is a current file in the ticket's visible Notebook
 // directory. The filesystem is authoritative, so the shape carries paths rather
 // than a database identity or lifecycle metadata.
 model TicketArtifact {
@@ -835,7 +835,7 @@ model TicketAttachFile {
   filename: string;
 }
 
-// TicketAttachMessage copies one or more Markdown artifacts into a ticket's
+// TicketAttachMessage copies one or more artifact files into a ticket's
 // visible Notebook directory and records one durable attach receipt. Without a
 // ticket_id the daemon resolves the caller's bound ticket; with one it follows the
 // same permissive by-id authorization as ticket status and comment.

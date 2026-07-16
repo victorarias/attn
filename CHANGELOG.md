@@ -14,6 +14,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-15]
 
 ### Added
+- **Tickets can now carry any regular file.** Attach HTML prototypes, images,
+  archives, and other artifacts alongside Markdown; text formats open as source
+  in the Notebook, while binary formats remain non-executing previews.
 - **OpenCode is now an opt-in plugin included with the app.** Each profile can
   install it from Settings or the CLI without an attn checkout, Bun, or a daemon
   restart. Uninstalling preserves OpenCode run data and is blocked while the

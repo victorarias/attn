@@ -27,7 +27,7 @@ also arm a Monitor on `attn ticket inbox --watch` to consume updates sooner. Ord
 delegation needs none of that.
 
 For a chief-tracked delegation that returns a durable plan, read the ticket before
-continuing: `attn ticket show <ticket-id>` lists the Markdown files currently in
+continuing: `attn ticket show <ticket-id>` lists the files currently in
 the ticket's Notebook directory. Pass those canonical paths in follow-on briefs so
 the next agent updates the same plan instead of creating a conversational copy.
 
