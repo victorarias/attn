@@ -423,6 +423,11 @@ model PluginInfo {
   priority: int32;
   connected: boolean;
   running: boolean;
+  availability: string; // "bundled" | "user"
+  installation_state: string; // "available" | "installed"
+  runtime_state: string; // "stopped" | "starting" | "connected" | "degraded"
+  can_install: boolean;
+  can_uninstall: boolean;
   // "starting" | "connected" | "backoff" | "stopped". Plain string keeps
   // generated Go/TypeScript consumers aligned with other runtime status fields.
   runtime_phase?: string;
@@ -1296,6 +1301,16 @@ model ListPluginsMessage {
 model InstallPluginMessage {
   cmd: "install_plugin";
   source: string;
+}
+
+model InstallBundledPluginMessage {
+  cmd: "install_bundled_plugin";
+  name: string;
+}
+
+model UninstallPluginMessage {
+  cmd: "uninstall_plugin";
+  name: string;
 }
 
 model RemovePluginMessage {

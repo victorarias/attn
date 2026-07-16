@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -1650,17 +1651,29 @@ func (s *Store) GetSetting(key string) string {
 
 // SetSetting sets a setting value (upserts)
 func (s *Store) SetSetting(key, value string) {
+	if err := s.SetSettingChecked(key, value); err != nil {
+		log.Printf("[store] SetSetting: %v", err)
+	}
+}
+
+// SetSettingChecked sets a setting value and reports persistence failures to
+// callers whose user-visible action must not succeed without durable state.
+func (s *Store) SetSettingChecked(key, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
-		return
+		return errors.New("settings database is unavailable")
 	}
 
-	s.execLog(`
+	_, err := s.db.Exec(`
 		INSERT INTO settings (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 		key, value)
+	if err != nil {
+		return fmt.Errorf("set setting %q: %w", key, err)
+	}
+	return nil
 }
 
 // DeleteSetting removes a setting row. No-op if the key is absent or the store

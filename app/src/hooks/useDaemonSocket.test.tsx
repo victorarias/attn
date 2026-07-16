@@ -554,6 +554,26 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
     await expect(install).resolves.toMatchObject({ success: true, name: 'attn-snipe' });
 
+    const installBundled = result.current.sendInstallBundledPlugin('attn-opencode');
+    expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+      cmd: 'install_bundled_plugin',
+      name: 'attn-opencode',
+    });
+    act(() => {
+      ws.emit({ event: 'plugin_action_result', action: 'install_bundled', name: 'attn-opencode', success: true });
+    });
+    await expect(installBundled).resolves.toMatchObject({ success: true, name: 'attn-opencode' });
+
+    const uninstall = result.current.sendUninstallPlugin('attn-opencode');
+    expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+      cmd: 'uninstall_plugin',
+      name: 'attn-opencode',
+    });
+    act(() => {
+      ws.emit({ event: 'plugin_action_result', action: 'uninstall', name: 'attn-opencode', success: true });
+    });
+    await expect(uninstall).resolves.toMatchObject({ success: true, name: 'attn-opencode' });
+
     const setPriority = result.current.sendSetPluginPriority('services-pilot-worktrees', 50);
     act(() => {
       ws.emit({

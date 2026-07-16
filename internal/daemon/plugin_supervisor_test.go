@@ -3,6 +3,8 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -206,6 +208,40 @@ func TestPluginSupervisorSnapshotsStartingConnectedBackoffAndStopped(t *testing.
 	snapshot, _ = supervisor.Snapshot("fixture")
 	if snapshot.Phase != pluginPhaseStopped {
 		t.Fatalf("stopped snapshot=%+v", snapshot)
+	}
+}
+
+func TestExecPluginProcessLauncherRunsExecutableWithoutBun(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, "started")
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	script := "#!/bin/sh\nprintf '%s' \"$PLUGIN_MARKER_VALUE\" > \"$PLUGIN_MARKER_PATH\"\n"
+	if err := os.WriteFile(filepath.Join(root, "bin", "provider"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 4\n\n[plugin]\nkind = \"executable\"\npath = \"bin/provider\"\n")
+	if err := os.WriteFile(filepath.Join(root, pluginManifestName), manifestData, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := loadPluginManifest(filepath.Join(root, pluginManifestName))
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+	handle, err := (execPluginProcessLauncher{}).Start(manifest, []string{"PLUGIN_MARKER_PATH=" + marker, "PLUGIN_MARKER_VALUE=direct"})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if exit := handle.Wait(); exit.Error != "" || exit.Signal != "" || exit.ExitCode == nil || *exit.ExitCode != 0 {
+		t.Fatalf("exit=%+v", exit)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if string(data) != "direct" {
+		t.Fatalf("marker=%q, want direct", data)
 	}
 }
 

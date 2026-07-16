@@ -1485,6 +1485,14 @@ type InspectPathResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type InstallBundledPluginMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
 type InstallPluginMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2388,6 +2396,15 @@ type PluginActionResultMessage struct {
 }
 
 type PluginInfo struct {
+	// Availability corresponds to the JSON schema field "availability".
+	Availability string `json:"availability"`
+
+	// CanInstall corresponds to the JSON schema field "can_install".
+	CanInstall bool `json:"can_install"`
+
+	// CanUninstall corresponds to the JSON schema field "can_uninstall".
+	CanUninstall bool `json:"can_uninstall"`
+
 	// Connected corresponds to the JSON schema field "connected".
 	Connected bool `json:"connected"`
 
@@ -2402,6 +2419,9 @@ type PluginInfo struct {
 
 	// HealthStatus corresponds to the JSON schema field "health_status".
 	HealthStatus *string `json:"health_status,omitempty,omitzero"`
+
+	// InstallationState corresponds to the JSON schema field "installation_state".
+	InstallationState string `json:"installation_state"`
 
 	// LastExit corresponds to the JSON schema field "last_exit".
 	LastExit *string `json:"last_exit,omitempty,omitzero"`
@@ -2426,6 +2446,9 @@ type PluginInfo struct {
 
 	// RuntimePhase corresponds to the JSON schema field "runtime_phase".
 	RuntimePhase *string `json:"runtime_phase,omitempty,omitzero"`
+
+	// RuntimeState corresponds to the JSON schema field "runtime_state".
+	RuntimeState string `json:"runtime_state"`
 
 	// Version corresponds to the JSON schema field "version".
 	Version string `json:"version"`
@@ -4147,6 +4170,14 @@ type TriggerNudgeMessage struct {
 
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID string `json:"session_id"`
+}
+
+type UninstallPluginMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
 }
 
 type UnregisterMessage struct {

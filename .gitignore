@@ -16,6 +16,7 @@ coverage.out
 
 # Build artifacts
 app/src-tauri/binaries/
+app/src-tauri/bundled-plugins/
 
 # Claude Code local config
 .claude/

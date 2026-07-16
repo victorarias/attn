@@ -1,24 +1,47 @@
 import { AttnRPCClient } from "./attn-rpc";
 import { OpenCodeDriver } from "./driver";
+import { launch } from "./launcher";
 import { RunRegistry, runtimeRootFromSocket } from "./run-registry";
 import type { DriverSpawnParams, SessionClosedParams } from "./types";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
-const socketPath = requiredEnvironment("ATTN_SOCKET_PATH");
-const pluginName = requiredEnvironment("ATTN_PLUGIN_NAME");
-const pluginGeneration = requiredGeneration();
-const rpc = new AttnRPCClient({ socketPath, name: pluginName, version: "0.1.0", generation: pluginGeneration });
-const driver = new OpenCodeDriver({
-  rpc,
-  registry: new RunRegistry(runtimeRootFromSocket(socketPath)),
-});
+const pluginVersion = "0.1.0";
+const launcherMarker = "--attn-opencode-launcher";
+const launcherIndex = process.argv.indexOf(launcherMarker);
 
-rpc.handle("attn.health", () => driver.health());
-rpc.handle("driver.spawn", (params) => driver.spawn(params as DriverSpawnParams));
-rpc.handle("driver.resume", (params) => driver.resume(params as DriverSpawnParams));
-rpc.handle("driver.session_closed", (params) => driver.sessionClosed(params as SessionClosedParams));
+if (launcherIndex >= 0) {
+  const configPath = process.argv[launcherIndex + 1];
+  if (!configPath) throw new Error(`${launcherMarker} requires a run config path`);
+  process.exitCode = await launch(configPath);
+} else {
+  await runPlugin();
+}
 
-await rpc.connect();
-await driver.initialize();
+async function runPlugin(): Promise<void> {
+  const socketPath = requiredEnvironment("ATTN_SOCKET_PATH");
+  const pluginName = requiredEnvironment("ATTN_PLUGIN_NAME");
+  const pluginGeneration = requiredGeneration();
+  const standalone = requiredEnvironment("ATTN_PLUGIN_ENTRYPOINT_KIND") === "executable";
+  const pluginRoot = requiredEnvironment("ATTN_PLUGIN_ROOT");
+  const rpc = new AttnRPCClient({ socketPath, name: pluginName, version: pluginVersion, generation: pluginGeneration });
+  const driver = new OpenCodeDriver({
+    rpc,
+    registry: new RunRegistry(runtimeRootFromSocket(socketPath)),
+    standaloneLauncher: standalone,
+    guidancePluginRef: standalone
+      ? pathToFileURL(join(pluginRoot, "guidance-plugin.js")).href
+      : undefined,
+  });
+
+  rpc.handle("attn.health", () => driver.health());
+  rpc.handle("driver.spawn", (params) => driver.spawn(params as DriverSpawnParams));
+  rpc.handle("driver.resume", (params) => driver.resume(params as DriverSpawnParams));
+  rpc.handle("driver.session_closed", (params) => driver.sessionClosed(params as SessionClosedParams));
+
+  await rpc.connect();
+  await driver.initialize();
+}
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();

@@ -1,14 +1,20 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/plugins"
+	"github.com/victorarias/attn/internal/protocol"
+	"nhooyr.io/websocket"
 )
 
 type pluginCommandResult struct {
@@ -16,11 +22,12 @@ type pluginCommandResult struct {
 	Plugin          *plugins.Manifest `json:"plugin,omitempty"`
 	PluginDir       string            `json:"plugin_dir,omitempty"`
 	RestartRequired bool              `json:"restart_required,omitempty"`
+	Name            string            `json:"name,omitempty"`
 }
 
 type pluginListResult struct {
-	Plugins []plugins.Manifest    `json:"plugins"`
-	Issues  []pluginManifestIssue `json:"issues,omitempty"`
+	Plugins []protocol.PluginInfo  `json:"plugins"`
+	Issues  []protocol.PluginIssue `json:"issues,omitempty"`
 }
 
 type pluginManifestIssue struct {
@@ -30,15 +37,19 @@ type pluginManifestIssue struct {
 
 func runPluginCommand() {
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: attn plugin <install|list|remove> ...")
+		fmt.Fprintln(os.Stderr, "usage: attn plugin <install|install-bundled|list|uninstall|remove> ...")
 		os.Exit(1)
 	}
 
 	switch os.Args[2] {
 	case "install":
 		runPluginInstall()
+	case "install-bundled":
+		runPluginInstallBundled()
 	case "list":
 		runPluginList()
+	case "uninstall":
+		runPluginUninstall()
 	case "remove":
 		runPluginRemove()
 	default:
@@ -75,17 +86,44 @@ func runPluginInstall() {
 }
 
 func runPluginList() {
-	manifests, issues := plugins.Discover(config.PluginDir())
-	result := pluginListResult{
-		Plugins: manifests,
+	event, err := pluginDaemonRequest(map[string]any{"cmd": protocol.CmdListPlugins}, protocol.EventPluginsUpdated, "", 10*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "plugin list: %v\n", err)
+		os.Exit(1)
 	}
-	for _, issue := range issues {
-		result.Issues = append(result.Issues, pluginManifestIssue{
-			Path:  issue.Path,
-			Error: issue.Err.Error(),
-		})
+	var result pluginListResult
+	payload, _ := json.Marshal(event)
+	if err := json.Unmarshal(payload, &result); err != nil {
+		fmt.Fprintf(os.Stderr, "plugin list: decode response: %v\n", err)
+		os.Exit(1)
 	}
 	printJSON(result)
+}
+
+func runPluginInstallBundled() {
+	if len(os.Args) != 4 || strings.TrimSpace(os.Args[3]) == "" {
+		fmt.Fprintln(os.Stderr, "usage: attn plugin install-bundled <name>")
+		os.Exit(1)
+	}
+	name := strings.TrimSpace(os.Args[3])
+	if _, err := pluginDaemonRequest(map[string]any{"cmd": protocol.CmdInstallBundledPlugin, "name": name}, protocol.EventPluginActionResult, "install_bundled", 30*time.Second); err != nil {
+		fmt.Fprintf(os.Stderr, "plugin install-bundled: %v\n", err)
+		os.Exit(1)
+	}
+	printJSON(pluginCommandResult{OK: true, Name: name})
+}
+
+func runPluginUninstall() {
+	if len(os.Args) != 4 || strings.TrimSpace(os.Args[3]) == "" {
+		fmt.Fprintln(os.Stderr, "usage: attn plugin uninstall <name>")
+		os.Exit(1)
+	}
+	name := strings.TrimSpace(os.Args[3])
+	if _, err := pluginDaemonRequest(map[string]any{"cmd": protocol.CmdUninstallPlugin, "name": name}, protocol.EventPluginActionResult, "uninstall", 30*time.Second); err != nil {
+		fmt.Fprintf(os.Stderr, "plugin uninstall: %v\n", err)
+		os.Exit(1)
+	}
+	printJSON(pluginCommandResult{OK: true, Name: name})
 }
 
 func runPluginRemove() {
@@ -125,4 +163,63 @@ func resolveCLIPath(path string) (string, error) {
 		return "", fmt.Errorf("resolve path %q: %w", path, err)
 	}
 	return resolved, nil
+}
+
+func pluginDaemonRequest(payload map[string]any, expectedEvent, expectedAction string, timeout time.Duration) (map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	url := "ws://" + net.JoinHostPort("127.0.0.1", config.WSPort()) + "/ws"
+	conn, _, err := websocket.Dial(ctx, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("connect to daemon: %w", err)
+	}
+	conn.SetReadLimit(16 << 20)
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	if _, _, err := conn.Read(ctx); err != nil {
+		return nil, fmt.Errorf("read daemon state: %w", err)
+	}
+	hello := map[string]any{
+		"cmd":          protocol.CmdClientHello,
+		"client_kind":  "attn-cli",
+		"version":      "protocol-" + protocol.ProtocolVersion,
+		"capabilities": []string{protocol.CapabilityWorkspaceSessions},
+	}
+	if err := writePluginDaemonMessage(ctx, conn, hello); err != nil {
+		return nil, err
+	}
+	if err := writePluginDaemonMessage(ctx, conn, payload); err != nil {
+		return nil, err
+	}
+	for {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("wait for daemon response: %w", err)
+		}
+		var event map[string]any
+		if json.Unmarshal(data, &event) != nil || event["event"] != expectedEvent {
+			continue
+		}
+		if expectedAction != "" && event["action"] != expectedAction {
+			continue
+		}
+		if success, present := event["success"].(bool); present && !success {
+			message, _ := event["error"].(string)
+			if message == "" {
+				message = "plugin action failed"
+			}
+			return nil, fmt.Errorf("%s", message)
+		}
+		return event, nil
+	}
+}
+
+func writePluginDaemonMessage(ctx context.Context, conn *websocket.Conn, payload map[string]any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if err := conn.Write(ctx, websocket.MessageText, body); err != nil {
+		return fmt.Errorf("write daemon command: %w", err)
+	}
+	return nil
 }

@@ -989,6 +989,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleListPluginsWS(client)
 	case protocol.CmdInstallPlugin:
 		d.handleInstallPluginWS(client, msg.(*protocol.InstallPluginMessage))
+	case protocol.CmdInstallBundledPlugin:
+		d.handleInstallBundledPluginWS(client, msg.(*protocol.InstallBundledPluginMessage))
+	case protocol.CmdUninstallPlugin:
+		d.handleUninstallPluginWS(client, msg.(*protocol.UninstallPluginMessage))
 	case protocol.CmdRemovePlugin:
 		d.handleRemovePluginWS(client, msg.(*protocol.RemovePluginMessage))
 	case protocol.CmdSetPluginPriority:

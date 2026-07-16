@@ -37,7 +37,7 @@ attn fixes the dumbest part of multi-agent workflows: knowing what needs you rig
 | [Claude Code](https://claude.ai/code) | Hooks + classifier | Yes |
 | [Codex](https://developers.openai.com/codex) | Hooks + classifier | No |
 | [Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) | PTY heuristics + transcript classifier | No |
-| OpenCode (installable plugin) | Native events | Yes |
+| OpenCode (opt-in bundled plugin) | Native events | Yes |
 
 ## Install
 

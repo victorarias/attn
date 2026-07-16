@@ -61,6 +61,8 @@ interface SettingsModalProps {
   onSetEndpointRemoteWeb: (endpointId: string, enabled: boolean) => Promise<{ success: boolean }>;
   onListPlugins: () => Promise<PluginListResult>;
   onInstallPlugin: (source: string) => Promise<{ success: boolean; name?: string }>;
+  onInstallBundledPlugin?: (name: string) => Promise<{ success: boolean; name?: string }>;
+  onUninstallPlugin?: (name: string) => Promise<{ success: boolean; name?: string }>;
   onRemovePlugin: (name: string) => Promise<{ success: boolean; name?: string }>;
   onSetPluginPriority: (name: string, priority: number) => Promise<{ success: boolean; name?: string }>;
   onSetSetting: (key: string, value: string) => void;
@@ -156,6 +158,8 @@ export function SettingsModal({
   onSetEndpointRemoteWeb,
   onListPlugins,
   onInstallPlugin,
+  onInstallBundledPlugin,
+  onUninstallPlugin,
   onRemovePlugin,
   onSetPluginPriority,
   onSetSetting,
@@ -764,6 +768,34 @@ export function SettingsModal({
       setPluginActionName(null);
     }
   }, [onRemovePlugin, refreshPlugins]);
+
+  const handleInstallBundledPlugin = useCallback(async (name: string) => {
+    setPluginError(null);
+    setPluginActionName(name);
+    try {
+      if (!onInstallBundledPlugin) throw new Error('Bundled plugin installation is unavailable');
+      await onInstallBundledPlugin(name);
+      await refreshPlugins();
+    } catch (error) {
+      setPluginError(error instanceof Error ? error.message : 'Failed to install bundled plugin');
+    } finally {
+      setPluginActionName(null);
+    }
+  }, [onInstallBundledPlugin, refreshPlugins]);
+
+  const handleUninstallPlugin = useCallback(async (name: string) => {
+    setPluginError(null);
+    setPluginActionName(name);
+    try {
+      if (!onUninstallPlugin) throw new Error('Plugin uninstall is unavailable');
+      await onUninstallPlugin(name);
+      await refreshPlugins();
+    } catch (error) {
+      setPluginError(error instanceof Error ? error.message : 'Failed to uninstall plugin');
+    } finally {
+      setPluginActionName(null);
+    }
+  }, [onUninstallPlugin, refreshPlugins]);
 
   const handlePluginPriorityChange = useCallback((name: string, value: string) => {
     setPluginPriorityDrafts((prev) => ({ ...prev, [name]: value }));
@@ -1502,7 +1534,7 @@ export function SettingsModal({
         <div className="settings-kicker">Extensions</div>
         <h3>Plugins</h3>
         <p className="settings-description">
-          Install user-owned plugins from a local directory or Git repository and control provider dispatch priority.
+          Install first-party bundled plugins or add user-owned plugins from a local directory or Git repository.
         </p>
       </div>
       <div className="settings-block-body">
@@ -1535,38 +1567,53 @@ export function SettingsModal({
         {pluginsLoading ? (
           <p className="settings-empty">Loading plugins...</p>
         ) : plugins.length === 0 ? (
-          <p className="settings-empty">No plugins installed.</p>
+          <p className="settings-empty">No plugins available or installed.</p>
         ) : (
           <div className="plugin-list">
             {plugins.map((plugin) => {
               const busy = pluginActionName === plugin.name;
               const draftPriority = pluginPriorityDrafts[plugin.name] ?? String(plugin.priority);
               const healthStatus = plugin.health_status || 'unknown';
-              const runtimePhase = plugin.runtime_phase || (plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped');
+              const installed = plugin.installation_state === 'installed';
+              const runtimePhase = plugin.runtime_state || plugin.runtime_phase || (plugin.connected ? 'connected' : plugin.running ? 'starting' : 'stopped');
               return (
                 <div key={plugin.name} className="plugin-card">
                   <div className="plugin-card-header">
                     <div className="plugin-card-title">
                       <span className="endpoint-name">{plugin.name}</span>
                       <span className="settings-pill">v{plugin.version}</span>
+                      {plugin.availability === 'bundled' && <span className="settings-pill">Bundled</span>}
+                      <span className="settings-pill">{installed ? 'Installed' : 'Available'}</span>
                       <span className={`plugin-status-badge ${runtimePhase}`}>
                         {runtimePhase}
                       </span>
-                      <span className={`plugin-health-badge ${healthStatus}`}>
-                        {healthStatus}
-                      </span>
+                      {installed && (
+                        <span className={`plugin-health-badge ${healthStatus}`}>
+                          {healthStatus}
+                        </span>
+                      )}
                     </div>
-                    <button className="settings-action danger" onClick={() => void handleRemovePlugin(plugin.name)} disabled={pluginActionName !== null}>
-                      Remove
-                    </button>
+                    {plugin.availability === 'bundled' && !installed ? (
+                      <button className="settings-action" onClick={() => void handleInstallBundledPlugin(plugin.name)} disabled={pluginActionName !== null || !plugin.can_install}>
+                        Install
+                      </button>
+                    ) : plugin.availability === 'bundled' ? (
+                      <button className="settings-action danger" onClick={() => void handleUninstallPlugin(plugin.name)} disabled={pluginActionName !== null || !plugin.can_uninstall}>
+                        Uninstall
+                      </button>
+                    ) : (
+                      <button className="settings-action danger" onClick={() => void handleRemovePlugin(plugin.name)} disabled={pluginActionName !== null || !plugin.can_uninstall}>
+                        Remove
+                      </button>
+                    )}
                   </div>
                   {plugin.description && <p className="settings-description plugin-description">{plugin.description}</p>}
-                  {plugin.health_message && (
+                  {installed && plugin.health_message && (
                     <div className="settings-warning">
                       Healthcheck: {plugin.health_message}
                     </div>
                   )}
-                  {plugin.last_exit && (
+                  {installed && plugin.last_exit && (
                     <div className="settings-warning">
                       Last exit: {plugin.last_exit}
                     </div>
@@ -1588,7 +1635,7 @@ export function SettingsModal({
                         <code>{plugin.next_restart_at}</code>
                       </div>
                     )}
-                    <label className="plugin-priority-control">
+                    {installed && <label className="plugin-priority-control">
                       <span className="settings-meta-label">Priority</span>
                       <input
                         type="number"
@@ -1605,7 +1652,7 @@ export function SettingsModal({
                       >
                         Save
                       </button>
-                    </label>
+                    </label>}
                   </div>
                   {busy && <div className="settings-hint">Updating {plugin.name}...</div>}
                 </div>

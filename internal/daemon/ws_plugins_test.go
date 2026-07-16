@@ -233,3 +233,141 @@ func TestDaemon_HandleRemovePluginWSKeepsSupervisorRunningWhenDeletionFails(t *t
 		t.Fatalf("start count after failed remove=%d, want 1", got)
 	}
 }
+
+func TestDaemon_BundledPluginIsAvailableAndInertByDefault(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "user-plugins")
+	d.bundledPluginDir = filepath.Join(t.TempDir(), "bundled-plugins")
+	writeTestPluginManifest(t, d.bundledPluginDir, "attn-opencode")
+	launcher := &fakePluginLauncher{}
+	d.pluginSupervisor = newTestPluginSupervisor(newFakePluginClock(), launcher)
+
+	d.startInstalledPlugins()
+	if got := launcher.count(); got != 0 {
+		t.Fatalf("bundled plugin starts=%d, want inert by default", got)
+	}
+	plugins := d.pluginsUpdatedMessage().Plugins
+	if len(plugins) != 1 {
+		t.Fatalf("plugins=%+v, want bundled catalog entry", plugins)
+	}
+	plugin := plugins[0]
+	if plugin.Availability != "bundled" || plugin.InstallationState != "available" || !plugin.CanInstall || plugin.CanUninstall {
+		t.Fatalf("available bundled plugin=%+v", plugin)
+	}
+}
+
+func TestDaemon_InstallAndUninstallBundledPluginUpdatesProfileState(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "user-plugins")
+	d.bundledPluginDir = filepath.Join(t.TempDir(), "bundled-plugins")
+	writeTestPluginManifest(t, d.bundledPluginDir, "attn-opencode")
+	launcher := &fakePluginLauncher{}
+	d.pluginSupervisor = newTestPluginSupervisor(newFakePluginClock(), launcher)
+	client := &wsClient{send: make(chan outboundMessage, 2)}
+
+	d.handleInstallBundledPluginWS(client, &protocol.InstallBundledPluginMessage{Name: "attn-opencode"})
+	if event := readOutboundEvent(t, client); event["success"] != true {
+		t.Fatalf("install event=%v", event)
+	}
+	if got := launcher.count(); got != 1 {
+		t.Fatalf("starts after install=%d, want 1", got)
+	}
+	installed := d.pluginsUpdatedMessage().Plugins[0]
+	if installed.InstallationState != "installed" || installed.RuntimeState != "starting" || installed.CanInstall || !installed.CanUninstall {
+		t.Fatalf("installed plugin=%+v", installed)
+	}
+
+	d.handleUninstallPluginWS(client, &protocol.UninstallPluginMessage{Name: "attn-opencode"})
+	if event := readOutboundEvent(t, client); event["success"] != true {
+		t.Fatalf("uninstall event=%v", event)
+	}
+	available := d.pluginsUpdatedMessage().Plugins[0]
+	if available.InstallationState != "available" || available.RuntimeState != "stopped" || !available.CanInstall || available.CanUninstall {
+		t.Fatalf("available plugin after uninstall=%+v", available)
+	}
+	if _, err := os.Stat(filepath.Join(d.bundledPluginDir, "attn-opencode", pluginManifestName)); err != nil {
+		t.Fatalf("bundled artifact changed by uninstall: %v", err)
+	}
+}
+
+func TestDaemon_InstallBundledPluginRejectsUserNameCollision(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "user-plugins")
+	d.bundledPluginDir = filepath.Join(t.TempDir(), "bundled-plugins")
+	writeTestPluginManifest(t, d.pluginDir, "attn-opencode")
+	writeTestPluginManifest(t, d.bundledPluginDir, "attn-opencode")
+	client := &wsClient{send: make(chan outboundMessage, 1)}
+
+	d.handleInstallBundledPluginWS(client, &protocol.InstallBundledPluginMessage{Name: "attn-opencode"})
+	event := readOutboundEvent(t, client)
+	if event["success"] != false || !strings.Contains(event["error"].(string), "user plugin") {
+		t.Fatalf("install collision event=%v", event)
+	}
+	plugins := d.pluginsUpdatedMessage().Plugins
+	if len(plugins) != 1 || plugins[0].Availability != "user" {
+		t.Fatalf("collision catalog=%+v, want user entry only", plugins)
+	}
+}
+
+func TestDaemon_UninstallBundledPluginRejectsActiveOwnedRun(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.bundledPluginDir = filepath.Join(t.TempDir(), "bundled-plugins")
+	writeTestPluginManifest(t, d.bundledPluginDir, "attn-opencode")
+	if err := d.setBundledPluginInstalled("attn-opencode", true); err != nil {
+		t.Fatalf("mark installed: %v", err)
+	}
+	now := protocol.TimestampNow().String()
+	d.store.Add(&protocol.Session{ID: "active", Agent: "opencode", State: protocol.SessionStateWorking, StateSince: now, LastSeen: now})
+	if !d.store.BeginAgentDriverRun("active", "attn-opencode", "run-active") {
+		t.Fatal("BeginAgentDriverRun failed")
+	}
+	client := &wsClient{send: make(chan outboundMessage, 1)}
+
+	d.handleUninstallPluginWS(client, &protocol.UninstallPluginMessage{Name: "attn-opencode"})
+	event := readOutboundEvent(t, client)
+	if event["success"] != false || !strings.Contains(event["error"].(string), "active delegated run") {
+		t.Fatalf("uninstall active-run event=%v", event)
+	}
+	if d.pluginsUpdatedMessage().Plugins[0].CanUninstall {
+		t.Fatal("active-run plugin should not be uninstallable")
+	}
+}
+
+func TestDaemon_BundledInstallDoesNotChangeMemoryWhenPersistenceFails(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	if got := d.installedBundledPlugins(); len(got) != 0 {
+		t.Fatalf("initial installed set=%v, want empty", got)
+	}
+	if err := d.store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	if err := d.setBundledPluginInstalled("attn-opencode", true); err == nil {
+		t.Fatal("setBundledPluginInstalled error=nil, want persistence failure")
+	}
+	if got := d.installedBundledPlugins(); len(got) != 0 {
+		t.Fatalf("installed set after persistence failure=%v, want unchanged", got)
+	}
+}
+
+func TestDaemon_BundledAppUpdatePreservesProfileInstallation(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.bundledPluginDir = filepath.Join(t.TempDir(), "bundled-plugins")
+	writeTestPluginManifest(t, d.bundledPluginDir, "attn-opencode")
+	if err := d.setBundledPluginInstalled("attn-opencode", true); err != nil {
+		t.Fatalf("mark installed: %v", err)
+	}
+	manifestPath := filepath.Join(d.bundledPluginDir, "attn-opencode", pluginManifestName)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	updated := strings.Replace(string(data), `version = "0.1.0"`, `version = "0.2.0"`, 1)
+	if err := os.WriteFile(manifestPath, []byte(updated), 0o644); err != nil {
+		t.Fatalf("update manifest: %v", err)
+	}
+
+	plugins := d.pluginsUpdatedMessage().Plugins
+	if len(plugins) != 1 || plugins[0].Version != "0.2.0" || plugins[0].InstallationState != "installed" {
+		t.Fatalf("catalog after app update=%+v, want updated installed artifact", plugins)
+	}
+}

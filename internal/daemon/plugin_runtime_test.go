@@ -23,6 +23,14 @@ func TestPluginDirForSocketUsesSocketRuntimeRoot(t *testing.T) {
 	}
 }
 
+func TestBundledPluginDirForExecutableUsesExplicitOverride(t *testing.T) {
+	override := filepath.Join(t.TempDir(), "bundled")
+	t.Setenv("ATTN_BUNDLED_PLUGIN_DIR", override)
+	if got := bundledPluginDirForExecutable(); got != override {
+		t.Fatalf("bundledPluginDirForExecutable()=%q, want %q", got, override)
+	}
+}
+
 func TestDiscoverPluginManifests_LoadsValidInstalledPlugins(t *testing.T) {
 	pluginDir := filepath.Join(t.TempDir(), "plugins")
 	writeTestPluginManifest(t, pluginDir, "worktree-provider")
