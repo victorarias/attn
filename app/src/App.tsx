@@ -75,6 +75,7 @@ import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
 import { ptySpawn } from './pty/bridge';
 import { clearBrowserHostFocus, controlBrowserHost, isBrowserHostOwnedTarget } from './browser/host';
+import { probeUiAfterSwitch } from './utils/uiDiagnosticsLog';
 import {
   agentLabel,
   getAgentAvailability,
@@ -2734,6 +2735,15 @@ sendFetchPRDetails,
     selectedSessionlessWorkspaceId,
   );
   const activeWorkspaceId = workspaceSelection.activeWorkspaceId;
+
+  useEffect(() => {
+    probeUiAfterSwitch({
+      sessionId: activeSessionId,
+      workspaceId: activeWorkspaceId,
+      view,
+    });
+  }, [activeSessionId, activeWorkspaceId, view]);
+
   // activeWorkspaceIdRef is declared earlier (near the ActionMenu items); keep it in
   // sync here, where activeWorkspaceId is derived.
   useEffect(() => {

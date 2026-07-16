@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-16]
+
+### Added
+- **Black or stuck UI failures now leave useful evidence on disk.** Agent switches capture delayed app-shell health snapshots alongside the existing terminal renderer diagnostics, including frontend crashes, event-loop stalls, and native browser visibility. A React render failure now shows a persistent error screen instead of leaving an unexplained black window.
+
 ## [2026-07-15]
 
 ### Added

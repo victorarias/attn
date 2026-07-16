@@ -1,10 +1,13 @@
 import { installVerbatimTextEntryGuard } from './utils/verbatimTextEntry';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { installUiDiagnostics, recordUiDiag } from './utils/uiDiagnosticsLog';
 
 declare global { interface Window { __dbg?: (msg: string) => void } }
 const dbg = (msg: string) => window.__dbg?.(msg);
 
 dbg('main.tsx: imports resolved');
 installVerbatimTextEntryGuard(document);
+installUiDiagnostics();
 
 // The Present window is a separate Tauri window (opened via
 // open_presentation_window) that loads this same bundle with
@@ -31,8 +34,11 @@ async function boot() {
   dbg('boot: createRoot');
   // Note: StrictMode disabled because it causes double-mounting which breaks
   // the PTY connection (terminal gets disposed and recreated)
-  root.render(<App />);
+  root.render(<AppErrorBoundary><App /></AppErrorBoundary>);
   dbg('boot: render called');
 }
 
-boot().catch((err) => dbg('boot FAILED: ' + (err?.stack || err)));
+boot().catch((err) => {
+  recordUiDiag({ kind: 'boot_failed', message: String(err), stack: err instanceof Error ? err.stack : undefined });
+  dbg('boot FAILED: ' + (err?.stack || err));
+});
