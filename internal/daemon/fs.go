@@ -134,7 +134,7 @@ func (d *Daemon) sendFsReadAssetWSResult(client *wsClient, requestID, path strin
 		var store *fsdoc.Store
 		if store, err = d.fsStoreFor(); err == nil {
 			var content []byte
-			if content, _, err = store.Read(path); err == nil {
+			if content, _, err = store.ReadWithLimit(path, maxAssetBytes); err == nil {
 				if len(content) > maxAssetBytes {
 					err = fmt.Errorf("asset exceeds the %d byte read cap", maxAssetBytes)
 				} else if fits, ferr := assetMessageFits(requestID, path, mimeType, len(content)); ferr != nil {

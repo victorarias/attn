@@ -9,22 +9,27 @@ describe('fileKind', () => {
     expect(isMarkdownPath('a/b/c.txt')).toBe(false);
   });
 
-  it('classifies known-binary extensions as binary', () => {
+  it('classifies opaque and unknown extensions as binary', () => {
     expect(fileKind('assets/cover.png')).toBe('binary');
     expect(fileKind('a/b/clip.MP4')).toBe('binary');
     expect(fileKind('fonts/Inter.woff2')).toBe('binary');
     expect(isBinaryPath('x.pdf')).toBe(true);
+    expect(fileKind('attachments/prototype.docx')).toBe('binary');
+    expect(fileKind('attachments/installer.pkg')).toBe('binary');
     expect(isBinaryPath('x.md')).toBe(false);
   });
 
-  it('treats unknown and missing extensions as editable text', () => {
+  it('classifies known text source formats as editable text', () => {
     expect(fileKind('notes.txt')).toBe('text');
     expect(fileKind('config.json')).toBe('text');
     expect(fileKind('src/main.go')).toBe('text');
-    // No extension at all → text (e.g. a README or a LICENSE).
+    expect(fileKind('prototype.html')).toBe('text');
+    // Well-known extensionless source files remain editable.
     expect(fileKind('README')).toBe('text');
-    // A leading-dot dotfile with no further extension → text, not "" -> binary.
-    expect(fileKind('.gitignore')).toBe('text');
+    expect(fileKind('Makefile')).toBe('text');
+    // Ambiguous extensionless names and dotfiles fail closed.
+    expect(fileKind('attachment')).toBe('binary');
+    expect(fileKind('.gitignore')).toBe('binary');
   });
 
   it('extracts the lowercased extension of the basename only', () => {

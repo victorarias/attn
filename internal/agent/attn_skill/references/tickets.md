@@ -40,7 +40,7 @@ Deliverable type also predicts the terminal status: research and prose often go 
 to **done** (the artifact is the proof); code lands in **in review** because someone else
 validates it.
 
-## Handing over Markdown artifacts
+## Handing over artifacts
 
 `attn ticket attach` is the durable producer-to-ticket operation:
 
@@ -53,7 +53,7 @@ validates it.
 
 - Omit `--ticket` to use your own bound ticket; include it to target any known
   ticket, matching `ticket status --ticket` and `ticket comment`.
-- Repeat `--file` to submit several Markdown files in one attachment.
+- Repeat `--file` to submit several files in one attachment.
 - `--state` uses the reporting vocabulary: `in_progress`, `needs_input`,
   `ready_for_review`, `completed`, or `failed`.
 - `--comment` is short decision context. Put the full reasoning in the Markdown.

@@ -6,24 +6,21 @@
 //   binary   -> a read-only placeholder; we never even read it (fs_read returns a
 //               string, which is meaningless for binary bytes)
 //
-// The gate is an explicit binary-extension denylist: anything not known-binary is
-// treated as editable text. That errs toward editability (a stray unknown extension
-// opens as text) rather than hiding files behind a placeholder.
-
-const BINARY_EXTENSIONS = new Set([
-  // images
-  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svgz', 'tif', 'tiff', 'heic', 'avif',
-  // documents / archives
-  'pdf', 'zip', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'tar',
-  // audio / video
-  'mp4', 'mov', 'avi', 'mkv', 'webm', 'mp3', 'wav', 'flac', 'ogg', 'm4a',
-  // fonts
-  'woff', 'woff2', 'ttf', 'otf', 'eot',
-  // compiled / opaque binaries
-  'exe', 'dll', 'dylib', 'so', 'o', 'a', 'wasm', 'bin', 'dat', 'class', 'jar',
-  // databases / misc
-  'sqlite', 'db',
+// The gate is an explicit text-extension allowlist. Ticket attachments can carry
+// arbitrary files, so unknown formats must fail closed: opening an opaque file as
+// text could transform its bytes on a later autosave. Add an extension only when
+// the Notebook can safely edit it as UTF-8 source.
+const TEXT_EXTENSIONS = new Set([
+  'txt', 'text', 'html', 'htm', 'css', 'scss', 'sass', 'less',
+  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
+  'json', 'jsonc', 'jsonl', 'yaml', 'yml', 'toml', 'xml', 'csv', 'tsv',
+  'ini', 'cfg', 'conf', 'env', 'log',
+  'sh', 'bash', 'zsh', 'fish', 'ps1',
+  'go', 'rs', 'py', 'rb', 'php', 'java', 'kt', 'kts', 'c', 'cc', 'cpp', 'cxx', 'h', 'hpp', 'cs', 'swift', 'scala', 'sql',
+  'md', 'markdown',
 ]);
+
+const TEXT_FILENAMES = new Set(['readme', 'license', 'makefile', 'dockerfile', 'brewfile']);
 
 export type FileKind = 'markdown' | 'text' | 'binary';
 
@@ -39,8 +36,8 @@ export function extensionOf(path: string): string {
 export function fileKind(path: string): FileKind {
   const ext = extensionOf(path);
   if (ext === 'md' || ext === 'markdown') return 'markdown';
-  if (BINARY_EXTENSIONS.has(ext)) return 'binary';
-  return 'text';
+  const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase();
+  return TEXT_EXTENSIONS.has(ext) || TEXT_FILENAMES.has(name) ? 'text' : 'binary';
 }
 
 export function isMarkdownPath(path: string): boolean {

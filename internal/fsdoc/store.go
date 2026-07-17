@@ -24,7 +24,7 @@ import (
 
 // MaxFileSize bounds a single fs_write so a runaway write cannot balloon the
 // root. It mirrors notebook.MaxFileSize: the same root, the same sync-friendly
-// goal. (Reads are not yet size-capped — that lands with the non-text handling.)
+// goal. Reads use the same cap before allocating file contents for the WebSocket.
 const MaxFileSize = 2 << 20 // 2 MiB
 
 // Store is the generic filesystem store for one root directory. Writes serialize
@@ -146,9 +146,16 @@ func (s *Store) List(dir string) ([]Entry, error) {
 	return entries, nil
 }
 
-// Read returns the raw bytes of a file and their content hash. A missing file
-// yields a *NotFoundError.
+// Read returns the raw bytes of a file and their content hash, bounded by
+// MaxFileSize. A missing file yields a *NotFoundError.
 func (s *Store) Read(p string) (content []byte, hash string, err error) {
+	return s.ReadWithLimit(p, MaxFileSize)
+}
+
+// ReadWithLimit returns the raw bytes of a file and their content hash, bounded
+// by maxBytes before allocating file contents. Callers must supply the limit for
+// their transport or presentation surface; generic text reads use Read.
+func (s *Store) ReadWithLimit(p string, maxBytes int64) (content []byte, hash string, err error) {
 	rel, err := cleanRel(p, false)
 	if err != nil {
 		return nil, "", err
@@ -156,6 +163,19 @@ func (s *Store) Read(p string) (content []byte, hash string, err error) {
 	abs, err := s.abs(rel)
 	if err != nil {
 		return nil, "", err
+	}
+	info, statErr := os.Lstat(abs)
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return nil, "", &NotFoundError{Path: p}
+		}
+		return nil, "", statErr
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, "", fmt.Errorf("fsdoc: %q is not a regular file", p)
+	}
+	if info.Size() > maxBytes {
+		return nil, "", fmt.Errorf("fsdoc: %q exceeds %d byte read cap", p, maxBytes)
 	}
 	content, err = os.ReadFile(abs)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -122,6 +123,29 @@ func TestFsWriteListReadWSResults(t *testing.T) {
 	readNotebookWSEvent(t, client.send, &missing)
 	if missing.RequestID != "r2" || missing.Success || missing.Error == nil {
 		t.Fatalf("missing read result = %+v, want failure with error", missing)
+	}
+}
+
+func TestFsReadWSRejectsOversizedFile(t *testing.T) {
+	d := newFsDaemon(t)
+	root, err := d.notebookRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "attachments", "too-large.txt")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), fsdoc.MaxFileSize+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsReadWSResult(client, "oversized", "attachments/too-large.txt")
+	var read protocol.FsReadResultMessage
+	readNotebookWSEvent(t, client.send, &read)
+	if read.Success || read.Error == nil || !strings.Contains(*read.Error, "read cap") {
+		t.Fatalf("oversized read = %+v, want read-cap error", read)
 	}
 }
 

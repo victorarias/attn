@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func attachSource(t *testing.T, dir, name, content string) protocol.TicketAttach
 	return protocol.TicketAttachFile{SourcePath: path, Filename: name}
 }
 
-func TestTicketAttachCopiesMultipleFilesAndChangesState(t *testing.T) {
+func TestTicketAttachCopiesFilesOfAnyTypeAndChangesState(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	notebookRoot := t.TempDir()
 	d.store.SetSetting(SettingNotebookRoot, notebookRoot)
@@ -56,7 +57,8 @@ func TestTicketAttachCopiesMultipleFilesAndChangesState(t *testing.T) {
 		SourceSessionID: agentID,
 		Files: []protocol.TicketAttachFile{
 			attachSource(t, sources, "design.md", "the design"),
-			attachSource(t, sources, "rollout.md", "the rollout"),
+			attachSource(t, sources, "prototype.html", "<!doctype html><title>prototype</title>"),
+			attachSource(t, sources, "results.json", `{"ok":true}`),
 		},
 		State:   &state,
 		Comment: &comment,
@@ -65,7 +67,7 @@ func TestTicketAttachCopiesMultipleFilesAndChangesState(t *testing.T) {
 		t.Fatalf("response = %+v, want attach receipt", resp)
 	}
 	result := resp.TicketAttachResult
-	if result.TicketID != ticketID || result.State != protocol.TicketStatusInReview || len(result.Artifacts) != 2 || result.EventSeq == 0 {
+	if result.TicketID != ticketID || result.State != protocol.TicketStatusInReview || len(result.Artifacts) != 3 || result.EventSeq == 0 {
 		t.Fatalf("receipt = %+v", result)
 	}
 	for _, artifact := range result.Artifacts {
@@ -75,6 +77,9 @@ func TestTicketAttachCopiesMultipleFilesAndChangesState(t *testing.T) {
 		if _, err := os.Stat(artifact.Path); err != nil {
 			t.Fatalf("artifact %q missing: %v", artifact.Path, err)
 		}
+	}
+	if got := artifactNames(result.Artifacts); !reflect.DeepEqual(got, []string{"design.md", "prototype.html", "results.json"}) {
+		t.Fatalf("receipt artifacts = %v", got)
 	}
 	ticket, err := d.store.GetTicket(ticketID)
 	if err != nil {
@@ -86,11 +91,38 @@ func TestTicketAttachCopiesMultipleFilesAndChangesState(t *testing.T) {
 	var sawAttach bool
 	for _, activity := range ticket.Activity {
 		if activity.Kind == store.TicketActivityAttach {
-			sawAttach = strings.Contains(activity.Comment, "design.md, rollout.md") && strings.Contains(activity.Comment, comment)
+			sawAttach = strings.Contains(activity.Comment, "design.md, prototype.html, results.json") && strings.Contains(activity.Comment, comment)
 		}
 	}
 	if !sawAttach {
 		t.Fatalf("attach history missing: %+v", ticket.Activity)
+	}
+}
+
+func TestTicketAttachUsesVisibleBasenamesAndRejectsNonRegularSources(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
+	_, agentID, _ := delegateForNotify(t, d, "codex")
+
+	source := attachSource(t, t.TempDir(), "source.html", "<!doctype html>")
+	source.Filename = "nested/prototype.html"
+	resp := callTicketAttach(t, d, &protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: agentID, Files: []protocol.TicketAttachFile{source}})
+	if !resp.Ok || resp.TicketAttachResult == nil || len(resp.TicketAttachResult.Artifacts) != 1 || resp.TicketAttachResult.Artifacts[0].Filename != "prototype.html" {
+		t.Fatalf("basename attach response = %+v", resp)
+	}
+
+	target := attachSource(t, t.TempDir(), "target.txt", "target")
+	symlink := filepath.Join(t.TempDir(), "linked.txt")
+	if err := os.Symlink(target.SourcePath, symlink); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	resp = callTicketAttach(t, d, &protocol.TicketAttachMessage{
+		Cmd:             protocol.CmdTicketAttach,
+		SourceSessionID: agentID,
+		Files:           []protocol.TicketAttachFile{{SourcePath: symlink, Filename: "linked.txt"}},
+	})
+	if resp.Ok || resp.Error == nil || !strings.Contains(*resp.Error, "not a regular file") {
+		t.Fatalf("symlink response = %+v, want regular-file error", resp)
 	}
 }
 
@@ -121,11 +153,11 @@ func TestTicketAttachPreservesDifferentExistingArtifact(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	destination := filepath.Join(dir, "design.md")
+	destination := filepath.Join(dir, "prototype.html")
 	if err := os.WriteFile(destination, []byte("keep me"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	source := attachSource(t, t.TempDir(), "design.md", "replacement")
+	source := attachSource(t, t.TempDir(), "prototype.html", "replacement")
 	resp := callTicketAttach(t, d, &protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: agentID, Files: []protocol.TicketAttachFile{source}})
 	if resp.Ok || resp.Error == nil || !strings.Contains(*resp.Error, "different contents") {
 		t.Fatalf("response = %+v, want collision error", resp)

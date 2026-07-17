@@ -78,6 +78,7 @@ const TREE: Record<string, FsEntry[]> = {
     { path: 'journal', name: 'journal', isDir: true, size: 0 },
     { path: 'notes.txt', name: 'notes.txt', isDir: false, size: 64 },
     { path: 'cover.png', name: 'cover.png', isDir: false, size: 4096 },
+    { path: 'prototype.docx', name: 'prototype.docx', isDir: false, size: 4096 },
   ],
   knowledge: [
     { path: 'knowledge/index.md', name: 'index.md', isDir: false, size: 128 },
@@ -256,6 +257,18 @@ describe('NotebookBrowser', () => {
     expect(screen.getByText("cover.png can't be opened here yet.")).toBeInTheDocument();
     // A binary file is never read (fs_read returns a string, meaningless for bytes).
     expect(readFile).not.toHaveBeenCalledWith('cover.png');
+  });
+
+  it('fails closed for an unknown opaque attachment without reading it', async () => {
+    const { props, readFile } = makeProps();
+    render(<NotebookBrowser {...props} />);
+    await screen.findByRole('treeitem', { name: 'prototype.docx' });
+
+    fireEvent.click(screen.getByRole('treeitem', { name: 'prototype.docx' }));
+
+    expect(await screen.findByText('Preview not available')).toBeInTheDocument();
+    expect(screen.getByText("prototype.docx can't be opened here yet.")).toBeInTheDocument();
+    expect(readFile).not.toHaveBeenCalledWith('prototype.docx');
   });
 
   it('does not read a binary file when the Notebook is reopened with one selected', async () => {

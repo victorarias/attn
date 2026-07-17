@@ -410,7 +410,7 @@ export function TicketDetailPanel({
                   data-testid="ticket-choose-attach"
                   disabled={busyAction !== null}
                   onClick={() => {
-                    void open({ multiple: true, filters: [{ name: 'Markdown', extensions: ['md'] }] })
+                    void open({ multiple: true })
                       .then((selected) => {
                         const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
                         if (paths.length > 0) setAttachFiles(paths);
@@ -485,7 +485,7 @@ export function TicketDetailPanel({
                           />
                           <button
                             type="button"
-                            disabled={busyAction !== null || !renameDraft.trim().endsWith('.md') || renameDraft.includes('/')}
+                            disabled={busyAction !== null || !renameDraft.trim() || renameDraft.includes('/')}
                             onClick={() => {
                               if (!onRenameArtifact) return;
                               runAction('rename-artifact', async () => {
