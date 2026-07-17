@@ -332,10 +332,21 @@ func TestRunHeadlessCommandUsesMinimalEnvironmentAndDiscardsOutput(t *testing.T)
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "env.log")
 	scriptPath := filepath.Join(dir, "agent")
-	script := "#!/bin/sh\nenv > " + shellSingleQuote(logPath) + "\nprintf 'workspace context secret\\n'\nprintf 'stderr secret\\n' >&2\n"
+	script := "#!/bin/sh\n/usr/bin/env > " + shellSingleQuote(logPath) + "\nprintf 'workspace context secret\\n'\nprintf 'stderr secret\\n' >&2\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake agent: %v", err)
 	}
+	profileDir := filepath.Join(dir, "attn-profile")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("create profile dir: %v", err)
+	}
+	wrapperPath := filepath.Join(profileDir, "attn")
+	if err := os.WriteFile(wrapperPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write active attn wrapper: %v", err)
+	}
+	staleDir := filepath.Join(dir, "stale-attn")
+	t.Setenv("ATTN_WRAPPER_PATH", wrapperPath)
+	t.Setenv("PATH", strings.Join([]string{staleDir, profileDir, staleDir}, string(os.PathListSeparator)))
 	t.Setenv("ATTN_SESSION_ID", "session-secret")
 	t.Setenv("CODEX_THREAD_ID", "thread-secret")
 	t.Setenv("UNRELATED_SECRET", "secret")
@@ -367,6 +378,10 @@ func TestRunHeadlessCommandUsesMinimalEnvironmentAndDiscardsOutput(t *testing.T)
 	}
 	if strings.Contains(env, "OPENAI_API_KEY=") {
 		t.Fatalf("Claude environment retained Codex provider authentication:\n%s", env)
+	}
+	wantPath := "PATH=" + strings.Join([]string{profileDir, staleDir}, string(os.PathListSeparator))
+	if !strings.Contains(env, wantPath+"\n") {
+		t.Fatalf("headless PATH did not select active profile wrapper first: want %q in:\n%s", wantPath, env)
 	}
 }
 

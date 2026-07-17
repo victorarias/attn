@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/launchenv"
 )
 
 func TestParseNullSeparatedEnv(t *testing.T) {
@@ -77,41 +78,6 @@ func TestShouldFallbackShell(t *testing.T) {
 	}
 }
 
-func TestFirstExecutablePath_PicksFirstValidExecutable(t *testing.T) {
-	tmpDir := t.TempDir()
-	missing := filepath.Join(tmpDir, "missing-attn")
-	notExec := filepath.Join(tmpDir, "not-exec-attn")
-	execPath := filepath.Join(tmpDir, "exec-attn")
-
-	if err := os.WriteFile(notExec, []byte("#!/bin/sh\n"), 0o644); err != nil {
-		t.Fatalf("write notExec: %v", err)
-	}
-	if err := os.WriteFile(execPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write execPath: %v", err)
-	}
-
-	got, ok := firstExecutablePath([]string{missing, notExec, execPath})
-	if !ok {
-		t.Fatal("expected executable candidate to be found")
-	}
-	if got != execPath {
-		t.Fatalf("firstExecutablePath = %q, want %q", got, execPath)
-	}
-}
-
-func TestFirstExecutablePath_ReturnsFalseWhenNoneValid(t *testing.T) {
-	tmpDir := t.TempDir()
-	notExec := filepath.Join(tmpDir, "not-exec-attn")
-	if err := os.WriteFile(notExec, []byte("#!/bin/sh\n"), 0o644); err != nil {
-		t.Fatalf("write notExec: %v", err)
-	}
-
-	got, ok := firstExecutablePath([]string{"", "   ", filepath.Join(tmpDir, "missing"), notExec})
-	if ok {
-		t.Fatalf("expected no executable candidate, got %q", got)
-	}
-}
-
 func TestResolveAttnPath_PrefersEnvWrapperPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	wrapperPath := filepath.Join(tmpDir, "attn-wrapper")
@@ -125,7 +91,7 @@ func TestResolveAttnPath_PrefersEnvWrapperPath(t *testing.T) {
 		_ = os.Setenv("ATTN_WRAPPER_PATH", old)
 	})
 
-	got := resolveAttnPath()
+	got := launchenv.ActiveAttnExecutable()
 	if got != wrapperPath {
 		t.Fatalf("resolveAttnPath() = %q, want %q", got, wrapperPath)
 	}
@@ -161,6 +127,57 @@ func TestBuildSpawnEnv_SetsAttnPresence(t *testing.T) {
 			t.Fatalf("expected %s in env, got %v", expected, env)
 		}
 	}
+}
+
+func TestBuildSpawnEnv_PutsActiveAttnFirstForAgentsAndShells(t *testing.T) {
+	profileDir := filepath.Join(t.TempDir(), "attn-profile")
+	wrapperPath := filepath.Join(profileDir, "attn")
+	staleDir := filepath.Join(t.TempDir(), "stale-attn")
+	otherDir := filepath.Join(t.TempDir(), "other-tools")
+	loginPath := strings.Join([]string{staleDir, profileDir, otherDir, profileDir}, string(os.PathListSeparator))
+
+	t.Setenv("ATTN_SESSION_ID", "inherited-session")
+	t.Setenv("ATTN_AGENT", "inherited-agent")
+	for _, agent := range []string{"codex", "shell"} {
+		t.Run(agent, func(t *testing.T) {
+			env := buildSpawnEnv("", SpawnOptions{
+				ID:            "managed-session",
+				LoginShellEnv: []string{"PATH=" + loginPath},
+			}, agent, wrapperPath, nil)
+
+			path := envValue(t, env, "PATH")
+			wantPath := strings.Join([]string{profileDir, staleDir, otherDir}, string(os.PathListSeparator))
+			if path != wantPath {
+				t.Fatalf("PATH = %q, want active profile first with duplicate removed: %q", path, wantPath)
+			}
+
+			if agent == "shell" {
+				for _, key := range []string{"ATTN_SESSION_ID", "ATTN_AGENT"} {
+					if got := envValue(t, env, key); got != "" {
+						t.Fatalf("shell pane inherited managed identity %s=%q", key, got)
+					}
+				}
+				return
+			}
+			if got := envValue(t, env, "ATTN_SESSION_ID"); got != "managed-session" {
+				t.Fatalf("managed agent session id = %q, want managed-session", got)
+			}
+			if got := envValue(t, env, "ATTN_AGENT"); got != "codex" {
+				t.Fatalf("managed agent = %q, want codex", got)
+			}
+		})
+	}
+}
+
+func envValue(t *testing.T, env []string, key string) string {
+	t.Helper()
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }
 
 func TestBuildSpawnEnv_DoesNotSetAgentExecutableForDefaultBinary(t *testing.T) {
