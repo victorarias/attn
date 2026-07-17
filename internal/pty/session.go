@@ -88,6 +88,9 @@ type Session struct {
 
 	ptmx *os.File
 	cmd  *exec.Cmd
+	// cleanup removes spawn-time resources that must outlive shell startup,
+	// such as an isolated startup-file overlay for an interactive shell pane.
+	cleanup func()
 
 	scrollback *RingBuffer
 	replayLog  *ReplayLog
@@ -251,6 +254,9 @@ func nextCoalescedRead(reads <-chan ptyRead, maxBytes int, window time.Duration)
 func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(string, ...interface{})) {
 	defer func() {
 		_ = s.ptmx.Close()
+		if s.cleanup != nil {
+			s.cleanup()
+		}
 	}()
 
 	reads := make(chan ptyRead, 4)

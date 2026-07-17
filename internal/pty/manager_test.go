@@ -3,6 +3,7 @@ package pty
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -271,24 +272,194 @@ exit 2
 		"STALE_ATTN_DIR=" + staleDir,
 		"RESULT_PATH=" + resultPath,
 	}
-	for _, agent := range []string{"codex", "shell"} {
-		t.Run(agent, func(t *testing.T) {
-			if err := os.Remove(resultPath); err != nil && !os.IsNotExist(err) {
-				t.Fatalf("reset result: %v", err)
-			}
-			cmd := buildSpawnCommand(SpawnOptions{}, agent, loginShell, activeAttn, env)
-			cmd.Env = env
-			if err := cmd.Run(); err != nil {
-				t.Fatalf("run spawned %s command: %v", agent, err)
-			}
-			resolved, err := os.ReadFile(resultPath)
-			if err != nil {
-				t.Fatalf("read resolved attn: %v", err)
-			}
-			if got := strings.TrimSpace(string(resolved)); got != activeAttn {
-				t.Fatalf("bare attn resolved to %q after login startup, want active wrapper %q", got, activeAttn)
-			}
-		})
+	cmd := buildSpawnCommand(SpawnOptions{}, "codex", loginShell, activeAttn, env)
+	cmd.Env = env
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run managed agent command: %v", err)
+	}
+	resolved, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read resolved attn: %v", err)
+	}
+	if got := strings.TrimSpace(string(resolved)); got != activeAttn {
+		t.Fatalf("bare attn resolved to %q after login startup, want active wrapper %q", got, activeAttn)
+	}
+}
+
+func TestPrepareShellPaneLaunch_ReassertsPathAfterInteractiveLoginStartup(t *testing.T) {
+	root := t.TempDir()
+	activeDir := filepath.Join(root, "active")
+	staleDir := filepath.Join(root, "stale")
+	userZdotdir := filepath.Join(root, "user-zdotdir")
+	resultPath := filepath.Join(root, "resolved-attn")
+	for _, dir := range []string{activeDir, staleDir, userZdotdir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	activeAttn := filepath.Join(activeDir, "attn")
+	if err := os.WriteFile(activeAttn, []byte("#!/bin/sh\ncommand -v attn > \"$RESULT_PATH\"\n"), 0o755); err != nil {
+		t.Fatalf("write active attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, "attn"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write stale attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userZdotdir, ".zshrc"), []byte("PATH=\"$STALE_ATTN_DIR:$PATH\"\nexport PATH\n"), 0o600); err != nil {
+		t.Fatalf("write user zshrc: %v", err)
+	}
+
+	loginShell := filepath.Join(root, "zsh")
+	loginShellScript := `#!/bin/sh
+[ "$1" = "-l" ] || exit 2
+[ "$#" = 1 ] || exit 3
+for file in .zshenv .zprofile .zshrc .zlogin; do
+  if [ -r "$ZDOTDIR/$file" ]; then
+    . "$ZDOTDIR/$file"
+  fi
+done
+[ "$ZDOTDIR" = "$EXPECTED_ZDOTDIR" ] || exit 4
+command -v attn > "$RESULT_PATH"
+`
+	if err := os.WriteFile(loginShell, []byte(loginShellScript), 0o755); err != nil {
+		t.Fatalf("write fake zsh: %v", err)
+	}
+
+	env := []string{
+		"PATH=" + activeDir + string(os.PathListSeparator) + staleDir,
+		"HOME=" + root,
+		"ZDOTDIR=" + userZdotdir,
+		"STALE_ATTN_DIR=" + staleDir,
+		"RESULT_PATH=" + resultPath,
+		"EXPECTED_ZDOTDIR=" + userZdotdir,
+	}
+	launch, err := prepareShellPaneLaunch(loginShell, env)
+	if err != nil {
+		t.Fatalf("prepare shell pane launch: %v", err)
+	}
+	defer launch.cleanup()
+	launch.command.Env = launch.env
+	if err := launch.command.Run(); err != nil {
+		t.Fatalf("run shell pane: %v", err)
+	}
+	resolved, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read resolved attn: %v", err)
+	}
+	if got := strings.TrimSpace(string(resolved)); got != activeAttn {
+		t.Fatalf("bare attn resolved to %q after interactive login startup, want active wrapper %q", got, activeAttn)
+	}
+}
+
+func TestPrepareShellPaneLaunch_ReassertsPathAfterRealZshStartup(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("attn supports macOS; this exercises the system zsh startup contract")
+	}
+	root := t.TempDir()
+	activeDir := filepath.Join(root, "active")
+	staleDir := filepath.Join(root, "stale")
+	userZdotdir := filepath.Join(root, "user-zdotdir")
+	resultPath := filepath.Join(root, "resolved-attn")
+	for _, dir := range []string{activeDir, staleDir, userZdotdir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	activeAttn := filepath.Join(activeDir, "attn")
+	if err := os.WriteFile(activeAttn, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write active attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, "attn"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write stale attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userZdotdir, ".zshrc"), []byte("path=(\"$STALE_ATTN_DIR\" $path)\n"), 0o600); err != nil {
+		t.Fatalf("write user zshrc: %v", err)
+	}
+
+	env := []string{
+		"PATH=" + activeDir + string(os.PathListSeparator) + staleDir + string(os.PathListSeparator) + "/usr/bin:/bin",
+		"HOME=" + root,
+		"ZDOTDIR=" + userZdotdir,
+		"STALE_ATTN_DIR=" + staleDir,
+		"RESULT_PATH=" + resultPath,
+	}
+	launch, err := prepareShellPaneLaunch("/bin/zsh", env)
+	if err != nil {
+		t.Fatalf("prepare shell pane launch: %v", err)
+	}
+	defer launch.cleanup()
+	launch.command = exec.Command("/bin/zsh", "-l", "-i", "-c", "[[ -o login ]] || exit 8; command -v attn > \"$RESULT_PATH\"")
+	launch.command.Env = launch.env
+	if output, err := launch.command.CombinedOutput(); err != nil {
+		t.Fatalf("run real zsh startup: %v\n%s", err, output)
+	}
+	resolved, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read resolved attn: %v", err)
+	}
+	if got := strings.TrimSpace(string(resolved)); got != activeAttn {
+		t.Fatalf("bare attn resolved to %q after real zsh startup, want active wrapper %q", got, activeAttn)
+	}
+}
+
+func TestPrepareShellPaneLaunch_ReassertsPathAfterBashRCStartup(t *testing.T) {
+	root := t.TempDir()
+	activeDir := filepath.Join(root, "active")
+	staleDir := filepath.Join(root, "stale")
+	userHome := filepath.Join(root, "home")
+	resultPath := filepath.Join(root, "resolved-attn")
+	for _, dir := range []string{activeDir, staleDir, userHome} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	activeAttn := filepath.Join(activeDir, "attn")
+	if err := os.WriteFile(activeAttn, []byte("#!/bin/sh\ncommand -v attn > \"$RESULT_PATH\"\n"), 0o755); err != nil {
+		t.Fatalf("write active attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, "attn"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write stale attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userHome, ".bashrc"), []byte("PATH=\"$STALE_ATTN_DIR:$PATH\"\nexport PATH\n"), 0o600); err != nil {
+		t.Fatalf("write user bashrc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userHome, ".bash_profile"), []byte(". \"$HOME/.bashrc\"\n"), 0o600); err != nil {
+		t.Fatalf("write user bash profile: %v", err)
+	}
+
+	loginShell := filepath.Join(root, "bash")
+	loginShellScript := `#!/bin/sh
+[ "$1" = "-l" ] || exit 2
+[ "$#" = 1 ] || exit 3
+. "$HOME/.bash_profile"
+[ "$HOME" = "$EXPECTED_HOME" ] || exit 4
+command -v attn > "$RESULT_PATH"
+`
+	if err := os.WriteFile(loginShell, []byte(loginShellScript), 0o755); err != nil {
+		t.Fatalf("write fake bash: %v", err)
+	}
+
+	env := []string{
+		"PATH=" + activeDir + string(os.PathListSeparator) + staleDir,
+		"HOME=" + userHome,
+		"STALE_ATTN_DIR=" + staleDir,
+		"RESULT_PATH=" + resultPath,
+		"EXPECTED_HOME=" + userHome,
+	}
+	launch, err := prepareShellPaneLaunch(loginShell, env)
+	if err != nil {
+		t.Fatalf("prepare shell pane launch: %v", err)
+	}
+	defer launch.cleanup()
+	launch.command.Env = launch.env
+	if err := launch.command.Run(); err != nil {
+		t.Fatalf("run shell pane: %v", err)
+	}
+	resolved, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read resolved attn: %v", err)
+	}
+	if got := strings.TrimSpace(string(resolved)); got != activeAttn {
+		t.Fatalf("bare attn resolved to %q after bash rc startup, want active wrapper %q", got, activeAttn)
 	}
 }
 

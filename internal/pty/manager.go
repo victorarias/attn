@@ -189,18 +189,36 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	cmdEnv := buildSpawnEnv(loginShell, opts, agent, attnPath, m.logf)
 
 	var (
-		cmd       *exec.Cmd
-		ptmx      *os.File
-		lastErr   error
-		usedShell string
+		cmd          *exec.Cmd
+		ptmx         *os.File
+		lastErr      error
+		usedShell    string
+		deferCleanup func()
 	)
 	for i, shellPath := range shellCandidates {
-		cmd = buildSpawnCommand(opts, agent, shellPath, attnPath, cmdEnv)
+		attemptEnv := cmdEnv
+		var cleanup func()
+		if agent == "shell" {
+			launch, err := prepareShellPaneLaunch(shellPath, cmdEnv)
+			if err != nil {
+				lastErr = err
+				if i < len(shellCandidates)-1 && errors.Is(err, errUnsupportedShellStartup) {
+					m.logf("pty spawn: shell=%s cannot restore PATH after startup id=%s; trying fallback shell", shellPath, opts.ID)
+					continue
+				}
+				return fmt.Errorf("prepare terminal shell %s: %w", shellPath, err)
+			}
+			cmd = launch.command
+			attemptEnv = launch.env
+			cleanup = launch.cleanup
+		} else {
+			cmd = buildSpawnCommand(opts, agent, shellPath, attnPath, cmdEnv)
+		}
 		cmd.Dir = opts.CWD
 		if strings.TrimSpace(opts.ExternalCWD) != "" {
 			cmd.Dir = opts.ExternalCWD
 		}
-		cmd.Env = cmdEnv
+		cmd.Env = attemptEnv
 
 		ptmx, lastErr = creackpty.StartWithSize(cmd, &creackpty.Winsize{
 			Cols: opts.Cols,
@@ -208,7 +226,13 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		})
 		if lastErr == nil {
 			usedShell = shellPath
+			if cleanup != nil {
+				deferCleanup = cleanup
+			}
 			break
+		}
+		if cleanup != nil {
+			cleanup()
 		}
 
 		if i < len(shellCandidates)-1 && shouldFallbackShell(lastErr) {
@@ -236,6 +260,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		exited:      make(chan struct{}),
 		startedAt:   time.Now(),
 		theme:       opts.Theme,
+		cleanup:     deferCleanup,
 	}
 	session.screen = newVirtualScreen(opts.Cols, opts.Rows)
 
@@ -443,10 +468,7 @@ func normalizeAgent(agent string, external bool) string {
 
 func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string, env []string) *exec.Cmd {
 	if agent == "shell" {
-		// Login startup files run after cmd.Env is applied and may rewrite PATH.
-		// Run a short login-shell bootstrap, restore the prepared launch PATH once
-		// startup has finished, then replace it with the interactive pane shell.
-		return exec.Command(shellPath, "-l", "-c", postLoginExecCommand(env, []string{shellPath, "-i"}))
+		return exec.Command(shellPath, "-l")
 	}
 	if len(opts.ExternalCommand) > 0 {
 		command := opts.ExternalCommand[0]
