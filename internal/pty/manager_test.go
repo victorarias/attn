@@ -227,6 +227,71 @@ func TestBuildSpawnCommand_ResolvesExternalPluginCommandFromLaunchPath(t *testin
 	}
 }
 
+func TestBuildSpawnCommand_ReassertsActiveAttnPathAfterLoginStartup(t *testing.T) {
+	root := t.TempDir()
+	activeDir := filepath.Join(root, "active")
+	staleDir := filepath.Join(root, "stale")
+	resultPath := filepath.Join(root, "resolved-attn")
+	for _, dir := range []string{activeDir, staleDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	activeAttn := filepath.Join(activeDir, "attn")
+	if err := os.WriteFile(activeAttn, []byte("#!/bin/sh\ncommand -v attn > \"$RESULT_PATH\"\n"), 0o755); err != nil {
+		t.Fatalf("write active attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, "attn"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write stale attn: %v", err)
+	}
+
+	loginShell := filepath.Join(root, "login-shell")
+	loginShellScript := `#!/bin/sh
+if [ "$1" = "-l" ]; then
+  shift
+  PATH="$STALE_ATTN_DIR:$PATH"
+  export PATH
+fi
+if [ "$1" = "-c" ]; then
+  shift
+  exec /bin/sh -c "$1"
+fi
+if [ "$1" = "-i" ]; then
+  command -v attn > "$RESULT_PATH"
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(loginShell, []byte(loginShellScript), 0o755); err != nil {
+		t.Fatalf("write login shell: %v", err)
+	}
+
+	env := []string{
+		"PATH=" + activeDir + string(os.PathListSeparator) + staleDir,
+		"STALE_ATTN_DIR=" + staleDir,
+		"RESULT_PATH=" + resultPath,
+	}
+	for _, agent := range []string{"codex", "shell"} {
+		t.Run(agent, func(t *testing.T) {
+			if err := os.Remove(resultPath); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("reset result: %v", err)
+			}
+			cmd := buildSpawnCommand(SpawnOptions{}, agent, loginShell, activeAttn, env)
+			cmd.Env = env
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("run spawned %s command: %v", agent, err)
+			}
+			resolved, err := os.ReadFile(resultPath)
+			if err != nil {
+				t.Fatalf("read resolved attn: %v", err)
+			}
+			if got := strings.TrimSpace(string(resolved)); got != activeAttn {
+				t.Fatalf("bare attn resolved to %q after login startup, want active wrapper %q", got, activeAttn)
+			}
+		})
+	}
+}
+
 func TestBuildSpawnEnv_AppliesExternalPluginEnvironment(t *testing.T) {
 	t.Setenv("SNIPE_BRIDGE", "stale")
 	t.Setenv("ATTN_PTY_EXTERNAL_ENV", `["SNIPE_BRIDGE=secret"]`)

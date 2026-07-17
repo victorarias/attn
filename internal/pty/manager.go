@@ -443,7 +443,10 @@ func normalizeAgent(agent string, external bool) string {
 
 func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string, env []string) *exec.Cmd {
 	if agent == "shell" {
-		return exec.Command(shellPath, "-l")
+		// Login startup files run after cmd.Env is applied and may rewrite PATH.
+		// Run a short login-shell bootstrap, restore the prepared launch PATH once
+		// startup has finished, then replace it with the interactive pane shell.
+		return exec.Command(shellPath, "-l", "-c", postLoginExecCommand(env, []string{shellPath, "-i"}))
 	}
 	if len(opts.ExternalCommand) > 0 {
 		command := opts.ExternalCommand[0]
@@ -469,8 +472,21 @@ func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string, env
 		args = append(args, "--initial-prompt-file", opts.InitialPromptFile)
 	}
 
+	return exec.Command(shellPath, "-l", "-c", postLoginExecCommand(env, args))
+}
+
+// postLoginExecCommand restores the launch PATH after shell login startup has
+// run. This makes the active attn directory authoritative even when a login
+// profile prepends a stale installation. The command itself is exec'd so the
+// PTY remains attached to the actual agent or interactive shell process.
+func postLoginExecCommand(env []string, args []string) string {
 	cmdline := "exec " + shellJoin(args)
-	return exec.Command(shellPath, "-l", "-c", cmdline)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "PATH=") {
+			return "export PATH=" + shellQuote(strings.TrimPrefix(entry, "PATH=")) + "; " + cmdline
+		}
+	}
+	return cmdline
 }
 
 func resolveExternalCommandPath(command string, env []string) (string, bool) {
