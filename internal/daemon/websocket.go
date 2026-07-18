@@ -964,6 +964,9 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdFsUnwatch:
 		fsUnwatch := msg.(*protocol.FsUnwatchMessage)
 		go d.handleFsUnwatch(client, protocol.Deref(fsUnwatch.RequestID), protocol.Deref(fsUnwatch.Root))
+	case protocol.CmdFsIndex:
+		fsIndex := msg.(*protocol.FsIndexMessage)
+		go d.handleFsIndex(client, protocol.Deref(fsIndex.RequestID), protocol.Deref(fsIndex.Root))
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:

@@ -868,6 +868,40 @@ type FsExistsResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type FsIndexMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
+}
+
+type FsIndexResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Files corresponds to the JSON schema field "files".
+	Files []string `json:"files"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root string `json:"root"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Truncated corresponds to the JSON schema field "truncated".
+	Truncated bool `json:"truncated"`
+}
+
 type FsListMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
