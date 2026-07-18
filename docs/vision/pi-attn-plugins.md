@@ -1,28 +1,28 @@
 # Vision: pi as the daily-driver harness — the attn plugin suite
 
-> Grounded in pi's actual extension surface ([earendil-works/pi](https://github.com/earendil-works/pi),
-> `packages/coding-agent`) and in openclaw's history of embedding pi
-> ([openclaw/openclaw](https://github.com/openclaw/openclaw)). Builds on attn's
-> plugin system ([docs/plans/2026-04-16-plugin-system.md](../plans/2026-04-16-plugin-system.md)),
-> the earlier pi plans ([2026-04-16-pi-plugin.md](../plans/2026-04-16-pi-plugin.md),
-> [2026-04-07-pi-integration.md](../plans/2026-04-07-pi-integration.md) — still
-> behavior-authoritative), and the shipped `plugins/attn-opencode` driver.
+> The what and the why. Each capability below gets its own implementation-level
+> document when its turn comes; none of that detail lives here. Grounding for
+> the decisions: pi's extension surface ([earendil-works/pi](https://github.com/earendil-works/pi)),
+> openclaw's history of embedding pi ([openclaw/openclaw](https://github.com/openclaw/openclaw)),
+> and attn's plugin system ([docs/plans/2026-04-16-plugin-system.md](../plans/2026-04-16-plugin-system.md),
+> with the earlier pi plans [2026-04-16-pi-plugin.md](../plans/2026-04-16-pi-plugin.md)
+> and [2026-04-07-pi-integration.md](../plans/2026-04-07-pi-integration.md)).
 
 ## End state (the why)
 
 Victor opens a session and it's pi — but it doesn't feel like a downgrade from
-claude code, it feels like *his* harness. The features that earn their keep are
-there: auto mode with a real permission gate, subagents fanning out, skills and
-slash commands, compaction that respects his conventions, a Monitor that wakes
-the agent when the build goes red, background commands that ring the doorbell.
-Under it, any model — Claude next to GPT next to whatever ships next month —
-switchable mid-session, one muscle memory across all of them.
+claude code, it feels like *his* harness. The capabilities that earn their keep
+are there: real autonomy without babysitting, subagents fanning out, skills and
+slash commands, compaction that respects his conventions, background eyes that
+wake the agent when something changes. Under it, any model — Claude next to GPT
+next to whatever ships next month — switchable mid-session, one muscle memory
+across all of them.
 
 And it's a *native attn citizen*, not a guest observed through hooks and
-transcript scraping: the agent reports its own state through structured events,
-takes ticket nudges and doorbell wakes as in-band steering, links its session to
-attn's on birth. The claude-code integration is attn adapting to a closed
-harness from the outside; pi is the harness attn gets to shape from the inside.
+transcript scraping: the agent reports its own state, takes ticket nudges and
+doorbell wakes as in-band steering, links its session to attn's on birth. The
+claude-code integration is attn adapting to a closed harness from the outside;
+pi is the harness attn gets to shape from the inside.
 
 Why it matters: attn's model is many agents, one Victor. Today the harness
 underneath is someone else's product — its roadmap, its model lock-in, its
@@ -32,157 +32,116 @@ the maintenance treadmill.
 
 ## The central decision: plugin suite, not a fork
 
-**Decision: one main attn package for pi, composing focused extensions.** pi
-packages declare `pi.extensions/skills/prompts/themes` in `package.json` and
-install via `pi install git:...` / local path ([docs/packages.md](https://github.com/earendil-works/pi/blob/main/docs/coding-agent/packages.md)).
-The suite is that one package; each capability inside it is a separate
-extension file that stands alone.
+**Decision: one main attn package for pi, composing focused extensions** —
+installed with a single `pi install`, each capability a piece that stands
+alone. Everything this vision wants maps onto pi's supported extension surface;
+the verified feature-by-feature mapping informs each capability's own doc.
 
-Every feature on the wishlist maps to a documented extension point (table
-below). The extension API is deep enough that fork-territory is genuinely
-narrow: events fire at every seam (`tool_call` can block/mutate,
-`context` edits the message array pre-call, `before_agent_start` swaps the
-system prompt, `before_provider_request` rewrites the raw payload), extensions
-can inject turns (`pi.sendMessage({triggerTurn, deliverAs: "steer"|"followUp"|"nextTurn"})`),
-register tools/commands/shortcuts/providers, own UI widgets and overlays, and
-override compaction (`session_before_compact`). See
-`packages/coding-agent/src/core/extensions/types.ts` for the full surface.
+**Rejected: forking pi.** openclaw is the cautionary tale, not the template:
+it embedded pi in-process, fought version churn and nested control loops, and
+ended up vendoring the entire runtime. But it forked because it bet its product
+on *owning* the loop — compaction policy, retries, failover, persistence. attn
+needs none of that ownership; it needs signals, steering, and capabilities,
+which is exactly what extensions provide. If a future need ever crosses into
+loop-ownership territory, that's a new decision made then, with openclaw's
+scars as the price list.
 
-**Rejected: forking pi.** openclaw is the cautionary tale, not the template.
-It never used pi's RPC mode — it embedded pi in-process via exact-pinned npm
-packages, spent months fighting nested retry loops, event-name churn, and
-opaque error sentinels, and finally vendored the whole runtime into its tree
-(`@openclaw/agent-core`, `@openclaw/ai`; only `pi-tui` survives as a real
-dependency). But openclaw forked because it needed to *own* compaction policy,
-retries, failover, and persistence — it bet its product on being the runtime.
-attn needs none of that ownership: it needs lifecycle signals, steering, and
-feature extensions — exactly what the extension API sells. If a future need
-crosses into loop-ownership territory, that is a new decision to make then,
-with openclaw's scars as the price list; it is not part of this vision.
-
-**Also rejected (for now): RPC-first embedding.** `pi --mode rpc` (JSONL over
-stdio, [docs/rpc.md](https://github.com/earendil-works/pi/blob/main/docs/coding-agent/rpc.md))
-would make attn render the conversation itself — a much larger build, and RPC
-hosts cannot register tools or event handlers over the wire anyway (extensions
-must ship on disk regardless). PTY + extension gets the value at a fraction of
-the surface. RPC embedding stays available if a Present-style native rendering
-of pi sessions ever wants it.
+**Also rejected (for now): RPC-first embedding.** pi can run headless with a
+host rendering the conversation; that's a much larger build than attn needs,
+and it doesn't remove the need for on-disk extensions anyway. It stays
+available if a Present-style native rendering of pi sessions ever wants it.
 
 ## The shape: two plugin systems meet in the middle
 
 Both sides are plugins; neither harness gets forked or patched:
 
-- **attn side — `plugins/attn-pi`**, an agent-driver plugin per attn's own
-  plugin system (Bun subprocess, JSON-RPC on `attn.sock`, `driver.register` /
-  `driver.spawn` → argv; attn owns the PTY). The opencode plugin is the
-  precedent; the 2026-04-16 pi-plugin plan is the sketch. It stages the pi-side
-  package and launches `pi` with it.
-- **pi side — the attn suite**, one pi package composing the extensions below.
-  Loaded per-launch (`-e` / staged package), it phones the daemon over the unix
-  socket: session linking on `session_start`, state from agent lifecycle
-  events, and inbound steering (doorbell, ticket nudges) via `pi.sendMessage`.
+- **attn side** — an agent-driver plugin per attn's own plugin system, like
+  the opencode plugin before it: it launches pi into an attn-owned PTY and
+  carries the session's lifecycle.
+- **pi side** — the attn suite, a pi package the driver stages: it links the
+  session, declares state, delivers doorbells and nudges as steering, and
+  carries the harness capabilities.
 
-State reporting flips from inference to declaration: today attn *deduces*
-claude's state from hooks, PTY heuristics, and a stop-time classifier; the pi
-extension *reports* it from `agent_start/end/settled`, `tool_execution_*`, and
-the permission gate — same authority model as the hook-authoritative states,
-with fewer guessing layers.
+State flips from inference to declaration: today attn *deduces* claude's state
+from hooks, heuristics, and a stop-time classifier; the pi extension *reports*
+it. Fewer guessing layers, same authority model.
 
-## Per-feature map (wishlist → pi extension point)
+## The capabilities (each gets its own doc)
 
-All paths under `packages/coding-agent` unless noted; examples under
-[`examples/extensions/`](https://github.com/earendil-works/pi/tree/main/packages/coding-agent/examples/extensions).
-
-| Feature | pi extension point | Status in pi |
-| --- | --- | --- |
-| Auto mode / permission modes | `tool_call` event blocks/mutates pre-execution + `ctx.ui.confirm`; `permission-gate.ts`, `plan-mode/` examples | Deliberately absent natively; extension-buildable, worked examples |
-| Subagent orchestration | `registerTool` spawning child `pi --mode json` processes; `subagent/` example (parallel/chain modes, `agents/*.md`) | Absent natively; worked example |
-| Skills / commands | Native: agentskills.io spec, `.pi/skills`, `/skill:name`, prompt templates `/name`, `registerCommand` | Native |
-| Compaction | Native auto-compaction + `/compact`; `session_before_compact` full override (`custom-compaction.ts`) | Native + overridable |
-| Monitor / background wake | Any async callback → `pi.sendMessage({triggerTurn: true, deliverAs})`; `file-trigger.ts` is the pattern | Extension-buildable, first-class steering API |
-| Workflows / orchestration | SDK (`createAgentSession`) for deterministic pipelines; subagent chain mode; `packages/orchestrator` exists | Absent in coding-agent; buildable |
-| Multi-model | Native: ~40 providers (`packages/ai/src/providers/`), mid-session `/model` + `set_model`, `registerProvider` for custom ones | Native |
-| attn state / presence | `agent_start/end/settled`, `turn_*`, `tool_execution_*` events → daemon socket | Extension-buildable |
-| Doorbell / ticket nudges | Unix-socket listener in extension → `sendUserMessage(..., {deliverAs: "steer"})` | Extension-buildable |
-| Session linking / resume | `session_start` event, `appendEntry` for persisted attn metadata; native session tree, `-r`/`--session` | Native + extension glue |
-| Custom system prompt | `.pi/APPEND_SYSTEM.md` / `SYSTEM.md`; per-turn via `before_agent_start` | Native |
-| MCP (if ever needed) | Deliberately absent; bridgeable via `registerTool` | Absent by design |
-
-**Fork-pressure points, honestly:** the core agent loop's turn structure
-(`packages/agent`), the transcript renderer layout (individual message types
-re-renderable, screen structure fixed), and built-in tool internals. Nothing
-on the wishlist needs any of them today.
+- **Autonomy with a safety envelope.** Not a permissioning system — no
+  approving things one by one. A simple policy declares what's inherently
+  safe: the worktree pi has open is the agent's to read and write, no
+  ceremony. Everything outside the envelope — bash, anything that reaches
+  further — rides auto mode. Easy, safe defaults; pressure off.
+- **Subagent orchestration.** Fan-out and delegation inside the session.
+  Prior art exists in the pi ecosystem — we adapt, not invent.
+- **Skills and commands.** pi speaks the same skills spec; the existing
+  corpus should largely carry over, curated rather than rewritten.
+- **Compaction, tuned.** Native in pi and fully overridable; shape it to
+  Victor's conventions.
+- **Background eyes.** Monitors and background commands that wake the main
+  agent when the world changes — pi's steering API makes this first-class.
+- **Multi-model, one place.** Native to pi: dozens of providers, mid-session
+  switching.
+- **attn citizenship.** Session linking, declared state, doorbell/ticket
+  steering — the piece that makes all of the above legible to the outer
+  harness.
 
 ## North-star principles
 
-- **Plugins on both sides, forks on neither.** attn integration ships as an
-  attn driver plugin; pi capability ships as a pi package. No in-tree Go
-  driver, no vendored pi. If a feature can't be expressed, that's a named
-  escalation, not a quiet patch.
-- **Declared state beats inferred state.** The extension reports what the
-  agent *is doing*; scraping and stop-time classification are fallbacks, not
-  the design.
-- **One package, composable inside.** A single `pi install` gets the suite;
-  each extension inside works alone and earns its place alone. No monolith
-  where disabling auto mode breaks the doorbell.
+- **Plugins on both sides, forks on neither.** If a capability can't be
+  expressed as a plugin, that's a named escalation, not a quiet patch.
+- **Declared state beats inferred state.** Scraping and stop-time
+  classification are fallbacks, not the design.
+- **One install, composable inside.** A single `pi install` gets the suite;
+  each piece works alone and earns its place alone.
+- **Autonomy over approval.** The answer to risk is a safety envelope with
+  easy defaults, never click-to-approve ceremony.
 - **Parity by value, not by checklist.** Daily-driver is the destination, but
-  each feature ships when it's the next most valuable thing, judged against
-  actually living in pi — not to tick a claude-code comparison box.
-- **Pin pi like a protocol.** openclaw's event-name churn is the warning:
-  pin the pi version, treat the extension API surface as versioned, and gate
-  launches on a compat check — the same reflex as attn's `ProtocolVersion`.
+  each capability ships when it's the next most valuable thing — judged by
+  actually living in pi, not by a claude-code comparison table.
+- **Pin pi like a protocol.** Version the seam, gate on compat — the same
+  reflex as attn's `ProtocolVersion`.
 - **The agent stays a guest in attn's house.** attn owns the PTY, the session
-  lifecycle, and the outer harness (tickets, delegation, notebook, presence).
-  pi owns the loop, the models, the context. The seam is the socket.
+  lifecycle, and the outer harness. pi owns the loop, the models, the context.
+  The seam is the socket.
 
 ## Scope & non-goals
 
-**In scope:** the `plugins/attn-pi` driver plugin; the pi-side attn suite
-(state/link/steering extension, permission gate + auto mode, subagents,
-monitor/background wake, workflow tooling, compaction tuning, skills/prompts
-curation); multi-model daily use; living in it.
+**In scope:** the attn-side driver plugin; the pi-side attn suite carrying the
+capabilities above; multi-model daily use; living in it.
 
 **Non-goals:** forking or vendoring pi; RPC-mode embedding and attn-rendered
-conversations (revisit only if a concrete surface like Present demands it);
-building MCP support before something needs it; migrating claude/codex/copilot
-integrations to this pattern (zero-pressure, per the plugin-system plan);
-feature-parity for claude-code features Victor doesn't actually use.
+conversations; a click-to-approve permissioning system; MCP support before
+something needs it; migrating claude/codex/copilot integrations to this
+pattern; parity for claude-code features Victor doesn't actually use.
 
 ## Big rocks (the arc)
 
-- [ ] **attn-pi driver plugin** — spawn/resume/state plumbing per the
-      2026-04-16 pi-plugin plan, revalidated against today's plugin API and
-      the opencode precedent.
-- [ ] **attn-link extension** — session tie, declared state, doorbell/nudge
-      steering. The moment pi becomes a first-class attn citizen.
-- [ ] **Permission gate + auto mode** — the safety/velocity dial; unlocks
-      `pending_approval` as a real reported state.
-- [ ] **Subagents** — orchestration parity for the fan-out workflows.
-- [ ] **Monitor + background wake** — background commands that re-prompt the
-      main agent.
-- [ ] **Skills/prompts curation** — port the skills that matter; decide reuse
-      vs. rewrite per skill.
-- [ ] **Daily-driver trial** — live in it for real work; the feedback loop
-      that reorders everything above.
-- [ ] **Workflows / deterministic orchestration** — likely last; needs the
-      most design.
+Each rock opens with its own alignment + implementation doc.
+
+- [ ] **Driver plugin** — pi launches, resumes, and lives as an attn session.
+- [ ] **attn citizenship** — linking, declared state, doorbell/nudge steering.
+- [ ] **Safety envelope + auto mode** — the autonomy dial.
+- [ ] **Subagents** — adapted from ecosystem prior art.
+- [ ] **Background eyes** — monitors that wake the agent.
+- [ ] **Skills curation** — carry over what matters.
+- [ ] **Daily-driver trial** — live in it; the feedback loop that reorders
+      everything above.
+- [ ] **Compaction tuning and workflows** — likely last; needs the most
+      design.
 
 ## Open questions
 
-- **Skill reuse:** pi implements the agentskills.io spec and reads
-  `.agents/skills/`. How much of the existing `~/.claude/skills` corpus works
-  unmodified, and is a shared skills dir the right move vs. curation?
-- **Classifier's fate:** with declared state from the extension, does the
-  stop-time WAITING/DONE classifier still run for pi sessions, or does the
-  extension's `agent_settled` + gate state make it redundant? (Old pi plan
-  kept a classifier-with-hints; revisit with the richer event set.)
-- **Suite packaging details:** one package with many extensions vs. a small
-  family (`attn-core` + optional `attn-auto`, `attn-subagents`, ...) under one
-  install. Decide when the second extension lands.
-- **Auto-mode semantics:** map claude's permission-mode vocabulary onto the
-  gate, or design pi-native modes (plan/ask/auto/yolo) fresh?
-- **Blindspots (ground before first chunk):** pi's extension runtime under
-  long-lived real sessions (jiti loading, error isolation, `session_shutdown`
-  cleanup discipline); pi's release cadence and API stability in practice;
-  how pi's TUI behaves under attn's PTY geometry rules (resize authority,
-  replay) compared to claude/codex.
+- How much of the existing skills corpus carries over unmodified, and is a
+  shared skills directory the right move?
+- Does the stop-time classifier still run for pi sessions once state is
+  declared, or does it become redundant?
+- Packaging granularity: one package with many extensions, or a small family
+  under one install? Decide when the second capability lands.
+- The safety envelope's exact policy vocabulary — designed fresh in its own
+  doc, not inherited from claude's permission modes.
+- **Blindspots (ground before the first chunk):** pi's extension runtime under
+  long-lived real sessions; pi's release cadence and API stability in
+  practice; how pi's TUI behaves under attn's PTY geometry rules compared to
+  claude/codex.
