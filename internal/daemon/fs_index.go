@@ -50,11 +50,14 @@ func (d *Daemon) handleFsIndex(client *wsClient, requestID, rawRoot string) {
 // root-relative slash path, sorted lexicographically, plus whether the walk
 // was truncated at cap entries. It skips any directory whose name starts with
 // "." or is named "node_modules" (not descended at all), dot-prefixed files,
-// and symlinks (files and dirs alike — a symlinked dir is never descended by
-// WalkDir, and a symlinked file is skipped rather than listed). A per-entry
-// walk error (e.g. permission denied) skips that entry/subtree without
-// failing the whole index. cap is injected so tests can exercise truncation
-// with a tiny value instead of the real maxFsIndexEntries.
+// and any non-regular-file entry — symlinks, FIFOs, sockets, device nodes —
+// via DirEntry.Type().IsRegular(), a no-syscall type-bits check (a symlinked
+// dir is also never descended by WalkDir). This matters beyond symlinks: a
+// FIFO or socket that slipped into the list would be advertised as an
+// openable file when fs_read rejects anything that isn't a regular file. A
+// per-entry walk error (e.g. permission denied) skips that entry/subtree
+// without failing the whole index. cap is injected so tests can exercise
+// truncation with a tiny value instead of the real maxFsIndexEntries.
 //
 // normalizeExternalRoot only canonicalizes the deepest EXISTING ancestor, so a
 // root that does not exist (or a root that is a file, not a directory) can
@@ -96,7 +99,7 @@ func indexRoot(root string, cap int) ([]string, bool, error) {
 		if strings.HasPrefix(name, ".") {
 			return nil
 		}
-		if d.Type()&fs.ModeSymlink != 0 {
+		if !d.Type().IsRegular() {
 			return nil
 		}
 		if len(files) >= cap {

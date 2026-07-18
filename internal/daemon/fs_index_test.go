@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -21,7 +22,9 @@ func fsIndex(t *testing.T, d *Daemon, client *wsClient, requestID, root string) 
 
 // fs_index over a real tree returns every regular file's root-relative slash
 // path, sorted, while excluding: a dot-dir's contents (not just the dir
-// itself), a node_modules dir's contents, dot-files, and symlinked files.
+// itself), a node_modules dir's contents, dot-files, symlinked files, and a
+// FIFO (a non-regular-file entry that would otherwise be advertised as an
+// openable file when fs_read rejects anything that isn't a regular file).
 // truncated must be false since nothing hits the cap.
 func TestFsIndexListsFilesExcludingDotDirsNodeModulesAndSymlinks(t *testing.T) {
 	d := newFsDaemon(t)
@@ -41,7 +44,7 @@ func TestFsIndexListsFilesExcludingDotDirsNodeModulesAndSymlinks(t *testing.T) {
 	mustWrite("top.md")
 	mustWrite("nested/dir/deep.md")
 	mustWrite("nested/dir/deep2.txt")
-	mustWrite(".hidden-dir/inside.md")  // whole dot-dir excluded
+	mustWrite(".hidden-dir/inside.md")     // whole dot-dir excluded
 	mustWrite("node_modules/pkg/index.js") // whole node_modules dir excluded
 	mustWrite(".dotfile")                  // dot-file excluded
 
@@ -52,6 +55,12 @@ func TestFsIndexListsFilesExcludingDotDirsNodeModulesAndSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(symlinkTarget, filepath.Join(root, "linked.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// A FIFO must be excluded too — not a symlink, but still not a regular
+	// file, and fs_read can't open it either.
+	if err := syscall.Mkfifo(filepath.Join(root, "pipe.fifo"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
