@@ -331,22 +331,38 @@ describe('resolveEditorTileRoot', () => {
 });
 
 describe('localWorkspaceDirectory', () => {
-  it('returns undefined when a session on the workspace carries a non-empty endpoint_id', () => {
+  it('returns undefined for a sessionless workspace (absence of evidence is not evidence of locality)', () => {
+    expect(localWorkspaceDirectory('/Users/victor/code/attn', [], 'ws-1')).toBeUndefined();
+  });
+
+  it('returns undefined when the workspace has only a session with a non-empty endpoint_id', () => {
     const sessions = [{ workspace_id: 'ws-1', endpoint_id: 'remote-mac' }];
     expect(localWorkspaceDirectory('/home/victor/code/attn', sessions, 'ws-1')).toBeUndefined();
   });
 
-  it('passes the directory through when the remote session belongs to a different workspace', () => {
-    const sessions = [{ workspace_id: 'ws-2', endpoint_id: 'remote-mac' }];
+  it('returns undefined when the workspace has both a local and a remote session (duplicate-id corner)', () => {
+    const sessions = [
+      { workspace_id: 'ws-1', endpoint_id: '' },
+      { workspace_id: 'ws-1', endpoint_id: 'remote-mac' },
+    ];
+    expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBeUndefined();
+  });
+
+  it('returns the directory when a session on the workspace has an empty-string endpoint_id', () => {
+    const sessions = [{ workspace_id: 'ws-1', endpoint_id: '' }];
     expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBe('/Users/victor/code/attn');
   });
 
-  it('passes the directory through when there are no sessions', () => {
-    expect(localWorkspaceDirectory('/Users/victor/code/attn', [], 'ws-1')).toBe('/Users/victor/code/attn');
+  it('returns the directory when a session on the workspace has an absent endpoint_id', () => {
+    const sessions = [{ workspace_id: 'ws-1' }];
+    expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBe('/Users/victor/code/attn');
   });
 
-  it('treats an empty-string endpoint_id as local', () => {
-    const sessions = [{ workspace_id: 'ws-1', endpoint_id: '' }];
+  it('returns the directory when the only remote session belongs to a different workspace', () => {
+    const sessions = [
+      { workspace_id: 'ws-1' },
+      { workspace_id: 'ws-2', endpoint_id: 'remote-mac' },
+    ];
     expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBe('/Users/victor/code/attn');
   });
 });

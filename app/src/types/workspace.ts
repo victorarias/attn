@@ -498,19 +498,37 @@ export function resolveEditorTileRoot(
 }
 
 // localWorkspaceDirectory gates a workspace's directory to the local
-// filesystem: it returns undefined when any daemon session on this workspace
-// carries a non-empty endpoint_id, meaning the workspace lives on a remote
-// endpoint and its "directory" is a path on that remote machine, not one the
-// locally-connected daemon's fs pipeline (sendFsIndex, sendFsList, etc. — none
-// of which are endpoint-aware) can safely read. Otherwise it passes the
-// directory through unchanged.
+// filesystem, defaulting to locked (undefined) until locality is positively
+// proven — not the other way around. None of the sendFs* calls (sendFsIndex,
+// sendFsList, etc.) are endpoint-aware; they always execute against the
+// locally-connected daemon, so handing a remote directory to them can read or
+// write the wrong machine's files.
+//
+// A workspace's own record carries no endpoint marker: listWorkspaces appends
+// hubManager.RemoteWorkspaces() to the local workspace list independently of
+// sessions, and protocol.Workspace has no endpoint_id field at all. So the
+// only signal available here is the workspace's live sessions, and absence of
+// a session is absence of evidence, not evidence of locality — a retained
+// sessionless workspace (attn keeps pinned/tile-only workspaces after their
+// last session ends) must stay locked rather than default to passing its
+// directory through.
+//
+// Returns directory only when a session on this workspace positively proves
+// locality (an empty/absent endpoint_id) AND no session on this workspace
+// proves it remote. The second condition also covers the duplicate-id corner:
+// raw workspace ids can repeat across endpoints (disambiguated only by their
+// sessions), so if a remote twin's session shares this workspace_id, we can't
+// tell whose directory the caller's bare-id lookup actually grabbed — stay
+// locked rather than guess.
 export function localWorkspaceDirectory(
   directory: string | undefined,
   sessions: ReadonlyArray<{ workspace_id?: string | null; endpoint_id?: string | null }>,
   workspaceId: string,
 ): string | undefined {
-  const isRemote = sessions.some((session) => session.workspace_id === workspaceId && !!session.endpoint_id);
-  return isRemote ? undefined : directory;
+  const workspaceSessions = sessions.filter((session) => session.workspace_id === workspaceId);
+  const provenLocal = workspaceSessions.some((session) => !session.endpoint_id);
+  const provenRemote = workspaceSessions.some((session) => !!session.endpoint_id);
+  return provenLocal && !provenRemote ? directory : undefined;
 }
 
 function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
