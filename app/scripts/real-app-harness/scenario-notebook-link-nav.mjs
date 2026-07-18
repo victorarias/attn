@@ -9,6 +9,12 @@
 //      of the doc is virtualized OUT of the CodeMirror DOM before the jump
 //      and IN after it (CM only mounts visible lines, so presence proves the
 //      scroll landed).
+//   3. A note in a nested directory that references an image via a
+//      `..`-relative path (climbing back out to a sibling assets/ dir)
+//      renders the resolved image, not the broken placeholder — proving
+//      resolveImageSrc's baseDir-relative + `..`-clamped resolution against
+//      the real packaged-app asset-read IPC round trip (not just the
+//      resolver's unit tests).
 // Modeled on scenario-notebook-editor-undo.mjs, swapping every native driver
 // step for a bridge verb.
 
@@ -36,6 +42,12 @@ const FINDER_INPUT_SELECTOR = '.terminal-wrapper.active .notebook-finder-input';
 const FINDER_OPTION_SELECTOR = '.terminal-wrapper.active .notebook-finder-option';
 const DOWN_LINK = '.terminal-wrapper.active .cm-md-link[data-href="#down-below"]';
 const TOP_LINK = '.terminal-wrapper.active .cm-md-link[data-href="#anchor-top"]';
+const IMAGE_IMG = '.terminal-wrapper.active .cm-md-image img';
+const IMAGE_BROKEN = '.terminal-wrapper.active .cm-md-image-broken';
+
+// 1x1 transparent PNG, embedded so the harness has no external fixture to keep in sync.
+const PIXEL_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -164,6 +176,29 @@ async function main() {
     const filler = Array.from({ length: 80 }, (_, i) => `Filler line ${i + 1}.`).join('\n\n');
     fs.writeFileSync(navPath, `# nav probe\n\n[bar](${BAR}.md)\n`, 'utf8');
     fs.writeFileSync(barPath, `# bar\n\nSibling of nav probe.\n\n[anchor](${ANCHOR}.md)\n`, 'utf8');
+    // 0b. A note nested one directory deep, referencing an image via a
+    // `..`-relative path back out to a sibling assets/ directory:
+    //   <root>/<run>-imgdir/<run>qimg.md   -> ![pixel](../<run>-assets/pixel.png)
+    //   <root>/<run>-assets/pixel.png
+    // Linked from the anchor probe (relative-path-into-a-subdirectory link),
+    // so reaching it exercises the same mod-click navigation as steps 4-5
+    // above rather than needing to re-summon the finder mid-session (the
+    // finder's only reopen affordance is the "Find a note" empty-state
+    // button, which isn't shown while a note is already open).
+    const IMG = `${runId}qimg`;
+    const imgDirName = `${runId}-imgdir`;
+    const assetsDirName = `${runId}-assets`;
+    const imgDir = path.join(notebookRoot, imgDirName);
+    const assetsDir = path.join(notebookRoot, assetsDirName);
+    fs.mkdirSync(imgDir, { recursive: true });
+    fs.mkdirSync(assetsDir, { recursive: true });
+    const imgNotePath = path.join(imgDir, `${IMG}.md`);
+    const pixelPath = path.join(assetsDir, 'pixel.png');
+    const imgLinkHref = `${imgDirName}/${IMG}.md`;
+    fs.writeFileSync(imgNotePath, `# image probe\n\n![pixel](../${assetsDirName}/pixel.png)\n`, 'utf8');
+    fs.writeFileSync(pixelPath, Buffer.from(PIXEL_PNG_BASE64, 'base64'));
+    console.log(`[RealAppHarness] imgNote=${imgNotePath} pixel=${pixelPath}`);
+
     fs.writeFileSync(anchorPath, [
       '# anchor probe',
       '',
@@ -174,6 +209,8 @@ async function main() {
       '## down below',
       '',
       'You made it. [top](#anchor-top)',
+      '',
+      `[image probe](${imgLinkHref})`,
       '',
     ].join('\n'), 'utf8');
     console.log(`[RealAppHarness] notebookRoot=${notebookRoot} nav=${NAV}.md bar=${BAR}.md anchor=${ANCHOR}.md`);
@@ -260,6 +297,28 @@ async function main() {
     await waitForDomSelector(client, TOP_LINK, true, 'mod-click #down-below scrolls the note into view');
     console.log('[RealAppHarness] STEP 4 OK: mod-click on #down-below scrolled the note (bottom-of-doc link now in the CM DOM).');
 
+    // 8. ⌘-click the image-probe link -> navigates into the nested imgdir/
+    // note that references a `..`-relative image.
+    const IMAGE_LINK = `.terminal-wrapper.active .cm-md-link[data-href="${imgLinkHref}"]`;
+    await waitForDomSelector(client, IMAGE_LINK, true, 'image-probe link rendered');
+    await client.request('dom_click', { selector: IMAGE_LINK, modifiers: { meta: true } });
+    await waitForWorkspaceUi(
+      client,
+      workspaceId,
+      (state) => state?.tileTitles?.includes(`${IMG}.md`),
+      'mod-click relative link navigates anchor -> nested image probe',
+    );
+    console.log('[RealAppHarness] STEP 5 OK: mod-click on relative link navigated into the nested directory.');
+
+    // 9. The `..`-relative image must resolve and render (not the broken
+    // placeholder): proves resolveImageSrc's baseDir-relative + `..`-clamped
+    // path resolution against the real asset-read IPC round trip.
+    await waitForDomSelector(client, IMAGE_IMG, true, '`..`-relative image renders (not broken placeholder)');
+    if (await domSelectorPresent(client, IMAGE_BROKEN)) {
+      throw new Error('`..`-relative image rendered as broken placeholder instead of resolving');
+    }
+    console.log('[RealAppHarness] STEP 6 OK: `..`-relative image resolved and rendered.');
+
     const summary = {
       ok: true,
       runId,
@@ -268,9 +327,11 @@ async function main() {
       navPath,
       barPath,
       anchorPath,
+      imgNotePath,
+      pixelPath,
     };
     fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
-    console.log('[RealAppHarness] PASSED: bridge-only mod-click link navigation + heading jump verified.');
+    console.log('[RealAppHarness] PASSED: bridge-only mod-click link navigation + heading jump + `..`-relative image resolution verified.');
     console.log(JSON.stringify(summary, null, 2));
   } catch (error) {
     console.error(`[RealAppHarness] FAILED: ${error?.stack || error}`);
