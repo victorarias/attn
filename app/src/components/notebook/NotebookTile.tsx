@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
-import { NotebookSurface } from '../NotebookSurface';
+import { NotebookSurface, type NotebookSurfaceHandle } from '../NotebookSurface';
 
 // NotebookTile is the in-workspace shape of the Notebook: a `tile`-variant
 // NotebookSurface wired to the daemon via context. It reopens to `initialPath`
@@ -13,15 +13,15 @@ import { NotebookSurface } from '../NotebookSurface';
 // the daemon unconditionally, but nothing else is, so a tile is the one
 // deciding when it needs live updates for its root and dropping that
 // subscription when it stops needing them.
-export function NotebookTile({
-  initialPath,
-  root,
-  onOpenFile,
-}: {
+export const NotebookTile = forwardRef<NotebookSurfaceHandle, {
   initialPath: string | null;
   root?: string;
   onOpenFile: (path: string) => void;
-}) {
+}>(function NotebookTile({
+  initialPath,
+  root,
+  onOpenFile,
+}, ref) {
   const { makeDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch, connectionGeneration } = useNotebookSurfaceContext();
 
   // Off-root: this tile is pinned to a filesystem root other than the notebook
@@ -106,7 +106,11 @@ export function NotebookTile({
       // fs_watch_result can normalize the path (e.g. /tmp -> /private/tmp
       // on macOS), and that normalization must never itself trigger a
       // remount — only a real root change (a new raw prop value) should.
+      // The root switcher (WorkspaceDockTile) awaits flushPendingSave()
+      // BEFORE updating params, so the old instance persists to the old
+      // root before this key ever changes.
       key={root ?? ''}
+      ref={ref}
       variant="tile"
       active
       initialPath={initialPath}
@@ -122,4 +126,4 @@ export function NotebookTile({
       listFiles={daemon.listFiles}
     />
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { FsEntry, FsExistsResult, FsReadAssetResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
@@ -94,9 +94,23 @@ const AUTOSAVE_DELAY_MS = 700;
 // Outcome of persisting the buffer. On-demand callers (navigate/close) MUST react
 // to 'conflict'/'error' — a CAS conflict cannot be silently dropped, or the user's
 // edits vanish behind a navigation/close without the banner ever showing.
-type PersistOutcome = 'saved' | 'conflict' | 'error' | 'noop';
+export type PersistOutcome = 'saved' | 'conflict' | 'error' | 'noop';
 
-export function NotebookSurface({
+// Imperative escape hatch for callers that need to flush the dirty buffer AHEAD
+// of a state transition they own (e.g. NotebookTile's root switcher, which must
+// persist the outgoing root's edit before swapping tileParams — see
+// WorkspaceDockTile.tsx). Everything else about persistence stays internal;
+// this is the one seam.
+export interface NotebookSurfaceHandle {
+  // Persists the dirty buffer (if any) against its synced base, via the same
+  // persist path the navigate/close flush already uses. Resolves 'noop' when
+  // there's nothing dirty (already in sync). On 'conflict' or 'error' the
+  // surface's own banner is already showing — the caller must abort whatever
+  // transition prompted the flush rather than proceeding past the failure.
+  flushPendingSave: () => Promise<PersistOutcome>;
+}
+
+export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurfaceProps>(function NotebookSurface({
   variant,
   active,
   initialPath,
@@ -112,7 +126,7 @@ export function NotebookSurface({
   changeSignal = 0,
   listFiles,
   chiefActive,
-}: NotebookSurfaceProps) {
+}: NotebookSurfaceProps, ref) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [note, setNote] = useState<FsReadResult | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -449,6 +463,10 @@ export function NotebookSurface({
   // Indirection so loadFile/requestClose (declared above the editing block) can invoke
   // the latest persist without a forward declaration.
   persistRef.current = persist;
+
+  useImperativeHandle(ref, () => ({
+    flushPendingSave: () => persistRef.current?.() ?? Promise.resolve('noop'),
+  }), []);
 
   // Discard the local buffer and reload the current on-disk version (the conflict
   // reconcile "reload from disk" path).
@@ -1170,7 +1188,7 @@ export function NotebookSurface({
       </FocusTrap>
     </div>
   );
-}
+});
 
 function basename(path: string): string {
   const name = path.slice(path.lastIndexOf('/') + 1);

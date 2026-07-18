@@ -18,6 +18,7 @@ import { getMarkdownAnnotationsTransport } from '../MarkdownReader/annotations/t
 import { useShortcut } from '../../shortcuts';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
 import { NotebookTile } from '../notebook/NotebookTile';
+import type { NotebookSurfaceHandle } from '../NotebookSurface';
 import './WorkspaceDockTile.css';
 
 // Link/image target resolution moved to the reader; re-exported here for
@@ -125,6 +126,11 @@ export function WorkspaceDockTile({
   const browserLabel = browserHostLabel(workspaceId, tile.tileId);
   const [browserAddress, setBrowserAddress] = useState(tile.tileParams || '');
   const pendingBrowserParamsRef = useRef<string | null>(null);
+  // Handle to the docked NotebookTile's NotebookSurface, so the root switcher
+  // (below) can flush a dirty buffer to the OLD root before swapping params —
+  // otherwise the 700ms autosave debounce can lose an in-flight edit across
+  // a root switch, or worse, persist it to the wrong root after remount.
+  const notebookSurfaceRef = useRef<NotebookSurfaceHandle | null>(null);
 
   // ---- markdown annotation send flow (PR6) ---------------------------------
   const isMarkdown = tile.tileKind === 'markdown';
@@ -326,9 +332,21 @@ export function WorkspaceDockTile({
   const handleRootChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value;
     if (value === ROOT_BROWSE_VALUE) {
-      void open({ directory: true, multiple: false, title: 'Choose editor root' }).then((selected) => {
+      void open({ directory: true, multiple: false, title: 'Choose editor root' }).then(async (selected) => {
         if (!selected || typeof selected !== 'string') {
           return; // cancelled — the select is controlled by parsed params, snaps back on re-render
+        }
+        // Flush the outgoing root's dirty buffer BEFORE swapping params — the
+        // surface persists it to the OLD root via the same instance that has
+        // it open, since the param swap is what remounts NotebookSurface onto
+        // the new root (NotebookTile keys on `root`).
+        const outcome = notebookSurfaceRef.current ? await notebookSurfaceRef.current.flushPendingSave() : 'noop';
+        if (outcome === 'conflict' || outcome === 'error') {
+          // The surface's own conflict/save-error banner is already visible;
+          // the controlled select snaps back on re-render since params never
+          // changed. Aborting here is what keeps the edit from vanishing
+          // behind a root swap.
+          return;
         }
         void Promise.resolve(onUpdateParams?.(serializeNotebookTileParams({ root: selected }))).catch((error) => {
           console.warn('[WorkspaceDockTile] Failed to persist browsed notebook root:', error);
@@ -338,12 +356,19 @@ export function WorkspaceDockTile({
       });
       return;
     }
-    // A chosen dir (or any non-browse option): path is deliberately omitted —
-    // the open file is meaningless under a different root, so the tile drops
-    // back to its tree view.
-    void Promise.resolve(onUpdateParams?.(serializeNotebookTileParams({ root: value || undefined }))).catch((error) => {
-      console.warn('[WorkspaceDockTile] Failed to persist notebook root:', error);
-    });
+    void (async () => {
+      // Same flush-then-switch rule as the browse-dialog branch above.
+      const outcome = notebookSurfaceRef.current ? await notebookSurfaceRef.current.flushPendingSave() : 'noop';
+      if (outcome === 'conflict' || outcome === 'error') {
+        return;
+      }
+      // A chosen dir (or any non-browse option): path is deliberately omitted —
+      // the open file is meaningless under a different root, so the tile drops
+      // back to its tree view.
+      void Promise.resolve(onUpdateParams?.(serializeNotebookTileParams({ root: value || undefined }))).catch((error) => {
+        console.warn('[WorkspaceDockTile] Failed to persist notebook root:', error);
+      });
+    })();
   }, [onUpdateParams]);
 
   const reloadBrowser = () => {
@@ -554,6 +579,7 @@ export function WorkspaceDockTile({
             const { root, path: openPath } = parseNotebookTileParams(tile.tileParams);
             return (
               <NotebookTile
+                ref={notebookSurfaceRef}
                 initialPath={openPath || null}
                 root={root}
                 onOpenFile={(openedPath) => {

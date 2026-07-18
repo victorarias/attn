@@ -1,6 +1,7 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NotebookSurface } from './NotebookSurface';
+import { NotebookSurface, type NotebookSurfaceHandle } from './NotebookSurface';
 import type { FsEntry, FsExistsResult, FsReadAssetResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
 
 // Off-root gating (editor-arbitrary-roots PR6): backlinksNotebook and sendToChief
@@ -166,5 +167,79 @@ describe('NotebookSurface off-root gating (tile variant)', () => {
     act(() => editorMock.current!.onSelectionChange!({ text: 'a key decision', top: 40, left: 60 }));
 
     expect(await screen.findByRole('button', { name: 'Send to chief' })).toBeInTheDocument();
+  });
+});
+
+describe('NotebookSurface flushPendingSave handle (root-switch flush, PR #588 second review round)', () => {
+  // NotebookTile keys NotebookSurface on `root`, so a root switch remounts it —
+  // dropping any not-yet-autosaved edit (the autosave debounce is 700ms with no
+  // unmount flush). flushPendingSave is the imperative escape hatch the root
+  // switcher calls BEFORE swapping params, so the outgoing edit persists to the
+  // OLD root's file instead of vanishing.
+  beforeEach(() => {
+    globalThis.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+  });
+
+  afterEach(() => {
+    editorMock.current = null;
+    vi.restoreAllMocks();
+  });
+
+  it('flushPendingSave persists a dirty buffer immediately (ahead of the autosave debounce) and resolves "saved"', async () => {
+    const { props, writeFile } = makeProps();
+    const ref = createRef<NotebookSurfaceHandle>();
+    render(<NotebookSurface {...props} ref={ref} />);
+    await waitForNoteLoaded();
+
+    fireEvent.change(editor(), { target: { value: 'edited body' } });
+
+    // Called before the 700ms debounce would fire — writeFile must not have
+    // been called yet via the autosave path.
+    expect(writeFile).not.toHaveBeenCalled();
+
+    let outcome: string | undefined;
+    await act(async () => {
+      outcome = await ref.current!.flushPendingSave();
+    });
+
+    expect(writeFile).toHaveBeenCalledWith('note.md', 'edited body', 'h1');
+    expect(outcome).toBe('saved');
+  });
+
+  it('flushPendingSave resolves "conflict" and leaves the conflict banner showing when the write CAS-conflicts', async () => {
+    const { props, writeFile } = makeProps();
+    writeFile.mockResolvedValue({ path: 'note.md', conflict: true, currentHash: 'h-server' });
+    const ref = createRef<NotebookSurfaceHandle>();
+    render(<NotebookSurface {...props} ref={ref} />);
+    await waitForNoteLoaded();
+
+    fireEvent.change(editor(), { target: { value: 'edited body' } });
+
+    let outcome: string | undefined;
+    await act(async () => {
+      outcome = await ref.current!.flushPendingSave();
+    });
+
+    expect(outcome).toBe('conflict');
+    expect(document.querySelector('.notebook-browser-editor-conflict')).not.toBeNull();
+  });
+
+  it('flushPendingSave resolves "noop" when the buffer is already in sync', async () => {
+    const { props, writeFile } = makeProps();
+    const ref = createRef<NotebookSurfaceHandle>();
+    render(<NotebookSurface {...props} ref={ref} />);
+    await waitForNoteLoaded();
+
+    let outcome: string | undefined;
+    await act(async () => {
+      outcome = await ref.current!.flushPendingSave();
+    });
+
+    expect(outcome).toBe('noop');
+    expect(writeFile).not.toHaveBeenCalled();
   });
 });
