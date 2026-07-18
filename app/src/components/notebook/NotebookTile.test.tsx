@@ -102,10 +102,12 @@ describe('NotebookTile root-bound daemon + watch lifecycle', () => {
     expect(harness.sendFsWatch).not.toHaveBeenCalled();
   });
 
-  it('watches an arbitrary root on mount and unwatches the resolved root on unmount', async () => {
+  it('watches an arbitrary root on mount, adopts the resolved root for the daemon, and unwatches it on unmount', async () => {
     const harness = makeHarness({
       effectiveNotebookRoot: '/notebook-root',
-      // fs_watch_result may normalize the path (e.g. resolve symlinks/trailing slash).
+      // fs_watch_result may normalize the path (e.g. resolve symlinks/trailing slash) —
+      // fs_changed events for this subscription carry that resolved form, not the raw
+      // prop, so both the fs_* calls and the changeSignal lookup must key off it too.
       watchResolvesTo: () => '/repo-resolved',
     });
     const { unmount } = render(
@@ -114,13 +116,60 @@ describe('NotebookTile root-bound daemon + watch lifecycle', () => {
       </NotebookSurfaceProvider>,
     );
 
+    // Before resolution: bound to the raw root prop.
+    expect(harness.makeDaemon).toHaveBeenCalledWith('/repo');
+
     await waitFor(() => expect(harness.sendFsWatch).toHaveBeenCalledWith('/repo'));
+
+    // After fs_watch_result lands: the daemon is rebuilt against the resolved
+    // root, and the surface re-renders with that instance.
+    await waitFor(() => expect(harness.makeDaemon).toHaveBeenCalledWith('/repo-resolved'));
+    await waitFor(() => expect(surfaceCalls.length).toBeGreaterThan(1));
 
     unmount();
 
     await waitFor(() => expect(harness.sendFsUnwatch).toHaveBeenCalledWith('/repo-resolved'));
     // Mount-then-unmount ordering: watch strictly precedes the matching unwatch.
     expect(harness.callLog).toEqual(['watch:/repo', 'unwatch:/repo-resolved']);
+  });
+
+  it('unwatches a root whose fs_watch resolves only after the tile has already unmounted (no leaked watcher)', async () => {
+    const callLog: string[] = [];
+    let resolveWatch!: (result: FsWatchResult) => void;
+    const sendFsWatch = vi.fn((root?: string) => {
+      callLog.push(`watch:${root}`);
+      return new Promise<FsWatchResult>((resolve) => {
+        resolveWatch = resolve;
+      });
+    });
+    const sendFsUnwatch = vi.fn((root?: string): Promise<FsWatchResult> => {
+      callLog.push(`unwatch:${root}`);
+      return Promise.resolve({ root: root || '' });
+    });
+    const value: NotebookSurfaceContextValue = {
+      makeDaemon: vi.fn((_root?: string) => fakeDaemon()),
+      effectiveNotebookRoot: '/notebook-root',
+      sendFsWatch,
+      sendFsUnwatch,
+    };
+
+    const { unmount } = render(
+      <NotebookSurfaceProvider value={value}>
+        <NotebookTile initialPath={null} root="/repo" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+    await waitFor(() => expect(sendFsWatch).toHaveBeenCalledWith('/repo'));
+
+    // Unmount BEFORE fs_watch resolves: the effect's own cleanup runs with
+    // watchedRootRef still null, so it can't unwatch anything itself.
+    unmount();
+    expect(sendFsUnwatch).not.toHaveBeenCalled();
+
+    // The daemon-side watcher lands only now — it must still be dropped, or
+    // it leaks until app restart.
+    resolveWatch({ root: '/repo-resolved' });
+    await waitFor(() => expect(sendFsUnwatch).toHaveBeenCalledWith('/repo-resolved'));
+    expect(callLog).toEqual(['watch:/repo', 'unwatch:/repo-resolved']);
   });
 
   it('unwatches the previously resolved root and re-watches the new one when root changes', async () => {

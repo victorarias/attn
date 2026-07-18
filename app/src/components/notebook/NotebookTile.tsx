@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
 import { NotebookSurface } from '../NotebookSurface';
 
@@ -23,7 +23,16 @@ export function NotebookTile({
   onOpenFile: (path: string) => void;
 }) {
   const { makeDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch } = useNotebookSurfaceContext();
-  const daemon = useMemo(() => makeDaemon(root), [makeDaemon, root]);
+
+  // fs_watch_result may normalize `root` (e.g. macOS resolving /tmp to
+  // /private/tmp) — and fs_changed events for this subscription carry that
+  // resolved form, not the raw prop. Once resolution lands, both the fs_*
+  // calls and the changeSignal lookup must use it, or a root-bound tile's
+  // live refresh is silently dead. Reset on every root change so a stale
+  // resolution from a previous root never leaks into the new one.
+  const [resolvedRoot, setResolvedRoot] = useState<string | null>(null);
+  const effectiveRoot = root ? (resolvedRoot ?? root) : undefined;
+  const daemon = useMemo(() => makeDaemon(effectiveRoot), [makeDaemon, effectiveRoot]);
 
   // The root this tile is actually subscribed to via fs_watch, so the effect's
   // cleanup unwatches the resolution the daemon echoed back — not necessarily
@@ -31,6 +40,7 @@ export function NotebookTile({
   const watchedRootRef = useRef<string | null>(null);
 
   useEffect(() => {
+    setResolvedRoot(null);
     // The notebook root is watched by the daemon unconditionally; only an
     // arbitrary, distinct root needs this tile to open its own subscription.
     if (!root || root === effectiveNotebookRoot) {
@@ -40,9 +50,17 @@ export function NotebookTile({
     sendFsWatch(root)
       .then((result) => {
         if (cancelled) {
+          // The tile unmounted (or root changed) before this resolved: the
+          // daemon-side watcher was just established, so it must still be
+          // dropped here — the cleanup below already ran and saw no
+          // watchedRootRef to unwatch, so this is the only chance.
+          sendFsUnwatch(result.root).catch((error) => {
+            console.warn('[NotebookTile] fs_unwatch failed for root', result.root, error);
+          });
           return;
         }
         watchedRootRef.current = result.root;
+        setResolvedRoot(result.root);
       })
       .catch((error) => {
         // The tile still works without live refresh (e.g. the daemon's watch
