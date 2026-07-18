@@ -633,6 +633,15 @@ func TestFsCommandsOmittedRootResolvesToNotebookRoot(t *testing.T) {
 // client so this exercises path validation specifically, not the separate
 // auth-gate tests below.
 func TestFsCommandsRejectInvalidRoots(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if !strings.HasPrefix(config.DataDir(), tmpHome+string(filepath.Separator)) {
+		t.Fatalf("test data dir %q escaped the temp HOME — refusing to touch a real data dir", config.DataDir())
+	}
+	if err := os.MkdirAll(config.DataDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	d := newFsDaemon(t)
 
 	client := trustedFsClient(4)
@@ -661,6 +670,15 @@ func TestFsCommandsRejectInvalidRoots(t *testing.T) {
 // mutating path (fs_delete), and asserts the delete never touches the data
 // dir file.
 func TestFsCommandsRejectSymlinkedRootIntoDataDir(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if !strings.HasPrefix(config.DataDir(), tmpHome+string(filepath.Separator)) {
+		t.Fatalf("test data dir %q escaped the temp HOME — refusing to touch a real data dir", config.DataDir())
+	}
+	if err := os.MkdirAll(config.DataDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	d := newFsDaemon(t)
 
 	sentinel := filepath.Join(config.DataDir(), "attn.db")
@@ -728,6 +746,15 @@ func TestFsCommandsRejectSymlinkedRootIntoDataDir(t *testing.T) {
 // via a /private symlink — so this exercises the exact canonicalize-both-sides
 // path the fix relies on, not just a synthetic case.
 func TestFsCommandsAcceptLegitimateSymlinkedRoot(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if !strings.HasPrefix(config.DataDir(), tmpHome+string(filepath.Separator)) {
+		t.Fatalf("test data dir %q escaped the temp HOME — refusing to touch a real data dir", config.DataDir())
+	}
+	if err := os.MkdirAll(config.DataDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
 	d := newFsDaemon(t)
 
 	target := t.TempDir()
