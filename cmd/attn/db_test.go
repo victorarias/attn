@@ -10,26 +10,44 @@ import (
 	"time"
 )
 
-func alwaysRunning() (bool, error) { return true, nil }
-func neverRunning() (bool, error)  { return false, nil }
+// testPidPath returns a not-yet-created pid-file path in dir: passing it to
+// restoreDatabase exercises the common case where no daemon has ever run
+// (acquireDaemonLock creates and locks it), without any test needing to
+// depend on a real daemon-liveness stand-in.
+func testPidPath(dir string) string {
+	return filepath.Join(dir, "attn.pid")
+}
 
 // TestRestoreDatabase_RefusesWhileRunning proves restoreDatabase refuses to
-// touch anything on disk when the injected daemon-running check reports the
-// daemon is live, and that its error tells the operator to stop the daemon.
+// touch anything on disk when another file description already holds the
+// exclusive flock on the pid file (a faithful stand-in for a live daemon
+// holding daemon.acquirePIDLock — flock is per-open-file-description), and
+// that its error tells the operator to stop the daemon.
 func TestRestoreDatabase_RefusesWhileRunning(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "attn.db")
 	backupsDir := filepath.Join(dir, "backups")
+	pidPath := testPidPath(dir)
 	writeFile(t, dbPath, "current db")
 	mustMkdirAll(t, backupsDir)
 	writeFile(t, filepath.Join(backupsDir, "attn-20260101-000000.db"), "backup")
+	writeFile(t, pidPath, "12345")
 
-	_, _, err := restoreDatabase(dbPath, backupsDir, "latest", alwaysRunning)
-	if err == nil {
+	lockFile, err := os.OpenFile(pidPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open pid file: %v", err)
+	}
+	defer lockFile.Close()
+	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatalf("flock pid file: %v", err)
+	}
+
+	_, _, restoreErr := restoreDatabase(dbPath, backupsDir, "latest", pidPath)
+	if restoreErr == nil {
 		t.Fatal("expected error while daemon is running, got nil")
 	}
-	if !strings.Contains(err.Error(), "stop it first") && !strings.Contains(strings.ToLower(err.Error()), "running") {
-		t.Fatalf("error should tell the operator to stop the daemon, got: %v", err)
+	if !strings.Contains(restoreErr.Error(), "stop it first") && !strings.Contains(strings.ToLower(restoreErr.Error()), "running") {
+		t.Fatalf("error should tell the operator to stop the daemon, got: %v", restoreErr)
 	}
 
 	if got := readFile(t, dbPath); got != "current db" {
@@ -45,6 +63,7 @@ func TestRestoreDatabase_LatestSelectionPicksNewest(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "attn.db")
 	backupsDir := filepath.Join(dir, "backups")
+	pidPath := testPidPath(dir)
 	writeFile(t, dbPath, "current db")
 	mustMkdirAll(t, backupsDir)
 	writeFile(t, filepath.Join(backupsDir, "attn-20260101-000000.db"), "oldest")
@@ -54,7 +73,7 @@ func TestRestoreDatabase_LatestSelectionPicksNewest(t *testing.T) {
 	// rotating backup above must still be excluded from "latest".
 	writeFile(t, filepath.Join(backupsDir, "attn-premigration-99-20261231-000000.db"), "premigration, must be ignored")
 
-	restoredFrom, _, err := restoreDatabase(dbPath, backupsDir, "latest", neverRunning)
+	restoredFrom, _, err := restoreDatabase(dbPath, backupsDir, "latest", pidPath)
 	if err != nil {
 		t.Fatalf("restoreDatabase error: %v", err)
 	}
@@ -67,7 +86,7 @@ func TestRestoreDatabase_LatestSelectionPicksNewest(t *testing.T) {
 
 	// Default (empty string) source must behave identically to "latest".
 	writeFile(t, dbPath, "current db again")
-	restoredFrom2, _, err := restoreDatabase(dbPath, backupsDir, "", neverRunning)
+	restoredFrom2, _, err := restoreDatabase(dbPath, backupsDir, "", pidPath)
 	if err != nil {
 		t.Fatalf("restoreDatabase (default) error: %v", err)
 	}
@@ -84,6 +103,7 @@ func TestRestoreDatabase_PreservesOldDBAndLeavesBackupInPlace(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "attn.db")
 	backupsDir := filepath.Join(dir, "backups")
+	pidPath := testPidPath(dir)
 	writeFile(t, dbPath, "old contents")
 	writeFile(t, dbPath+"-wal", "wal")
 	writeFile(t, dbPath+"-shm", "shm")
@@ -91,7 +111,7 @@ func TestRestoreDatabase_PreservesOldDBAndLeavesBackupInPlace(t *testing.T) {
 	backupPath := filepath.Join(backupsDir, "attn-20260101-000000.db")
 	writeFile(t, backupPath, "backup contents")
 
-	restoredFrom, preservedAs, err := restoreDatabase(dbPath, backupsDir, "latest", neverRunning)
+	restoredFrom, preservedAs, err := restoreDatabase(dbPath, backupsDir, "latest", pidPath)
 	if err != nil {
 		t.Fatalf("restoreDatabase error: %v", err)
 	}
@@ -135,13 +155,14 @@ func TestRestoreDatabase_NoExistingDBRemovesStraySidecars(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "attn.db")
 	backupsDir := filepath.Join(dir, "backups")
+	pidPath := testPidPath(dir)
 	writeFile(t, dbPath+"-wal", "stray wal")
 	writeFile(t, dbPath+"-shm", "stray shm")
 	mustMkdirAll(t, backupsDir)
 	backupPath := filepath.Join(backupsDir, "attn-20260101-000000.db")
 	writeFile(t, backupPath, "backup contents")
 
-	_, preservedAs, err := restoreDatabase(dbPath, backupsDir, "latest", neverRunning)
+	_, preservedAs, err := restoreDatabase(dbPath, backupsDir, "latest", pidPath)
 	if err != nil {
 		t.Fatalf("restoreDatabase error: %v", err)
 	}
@@ -162,9 +183,10 @@ func TestRestoreDatabase_MissingBackupsDirErrors(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "attn.db")
 	backupsDir := filepath.Join(dir, "backups") // never created
+	pidPath := testPidPath(dir)
 	writeFile(t, dbPath, "current db")
 
-	_, _, err := restoreDatabase(dbPath, backupsDir, "latest", neverRunning)
+	_, _, err := restoreDatabase(dbPath, backupsDir, "latest", pidPath)
 	if err == nil {
 		t.Fatal("expected error for missing backups dir, got nil")
 	}
@@ -181,10 +203,11 @@ func TestRestoreDatabase_RejectsSourceEqualToDestination(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "attn.db")
 	backupsDir := filepath.Join(dir, "backups")
+	pidPath := testPidPath(dir)
 	writeFile(t, dbPath, "current db")
 	mustMkdirAll(t, backupsDir)
 
-	_, _, err := restoreDatabase(dbPath, backupsDir, dbPath, neverRunning)
+	_, _, err := restoreDatabase(dbPath, backupsDir, dbPath, pidPath)
 	if err == nil {
 		t.Fatal("expected error when source == destination, got nil")
 	}
@@ -212,12 +235,13 @@ func TestRestoreDatabase_RejectsNonRegularSource(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "attn.db")
 	backupsDir := filepath.Join(dir, "backups")
+	pidPath := testPidPath(dir)
 	writeFile(t, dbPath, "current db")
 	mustMkdirAll(t, backupsDir)
 	notAFile := filepath.Join(dir, "not-a-backup-dir")
 	mustMkdirAll(t, notAFile)
 
-	_, _, err := restoreDatabase(dbPath, backupsDir, notAFile, neverRunning)
+	_, _, err := restoreDatabase(dbPath, backupsDir, notAFile, pidPath)
 	if err == nil {
 		t.Fatal("expected error for a directory source, got nil")
 	}
@@ -343,28 +367,29 @@ func TestPreserveExistingDB_RollsBackIfSidecarRenameFails(t *testing.T) {
 	}
 }
 
-// TestIsDaemonRunningAt_NoPidFile proves the liveness check reports "not
-// running" (with no error) when there is no pid file at all, without ever
-// touching real config resolution — dataDir is an injected temp dir.
-func TestIsDaemonRunningAt_NoPidFile(t *testing.T) {
+// TestAcquireDaemonLock_NoPidFile proves the lock can be acquired (with no
+// error) when there is no pid file at all yet — acquireDaemonLock creates it.
+func TestAcquireDaemonLock_NoPidFile(t *testing.T) {
 	dir := t.TempDir()
-	check := isDaemonRunningAt(func() string { return dir })
-	running, err := check()
+	pidPath := filepath.Join(dir, "attn.pid")
+
+	release, err := acquireDaemonLock(pidPath)
 	if err != nil {
 		t.Fatalf("unexpected error with no pid file present: %v", err)
 	}
-	if running {
-		t.Fatal("expected not-running with no pid file present")
+	defer release()
+
+	if _, statErr := os.Stat(pidPath); statErr != nil {
+		t.Fatalf("expected acquireDaemonLock to create the pid file, stat err = %v", statErr)
 	}
 }
 
-// TestIsDaemonRunningAt_FlockHeld proves the liveness check reports
-// "running" (true, nil) while another open file description holds the
-// exclusive flock on the pid file, and "not running" (false, nil) once that
-// lock is released. BSD flock is per-open-file-description, so holding the
-// lock on a separate fd from the one isDaemonRunningAt opens internally is a
-// faithful stand-in for a live daemon process holding the lock.
-func TestIsDaemonRunningAt_FlockHeld(t *testing.T) {
+// TestAcquireDaemonLock_HeldByAnotherProcess proves acquireDaemonLock refuses
+// (with an operator-facing error) while another open file description holds
+// the exclusive flock on the pid file — a faithful stand-in for a live
+// daemon process holding daemon.acquirePIDLock, since BSD flock is
+// per-open-file-description.
+func TestAcquireDaemonLock_HeldByAnotherProcess(t *testing.T) {
 	dir := t.TempDir()
 	pidPath := filepath.Join(dir, "attn.pid")
 	writeFile(t, pidPath, "12345")
@@ -378,27 +403,71 @@ func TestIsDaemonRunningAt_FlockHeld(t *testing.T) {
 		t.Fatalf("flock pid file: %v", err)
 	}
 
-	check := isDaemonRunningAt(func() string { return dir })
-
-	running, err := check()
-	if err != nil {
-		t.Fatalf("unexpected error while lock held: %v", err)
-	}
-	if !running {
-		t.Fatal("expected running=true while another fd holds the flock")
+	if _, err := acquireDaemonLock(pidPath); err == nil {
+		t.Fatal("expected acquireDaemonLock to refuse while another fd holds the flock")
 	}
 
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN); err != nil {
 		t.Fatalf("unlock pid file: %v", err)
 	}
 
-	running, err = check()
+	release, err := acquireDaemonLock(pidPath)
 	if err != nil {
-		t.Fatalf("unexpected error after unlock: %v", err)
+		t.Fatalf("expected acquireDaemonLock to succeed after the lock was released, got: %v", err)
 	}
-	if running {
-		t.Fatal("expected running=false after the lock was released")
+	release()
+}
+
+// TestAcquireDaemonLock_ExcludesConcurrentRestore proves the lock is held —
+// not merely probed and released — for as long as the caller keeps it: a
+// daemon-style flock attempt on the same pid file, and a second
+// acquireDaemonLock call standing in for a concurrent `attn db restore`,
+// must both be refused while the first caller has not released, and both
+// must succeed once it has. This is the regression test for the TOCTOU gap
+// where a point-in-time-only probe left a window between the check and the
+// file swap for a daemon to start or a second restore to race in.
+func TestAcquireDaemonLock_ExcludesConcurrentRestore(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "attn.pid")
+
+	// Simulates restoreDatabase having acquired the lock and being paused
+	// mid-restore (staging/preserving/swapping) — release is deliberately
+	// not called yet.
+	release, err := acquireDaemonLock(pidPath)
+	if err != nil {
+		t.Fatalf("initial acquireDaemonLock error: %v", err)
 	}
+
+	// A daemon starting up (daemon.acquirePIDLock's exact mechanism: open
+	// with O_RDWR|O_CREATE, then LOCK_EX|LOCK_NB) must not be able to start
+	// while restore holds the lock.
+	daemonAttempt, err := os.OpenFile(pidPath, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		t.Fatalf("open pid file as a daemon-style attempt: %v", err)
+	}
+	if flockErr := syscall.Flock(int(daemonAttempt.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr == nil {
+		syscall.Flock(int(daemonAttempt.Fd()), syscall.LOCK_UN)
+		daemonAttempt.Close()
+		t.Fatal("expected a daemon-style flock attempt to be excluded while restore holds the lock")
+	}
+	daemonAttempt.Close()
+
+	// A second `attn db restore` (a second acquireDaemonLock call) must
+	// also be excluded.
+	if _, err := acquireDaemonLock(pidPath); err == nil {
+		t.Fatal("expected a concurrent acquireDaemonLock to be excluded while the first is still held")
+	}
+
+	release()
+
+	// Once released, both a daemon-style attempt and a fresh
+	// acquireDaemonLock must succeed — the exclusion must not outlive the
+	// held section.
+	afterRelease, err := acquireDaemonLock(pidPath)
+	if err != nil {
+		t.Fatalf("expected acquireDaemonLock to succeed after release, got: %v", err)
+	}
+	afterRelease()
 }
 
 func writeFile(t *testing.T, path, content string) {

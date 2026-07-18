@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -62,8 +63,9 @@ func runDBRestore(args []string) {
 
 	dbPath := config.DBPath()
 	backupsDir := filepath.Join(config.DataDir(), "backups")
+	pidPath := filepath.Join(config.DataDir(), "attn.pid")
 
-	restoredFrom, preservedAs, err := restoreDatabase(dbPath, backupsDir, source, isDaemonRunningAt(config.DataDir))
+	restoredFrom, preservedAs, err := restoreDatabase(dbPath, backupsDir, source, pidPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "attn db restore: %v\n", err)
 		os.Exit(1)
@@ -78,9 +80,9 @@ func runDBRestore(args []string) {
 	fmt.Println("start the daemon when ready (e.g. `attn daemon ensure`, or reopen the app)")
 }
 
-// restoreDatabase implements `attn db restore` against explicit paths, with an
-// injected daemonRunning check so it is fully unit-testable against temp
-// dirs: it never resolves config's real data dir itself.
+// restoreDatabase implements `attn db restore` against explicit paths so it
+// is fully unit-testable against temp dirs: it never resolves config's real
+// data dir itself.
 //
 // source is either "" or "latest" (pick the newest rotating attn-<ts>.db
 // snapshot in backupsDir) or an explicit path to any snapshot file, including
@@ -93,11 +95,14 @@ func runDBRestore(args []string) {
 // Returns the resolved source path and the preserved-db path (empty if there
 // was nothing to preserve).
 //
-// daemonRunning reports whether a live daemon holds the pid-file lock. An
-// error from it (anything other than a clean "not running"/"running"
-// determination) must not be silently treated as "not running" — that would
-// let a destructive restore proceed while daemon liveness is actually
-// unknown — so restoreDatabase refuses and surfaces the error instead.
+// pidPath is the daemon's pid-file lock (see acquireDaemonLock). The lock is
+// acquired before anything else and held for the entire restore, including
+// staging, preserving, and the final swap — not just probed and released up
+// front. A point-in-time-only probe would leave a window in which a daemon
+// could start (or a second `attn db restore` could run) between the probe
+// and the file swap; holding the lock for the whole critical section closes
+// that window, mirroring how the daemon itself holds the same lock for its
+// entire lifetime (daemon.acquirePIDLock).
 //
 // The live dbPath is only ever mutated after the source has been fully and
 // successfully staged, so a bad source (a directory, an unreadable file, or
@@ -108,14 +113,12 @@ func runDBRestore(args []string) {
 // fully-old file or the fully-new one, never a partially-written one. If the
 // final swap still fails after a preserve-rename has already happened, the
 // preserved copy is rolled back into place so dbPath is never left missing.
-func restoreDatabase(dbPath, backupsDir, source string, daemonRunning func() (bool, error)) (restoredFrom, preservedAs string, err error) {
-	running, err := daemonRunning()
+func restoreDatabase(dbPath, backupsDir, source, pidPath string) (restoredFrom, preservedAs string, err error) {
+	release, err := acquireDaemonLock(pidPath)
 	if err != nil {
-		return "", "", fmt.Errorf("cannot determine daemon state: %w", err)
+		return "", "", err
 	}
-	if running {
-		return "", "", fmt.Errorf("the attn daemon is running; stop it first (quit the app, or `attn daemon stop`) before restoring the database")
-	}
+	defer release()
 
 	srcPath := strings.TrimSpace(source)
 	if srcPath == "" || srcPath == "latest" {
@@ -361,36 +364,38 @@ func stageBackupCopy(src, dstPath string) (stagedPath string, err error) {
 	return tmpPath, nil
 }
 
-// isDaemonRunningAt reports whether a live daemon holds the exclusive flock on
-// dataDir()'s pid file. dataDir is a func rather than a plain string so tests
-// can inject a throwaway temp dir without dbRestore ever touching config's
-// real resolution.
+// acquireDaemonLock acquires and holds the exclusive advisory flock on
+// pidPath, creating the file if it does not yet exist, and returns a release
+// func the caller must call exactly once (a second call is a no-op) when the
+// held section is over.
 //
-// This mirrors the liveness+ownership technique stopProfileDaemon (profile.go)
-// uses: the daemon holds an exclusive advisory lock on its pid file for its
-// whole lifetime (daemon.acquirePIDLock), so successfully acquiring the lock
-// ourselves proves no live daemon owns it — the pid on disk, if any, is stale.
+// This mirrors the liveness+ownership technique stopProfileDaemon
+// (profile.go) uses: the daemon holds this same exclusive lock on its pid
+// file for its whole lifetime (daemon.acquirePIDLock), so successfully
+// acquiring it ourselves proves no live daemon owns it — the pid on disk, if
+// any, is stale. Unlike a probe-then-release check, the caller keeps holding
+// the lock (via the returned release func) for as long as it needs mutual
+// exclusion, so a daemon cannot start, and a second caller of
+// acquireDaemonLock cannot proceed, until release is called.
 //
-// The returned func distinguishes a clean "not running" determination from an
-// error: no pid file (or a lock we can acquire) is (false, nil), a lock held
-// by another process is (true, nil), and any other OpenFile failure (e.g.
-// permission denied) is (false, err) — never silently "not running", which
-// would let a destructive restore proceed while liveness is actually unknown.
-func isDaemonRunningAt(dataDir func() string) func() (bool, error) {
-	return func() (bool, error) {
-		pidPath := filepath.Join(dataDir(), "attn.pid")
-		lockFile, err := os.OpenFile(pidPath, os.O_RDWR, 0)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return false, nil
-			}
-			return false, fmt.Errorf("open pid file %s: %w", pidPath, err)
-		}
-		defer lockFile.Close()
-		if flockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr == nil {
-			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-			return false, nil
-		}
-		return true, nil
+// The lock file is never unlinked here — only unlocked and closed — so a
+// second acquireDaemonLock always contends on the same inode rather than
+// racing a delete-then-recreate against a concurrent acquirer.
+func acquireDaemonLock(pidPath string) (release func(), err error) {
+	lockFile, err := os.OpenFile(pidPath, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("open pid file %s: %w", pidPath, err)
 	}
+	if flockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("the attn daemon is running; stop it first (quit the app, or `attn daemon stop`) before restoring the database")
+	}
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+			_ = lockFile.Close()
+		})
+	}
+	return release, nil
 }
