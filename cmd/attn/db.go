@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/daemonctl"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -403,6 +404,28 @@ func acquireDaemonLock(pidPath string) (release func(), err error) {
 		// live daemon: never proceed with the restore on an inconclusive
 		// lock result.
 		return nil, fmt.Errorf("cannot determine daemon state: %w", flockErr)
+	}
+	// We now hold the lock, but the pid file may still contain a stale pid
+	// left by the last daemon to hold it. Stamp a sentinel over that content
+	// so a concurrent `attn daemon stop` (daemonctl.Stop), which trusts only
+	// content written by the current holder, never signals that stale pid.
+	// The sentinel is never restored on release — content is only
+	// meaningful while the lock is held, and the next daemon to acquire the
+	// lock overwrites it with its own pid as it always has.
+	if err := lockFile.Truncate(0); err != nil {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		lockFile.Close()
+		return nil, fmt.Errorf("stamp non-daemon holder sentinel: %w", err)
+	}
+	if _, err := lockFile.WriteAt([]byte(daemonctl.NonDaemonHolderSentinel), 0); err != nil {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		lockFile.Close()
+		return nil, fmt.Errorf("stamp non-daemon holder sentinel: %w", err)
+	}
+	if err := lockFile.Sync(); err != nil {
+		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+		lockFile.Close()
+		return nil, fmt.Errorf("stamp non-daemon holder sentinel: %w", err)
 	}
 	var once sync.Once
 	release = func() {

@@ -7,12 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/daemonctl"
 )
 
 // runProfile is the `attn profile <subcommand>` group: the human-facing surface
@@ -335,83 +333,36 @@ func runProfileClean(args []string) {
 	fmt.Printf("Cleaned profile %s.\n", r.Label)
 }
 
-// stopProfileDaemon stops a profile's daemon via its pid file (SIGTERM, then
-// SIGKILL if it lingers), for an arbitrary profile resolved by path rather than
-// the current process's config. Returns a human note ("" on a clean stop)
-// instead of an error because a missing/dead daemon is an expected, non-fatal
-// state during clean.
+// stopProfileDaemon stops a profile's daemon via its pid file, for an
+// arbitrary profile resolved by path rather than the current process's
+// config. It is a thin adapter over daemonctl.Stop: it preserves this
+// function's original string-return contract ("" on a clean stop, a human
+// note otherwise) because a missing/dead daemon is an expected, non-fatal
+// state during `attn profile clean`. See daemonctl.Stop for the underlying
+// liveness+ownership safety argument (the pid file's flock, not its
+// presence, is the gate — never trust the pid alone).
 //
-// Safety: the pid file is only removed on a *graceful* daemon shutdown
-// (daemon.releasePIDLock); a crash/SIGKILL leaves it behind pointing at a dead
-// pid that macOS may have recycled to an unrelated process. We therefore never
-// trust the pid alone. The daemon holds an exclusive advisory lock on the pid
-// file for its whole lifetime (daemon.acquirePIDLock), so we use that same lock
-// as the liveness+ownership gate: if WE can take the lock, no live daemon owns
-// the file and the pid is stale — we must not signal it.
+// One outcome maps error → note here: daemonctl.Stop treats "the pid names
+// this command's own process tree" as an error (a genuine caller mistake),
+// but `attn profile clean` must stay non-fatal even when cleaning the
+// profile it happens to be running under, so that specific error is mapped
+// back to a note instead of propagated.
 func stopProfileDaemon(r profileResolved) string {
 	pidPath := filepath.Join(r.DataDir, "attn.pid")
-	lockFile, err := os.OpenFile(pidPath, os.O_RDWR, 0)
-	if os.IsNotExist(err) {
-		return "not running (no pid file)"
-	}
+	result, err := daemonctl.Stop(pidPath)
 	if err != nil {
-		return fmt.Sprintf("could not open pid file: %v", err)
-	}
-	if flockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr == nil {
-		// Acquired the lock → no live daemon holds it. The pid on disk is stale;
-		// signaling it could hit a recycled, unrelated process.
-		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-		lockFile.Close()
-		return "not running (stale pid file)"
-	}
-	lockFile.Close()
-
-	// The lock is held → a live daemon owns this file and wrote its own pid into
-	// it under the lock, so the pid genuinely names that daemon: safe to signal.
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		return fmt.Sprintf("could not read pid file: %v", err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return fmt.Sprintf("ignoring malformed pid file %q", strings.TrimSpace(string(data)))
-	}
-	// Never signal our own process tree (e.g. cleaning the profile we're
-	// running under): killing it would take down this very command.
-	if pid == os.Getpid() || pid == os.Getppid() {
-		return fmt.Sprintf("skipped (pid %d is this command's own process tree)", pid)
-	}
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		if err == syscall.ESRCH {
-			return "not running (stale pid file)"
+		if strings.Contains(err.Error(), "own process tree") {
+			return fmt.Sprintf("skipped (%v)", err)
 		}
-		return fmt.Sprintf("SIGTERM pid %d failed: %v", pid, err)
+		return err.Error()
 	}
-	if processGoneWithin(pid, 5*time.Second) {
-		return ""
+	if !result.Stopped {
+		return result.Note
 	}
-	// Escalate: a throwaway profile's daemon should always die on SIGTERM, but
-	// don't leave a wedged process holding the data dir we're removing.
-	_ = syscall.Kill(pid, syscall.SIGKILL)
-	if processGoneWithin(pid, 2*time.Second) {
-		return fmt.Sprintf("force-killed pid %d (did not exit on SIGTERM)", pid)
+	if result.Forced {
+		return fmt.Sprintf("force-killed pid %d (did not exit on SIGTERM)", result.PID)
 	}
-	return fmt.Sprintf("warning: pid %d did not exit", pid)
-}
-
-// processGoneWithin polls `kill(pid, 0)` until the process is gone (ESRCH) or
-// the deadline passes.
-func processGoneWithin(pid int, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for {
-		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	return ""
 }
 
 // quitProfileApp asks the app to quit by bundle id. Best-effort: a not-running
