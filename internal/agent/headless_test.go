@@ -79,6 +79,21 @@ func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 	}
 }
 
+func TestHeadlessEnvironment_CodexSetsDefaultHomeWhenUnset(t *testing.T) {
+	t.Setenv("CODEX_HOME", "")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !environmentContains(headlessEnvironment("codex"), "CODEX_HOME") {
+		t.Fatal("Codex headless environment did not set CODEX_HOME")
+	}
+	want := "CODEX_HOME=" + filepath.Join(homeDir, ".codex")
+	if !strings.Contains(strings.Join(headlessEnvironment("codex"), "\n"), want) {
+		t.Fatalf("Codex headless environment missing %q", want)
+	}
+}
+
 func TestCodexRunHeadlessTaskScopesSingleToolNameAndCapturesLastMessage(t *testing.T) {
 	executable, logPath := writeHeadlessArgsRecorder(t)
 	_, err := (&Codex{}).RunHeadlessTask(context.Background(), HeadlessTaskRequest{

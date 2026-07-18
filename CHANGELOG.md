@@ -40,6 +40,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ### Added
 - **Black or stuck UI failures now leave useful evidence on disk.** Agent switches capture delayed app-shell health snapshots alongside the existing terminal renderer diagnostics, including frontend crashes, event-loop stalls, and native browser visibility. A React render failure now shows a persistent error screen instead of leaving an unexplained black window.
+- **Ask a bounded question about another Codex session.** `attn session instructions <session-id> --question "..."` reads that session's conversation and returns a concise Luna answer with exact supporting excerpts, transcript identity, and a fingerprint. It fails closed when the transcript, model response, or evidence cannot be verified.
 
 ## [2026-07-15]
 

@@ -332,8 +332,11 @@ type ConfigOverrideProvider interface {
 // daemon writes inputs into WorkDir and reads the agent's output file back;
 // validation + commit stay daemon-owned.
 type HeadlessTaskRequest struct {
-	Executable       string
-	Model            string
+	Executable string
+	Model      string
+	// ReasoningEffort selects the provider's reasoning setting for this one
+	// bounded headless request. Empty preserves the provider default.
+	ReasoningEffort  string
 	Prompt           string
 	WorkDir          string
 	MCPServerName    string

@@ -146,7 +146,11 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 	// it once here and pass it into the pure arg builders as an explicit input.
 	window := HeadlessContextWindowCap()
 	if request.usesNativeToolsPath() {
-		result, stdout, err := runHeadlessCommand(ctx, request.Executable, codexHeadlessArgs(request, window), request.WorkDir, "codex")
+		args := codexHeadlessArgs(request, window)
+		if request.DisableTools {
+			args = codexToolFreeHeadlessArgs(request, window)
+		}
+		result, stdout, err := runHeadlessCommand(ctx, request.Executable, args, request.WorkDir, "codex")
 		if err != nil {
 			return result, err
 		}
@@ -233,6 +237,9 @@ func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string, win
 	// for a workflow agent() with no per-call/run model override).
 	if model := strings.TrimSpace(request.Model); model != "" {
 		args = append(args, "-m", model)
+	}
+	if effort := strings.TrimSpace(request.ReasoningEffort); effort != "" {
+		args = append(args, "-c", `model_reasoning_effort="`+effort+`"`)
 	}
 	if lastMsgPath != "" {
 		args = append(args, "--output-last-message", lastMsgPath)
@@ -381,6 +388,9 @@ func codexHeadlessArgs(request HeadlessTaskRequest, window int) []string {
 		"-m", strings.TrimSpace(request.Model),
 		"-c", `approval_policy="never"`,
 	}
+	if effort := strings.TrimSpace(request.ReasoningEffort); effort != "" {
+		args = append(args, "-c", `model_reasoning_effort="`+effort+`"`)
+	}
 	// Widen the workspace-write sandbox's writable set beyond the scratch WorkDir
 	// for tasks that must write outside cwd (e.g. the notebook narrate pass writing the
 	// curated journal under the notebook root). `--add-dir` is the codex exec flag
@@ -394,6 +404,34 @@ func codexHeadlessArgs(request HeadlessTaskRequest, window int) []string {
 			continue
 		}
 		args = append(args, "--add-dir", root)
+	}
+	args = append(args, codexFeatureLocks()...)
+	args = append(args, codexContextWindowCapArgs(window)...)
+	args = append(args, request.Prompt)
+	return args
+}
+
+// codexToolFreeHeadlessArgs builds a pure completion invocation. The prompt is
+// the complete model-visible evidence boundary: Codex receives neither native
+// shell/file tools nor user-configured MCP, plugins, apps, or web search.
+func codexToolFreeHeadlessArgs(request HeadlessTaskRequest, window int) []string {
+	args := []string{
+		"exec",
+		"--json",
+		"--ephemeral",
+		"--ignore-user-config",
+		"--ignore-rules",
+		"--strict-config",
+		"--skip-git-repo-check",
+		"--sandbox", "read-only",
+		"-m", strings.TrimSpace(request.Model),
+		"-c", `approval_policy="never"`,
+		"-c", "features.shell_tool=false",
+		"-c", "features.unified_exec=false",
+		"-c", `web_search="disabled"`,
+	}
+	if effort := strings.TrimSpace(request.ReasoningEffort); effort != "" {
+		args = append(args, "-c", `model_reasoning_effort="`+effort+`"`)
 	}
 	args = append(args, codexFeatureLocks()...)
 	args = append(args, codexContextWindowCapArgs(window)...)
@@ -421,7 +459,7 @@ func (c *Codex) FindTranscript(sessionID, cwd string, startedAt time.Time) strin
 }
 
 func (c *Codex) FindTranscriptForResume(resumeID string) string {
-	return "" // Codex doesn't support resume-id transcript lookup.
+	return transcript.FindCodexTranscriptForResume(resumeID)
 }
 
 func (c *Codex) BootstrapBytes() int64 {

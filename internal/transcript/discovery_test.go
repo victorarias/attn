@@ -90,6 +90,7 @@ func writeCodexTranscript(
 
 func TestFindCodexTranscript_MatchesSymlinkEquivalentCWD(t *testing.T) {
 	homeDir := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
 	oldHome := os.Getenv("HOME")
 	if err := os.Setenv("HOME", homeDir); err != nil {
 		t.Fatalf("set HOME: %v", err)
@@ -122,6 +123,44 @@ func TestFindCodexTranscript_MatchesSymlinkEquivalentCWD(t *testing.T) {
 	got := FindCodexTranscript(linkCWD, startedAt)
 	if got != expected {
 		t.Fatalf("FindCodexTranscript() = %q, want %q", got, expected)
+	}
+}
+
+func TestFindCodexTranscriptForResume_SelectsExactNativeID(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
+	oldHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	wrong := writeCodexTranscript(t, homeDir, "native-wrong", "/repo", now, now)
+	want := writeCodexTranscript(t, homeDir, "native-target", "/other", now.Add(time.Second), now.Add(time.Second))
+	if got := FindCodexTranscriptForResume("native-target"); got != want {
+		t.Fatalf("FindCodexTranscriptForResume() = %q, want %q (wrong=%q)", got, want, wrong)
+	}
+}
+
+func TestFindCodexTranscriptForResume_HonorsCodexHome(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("HOME", t.TempDir())
+	start := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	sessionDir := filepath.Join(codexHome, "sessions", "2026", "07", "18")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(sessionDir, "rollout-native-target.jsonl")
+	line := fmt.Sprintf(`{"type":"session_meta","payload":{"id":"%s","cwd":"/synthetic"}}`+"\n", "native-target")
+	if err := os.WriteFile(want, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(want, start, start); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindCodexTranscriptForResume("native-target"); got != want {
+		t.Fatalf("FindCodexTranscriptForResume() = %q, want %q", got, want)
 	}
 }
 

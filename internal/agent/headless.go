@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -208,6 +209,11 @@ func headlessEnvironment(provider string) []string {
 			env = append(env, entry)
 		}
 	}
+	if provider == "codex" && strings.TrimSpace(os.Getenv("CODEX_HOME")) == "" {
+		if homeDir, err := os.UserHomeDir(); err == nil && strings.TrimSpace(homeDir) != "" {
+			env = append(env, "CODEX_HOME="+filepath.Join(homeDir, ".codex"))
+		}
+	}
 	if provider == "claude" {
 		env = append(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1")
 		// Cap the effective context window so auto-compaction fires at the
@@ -219,6 +225,16 @@ func headlessEnvironment(provider string) []string {
 		}
 	}
 	return launchenv.WithActiveAttnFirst(env, launchenv.ActiveAttnExecutable())
+}
+
+func environmentContains(env []string, name string) bool {
+	prefix := name + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func classifyHeadlessFailure(output string) string {
