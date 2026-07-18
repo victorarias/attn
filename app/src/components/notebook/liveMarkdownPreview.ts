@@ -19,16 +19,14 @@ import {
   WidgetType,
 } from '@codemirror/view';
 import type { Tree } from '@lezer/common';
-import { parseFrontmatter } from './frontmatter';
+import { parseFrontmatterFromDoc } from './frontmatter';
 
 // A note's leading frontmatter is YAML, not markdown — no inline-preview decoration
 // (bullets, bold, etc.) is ever correct there; it renders raw or as the frontmatterCard
 // widget (a separate extension). Returns 0 when the doc has no frontmatter, else the
-// region's end offset. Parses only a BOUNDED prefix (frontmatter is always small, and a
-// full doc.toString() per keystroke is wasted work on a large note).
+// region's end offset.
 function frontmatterEnd(state: EditorState): number {
-  const prefix = state.doc.sliceString(0, Math.min(state.doc.length, 4096));
-  const fm = parseFrontmatter(prefix);
+  const fm = parseFrontmatterFromDoc(state.doc);
   // Must agree with frontmatterCard's own notion of "is this frontmatter" — an opening
   // `---` with no closing fence (still being typed, malformed, or truncated past the
   // bounded prefix) is treated as NOT frontmatter by both extensions, matching

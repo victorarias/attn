@@ -15,7 +15,7 @@
 
 import { type EditorState, type Extension, RangeSet, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
-import { type Frontmatter, type FrontmatterValue, parseFrontmatter } from './frontmatter';
+import { type Frontmatter, type FrontmatterValue, parseFrontmatterFromDoc } from './frontmatter';
 
 // Raw frontmatter is an explicit editing mode, not a consequence of editor focus.
 // CodeMirror focuses before it places a pointer selection. Tying the card to focus
@@ -30,7 +30,7 @@ const editingFrontmatterField = StateField.define<boolean>({
       if (effect.is(setEditingFrontmatter)) value = effect.value;
     }
     if (value && tr.selection) {
-      const fm = parseFrontmatter(tr.state.doc.toString());
+      const fm = parseFrontmatterFromDoc(tr.state.doc);
       const remainsInside = fm && tr.state.selection.ranges.some(
         (range) => range.from < fm.to && range.to > fm.from,
       );
@@ -177,12 +177,11 @@ class FrontmatterCardWidget extends WidgetType {
 // buildDecorations. Returns the block-replace card, or an empty set when there's no
 // frontmatter or while explicit frontmatter editing is active.
 export function frontmatterCardDecorations(state: EditorState, editing: boolean): DecorationSet {
-  const doc = state.doc.toString();
-  const fm = parseFrontmatter(doc);
+  const fm = parseFrontmatterFromDoc(state.doc);
   if (!fm || fm.to <= fm.from) return Decoration.none;
   // Don't swallow the whole document: a note that is ONLY frontmatter has no body line
   // to keep the cursor on, so leave it as raw text.
-  if (fm.to >= doc.length) return Decoration.none;
+  if (fm.to >= state.doc.length) return Decoration.none;
   if (editing) {
     for (const range of state.selection.ranges) {
       if (range.from < fm.to && range.to > fm.from) return Decoration.none;
@@ -218,7 +217,7 @@ const cardField = StateField.define<DecorationSet>({
 // click cannot temporarily replace the card using CM's stale position-0 selection.
 const blurTracker = EditorView.domEventHandlers({
   blur: (_event, view) => {
-    const fm = parseFrontmatter(view.state.doc.toString());
+    const fm = parseFrontmatterFromDoc(view.state.doc);
     const selectionInside = fm && view.state.selection.ranges.some(
       (range) => range.from < fm.to && range.to > fm.from,
     );
