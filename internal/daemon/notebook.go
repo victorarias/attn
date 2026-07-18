@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
@@ -76,12 +77,22 @@ func (d *Daemon) ensureNotebookWatcher(root string) {
 		d.notebookWatcher = nil
 		d.notebookWatchedRoot = ""
 	}
-	w, err := notebook.NewWatcher(root, notebook.DefaultWatchDebounce, func(paths []string) {
-		// One filesystem, two surfaces over it: external edits feed both the curated
-		// notebook view and the raw fs view. (The watcher only surfaces .md paths
-		// today, so fs_changed inherits that limit until the watcher is generalized.)
-		d.broadcastNotebookChanged(originExternal, paths...)
+	w, err := notebook.NewWatcherWithCleaner(root, notebook.DefaultWatchDebounce, fsdoc.CleanPath, func(paths []string) {
+		// One filesystem, two surfaces over it: fs_changed always fires with every
+		// changed path (the raw fs view is not markdown-aware). notebook_changed is
+		// the curated markdown-only subset, so it only fires for the paths that are
+		// also valid notebook notes — and not at all when none are, since an empty
+		// notebook_changed would misreport "something in the notebook changed".
 		d.broadcastFsChanged(root, originExternal, paths...)
+		var mdPaths []string
+		for _, p := range paths {
+			if _, err := notebook.CleanPath(p); err == nil {
+				mdPaths = append(mdPaths, p)
+			}
+		}
+		if len(mdPaths) > 0 {
+			d.broadcastNotebookChanged(originExternal, mdPaths...)
+		}
 	})
 	if err != nil {
 		d.logf("notebook watcher: failed to watch %s: %v", root, err)

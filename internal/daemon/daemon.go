@@ -206,8 +206,13 @@ type Daemon struct {
 	// The notebook-root entry is the raw layer beneath the curated notebook
 	// surface and shares the one root watcher started by ensureNotebookWatcher;
 	// other roots (arbitrary editor roots) get their own Store but no watcher yet.
-	fsMu                sync.Mutex
-	fsStores            map[string]*fsdoc.Store
+	fsMu     sync.Mutex
+	fsStores map[string]*fsdoc.Store
+	// fsWatchMu guards fsWatchers, the per-root registry of client-refcounted
+	// watchers for fs_watch/fs_unwatch. Never holds an entry for the notebook
+	// root — that watcher is always-on via ensureNotebookWatcher instead.
+	fsWatchMu           sync.Mutex
+	fsWatchers          map[string]*fsRootWatch
 	pendingInitialWS    map[*wsClient]struct{}
 	startedOnce         sync.Once
 	startedCh           chan struct{}
@@ -1426,6 +1431,7 @@ func (d *Daemon) Stop() {
 	d.log("daemon stopping")
 	close(d.done)
 	d.stopNotebookWatcher()
+	d.stopFsWatchers()
 	if runner := d.compactRunnerRef(); runner != nil {
 		runner.Stop()
 	}

@@ -517,9 +517,13 @@ func TestFsCommandsWithExplicitRootActOnThatDirectory(t *testing.T) {
 	}
 	externalRoot := t.TempDir()
 
-	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
-	d.wsHub.clients[hubClient] = true
-	go d.wsHub.run()
+	// A generic root's fs_changed audience is its fs_watch subscribers, not
+	// every connected client (see broadcastFsChanged), so watch externalRoot
+	// to observe the write's broadcast.
+	watchClient := trustedFsClient(4)
+	if res := fsWatch(t, d, watchClient, "w1", externalRoot); !res.Success {
+		t.Fatalf("fs_watch(externalRoot) = %+v", res)
+	}
 
 	write := fsWriteCASRoot(t, d, "notes/todo.txt", "buy milk", "", externalRoot)
 	if !write.Success || write.Result == nil || write.Result.Conflict || write.Result.Hash == nil {
@@ -550,7 +554,7 @@ func TestFsCommandsWithExplicitRootActOnThatDirectory(t *testing.T) {
 		t.Fatalf("read under explicit root = %+v", read.Result)
 	}
 
-	ev := waitForFsChangeWithRoot(t, hubClient.send, originUI)
+	ev := waitForFsChangeWithRoot(t, watchClient.send, originUI)
 	if !slices.Contains(ev.Paths, "notes/todo.txt") {
 		t.Fatalf("ui fs_changed paths = %v, want notes/todo.txt", ev.Paths)
 	}
@@ -586,14 +590,18 @@ func waitForFsChangeWithRoot(t *testing.T, ch chan outboundMessage, origin strin
 func TestFsWriteBroadcastsResolvedRoot(t *testing.T) {
 	d := newFsDaemon(t)
 	externalRoot := t.TempDir()
-	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
-	d.wsHub.clients[hubClient] = true
-	go d.wsHub.run()
+
+	// A generic root's fs_changed audience is its fs_watch subscribers, not
+	// every connected client (see broadcastFsChanged).
+	watchClient := trustedFsClient(4)
+	if res := fsWatch(t, d, watchClient, "w1", externalRoot); !res.Success {
+		t.Fatalf("fs_watch(externalRoot) = %+v", res)
+	}
 
 	if res := fsWriteCASRoot(t, d, "a.txt", "x", "", externalRoot); !res.Success || res.Result == nil {
 		t.Fatalf("write = %+v", res.Result)
 	}
-	ev := waitForFsChangeWithRoot(t, hubClient.send, originUI)
+	ev := waitForFsChangeWithRoot(t, watchClient.send, originUI)
 	if ev.Root != externalRoot {
 		t.Fatalf("fs_changed.root = %q, want %q", ev.Root, externalRoot)
 	}
@@ -887,13 +895,22 @@ func TestFsRenameDeleteNotebookCouplingIsRootConditional(t *testing.T) {
 	d.wsHub.clients[hubClient] = true
 	go d.wsHub.run()
 
+	// A generic root's fs_changed audience is its fs_watch subscribers, not
+	// every connected client (see broadcastFsChanged), so watch externalRoot
+	// to observe its write/rename/delete broadcasts below. notebook_changed
+	// stays global, so hubClient still covers the assertNoBroadcast checks.
+	watchClient := trustedFsClient(8)
+	if res := fsWatch(t, d, watchClient, "w1", externalRoot); !res.Success {
+		t.Fatalf("fs_watch(externalRoot) = %+v", res)
+	}
+
 	// --- foreign root: rename ---
 	if res := fsWriteCASRoot(t, d, "a.md", "x", "", externalRoot); !res.Success || res.Result == nil {
 		t.Fatalf("seed write (external) = %+v", res.Result)
 	}
 	// Drain the seed write's own fs_changed(a.md) so the rename's broadcast below
 	// is the one actually asserted on.
-	waitForFsChange(t, hubClient.send, originUI)
+	waitForFsChange(t, watchClient.send, originUI)
 	renameClient := trustedFsClient(4)
 	d.sendFsRenameWSResult(renameClient, "rn1", "a.md", "b.md", externalRoot)
 	var renameRes protocol.FsRenameResultMessage
@@ -902,7 +919,7 @@ func TestFsRenameDeleteNotebookCouplingIsRootConditional(t *testing.T) {
 		t.Fatalf("rename (external root) = %+v", renameRes)
 	}
 	assertNoBroadcast(t, hubClient.send, protocol.EventNotebookChanged, 300*time.Millisecond)
-	if got := waitForFsChange(t, hubClient.send, originUI); !slices.Contains(got, "b.md") {
+	if got := waitForFsChange(t, watchClient.send, originUI); !slices.Contains(got, "b.md") {
 		t.Fatalf("fs_changed after external rename = %v, want b.md", got)
 	}
 
@@ -915,7 +932,7 @@ func TestFsRenameDeleteNotebookCouplingIsRootConditional(t *testing.T) {
 		t.Fatalf("delete (external root) = %+v", deleteRes)
 	}
 	assertNoBroadcast(t, hubClient.send, protocol.EventNotebookChanged, 300*time.Millisecond)
-	if got := waitForFsChange(t, hubClient.send, originUI); !slices.Contains(got, "b.md") {
+	if got := waitForFsChange(t, watchClient.send, originUI); !slices.Contains(got, "b.md") {
 		t.Fatalf("fs_changed after external delete = %v, want b.md", got)
 	}
 

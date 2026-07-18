@@ -488,12 +488,15 @@ func readPrefix(path string, limit int64) ([]byte, error) {
 
 // writeAtomic writes content to absPath atomically: it creates parent
 // directories, writes to a uniquely-named temp file in the same directory, then
-// renames it into place. The temp file is removed on any error.
+// renames it into place. The temp file is removed on any error. The temp name is
+// dot-prefixed so it lands outside CleanPath's trackable set: a watcher observing
+// this directory (self or otherwise) must not treat the transient swap file's own
+// fsnotify events as a change to a real, trackable path.
 func writeAtomic(absPath string, content []byte) error {
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", absPath, os.Getpid(), time.Now().UnixNano())
+	tmp := filepath.Join(filepath.Dir(absPath), fmt.Sprintf(".%s.tmp.%d.%d", filepath.Base(absPath), os.Getpid(), time.Now().UnixNano()))
 	if err := os.WriteFile(tmp, content, 0o644); err != nil {
 		_ = os.Remove(tmp)
 		return err

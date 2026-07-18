@@ -378,11 +378,14 @@ func (s *Store) abs(rel string) (string, error) {
 // directories, writes a uniquely-named temp file in the same directory, then
 // renames it into place. The temp file is removed on any error. (A focused copy
 // of the notebook's identical helper; both keep the same atomic-write semantics.)
+// The temp name is dot-prefixed so it falls outside CleanPath's trackable set:
+// fsdoc has no extension filter, so without this a watcher on the root would see
+// the transient swap file's own fsnotify events as a change to a real path.
 func writeAtomic(absPath string, content []byte) error {
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.tmp.%d.%d", absPath, os.Getpid(), time.Now().UnixNano())
+	tmp := filepath.Join(filepath.Dir(absPath), fmt.Sprintf(".%s.tmp.%d.%d", filepath.Base(absPath), os.Getpid(), time.Now().UnixNano()))
 	if err := os.WriteFile(tmp, content, 0o644); err != nil {
 		_ = os.Remove(tmp)
 		return err
