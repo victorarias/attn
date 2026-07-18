@@ -171,7 +171,7 @@ func TestChiefOfStaffDelegateBindsTicketAndPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "ask the user to confirm") {
 		t.Fatalf("tracked initial prompt missing confirm-before-complete guidance = %q", prompt)
 	}
-	for _, expected := range []string{"ticket attach --file", "returned Notebook paths are canonical", "meaningful edits, renames, or deletions"} {
+	for _, expected := range []string{"ticket attach-plan --file", "--scope <affected-component>", "committed repository plan stays canonical in Git", "never deletes a tracked", "meaningful edits, renames, or deletions"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("tracked initial prompt missing %q: %q", expected, prompt)
 		}
