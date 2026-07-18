@@ -34,6 +34,14 @@ func CollapseHome(path string) string {
 	if err != nil || home == "" {
 		return path
 	}
+	return collapseHomeRelativeTo(path, home)
+}
+
+// collapseHomeRelativeTo is the pure formula behind CollapseHome, taking
+// home explicitly instead of reading it from the environment. Extracted so
+// tests can exercise the collapsing logic against an arbitrary home string
+// without redirecting the real HOME env var.
+func collapseHomeRelativeTo(path, home string) string {
 	home = filepath.Clean(home)
 	cleaned := filepath.Clean(path)
 	if cleaned == home {

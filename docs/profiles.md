@@ -26,6 +26,16 @@ app path, and e2e ports, and whether the daemon socket / app are present. Any
 non-default `attn` command also prints a one-line `[attn profile=… socket=…
 port=…]` banner so you can never lose track of which world you are touching.
 
+`ATTN_DATA_DIR`, when set, overrides every profile-derived data dir outright
+(highest precedence, above `ATTN_PROFILE`) — the knob test suites and
+harnesses use to scope themselves to an explicit temp dir instead of ever
+touching a real profile's data. See
+[docs/plans/2026-07-18-db-loss-mitigation.md](plans/2026-07-18-db-loss-mitigation.md).
+It is a per-process scoping override, not a profile. `attn profile resolve`
+and `attn profile clean` deliberately keep reporting and operating on the
+profile's canonical directories and do not honor it, so under `ATTN_DATA_DIR`
+the live process's runtime paths differ from `resolve`'s output by design.
+
 ## The single authority: `attn profile resolve`
 
 Every resource a profile maps to is derived in exactly one place
