@@ -140,6 +140,19 @@ func TestAskRejectsAssistantOnlyAuthorization(t *testing.T) {
 	}
 }
 
+func TestAskRejectsAssistantOnlyAuthorizationQuestionAboutAgent(t *testing.T) {
+	path := writeTranscript(t, `{"type":"event_msg","payload":{"type":"agent_message","message":"I was authorized to merge PR #571."}}`)
+	model := &fakeModel{answers: []ModelAnswer{
+		{Answer: "Yes.", Evidence: []CandidateEvidence{{TurnID: "turn-1", Quote: "authorized to merge PR #571"}}},
+		{Answer: "Yes.", Evidence: []CandidateEvidence{{TurnID: "turn-1", Quote: "authorized to merge PR #571"}}},
+	}}
+	_, err := testService(path, model).Ask(context.Background(), Request{TargetSessionID: "target", Question: "Was the agent authorized to merge PR #571?"})
+	var sessionErr *Error
+	if !errors.As(err, &sessionErr) || sessionErr.Code != "invalid_evidence" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestAskAllowsAssistantEvidenceForAssistantStatementQuestion(t *testing.T) {
 	path := writeTranscript(t, `{"type":"event_msg","payload":{"type":"agent_message","message":"I merged PR #571."}}`)
 	model := &fakeModel{answers: []ModelAnswer{{Answer: "Yes. The agent said it merged PR #571.", Evidence: []CandidateEvidence{{TurnID: "turn-1", Quote: "merged PR #571"}}}}}

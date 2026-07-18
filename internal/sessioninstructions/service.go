@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -283,14 +284,19 @@ func requiresUserEvidence(question, answer string) bool {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(answer)), "unclear.") {
 		return false
 	}
-	q := strings.ToLower(question)
-	// Questions explicitly about what the assistant said are allowed to rely on
-	// assistant evidence. Everything else is conservatively treated as a claim
-	// about user-side instructions unless it is inconclusive.
-	if strings.Contains(q, "agent") || strings.Contains(q, "assistant") {
-		return false
-	}
-	return true
+	return !isExplicitSpeechReportingQuestion(question)
+}
+
+var explicitSpeechReportingQuestion = regexp.MustCompile(
+	`^(?:(?:did|does|do|has|have)\s+(?:the\s+)?(?:agent|assistant|codex)|what\s+(?:did|does|has|have)\s+(?:the\s+)?(?:agent|assistant|codex))\s+(?:say|said|tell|told|write|wrote|state|stated|claim|claimed|report|reported)\b|^(?:is|was|were)\s+(?:the\s+)?(?:agent|assistant|codex)\s+(?:saying|writing|stating|claiming|reporting)\b`,
+)
+
+func isExplicitSpeechReportingQuestion(question string) bool {
+	q := strings.ToLower(strings.TrimSpace(question))
+	// Assistant evidence can establish only what the assistant said. Mentioning
+	// an agent is not enough: "Was the agent authorized?" remains a claim about
+	// Victor's authorization and needs a user-authored instruction.
+	return explicitSpeechReportingQuestion.MatchString(q)
 }
 
 func uniqueQuoteMatch(text, hint string) bool {
