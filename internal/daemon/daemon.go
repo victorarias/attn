@@ -186,13 +186,14 @@ type Daemon struct {
 	// between the prompt and its trailing Enter.
 	doorbellMu                 sync.Mutex
 	nudgeMu                    sync.Mutex
-	nudgeCountdowns            map[string]*nudgeCountdown     // presence == a running (unpaused) countdown
-	unreadCache                map[string]bool                // per-session unread ticket activity, for cheap broadcast decoration
-	deliveryMu                 sync.Mutex                     // serializes live watch consumes and nudge fire-time checks
-	watchLeaseUntil            map[string]time.Time           // ephemeral live-watch lease per session
-	nudgeWindowOverride        time.Duration                  // 0 => defaultNudgeCountdownWindow; a short test override otherwise
-	ticketBufferWindowOverride time.Duration                  // 0 => defaultTicketBufferWindow; test-only override
-	nudgeFireHook              func(sessionID, action string) // tests only: invoked at the end of a countdown fire
+	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
+	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
+	deliveryMu                 sync.Mutex                                 // serializes consumes, catch-up, deadline rebuilds, and nudge fire-time checks
+	watchLeaseUntil            map[string]time.Time                       // ephemeral live-watch lease per session
+	nudgeWindowOverride        time.Duration                              // 0 => defaultNudgeCountdownWindow; a short test override otherwise
+	ticketBufferWindowOverride time.Duration                              // 0 => defaultTicketBufferWindow; test-only override
+	nudgeFireHook              func(sessionID, action string)             // tests only: invoked at the end of a countdown fire
+	ticketRebuildBeforeArmHook func(sessionID string, deadline time.Time) // tests only: invoked while deliveryMu is held
 	lastInputMu                sync.Mutex
 	lastUserInputAt            map[string]time.Time // per-session keystroke recency — the fire-time splice guard
 	recoveryMu                 sync.RWMutex

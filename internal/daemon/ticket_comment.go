@@ -51,7 +51,7 @@ func (d *Daemon) handleTicketComment(conn net.Conn, msg *protocol.TicketCommentM
 		CatchUp:  ticketMutationCatchUp(ticketID, outcome.ConflictEvents),
 	}
 	if len(outcome.ConflictEvents) > 0 {
-		d.afterTicketMutationCatchUp(sourceSessionID, outcome.ConflictEvents)
+		d.afterTicketMutationCatchUpLocked(sourceSessionID, outcome.ConflictEvents)
 		d.deliveryMu.Unlock()
 		_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketCommentResult: result})
 		return

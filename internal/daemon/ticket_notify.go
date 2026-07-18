@@ -155,6 +155,17 @@ func (d *Daemon) syncNudgeForState(sessionID, state string) {
 // recovery, when there is no single triggering ticket. It derives the earliest
 // eligible deadline from durable unread events instead of persisting a scheduler.
 func (d *Daemon) notifyUnreadTicketSession(sessionID string, now time.Time) {
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	d.notifyUnreadTicketSessionLocked(sessionID, now)
+}
+
+// notifyUnreadTicketSessionLocked is the serialized form used by catch-up paths
+// that already hold deliveryMu. Keeping the unread scan, attention read, deadline
+// calculation, and timer arm in one critical section prevents an old calculation
+// from re-arming an earlier countdown after a concurrent consume advances the
+// observer's attention clock.
+func (d *Daemon) notifyUnreadTicketSessionLocked(sessionID string, now time.Time) {
 	if d.store == nil {
 		return
 	}
@@ -183,6 +194,9 @@ func (d *Daemon) notifyUnreadTicketSession(sessionID string, now time.Time) {
 		}
 	}
 	if !deadline.IsZero() {
+		if d.ticketRebuildBeforeArmHook != nil {
+			d.ticketRebuildBeforeArmHook(sessionID, deadline)
+		}
 		if d.debugLogging {
 			d.logf("ticket delivery: observer=%s session=%s class=%s pending=%d deadline=%s channel=countdown outcome=armed", d.ticketAttentionKey(sessionID), sessionID, map[bool]string{true: "assignee", false: "buffered"}[immediate], len(pending), deadline.Format(time.RFC3339))
 		}

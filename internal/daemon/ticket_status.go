@@ -90,7 +90,7 @@ func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketSta
 		if current, getErr := d.store.GetTicket(ticketID); getErr == nil && current != nil {
 			result.Status = protocol.TicketStatus(current.Status)
 		}
-		d.afterTicketMutationCatchUp(sourceSessionID, outcome.ConflictEvents)
+		d.afterTicketMutationCatchUpLocked(sourceSessionID, outcome.ConflictEvents)
 		d.deliveryMu.Unlock()
 		_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketStatusResult: result})
 		return

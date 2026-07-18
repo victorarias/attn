@@ -161,7 +161,7 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 	}
 	if len(outcome.ConflictEvents) > 0 {
 		rollbackInstalledAttachFiles(staged)
-		d.afterTicketMutationCatchUp(author, outcome.ConflictEvents)
+		d.afterTicketMutationCatchUpLocked(author, outcome.ConflictEvents)
 		d.deliveryMu.Unlock()
 		currentStatus := currentTicket.Status
 		if current, getErr := d.store.GetTicket(ticketID); getErr == nil && current != nil {

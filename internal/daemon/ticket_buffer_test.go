@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,22 +72,58 @@ func TestMutationCatchUpRebuildsRemainingUnreadFromNewAttention(t *testing.T) {
 	if err := d.store.SetTicketDeliveryAttention(sessionID, now.Add(-50*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	d.notifyUnreadTicketSession(sessionID, now)
-	oldDeadline := currentNudgeDeadline(d, sessionID)
+	staleDeadline := make(chan time.Time, 1)
+	resumeStaleRebuild := make(chan struct{})
+	var pauseOnce sync.Once
+	d.ticketRebuildBeforeArmHook = func(gotSessionID string, deadline time.Time) {
+		if gotSessionID != sessionID {
+			return
+		}
+		pauseOnce.Do(func() {
+			staleDeadline <- deadline
+			<-resumeStaleRebuild
+		})
+	}
+	rebuildDone := make(chan struct{})
+	go func() {
+		d.notifyUnreadTicketSession(sessionID, now)
+		close(rebuildDone)
+	}()
+	oldDeadline := <-staleDeadline
 	if oldDeadline.IsZero() || oldDeadline.After(now.Add(11*time.Minute)) {
 		t.Fatalf("old deadline = %s, want about ten minutes", oldDeadline)
 	}
 
-	d.deliveryMu.Lock()
-	_, outcome, err := d.store.AddTicketCommentWithOptions(
-		"first", sessionID, "should not land", d.ticketMutationOptions(sessionID), now,
-	)
-	if err != nil || len(outcome.ConflictEvents) == 0 {
-		d.deliveryMu.Unlock()
-		t.Fatalf("mutation outcome = %+v err=%v, want catch-up", outcome, err)
+	type catchUpResult struct {
+		outcome store.TicketMutationOutcome
+		err     error
 	}
-	d.afterTicketMutationCatchUp(sessionID, outcome.ConflictEvents)
-	d.deliveryMu.Unlock()
+	catchUpStarted := make(chan struct{})
+	catchUpDone := make(chan catchUpResult, 1)
+	go func() {
+		close(catchUpStarted)
+		d.deliveryMu.Lock()
+		_, outcome, err := d.store.AddTicketCommentWithOptions(
+			"first", sessionID, "should not land", d.ticketMutationOptions(sessionID), now,
+		)
+		if err == nil && len(outcome.ConflictEvents) > 0 {
+			d.afterTicketMutationCatchUpLocked(sessionID, outcome.ConflictEvents)
+		}
+		d.deliveryMu.Unlock()
+		catchUpDone <- catchUpResult{outcome: outcome, err: err}
+	}()
+	<-catchUpStarted
+	select {
+	case result := <-catchUpDone:
+		t.Fatalf("catch-up crossed paused reconstruction: outcome=%+v err=%v", result.outcome, result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(resumeStaleRebuild)
+	<-rebuildDone
+	result := <-catchUpDone
+	if result.err != nil || len(result.outcome.ConflictEvents) == 0 {
+		t.Fatalf("mutation outcome = %+v err=%v, want catch-up", result.outcome, result.err)
+	}
 
 	newDeadline := currentNudgeDeadline(d, sessionID)
 	if newDeadline.Before(now.Add(59 * time.Minute)) {

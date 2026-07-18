@@ -50,7 +50,10 @@ func ticketMutationCatchUp(ticketID string, events []store.TicketEvent) *protoco
 	return &bundles[0]
 }
 
-func (d *Daemon) afterTicketMutationCatchUp(sessionID string, events []store.TicketEvent) {
+// afterTicketMutationCatchUpLocked repairs live delivery state after the store's
+// atomic read-before-write transaction advances cursors and attention. Caller holds
+// deliveryMu so no stale deadline reconstruction can cross the new attention clock.
+func (d *Daemon) afterTicketMutationCatchUpLocked(sessionID string, events []store.TicketEvent) {
 	if len(events) == 0 {
 		return
 	}
@@ -62,7 +65,7 @@ func (d *Daemon) afterTicketMutationCatchUp(sessionID string, events []store.Tic
 	// durable unread events instead of retaining the earliest-deadline timer.
 	d.cancelNudgeCountdown(sessionID, "mutation catch-up")
 	d.refreshTicketUnread(sessionID)
-	d.notifyUnreadTicketSession(sessionID, time.Now())
+	d.notifyUnreadTicketSessionLocked(sessionID, time.Now())
 }
 
 func (d *Daemon) targetTicketUnreadCount(sessionID, ticketID string) int {
