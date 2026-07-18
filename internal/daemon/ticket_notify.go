@@ -58,12 +58,12 @@ func (d *Daemon) ticketAttentionKey(sessionID string) string {
 	return sessionID
 }
 
-func (d *Daemon) ticketDeadline(sessionID, ticketID string, unreadAt, now time.Time) (time.Time, bool, error) {
-	ticket, err := d.store.GetTicket(ticketID)
+func (d *Daemon) ticketDeadline(sessionID string, event store.TicketEvent, now time.Time) (time.Time, bool, error) {
+	ticket, err := d.store.GetTicket(event.TicketID)
 	if err != nil || ticket == nil {
 		return time.Time{}, false, err
 	}
-	if ticket.Assignee == sessionID {
+	if ticket.Assignee == sessionID || ticketEventNeedsImmediateAttention(event) {
 		return now.Add(d.nudgeWindow()), true, nil
 	}
 	attention, found, err := d.store.TicketDeliveryAttention(d.ticketAttentionKey(sessionID))
@@ -75,12 +75,20 @@ func (d *Daemon) ticketDeadline(sessionID, ticketID string, unreadAt, now time.T
 		if buffered := attention.LastAttentionAt.Add(d.ticketBufferWindow()); buffered.After(deadline) {
 			deadline = buffered
 		}
-	} else if !unreadAt.IsZero() {
-		if buffered := unreadAt.Add(d.ticketBufferWindow()); buffered.After(deadline) {
+	} else if !event.CreatedAt.IsZero() {
+		if buffered := event.CreatedAt.Add(d.ticketBufferWindow()); buffered.After(deadline) {
 			deadline = buffered
 		}
 	}
 	return deadline, false, nil
+}
+
+// ticketEventNeedsImmediateAttention identifies handoff boundaries that must not
+// wait behind an observer's ordinary interruption budget. Completion is the one
+// canonical successful terminal report; other statuses and activity retain PR
+// 594's buffering policy.
+func ticketEventNeedsImmediateAttention(event store.TicketEvent) bool {
+	return event.Kind == store.TicketEventStatusChanged && event.ToStatus == store.TicketStatusDone
 }
 
 // ticketNudger adapts the daemon's doorbell primitive to ticketnotify.Nudger.
@@ -184,12 +192,12 @@ func (d *Daemon) notifyUnreadTicketSessionLocked(sessionID string, now time.Time
 		}
 		for _, event := range events {
 			pending[event.Seq] = struct{}{}
-			candidate, assigned, err := d.ticketDeadline(sessionID, event.TicketID, event.CreatedAt, now)
+			candidate, eventImmediate, err := d.ticketDeadline(sessionID, event, now)
 			if err != nil {
 				continue
 			}
 			if deadline.IsZero() || candidate.Before(deadline) {
-				deadline, immediate = candidate, assigned
+				deadline, immediate = candidate, eventImmediate
 			}
 		}
 	}
@@ -198,7 +206,7 @@ func (d *Daemon) notifyUnreadTicketSessionLocked(sessionID string, now time.Time
 			d.ticketRebuildBeforeArmHook(sessionID, deadline)
 		}
 		if d.debugLogging {
-			d.logf("ticket delivery: observer=%s session=%s class=%s pending=%d deadline=%s channel=countdown outcome=armed", d.ticketAttentionKey(sessionID), sessionID, map[bool]string{true: "assignee", false: "buffered"}[immediate], len(pending), deadline.Format(time.RFC3339))
+			d.logf("ticket delivery: observer=%s session=%s class=%s pending=%d deadline=%s channel=countdown outcome=armed", d.ticketAttentionKey(sessionID), sessionID, map[bool]string{true: "immediate", false: "buffered"}[immediate], len(pending), deadline.Format(time.RFC3339))
 		}
 		d.armNudgeCountdownAt(sessionID, deadline)
 	}

@@ -52,7 +52,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   ritual.** Agents may complete work that Victor accepted, whose requested PR
   merged, or that has an equivalent objective terminal signal; finished work still
   awaiting review remains in review.
-- **Ticket notifications now protect attention without delaying the agent doing the work.** The current assignee keeps immediate delivery, while chiefs, subscribers, and other participants coalesce unread activity into one 30-minute observer-wide window. Explicit inbox reads remain immediate, and inbox watches share delivery with nudges without duplicate wake-ups.
+- **Ticket notifications now protect attention without delaying handoffs.** The current assignee and successful ticket completions keep immediate delivery, while chiefs, subscribers, and other participants coalesce ordinary unread activity into one 30-minute observer-wide window. Explicit inbox reads remain immediate, and inbox watches share delivery with nudges without duplicate wake-ups.
 - **Ticket updates now make agents read intervening activity before writing.** Status, comment, and attachment commands show unread updates and require a deliberate retry; app edits reject stale ticket details and refresh them before retry. Taking or subscribing to a ticket reports unread history without consuming it.
 
 ### Fixed
