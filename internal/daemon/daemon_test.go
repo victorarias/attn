@@ -103,6 +103,21 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv("ATTN_PTY_BACKEND", "embedded")
 	_ = os.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "1")
 
+	// Plugin-process helper subprocesses (TestDaemonPluginProcessHelper,
+	// TestPluginDriverFixtureProcess) re-exec this same test binary with a
+	// single -test.run and rely on ATTN_SOCKET_PATH being the exact value
+	// the parent test process injected via cmd.Env to wire the fixture back
+	// to its temp-scoped daemon socket — that's trusted IPC plumbing from an
+	// already-scoped parent test, not an inherited-from-the-shell override,
+	// and neither helper calls config.DataDir()/DBPath()/SocketPath(), so
+	// there is nothing here for ScopeTestEnvironment to protect. Skip
+	// scoping (and let them inherit whatever ATTN_DATA_DIR the parent test
+	// process already had) rather than clobber that wiring, same shape as
+	// config's own ATTN_TEST_DATADIR_BACKSTOP_HELPER skip.
+	if os.Getenv("ATTN_PLUGIN_HELPER") == "1" || os.Getenv("ATTN_PLUGIN_DRIVER_HELPER") == "1" {
+		os.Exit(m.Run())
+	}
+
 	// Scope every test in this package to an explicit temp data dir so no
 	// daemon test can resolve config.DataDir() to the real ~/.attn — see
 	// docs/plans/2026-07-18-db-loss-mitigation.md. Individual tests that need
@@ -111,7 +126,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("daemon: TestMain: MkdirTemp: " + err.Error())
 	}
-	_ = os.Setenv("ATTN_DATA_DIR", dataDir)
+	config.ScopeTestEnvironment(dataDir)
 
 	code := m.Run()
 	os.RemoveAll(dataDir)

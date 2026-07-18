@@ -3,6 +3,8 @@ package client
 import (
 	"os"
 	"testing"
+
+	"github.com/victorarias/attn/internal/config"
 )
 
 // TestMain scopes every test in this package to an explicit temp data dir so
@@ -15,7 +17,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("client: TestMain: MkdirTemp: " + err.Error())
 	}
-	os.Setenv("ATTN_DATA_DIR", dir)
+	config.ScopeTestEnvironment(dir)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

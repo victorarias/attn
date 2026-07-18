@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("config: TestMain: MkdirTemp: " + err.Error())
 	}
-	os.Setenv("ATTN_DATA_DIR", dir)
+	ScopeTestEnvironment(dir)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

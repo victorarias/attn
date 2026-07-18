@@ -70,13 +70,31 @@ ATTN_DATA_DIR env var, highest         under `go test`, config.DataDir()
       explicit temp path.
 - [x] **TestMain scoping** in `internal/daemon` (and any other package whose
       tests can reach `config.DataDir()` — audit `internal/store`,
-      `internal/hooks`, `cmd/attn`): `os.Setenv("ATTN_DATA_DIR", <temp dir>)`
-      in `TestMain` before `m.Run()`, so every test in the package is scoped
-      by default instead of opt-in. Empirically (added the backstop, ran
-      `go test ./...`, fixed every panic) this landed in `internal/daemon`
-      (extended the existing `TestMain`), `internal/daemonctl`, and
-      `internal/client`; `internal/store`, `internal/hooks`, and `cmd/attn`
-      never reach the guarded chokepoint in tests and needed no changes.
+      `internal/hooks`, `cmd/attn`): `config.ScopeTestEnvironment(<temp
+      dir>)` in `TestMain` before `m.Run()`, so every test in the package is
+      scoped by default instead of opt-in. Empirically (added the backstop,
+      ran `go test ./...`, fixed every panic) this landed in
+      `internal/daemon` (extended the existing `TestMain`),
+      `internal/daemonctl`, and `internal/client`; `internal/store`,
+      `internal/hooks`, and `cmd/attn` never reach the guarded chokepoint in
+      tests and needed no changes.
+- [x] **Closed the per-path override escape door** (figgyster review on
+      PR #584): `DBPath`, `SocketPath`, `PluginDir`, and the config-file path
+      each check their own env var (`ATTN_DB_PATH`, `ATTN_SOCKET_PATH`,
+      `ATTN_PLUGIN_DIR`, `ATTN_CONFIG_PATH`) before ever reaching the
+      `ATTN_DATA_DIR`-scoped `attnDir()` chokepoint, so setting
+      `ATTN_DATA_DIR` alone in `TestMain` did not bound them — a shell with
+      an inherited `ATTN_DB_PATH` pointed at the real database would still
+      leak into tests. `config.ScopeTestEnvironment(dataDir)` sets
+      `ATTN_DATA_DIR` and unconditionally clears all four overrides in one
+      call; every `TestMain` above uses it instead of a raw
+      `os.Setenv("ATTN_DATA_DIR", ...)`. Test-only: panics outside
+      `testing.Testing()`. Proven by a subprocess regression
+      (`TestScopeTestEnvironment_SanitizesInheritedOverrides`) that seeds
+      hostile `ATTN_DB_PATH`/`ATTN_SOCKET_PATH`/`ATTN_CONFIG_PATH` in the
+      child's inherited env and asserts the child's `TestMain`-scoped
+      `DBPath()`/`SocketPath()` still resolve inside the fresh
+      `ATTN_DATA_DIR`, not the hostile values.
 - [x] **Backstop in `config`**: using `testing.Testing()` (Go ≥1.21),
       `DataDir()` panics if called under `go test` without `ATTN_DATA_DIR`
       set. A panic is correct here: it converts silent prod damage into an

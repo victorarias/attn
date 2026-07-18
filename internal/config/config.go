@@ -290,6 +290,41 @@ func requireExplicitDataDirUnderTest() {
 	}
 }
 
+// ScopeTestEnvironment sets ATTN_DATA_DIR to dataDir and clears
+// ATTN_DB_PATH, ATTN_SOCKET_PATH, ATTN_CONFIG_PATH, and ATTN_PLUGIN_DIR.
+// Call it from a package TestMain (or an individual test) instead of
+// setting ATTN_DATA_DIR directly.
+//
+// Why clear the other four: DBPath, SocketPath, PluginDir, and the
+// config-file path all check their own env-var override before ever
+// reaching the attnDir() chokepoint, so ATTN_DATA_DIR alone does not bound
+// them. A developer's shell can carry an inherited ATTN_DB_PATH pointing at
+// the real ~/.attn/attn.db (e.g. from a scoped profile) even while
+// ATTN_DATA_DIR is set to a temp dir for the current test run; without this
+// clearing, that inherited override would still route test I/O at the real
+// database. This is the same incident class documented in
+// docs/plans/2026-07-18-db-loss-mitigation.md, one step removed: the
+// backstop in requireExplicitDataDirUnderTest only guards attnDir() itself,
+// not these four overrides that sit above it in precedence.
+//
+// It does not touch HOME or ATTN_PROFILE: ATTN_DATA_DIR already outranks
+// profile derivation, and HOME is off-limits for test scoping (see the
+// Decisions section of the plan above).
+//
+// Test-only: panics if called outside testing.Testing(), since it mutates
+// process-global environment and must never be reachable from a production
+// binary.
+func ScopeTestEnvironment(dataDir string) {
+	if !testing.Testing() {
+		panic("config.ScopeTestEnvironment is test-only")
+	}
+	os.Setenv("ATTN_DATA_DIR", dataDir)
+	os.Unsetenv("ATTN_DB_PATH")
+	os.Unsetenv("ATTN_SOCKET_PATH")
+	os.Unsetenv("ATTN_CONFIG_PATH")
+	os.Unsetenv("ATTN_PLUGIN_DIR")
+}
+
 // defaultAttnDir computes the profile-aware default data dir from the real
 // $HOME, ignoring ATTN_DATA_DIR and the test backstop entirely. It is a pure
 // function of (HOME, profile) with no I/O, so it's safe to call directly
