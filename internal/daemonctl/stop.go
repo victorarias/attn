@@ -1,9 +1,12 @@
 package daemonctl
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
@@ -100,6 +103,20 @@ func Stop(pidPath string) (StopResult, error) {
 	if pid == os.Getpid() || pid == os.Getppid() {
 		return StopResult{}, fmt.Errorf("refusing to stop pid %d: it is this command's own process tree", pid)
 	}
+	// Content ordering alone cannot prove pid genuinely holds the lock: a
+	// holder acquires the flock before it writes its own pid (or the
+	// sentinel), so a Stop racing that window sees EWOULDBLOCK plus
+	// whatever stale content was there first. Require positive proof
+	// instead: pid must itself have the file open right now. A stale pid
+	// (recycled or not), or a holder caught between acquiring the flock
+	// and writing its content, fails this check and is never signaled.
+	holds, err := pidHoldsPIDFile(pid, pidPath)
+	if err != nil {
+		return StopResult{}, fmt.Errorf("could not verify pid %d holds the daemon lock: %w", pid, err)
+	}
+	if !holds {
+		return StopResult{Note: fmt.Sprintf("not running (pid %d does not hold the daemon lock — if a daemon is starting up right now, retry in a moment)", pid)}, nil
+	}
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
 		if err == syscall.ESRCH {
 			return StopResult{Note: "not running (stale pid file)"}, nil
@@ -115,6 +132,63 @@ func Stop(pidPath string) (StopResult, error) {
 		return StopResult{Stopped: true, Forced: true, PID: pid}, nil
 	}
 	return StopResult{}, fmt.Errorf("pid %d did not exit after SIGKILL", pid)
+}
+
+// lsofPath resolves the `lsof` binary once: PATH first, falling back to its
+// standard macOS location, since Stop may run with a trimmed PATH.
+var lsofPath = resolveLsofPath()
+
+func resolveLsofPath() string {
+	if p, err := exec.LookPath("lsof"); err == nil {
+		return p
+	}
+	return "/usr/sbin/lsof"
+}
+
+// pidHoldsPIDFile reports whether pid currently has pidPath open, via
+// `lsof -t -- <path>`. This is the positive ownership proof that closes the
+// acquire-flock-then-write-content ordering gap: unlike trusting the
+// content under a held lock, a process cannot appear here without an open
+// file descriptor on pidPath at the moment of the check, regardless of how
+// far it has gotten writing content.
+//
+// Fail-closed: any exec/parse error is returned as an error (never signaled
+// on an inconclusive result). lsof exiting 1 with no output means "no
+// process holds the file" — not an error, just holds=false. Note Stop's own
+// process may itself have pidPath open at probe time (from the earlier
+// contention check) — the check below tests membership of the specific
+// content pid, not exclusivity, so that is harmless.
+func pidHoldsPIDFile(pid int, pidPath string) (bool, error) {
+	cmd := exec.Command(lsofPath, "-t", "--", pidPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	runErr := cmd.Run()
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 && stdout.Len() == 0 {
+			// lsof's documented "nothing matched" exit status.
+			return false, nil
+		}
+		return false, fmt.Errorf("lsof -t %s: %w (stderr: %s)", pidPath, runErr, strings.TrimSpace(stderr.String()))
+	}
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		holderPID, err := strconv.Atoi(line)
+		if err != nil {
+			return false, fmt.Errorf("lsof -t %s: unexpected output line %q", pidPath, line)
+		}
+		if holderPID == pid {
+			return true, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return false, fmt.Errorf("lsof -t %s: read output: %w", pidPath, err)
+	}
+	return false, nil
 }
 
 // processGoneWithin polls `kill(pid, 0)` until the process is gone (ESRCH) or

@@ -26,6 +26,12 @@ import (
 //     ATTN_STOP_TEST_HELPER_WRITE_PID instead of its own (used to simulate
 //     the pid file naming an unrelated process — e.g. the test parent —
 //     while a *different* process holds the lock).
+//   - "lock-pause": opens/creates the pid file, takes the exclusive flock,
+//     signals readiness by creating ATTN_STOP_TEST_HELPER_READYPATH, then
+//     blocks WITHOUT ever writing pid-file content — models the window
+//     between a holder acquiring the flock and publishing its content
+//     (its own pid, or NonDaemonHolderSentinel), which pid-file-content
+//     polling can never observe since there's nothing new to see there.
 //
 // Run under plain `go test`, ATTN_STOP_TEST_HELPER_MODE is unset, so this
 // is a silent no-op.
@@ -49,6 +55,25 @@ func TestStopHelperProcess(t *testing.T) {
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		fmt.Fprintf(os.Stderr, "helper: flock: %v\n", err)
 		os.Exit(1)
+	}
+
+	if mode == "lock-pause" {
+		readyPath := os.Getenv("ATTN_STOP_TEST_HELPER_READYPATH")
+		if readyPath == "" {
+			fmt.Fprintln(os.Stderr, "helper: missing ATTN_STOP_TEST_HELPER_READYPATH")
+			os.Exit(1)
+		}
+		// Deliberately never writes pid-file content: this is the window
+		// between acquiring the flock and publishing content that
+		// pidHoldsPIDFile must guard against even though nothing observable
+		// changes in the pid file itself. The ready file is the only signal
+		// the parent test can poll for readiness here.
+		if err := os.WriteFile(readyPath, []byte("ready"), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "helper: write ready file: %v\n", err)
+			os.Exit(1)
+		}
+		time.Sleep(time.Hour)
+		return
 	}
 
 	var content string
@@ -147,6 +172,21 @@ func waitForPIDFileContent(t *testing.T, pidPath string, want string, timeout ti
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s to contain %q (last read: %q, err: %v)", pidPath, want, string(data), err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// waitForFile polls until path exists, or fails the test on timeout.
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s to exist", path)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -314,6 +354,56 @@ func TestStop_NonDaemonHolderSentinel(t *testing.T) {
 	}
 	if !isAlive(stalePidHolder.Process.Pid) {
 		t.Fatal("stale-pid-holder process is gone: Stop() signaled a pid the current lock holder never wrote")
+	}
+}
+
+// TestStop_AcquireBeforeContentWriteGap is the deterministic regression for
+// the ordering gap figgyster flagged: a holder that has acquired the flock
+// but has NOT YET written its content (its own pid, or
+// NonDaemonHolderSentinel) — held open indefinitely via the "lock-pause"
+// helper mode — must not let Stop trust whatever stale content was in the
+// pid file before the holder ever touched it. Content-ordering alone cannot
+// prove ownership here; only pidHoldsPIDFile's positive lsof-based proof
+// can, since the stale pid genuinely does not have the file open.
+func TestStop_AcquireBeforeContentWriteGap(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "attn.pid")
+	readyPath := filepath.Join(dir, "ready")
+
+	// A live process whose pid stands in for a stale daemon pid already on
+	// disk — written BEFORE the new holder ever touches the file, exactly
+	// as a crashed daemon would leave it.
+	stalePidHolder := exec.Command("sleep", "30")
+	if err := stalePidHolder.Start(); err != nil {
+		t.Fatalf("start sleep helper: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = stalePidHolder.Process.Kill()
+		_, _ = stalePidHolder.Process.Wait()
+	})
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(stalePidHolder.Process.Pid)), 0644); err != nil {
+		t.Fatalf("seed stale pid file: %v", err)
+	}
+
+	// A new holder (e.g. `attn db restore`, mid acquireDaemonLock) takes the
+	// flock and is paused deliberately BEFORE it writes any content — the
+	// pid file still reads as the stale pid at this instant.
+	spawnStopHelper(t, pidPath, "lock-pause", "ATTN_STOP_TEST_HELPER_READYPATH="+readyPath)
+	waitForFile(t, readyPath, 5*time.Second)
+	waitForFlockHeld(t, pidPath, 5*time.Second)
+
+	result, err := Stop(pidPath)
+	if err != nil {
+		t.Fatalf("Stop() error = %v, want nil", err)
+	}
+	if result.Stopped {
+		t.Fatalf("Stop() = %+v, want Stopped=false (the content pid does not itself hold the lock)", result)
+	}
+	if !strings.Contains(result.Note, "does not hold the daemon lock") {
+		t.Fatalf("Stop().Note = %q, want it to mention the pid not holding the daemon lock", result.Note)
+	}
+	if !isAlive(stalePidHolder.Process.Pid) {
+		t.Fatal("stale-pid-holder process is gone: Stop() signaled a pid that never itself held the lock")
 	}
 }
 
