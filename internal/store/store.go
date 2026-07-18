@@ -24,6 +24,16 @@ type Store struct {
 	mu sync.RWMutex
 	db *sql.DB
 
+	// durable reports whether db is backed by a real on-disk file rather
+	// than the in-memory (":memory:") fallback New() uses when the durable
+	// database fails to open. BackupNow refuses to run against a
+	// non-durable store: VACUUM INTO an in-memory fallback would silently
+	// write empty/degraded snapshots into the real backups directory and,
+	// after enough rotation ticks, prune away the last genuine recovery
+	// copies precisely when the durable DB is corrupt or unavailable — the
+	// moment they're needed most.
+	durable bool
+
 	sessions        map[string]*protocol.Session
 	agentDriverRuns map[string]AgentDriverReportCursor
 	agentMetadata   map[string]string
@@ -94,7 +104,7 @@ func NewWithDB(dbPath string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, durable: true}, nil
 }
 
 // NewWithPersistence creates a store that persists to SQLite (replaces JSON persistence)

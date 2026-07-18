@@ -205,6 +205,31 @@ func TestBackupNow_Rotation(t *testing.T) {
 	}
 }
 
+// TestBackupNow_RefusesNonDurableStore proves that a store falling back to
+// the in-memory (":memory:") database — what New() returns when the durable
+// DB fails to open — refuses to back up rather than silently writing an
+// empty snapshot. Without this guard, a degraded daemon would rotate real
+// recovery copies out of the backups directory over the twelve ticks it
+// takes to fill the keep window, destroying exactly the safety net needed
+// while the durable DB is unavailable.
+func TestBackupNow_RefusesNonDurableStore(t *testing.T) {
+	s := New()
+	defer s.Close()
+
+	backupDir := t.TempDir()
+	if _, err := s.BackupNow(backupDir, 12); err == nil {
+		t.Fatal("expected BackupNow to refuse a non-durable (in-memory fallback) store, got nil error")
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatalf("read backup dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("BackupNow wrote to backups dir despite refusing: %v", entries)
+	}
+}
+
 // TestMigrateDB_PreMigrationBackup proves that migrating an existing,
 // non-empty database forward writes a pre-migration snapshot to backups/
 // alongside the DB file before mutating the schema, using the same

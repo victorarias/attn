@@ -30,6 +30,9 @@ func (s *Store) BackupNow(dir string, keep int) (string, error) {
 	if s == nil || s.db == nil {
 		return "", fmt.Errorf("backup: store has no open database")
 	}
+	if !s.durable {
+		return "", fmt.Errorf("backup: store is not durably backed (in-memory fallback), skipping backup")
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("backup: create dir %s: %w", dir, err)
 	}
