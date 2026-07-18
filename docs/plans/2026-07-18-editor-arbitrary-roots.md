@@ -73,13 +73,13 @@ directory. The storage concept (keeper, journal, knowledge base) stays bound to
       string back-compat), root-aware fs calls, `fs_changed` root filtering
 - [x] PR5 frontend (#585): workspace-directory default for ⌘⌥N, header root
       switcher, finder on `fs_index`
-- [ ] PR6 frontend: off-root affordance gating, Editor labels + settings copy,
+- [x] PR6 frontend (#588): off-root affordance gating, Editor labels + settings copy,
       changelog, packaged-app bridge-only scenario (editor over a workspace
       root)
 - [ ] PR7 daemon+frontend: endpoint_id on protocol.Workspace (populated for
       hub remote workspaces) so localWorkspaceDirectory can restore the
       workspace-dir default for sessionless local pinned workspaces
-      (fast-follow committed in PR #585 review)
+      (fast-follow committed in PR #585 review) (this PR)
 
 ## Open Questions
 

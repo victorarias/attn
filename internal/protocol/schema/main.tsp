@@ -149,6 +149,7 @@ model Workspace {
   pinned: boolean;              // Pinned workspaces persist in the sidebar even when empty.
   rank: string;                 // Fractional-index sort key; default order is opening (creation) order.
   layout?: WorkspaceLayout;
+  endpoint_id?: string;         // Set by a hub daemon on workspaces mirrored from a remote endpoint; absent/empty means the workspace is local to this daemon. Remote daemons never set this themselves — the hub stamps it at ingest.
 }
 
 model WorkspaceContext {

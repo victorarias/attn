@@ -1040,3 +1040,40 @@ func (b *failingSpawnBackend) Recover(context.Context) (ptybackend.RecoveryRepor
 	return ptybackend.RecoveryReport{}, nil
 }
 func (b *failingSpawnBackend) Shutdown(context.Context) error { return nil }
+
+// TestListWorkspacesLocalWorkspaceHasEmptyEndpointID guards the local half of
+// the endpoint_id contract (internal/protocol/schema/main.tsp Workspace):
+// only a hub stamps EndpointID on workspaces it mirrors from a remote
+// endpoint (internal/hub/manager.go replaceRemoteWorkspaces/
+// upsertRemoteWorkspace); a workspace registered directly on this daemon must
+// never carry one. The frontend's localWorkspaceDirectory gate
+// (app/src/types/workspace.ts) trusts this to decide whether a workspace's
+// directory is safe to hand to non-endpoint-aware fs calls.
+func TestListWorkspacesLocalWorkspaceHasEmptyEndpointID(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-local-endpoint-id"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        workspaceID,
+		Title:     "Local Workspace",
+		Directory: cwd,
+	})
+
+	workspaces := d.listWorkspaces()
+	var found *protocol.Workspace
+	for i := range workspaces {
+		if workspaces[i].ID == workspaceID {
+			found = &workspaces[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("listWorkspaces() did not include %s: %+v", workspaceID, workspaces)
+	}
+	if found.EndpointID != nil && *found.EndpointID != "" {
+		t.Fatalf("local workspace EndpointID = %v, want nil/empty", found.EndpointID)
+	}
+}

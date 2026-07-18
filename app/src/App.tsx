@@ -1973,12 +1973,6 @@ sendFetchPRDetails,
   // default actually needs.
   const daemonWorkspacesRef = useRef<DaemonWorkspace[]>([]);
 
-  // Same reasoning as daemonWorkspacesRef: lets handleOpenNotebookTile read the
-  // current session list (to gate a workspace's directory to local-only, see
-  // localWorkspaceDirectory) without rebinding the callback on every session
-  // change.
-  const daemonSessionsRef = useRef<DaemonSession[]>([]);
-
   // Dock a fresh Notebook tile into the active workspace. A unique tile id every
   // time: the daemon treats a duplicate id as a move, so a shared id would just
   // relocate the first tile instead of opening a second. Defaults the tile's root
@@ -1991,8 +1985,11 @@ sendFetchPRDetails,
     const workspaceId = activeWorkspaceIdRef.current;
     if (!workspaceId) return;
     const tileId = `notebook-tile-${crypto.randomUUID()}`;
-    const workspace = daemonWorkspacesRef.current.find((w) => w.id === workspaceId);
-    const localDirectory = localWorkspaceDirectory(workspace?.directory, daemonSessionsRef.current, workspaceId);
+    // endpoint-aware find: raw workspace ids can repeat across a remote twin
+    // mirrored by the hub, so filter to the local record before trusting its
+    // directory (see localWorkspaceDirectory).
+    const workspace = daemonWorkspacesRef.current.find((w) => w.id === workspaceId && !w.endpoint_id);
+    const localDirectory = localWorkspaceDirectory(workspace);
     const effectiveNotebookRoot = settings['notebook.root.effective'] || '';
     const root = resolveEditorTileRoot(localDirectory, effectiveNotebookRoot);
     void sendWorkspaceDockTile(workspaceId, tileId, 'notebook', {
@@ -2836,11 +2833,6 @@ sendFetchPRDetails,
   useEffect(() => {
     daemonWorkspacesRef.current = daemonWorkspaces;
   }, [daemonWorkspaces]);
-  // daemonSessionsRef mirrors daemonSessions for handleOpenNotebookTile — see
-  // its declaration for why a ref instead of a direct dependency.
-  useEffect(() => {
-    daemonSessionsRef.current = daemonSessions;
-  }, [daemonSessions]);
   useEffect(() => {
     if (view === 'session' && activeWorkspaceId) {
       sendWorkspaceSelected(activeWorkspaceId);
@@ -3646,7 +3638,7 @@ sendFetchPRDetails,
                   <SessionTerminalWorkspace
                     ref={setWorkspaceRef(workspace.id)}
                     workspaceId={workspace.id}
-                    workspaceDirectory={localWorkspaceDirectory(workspace.directory, daemonSessions, workspace.id)}
+                    workspaceDirectory={localWorkspaceDirectory({ directory: workspace.directory, endpoint_id: workspace.endpointId })}
                     workspaceSessions={workspace.sessions.map((entry) => ({
                       id: entry.id,
                       label: entry.label,
