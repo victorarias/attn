@@ -8,6 +8,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-18]
 
+### Fixed
+- **Orphaned session workers now clean themselves up.** A per-session PTY worker
+  whose daemon is gone for good (e.g. a torn-down test profile, or a daemon that
+  was killed and never restarted) previously kept running forever, accumulating
+  stray `attn pty-worker` and agent processes. Workers now stop themselves after
+  12 hours with no daemon attached and no terminal output, ending their agent
+  process and removing their registry/socket files. Daemon restarts and upgrades
+  are unaffected — a reattaching daemon cancels the countdown, and a busy agent
+  producing output defers it.
+
 ### Added
 - **Automatic rotating database backups.** The daemon now snapshots its SQLite
   database every 6 hours (keeping the last 12) and takes an extra safety

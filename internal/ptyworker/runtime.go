@@ -57,6 +57,19 @@ func cloneReplaySegments[From any, To any](segments []From, convert func(From) T
 
 var exitedSessionCleanupTTL = 45 * time.Second
 
+// orphanedWorkerTTL is how long a worker with a live child keeps running with
+// no authenticated daemon connection AND no PTY output before it stops itself.
+// Workers must survive daemon restarts/upgrades (the daemon reattaches within
+// seconds), and an in-flight agent run during a daemon outage keeps producing
+// output, which defers the deadline — so this only reaps sessions that are
+// both unowned and idle, e.g. workers left behind by torn-down profiles.
+// Override with ATTN_WORKER_ORPHAN_TTL (Go duration; "0" disables reaping).
+var orphanedWorkerTTL = 12 * time.Hour
+
+const orphanTTLEnvVar = "ATTN_WORKER_ORPHAN_TTL"
+
+const orphanActivitySubscriberID = "worker-orphan-activity"
+
 const (
 	connSendQueueSize       = 256
 	connWriteTimeout        = 2 * time.Second
@@ -128,6 +141,12 @@ type Runtime struct {
 	exited      bool
 	cleanupTTL  *time.Timer
 
+	// Orphan reaping: see orphanedWorkerTTL. orphanTimer is guarded by
+	// lifecycleMu; lastOutputNano is stamped from the PTY output path.
+	orphanTTL      time.Duration
+	orphanTimer    *time.Timer
+	lastOutputNano atomic.Int64
+
 	connSeq atomic.Uint64
 
 	watchMu   sync.RWMutex
@@ -145,6 +164,14 @@ func Run(ctx context.Context, cfg Config) error {
 		stopCh:    make(chan struct{}),
 		logf:      logf,
 		watchConn: make(map[*connCtx]struct{}),
+		orphanTTL: orphanedWorkerTTL,
+	}
+	if v := strings.TrimSpace(os.Getenv(orphanTTLEnvVar)); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d >= 0 {
+			rt.orphanTTL = d
+		} else {
+			logf("worker orphan ttl: ignoring invalid %s=%q: %v", orphanTTLEnvVar, v, err)
+		}
 	}
 	return rt.run(ctx)
 }
@@ -230,6 +257,7 @@ func (r *Runtime) run(ctx context.Context) error {
 		r.requestStop()
 		if r.manager != nil {
 			r.manager.Detach(r.cfg.SessionID, debugCaptureSubscriberID)
+			r.manager.Detach(r.cfg.SessionID, orphanActivitySubscriberID)
 		}
 		if r.capture != nil {
 			path, err := r.capture.dump("runtime_shutdown")
@@ -332,6 +360,26 @@ func (r *Runtime) run(ctx context.Context) error {
 	}
 	r.logf("worker startup: registry ready session=%s pid=%d child_pid=%d", r.cfg.SessionID, os.Getpid(), info.PID)
 
+	// Orphan reaping: observe PTY output so a busy child defers the deadline,
+	// then arm the watch. The daemon's first authenticated connection (seconds
+	// away in the normal path) cancels it; it re-arms whenever the last authed
+	// connection drops.
+	r.noteOutputActivity()
+	if _, err := r.manager.Attach(
+		r.cfg.SessionID,
+		orphanActivitySubscriberID,
+		func(_ []byte, _ uint32) bool {
+			r.noteOutputActivity()
+			return true
+		},
+		func(reason string) {
+			r.logf("worker orphan activity subscriber dropped: session=%s reason=%s", r.cfg.SessionID, reason)
+		},
+	); err != nil {
+		r.logf("worker orphan activity attach failed: session=%s err=%v", r.cfg.SessionID, err)
+	}
+	r.armOrphanWatch()
+
 	go func() {
 		<-ctx.Done()
 		r.requestStop()
@@ -403,6 +451,7 @@ func (r *Runtime) cleanup() {
 		r.cleanupTTL.Stop()
 		r.cleanupTTL = nil
 	}
+	r.stopOrphanTimerLocked()
 	r.lifecycleMu.Unlock()
 
 	_ = os.Remove(r.cfg.RegistryPath)
@@ -421,6 +470,7 @@ func (r *Runtime) requestStop() {
 func (r *Runtime) noteSessionExited() {
 	r.lifecycleMu.Lock()
 	r.exited = true
+	r.stopOrphanTimerLocked()
 	r.maybeScheduleCleanupLocked()
 	r.lifecycleMu.Unlock()
 }
@@ -432,6 +482,7 @@ func (r *Runtime) noteConnAuthed() {
 		r.cleanupTTL.Stop()
 		r.cleanupTTL = nil
 	}
+	r.stopOrphanTimerLocked()
 	r.lifecycleMu.Unlock()
 }
 
@@ -441,7 +492,54 @@ func (r *Runtime) noteConnClosed() {
 		r.authedConns--
 	}
 	r.maybeScheduleCleanupLocked()
+	r.maybeScheduleOrphanLocked()
 	r.lifecycleMu.Unlock()
+}
+
+func (r *Runtime) noteOutputActivity() {
+	r.lastOutputNano.Store(time.Now().UnixNano())
+}
+
+func (r *Runtime) armOrphanWatch() {
+	r.lifecycleMu.Lock()
+	r.maybeScheduleOrphanLocked()
+	r.lifecycleMu.Unlock()
+}
+
+func (r *Runtime) stopOrphanTimerLocked() {
+	if r.orphanTimer != nil {
+		r.orphanTimer.Stop()
+		r.orphanTimer = nil
+	}
+}
+
+func (r *Runtime) maybeScheduleOrphanLocked() {
+	if r.orphanTTL <= 0 || r.exited || r.authedConns != 0 || r.orphanTimer != nil {
+		return
+	}
+	r.orphanTimer = time.AfterFunc(r.orphanTTL, r.orphanDeadlineFired)
+}
+
+func (r *Runtime) orphanDeadlineFired() {
+	r.lifecycleMu.Lock()
+	r.orphanTimer = nil
+	if r.exited || r.authedConns != 0 {
+		r.lifecycleMu.Unlock()
+		return
+	}
+	// A busy child (e.g. an agent still finishing a run while the daemon is
+	// down) defers reaping until output has been quiet for a full TTL.
+	idle := time.Since(time.Unix(0, r.lastOutputNano.Load()))
+	if idle < r.orphanTTL {
+		r.orphanTimer = time.AfterFunc(r.orphanTTL-idle, r.orphanDeadlineFired)
+		r.lifecycleMu.Unlock()
+		return
+	}
+	r.lifecycleMu.Unlock()
+	if r.logf != nil {
+		r.logf("worker orphaned: session=%s no daemon connection and no output for %s; stopping", r.cfg.SessionID, r.orphanTTL)
+	}
+	r.requestStop()
 }
 
 func (r *Runtime) maybeScheduleCleanupLocked() {
