@@ -63,7 +63,7 @@ Each PR ships with unit tests where the logic is pure, and is verified live in a
 (`make dev`, drive the real editor). Menu-trap PRs additionally get a packaged-app harness
 scenario where feasible.
 
-- [x] **PR1 — Undo/redo (G1).** Remove Edit > Undo predefined item in `app_menu()` (merged #550)
+- [x] **PR1 — Undo/redo (G1).** Remove Edit > Undo predefined item in `app_menu()` (merged #535)
       (`app/src-tauri/src/lib.rs`) so ⌘Z reaches the WebView; CM history (already in
       basicSetup) handles it when the editor has focus, and WebKit's native undo still covers
       plain inputs/textareas. For redo: make the ⇧⌘Z resolution context-aware in
@@ -71,22 +71,22 @@ scenario where feasible.
       otherwise keep `terminal.toggleZoom`. Verify live: type → ⌘Z → ⇧⌘Z in the editor;
       zoom still works in a terminal pane; undo still works in the ticket comment box.
       Packaged-app scenario for the editor path (this exact class of bug is invisible to e2e).
-- [x] **PR2 — In-editor search (G2).** Enable `@codemirror/search` (searchKeymap + panel) (merged #552)
+- [x] **PR2 — In-editor search (G2).** Enable `@codemirror/search` (searchKeymap + panel) (merged #536)
       in `LiveMarkdownEditor.tsx`, themed via CSS variables; scope ⌘F so it only claims the
       key when editor is focused. Esc closes the search panel *before* the surface's
       Esc-to-close handler fires (stopPropagation when panel open — Esc currently closes the
       whole fullscreen surface).
-- [x] **PR3 — Fence highlighting + blockquote/HR styling (G4, G7).** Re-enable (merged #554)
+- [x] **PR3 — Fence highlighting + blockquote/HR styling (G4, G7).** Re-enable (merged #538)
       `syntaxHighlighting` with a CSS-variable highlight style; add fence language support
       (`@codemirror/language-data` lazy import) and blockquote/HR decorations in
       `liveMarkdownPreview.ts`.
-- [x] **PR4 — Tables (G3).** Live-preview table widget in `liveMarkdownPreview.ts`: render (merged #556)
+- [x] **PR4 — Tables (G3).** Live-preview table widget in `liveMarkdownPreview.ts`: render (merged #539)
       GFM tables as a styled widget when the cursor is outside, reveal raw source on the
       cursor's row (same reveal model the rest of the preview uses).
-- [x] **PR5 — Formatting keybindings (G6).** ⌘B/⌘I (+ ⌘E inline code) toggle wrap/unwrap (merged #558)
+- [x] **PR5 — Formatting keybindings (G6).** ⌘B/⌘I (+ ⌘E inline code) toggle wrap/unwrap (merged #540)
       around selection or word; pure command functions unit-tested, bound via the editor
       keymap. Check combos against default-menu accelerators first (⌘B/⌘I/⌘E are free).
-- [x] **PR6 — Image rendering (G5).** Render `![...]` as an image widget (asset path (merged #560)
+- [x] **PR6 — Image rendering (G5).** Render `![...]` as an image widget (asset path (merged #542)
       resolved through the notebook fs surface via Tauri `convertFileSrc` or equivalent —
       must not add fs permissions beyond the notebook root) with a clean broken-image
       placeholder; raw source on cursor line.
