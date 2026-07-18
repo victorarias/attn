@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -29,8 +30,14 @@ func newFsDaemon(t *testing.T) *Daemon {
 // client; the origin=ui broadcast goes to the hub, not this client.
 func fsWriteCAS(t *testing.T, d *Daemon, path, content, baseHash string) protocol.FsWriteResultMessage {
 	t.Helper()
+	return fsWriteCASRoot(t, d, path, content, baseHash, "")
+}
+
+// fsWriteCASRoot is fsWriteCAS with an explicit root (empty = notebook root).
+func fsWriteCASRoot(t *testing.T, d *Daemon, path, content, baseHash, root string) protocol.FsWriteResultMessage {
+	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 8)}
-	d.sendFsWriteWSResult(client, "setup-fs-write", path, content, baseHash)
+	d.sendFsWriteWSResult(client, "setup-fs-write", path, content, baseHash, root)
 	var res protocol.FsWriteResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	return res
@@ -39,8 +46,14 @@ func fsWriteCAS(t *testing.T, d *Daemon, path, content, baseHash string) protoco
 // listFs lists one directory over the WS fs path and returns the entries.
 func listFs(t *testing.T, d *Daemon, dir string) []protocol.FsEntry {
 	t.Helper()
+	return listFsRoot(t, d, dir, "")
+}
+
+// listFsRoot is listFs with an explicit root (empty = notebook root).
+func listFsRoot(t *testing.T, d *Daemon, dir, root string) []protocol.FsEntry {
+	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 8)}
-	d.sendFsListWSResult(client, "setup-fs-list", dir)
+	d.sendFsListWSResult(client, "setup-fs-list", dir, root)
 	var res protocol.FsListResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if !res.Success {
@@ -53,7 +66,7 @@ func listFs(t *testing.T, d *Daemon, dir string) []protocol.FsEntry {
 func fsExists(t *testing.T, d *Daemon, path string) protocol.FsExistsResultMessage {
 	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 8)}
-	d.sendFsExistsWSResult(client, "setup-fs-exists", path)
+	d.sendFsExistsWSResult(client, "setup-fs-exists", path, "")
 	var res protocol.FsExistsResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	return res
@@ -109,7 +122,7 @@ func TestFsWriteListReadWSResults(t *testing.T) {
 
 	// Read the file: content + the same hash the write returned.
 	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendFsReadWSResult(client, "r1", "notes/todo.txt")
+	d.sendFsReadWSResult(client, "r1", "notes/todo.txt", "")
 	var read protocol.FsReadResultMessage
 	readNotebookWSEvent(t, client.send, &read)
 	if read.Event != protocol.EventFsReadResult || read.RequestID != "r1" || !read.Success ||
@@ -118,7 +131,7 @@ func TestFsWriteListReadWSResults(t *testing.T) {
 	}
 
 	// A missing file is a failed result, not a panic or empty success.
-	d.sendFsReadWSResult(client, "r2", "nope.txt")
+	d.sendFsReadWSResult(client, "r2", "nope.txt", "")
 	var missing protocol.FsReadResultMessage
 	readNotebookWSEvent(t, client.send, &missing)
 	if missing.RequestID != "r2" || missing.Success || missing.Error == nil {
@@ -141,7 +154,7 @@ func TestFsReadWSRejectsOversizedFile(t *testing.T) {
 	}
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendFsReadWSResult(client, "oversized", "attachments/too-large.txt")
+	d.sendFsReadWSResult(client, "oversized", "attachments/too-large.txt", "")
 	var read protocol.FsReadResultMessage
 	readNotebookWSEvent(t, client.send, &read)
 	if read.Success || read.Error == nil || !strings.Contains(*read.Error, "read cap") {
@@ -267,7 +280,7 @@ func TestFsWriteBroadcastsUiChange(t *testing.T) {
 	go d.wsHub.run()
 
 	writer := &wsClient{send: make(chan outboundMessage, 8)}
-	d.sendFsWriteWSResult(writer, "w1", "notes/todo.txt", "hello", "")
+	d.sendFsWriteWSResult(writer, "w1", "notes/todo.txt", "hello", "", "")
 	var res protocol.FsWriteResultMessage
 	readNotebookWSEvent(t, writer.send, &res)
 	if !res.Success || res.Result == nil || res.Result.Conflict {
@@ -342,7 +355,7 @@ var pngHeaderBytes = []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0
 func fsReadAsset(t *testing.T, d *Daemon, requestID, path string) protocol.FsReadAssetResultMessage {
 	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendFsReadAssetWSResult(client, requestID, path)
+	d.sendFsReadAssetWSResult(client, requestID, path, "")
 	var res protocol.FsReadAssetResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	return res
@@ -472,5 +485,274 @@ func TestFsReadAssetUnsupportedExtension(t *testing.T) {
 	got := fsReadAsset(t, d, "a1", "assets/doc.pdf")
 	if got.Success || got.Error == nil || *got.Error != "not a supported image asset" {
 		t.Fatalf("read asset(unsupported ext) = %+v, want \"not a supported image asset\"", got)
+	}
+}
+
+// An explicit root pointing outside the notebook root must make fs_write/fs_read/
+// fs_list operate on THAT directory: the file must physically land there (not
+// under the notebook root), results must be relative to it, and the fs_changed
+// broadcast must carry the resolved root. This is the core PR1 behavior — without
+// it, an explicit root would be silently ignored or resolved against the wrong
+// base.
+func TestFsCommandsWithExplicitRootActOnThatDirectory(t *testing.T) {
+	d := newFsDaemon(t)
+	notebookRoot, err := d.notebookRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalRoot := t.TempDir()
+
+	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[hubClient] = true
+	go d.wsHub.run()
+
+	write := fsWriteCASRoot(t, d, "notes/todo.txt", "buy milk", "", externalRoot)
+	if !write.Success || write.Result == nil || write.Result.Conflict || write.Result.Hash == nil {
+		t.Fatalf("write under explicit root = %+v", write.Result)
+	}
+	if write.Result.Path != "notes/todo.txt" {
+		t.Fatalf("write result path = %q, want root-relative notes/todo.txt", write.Result.Path)
+	}
+
+	// The file must physically land under externalRoot, not the notebook root.
+	if _, err := os.Stat(filepath.Join(externalRoot, "notes", "todo.txt")); err != nil {
+		t.Fatalf("file did not land under explicit root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(notebookRoot, "notes", "todo.txt")); err == nil {
+		t.Fatalf("file wrongly landed under the notebook root")
+	}
+
+	entries := listFsRoot(t, d, "notes", externalRoot)
+	if len(entries) != 1 || entries[0].Path != "notes/todo.txt" {
+		t.Fatalf("list under explicit root = %+v", entries)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsReadWSResult(client, "r1", "notes/todo.txt", externalRoot)
+	var read protocol.FsReadResultMessage
+	readNotebookWSEvent(t, client.send, &read)
+	if !read.Success || read.Result == nil || read.Result.Content != "buy milk" {
+		t.Fatalf("read under explicit root = %+v", read.Result)
+	}
+
+	ev := waitForFsChangeWithRoot(t, hubClient.send, originUI)
+	if !slices.Contains(ev.Paths, "notes/todo.txt") {
+		t.Fatalf("ui fs_changed paths = %v, want notes/todo.txt", ev.Paths)
+	}
+	if ev.Root != externalRoot {
+		t.Fatalf("ui fs_changed root = %q, want %q", ev.Root, externalRoot)
+	}
+}
+
+// waitForFsChangeWithRoot returns the full fs_changed event matching origin, so
+// callers can assert on Root in addition to Paths.
+func waitForFsChangeWithRoot(t *testing.T, ch chan outboundMessage, origin string) protocol.FsChangedMessage {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case msg := <-ch:
+			var ev protocol.FsChangedMessage
+			if err := json.Unmarshal(msg.payload, &ev); err != nil {
+				continue
+			}
+			if ev.Event == protocol.EventFsChanged && ev.Origin == origin {
+				return ev
+			}
+		case <-deadline:
+			t.Fatalf("no fs_changed with origin %q was broadcast", origin)
+			return protocol.FsChangedMessage{}
+		}
+	}
+}
+
+// fs_changed's root must be the resolved absolute root the write happened under,
+// so a UI subscribed to one root can ignore broadcasts for another.
+func TestFsWriteBroadcastsResolvedRoot(t *testing.T) {
+	d := newFsDaemon(t)
+	externalRoot := t.TempDir()
+	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[hubClient] = true
+	go d.wsHub.run()
+
+	if res := fsWriteCASRoot(t, d, "a.txt", "x", "", externalRoot); !res.Success || res.Result == nil {
+		t.Fatalf("write = %+v", res.Result)
+	}
+	ev := waitForFsChangeWithRoot(t, hubClient.send, originUI)
+	if ev.Root != externalRoot {
+		t.Fatalf("fs_changed.root = %q, want %q", ev.Root, externalRoot)
+	}
+}
+
+// Omitting root must still resolve to the notebook root, and fs_changed.root must
+// equal it exactly — a back-compat regression would either break existing fs
+// clients (nothing sent a root before this PR) or silently resolve to some other
+// directory.
+func TestFsCommandsOmittedRootResolvesToNotebookRoot(t *testing.T) {
+	d := newFsDaemon(t)
+	notebookRoot, err := d.notebookRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[hubClient] = true
+	go d.wsHub.run()
+
+	res := fsWriteCAS(t, d, "notes/todo.txt", "buy milk", "")
+	if !res.Success || res.Result == nil {
+		t.Fatalf("write = %+v", res.Result)
+	}
+	if _, err := os.Stat(filepath.Join(notebookRoot, "notes", "todo.txt")); err != nil {
+		t.Fatalf("file did not land under the notebook root: %v", err)
+	}
+	ev := waitForFsChangeWithRoot(t, hubClient.send, originUI)
+	if ev.Root != notebookRoot {
+		t.Fatalf("fs_changed.root = %q, want notebook root %q", ev.Root, notebookRoot)
+	}
+}
+
+// A relative root, and a root inside config.DataDir(), must both be rejected —
+// the same validation notebook.root enforces. Without this, a client could point
+// the fs surface at attn's own data dir (defeating the "notebook must live
+// outside .attn" invariant) or at an ambiguous relative path.
+func TestFsCommandsRejectInvalidRoots(t *testing.T) {
+	d := newFsDaemon(t)
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsListWSResult(client, "rel", "", "relative/path")
+	var relRes protocol.FsListResultMessage
+	readNotebookWSEvent(t, client.send, &relRes)
+	if relRes.Success || relRes.Error == nil {
+		t.Fatalf("fs_list(relative root) = %+v, want failure", relRes)
+	}
+
+	insideDataDir := filepath.Join(config.DataDir(), "notebook")
+	client2 := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsListWSResult(client2, "indatadir", "", insideDataDir)
+	var dataDirRes protocol.FsListResultMessage
+	readNotebookWSEvent(t, client2.send, &dataDirRes)
+	if dataDirRes.Success || dataDirRes.Error == nil {
+		t.Fatalf("fs_list(root inside data dir) = %+v, want failure", dataDirRes)
+	}
+}
+
+// fs_rename/fs_delete under a non-notebook root must broadcast fs_changed but NOT
+// notebook_changed (a foreign root has no notebook to couple to), while the same
+// operations under the notebook root must still broadcast both — regressing
+// either direction either leaks the notebook coupling to arbitrary roots or loses
+// it for the actual notebook.
+func TestFsRenameDeleteNotebookCouplingIsRootConditional(t *testing.T) {
+	d := newFsDaemon(t)
+	notebookRoot, err := d.notebookRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalRoot := t.TempDir()
+
+	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[hubClient] = true
+	go d.wsHub.run()
+
+	// --- foreign root: rename ---
+	if res := fsWriteCASRoot(t, d, "a.md", "x", "", externalRoot); !res.Success || res.Result == nil {
+		t.Fatalf("seed write (external) = %+v", res.Result)
+	}
+	// Drain the seed write's own fs_changed(a.md) so the rename's broadcast below
+	// is the one actually asserted on.
+	waitForFsChange(t, hubClient.send, originUI)
+	renameClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsRenameWSResult(renameClient, "rn1", "a.md", "b.md", externalRoot)
+	var renameRes protocol.FsRenameResultMessage
+	readNotebookWSEvent(t, renameClient.send, &renameRes)
+	if !renameRes.Success || renameRes.Result == nil {
+		t.Fatalf("rename (external root) = %+v", renameRes)
+	}
+	assertNoBroadcast(t, hubClient.send, protocol.EventNotebookChanged, 300*time.Millisecond)
+	if got := waitForFsChange(t, hubClient.send, originUI); !slices.Contains(got, "b.md") {
+		t.Fatalf("fs_changed after external rename = %v, want b.md", got)
+	}
+
+	// --- foreign root: delete ---
+	deleteClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsDeleteWSResult(deleteClient, "d1", "b.md", externalRoot)
+	var deleteRes protocol.FsDeleteResultMessage
+	readNotebookWSEvent(t, deleteClient.send, &deleteRes)
+	if !deleteRes.Success || deleteRes.Result == nil {
+		t.Fatalf("delete (external root) = %+v", deleteRes)
+	}
+	assertNoBroadcast(t, hubClient.send, protocol.EventNotebookChanged, 300*time.Millisecond)
+	if got := waitForFsChange(t, hubClient.send, originUI); !slices.Contains(got, "b.md") {
+		t.Fatalf("fs_changed after external delete = %v, want b.md", got)
+	}
+
+	// --- notebook root: rename still broadcasts both ---
+	if res := fsWriteCAS(t, d, "c.md", "x", ""); !res.Success || res.Result == nil {
+		t.Fatalf("seed write (notebook) = %+v", res.Result)
+	}
+	// Drain the seed write's own fs_changed(c.md) broadcast.
+	waitForFsChange(t, hubClient.send, originUI)
+	renameClient2 := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsRenameWSResult(renameClient2, "rn2", "c.md", "d.md", "")
+	var renameRes2 protocol.FsRenameResultMessage
+	readNotebookWSEvent(t, renameClient2.send, &renameRes2)
+	if !renameRes2.Success || renameRes2.Result == nil {
+		t.Fatalf("rename (notebook root) = %+v", renameRes2)
+	}
+	notebookEv := waitForNotebookChangeEvent(t, hubClient.send)
+	if !slices.Contains(notebookEv, "d.md") {
+		t.Fatalf("notebook_changed after notebook rename = %v, want d.md", notebookEv)
+	}
+	if got := waitForFsChange(t, hubClient.send, originUI); !slices.Contains(got, "d.md") {
+		t.Fatalf("fs_changed after notebook rename = %v, want d.md", got)
+	}
+	_ = notebookRoot
+}
+
+// assertNoBroadcast fails the test if an event of the given type shows up on ch
+// within the wait window. Any other events (including fs_changed) are drained and
+// ignored so a later waitForFsChange in the same test still sees them — this
+// function only asserts absence of eventType.
+func assertNoBroadcast(t *testing.T, ch chan outboundMessage, eventType string, wait time.Duration) {
+	t.Helper()
+	deadline := time.After(wait)
+	var drained []outboundMessage
+	for {
+		select {
+		case msg := <-ch:
+			var ev struct {
+				Event string `json:"event"`
+			}
+			if err := json.Unmarshal(msg.payload, &ev); err == nil && ev.Event == eventType {
+				t.Fatalf("unexpected %s broadcast", eventType)
+			}
+			drained = append(drained, msg)
+		case <-deadline:
+			for _, m := range drained {
+				ch <- m
+			}
+			return
+		}
+	}
+}
+
+// waitForNotebookChangeEvent returns the paths of the first notebook_changed
+// broadcast on ch.
+func waitForNotebookChangeEvent(t *testing.T, ch chan outboundMessage) []string {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case msg := <-ch:
+			var ev protocol.NotebookChangedMessage
+			if err := json.Unmarshal(msg.payload, &ev); err != nil {
+				continue
+			}
+			if ev.Event == protocol.EventNotebookChanged {
+				return ev.Paths
+			}
+		case <-deadline:
+			t.Fatalf("no notebook_changed was broadcast")
+			return nil
+		}
 	}
 }

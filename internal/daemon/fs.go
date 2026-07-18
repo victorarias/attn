@@ -46,42 +46,66 @@ var assetMimeTypes = map[string]string{
 	".ico":  "image/x-icon",
 }
 
-// fsStoreFor returns the daemon's single generic filesystem Store for the active
-// root. The root is the SAME one the notebook uses (notebook.root): fsdoc is the
-// raw layer beneath the curated notebook surface. The Store is cached and reused
-// so writes serialize through one in-process writer, and rebuilt only when the
-// resolved root changes. As with the notebook, every fs operation lazily ensures
-// the one shared root watcher is running (so fs_changed fires for external edits).
-func (d *Daemon) fsStoreFor() (*fsdoc.Store, error) {
-	root, err := d.notebookRoot()
+// resolveFsRoot resolves the raw root a fs_* command asked to operate under:
+// empty/blank means "the notebook root" (today's behavior, unchanged); a
+// non-empty value must be a normalized-clean absolute path outside the attn
+// data dir, same rule as notebook.root, worded for the fs surface.
+func (d *Daemon) resolveFsRoot(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return d.notebookRoot()
+	}
+	resolved, err := normalizeExternalRoot(raw)
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("fs root %w", err)
+	}
+	return resolved, nil
+}
+
+// fsStoreFor returns the daemon's generic filesystem Store for rawRoot,
+// resolving it first (see resolveFsRoot). Stores are cached per resolved root
+// so writes to the same root serialize through one in-process writer. Only the
+// notebook root gets the shared external-edit watcher today (ensureNotebookWatcher);
+// other roots get a Store but no watcher — that lands with the non-text editor
+// work (PR2). Returns the resolved root alongside the store so callers can key
+// broadcasts and notebook-coupling decisions on it without re-resolving.
+func (d *Daemon) fsStoreFor(rawRoot string) (*fsdoc.Store, string, error) {
+	root, err := d.resolveFsRoot(rawRoot)
+	if err != nil {
+		return nil, "", err
 	}
 	d.fsMu.Lock()
-	if d.fsStore == nil || d.fsStore.Root() != root {
-		d.fsStore = fsdoc.NewStore(root)
+	if d.fsStores == nil {
+		d.fsStores = make(map[string]*fsdoc.Store)
 	}
-	store := d.fsStore
+	store, ok := d.fsStores[root]
+	if !ok {
+		store = fsdoc.NewStore(root)
+		d.fsStores[root] = store
+	}
 	d.fsMu.Unlock()
-	d.ensureNotebookWatcher(root)
-	return store, nil
+	if notebookRoot, nerr := d.notebookRoot(); nerr == nil && root == notebookRoot {
+		d.ensureNotebookWatcher(root)
+	}
+	return store, root, nil
 }
 
 // broadcastFsChanged announces a filesystem change to all websocket clients.
-// origin is agent|ui|external, the same vocabulary as notebook_changed.
-func (d *Daemon) broadcastFsChanged(origin string, paths ...string) {
+// origin is agent|ui|external, the same vocabulary as notebook_changed. root is
+// the resolved absolute root the change happened under.
+func (d *Daemon) broadcastFsChanged(root, origin string, paths ...string) {
 	d.broadcastMessage(protocol.FsChangedMessage{
 		Event:  protocol.EventFsChanged,
 		Paths:  paths,
 		Origin: origin,
+		Root:   root,
 	})
 }
 
 // sendFsListWSResult lists one directory's immediate children and replies with an
 // fs_list_result event correlated by requestID.
-func (d *Daemon) sendFsListWSResult(client *wsClient, requestID, path string) {
+func (d *Daemon) sendFsListWSResult(client *wsClient, requestID, path, rawRoot string) {
 	var entries []protocol.FsEntry
-	store, err := d.fsStoreFor()
+	store, _, err := d.fsStoreFor(rawRoot)
 	if err == nil {
 		var list []fsdoc.Entry
 		if list, err = store.List(path); err == nil {
@@ -102,9 +126,9 @@ func (d *Daemon) sendFsListWSResult(client *wsClient, requestID, path string) {
 
 // sendFsReadWSResult reads one file and replies with an fs_read_result event
 // correlated by requestID.
-func (d *Daemon) sendFsReadWSResult(client *wsClient, requestID, path string) {
+func (d *Daemon) sendFsReadWSResult(client *wsClient, requestID, path, rawRoot string) {
 	var result *protocol.FsReadResult
-	store, err := d.fsStoreFor()
+	store, _, err := d.fsStoreFor(rawRoot)
 	if err == nil {
 		var content []byte
 		var hash string
@@ -127,12 +151,12 @@ func (d *Daemon) sendFsReadWSResult(client *wsClient, requestID, path string) {
 // sendFsReadAssetWSResult reads one image file's bytes as base64 and replies with
 // an fs_read_asset_result event correlated by requestID. Only extensions in
 // assetMimeTypes are served; the extension is rejected before the file is read.
-func (d *Daemon) sendFsReadAssetWSResult(client *wsClient, requestID, path string) {
+func (d *Daemon) sendFsReadAssetWSResult(client *wsClient, requestID, path, rawRoot string) {
 	var result *protocol.FsReadAssetResult
 	mimeType, err := assetMimeTypeFor(path)
 	if err == nil {
 		var store *fsdoc.Store
-		if store, err = d.fsStoreFor(); err == nil {
+		if store, _, err = d.fsStoreFor(rawRoot); err == nil {
 			var content []byte
 			if content, _, err = store.ReadWithLimit(path, maxAssetBytes); err == nil {
 				if len(content) > maxAssetBytes {
@@ -201,9 +225,9 @@ func assetMessageFits(requestID, path, mimeType string, rawLen int) (bool, error
 // for the UI to reconcile, not an error. On a successful write it records the
 // path as a self-write (so the shared watcher does not echo it as external) and
 // broadcasts fs_changed(origin=ui).
-func (d *Daemon) sendFsWriteWSResult(client *wsClient, requestID, path, content, baseHash string) {
+func (d *Daemon) sendFsWriteWSResult(client *wsClient, requestID, path, content, baseHash, rawRoot string) {
 	var result *protocol.FsWriteResult
-	store, err := d.fsStoreFor()
+	store, root, err := d.fsStoreFor(rawRoot)
 	if err == nil {
 		// Normalize the path to the canonical form fs_list/fs_changed key on, so the
 		// echoed result.path and the broadcast match it (not the raw leading-slash
@@ -224,13 +248,15 @@ func (d *Daemon) sendFsWriteWSResult(client *wsClient, requestID, path, content,
 				}
 			} else {
 				result.Hash = protocol.Ptr(hash)
-				// Content-aware self-write so the shared watcher does not surface this
-				// UI edit as an external one. NoteSelfWrite keys on the notebook's
-				// CleanPath, so it only registers a .md path — which is exactly the set
-				// the watcher can report today; a non-.md write fires no watcher event,
-				// so there is nothing to suppress for it either way.
-				d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: changed, Hash: hash})
-				d.broadcastFsChanged(originUI, changed)
+				if d.isNotebookRoot(root) {
+					// Content-aware self-write so the shared watcher does not surface this
+					// UI edit as an external one. NoteSelfWrite keys on the notebook's
+					// CleanPath, so it only registers a .md path — which is exactly the set
+					// the watcher can report today; a non-.md write fires no watcher event,
+					// so there is nothing to suppress for it either way.
+					d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: changed, Hash: hash})
+				}
+				d.broadcastFsChanged(root, originUI, changed)
 			}
 		}
 	}
@@ -246,12 +272,12 @@ func (d *Daemon) sendFsWriteWSResult(client *wsClient, requestID, path, content,
 	d.sendToClient(client, msg)
 }
 
-func (d *Daemon) sendFsRenameWSResult(client *wsClient, requestID, oldPath, newPath string) {
+func (d *Daemon) sendFsRenameWSResult(client *wsClient, requestID, oldPath, newPath, rawRoot string) {
 	oldRel, oldErr := fsdoc.CleanPath(oldPath)
 	newRel, newErr := fsdoc.CleanPath(newPath)
 	err := errors.Join(oldErr, newErr)
 	var result *protocol.FsRenameResult
-	store, storeErr := d.fsStoreFor()
+	store, root, storeErr := d.fsStoreFor(rawRoot)
 	if err == nil {
 		err = storeErr
 	}
@@ -260,15 +286,20 @@ func (d *Daemon) sendFsRenameWSResult(client *wsClient, requestID, oldPath, newP
 		if readErr != nil {
 			err = readErr
 		} else {
-			d.noteNotebookSelfWrite(
-				notebook.SelfWrite{Rel: oldRel},
-				notebook.SelfWrite{Rel: newRel, Hash: hash},
-			)
+			inNotebook := d.isNotebookRoot(root)
+			if inNotebook {
+				d.noteNotebookSelfWrite(
+					notebook.SelfWrite{Rel: oldRel},
+					notebook.SelfWrite{Rel: newRel, Hash: hash},
+				)
+			}
 			err = store.Rename(oldRel, newRel)
 			if err == nil {
 				result = &protocol.FsRenameResult{Path: oldRel, NewPath: newRel}
-				d.broadcastNotebookChanged(originUI, oldRel, newRel)
-				d.broadcastFsChanged(originUI, oldRel, newRel)
+				if inNotebook {
+					d.broadcastNotebookChanged(originUI, oldRel, newRel)
+				}
+				d.broadcastFsChanged(root, originUI, oldRel, newRel)
 			}
 		}
 	}
@@ -279,20 +310,25 @@ func (d *Daemon) sendFsRenameWSResult(client *wsClient, requestID, oldPath, newP
 	d.sendToClient(client, msg)
 }
 
-func (d *Daemon) sendFsDeleteWSResult(client *wsClient, requestID, path string) {
+func (d *Daemon) sendFsDeleteWSResult(client *wsClient, requestID, path, rawRoot string) {
 	rel, err := fsdoc.CleanPath(path)
 	var result *protocol.FsDeleteResult
-	store, storeErr := d.fsStoreFor()
+	store, root, storeErr := d.fsStoreFor(rawRoot)
 	if err == nil {
 		err = storeErr
 	}
 	if err == nil {
-		d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: rel})
+		inNotebook := d.isNotebookRoot(root)
+		if inNotebook {
+			d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: rel})
+		}
 		err = store.Delete(rel)
 		if err == nil {
 			result = &protocol.FsDeleteResult{Path: rel}
-			d.broadcastNotebookChanged(originUI, rel)
-			d.broadcastFsChanged(originUI, rel)
+			if inNotebook {
+				d.broadcastNotebookChanged(originUI, rel)
+			}
+			d.broadcastFsChanged(root, originUI, rel)
 		}
 	}
 	msg := protocol.FsDeleteResultMessage{Event: protocol.EventFsDeleteResult, RequestID: requestID, Success: err == nil, Result: result}
@@ -307,9 +343,9 @@ func (d *Daemon) sendFsDeleteWSResult(client *wsClient, requestID, path string) 
 // file — the frontend uses it to flag an in-notebook link whose target note is
 // missing. A path that fails to validate (escapes the root, dotfile) is an error
 // the frontend treats as "unknown, leave the link unflagged", not as "missing".
-func (d *Daemon) sendFsExistsWSResult(client *wsClient, requestID, path string) {
+func (d *Daemon) sendFsExistsWSResult(client *wsClient, requestID, path, rawRoot string) {
 	var result *protocol.FsExistsResult
-	store, err := d.fsStoreFor()
+	store, _, err := d.fsStoreFor(rawRoot)
 	if err == nil {
 		var exists bool
 		if exists, err = store.Exists(path); err == nil {
@@ -326,6 +362,14 @@ func (d *Daemon) sendFsExistsWSResult(client *wsClient, requestID, path string) 
 		msg.Error = protocol.Ptr(err.Error())
 	}
 	d.sendToClient(client, msg)
+}
+
+// isNotebookRoot reports whether root is the currently resolved notebook root
+// (best-effort: a notebookRoot() error is treated as "not the notebook root",
+// so a foreign fs root never accidentally couples to notebook broadcasts).
+func (d *Daemon) isNotebookRoot(root string) bool {
+	notebookRoot, err := d.notebookRoot()
+	return err == nil && root == notebookRoot
 }
 
 // fsEntriesToProtocol converts store entries to their protocol shape.

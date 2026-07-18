@@ -81,7 +81,7 @@ func (d *Daemon) ensureNotebookWatcher(root string) {
 		// notebook view and the raw fs view. (The watcher only surfaces .md paths
 		// today, so fs_changed inherits that limit until the watcher is generalized.)
 		d.broadcastNotebookChanged(originExternal, paths...)
-		d.broadcastFsChanged(originExternal, paths...)
+		d.broadcastFsChanged(root, originExternal, paths...)
 	})
 	if err != nil {
 		d.logf("notebook watcher: failed to watch %s: %v", root, err)

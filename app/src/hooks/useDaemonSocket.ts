@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '166';
+export const PROTOCOL_VERSION = '167';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -453,7 +453,7 @@ interface UseDaemonSocketOptions {
   // Fired when files under the root change (any client/agent/external write). paths
   // are root-relative; origin is agent|ui|external. Mirrors onNotebookChanged for
   // the generic filesystem surface (fs_changed).
-  onFsChanged?: (origin: string, paths: string[]) => void;
+  onFsChanged?: (origin: string, paths: string[], root: string) => void;
   // Fired with the non-archived ticket board (bare rows) on initial_state and on
   // every tickets_updated broadcast. The detail view fetches full records itself.
   onTicketsUpdate?: (tickets: Ticket[]) => void;
@@ -1524,6 +1524,7 @@ export function useDaemonSocket({
             callbacksRef.current.onFsChanged?.(
               typeof data.origin === 'string' ? data.origin : '',
               Array.isArray(data.paths) ? data.paths : [],
+              typeof data.root === 'string' ? data.root : '',
             );
             break;
 
@@ -4603,7 +4604,7 @@ export function useDaemonSocket({
   // List one directory's immediate children over the generic filesystem surface.
   // Omit/empty path = the root directory. Shallow: a tree expands lazily, one call
   // per node.
-  const sendFsList = useCallback((path?: string): Promise<FsEntry[]> => {
+  const sendFsList = useCallback((path?: string, root?: string): Promise<FsEntry[]> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4613,7 +4614,7 @@ export function useDaemonSocket({
       const requestId = nextRequestID('fs_list');
       const key = `fs_list:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_list', request_id: requestId, ...(path ? { path } : {}) }));
+      ws.send(JSON.stringify({ cmd: 'fs_list', request_id: requestId, ...(path ? { path } : {}), ...(root ? { root } : {}) }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -4624,7 +4625,7 @@ export function useDaemonSocket({
   }, [nextRequestID]);
 
   // Read one file's full bytes + content hash.
-  const sendFsRead = useCallback((path: string): Promise<FsReadResult> => {
+  const sendFsRead = useCallback((path: string, root?: string): Promise<FsReadResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4634,7 +4635,7 @@ export function useDaemonSocket({
       const requestId = nextRequestID('fs_read');
       const key = `fs_read:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_read', request_id: requestId, path }));
+      ws.send(JSON.stringify({ cmd: 'fs_read', request_id: requestId, path, ...(root ? { root } : {}) }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -4646,7 +4647,7 @@ export function useDaemonSocket({
 
   // Read one image asset's bytes as base64, for rendering ![alt](path) images in
   // the notebook editor without widening Tauri's fs permissions.
-  const sendFsReadAsset = useCallback((path: string): Promise<FsReadAssetResult> => {
+  const sendFsReadAsset = useCallback((path: string, root?: string): Promise<FsReadAssetResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4656,7 +4657,7 @@ export function useDaemonSocket({
       const requestId = nextRequestID('fs_read_asset');
       const key = `fs_read_asset:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_read_asset', request_id: requestId, path }));
+      ws.send(JSON.stringify({ cmd: 'fs_read_asset', request_id: requestId, path, ...(root ? { root } : {}) }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -4669,7 +4670,7 @@ export function useDaemonSocket({
   // Save one file via the daemon (hash-CAS). Omit baseHash to create-only; pass the
   // file's loaded hash to edit. Resolves with the outcome — including a conflict
   // (resolve, not reject) the editor reconciles; rejects only on a transport error.
-  const sendFsWrite = useCallback((path: string, content: string, baseHash?: string): Promise<FsWriteResult> => {
+  const sendFsWrite = useCallback((path: string, content: string, baseHash?: string, root?: string): Promise<FsWriteResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4679,7 +4680,7 @@ export function useDaemonSocket({
       const requestId = nextRequestID('fs_write');
       const key = `fs_write:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_write', request_id: requestId, path, content, ...(baseHash ? { base_hash: baseHash } : {}) }));
+      ws.send(JSON.stringify({ cmd: 'fs_write', request_id: requestId, path, content, ...(baseHash ? { base_hash: baseHash } : {}), ...(root ? { root } : {}) }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -4689,7 +4690,7 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
-  const sendFsRename = useCallback((path: string, newPath: string): Promise<FsRenameResult> => new Promise((resolve, reject) => {
+  const sendFsRename = useCallback((path: string, newPath: string, root?: string): Promise<FsRenameResult> => new Promise((resolve, reject) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       reject(new Error('WebSocket not connected'));
@@ -4698,7 +4699,7 @@ export function useDaemonSocket({
     const requestId = nextRequestID('fs_rename');
     const key = `fs_rename:${requestId}`;
     pendingActionsRef.current.set(key, { resolve, reject });
-    ws.send(JSON.stringify({ cmd: 'fs_rename', request_id: requestId, path, new_path: newPath }));
+    ws.send(JSON.stringify({ cmd: 'fs_rename', request_id: requestId, path, new_path: newPath, ...(root ? { root } : {}) }));
     setTimeout(() => {
       if (pendingActionsRef.current.has(key)) {
         pendingActionsRef.current.delete(key);
@@ -4707,7 +4708,7 @@ export function useDaemonSocket({
     }, 10000);
   }), [nextRequestID]);
 
-  const sendFsDelete = useCallback((path: string): Promise<FsDeleteResult> => new Promise((resolve, reject) => {
+  const sendFsDelete = useCallback((path: string, root?: string): Promise<FsDeleteResult> => new Promise((resolve, reject) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       reject(new Error('WebSocket not connected'));
@@ -4716,7 +4717,7 @@ export function useDaemonSocket({
     const requestId = nextRequestID('fs_delete');
     const key = `fs_delete:${requestId}`;
     pendingActionsRef.current.set(key, { resolve, reject });
-    ws.send(JSON.stringify({ cmd: 'fs_delete', request_id: requestId, path }));
+    ws.send(JSON.stringify({ cmd: 'fs_delete', request_id: requestId, path, ...(root ? { root } : {}) }));
     setTimeout(() => {
       if (pendingActionsRef.current.has(key)) {
         pendingActionsRef.current.delete(key);
@@ -4728,7 +4729,7 @@ export function useDaemonSocket({
   // Check whether a path exists under the notebook root, without reading it. Used
   // to flag in-notebook markdown links whose target note is missing. Rejects on a
   // transport/daemon error (the caller leaves the link unflagged in that case).
-  const sendFsExists = useCallback((path: string): Promise<FsExistsResult> => {
+  const sendFsExists = useCallback((path: string, root?: string): Promise<FsExistsResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4738,7 +4739,7 @@ export function useDaemonSocket({
       const requestId = nextRequestID('fs_exists');
       const key = `fs_exists:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_exists', request_id: requestId, path }));
+      ws.send(JSON.stringify({ cmd: 'fs_exists', request_id: requestId, path, ...(root ? { root } : {}) }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);

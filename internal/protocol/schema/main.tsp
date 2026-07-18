@@ -1108,12 +1108,14 @@ model NotificationMarkReadMessage {
 model FsListMessage {
   cmd: "fs_list";
   path?: string; // omitted/"" = the root directory itself
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
 model FsReadMessage {
   cmd: "fs_read";
   path: string;
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
@@ -1123,6 +1125,7 @@ model FsReadMessage {
 model FsReadAssetMessage {
   cmd: "fs_read_asset";
   path: string;
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
@@ -1131,6 +1134,7 @@ model FsWriteMessage {
   path: string;
   content: string;
   base_hash?: string; // omitted = create-only; present = hash-CAS edit
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
@@ -1138,12 +1142,14 @@ model FsRenameMessage {
   cmd: "fs_rename";
   path: string;
   new_path: string;
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
   request_id?: string;
 }
 
 model FsDeleteMessage {
   cmd: "fs_delete";
   path: string;
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
   request_id?: string;
 }
 
@@ -1152,6 +1158,7 @@ model FsDeleteMessage {
 model FsExistsMessage {
   cmd: "fs_exists";
   path: string;
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
@@ -2974,6 +2981,7 @@ model FsChangedMessage {
   event: "fs_changed";
   paths: string[];
   origin: string;
+  root: string; // the resolved absolute root the change happened under
 }
 
 model WorkspaceContextResultMessage {

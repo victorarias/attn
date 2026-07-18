@@ -476,23 +476,44 @@ func validateNotebookRoot(value string) error {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
-	path := value
+	_, err := normalizeExternalRoot(value)
+	if err != nil {
+		return fmt.Errorf("notebook.root %w", err)
+	}
+	return nil
+}
+
+// normalizeExternalRoot expands a leading "~/" against the user's home
+// directory, requires the result to be an absolute path, cleans it, and
+// rejects a path that is (or is inside) the attn data dir — an external root
+// must live OUTSIDE ~/.attn[-profile] so it stays a plain, externally-syncable
+// directory a dotfile-skipping scanner won't miss. Empty input is the
+// caller's concern: it returns ("", nil) unchanged.
+//
+// Errors are unprefixed (e.g. "must be an absolute path") so each caller can
+// prefix them with its own vocabulary (notebook.root vs fs root).
+func normalizeExternalRoot(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+	path := trimmed
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return fmt.Errorf("cannot determine home directory: %w", err)
+			return "", fmt.Errorf("cannot determine home directory: %w", err)
 		}
 		path = filepath.Join(home, path[2:])
 	}
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("notebook.root must be an absolute path")
+		return "", fmt.Errorf("must be an absolute path")
 	}
 	dataDir := config.DataDir()
 	clean := filepath.Clean(path)
 	if clean == dataDir || strings.HasPrefix(clean, dataDir+string(filepath.Separator)) {
-		return fmt.Errorf("notebook.root must be outside the attn data dir (%s)", dataDir)
+		return "", fmt.Errorf("must be outside the attn data dir (%s)", dataDir)
 	}
-	return nil
+	return clean, nil
 }
 
 // validateNotebookCronFrequency accepts an empty value (use the default) or a
