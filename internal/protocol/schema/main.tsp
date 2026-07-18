@@ -1556,6 +1556,12 @@ model WorkflowRunCancelMessage {
   run_id: string;
 }
 
+model AutomationApplyMessage { cmd: "automation_apply"; definition_yaml: string; }
+model AutomationListMessage { cmd: "automation_list"; }
+model AutomationShowMessage { cmd: "automation_show"; definition_id: string; }
+model AutomationRunMessage { cmd: "automation_run"; definition_id: string; request_id: string; input_json?: string; }
+model AutomationRunListMessage { cmd: "automation_run_list"; definition_id: string; }
+
 model SpawnSessionMessage {
   cmd: "spawn_session";
   id: string;

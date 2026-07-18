@@ -659,6 +659,51 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		observer_key TEXT PRIMARY KEY,
 		last_attention_at TEXT NOT NULL
 	)`},
+	{70, "create automation foundation tables", `
+		CREATE TABLE IF NOT EXISTS automation_definitions (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			enabled INTEGER NOT NULL,
+			revision INTEGER NOT NULL,
+			spec_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			deleted_at TEXT NOT NULL DEFAULT ''
+		);
+		CREATE TABLE IF NOT EXISTS automation_occurrences (
+			id TEXT PRIMARY KEY,
+			definition_id TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			occurrence_key TEXT NOT NULL,
+			subject_key TEXT NOT NULL DEFAULT '',
+			observed_at TEXT NOT NULL,
+			payload_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(definition_id, provider, occurrence_key),
+			FOREIGN KEY(definition_id) REFERENCES automation_definitions(id)
+		);
+		CREATE TABLE IF NOT EXISTS automation_runs (
+			id TEXT PRIMARY KEY,
+			definition_id TEXT NOT NULL,
+			occurrence_id TEXT NOT NULL UNIQUE,
+			definition_revision INTEGER NOT NULL,
+			snapshot_json TEXT NOT NULL,
+			state TEXT NOT NULL,
+			last_error TEXT NOT NULL DEFAULT '',
+			ticket_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			pane_id TEXT NOT NULL,
+			resolved_location_json TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			delivered_at TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY(definition_id) REFERENCES automation_definitions(id),
+			FOREIGN KEY(occurrence_id) REFERENCES automation_occurrences(id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_automation_runs_definition_created
+			ON automation_runs(definition_id, created_at DESC);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -873,6 +918,15 @@ func migrateDB(db *sql.DB, dbPath string) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 70 {
+			if _, err := tx.Exec(m.sql); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+			if err := applyMigration70(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -895,6 +949,20 @@ func migrateDB(db *sql.DB, dbPath string) error {
 	}
 
 	return nil
+}
+
+func applyMigration70(tx *sql.Tx) error {
+	exists, err := columnExists(tx, "tickets", "automation_run_id")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if _, err := tx.Exec(`ALTER TABLE tickets ADD COLUMN automation_run_id TEXT`); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_automation_run ON tickets(automation_run_id) WHERE automation_run_id IS NOT NULL`)
+	return err
 }
 
 func applyMigration20(tx *sql.Tx) error {

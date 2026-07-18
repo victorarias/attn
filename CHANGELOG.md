@@ -25,6 +25,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   producing output defers it.
 
 ### Added
+- **CLI-driven automations can prepare visible work before it needs attention.**
+  Apply a durable manual definition with `attn automation apply`, run it on
+  demand, and inspect its immutable run history. Each run creates an ordinary
+  chief-owned ticket and steerable agent session with fixed automatic approval,
+  stable provenance, idempotent request handling, and restart recovery. Reuse
+  `--request-id` when retrying a run whose result was interrupted or uncertain.
 - **Automatic rotating database backups.** The daemon now snapshots its SQLite
   database every 6 hours (keeping the last 12) and takes an extra safety
   snapshot right before any database migration, so session, ticket, and

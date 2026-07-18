@@ -119,6 +119,49 @@ type AuthorsUpdatedMessage struct {
 	Event string `json:"event"`
 }
 
+type AutomationApplyMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DefinitionYaml corresponds to the JSON schema field "definition_yaml".
+	DefinitionYaml string `json:"definition_yaml"`
+}
+
+type AutomationListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type AutomationRunListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+}
+
+type AutomationRunMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+
+	// InputJson corresponds to the JSON schema field "input_json".
+	InputJson *string `json:"input_json,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
+type AutomationShowMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+}
+
 type BootstrapEndpointMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`

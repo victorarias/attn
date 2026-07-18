@@ -55,6 +55,13 @@ func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
 		ExternalCWD:       opts.ExternalCWD,
 		LifecycleID:       opts.LifecycleID,
 		LoginShellEnv:     opts.LoginShellEnv,
+
+		WorkflowGuidanceEnabled: opts.WorkflowGuidanceEnabled,
+		AutoApprove:             opts.AutoApprove,
+		TrustWorkingDirectory:   opts.TrustWorkingDirectory,
+		Model:                   opts.Model,
+		Effort:                  opts.Effort,
+		ChiefContextWindowCap:   opts.ChiefContextWindowCap,
 	})
 }
 

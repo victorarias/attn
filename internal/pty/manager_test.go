@@ -114,6 +114,43 @@ func TestBuildSpawnEnv_SetsWrapperPath(t *testing.T) {
 	}
 }
 
+func TestBuildSpawnEnv_WorkerLaunchPinsOverrideCachedShellEnvironment(t *testing.T) {
+	t.Setenv("ATTN_PTY_WORKER", "1")
+	t.Setenv("ATTN_MODEL", "automation-model")
+	t.Setenv("ATTN_EFFORT", "low")
+	env := buildSpawnEnv("", SpawnOptions{
+		ID:            "session-1",
+		LoginShellEnv: []string{"ATTN_MODEL=parent-model", "ATTN_EFFORT=medium"},
+	}, "codex", "/tmp/attn", nil)
+	if got, _ := lookupEnv(env, "ATTN_MODEL"); got != "automation-model" {
+		t.Fatalf("ATTN_MODEL = %q, want automation-model", got)
+	}
+	if got, _ := lookupEnv(env, "ATTN_EFFORT"); got != "low" {
+		t.Fatalf("ATTN_EFFORT = %q, want low", got)
+	}
+	if _, ok := lookupEnv(env, "ATTN_PTY_WORKER"); ok {
+		t.Fatal("ATTN_PTY_WORKER leaked into the launched session")
+	}
+}
+
+func TestBuildSpawnEnv_EmbeddedLaunchPinsOverrideInheritedEnvironment(t *testing.T) {
+	t.Setenv("ATTN_MODEL", "parent-model")
+	t.Setenv("ATTN_EFFORT", "medium")
+	t.Setenv("ATTN_AUTO_APPROVE", "parent-value")
+	env := buildSpawnEnv("", SpawnOptions{
+		ID: "session-1", LoginShellEnv: []string{"ATTN_MODEL=login-model"},
+		AutoApprove: true, TrustWorkingDirectory: true, Model: "automation-model", Effort: "low",
+	}, "codex", "/tmp/attn", nil)
+	for key, want := range map[string]string{
+		"ATTN_AUTO_APPROVE": "1", "ATTN_TRUST_WORKING_DIRECTORY": "1",
+		"ATTN_MODEL": "automation-model", "ATTN_EFFORT": "low",
+	} {
+		if got, _ := lookupEnv(env, key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestBuildSpawnEnv_SetsAttnPresence(t *testing.T) {
 	env := buildSpawnEnv("", SpawnOptions{ID: "session-1"}, "codex", "/tmp/attn-wrapper", nil)
 

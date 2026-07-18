@@ -103,6 +103,7 @@ type Daemon struct {
 	dataRoot         string
 	daemonInstanceID string
 	store            *store.Store
+	automationMu     sync.Mutex // serializes idempotent ensure/adopt delivery per profile
 	listener         net.Listener
 	httpServer       *http.Server
 	httpHandler      http.Handler
@@ -859,6 +860,7 @@ func (d *Daemon) Start() error {
 	recoveryStartedAt := time.Now()
 	go func() {
 		d.performStartupPTYRecovery(recoveryStartedAt)
+		d.recoverAutomations()
 		d.setRecovering(false)
 	}()
 
@@ -2024,6 +2026,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleRegister(conn, msg.(*protocol.RegisterMessage))
 	case protocol.CmdDelegate:
 		d.handleDelegate(conn, msg.(*protocol.DelegateMessage))
+	case protocol.CmdAutomationApply, protocol.CmdAutomationList, protocol.CmdAutomationShow, protocol.CmdAutomationRun, protocol.CmdAutomationRunList:
+		d.handleAutomationCommand(conn, cmd, msg)
 	case protocol.CmdSetTicketStatus:
 		d.handleSetTicketStatus(conn, msg.(*protocol.SetTicketStatusMessage))
 	case protocol.CmdTicketInbox:

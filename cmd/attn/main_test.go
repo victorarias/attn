@@ -390,6 +390,26 @@ func TestParseDirectLaunchArgs_InitialPromptFile(t *testing.T) {
 	}
 }
 
+func TestConsumeOneShotBoolEnvRemovesLaunchCapability(t *testing.T) {
+	t.Setenv("ATTN_TEST_ONE_SHOT", "1")
+	if !consumeOneShotBoolEnv("ATTN_TEST_ONE_SHOT") {
+		t.Fatal("consumeOneShotBoolEnv() = false, want true")
+	}
+	if _, ok := os.LookupEnv("ATTN_TEST_ONE_SHOT"); ok {
+		t.Fatal("one-shot launch capability remained in the environment")
+	}
+}
+
+func TestConsumeOneShotEnvRemovesLaunchPin(t *testing.T) {
+	t.Setenv("ATTN_TEST_ONE_SHOT_VALUE", " pinned ")
+	if got := consumeOneShotEnv("ATTN_TEST_ONE_SHOT_VALUE"); got != "pinned" {
+		t.Fatalf("consumeOneShotEnv() = %q, want pinned", got)
+	}
+	if _, ok := os.LookupEnv("ATTN_TEST_ONE_SHOT_VALUE"); ok {
+		t.Fatal("one-shot launch pin remained in the environment")
+	}
+}
+
 func TestReadInitialPromptFileRemovesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prompt.md")
 	if err := os.WriteFile(path, []byte("delegated brief"), 0o600); err != nil {

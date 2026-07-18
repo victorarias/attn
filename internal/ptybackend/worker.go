@@ -484,12 +484,26 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 			_ = workerLogFile.Close()
 		}()
 	}
-	workerEnv := append(os.Environ(), "ATTN_PTY_WORKER=1")
+	workerEnv := withoutEnvironmentKeys(os.Environ(),
+		"ATTN_PTY_WORKER",
+		"ATTN_WORKFLOW_GUIDANCE_ENABLED",
+		"ATTN_AUTO_APPROVE",
+		"ATTN_TRUST_WORKING_DIRECTORY",
+		"ATTN_MODEL",
+		"ATTN_EFFORT",
+		"ATTN_CHIEF_AUTO_COMPACT_WINDOW",
+		"ATTN_CACHED_SHELL_ENV",
+		"ATTN_PTY_EXTERNAL_ENV",
+	)
+	workerEnv = append(workerEnv, "ATTN_PTY_WORKER=1")
 	if opts.WorkflowGuidanceEnabled {
 		workerEnv = append(workerEnv, "ATTN_WORKFLOW_GUIDANCE_ENABLED=1")
 	}
 	if opts.AutoApprove {
 		workerEnv = append(workerEnv, "ATTN_AUTO_APPROVE=1")
+	}
+	if opts.TrustWorkingDirectory {
+		workerEnv = append(workerEnv, "ATTN_TRUST_WORKING_DIRECTORY=1")
 	}
 	if model := strings.TrimSpace(opts.Model); model != "" {
 		workerEnv = append(workerEnv, "ATTN_MODEL="+model)
@@ -558,6 +572,22 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		return errors.New("worker exited before ready")
 	}
 	return fmt.Errorf("worker did not become ready: %w", lastErr)
+}
+
+func withoutEnvironmentKeys(env []string, keys ...string) []string {
+	blocked := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		blocked[key] = struct{}{}
+	}
+	filtered := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, found := blocked[key]; found {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }
 
 func (b *WorkerBackend) Attach(ctx context.Context, sessionID, subscriberID string) (AttachInfo, Stream, error) {

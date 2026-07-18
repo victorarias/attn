@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -19,6 +20,19 @@ import (
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptyworker"
 )
+
+func TestWithoutEnvironmentKeysRemovesInheritedLaunchPins(t *testing.T) {
+	got := withoutEnvironmentKeys([]string{
+		"PATH=/bin",
+		"ATTN_MODEL=inherited",
+		"ATTN_EFFORT=medium",
+		"ATTN_MODEL=duplicate",
+	}, "ATTN_MODEL", "ATTN_EFFORT")
+	want := []string{"PATH=/bin"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("withoutEnvironmentKeys() = %#v, want %#v", got, want)
+	}
+}
 
 func newWorkerBackendTestRoot(t *testing.T) string {
 	t.Helper()

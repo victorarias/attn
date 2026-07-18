@@ -426,7 +426,53 @@ func (d *Daemon) sendSpawnFailure(client *wsClient, sessionID string, err error)
 	})
 }
 
+func buildSpawnSessionRecord(msg *protocol.SpawnSessionMessage, agent, cwd, label string, existing *protocol.Session, isShell, pluginReportsNoState bool) *protocol.Session {
+	nowStr := string(protocol.TimestampNow())
+	state := protocol.SessionStateLaunching
+	if isShell {
+		state = protocol.SessionStateIdle
+	}
+	stateSince, stateUpdatedAt := nowStr, nowStr
+	if existing != nil {
+		state, stateSince, stateUpdatedAt = existing.State, existing.StateSince, existing.StateUpdatedAt
+		if stateSince == "" {
+			stateSince = nowStr
+		}
+		if stateUpdatedAt == "" {
+			stateUpdatedAt = nowStr
+		}
+	}
+	if pluginReportsNoState {
+		state, stateSince, stateUpdatedAt = protocol.SessionStateWorking, nowStr, nowStr
+	}
+	session := &protocol.Session{ID: msg.ID, Label: label, Agent: protocol.SessionAgent(agent), Directory: cwd, State: state, StateSince: stateSince, StateUpdatedAt: stateUpdatedAt, LastSeen: nowStr, WorkspaceID: msg.WorkspaceID}
+	if branchInfo, _ := git.GetBranchInfo(cwd); branchInfo != nil {
+		if branchInfo.Branch != "" {
+			session.Branch = protocol.Ptr(branchInfo.Branch)
+		}
+		if branchInfo.IsWorktree {
+			session.IsWorktree = protocol.Ptr(true)
+		}
+		if branchInfo.MainRepo != "" {
+			session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
+		}
+	}
+	return session
+}
+
+type internalSpawnPolicy struct {
+	autoApprove           bool
+	trustWorkingDirectory bool
+}
+
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
+	d.handleSpawnSessionWithPolicy(client, msg, internalSpawnPolicy{})
+}
+
+// handleSpawnSessionWithPolicy is reserved for daemon-owned launch paths. The
+// public workspace protocol must not be able to grant automatic approval or
+// working-directory trust independently of the user's daemon settings.
+func (d *Daemon) handleSpawnSessionWithPolicy(client *wsClient, msg *protocol.SpawnSessionMessage, policy internalSpawnPolicy) {
 	requestedAgent := strings.TrimSpace(strings.ToLower(msg.Agent))
 	pluginDriver, hasPluginDriver := d.ensurePluginRegistry().driver(requestedAgent)
 	agent := normalizeSpawnAgent(msg.Agent)
@@ -552,7 +598,8 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		LoginShellEnv:     d.cachedLoginShellEnv(),
 
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
-		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
+		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)) || policy.autoApprove,
+		TrustWorkingDirectory:   policy.trustWorkingDirectory,
 		Model:                   strings.TrimSpace(protocol.Deref(msg.Model)),
 		Effort:                  strings.TrimSpace(protocol.Deref(msg.Effort)),
 	}
@@ -653,7 +700,28 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 		spawnOpts.ExternalCWD = strings.TrimSpace(result.CWD)
 	}
 
+	// Persist the complete launch intent before creating the worker. If the daemon
+	// dies after Spawn, startup recovery can now associate that worker with its
+	// workspace, pane, ticket, and automation run instead of seeing an anonymous
+	// process with no durable session row.
+	launchSession := buildSpawnSessionRecord(msg, agent, cwd, label, existingSession, isShell, hasPluginDriver && !pluginDriver.Capabilities["state_reporting"])
+	if err := d.store.AddChecked(launchSession); err != nil {
+		if hasPluginDriver {
+			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
+		}
+		if chiefAssigned {
+			d.clearChiefOfStaffIfSession(msg.ID)
+		}
+		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("persist session launch intent: %w", err))
+		return
+	}
+
 	if err := d.ptyBackend.Spawn(context.Background(), spawnOpts); err != nil {
+		if existingSession == nil {
+			d.store.Remove(msg.ID)
+		} else if restoreErr := d.store.AddChecked(existingSession); restoreErr != nil {
+			err = errors.Join(err, fmt.Errorf("restore prior session after spawn failure: %w", restoreErr))
+		}
 		if hasPluginDriver {
 			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
 		}
@@ -672,58 +740,7 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 
 	{
 		d.clearLongRunTracking(msg.ID)
-		branchInfo, _ := git.GetBranchInfo(cwd)
-		nowStr := string(protocol.TimestampNow())
-		initialState := protocol.SessionStateLaunching
-		if isShell {
-			// A shell is a plain user-driven PTY: it has no agent turn
-			// lifecycle, no Stop hook, and (deliberately) no state detector, so
-			// nothing ever transitions it once spawned. Seed it `idle` rather
-			// than `working` — a shell sitting at a prompt is not "working", and
-			// the old `working` seed made every shell (and its workspace) show a
-			// permanent green dot it could never leave until the process exited.
-			initialState = protocol.SessionStateIdle
-		}
-		initialStateSince := nowStr
-		initialStateUpdatedAt := nowStr
-		if existingSession != nil {
-			initialState = existingSession.State
-			initialStateSince = existingSession.StateSince
-			initialStateUpdatedAt = existingSession.StateUpdatedAt
-			if initialStateSince == "" {
-				initialStateSince = nowStr
-			}
-			if initialStateUpdatedAt == "" {
-				initialStateUpdatedAt = nowStr
-			}
-		}
-		if hasPluginDriver && !pluginDriver.Capabilities["state_reporting"] {
-			initialState = protocol.SessionStateWorking
-			initialStateSince = nowStr
-			initialStateUpdatedAt = nowStr
-		}
-		session := &protocol.Session{
-			ID:             msg.ID,
-			Label:          label,
-			Agent:          protocol.SessionAgent(agent),
-			Directory:      cwd,
-			State:          initialState,
-			StateSince:     initialStateSince,
-			StateUpdatedAt: initialStateUpdatedAt,
-			LastSeen:       nowStr,
-			WorkspaceID:    workspaceID,
-		}
-		if branchInfo != nil {
-			if branchInfo.Branch != "" {
-				session.Branch = protocol.Ptr(branchInfo.Branch)
-			}
-			if branchInfo.IsWorktree {
-				session.IsWorktree = protocol.Ptr(true)
-			}
-			if branchInfo.MainRepo != "" {
-				session.MainRepo = protocol.Ptr(branchInfo.MainRepo)
-			}
-		}
+		session := launchSession
 		if err := d.store.AddChecked(session); err != nil {
 			if hasPluginDriver {
 				d.abortPluginSessionLaunch(msg.ID, "launch_failed")
