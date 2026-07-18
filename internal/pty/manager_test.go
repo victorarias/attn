@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"syscall"
@@ -460,6 +461,87 @@ command -v attn > "$RESULT_PATH"
 	}
 	if got := strings.TrimSpace(string(resolved)); got != activeAttn {
 		t.Fatalf("bare attn resolved to %q after bash rc startup, want active wrapper %q", got, activeAttn)
+	}
+}
+
+func TestPrepareShellPaneLaunch_ReassertsPathAfterRealFishStartup(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("attn supports macOS; this exercises the installed fish startup contract")
+	}
+	fishPath, err := exec.LookPath("fish")
+	if err != nil {
+		t.Skip("fish is not installed")
+	}
+	root := t.TempDir()
+	activeDir := filepath.Join(root, "active")
+	staleDir := filepath.Join(root, "stale")
+	configHome := filepath.Join(root, "config")
+	resultPath := filepath.Join(root, "resolved-attn")
+	for _, dir := range []string{activeDir, staleDir, filepath.Join(configHome, "fish")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	activeAttn := filepath.Join(activeDir, "attn")
+	if err := os.WriteFile(activeAttn, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write active attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, "attn"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write stale attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configHome, "fish", "config.fish"), []byte("set -gx PATH $STALE_ATTN_DIR $PATH\n"), 0o600); err != nil {
+		t.Fatalf("write fish config: %v", err)
+	}
+
+	env := []string{
+		"PATH=" + activeDir + string(os.PathListSeparator) + staleDir + string(os.PathListSeparator) + "/usr/bin:/bin",
+		"HOME=" + root,
+		"XDG_CONFIG_HOME=" + configHome,
+		"STALE_ATTN_DIR=" + staleDir,
+		"RESULT_PATH=" + resultPath,
+	}
+	launch, err := prepareShellPaneLaunch(fishPath, env)
+	if err != nil {
+		t.Fatalf("prepare fish pane launch: %v", err)
+	}
+	defer launch.cleanup()
+	args := append([]string(nil), launch.command.Args[1:]...)
+	args = append(args, "-i", "-c", "status is-login; or exit 8; command -v attn > $RESULT_PATH")
+	launch.command = exec.Command(launch.command.Path, args...)
+	launch.command.Env = launch.env
+	if output, err := launch.command.CombinedOutput(); err != nil {
+		t.Fatalf("run real fish startup: %v\n%s", err, output)
+	}
+	resolved, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read resolved attn: %v", err)
+	}
+	if got := strings.TrimSpace(string(resolved)); got != activeAttn {
+		t.Fatalf("bare attn resolved to %q after fish startup, want active wrapper %q", got, activeAttn)
+	}
+}
+
+func TestPrepareShellPaneLaunch_UnknownShellPreservesConfiguredLoginShell(t *testing.T) {
+	root := t.TempDir()
+	loginShell := filepath.Join(root, "nushell")
+	if err := os.WriteFile(loginShell, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write custom login shell: %v", err)
+	}
+	env := []string{"PATH=/active:/stale", "HOME=" + root}
+
+	launch, err := prepareShellPaneLaunch(loginShell, env)
+	if err != nil {
+		t.Fatalf("prepare custom shell pane launch: %v", err)
+	}
+	defer launch.cleanup()
+	if launch.command.Path != loginShell {
+		t.Fatalf("shell command path = %q, want configured shell %q", launch.command.Path, loginShell)
+	}
+	if got, want := launch.command.Args, []string{loginShell, "-l"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("shell command args = %q, want %q", got, want)
+	}
+	if got, want := launch.env, env; !reflect.DeepEqual(got, want) {
+		t.Fatalf("shell environment = %q, want unchanged %q", got, want)
 	}
 }
 

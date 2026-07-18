@@ -9,37 +9,66 @@ import (
 	"strings"
 )
 
-var errUnsupportedShellStartup = errors.New("shell has no supported post-startup hook")
-
 type shellPaneLaunch struct {
 	command *exec.Cmd
 	env     []string
 	cleanup func()
 }
 
+type shellStartupStrategy func(shellPath string, env []string) (shellPaneLaunch, error)
+
+// shellStartupStrategies lists shells whose startup contracts let attn restore
+// PATH after user configuration has run. Add a strategy here when supporting a
+// new shell; shells without one retain their normal login launch unchanged.
+var shellStartupStrategies = map[string]shellStartupStrategy{
+	"zsh":  prepareZshShellPaneLaunch,
+	"bash": preparePOSIXShellPaneLaunch,
+	"sh":   preparePOSIXShellPaneLaunch,
+	"fish": prepareFishShellPaneLaunch,
+}
+
 // prepareShellPaneLaunch preserves the user's single interactive login shell
-// while restoring the launch PATH after its personal startup files. A normal
-// cmd.Env assignment is not enough: login and interactive rc files run after
-// exec and may prepend an old attn installation.
+// while restoring the launch PATH after its personal startup files when the
+// shell has a supported post-startup hook. A normal cmd.Env assignment is not
+// enough for those shells: login and interactive rc files run after exec and
+// may prepend an old attn installation. Other shells retain their prior -l
+// launch instead of being silently replaced with a different interpreter.
 func prepareShellPaneLaunch(shellPath string, env []string) (shellPaneLaunch, error) {
-	switch strings.TrimSuffix(filepath.Base(shellPath), ".exe") {
-	case "zsh":
-		return prepareZshShellPaneLaunch(shellPath, env)
-	case "bash", "sh":
-		return preparePOSIXShellPaneLaunch(shellPath, env)
-	case "fish":
-		path, ok := lookupEnv(env, "PATH")
-		if !ok {
-			return shellPaneLaunch{}, errors.New("launch environment is missing PATH")
+	for _, name := range shellNames(shellPath) {
+		if strategy, ok := shellStartupStrategies[name]; ok {
+			return strategy(shellPath, env)
 		}
-		return shellPaneLaunch{
-			command: exec.Command(shellPath, "-l", "-C", "set -gx PATH "+shellQuote(path)),
-			env:     env,
-			cleanup: func() {},
-		}, nil
-	default:
-		return shellPaneLaunch{}, fmt.Errorf("%w: %s", errUnsupportedShellStartup, shellPath)
 	}
+	return shellPaneLaunch{
+		command: exec.Command(shellPath, "-l"),
+		env:     append([]string(nil), env...),
+		cleanup: func() {},
+	}, nil
+}
+
+func shellNames(shellPath string) []string {
+	names := []string{strings.TrimSuffix(filepath.Base(shellPath), ".exe")}
+	if resolved, err := filepath.EvalSymlinks(shellPath); err == nil {
+		resolvedName := strings.TrimSuffix(filepath.Base(resolved), ".exe")
+		if resolvedName != names[0] {
+			names = append(names, resolvedName)
+		}
+	}
+	return names
+}
+
+func prepareFishShellPaneLaunch(shellPath string, env []string) (shellPaneLaunch, error) {
+	path, ok := lookupEnv(env, "PATH")
+	if !ok {
+		return shellPaneLaunch{}, fmt.Errorf("launch environment is missing PATH")
+	}
+	return shellPaneLaunch{
+		// fish runs -C commands after config.fish, so this is the final startup
+		// action before it accepts terminal input.
+		command: exec.Command(shellPath, "-l", "-C", "set -gx PATH "+shellQuote(path)),
+		env:     env,
+		cleanup: func() {},
+	}, nil
 }
 
 func prepareZshShellPaneLaunch(shellPath string, env []string) (shellPaneLaunch, error) {

@@ -202,10 +202,6 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 			launch, err := prepareShellPaneLaunch(shellPath, cmdEnv)
 			if err != nil {
 				lastErr = err
-				if i < len(shellCandidates)-1 && errors.Is(err, errUnsupportedShellStartup) {
-					m.logf("pty spawn: shell=%s cannot restore PATH after startup id=%s; trying fallback shell", shellPath, opts.ID)
-					continue
-				}
 				return fmt.Errorf("prepare terminal shell %s: %w", shellPath, err)
 			}
 			cmd = launch.command
