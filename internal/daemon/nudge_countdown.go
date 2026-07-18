@@ -44,8 +44,19 @@ func (d *Daemon) nudgeWindow() time.Duration {
 // countdown is paused (no timer, no nudge_fires_at) and the UI offers click-to-
 // trigger; switching away resumes it via setSelectedSession.
 func (d *Daemon) armNudgeCountdown(sessionID string) {
+	d.armNudgeCountdownAt(sessionID, time.Now().Add(d.nudgeWindow()))
+}
+
+// armNudgeCountdownAt marks ticket activity unread and asks the existing
+// countdown to fire no later than deadline. A burst never pushes an already
+// armed countdown later; an immediate assignee update can pull a buffered
+// observer's deadline forward.
+func (d *Daemon) armNudgeCountdownAt(sessionID string, deadline time.Time) {
 	if sessionID == "" {
 		return
+	}
+	if deadline.Before(time.Now()) {
+		deadline = time.Now()
 	}
 	active := d.currentlySelectedSession() == sessionID
 
@@ -54,10 +65,10 @@ func (d *Daemon) armNudgeCountdown(sessionID string) {
 	if active {
 		// Paused while active: ensure no running timer and no deadline on the wire.
 		changed = d.stopCountdownLocked(sessionID) || changed
-	} else if _, running := d.nudgeCountdowns[sessionID]; !running {
-		// Debounce: an already-running countdown keeps its original deadline rather
-		// than resetting (a burst of ticket events must not sawtooth the bar).
-		d.startCountdownLocked(sessionID, d.nudgeWindow())
+	} else if existing, running := d.nudgeCountdowns[sessionID]; !running || deadline.Before(existing.firesAt) {
+		// Keep the earliest deadline. This is both the existing non-sliding burst
+		// debounce and the assignee-over-buffered precedence rule.
+		d.startCountdownAtLocked(sessionID, deadline)
 		changed = true
 	}
 	d.nudgeMu.Unlock()
@@ -73,6 +84,10 @@ func (d *Daemon) armNudgeCountdown(sessionID string) {
 // written value even if a tiny (test) window fires the timer immediately — the same
 // handshake scheduleTicketBackstop uses.
 func (d *Daemon) startCountdownLocked(sessionID string, window time.Duration) {
+	d.startCountdownAtLocked(sessionID, time.Now().Add(window))
+}
+
+func (d *Daemon) startCountdownAtLocked(sessionID string, firesAt time.Time) {
 	if d.nudgeCountdowns == nil {
 		d.nudgeCountdowns = make(map[string]*nudgeCountdown)
 	}
@@ -81,11 +96,15 @@ func (d *Daemon) startCountdownLocked(sessionID string, window time.Duration) {
 	}
 	ready := make(chan struct{})
 	var timer *time.Timer
-	timer = time.AfterFunc(window, func() {
+	delay := time.Until(firesAt)
+	if delay < 0 {
+		delay = 0
+	}
+	timer = time.AfterFunc(delay, func() {
 		<-ready
 		d.nudgeCountdownFire(sessionID, timer)
 	})
-	d.nudgeCountdowns[sessionID] = &nudgeCountdown{timer: timer, firesAt: time.Now().Add(window)}
+	d.nudgeCountdowns[sessionID] = &nudgeCountdown{timer: timer, firesAt: firesAt}
 	close(ready)
 }
 
@@ -159,6 +178,9 @@ func (d *Daemon) clearNudgeState(sessionID string) {
 	d.lastInputMu.Lock()
 	delete(d.lastUserInputAt, sessionID)
 	d.lastInputMu.Unlock()
+	d.deliveryMu.Lock()
+	delete(d.watchLeaseUntil, sessionID)
+	d.deliveryMu.Unlock()
 }
 
 // stopNudgeCountdowns cancels every armed countdown. Daemon.Stop() calls it so no
@@ -195,6 +217,9 @@ func (d *Daemon) nudgeCountdownFire(sessionID string, self *time.Timer) {
 // one was armed on re-arm).
 func (d *Daemon) deliverNudgeOrReArm(sessionID string) {
 	action := d.runNudgeDelivery(sessionID)
+	if d.debugLogging {
+		d.logf("ticket delivery: observer=%s session=%s channel=countdown outcome=%s", d.ticketAttentionKey(sessionID), sessionID, action)
+	}
 	if d.nudgeFireHook != nil {
 		d.nudgeFireHook(sessionID, action)
 	}
@@ -220,6 +245,16 @@ func (d *Daemon) runNudgeDelivery(sessionID string) string {
 		// Became the active session during the window; switching away re-arms it.
 		return "active"
 	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	if until := d.watchLeaseUntil[sessionID]; until.After(time.Now()) {
+		// A live watch gets the next polling opportunity first. If it disappears,
+		// the short lease expires and this rearmed countdown becomes the backstop.
+		d.nudgeMu.Lock()
+		d.startCountdownAtLocked(sessionID, until)
+		d.nudgeMu.Unlock()
+		return "watch"
+	}
 	unread, err := d.ticketUnreadForSession(sessionID)
 	if err != nil {
 		d.logf("nudge countdown unread check %s: %v", sessionID, err)
@@ -238,6 +273,9 @@ func (d *Daemon) runNudgeDelivery(sessionID string) string {
 	if err := d.typeDoorbell(sessionID, ticketNudgePrompt); err != nil {
 		d.logf("nudge countdown doorbell %s: %v", sessionID, err)
 		return "doorbell-error"
+	}
+	if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(sessionID), time.Now()); err != nil {
+		d.logf("nudge attention update %s: %v", sessionID, err)
 	}
 	return "doorbell"
 }
@@ -259,16 +297,17 @@ func (d *Daemon) updateNudgeSelection(oldID, newID string) {
 	if newID != "" && d.stopCountdownLocked(newID) {
 		changed = append(changed, newID)
 	}
-	if resumeOld && d.unreadCache[oldID] {
-		if _, running := d.nudgeCountdowns[oldID]; !running {
-			d.startCountdownLocked(oldID, d.nudgeWindow())
-			changed = append(changed, oldID)
-		}
-	}
+	resumeUnread := resumeOld && d.unreadCache[oldID]
 	d.nudgeMu.Unlock()
 
 	for _, id := range changed {
 		d.broadcastSessionStateChanged(id)
+	}
+	if resumeUnread {
+		// The paused timer intentionally carries no deadline. Re-derive the
+		// assignee/buffered deadline from durable unread events and attention so
+		// switching away cannot collapse a long observer buffer to 30 seconds.
+		go d.notifyUnreadTicketSession(oldID, time.Now())
 	}
 }
 
@@ -314,6 +353,8 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
 		return
 	}
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
 	unread, err := d.ticketUnreadForSession(sessionID)
 	if err != nil || unread == 0 {
 		// Nothing to deliver; clear a stale indicator rather than doorbell into nothing.
@@ -322,6 +363,8 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	}
 	if err := d.typeDoorbell(sessionID, ticketNudgePrompt); err != nil {
 		d.logf("trigger_nudge doorbell %s: %v", sessionID, err)
+	} else if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(sessionID), time.Now()); err != nil {
+		d.logf("trigger_nudge attention update %s: %v", sessionID, err)
 	}
 	d.broadcastSessionStateChanged(sessionID)
 }

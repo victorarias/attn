@@ -50,6 +50,10 @@ func (d *Daemon) handleTicketChangeStatus(client *wsClient, msg *protocol.Ticket
 		d.sendTicketActionResult(client, requestID, fmt.Errorf("ticket_id is required"))
 		return
 	}
+	if err := requireExpectedTicketEventSeq(msg.ExpectedEventSeq); err != nil {
+		d.sendTicketActionResult(client, requestID, err)
+		return
+	}
 	// crashed is the one status attn authors itself (a session that died without
 	// reporting); the board never offers it as a manual destination. The daemon is
 	// the authority, so it rejects it here rather than trusting the UI's
@@ -61,7 +65,10 @@ func (d *Daemon) handleTicketChangeStatus(client *wsClient, msg *protocol.Ticket
 		return
 	}
 	comment := strings.TrimSpace(protocol.Deref(msg.Comment))
-	_, err := d.store.SetTicketStatus(ticketID, status, store.TicketAuthorYou, comment, time.Now())
+	_, _, err := d.store.SetTicketStatusWithOptions(
+		ticketID, status, store.TicketAuthorYou, comment,
+		expectedTicketMutationOptions(msg.ExpectedEventSeq), time.Now(),
+	)
 	d.afterTicketMutation(ticketID, err)
 	d.sendTicketActionResult(client, requestID, err)
 }
@@ -74,7 +81,14 @@ func (d *Daemon) handleTicketAddComment(client *wsClient, msg *protocol.TicketAd
 		d.sendTicketActionResult(client, requestID, fmt.Errorf("ticket_id and comment are required"))
 		return
 	}
-	_, err := d.store.AddTicketComment(ticketID, store.TicketAuthorYou, comment, time.Now())
+	if err := requireExpectedTicketEventSeq(msg.ExpectedEventSeq); err != nil {
+		d.sendTicketActionResult(client, requestID, err)
+		return
+	}
+	_, _, err := d.store.AddTicketCommentWithOptions(
+		ticketID, store.TicketAuthorYou, comment,
+		expectedTicketMutationOptions(msg.ExpectedEventSeq), time.Now(),
+	)
 	d.afterTicketMutation(ticketID, err)
 	d.sendTicketActionResult(client, requestID, err)
 }
@@ -86,7 +100,14 @@ func (d *Daemon) handleTicketEditDescription(client *wsClient, msg *protocol.Tic
 		d.sendTicketActionResult(client, requestID, fmt.Errorf("ticket_id is required"))
 		return
 	}
-	err := d.store.EditTicketDescription(ticketID, msg.Description, store.TicketAuthorYou, time.Now())
+	if err := requireExpectedTicketEventSeq(msg.ExpectedEventSeq); err != nil {
+		d.sendTicketActionResult(client, requestID, err)
+		return
+	}
+	_, err := d.store.EditTicketDescriptionWithOptions(
+		ticketID, msg.Description, store.TicketAuthorYou,
+		expectedTicketMutationOptions(msg.ExpectedEventSeq), time.Now(),
+	)
 	d.afterTicketMutation(ticketID, err)
 	d.sendTicketActionResult(client, requestID, err)
 }

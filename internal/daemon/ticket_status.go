@@ -71,17 +71,36 @@ func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketSta
 	if msg.Comment != nil {
 		comment = strings.TrimSpace(*msg.Comment)
 	}
-	updated, err := d.store.SetTicketStatus(ticketID, status, sourceSessionID, comment, time.Now())
+	d.deliveryMu.Lock()
+	updated, outcome, err := d.store.SetTicketStatusWithOptions(
+		ticketID, status, sourceSessionID, comment,
+		d.ticketMutationOptions(sourceSessionID), time.Now(),
+	)
 	if err != nil {
+		d.deliveryMu.Unlock()
 		d.sendError(conn, "ticket status: "+err.Error())
 		return
 	}
+	result := &protocol.TicketStatusResult{
+		TicketID: ticketID,
+		Status:   protocol.TicketStatus(status),
+		CatchUp:  ticketMutationCatchUp(ticketID, outcome.ConflictEvents),
+	}
+	if len(outcome.ConflictEvents) > 0 {
+		if current, getErr := d.store.GetTicket(ticketID); getErr == nil && current != nil {
+			result.Status = protocol.TicketStatus(current.Status)
+		}
+		d.afterTicketMutationCatchUp(sourceSessionID, outcome.ConflictEvents)
+		d.deliveryMu.Unlock()
+		_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketStatusResult: result})
+		return
+	}
+	result.TicketID = updated.ID
+	result.Status = protocol.TicketStatus(updated.Status)
+	d.deliveryMu.Unlock()
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok: true,
-		TicketStatusResult: &protocol.TicketStatusResult{
-			TicketID: updated.ID,
-			Status:   protocol.TicketStatus(updated.Status),
-		},
+		Ok:                 true,
+		TicketStatusResult: result,
 	})
 	// The agent moved its own ticket; notify the other observers (the chief) so the
 	// board→watcher direction reflects it. The agent itself authored the event, so

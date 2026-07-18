@@ -2,12 +2,22 @@ package daemon
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
+
+func currentTicketEventSeq(t *testing.T, d *Daemon, ticketID string) *int {
+	t.Helper()
+	ticket, err := d.store.GetTicket(ticketID)
+	if err != nil || ticket == nil {
+		t.Fatalf("ticket %s: %v", ticketID, err)
+	}
+	return protocol.Ptr(int(ticket.LatestEventSeq))
+}
 
 // A human status change from the app moves the ticket, succeeds, and — because it
 // is authored as "you", not the agent — notifies the idle assigned agent.
@@ -21,11 +31,12 @@ func TestTicketChangeStatusMovesAndNotifies(t *testing.T) {
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleTicketChangeStatus(client, &protocol.TicketChangeStatusMessage{
-		Cmd:       protocol.CmdTicketChangeStatus,
-		RequestID: protocol.Ptr("req-1"),
-		TicketID:  ticketID,
-		Status:    protocol.TicketStatus(store.TicketStatusBlocked),
-		Comment:   protocol.Ptr("need a decision"),
+		Cmd:              protocol.CmdTicketChangeStatus,
+		RequestID:        protocol.Ptr("req-1"),
+		TicketID:         ticketID,
+		Status:           protocol.TicketStatus(store.TicketStatusBlocked),
+		Comment:          protocol.Ptr("need a decision"),
+		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
 	})
 
 	var res protocol.TicketActionResultMessage
@@ -55,10 +66,11 @@ func TestTicketAddCommentLandsAndNotifies(t *testing.T) {
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleTicketAddComment(client, &protocol.TicketAddCommentMessage{
-		Cmd:       protocol.CmdTicketAddComment,
-		RequestID: protocol.Ptr("req-2"),
-		TicketID:  ticketID,
-		Comment:   "try the other approach",
+		Cmd:              protocol.CmdTicketAddComment,
+		RequestID:        protocol.Ptr("req-2"),
+		TicketID:         ticketID,
+		Comment:          "try the other approach",
+		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
 	})
 
 	var res protocol.TicketActionResultMessage
@@ -90,10 +102,11 @@ func TestTicketEditDescriptionUpdates(t *testing.T) {
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleTicketEditDescription(client, &protocol.TicketEditDescriptionMessage{
-		Cmd:         protocol.CmdTicketEditDescription,
-		RequestID:   protocol.Ptr("req-3"),
-		TicketID:    ticketID,
-		Description: "Re-scoped: do only the read path",
+		Cmd:              protocol.CmdTicketEditDescription,
+		RequestID:        protocol.Ptr("req-3"),
+		TicketID:         ticketID,
+		Description:      "Re-scoped: do only the read path",
+		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
 	})
 
 	var res protocol.TicketActionResultMessage
@@ -104,6 +117,57 @@ func TestTicketEditDescriptionUpdates(t *testing.T) {
 	tk, _ := d.store.GetTicket(ticketID)
 	if tk == nil || tk.Description != "Re-scoped: do only the read path" {
 		t.Fatalf("description = %q, want re-scoped text", tk.Description)
+	}
+}
+
+func TestTicketActionRejectsStaleDetailSequence(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	_, agentID, _ := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	detail, err := d.store.GetTicket(ticketID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.store.AddTicketComment(ticketID, agentID, "new since detail", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	expected := int(detail.LatestEventSeq)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleTicketChangeStatus(client, &protocol.TicketChangeStatusMessage{
+		Cmd: protocol.CmdTicketChangeStatus, RequestID: protocol.Ptr("stale"),
+		TicketID: ticketID, Status: protocol.TicketStatusDone, ExpectedEventSeq: &expected,
+	})
+	var res protocol.TicketActionResultMessage
+	readTicketResult(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "ticket changed since it was opened") {
+		t.Fatalf("stale result = %+v", res)
+	}
+	got, _ := d.store.GetTicket(ticketID)
+	if got.Status == store.TicketStatusDone {
+		t.Fatal("stale app action mutated the ticket")
+	}
+}
+
+func TestTicketActionRequiresDetailSequence(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	_, agentID, _ := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+
+	d.handleTicketAddComment(client, &protocol.TicketAddCommentMessage{
+		Cmd: protocol.CmdTicketAddComment, RequestID: protocol.Ptr("missing-seq"),
+		TicketID: ticketID, Comment: "must not land",
+	})
+	var res protocol.TicketActionResultMessage
+	readTicketResult(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "expected_event_seq is required") {
+		t.Fatalf("missing sequence result = %+v", res)
+	}
+	ticket, _ := d.store.GetTicket(ticketID)
+	for _, activity := range ticket.Activity {
+		if activity.Comment == "must not land" {
+			t.Fatal("action without a detail sequence mutated the ticket")
+		}
 	}
 }
 
@@ -129,10 +193,11 @@ func TestTicketActionUnknownTicketFails(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleTicketChangeStatus(client, &protocol.TicketChangeStatusMessage{
-		Cmd:       protocol.CmdTicketChangeStatus,
-		RequestID: protocol.Ptr("req-5"),
-		TicketID:  "does-not-exist",
-		Status:    protocol.TicketStatus(store.TicketStatusDone),
+		Cmd:              protocol.CmdTicketChangeStatus,
+		RequestID:        protocol.Ptr("req-5"),
+		TicketID:         "does-not-exist",
+		Status:           protocol.TicketStatus(store.TicketStatusDone),
+		ExpectedEventSeq: protocol.Ptr(0),
 	})
 	var res protocol.TicketActionResultMessage
 	readTicketResult(t, client.send, &res)
@@ -151,10 +216,11 @@ func TestTicketChangeStatusBroadcastsBoard(t *testing.T) {
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleTicketChangeStatus(client, &protocol.TicketChangeStatusMessage{
-		Cmd:       protocol.CmdTicketChangeStatus,
-		RequestID: protocol.Ptr("req-b"),
-		TicketID:  ticketID,
-		Status:    protocol.TicketStatus(store.TicketStatusBlocked),
+		Cmd:              protocol.CmdTicketChangeStatus,
+		RequestID:        protocol.Ptr("req-b"),
+		TicketID:         ticketID,
+		Status:           protocol.TicketStatus(store.TicketStatusBlocked),
+		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
 	})
 
 	board := latestBroadcast()
@@ -186,10 +252,11 @@ func TestTicketActionFailureDoesNotNotify(t *testing.T) {
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleTicketChangeStatus(client, &protocol.TicketChangeStatusMessage{
-		Cmd:       protocol.CmdTicketChangeStatus,
-		RequestID: protocol.Ptr("req-f"),
-		TicketID:  ticketID,
-		Status:    protocol.TicketStatus("not-a-status"),
+		Cmd:              protocol.CmdTicketChangeStatus,
+		RequestID:        protocol.Ptr("req-f"),
+		TicketID:         ticketID,
+		Status:           protocol.TicketStatus("not-a-status"),
+		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
 	})
 
 	var res protocol.TicketActionResultMessage
@@ -213,10 +280,11 @@ func TestTicketChangeStatusRejectsCrashed(t *testing.T) {
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleTicketChangeStatus(client, &protocol.TicketChangeStatusMessage{
-		Cmd:       protocol.CmdTicketChangeStatus,
-		RequestID: protocol.Ptr("req-c"),
-		TicketID:  ticketID,
-		Status:    protocol.TicketStatus(store.TicketStatusCrashed),
+		Cmd:              protocol.CmdTicketChangeStatus,
+		RequestID:        protocol.Ptr("req-c"),
+		TicketID:         ticketID,
+		Status:           protocol.TicketStatus(store.TicketStatusCrashed),
+		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
 	})
 
 	var res protocol.TicketActionResultMessage

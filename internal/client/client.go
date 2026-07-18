@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -376,10 +377,26 @@ func (c *Client) PresentFeedback(presentationID string, seq int) (*protocol.Pres
 // last_user_activity_at, the daemon's most recent observed user-presence
 // signal, so a watching agent can decide whether to push or hold.
 func (c *Client) TicketInbox(sourceSessionID string) (*protocol.TicketInboxResult, error) {
-	resp, err := c.send(protocol.TicketInboxMessage{
+	return c.ticketInbox(sourceSessionID, protocol.TicketInboxModeExplicit, 0)
+}
+
+// TicketInboxWatch is the polling form used by `ticket inbox --watch`. Unlike a
+// deliberate one-shot read, it only drains activity once the daemon says the
+// observer's immediate or buffered delivery deadline is eligible.
+func (c *Client) TicketInboxWatch(sourceSessionID string, interval time.Duration) (*protocol.TicketInboxResult, error) {
+	return c.ticketInbox(sourceSessionID, protocol.TicketInboxModeWatch, interval)
+}
+
+func (c *Client) ticketInbox(sourceSessionID string, mode protocol.TicketInboxMode, interval time.Duration) (*protocol.TicketInboxResult, error) {
+	message := protocol.TicketInboxMessage{
 		Cmd:             protocol.CmdTicketInbox,
 		SourceSessionID: sourceSessionID,
-	})
+		Mode:            protocol.Ptr(mode),
+	}
+	if mode == protocol.TicketInboxModeWatch && interval > 0 {
+		message.WatchIntervalMs = protocol.Ptr(strconv.FormatInt(interval.Milliseconds(), 10))
+	}
+	resp, err := c.send(message)
 	if err != nil {
 		return nil, err
 	}

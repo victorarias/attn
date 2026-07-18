@@ -811,6 +811,10 @@ func runTicketStatus(args []string) {
 		fmt.Fprintf(os.Stderr, "ticket status: %v\n", err)
 		os.Exit(1)
 	}
+	if result.CatchUp != nil {
+		printTicketMutationCatchUp("ticket status", result.CatchUp, parsed.JSON, result)
+		os.Exit(1)
+	}
 	if parsed.JSON {
 		printJSON(result)
 		return
@@ -903,6 +907,10 @@ func runTicketAttach(args []string) {
 	result, err := client.New("").AttachTicket(source, files, parsed.Ticket, parsed.State, parsed.Comment)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ticket attach: %v\n", err)
+		os.Exit(1)
+	}
+	if result.CatchUp != nil {
+		printTicketMutationCatchUp("ticket attach", result.CatchUp, parsed.JSON, result)
 		os.Exit(1)
 	}
 	if parsed.JSON {
@@ -1190,11 +1198,24 @@ func runTicketComment(args []string) {
 		fmt.Fprintf(os.Stderr, "ticket comment: %v\n", err)
 		os.Exit(1)
 	}
+	if result.CatchUp != nil {
+		printTicketMutationCatchUp("ticket comment", result.CatchUp, parsed.JSON, result)
+		os.Exit(1)
+	}
 	if parsed.JSON {
 		printJSON(result)
 		return
 	}
 	fmt.Printf("commented on ticket %s\n", result.TicketID)
+}
+
+func printTicketMutationCatchUp(command string, bundle *protocol.TicketEventBundle, jsonOutput bool, result any) {
+	if jsonOutput {
+		printJSON(result)
+	} else {
+		fprintTicketInbox(os.Stdout, &protocol.TicketInboxResult{Bundles: []protocol.TicketEventBundle{*bundle}})
+	}
+	fmt.Fprintf(os.Stderr, "%s: unread ticket activity was shown above; the requested update did not run — review it and retry\n", command)
 }
 
 // ticketIDArgs is a single ticket-id positional plus the common session/json flags —
@@ -1263,6 +1284,9 @@ func runTicketSubscribe(args []string) {
 		return
 	}
 	fmt.Printf("subscribed to ticket %s\n", result.TicketID)
+	if result.UnreadCount != nil && *result.UnreadCount > 0 {
+		fmt.Printf("%d ticket update(s) are unread — run `attn ticket inbox` before editing it\n", *result.UnreadCount)
+	}
 }
 
 // runTicketUnsubscribe opts the calling session back out. It is idempotent —
@@ -1361,9 +1385,12 @@ func runTicketTake(args []string) {
 	}
 	if result.PreviousAssignee != "" && result.PreviousAssignee != source {
 		fmt.Printf("took ticket %s (was assigned to %s)\n", result.TicketID, result.PreviousAssignee)
-		return
+	} else {
+		fmt.Printf("took ticket %s\n", result.TicketID)
 	}
-	fmt.Printf("took ticket %s\n", result.TicketID)
+	if result.UnreadCount != nil && *result.UnreadCount > 0 {
+		fmt.Printf("%d ticket update(s) are unread — run `attn ticket inbox` before editing it\n", *result.UnreadCount)
+	}
 }
 
 // runTicketInbox reads (and consumes) this session's unread ticket events — the
@@ -1429,7 +1456,7 @@ func runTicketInboxWatch(source string, interval time.Duration, jsonOutput bool)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	watchTicketInbox(ctx, ticker.C, func() (*protocol.TicketInboxResult, error) {
-		return c.TicketInbox(source)
+		return c.TicketInboxWatch(source, interval)
 	}, os.Stdout, os.Stderr, jsonOutput)
 }
 

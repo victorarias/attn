@@ -36,14 +36,28 @@ func (d *Daemon) handleTicketComment(conn net.Conn, msg *protocol.TicketCommentM
 	// AddTicketComment fails with ErrTicketNotFound when the id does not exist
 	// (touchTicketTx affects no rows), so an agent naming a bad ticket gets a clear
 	// error rather than a silently dropped comment.
-	if _, err := d.store.AddTicketComment(ticketID, sourceSessionID, comment, time.Now()); err != nil {
+	d.deliveryMu.Lock()
+	_, outcome, err := d.store.AddTicketCommentWithOptions(
+		ticketID, sourceSessionID, comment,
+		d.ticketMutationOptions(sourceSessionID), time.Now(),
+	)
+	if err != nil {
+		d.deliveryMu.Unlock()
 		d.sendError(conn, "ticket comment: "+err.Error())
 		return
 	}
-	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok:                  true,
-		TicketCommentResult: &protocol.TicketCommentResult{TicketID: ticketID},
-	})
+	result := &protocol.TicketCommentResult{
+		TicketID: ticketID,
+		CatchUp:  ticketMutationCatchUp(ticketID, outcome.ConflictEvents),
+	}
+	if len(outcome.ConflictEvents) > 0 {
+		d.afterTicketMutationCatchUp(sourceSessionID, outcome.ConflictEvents)
+		d.deliveryMu.Unlock()
+		_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketCommentResult: result})
+		return
+	}
+	d.deliveryMu.Unlock()
+	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketCommentResult: result})
 	// The comment is an event the ticket's participants did not author, so notify
 	// them (the assignee, the chief). The commenter authored it, so Notify excludes
 	// it — no self-nudge — and comment authorship does not make the commenter a

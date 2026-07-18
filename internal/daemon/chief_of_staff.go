@@ -313,7 +313,7 @@ func (d *Daemon) retargetChiefTicketDelivery(previousSessionID, newSessionID str
 		d.refreshTicketUnread(previousSessionID)
 	}
 	if newSessionID != "" {
-		d.notifyTicketSession(newSessionID, time.Now())
+		d.notifyUnreadTicketSession(newSessionID, time.Now())
 	}
 }
 

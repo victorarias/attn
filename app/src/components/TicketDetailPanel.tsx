@@ -17,10 +17,10 @@ interface TicketDetailPanelProps {
   // Chief/user actions (slice 4c). Optional so the panel can render read-only
   // when an owner does not wire them. Each resolves once the daemon confirms;
   // the refreshed record arrives via the live re-fetch, not the resolve value.
-  onChangeStatus?: (ticketId: string, status: Ticket['status'], comment?: string) => Promise<void>;
-  onAddComment?: (ticketId: string, comment: string) => Promise<void>;
-  onEditDescription?: (ticketId: string, description: string) => Promise<void>;
-  onAttach?: (ticketId: string, paths: string[], state?: string, comment?: string) => Promise<unknown>;
+  onChangeStatus?: (ticketId: string, status: Ticket['status'], expectedEventSeq: number, comment?: string) => Promise<void>;
+  onAddComment?: (ticketId: string, comment: string, expectedEventSeq: number) => Promise<void>;
+  onEditDescription?: (ticketId: string, description: string, expectedEventSeq: number) => Promise<void>;
+  onAttach?: (ticketId: string, paths: string[], state?: string, comment?: string, expectedEventSeq?: number) => Promise<unknown>;
   onRenameArtifact?: (path: string, newPath: string) => Promise<unknown>;
   onDeleteArtifact?: (path: string) => Promise<unknown>;
   onOpenArtifact?: (path: string) => void;
@@ -114,6 +114,7 @@ export function TicketDetailPanel({
   const [commentDraft, setCommentDraft] = useState('');
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [descriptionEditEventSeq, setDescriptionEditEventSeq] = useState(0);
   const [attachFiles, setAttachFiles] = useState<string[]>([]);
   const [attachState, setAttachState] = useState('');
   const [attachComment, setAttachComment] = useState('');
@@ -157,6 +158,7 @@ export function TicketDetailPanel({
     setCommentDraft('');
     setEditingDescription(false);
     setDescriptionDraft('');
+    setDescriptionEditEventSeq(0);
     setAttachFiles([]);
     setAttachState('');
     setAttachComment('');
@@ -171,8 +173,24 @@ export function TicketDetailPanel({
     setBusyAction(name);
     setActionError(null);
     return fn()
-      .catch((err) => {
-        setActionError(err instanceof Error ? err.message : 'Action failed');
+      .catch(async (err) => {
+        const message = err instanceof Error ? err.message : 'Action failed';
+        if (message.includes('ticket changed since it was opened') && ticketId) {
+          try {
+            const refreshed = await fetchTicket(ticketId);
+            setTicket(refreshed);
+            if (name === 'description') {
+              // Keep the user's draft, but require this failed save before adopting
+              // the refreshed sequence. A deliberate second click can then apply
+              // the draft after the user has seen the conflict and new history.
+              setDescriptionEditEventSeq(refreshed.latest_event_seq ?? 0);
+            }
+          } catch {
+            // Keep the mutation error as the useful action result. The normal
+            // board refresh path can retry the detail read.
+          }
+        }
+        setActionError(message);
         throw err;
       })
       .finally(() => setBusyAction(null));
@@ -204,7 +222,7 @@ export function TicketDetailPanel({
     if (!onAddComment || !fullTicket) return;
     const text = commentDraft.trim();
     if (!text || busyAction !== null) return;
-    runAction('comment', () => onAddComment(fullTicket.id, text))
+    runAction('comment', () => onAddComment(fullTicket.id, text, fullTicket.latest_event_seq ?? 0))
       .then(() => setCommentDraft(''))
       .catch(() => {});
   };
@@ -275,7 +293,7 @@ export function TicketDetailPanel({
                 onChange={(event) => {
                   const next = event.target.value as Ticket['status'];
                   if (next === fullTicket.status) return;
-                  runAction('status', () => onChangeStatus(fullTicket.id, next)).catch(() => {});
+                  runAction('status', () => onChangeStatus(fullTicket.id, next, fullTicket.latest_event_seq ?? 0)).catch(() => {});
                 }}
               >
                 {(SELECTABLE_STATUSES.includes(fullTicket.status)
@@ -306,6 +324,7 @@ export function TicketDetailPanel({
                   data-testid="ticket-edit-description"
                   onClick={() => {
                     setDescriptionDraft(fullTicket.description);
+                    setDescriptionEditEventSeq(fullTicket.latest_event_seq ?? 0);
                     setEditingDescription(true);
                   }}
                 >
@@ -330,7 +349,7 @@ export function TicketDetailPanel({
                     disabled={busyAction !== null}
                     onClick={() => {
                       if (!onEditDescription) return;
-                      runAction('description', () => onEditDescription(fullTicket.id, descriptionDraft))
+                      runAction('description', () => onEditDescription(fullTicket.id, descriptionDraft, descriptionEditEventSeq))
                         .then(() => setEditingDescription(false))
                         .catch(() => {});
                     }}
@@ -455,7 +474,7 @@ export function TicketDetailPanel({
                     disabled={busyAction !== null}
                     onClick={() => {
                       runAction('attach', async () => {
-                        await onAttach(fullTicket.id, attachFiles, attachState || undefined, attachComment.trim() || undefined);
+                        await onAttach(fullTicket.id, attachFiles, attachState || undefined, attachComment.trim() || undefined, fullTicket.latest_event_seq ?? 0);
                         setAttachFiles([]);
                         setAttachState('');
                         setAttachComment('');

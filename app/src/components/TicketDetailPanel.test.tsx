@@ -19,6 +19,7 @@ function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
     project_id: '',
     created_at: '2026-06-27T10:00:00Z',
     updated_at: '2026-06-27T10:05:00Z',
+    latest_event_seq: 7,
     activity: [
       {
         id: 1,
@@ -183,7 +184,7 @@ describe('TicketDetailPanel', () => {
 
     fireEvent.change(screen.getByTestId('ticket-status-select'), { target: { value: 'done' } });
     expect(onChangeStatus).toHaveBeenCalledTimes(1);
-    expect(onChangeStatus).toHaveBeenCalledWith('store-migration', 'done');
+    expect(onChangeStatus).toHaveBeenCalledWith('store-migration', 'done', 7);
   });
 
   it('adds a comment and clears the draft on success', async () => {
@@ -205,7 +206,7 @@ describe('TicketDetailPanel', () => {
     fireEvent.change(input, { target: { value: 'try the other approach' } });
     fireEvent.click(screen.getByTestId('ticket-add-comment'));
 
-    expect(onAddComment).toHaveBeenCalledWith('store-migration', 'try the other approach');
+    expect(onAddComment).toHaveBeenCalledWith('store-migration', 'try the other approach', 7);
     await waitFor(() => expect(input.value).toBe(''));
   });
 
@@ -229,7 +230,7 @@ describe('TicketDetailPanel', () => {
       fireEvent.change(input, { target: { value: 'ship it' } });
       fireEvent.keyDown(input, { key: 'Enter', [modifier]: true });
 
-      expect(onAddComment).toHaveBeenCalledWith('store-migration', 'ship it');
+      expect(onAddComment).toHaveBeenCalledWith('store-migration', 'ship it', 7);
       await waitFor(() => expect(input.value).toBe(''));
       unmount();
     }
@@ -337,9 +338,55 @@ describe('TicketDetailPanel', () => {
     fireEvent.change(input, { target: { value: 'Re-scoped: read path only' } });
     fireEvent.click(screen.getByTestId('ticket-save-description'));
 
-    expect(onEditDescription).toHaveBeenCalledWith('store-migration', 'Re-scoped: read path only');
+    expect(onEditDescription).toHaveBeenCalledWith('store-migration', 'Re-scoped: read path only', 7);
     // The editor closes on success.
     await waitFor(() => expect(screen.queryByTestId('ticket-description-input')).toBeNull());
+  });
+
+  it('keeps the description edit sequence stable across live refresh and adopts the new sequence only after a conflict', async () => {
+    const stale = makeTicket({ latest_event_seq: 7, description: 'Original description' });
+    const fresh = makeTicket({ latest_event_seq: 8, description: 'Someone else changed it' });
+    const fetchTicket = vi.fn().mockResolvedValueOnce(stale).mockResolvedValue(fresh);
+    const onEditDescription = vi.fn()
+      .mockRejectedValueOnce(new Error('ticket changed since it was opened: expected event 7, latest is 8'))
+      .mockResolvedValueOnce(undefined);
+    const row = makeTicket();
+    const { rerender } = render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={row}
+        fetchTicket={fetchTicket}
+        onEditDescription={onEditDescription}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByText('Original description'));
+    fireEvent.click(screen.getByTestId('ticket-edit-description'));
+    const input = screen.getByTestId('ticket-description-input') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'My draft' } });
+
+    rerender(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={{ ...row, updated_at: '2026-06-27T11:00:00Z' }}
+        fetchTicket={fetchTicket}
+        onEditDescription={onEditDescription}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => expect(fetchTicket).toHaveBeenCalledTimes(2));
+    expect(input.value).toBe('My draft');
+
+    fireEvent.click(screen.getByTestId('ticket-save-description'));
+    await waitFor(() => screen.getByRole('alert'));
+    expect(onEditDescription).toHaveBeenNthCalledWith(1, 'store-migration', 'My draft', 7);
+    expect(input.value).toBe('My draft');
+
+    fireEvent.click(screen.getByTestId('ticket-save-description'));
+    await waitFor(() => expect(onEditDescription).toHaveBeenCalledTimes(2));
+    expect(onEditDescription).toHaveBeenNthCalledWith(2, 'store-migration', 'My draft', 8);
   });
 
   it('surfaces an action error without claiming success', async () => {
@@ -360,6 +407,29 @@ describe('TicketDetailPanel', () => {
     fireEvent.change(screen.getByTestId('ticket-status-select'), { target: { value: 'failed' } });
     await waitFor(() => screen.getByRole('alert'));
     expect(screen.getByText('daemon refused the move')).toBeTruthy();
+  });
+
+  it('refreshes the detail after a stale action and requires retry', async () => {
+    const stale = makeTicket({ latest_event_seq: 7, description: 'old detail' });
+    const fresh = makeTicket({ latest_event_seq: 8, description: 'fresh detail' });
+    const fetchTicket = vi.fn().mockResolvedValueOnce(stale).mockResolvedValueOnce(fresh);
+    const onChangeStatus = vi.fn().mockRejectedValue(new Error('ticket changed since it was opened: expected event 7, latest is 8'));
+    render(
+      <TicketDetailPanel
+        isOpen
+        ticketId="store-migration"
+        ticketRow={makeTicket()}
+        fetchTicket={fetchTicket}
+        onChangeStatus={onChangeStatus}
+        onClose={() => {}}
+      />,
+    );
+    await waitFor(() => screen.getByText('old detail'));
+
+    fireEvent.change(screen.getByTestId('ticket-status-select'), { target: { value: 'failed' } });
+    await waitFor(() => screen.getByText('fresh detail'));
+    expect(fetchTicket).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('alert').textContent).toContain('ticket changed since it was opened');
   });
 
   it('shows Resume and calls onResume with the ticket id for a delegated ticket', async () => {
@@ -442,6 +512,7 @@ describe('TicketDetailPanel', () => {
       ['/tmp/design.md', '/tmp/prototype.html', '/tmp/results.zip'],
       'ready_for_review',
       'Chosen approach',
+      7,
     ));
     expect(open).toHaveBeenCalledWith({ multiple: true });
   });

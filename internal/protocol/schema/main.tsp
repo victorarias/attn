@@ -317,6 +317,14 @@ model TicketInboxResult {
   last_user_activity_at?: string;
 }
 
+// TicketInboxMode distinguishes a deliberate catch-up from a long-lived polling
+// watch. Explicit reads drain immediately; watches share the buffered delivery
+// eligibility used by nudges.
+enum TicketInboxMode {
+  explicit,
+  watch,
+}
+
 // TicketActivityKind is the type of a human-facing history entry in a ticket's
 // detail view: a status change (column move, optional note) or a freeform comment.
 // It is the display subset of the richer event log (TicketEventKind).
@@ -368,6 +376,9 @@ model Ticket {
   // was judged by the reconciliation classifier (the verdict lands as an
   // attn-authored comment). Non-terminal + reconciled_at set = the orphan badge.
   reconciled_at?: string;
+  // Highest event sequence for this ticket at detail-read time. App mutations
+  // echo it as expected_event_seq and must refresh when it is stale.
+  latest_event_seq?: int32;
   activity: TicketActivity[];
   artifacts: TicketArtifact[];
 }
@@ -647,6 +658,7 @@ model SetTicketStatusMessage {
 model TicketStatusResult {
   ticket_id: string;
   status: TicketStatus;
+  catch_up?: TicketEventBundle;
 }
 
 // TicketCreateMessage mints a standalone backlog ticket — unbound (no assignee, no
@@ -688,6 +700,7 @@ model TicketCommentMessage {
 // confirm which ticket it posted to.
 model TicketCommentResult {
   ticket_id: string;
+  catch_up?: TicketEventBundle;
 }
 
 // PresentOpenMessage opens a new presentation (or a new round on an existing
@@ -744,6 +757,10 @@ model PresentFeedbackResult {
 model TicketInboxMessage {
   cmd: "ticket_inbox";
   source_session_id: string;
+  mode?: TicketInboxMode;
+  // Watch polls report their cadence so the daemon can distinguish a live slow
+  // watcher from an abandoned one without narrowing the CLI's interval support.
+  watch_interval_ms?: int64;
 }
 
 // TicketListMessage reads the board — every ticket, optionally filtered by status —
@@ -800,6 +817,7 @@ model TicketSubscribeMessage {
 // TicketSubscribeResult echoes the ticket the subscription landed on.
 model TicketSubscribeResult {
   ticket_id: string;
+  unread_count?: int32;
 }
 
 // TicketUnsubscribeMessage opts the calling session back out of a ticket's
@@ -835,6 +853,7 @@ model TicketTakeMessage {
 model TicketTakeResult {
   ticket_id: string;
   previous_assignee: string;
+  unread_count?: int32;
 }
 
 model TicketAttachFile {
@@ -854,6 +873,7 @@ model TicketAttachMessage {
   state?: DispatchWorkState;
   comment?: string;
   request_id?: string;
+  expected_event_seq?: int32;
 }
 
 // TicketAttachResult is the durable receipt returned for a new submission and
@@ -865,6 +885,7 @@ model TicketAttachResult {
   event_seq: int32;
   state: TicketStatus;
   deduplicated: boolean;
+  catch_up?: TicketEventBundle;
 }
 
 model TicketAttachResultMessage {
@@ -901,6 +922,7 @@ model TicketChangeStatusMessage {
   ticket_id: string;
   status: TicketStatus;
   comment?: string;
+  expected_event_seq?: int32;
 }
 
 // ticket_add_comment appends a freeform note to a ticket's thread — the chief's
@@ -910,6 +932,7 @@ model TicketAddCommentMessage {
   request_id?: string;
   ticket_id: string;
   comment: string;
+  expected_event_seq?: int32;
 }
 
 // ticket_edit_description replaces a ticket's brief (a re-brief / re-scope).
@@ -918,6 +941,7 @@ model TicketEditDescriptionMessage {
   request_id?: string;
   ticket_id: string;
   description: string;
+  expected_event_seq?: int32;
 }
 
 // TicketActionResultMessage is the shared reply to a chief ticket action,
