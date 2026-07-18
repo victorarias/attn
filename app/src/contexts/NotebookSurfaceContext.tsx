@@ -53,6 +53,11 @@ export interface NotebookSurfaceContextValue {
   effectiveNotebookRoot: string;
   sendFsWatch: (root?: string) => Promise<FsWatchResult>;
   sendFsUnwatch: (root?: string) => Promise<FsWatchResult>;
+  // Bumps on every fresh WebSocket connect (including reconnects). The daemon
+  // drops explicit fs_watch refs whenever a client's socket disconnects, so a
+  // root-bound tile must re-issue fs_watch after each new generation or it
+  // silently stops seeing external fs_changed events post-reconnect.
+  connectionGeneration: number;
 }
 
 const NotebookSurfaceContext = createContext<NotebookSurfaceContextValue | null>(null);

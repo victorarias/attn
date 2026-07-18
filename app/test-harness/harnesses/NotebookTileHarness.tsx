@@ -94,6 +94,7 @@ export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProp
     effectiveNotebookRoot: '',
     sendFsWatch,
     sendFsUnwatch,
+    connectionGeneration: 0,
   }), [daemon, sendFsWatch, sendFsUnwatch]);
 
   useEffect(() => {

@@ -22,7 +22,7 @@ export function NotebookTile({
   root?: string;
   onOpenFile: (path: string) => void;
 }) {
-  const { makeDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch } = useNotebookSurfaceContext();
+  const { makeDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch, connectionGeneration } = useNotebookSurfaceContext();
 
   // fs_watch_result may normalize `root` (e.g. macOS resolving /tmp to
   // /private/tmp) — and fs_changed events for this subscription carry that
@@ -46,6 +46,11 @@ export function NotebookTile({
     if (!root || root === effectiveNotebookRoot) {
       return;
     }
+    // connectionGeneration is a dep (not read below) purely to force this
+    // effect to re-run on every fresh WebSocket connect: the daemon drops
+    // this tile's explicit fs_watch ref whenever the socket disconnects, but
+    // a normal frontend reconnect leaves the tile mounted and these callback
+    // identities intact, so nothing else here would re-fire the subscription.
     let cancelled = false;
     sendFsWatch(root)
       .then((result) => {
@@ -79,7 +84,7 @@ export function NotebookTile({
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sendFsWatch/sendFsUnwatch are stable daemon callbacks
-  }, [root, effectiveNotebookRoot]);
+  }, [root, effectiveNotebookRoot, connectionGeneration]);
 
   return (
     <NotebookSurface

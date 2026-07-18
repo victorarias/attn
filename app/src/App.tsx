@@ -640,6 +640,7 @@ function App() {
     sendTicketResume,
     getPresentations,
     connectionError,
+    connectionGeneration,
     hasReceivedInitialState,
     rateLimit,
     warnings,
@@ -749,6 +750,7 @@ function App() {
         daemonGitHubHosts={daemonGitHubHosts}
         settings={settings}
         connectionError={connectionError}
+        connectionGeneration={connectionGeneration}
         hasReceivedInitialState={hasReceivedInitialState}
         rateLimit={rateLimit}
         warnings={warnings}
@@ -866,6 +868,7 @@ interface AppContentProps {
   daemonGitHubHosts: string[];
   settings: Record<string, string>;
   connectionError: string | null;
+  connectionGeneration: number;
   hasReceivedInitialState: boolean;
   rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
   warnings: DaemonWarning[];
@@ -978,6 +981,7 @@ function AppContent({
   daemonGitHubHosts,
   settings,
   connectionError,
+  connectionGeneration,
   hasReceivedInitialState,
   rateLimit,
   warnings,
@@ -3418,7 +3422,8 @@ sendFetchPRDetails,
     effectiveNotebookRoot,
     sendFsWatch,
     sendFsUnwatch,
-  }), [makeNotebookSurfaceDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch]);
+    connectionGeneration,
+  }), [makeNotebookSurfaceDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch, connectionGeneration]);
 
   // The fullscreen browser is always notebook-rooted — same signal a rootless
   // tile would resolve to via makeNotebookSurfaceDaemon(undefined).

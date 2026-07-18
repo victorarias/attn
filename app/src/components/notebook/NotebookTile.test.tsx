@@ -45,6 +45,7 @@ function makeHarness(opts: {
   effectiveNotebookRoot?: string;
   watchResolvesTo?: (root: string) => string;
   watchRejects?: boolean;
+  connectionGeneration?: number;
 } = {}): Harness {
   const callLog: string[] = [];
   const resolveRoot = opts.watchResolvesTo ?? ((root: string) => root);
@@ -65,6 +66,7 @@ function makeHarness(opts: {
     effectiveNotebookRoot: opts.effectiveNotebookRoot ?? '/notebook-root',
     sendFsWatch,
     sendFsUnwatch,
+    connectionGeneration: opts.connectionGeneration ?? 0,
   };
   return { value, makeDaemon, sendFsWatch, sendFsUnwatch, callLog };
 }
@@ -151,6 +153,7 @@ describe('NotebookTile root-bound daemon + watch lifecycle', () => {
       effectiveNotebookRoot: '/notebook-root',
       sendFsWatch,
       sendFsUnwatch,
+      connectionGeneration: 0,
     };
 
     const { unmount } = render(
@@ -193,6 +196,38 @@ describe('NotebookTile root-bound daemon + watch lifecycle', () => {
     await waitFor(() => expect(harness.sendFsUnwatch).toHaveBeenCalledWith('/repo-a-resolved'));
     await waitFor(() => expect(harness.sendFsWatch).toHaveBeenCalledWith('/repo-b'));
     expect(harness.callLog).toEqual(['watch:/repo-a', 'unwatch:/repo-a-resolved', 'watch:/repo-b']);
+  });
+
+  it('re-issues fs_watch after a reconnect (connectionGeneration bump), unwatching the pre-reconnect ref first', async () => {
+    // The daemon drops an explicit fs_watch ref whenever the owning client's
+    // socket disconnects, but a normal frontend reconnect leaves the tile
+    // mounted with the same root/callback identities — nothing else in the
+    // effect's deps would re-fire the subscription without connectionGeneration.
+    const harness = makeHarness({
+      effectiveNotebookRoot: '/notebook-root',
+      watchResolvesTo: () => '/repo-resolved',
+      connectionGeneration: 1,
+    });
+    const { rerender } = render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath={null} root="/repo" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+    await waitFor(() => expect(harness.sendFsWatch).toHaveBeenCalledWith('/repo'));
+    await waitFor(() => expect(harness.makeDaemon).toHaveBeenCalledWith('/repo-resolved'));
+
+    // Simulate a reconnect: same root, same context shape, only the
+    // generation counter bumps.
+    rerender(
+      <NotebookSurfaceProvider value={{ ...harness.value, connectionGeneration: 2 }}>
+        <NotebookTile initialPath={null} root="/repo" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(harness.sendFsUnwatch).toHaveBeenCalledWith('/repo-resolved'));
+    await waitFor(() => expect(harness.sendFsWatch).toHaveBeenCalledTimes(2));
+    expect(harness.sendFsWatch.mock.calls[1]).toEqual(['/repo']);
+    expect(harness.callLog).toEqual(['watch:/repo', 'unwatch:/repo-resolved', 'watch:/repo']);
   });
 
   it('survives a watch failure (e.g. the daemon watch cap) without throwing — the tile still renders', async () => {
