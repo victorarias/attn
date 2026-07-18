@@ -1656,6 +1656,11 @@ model WorkspaceLayoutDockTileMessage {
   tile_id: string;
   tile_kind: string;
   ratio?: float64;
+
+  // Optional initial tile params for a freshly docked tile. When non-empty it
+  // becomes the tile's params; when omitted/empty, a re-dock (move) preserves
+  // the tile's existing params.
+  tile_params?: string;
 }
 
 model WorkspaceLayoutUndockTileMessage {

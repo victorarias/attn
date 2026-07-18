@@ -814,6 +814,64 @@ func TestWorkspaceLayoutDockTilePersistsAndMoves(t *testing.T) {
 	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutUndockTile, workspaceID, "", "", "tile-md", false)
 }
 
+// TestWorkspaceLayoutDockTileMessageParamsField exercises the tile_params
+// field on the dock_tile websocket message directly (as opposed to the
+// internal d.dockTile helper): a freshly docked tile takes the sent params,
+// and a later re-dock (move) with tile_params empty preserves what's already
+// persisted rather than clobbering it.
+func TestWorkspaceLayoutDockTileMessageParamsField(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-dock-tile-params-field"
+	cwd := t.TempDir()
+
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        workspaceID,
+		Title:     "Dock Tile Params Field",
+		Directory: cwd,
+	})
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID: workspaceID,
+		PaneID:      protocol.Ptr("pane-1"),
+		SessionID:   "session-1",
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, "pane-1", true)
+
+	// (a) Docking a NEW tile with tile_params set persists the sent value.
+	d.handleWorkspaceLayoutDockTile(client, &protocol.WorkspaceLayoutDockTileMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutDockTile,
+		WorkspaceID:  workspaceID,
+		AnchorPaneID: "pane-1",
+		Edge:         protocol.WorkspaceLayoutDockEdgeRight,
+		TileID:       "tile-notebook",
+		TileKind:     string(workspacelayout.TileKindNotebook),
+		TileParams:   protocol.Ptr("/notes/knowledge/decisions.md"),
+	})
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutDockTile, workspaceID, "", "", "tile-notebook", true)
+	fresh := d.store.GetWorkspaceLayout(workspaceID)
+	if params, ok := workspacelayout.TileParamsByID(fresh.Layout, "tile-notebook"); !ok || params != "/notes/knowledge/decisions.md" {
+		t.Fatalf("fresh tile params = (%q, %v), want (%q, true)", params, ok, "/notes/knowledge/decisions.md")
+	}
+
+	// (b) Re-docking that same tile (a move) with tile_params empty must NOT
+	// clobber the params already persisted.
+	d.handleWorkspaceLayoutDockTile(client, &protocol.WorkspaceLayoutDockTileMessage{
+		Cmd:          protocol.CmdWorkspaceLayoutDockTile,
+		WorkspaceID:  workspaceID,
+		AnchorPaneID: "pane-1",
+		Edge:         protocol.WorkspaceLayoutDockEdgeBottom,
+		TileID:       "tile-notebook",
+		TileKind:     string(workspacelayout.TileKindNotebook),
+	})
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutDockTile, workspaceID, "", "", "tile-notebook", true)
+	moved := d.store.GetWorkspaceLayout(workspaceID)
+	if params, ok := workspacelayout.TileParamsByID(moved.Layout, "tile-notebook"); !ok || params != "/notes/knowledge/decisions.md" {
+		t.Fatalf("moved tile params = (%q, %v), want unchanged (%q, true)", params, ok, "/notes/knowledge/decisions.md")
+	}
+}
+
 func firstSplitID(node workspacelayout.Node) string {
 	if node.Type == "split" {
 		return node.SplitID

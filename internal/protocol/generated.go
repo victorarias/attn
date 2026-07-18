@@ -5077,6 +5077,9 @@ type WorkspaceLayoutDockTileMessage struct {
 	// TileKind corresponds to the JSON schema field "tile_kind".
 	TileKind string `json:"tile_kind"`
 
+	// TileParams corresponds to the JSON schema field "tile_params".
+	TileParams *string `json:"tile_params,omitempty,omitzero"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
 }
