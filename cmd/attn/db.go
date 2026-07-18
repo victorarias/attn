@@ -97,6 +97,16 @@ func runDBRestore(args []string) {
 // determination) must not be silently treated as "not running" — that would
 // let a destructive restore proceed while daemon liveness is actually
 // unknown — so restoreDatabase refuses and surfaces the error instead.
+//
+// The live dbPath is only ever mutated after the source has been fully and
+// successfully staged, so a bad source (a directory, an unreadable file, or
+// dbPath itself) is rejected before anything at dbPath is touched. Staging
+// happens into a uniquely-named temp file in dbPath's own directory, which
+// also makes the final swap a same-filesystem os.Rename instead of a
+// copy/truncate directly onto the live path — so the live path is either the
+// fully-old file or the fully-new one, never a partially-written one. If the
+// final swap still fails after a preserve-rename has already happened, the
+// preserved copy is rolled back into place so dbPath is never left missing.
 func restoreDatabase(dbPath, backupsDir, source string, daemonRunning func() (bool, error)) (restoredFrom, preservedAs string, err error) {
 	running, err := daemonRunning()
 	if err != nil {
@@ -112,27 +122,45 @@ func restoreDatabase(dbPath, backupsDir, source string, daemonRunning func() (bo
 		if err != nil {
 			return "", "", err
 		}
-	} else if _, statErr := os.Stat(srcPath); statErr != nil {
-		return "", "", fmt.Errorf("backup file %s: %w", srcPath, statErr)
 	}
 
-	if _, statErr := os.Stat(dbPath); statErr == nil {
-		preservedAs = dbPath + ".pre-restore-" + time.Now().UTC().Format("20060102-150405")
-		if err := os.Rename(dbPath, preservedAs); err != nil {
-			return "", "", fmt.Errorf("preserve existing db %s: %w", dbPath, err)
-		}
-		// Preserve the -wal/-shm sidecars alongside the renamed db, never
-		// delete them: they can hold uncheckpointed data that only exists
-		// there. SQLite derives sidecar names by appending to the main
-		// filename, so renaming both to preservedAs+suffix keeps the
-		// preserved copy openable and consistent.
-		for _, suffix := range []string{"-wal", "-shm"} {
-			if err := os.Rename(dbPath+suffix, preservedAs+suffix); err != nil && !os.IsNotExist(err) {
-				return "", "", fmt.Errorf("preserve existing db sidecar %s: %w", dbPath+suffix, err)
-			}
+	srcInfo, statErr := os.Stat(srcPath)
+	if statErr != nil {
+		return "", "", fmt.Errorf("backup file %s: %w", srcPath, statErr)
+	}
+	if !srcInfo.Mode().IsRegular() {
+		return "", "", fmt.Errorf("backup source %s is not a regular file", srcPath)
+	}
+
+	dstExists := false
+	if dstInfo, statErr := os.Stat(dbPath); statErr == nil {
+		dstExists = true
+		if os.SameFile(srcInfo, dstInfo) {
+			return "", "", fmt.Errorf("backup source %s is the live database at %s; choose a snapshot from the backups directory instead", srcPath, dbPath)
 		}
 	} else if !os.IsNotExist(statErr) {
 		return "", "", fmt.Errorf("stat existing db %s: %w", dbPath, statErr)
+	}
+
+	// Fully materialize the source before touching the live path at all:
+	// this is what turns a bad source (directory, unreadable file, disk
+	// full mid-copy) into a no-op failure instead of a stranded db.
+	stagedPath, err := stageBackupCopy(srcPath, dbPath)
+	if err != nil {
+		return "", "", fmt.Errorf("stage backup %s: %w", srcPath, err)
+	}
+	stagedNeedsCleanup := true
+	defer func() {
+		if stagedNeedsCleanup {
+			_ = os.Remove(stagedPath)
+		}
+	}()
+
+	if dstExists {
+		preservedAs, err = preserveExistingDB(dbPath)
+		if err != nil {
+			return "", "", err
+		}
 	} else {
 		// Nothing existed at dbPath to preserve; any stray sidecars are not
 		// tied to a preserved copy, so remove them as before.
@@ -141,11 +169,52 @@ func restoreDatabase(dbPath, backupsDir, source string, daemonRunning func() (bo
 		}
 	}
 
-	if err := copyFileContents(srcPath, dbPath); err != nil {
-		return "", "", fmt.Errorf("copy backup %s into place: %w", srcPath, err)
+	if err := os.Rename(stagedPath, dbPath); err != nil {
+		if preservedAs != "" {
+			// The live path is now missing because the preserve-rename
+			// already happened; put the preserved copy back rather than
+			// leaving dbPath gone.
+			_ = os.Rename(preservedAs, dbPath)
+			for _, suffix := range []string{"-wal", "-shm"} {
+				_ = os.Rename(preservedAs+suffix, dbPath+suffix)
+			}
+		}
+		return "", "", fmt.Errorf("move staged backup into place: %w", err)
 	}
+	stagedNeedsCleanup = false
 
 	return srcPath, preservedAs, nil
+}
+
+// preserveExistingDB renames dbPath (and its -wal/-shm sidecars, if any) to a
+// collision-proof dbPath+".pre-restore-<UTC ts>[-N]" path, never deleting
+// them: they can hold uncheckpointed data that only exists there. SQLite
+// derives sidecar names by appending to the main filename, so renaming both
+// to preservedAs+suffix keeps the preserved copy openable and consistent.
+//
+// The timestamp alone is only second-resolution, so two restores within the
+// same second would otherwise collide and the second os.Rename would replace
+// the first preserved copy; the -N suffix loop makes the chosen name unique
+// regardless of how many restores land in the same second.
+func preserveExistingDB(dbPath string) (string, error) {
+	base := dbPath + ".pre-restore-" + time.Now().UTC().Format("20060102-150405")
+	preservedAs := base
+	for n := 2; ; n++ {
+		if _, err := os.Stat(preservedAs); os.IsNotExist(err) {
+			break
+		}
+		preservedAs = fmt.Sprintf("%s-%d", base, n)
+	}
+
+	if err := os.Rename(dbPath, preservedAs); err != nil {
+		return "", fmt.Errorf("preserve existing db %s: %w", dbPath, err)
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err := os.Rename(dbPath+suffix, preservedAs+suffix); err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("preserve existing db sidecar %s: %w", dbPath+suffix, err)
+		}
+	}
+	return preservedAs, nil
 }
 
 // latestRotatingBackup returns the newest canonical rotating backup
@@ -179,33 +248,58 @@ func latestRotatingBackup(dir string) (string, error) {
 	return filepath.Join(dir, names[len(names)-1]), nil
 }
 
-// copyFileContents copies src's bytes into dst (creating/truncating dst),
-// preserving src's file mode. It never removes src — the backup being
-// restored from is left in place.
-func copyFileContents(src, dst string) (err error) {
-	info, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
+// stageBackupCopy copies src's bytes into a new, uniquely-named temp file in
+// dstPath's own directory (never dstPath itself), preserving src's file
+// mode, and fsyncs it before returning. It never removes src — the backup
+// being restored from is left in place. On any error the temp file is
+// removed and the caller gets no path to clean up.
+//
+// Staging in dstPath's directory (rather than copying straight onto dstPath)
+// is what makes the final move a same-filesystem os.Rename: atomic, and safe
+// to attempt even if the source turns out to be bad, because nothing at
+// dstPath has been touched yet.
+func stageBackupCopy(src, dstPath string) (stagedPath string, err error) {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer in.Close()
 
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+	info, err := in.Stat()
 	if err != nil {
-		return err
+		return "", err
 	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(dstPath), filepath.Base(dstPath)+".restore-tmp-*")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	succeeded := false
 	defer func() {
-		if closeErr := out.Close(); err == nil {
-			err = closeErr
+		if !succeeded {
+			_ = os.Remove(tmpPath)
 		}
 	}()
 
-	_, err = io.Copy(out, in)
-	return err
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+
+	succeeded = true
+	return tmpPath, nil
 }
 
 // isDaemonRunningAt reports whether a live daemon holds the exclusive flock on

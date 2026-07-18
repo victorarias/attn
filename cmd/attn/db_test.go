@@ -171,6 +171,101 @@ func TestRestoreDatabase_MissingBackupsDirErrors(t *testing.T) {
 	}
 }
 
+// TestRestoreDatabase_RejectsSourceEqualToDestination proves that passing
+// the live attn.db itself as the restore source is rejected before anything
+// is touched, rather than renaming the source out from under itself and
+// then failing with the live db already gone.
+func TestRestoreDatabase_RejectsSourceEqualToDestination(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "attn.db")
+	backupsDir := filepath.Join(dir, "backups")
+	writeFile(t, dbPath, "current db")
+	mustMkdirAll(t, backupsDir)
+
+	_, _, err := restoreDatabase(dbPath, backupsDir, dbPath, neverRunning)
+	if err == nil {
+		t.Fatal("expected error when source == destination, got nil")
+	}
+	if !strings.Contains(err.Error(), "live database") {
+		t.Fatalf("error should call out that the source is the live database, got: %v", err)
+	}
+	if got := readFile(t, dbPath); got != "current db" {
+		t.Fatalf("db was modified despite the rejection: %q", got)
+	}
+	matches, globErr := filepath.Glob(dbPath + ".pre-restore-*")
+	if globErr != nil {
+		t.Fatalf("glob for preserve-rename artifacts: %v", globErr)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("no preserve-rename should have happened, found: %v", matches)
+	}
+}
+
+// TestRestoreDatabase_RejectsNonRegularSource proves that a directory passed
+// as the restore source is rejected (os.Stat succeeds for directories, so
+// this must be an explicit check) before the live db is touched, rather than
+// failing partway through io.Copy after the live db has already been
+// renamed aside and truncated.
+func TestRestoreDatabase_RejectsNonRegularSource(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "attn.db")
+	backupsDir := filepath.Join(dir, "backups")
+	writeFile(t, dbPath, "current db")
+	mustMkdirAll(t, backupsDir)
+	notAFile := filepath.Join(dir, "not-a-backup-dir")
+	mustMkdirAll(t, notAFile)
+
+	_, _, err := restoreDatabase(dbPath, backupsDir, notAFile, neverRunning)
+	if err == nil {
+		t.Fatal("expected error for a directory source, got nil")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("error should call out the source is not a regular file, got: %v", err)
+	}
+	if got := readFile(t, dbPath); got != "current db" {
+		t.Fatalf("db was modified despite the rejection: %q", got)
+	}
+}
+
+// TestRestoreDatabase_PreserveNameCollisionIsResolved proves that two
+// restores landing in the same second (so their default UTC-timestamp
+// preserve names would collide) each get their own preserved copy instead of
+// the second restore's preserve-rename silently replacing the first.
+func TestRestoreDatabase_PreserveNameCollisionIsResolved(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "attn.db")
+	backupsDir := filepath.Join(dir, "backups")
+	mustMkdirAll(t, backupsDir)
+	backupPath := filepath.Join(backupsDir, "attn-20260101-000000.db")
+	writeFile(t, backupPath, "backup contents")
+
+	// Simulate the collision directly: preserveExistingDB is what
+	// restoreDatabase calls internally, and its collision-avoidance loop is
+	// exercised by calling it twice for the same second without relying on
+	// two restoreDatabase calls landing in the same wall-clock second.
+	writeFile(t, dbPath, "first generation")
+	firstPreserved, err := preserveExistingDB(dbPath)
+	if err != nil {
+		t.Fatalf("first preserveExistingDB error: %v", err)
+	}
+
+	writeFile(t, dbPath, "second generation")
+	secondPreserved, err := preserveExistingDB(dbPath)
+	if err != nil {
+		t.Fatalf("second preserveExistingDB error: %v", err)
+	}
+
+	if firstPreserved == secondPreserved {
+		t.Fatalf("expected distinct preserved paths, both were %q", firstPreserved)
+	}
+	if got := readFile(t, firstPreserved); got != "first generation" {
+		t.Fatalf("first preserved db content = %q, want %q (must not be clobbered by the second preserve)", got, "first generation")
+	}
+	if got := readFile(t, secondPreserved); got != "second generation" {
+		t.Fatalf("second preserved db content = %q, want %q", got, "second generation")
+	}
+}
+
 // TestIsDaemonRunningAt_NoPidFile proves the liveness check reports "not
 // running" (with no error) when there is no pid file at all, without ever
 // touching real config resolution — dataDir is an injected temp dir.
