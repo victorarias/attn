@@ -279,6 +279,13 @@ type Daemon struct {
 	browserControlMu sync.Mutex
 	browserControl   map[string]browserControlPending
 
+	// lastBackupMu guards lastBackupAt, the UTC timestamp of the most recent
+	// successful performDatabaseBackup call. Zero value means no backup has
+	// succeeded yet this process lifetime. Surfaced read-only in the settings
+	// payload as SettingDBLastBackupAt (see ws_settings.go).
+	lastBackupMu sync.Mutex
+	lastBackupAt time.Time
+
 	// Durable workflow engine IPC state. The engine runs in a separate process
 	// (the `attn workflow run` CLI); the daemon persists, coalesced-broadcasts
 	// run updates to the read-only UI, and relays cancel to the engine sink.
@@ -1946,15 +1953,22 @@ func (d *Daemon) acquirePIDLock() error {
 	return nil
 }
 
-// releasePIDLock unlocks and removes the PID file
+// releasePIDLock unlocks the PID file. It deliberately leaves the file in
+// place on disk rather than removing it: other flock holders of that exact
+// inode (notably `attn db restore`, which holds this same lock for the
+// duration of a restore — see cmd/attn/db.go's acquireDaemonLock) only
+// contend correctly with a future daemon startup if acquirePIDLock reopens
+// and relocks that same inode. Unlinking here would let a concurrent holder
+// keep flocking an orphaned inode while a subsequent os.OpenFile(O_CREATE)
+// elsewhere silently creates and locks a different one at the same
+// pathname, defeating mutual exclusion entirely. acquirePIDLock already
+// truncates and rewrites the file's contents on every acquire, so a stale
+// leftover file is harmless.
 func (d *Daemon) releasePIDLock() {
 	if d.pidFile != nil {
 		syscall.Flock(int(d.pidFile.Fd()), syscall.LOCK_UN)
 		d.pidFile.Close()
 		d.pidFile = nil
-	}
-	if err := os.Remove(d.pidPath); err != nil && !os.IsNotExist(err) {
-		d.logf("Failed to remove PID file: %v", err)
 	}
 }
 

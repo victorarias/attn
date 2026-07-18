@@ -145,14 +145,22 @@ func spawnDaemon(binaryPath string) error {
 	return nil
 }
 
+// removeStaleSocketFiles clears the way for a fresh daemon to bind a new
+// listening socket. It deliberately does NOT remove the PID file: the PID
+// file's exclusive flock (not its presence on disk) is the sole mutual-
+// exclusion mechanism a live daemon and `attn db restore` share (see
+// Daemon.acquirePIDLock / releasePIDLock and cmd/attn/db.go's
+// acquireDaemonLock). Unlinking it here — right before spawnDaemon calls
+// acquirePIDLock, which reopens the path with O_CREATE — would let a
+// concurrent flock holder (e.g. a restore in progress) keep its lock on an
+// orphaned inode while the new daemon creates and locks a different inode
+// at the same pathname, so the two would never actually contend. The
+// listening socket has no such lock-based protection, so it still needs
+// unlinking before a fresh bind.
 func removeStaleSocketFiles() error {
 	socketPath := config.SocketPath()
-	pidPath := config.PIDPath()
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove stale socket %s: %w", socketPath, err)
-	}
-	if err := os.Remove(pidPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove stale pid %s: %w", pidPath, err)
 	}
 	return nil
 }

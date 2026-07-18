@@ -99,6 +99,12 @@ const (
 	// but produce no background work while off. See notebookTasksEnabled and the
 	// enqueue/executor gates that honor it.
 	SettingNotebookTasksEnabled = "notebook.tasks_enabled"
+	// SettingDBLastBackupAt is a READ-ONLY, daemon-computed key surfaced in the
+	// settings payload (never stored, never accepted by set_setting): the UTC
+	// RFC3339 timestamp of the most recently successful rotating database
+	// backup (see performDatabaseBackup). Absent/empty before the first
+	// successful backup this process lifetime.
+	SettingDBLastBackupAt = "db.last_backup_at"
 )
 
 func (d *Daemon) handleGetSettingsWS(client *wsClient) {
@@ -147,7 +153,7 @@ func (d *Daemon) broadcastCurrentSettings(changedKey string) {
 	if strings.TrimSpace(changedKey) != "" {
 		event.ChangedKey = protocol.Ptr(changedKey)
 	}
-	d.wsHub.BroadcastValue(event)
+	d.broadcastMessage(event)
 }
 
 func executableSettingKey(agent string) string {
@@ -248,6 +254,12 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	settings[SettingPTYBackendMode] = d.ptyBackendMode()
 	if root, err := d.notebookRoot(); err == nil {
 		settings[SettingNotebookRootEffective] = root
+	}
+	d.lastBackupMu.Lock()
+	lastBackupAt := d.lastBackupAt
+	d.lastBackupMu.Unlock()
+	if !lastBackupAt.IsZero() {
+		settings[SettingDBLastBackupAt] = lastBackupAt.Format(time.RFC3339)
 	}
 	settings[SettingTailscaleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingTailscaleEnabled]))
 	settings[SettingWorkflowsEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingWorkflowsEnabled]))

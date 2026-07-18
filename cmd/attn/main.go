@@ -255,6 +255,9 @@ func main() {
 	case "debug":
 		maybePrintProfileBanner()
 		runDebug()
+	case "db":
+		maybePrintProfileBanner()
+		runDB()
 	case "journal":
 		maybePrintProfileBanner()
 		runJournal()
@@ -581,6 +584,7 @@ commands:
   list                              list sessions and workspaces
   present <command>                 open a review presentation and read feedback
   debug <command>                   probe debug artifacts (incidents, logs)
+  db <command>                      database maintenance (restore from backup)
   vision-check <image> <question>   answer a question about an image (single LLM call)
   daemon <command>                  manage the daemon
   profile <status|resolve|list>     show / resolve the active profile's resources

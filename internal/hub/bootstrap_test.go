@@ -134,6 +134,55 @@ func TestStopRemoteDaemonScript_PortByProfile(t *testing.T) {
 	}
 }
 
+// TestStopRemoteDaemonScript_LeavesPIDFileInPlace pins the invariant that
+// stopping a remote daemon never unlinks its PID file. The PID file's flock
+// (not its presence on disk), is the sole mutual-exclusion mechanism a
+// remote daemon and a concurrent `attn db restore` on that same host share
+// (see removeStaleRemoteSocketScript and internal/daemonctl/ensure.go's
+// removeStaleSocketFiles for the identical local-daemon invariant).
+// Unlinking the pathname here would let a restore holding the old inode's
+// flock go uncontended against whatever daemon later creates a fresh inode
+// at the same pathname.
+func TestStopRemoteDaemonScript_LeavesPIDFileInPlace(t *testing.T) {
+	script := stopRemoteDaemonScript("")
+	if !strings.Contains(script, `rm -f "$socket_path"`) {
+		t.Fatalf("stop script should remove the stale socket: %s", script)
+	}
+	for _, line := range extractRemovalLines(script) {
+		if strings.Contains(line, "pid_path") {
+			t.Fatalf("stop script unlinks the PID path, want it left in place: %s", line)
+		}
+	}
+}
+
+// TestRemoveStaleRemoteSocketScript_LeavesPIDFileInPlace pins the same
+// invariant for the stale-cleanup script shared by ensureRemoteDaemonRunning
+// (stale-socket recovery) and restartRemoteDaemon.
+func TestRemoveStaleRemoteSocketScript_LeavesPIDFileInPlace(t *testing.T) {
+	script := removeStaleRemoteSocketScript()
+	if !strings.Contains(script, `rm -f "$socket_path"`) {
+		t.Fatalf("stale-cleanup script should remove the stale socket: %s", script)
+	}
+	for _, line := range extractRemovalLines(script) {
+		if strings.Contains(line, "pid_path") {
+			t.Fatalf("stale-cleanup script unlinks the PID path, want it left in place: %s", line)
+		}
+	}
+}
+
+// extractRemovalLines returns the lines of a generated shell script that
+// invoke `rm`, so tests can assert on exactly what gets unlinked without
+// being fooled by pid_path appearing elsewhere (e.g. reads via `cat`).
+func extractRemovalLines(script string) []string {
+	var lines []string
+	for _, line := range strings.Split(script, "\n") {
+		if strings.Contains(line, "rm ") || strings.Contains(line, "rm\t") || strings.HasPrefix(strings.TrimSpace(line), "rm ") {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 func TestRemoteSocketConfigScriptHonorsProfileEnv(t *testing.T) {
 	script := remoteSocketConfigScript()
 	if !strings.Contains(script, `attn_profile="${ATTN_PROFILE:-}"`) {

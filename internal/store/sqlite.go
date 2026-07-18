@@ -717,7 +717,15 @@ func migrateDB(db *sql.DB, dbPath string) error {
 		latest := migrations[len(migrations)-1].version
 		if currentVersion < latest {
 			if path, err := backupPreMigration(db, dbPath, currentVersion); err != nil {
-				log.Printf("[store] pre-migration backup failed (schema v%d -> v%d): %v; proceeding with migrations", currentVersion, latest, err)
+				if path != "" {
+					// The snapshot itself was written; only pruning old
+					// pre-migration snapshots afterward failed. Report it as
+					// such — the operator needs to know the protective
+					// snapshot exists, not that the backup failed outright.
+					log.Printf("[store] pre-migration backup written to %s (schema v%d -> v%d), but pruning old pre-migration snapshots failed: %v", path, currentVersion, latest, err)
+				} else {
+					log.Printf("[store] pre-migration backup failed (schema v%d -> v%d): %v; proceeding with migrations", currentVersion, latest, err)
+				}
 			} else {
 				log.Printf("[store] pre-migration backup written to %s (schema v%d -> v%d)", path, currentVersion, latest)
 			}
