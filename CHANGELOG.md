@@ -29,6 +29,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   database file rather than deleting it. Settings now also surface the
   timestamp of the most recent successful backup.
 
+### Changed
+- **The Notebook tile is now an Editor that can open any folder.** ⌘⌥N opens
+  it on the active workspace's directory, the tile header shows the open root
+  with a switcher (workspace / Notebook / browse), and ⌘P fuzzy-finds across
+  the whole open root. Notebook-only affordances — backlinks and send-to-chief
+  — still appear only when you're browsing your actual Notebook.
+
 ## [2026-07-16]
 
 ### Added

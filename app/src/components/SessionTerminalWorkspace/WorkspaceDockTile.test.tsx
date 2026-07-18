@@ -231,6 +231,10 @@ describe('deriveTileTitle', () => {
     expect(deriveTileTitle({ type: 'tile', tileId: 'tile-x', tileKind: 'markdown' }, undefined)).toBe('markdown');
   });
 
+  it('falls back to "Editor" for a notebook tile with no open file yet', () => {
+    expect(deriveTileTitle({ type: 'tile', tileId: 'tile-notebook', tileKind: 'notebook' }, undefined)).toBe('Editor');
+  });
+
   it('uses the host as the title for a browser tile', () => {
     expect(deriveTileTitle({
       type: 'tile',

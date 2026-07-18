@@ -56,7 +56,7 @@ export function deriveTileTitle(tile: TileLeaf, content?: TileContentState): str
   // root-bound tile persists — parse either way to reach the open path.
   if (tile.tileKind === 'notebook') {
     const { path } = parseNotebookTileParams(tile.tileParams);
-    return path ? tilePathBasename(path) : 'Notebook';
+    return path ? tilePathBasename(path) : 'Editor';
   }
   const path = content?.path || tile.tileParams || '';
   return path ? tilePathBasename(path) : tile.tileKind;

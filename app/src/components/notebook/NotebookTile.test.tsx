@@ -11,9 +11,13 @@ import type { FsWatchResult } from '../../hooks/useDaemonSocket';
 // NotebookSurface itself (CodeMirror-backed tree/editor/finder) is covered by
 // NotebookBrowser.test.tsx; here we only need to observe what NotebookTile
 // hands it, so stub it to a thin recorder.
-const surfaceCalls = vi.hoisted(() => [] as Array<{ changeSignal?: number }>);
+const surfaceCalls = vi.hoisted(() => [] as Array<{
+  changeSignal?: number;
+  backlinksNotebook?: unknown;
+  sendToChief?: unknown;
+}>);
 vi.mock('../NotebookSurface', () => ({
-  NotebookSurface: (props: { changeSignal?: number }) => {
+  NotebookSurface: (props: { changeSignal?: number; backlinksNotebook?: unknown; sendToChief?: unknown }) => {
     surfaceCalls.push(props);
     return <div data-testid="notebook-surface" data-change-signal={props.changeSignal} />;
   },
@@ -244,5 +248,49 @@ describe('NotebookTile root-bound daemon + watch lifecycle', () => {
     await waitFor(() => expect(warnSpy).toHaveBeenCalled());
     expect(warnSpy.mock.calls[0][0]).toMatch(/^\[NotebookTile\]/);
     expect(surfaceCalls.length).toBeGreaterThan(0);
+  });
+});
+
+describe('NotebookTile off-root capability gating', () => {
+  it('omits backlinksNotebook and sendToChief for a tile bound to a root other than the effective notebook root', async () => {
+    const harness = makeHarness({ effectiveNotebookRoot: '/notebook-root' });
+    render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" root="/repo" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(surfaceCalls.length).toBeGreaterThan(0));
+    const lastCall = surfaceCalls[surfaceCalls.length - 1];
+    expect(lastCall.backlinksNotebook).toBeUndefined();
+    expect(lastCall.sendToChief).toBeUndefined();
+  });
+
+  it('passes backlinksNotebook and sendToChief through for a rootless (notebook-rooted) tile', async () => {
+    const harness = makeHarness({ effectiveNotebookRoot: '/notebook-root' });
+    render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(surfaceCalls.length).toBeGreaterThan(0));
+    const lastCall = surfaceCalls[surfaceCalls.length - 1];
+    expect(lastCall.backlinksNotebook).toBeDefined();
+    expect(lastCall.sendToChief).toBeDefined();
+  });
+
+  it('passes backlinksNotebook and sendToChief through for a tile explicitly bound to the effective notebook root', async () => {
+    const harness = makeHarness({ effectiveNotebookRoot: '/notebook-root' });
+    render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" root="/notebook-root" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(surfaceCalls.length).toBeGreaterThan(0));
+    const lastCall = surfaceCalls[surfaceCalls.length - 1];
+    expect(lastCall.backlinksNotebook).toBeDefined();
+    expect(lastCall.sendToChief).toBeDefined();
   });
 });

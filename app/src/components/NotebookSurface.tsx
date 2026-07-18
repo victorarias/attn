@@ -56,12 +56,16 @@ export interface NotebookSurfaceProps {
   // Only consulted for a non-direct src (not http(s)/data:/protocol-relative).
   readAsset: (path: string) => Promise<FsReadAssetResult>;
   // Backlinks ("Linked from") for a markdown note. Notebook-specific (walks .md link
-  // graphs), so it is only consulted for .md files.
-  backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
+  // graphs), so it is only consulted for .md files. Optional: a caller that omits it
+  // (an off-root tile — see NotebookTile) gets no backlinks rail at all; the surface
+  // stays root-unaware and simply renders the affordances it's handed.
+  backlinksNotebook?: (path: string) => Promise<NotebookEntry[]>;
   // Hand a highlighted selection to the daemon to deliver to the chief of staff
   // (appends to the chief inbox note + best-effort live PTY nudge). The UI never
   // messages the chief directly. sourcePath is the note the selection came from.
-  sendToChief: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
+  // Optional: a caller that omits it (an off-root tile) gets no floating "Send to
+  // chief" button at all.
+  sendToChief?: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
   // Increments whenever an fs_changed event arrives, so an open browser re-lists the
   // tree (handled by FileTree) and reloads the open file (covering agent and external
   // writes).
@@ -326,7 +330,8 @@ export function NotebookSurface({
     }
     // Backlinks are a markdown-note concept; only walk the link graph for .md files.
     // A backlinks failure must not blank the file — it just yields no backlinks.
-    if (isMarkdownPath(path)) {
+    // Absent (an off-root tile) is a no-op: no fetch, backlinks stay empty.
+    if (isMarkdownPath(path) && backlinksNotebook) {
       setBacklinksLoading(true);
       void backlinksNotebook(path)
         .then((entries) => {
@@ -513,7 +518,8 @@ export function NotebookSurface({
     setDraft(fresh.content);
     setNoteError(null);
     // Content moved, so links may have too — re-walk backlinks for a markdown note.
-    if (isMarkdownPath(path)) {
+    // Absent (an off-root tile) is a no-op: no fetch, backlinks stay empty.
+    if (isMarkdownPath(path) && backlinksNotebook) {
       setBacklinksLoading(true);
       void backlinksNotebook(path)
         .then((entries) => {
@@ -533,7 +539,7 @@ export function NotebookSurface({
   // appends it to the chief inbox note and best-effort nudges a live chief; the
   // UI only surfaces the outcome and never messages the chief directly.
   const sendSelectionToChief = useCallback(async () => {
-    if (!chiefSel) return;
+    if (!chiefSel || !sendToChief) return;
     const path = selectedPathRef.current ?? undefined;
     // Freeze the load token (as writeBuffer does) so an outcome that resolves after
     // the user navigated away doesn't flash on the now-selected file.
@@ -761,10 +767,12 @@ export function NotebookSurface({
   }, [loadFile]);
 
   // The editor reports its current selection (or null when collapsed); float the
-  // "Send to chief" action over it.
+  // "Send to chief" action over it. Inert when sendToChief is absent (an off-root
+  // tile) — never tracks a selection, so the floating button can never render.
   const handleSelectionChange = useCallback((selection: LiveSelection | null) => {
+    if (!sendToChief) return;
     setChiefSel(selection);
-  }, []);
+  }, [sendToChief]);
 
   // Resolve an inline image's src for the live editor's image widget: strip any
   // #fragment/?query tail (notebookLinkPath — same rule brokenLinks uses), then read
@@ -799,7 +807,10 @@ export function NotebookSurface({
   const showBinaryPlaceholder = selectedPath !== null && selectedKind === 'binary';
   // The context rail (outline + backlinks) is a markdown-document affordance; a text
   // or binary file shows neither, so it keeps the two-pane layout (no empty rail).
-  const showRail = selectedKind === 'markdown' && !!note;
+  // Also gated on backlinksNotebook being provided: an off-root tile (NotebookTile)
+  // omits it, and the rail's Backlinks section has no other source, so the whole
+  // rail (Outline included) is withheld rather than showing a half-capable rail.
+  const showRail = selectedKind === 'markdown' && !!note && !!backlinksNotebook;
   // A single live save indicator (the error itself is surfaced by its own banner).
   const saveStatus = saveError
     ? null
@@ -1079,7 +1090,7 @@ export function NotebookSurface({
     </div>
   );
 
-  const floatingChief = chiefSel ? (
+  const floatingChief = chiefSel && sendToChief ? (
     <button
       type="button"
       className="notebook-browser-send-chief"

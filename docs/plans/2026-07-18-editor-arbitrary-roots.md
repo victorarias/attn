@@ -60,22 +60,26 @@ directory. The storage concept (keeper, journal, knowledge base) stays bound to
 
 ## PRs
 
-- [ ] PR1 daemon: `root` on fs_* + fs_read_asset + `fs_changed`, per-root store
-      cache, root validation, protocol bump + auth gate: explicit roots
-      require the authenticated app client (isTrustedAppClient), with
-      negative protocol tests
-- [ ] PR2 daemon: per-root watcher registry, generalized trackable,
+- [x] PR1 daemon (#577): `root` on fs_* + fs_read_asset + `fs_changed`,
+      per-root store cache, root validation, protocol bump + auth gate:
+      explicit roots require the authenticated app client
+      (isTrustedAppClient), with negative protocol tests
+- [x] PR2 daemon (#579): per-root watcher registry, generalized trackable,
       `fs_watch`/`fs_unwatch` (fs_watch inherits the root auth gate via
       resolveFsRoot + its own denial test)
-- [ ] PR3 daemon: `fs_index` bounded recursive file index (fs_index inherits
-      the root auth gate + denial test)
-- [ ] PR4 frontend: tile root plumbing (tileParams `{root, path}` + string
-      back-compat), root-aware fs calls, `fs_changed` root filtering
-- [ ] PR5 frontend: workspace-directory default for ⌘⌥N, header root switcher,
-      finder on `fs_index`
+- [x] PR3 daemon (#580): `fs_index` bounded recursive file index (fs_index
+      inherits the root auth gate + denial test)
+- [x] PR4 frontend (#583): tile root plumbing (tileParams `{root, path}` +
+      string back-compat), root-aware fs calls, `fs_changed` root filtering
+- [x] PR5 frontend (#585): workspace-directory default for ⌘⌥N, header root
+      switcher, finder on `fs_index`
 - [ ] PR6 frontend: off-root affordance gating, Editor labels + settings copy,
       changelog, packaged-app bridge-only scenario (editor over a workspace
       root)
+- [ ] PR7 daemon+frontend: endpoint_id on protocol.Workspace (populated for
+      hub remote workspaces) so localWorkspaceDirectory can restore the
+      workspace-dir default for sessionless local pinned workspaces
+      (fast-follow committed in PR #585 review)
 
 ## Open Questions
 

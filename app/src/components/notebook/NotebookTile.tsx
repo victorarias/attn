@@ -24,6 +24,12 @@ export function NotebookTile({
 }) {
   const { makeDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch, connectionGeneration } = useNotebookSurfaceContext();
 
+  // Off-root: this tile is pinned to a filesystem root other than the notebook
+  // storage root. Notebook-only affordances (backlinks, send-to-chief) are
+  // gated off below — mirrors the same root-vs-notebook-root comparison the
+  // fs_watch effect uses (line ~46) so on-root/off-root agree everywhere.
+  const offRoot = !!root && root !== effectiveNotebookRoot;
+
   // fs_watch_result may normalize `root` (e.g. macOS resolving /tmp to
   // /private/tmp) — and fs_changed events for this subscription carry that
   // resolved form, not the raw prop. Once resolution lands, both the fs_*
@@ -97,8 +103,8 @@ export function NotebookTile({
       writeFile={daemon.writeFile}
       existsFile={daemon.existsFile}
       readAsset={daemon.readAsset}
-      backlinksNotebook={daemon.backlinksNotebook}
-      sendToChief={daemon.sendToChief}
+      backlinksNotebook={offRoot ? undefined : daemon.backlinksNotebook}
+      sendToChief={offRoot ? undefined : daemon.sendToChief}
       changeSignal={daemon.changeSignal}
       listFiles={daemon.listFiles}
     />

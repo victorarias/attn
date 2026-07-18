@@ -173,8 +173,8 @@ async function main() {
         client,
         workspaceId,
         (state) => Array.isArray(state?.tileIds) && state.tileIds.length === 1
-          && Array.isArray(state?.tileTitles) && state.tileTitles.includes('Notebook'),
-        'native Cmd+Opt+N to dock a fresh notebook tile (titled "Notebook")',
+          && Array.isArray(state?.tileTitles) && state.tileTitles.includes('Editor'),
+        'native Cmd+Opt+N to dock a fresh notebook tile (titled "Editor")',
         15_000,
       );
     } catch (dockError) {
