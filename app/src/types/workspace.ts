@@ -497,6 +497,22 @@ export function resolveEditorTileRoot(
   return trimmed;
 }
 
+// localWorkspaceDirectory gates a workspace's directory to the local
+// filesystem: it returns undefined when any daemon session on this workspace
+// carries a non-empty endpoint_id, meaning the workspace lives on a remote
+// endpoint and its "directory" is a path on that remote machine, not one the
+// locally-connected daemon's fs pipeline (sendFsIndex, sendFsList, etc. — none
+// of which are endpoint-aware) can safely read. Otherwise it passes the
+// directory through unchanged.
+export function localWorkspaceDirectory(
+  directory: string | undefined,
+  sessions: ReadonlyArray<{ workspace_id?: string | null; endpoint_id?: string | null }>,
+  workspaceId: string,
+): string | undefined {
+  const isRemote = sessions.some((session) => session.workspace_id === workspaceId && !!session.endpoint_id);
+  return isRemote ? undefined : directory;
+}
+
 function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
   return panes
     .filter((pane) => pane.kind === 'agent' && typeof pane.runtime_id === 'string' && typeof pane.session_id === 'string')

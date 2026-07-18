@@ -8,6 +8,7 @@ import {
   getNormalizedPaneBounds,
   getSplitDividers,
   hasPane,
+  localWorkspaceDirectory,
   parseNotebookTileParams,
   resolveEditorTileRoot,
   serializeNotebookTileParams,
@@ -326,5 +327,26 @@ describe('resolveEditorTileRoot', () => {
   it('returns the trimmed workspace directory when it differs from the notebook root', () => {
     expect(resolveEditorTileRoot('/Users/victor/code/attn', '/Users/victor/notebook')).toBe('/Users/victor/code/attn');
     expect(resolveEditorTileRoot('  /Users/victor/code/attn  ', '/Users/victor/notebook')).toBe('/Users/victor/code/attn');
+  });
+});
+
+describe('localWorkspaceDirectory', () => {
+  it('returns undefined when a session on the workspace carries a non-empty endpoint_id', () => {
+    const sessions = [{ workspace_id: 'ws-1', endpoint_id: 'remote-mac' }];
+    expect(localWorkspaceDirectory('/home/victor/code/attn', sessions, 'ws-1')).toBeUndefined();
+  });
+
+  it('passes the directory through when the remote session belongs to a different workspace', () => {
+    const sessions = [{ workspace_id: 'ws-2', endpoint_id: 'remote-mac' }];
+    expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBe('/Users/victor/code/attn');
+  });
+
+  it('passes the directory through when there are no sessions', () => {
+    expect(localWorkspaceDirectory('/Users/victor/code/attn', [], 'ws-1')).toBe('/Users/victor/code/attn');
+  });
+
+  it('treats an empty-string endpoint_id as local', () => {
+    const sessions = [{ workspace_id: 'ws-1', endpoint_id: '' }];
+    expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBe('/Users/victor/code/attn');
   });
 });
