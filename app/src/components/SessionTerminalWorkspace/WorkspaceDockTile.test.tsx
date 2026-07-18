@@ -1,16 +1,54 @@
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import { normalizeBrowserAddress, WorkspaceDockTile, resolveMarkdownTarget } from './WorkspaceDockTile';
 import type { WorkspaceTileSessionOption } from './WorkspaceDockTile';
 import { deriveTileTitle } from '../../utils/tilePresentation';
-import type { TileLeaf } from '../../types/workspace';
+import { serializeNotebookTileParams, type TileLeaf } from '../../types/workspace';
+import { NotebookSurfaceProvider, type NotebookSurfaceContextValue } from '../../contexts/NotebookSurfaceContext';
 import { setMarkdownAnnotationsTransport } from '../MarkdownReader/annotations/transport';
 import type {
   MarkdownAnnotationsSubmitResult,
   MarkdownAnnotationsTransport,
 } from '../MarkdownReader/annotations/transport';
 import type { WireAnnotation } from '../MarkdownReader/annotations/types';
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
+
+// The root picker's body (NotebookTile → NotebookSurface, CodeMirror-backed)
+// is exercised elsewhere (NotebookTile.test.tsx, NotebookBrowser.test.tsx);
+// stub it here so these tests exercise only the header switcher.
+vi.mock('../NotebookSurface', () => ({
+  NotebookSurface: () => <div data-testid="notebook-surface" />,
+}));
+
+// WorkspaceDockTile reads effectiveNotebookRoot for its (notebook-only) root
+// switcher unconditionally via useNotebookSurfaceContext — the real app always
+// renders it under NotebookSurfaceProvider, so every render here needs the same
+// wrapper even for the markdown/browser tiles this file mostly exercises.
+const testSurfaceValue: NotebookSurfaceContextValue = {
+  makeDaemon: () => ({
+    listDir: vi.fn(),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    existsFile: vi.fn(),
+    readAsset: vi.fn(),
+    backlinksNotebook: vi.fn(),
+    sendToChief: vi.fn(),
+    listFiles: vi.fn(),
+    changeSignal: 0,
+  }),
+  effectiveNotebookRoot: '/notebook-root',
+  sendFsWatch: vi.fn().mockResolvedValue({ root: '' }),
+  sendFsUnwatch: vi.fn().mockResolvedValue({ root: '' }),
+  connectionGeneration: 0,
+};
+
+function NotebookSurfaceTestWrapper({ children }: { children: ReactNode }) {
+  return <NotebookSurfaceProvider value={testSurfaceValue}>{children}</NotebookSurfaceProvider>;
+}
 
 const opener = vi.hoisted(() => ({
   openUrl: vi.fn(async () => {}),
@@ -46,6 +84,7 @@ function renderMarkdown(content: string, allowLocalTargets = true) {
       onHeaderPointerDown={vi.fn()}
       onRequestContent={vi.fn()}
     />,
+    { wrapper: NotebookSurfaceTestWrapper },
   );
 }
 
@@ -229,6 +268,7 @@ describe('WorkspaceDockTile browser integration', () => {
         onHeaderPointerDown={vi.fn()}
         onRequestContent={vi.fn()}
       />,
+      { wrapper: NotebookSurfaceTestWrapper },
     );
 
     await screen.findByText('Error: In-app browser hosting requires the Tauri app');
@@ -256,6 +296,7 @@ describe('WorkspaceDockTile browser integration', () => {
         onHeaderPointerDown={vi.fn()}
         onRequestContent={vi.fn()}
       />,
+      { wrapper: NotebookSurfaceTestWrapper },
     );
 
     await screen.findByText('Error: In-app browser hosting requires the Tauri app');
@@ -286,6 +327,7 @@ describe('WorkspaceDockTile browser integration', () => {
         onHeaderPointerDown={vi.fn()}
         onRequestContent={vi.fn()}
       />,
+      { wrapper: NotebookSurfaceTestWrapper },
     );
 
     fireEvent.pointerDown(screen.getByRole('textbox', { name: 'Browser address' }));
@@ -312,6 +354,7 @@ describe('WorkspaceDockTile browser integration', () => {
         onHeaderPointerDown={vi.fn()}
         onRequestContent={vi.fn()}
       />,
+      { wrapper: NotebookSurfaceTestWrapper },
     );
     const address = screen.getByRole('textbox', { name: 'Browser address' });
 
@@ -359,6 +402,113 @@ describe('WorkspaceDockTile browser integration', () => {
     expect(normalizeBrowserAddress('example.com:8080')).toBe('https://example.com:8080');
     expect(normalizeBrowserAddress('http://example.com:8080')).toBe('http://example.com:8080');
     expect(normalizeBrowserAddress('ftp://example.com')).toBe('ftp://example.com');
+  });
+});
+
+describe('WorkspaceDockTile notebook root switcher', () => {
+  beforeEach(() => {
+    vi.mocked(open).mockReset();
+  });
+
+  function renderNotebookTile(opts: {
+    tileParams?: string;
+    workspaceDirectory?: string;
+    onUpdateParams?: (tileParams: string) => Promise<unknown> | void;
+  } = {}) {
+    const onUpdateParams = opts.onUpdateParams ?? vi.fn(async () => {});
+    const utils = render(
+      <WorkspaceDockTile
+        tile={{ type: 'tile', tileId: 'tile-notebook', tileKind: 'notebook', tileParams: opts.tileParams }}
+        workspaceId="workspace-1"
+        workspaceDirectory={opts.workspaceDirectory}
+        dragging={false}
+        onClose={vi.fn()}
+        onUpdateParams={onUpdateParams}
+        onHeaderPointerDown={vi.fn()}
+        onRequestContent={vi.fn()}
+      />,
+      { wrapper: NotebookSurfaceTestWrapper },
+    );
+    return { ...utils, onUpdateParams };
+  }
+
+  function picker() {
+    return screen.getByRole('combobox', { name: 'Editor root' });
+  }
+
+  it('offers Notebook and Workspace options for a rootless tile with a distinct workspace directory', () => {
+    renderNotebookTile({ workspaceDirectory: '/Users/victor/code/attn' });
+
+    const options = Array.from(picker().querySelectorAll('option')).map((option) => option.textContent);
+    expect(options).toEqual(['Notebook', 'Workspace — attn', 'Browse…']);
+    expect(picker()).toHaveValue('');
+  });
+
+  it('adds the current root as its own option when it matches neither the notebook root nor the workspace directory', async () => {
+    renderNotebookTile({
+      tileParams: serializeNotebookTileParams({ root: '/tmp/some-other-root' }),
+      workspaceDirectory: '/Users/victor/code/attn',
+    });
+    // A root-bound tile's NotebookTile body opens its own fs_watch subscription
+    // (see NotebookTile.tsx); let that settle so the assertion isn't racing an
+    // unwrapped state update.
+    await act(async () => { await Promise.resolve(); });
+
+    const options = Array.from(picker().querySelectorAll('option')).map((option) => option.textContent);
+    expect(options).toEqual(['Notebook', 'Workspace — attn', 'some-other-root', 'Browse…']);
+    expect(picker()).toHaveValue('/tmp/some-other-root');
+  });
+
+  it('omits the Workspace option when no workspace directory is set', () => {
+    renderNotebookTile({});
+
+    const options = Array.from(picker().querySelectorAll('option')).map((option) => option.textContent);
+    expect(options).toEqual(['Notebook', 'Browse…']);
+  });
+
+  it('selecting Notebook writes rootless params without the open path', async () => {
+    const { onUpdateParams } = renderNotebookTile({
+      tileParams: serializeNotebookTileParams({ root: '/tmp/some-other-root', path: 'notes.md' }),
+      workspaceDirectory: '/Users/victor/code/attn',
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    fireEvent.change(picker(), { target: { value: '' } });
+
+    expect(onUpdateParams).toHaveBeenCalledWith(serializeNotebookTileParams({ root: undefined }));
+  });
+
+  it('selecting the workspace directory writes it as the root without the open path', () => {
+    const { onUpdateParams } = renderNotebookTile({
+      tileParams: serializeNotebookTileParams({ root: undefined, path: 'notes.md' }),
+      workspaceDirectory: '/Users/victor/code/attn',
+    });
+
+    fireEvent.change(picker(), { target: { value: '/Users/victor/code/attn' } });
+
+    expect(onUpdateParams).toHaveBeenCalledWith(serializeNotebookTileParams({ root: '/Users/victor/code/attn' }));
+  });
+
+  it('Browse… persists the chosen directory as the root', async () => {
+    vi.mocked(open).mockResolvedValue('/tmp/chosen-root');
+    const { onUpdateParams } = renderNotebookTile({ workspaceDirectory: '/Users/victor/code/attn' });
+
+    fireEvent.change(picker(), { target: { value: '__browse__' } });
+
+    await waitFor(() => {
+      expect(onUpdateParams).toHaveBeenCalledWith(serializeNotebookTileParams({ root: '/tmp/chosen-root' }));
+    });
+    expect(open).toHaveBeenCalledWith({ directory: true, multiple: false, title: 'Choose editor root' });
+  });
+
+  it('Browse… cancelled leaves the tile params untouched', async () => {
+    vi.mocked(open).mockResolvedValue(null);
+    const { onUpdateParams } = renderNotebookTile({ workspaceDirectory: '/Users/victor/code/attn' });
+
+    fireEvent.change(picker(), { target: { value: '__browse__' } });
+
+    await waitFor(() => expect(open).toHaveBeenCalled());
+    expect(onUpdateParams).not.toHaveBeenCalled();
   });
 });
 
@@ -423,7 +573,10 @@ function renderSendTile({
     onHeaderPointerDown: vi.fn(),
     onRequestContent: vi.fn(),
   };
-  const view = render(<WorkspaceDockTile tile={sendTile(tileSessionId)} {...props} />);
+  const view = render(
+    <WorkspaceDockTile tile={sendTile(tileSessionId)} {...props} />,
+    { wrapper: NotebookSurfaceTestWrapper },
+  );
   return {
     ...view,
     onRetargetTile,

@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  ChangeEvent,
   FocusEvent as ReactFocusEvent,
   FormEvent,
   PointerEvent as ReactPointerEvent,
   Ref,
   RefObject,
 } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { browserHostLabel, claimBrowserHostFocus, controlBrowserHost } from '../../browser/host';
 import { parseNotebookTileParams, serializeNotebookTileParams, type TileContentState, type TileLeaf } from '../../types/workspace';
-import { deriveTileTitle } from '../../utils/tilePresentation';
+import { deriveTileTitle, tilePathBasename } from '../../utils/tilePresentation';
 import { BrowserTileBody } from './BrowserTileBody';
 import { MarkdownReader } from '../MarkdownReader';
 import type { MarkdownAnnotationsSendHandle } from '../MarkdownReader';
 import { getMarkdownAnnotationsTransport } from '../MarkdownReader/annotations/transport';
 import { useShortcut } from '../../shortcuts';
+import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
 import { NotebookTile } from '../notebook/NotebookTile';
 import './WorkspaceDockTile.css';
 
@@ -54,6 +57,10 @@ interface WorkspaceDockTileProps {
   visible?: boolean;
   // The workspace's agent sessions — the markdown tile's retarget options.
   workspaceSessions?: WorkspaceTileSessionOption[];
+  // The owning workspace's directory (Workspace.directory), for the notebook
+  // tile's root switcher's "Workspace — <dir>" option. Absent for tile-only
+  // workspaces with no directory.
+  workspaceDirectory?: string;
   onClose: () => void;
   onUpdateParams?: (tileParams: string) => Promise<unknown> | void;
   // Rebind the tile's session binding (markdown Send target). Persisted by the
@@ -92,6 +99,7 @@ export function WorkspaceDockTile({
   dragging,
   visible = true,
   workspaceSessions = [],
+  workspaceDirectory,
   onClose,
   onUpdateParams,
   onRetargetTile,
@@ -299,6 +307,45 @@ export function WorkspaceDockTile({
     };
   }, [browserLabel, onUpdateParams, tile.tileKind, tile.tileParams]);
 
+  // Root switcher (notebook tiles only). Lives in the tile chrome rather than
+  // NotebookSurface because the dock tile already owns tileParams writes (see
+  // the notebook body's onOpenFile below) — the switcher just writes a
+  // different field of the same params.
+  const { effectiveNotebookRoot } = useNotebookSurfaceContext();
+  const isNotebook = tile.tileKind === 'notebook';
+  const currentRoot = isNotebook ? parseNotebookTileParams(tile.tileParams).root : undefined;
+  const ROOT_BROWSE_VALUE = '__browse__';
+  const workspaceDirIsRoot = !!workspaceDirectory && workspaceDirectory !== effectiveNotebookRoot;
+  // The current root shows as its own option only when it's neither of the two
+  // named shortcuts already covering it — otherwise it'd duplicate "Notebook"
+  // or "Workspace — <dir>".
+  const currentRootIsOther = !!currentRoot
+    && currentRoot !== effectiveNotebookRoot
+    && currentRoot !== workspaceDirectory;
+
+  const handleRootChange = useCallback((event: ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    if (value === ROOT_BROWSE_VALUE) {
+      void open({ directory: true, multiple: false, title: 'Choose editor root' }).then((selected) => {
+        if (!selected || typeof selected !== 'string') {
+          return; // cancelled — the select is controlled by parsed params, snaps back on re-render
+        }
+        void Promise.resolve(onUpdateParams?.(serializeNotebookTileParams({ root: selected }))).catch((error) => {
+          console.warn('[WorkspaceDockTile] Failed to persist browsed notebook root:', error);
+        });
+      }).catch((error) => {
+        console.warn('[WorkspaceDockTile] Failed to open root browse dialog:', error);
+      });
+      return;
+    }
+    // A chosen dir (or any non-browse option): path is deliberately omitted —
+    // the open file is meaningless under a different root, so the tile drops
+    // back to its tree view.
+    void Promise.resolve(onUpdateParams?.(serializeNotebookTileParams({ root: value || undefined }))).catch((error) => {
+      console.warn('[WorkspaceDockTile] Failed to persist notebook root:', error);
+    });
+  }, [onUpdateParams]);
+
   const reloadBrowser = () => {
     void controlBrowserHost(workspaceId, tile.tileId, 'reload').catch((error) => {
       console.warn('[WorkspaceDockTile] Failed to reload browser:', error);
@@ -354,6 +401,26 @@ export function WorkspaceDockTile({
         ) : (
           <span className="workspace-dock-tile-title">{title}</span>
         )}
+        {isNotebook ? (
+          <select
+            className="workspace-dock-tile-root-picker"
+            aria-label="Editor root"
+            value={currentRoot ?? ''}
+            // The header is the drag handle; interacting with the picker must
+            // not start a re-dock drag (mirrors the session-picker below).
+            onPointerDown={(event) => event.stopPropagation()}
+            onChange={handleRootChange}
+          >
+            <option value="">Notebook</option>
+            {workspaceDirIsRoot && (
+              <option value={workspaceDirectory}>Workspace — {tilePathBasename(workspaceDirectory as string)}</option>
+            )}
+            {currentRootIsOther && (
+              <option value={currentRoot}>{tilePathBasename(currentRoot as string)}</option>
+            )}
+            <option value={ROOT_BROWSE_VALUE}>Browse…</option>
+          </select>
+        ) : null}
         {isMarkdown ? (
           <div
             className="workspace-dock-tile-send"

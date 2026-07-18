@@ -479,6 +479,24 @@ export function serializeNotebookTileParams(params: NotebookTileParams): string 
   return params.path || '';
 }
 
+// resolveEditorTileRoot picks the root a freshly-docked ⌘⌥N editor tile should
+// open at: the active workspace's directory, so the tile browses the tree the
+// user is actually working in rather than forcing a jump to notebook storage.
+// Returns undefined (rootless — notebook-rooted) when the directory is unset
+// or already equals the notebook root: those tiles keep the always-on
+// notebook watcher and notebook-only affordances (backlinks, etc.) instead of
+// being pinned to a redundant explicit root.
+export function resolveEditorTileRoot(
+  workspaceDirectory: string | undefined,
+  effectiveNotebookRoot: string,
+): string | undefined {
+  const trimmed = workspaceDirectory?.trim();
+  if (!trimmed || trimmed === effectiveNotebookRoot) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
   return panes
     .filter((pane) => pane.kind === 'agent' && typeof pane.runtime_id === 'string' && typeof pane.session_id === 'string')

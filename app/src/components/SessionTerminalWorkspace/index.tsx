@@ -104,6 +104,9 @@ export interface SessionTerminalWorkspaceHandle {
 
 interface SessionTerminalWorkspaceProps {
   workspaceId: string;
+  // The owning workspace's directory (Workspace.directory). Threaded down to
+  // WorkspaceDockTile's notebook root switcher's "Workspace — <dir>" option.
+  workspaceDirectory?: string;
   workspaceSessions?: Array<{
     id: string;
     label: string;
@@ -185,6 +188,7 @@ interface SessionTerminalWorkspaceProps {
 export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandle, SessionTerminalWorkspaceProps>(
   function SessionTerminalWorkspace({
     workspaceId,
+    workspaceDirectory,
     workspaceSessions = [],
     ticketActions,
     workspace,
@@ -985,6 +989,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 && effectiveDraggingLeafId === null
               }
               workspaceSessions={tileSessionOptions}
+              workspaceDirectory={workspaceDirectory}
               onClose={() => onUndockTile?.(tileLeaf.tileId)}
               onUpdateParams={(tileParams) => onUpdateTile?.(tileLeaf.tileId, tileParams)}
               onRetargetTile={(sessionId) => (

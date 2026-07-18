@@ -3275,7 +3275,7 @@ export function useDaemonSocket({
     workspaceId: string,
     tileId: string,
     tileKind: string,
-    options: { anchorPaneId?: string; edge?: TerminalDockEdge; ratio?: number } = {},
+    options: { anchorPaneId?: string; edge?: TerminalDockEdge; ratio?: number; tileParams?: string } = {},
   ) => {
     return sendWorkspaceCommand(
       'workspace_layout_dock_tile',
@@ -3288,6 +3288,7 @@ export function useDaemonSocket({
         tile_kind: tileKind,
         edge: options.edge ?? 'right',
         ...(options.ratio != null ? { ratio: options.ratio } : {}),
+        ...(options.tileParams != null ? { tile_params: options.tileParams } : {}),
       },
       tileId,
     );

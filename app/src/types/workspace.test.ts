@@ -9,6 +9,7 @@ import {
   getSplitDividers,
   hasPane,
   parseNotebookTileParams,
+  resolveEditorTileRoot,
   serializeNotebookTileParams,
   workspaceSnapshotFromDaemonWorkspace,
   type TerminalLayoutNode,
@@ -308,5 +309,22 @@ describe('notebook tile params (parse/serialize)', () => {
   it('ignores unknown fields in the JSON envelope', () => {
     const raw = JSON.stringify({ root: '/repo', path: 'a.md', bogus: 'nope' });
     expect(parseNotebookTileParams(raw)).toEqual({ root: '/repo', path: 'a.md' });
+  });
+});
+
+describe('resolveEditorTileRoot', () => {
+  it('returns undefined when the workspace has no directory', () => {
+    expect(resolveEditorTileRoot(undefined, '/Users/victor/notebook')).toBeUndefined();
+    expect(resolveEditorTileRoot('', '/Users/victor/notebook')).toBeUndefined();
+    expect(resolveEditorTileRoot('   ', '/Users/victor/notebook')).toBeUndefined();
+  });
+
+  it('returns undefined when the workspace directory is the notebook root', () => {
+    expect(resolveEditorTileRoot('/Users/victor/notebook', '/Users/victor/notebook')).toBeUndefined();
+  });
+
+  it('returns the trimmed workspace directory when it differs from the notebook root', () => {
+    expect(resolveEditorTileRoot('/Users/victor/code/attn', '/Users/victor/notebook')).toBe('/Users/victor/code/attn');
+    expect(resolveEditorTileRoot('  /Users/victor/code/attn  ', '/Users/victor/notebook')).toBe('/Users/victor/code/attn');
   });
 });
