@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func alwaysRunning() (bool, error) { return true, nil }
@@ -227,6 +229,15 @@ func TestRestoreDatabase_RejectsNonRegularSource(t *testing.T) {
 	}
 }
 
+// fixedClock returns a now func pinned to the same instant every call, so
+// preserveExistingDBAt's collision-avoidance loop can be exercised
+// deterministically instead of depending on two calls landing in the same
+// real wall-clock second.
+func fixedClock() func() time.Time {
+	t := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	return func() time.Time { return t }
+}
+
 // TestRestoreDatabase_PreserveNameCollisionIsResolved proves that two
 // restores landing in the same second (so their default UTC-timestamp
 // preserve names would collide) each get their own preserved copy instead of
@@ -234,25 +245,18 @@ func TestRestoreDatabase_RejectsNonRegularSource(t *testing.T) {
 func TestRestoreDatabase_PreserveNameCollisionIsResolved(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "attn.db")
-	backupsDir := filepath.Join(dir, "backups")
-	mustMkdirAll(t, backupsDir)
-	backupPath := filepath.Join(backupsDir, "attn-20260101-000000.db")
-	writeFile(t, backupPath, "backup contents")
+	now := fixedClock()
 
-	// Simulate the collision directly: preserveExistingDB is what
-	// restoreDatabase calls internally, and its collision-avoidance loop is
-	// exercised by calling it twice for the same second without relying on
-	// two restoreDatabase calls landing in the same wall-clock second.
 	writeFile(t, dbPath, "first generation")
-	firstPreserved, err := preserveExistingDB(dbPath)
+	firstPreserved, err := preserveExistingDBAt(dbPath, now, os.Rename)
 	if err != nil {
-		t.Fatalf("first preserveExistingDB error: %v", err)
+		t.Fatalf("first preserveExistingDBAt error: %v", err)
 	}
 
 	writeFile(t, dbPath, "second generation")
-	secondPreserved, err := preserveExistingDB(dbPath)
+	secondPreserved, err := preserveExistingDBAt(dbPath, now, os.Rename)
 	if err != nil {
-		t.Fatalf("second preserveExistingDB error: %v", err)
+		t.Fatalf("second preserveExistingDBAt error: %v", err)
 	}
 
 	if firstPreserved == secondPreserved {
@@ -263,6 +267,79 @@ func TestRestoreDatabase_PreserveNameCollisionIsResolved(t *testing.T) {
 	}
 	if got := readFile(t, secondPreserved); got != "second generation" {
 		t.Fatalf("second preserved db content = %q, want %q", got, "second generation")
+	}
+}
+
+// TestPreserveExistingDB_CollisionCheckCoversSidecarTargets proves the
+// collision-avoidance loop rejects a candidate name whose main-file slot is
+// free but whose -wal sidecar slot is already taken by an unrelated file —
+// checking only the main file would let the sidecar rename silently replace
+// that stray file.
+func TestPreserveExistingDB_CollisionCheckCoversSidecarTargets(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "attn.db")
+	now := fixedClock()
+	writeFile(t, dbPath, "live db")
+	writeFile(t, dbPath+"-wal", "live wal")
+
+	base := dbPath + ".pre-restore-" + now().UTC().Format("20060102-150405")
+	writeFile(t, base+"-wal", "unrelated stray wal")
+
+	preservedAs, err := preserveExistingDBAt(dbPath, now, os.Rename)
+	if err != nil {
+		t.Fatalf("preserveExistingDBAt error: %v", err)
+	}
+	if preservedAs == base {
+		t.Fatalf("expected a name other than %q since its -wal target was already taken", base)
+	}
+	if got := readFile(t, base+"-wal"); got != "unrelated stray wal" {
+		t.Fatalf("stray -wal file was clobbered, content = %q", got)
+	}
+	if got := readFile(t, preservedAs); got != "live db" {
+		t.Fatalf("preserved db content = %q, want %q", got, "live db")
+	}
+	if got := readFile(t, preservedAs+"-wal"); got != "live wal" {
+		t.Fatalf("preserved -wal content = %q, want %q", got, "live wal")
+	}
+}
+
+// TestPreserveExistingDB_RollsBackIfSidecarRenameFails proves that when the
+// main-file rename succeeds but a sidecar rename then fails, the main-file
+// move is rolled back so dbPath is never left missing.
+func TestPreserveExistingDB_RollsBackIfSidecarRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "attn.db")
+	writeFile(t, dbPath, "live db")
+	writeFile(t, dbPath+"-wal", "live wal")
+	writeFile(t, dbPath+"-shm", "live shm")
+
+	calls := 0
+	failOnSecondCall := func(oldpath, newpath string) error {
+		calls++
+		if calls == 2 { // the -wal sidecar rename
+			return fmt.Errorf("injected rename failure")
+		}
+		return os.Rename(oldpath, newpath)
+	}
+
+	_, err := preserveExistingDBAt(dbPath, fixedClock(), failOnSecondCall)
+	if err == nil {
+		t.Fatal("expected error when the sidecar rename fails")
+	}
+	if !strings.Contains(err.Error(), "injected rename failure") {
+		t.Fatalf("error should surface the underlying rename failure, got: %v", err)
+	}
+
+	if got := readFile(t, dbPath); got != "live db" {
+		t.Fatalf("dbPath was not restored by rollback, content = %q", got)
+	}
+	if got := readFile(t, dbPath+"-wal"); got != "live wal" {
+		t.Fatalf("-wal sidecar was not restored by rollback, content = %q", got)
+	}
+	// The -shm sidecar rename was never reached (the -wal one failed first)
+	// so it should be untouched.
+	if got := readFile(t, dbPath+"-shm"); got != "live shm" {
+		t.Fatalf("-shm sidecar unexpectedly modified, content = %q", got)
 	}
 }
 

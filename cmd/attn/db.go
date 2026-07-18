@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -193,28 +194,86 @@ func restoreDatabase(dbPath, backupsDir, source string, daemonRunning func() (bo
 // to preservedAs+suffix keeps the preserved copy openable and consistent.
 //
 // The timestamp alone is only second-resolution, so two restores within the
-// same second would otherwise collide and the second os.Rename would replace
-// the first preserved copy; the -N suffix loop makes the chosen name unique
-// regardless of how many restores land in the same second.
+// same second would otherwise collide; the -N suffix loop makes the chosen
+// name unique regardless of how many restores land in the same second. The
+// loop checks the main file AND both sidecar targets before accepting a
+// candidate — a candidate whose main-file path is free but whose -wal or
+// -shm path is already taken (e.g. from an earlier restore that had no
+// sidecars to preserve, leaving that name's main-file slot free) would
+// otherwise let a later rename silently replace that stray file.
+//
+// If the main-file rename succeeds but a sidecar rename then fails, every
+// earlier move in this call is rolled back (in reverse order) before
+// returning, so a sidecar-only filesystem error never strands dbPath
+// missing; a rollback failure is wrapped alongside the original error
+// instead of being discarded.
 func preserveExistingDB(dbPath string) (string, error) {
-	base := dbPath + ".pre-restore-" + time.Now().UTC().Format("20060102-150405")
-	preservedAs := base
+	return preserveExistingDBAt(dbPath, time.Now, os.Rename)
+}
+
+// preserveExistingDBAt is preserveExistingDB with the clock and the rename
+// operation injected, so tests can force a same-second collision
+// deterministically and force a specific rename in the sequence to fail
+// without relying on real filesystem-permission tricks.
+func preserveExistingDBAt(dbPath string, now func() time.Time, rename func(oldpath, newpath string) error) (preservedAs string, err error) {
+	base := dbPath + ".pre-restore-" + now().UTC().Format("20060102-150405")
+	preservedAs = base
 	for n := 2; ; n++ {
-		if _, err := os.Stat(preservedAs); os.IsNotExist(err) {
+		free, err := preserveTargetFree(preservedAs)
+		if err != nil {
+			return "", fmt.Errorf("check preserve target %s: %w", preservedAs, err)
+		}
+		if free {
 			break
 		}
 		preservedAs = fmt.Sprintf("%s-%d", base, n)
 	}
 
-	if err := os.Rename(dbPath, preservedAs); err != nil {
+	type move struct{ from, to string }
+	var moved []move
+	rollback := func() error {
+		var rbErr error
+		for i := len(moved) - 1; i >= 0; i-- {
+			if err := os.Rename(moved[i].to, moved[i].from); err != nil {
+				rbErr = errors.Join(rbErr, fmt.Errorf("restore %s: %w", moved[i].from, err))
+			}
+		}
+		return rbErr
+	}
+
+	if err := rename(dbPath, preservedAs); err != nil {
 		return "", fmt.Errorf("preserve existing db %s: %w", dbPath, err)
 	}
+	moved = append(moved, move{from: dbPath, to: preservedAs})
+
 	for _, suffix := range []string{"-wal", "-shm"} {
-		if err := os.Rename(dbPath+suffix, preservedAs+suffix); err != nil && !os.IsNotExist(err) {
-			return "", fmt.Errorf("preserve existing db sidecar %s: %w", dbPath+suffix, err)
+		from, to := dbPath+suffix, preservedAs+suffix
+		if err := rename(from, to); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			if rbErr := rollback(); rbErr != nil {
+				return "", fmt.Errorf("preserve existing db sidecar %s: %w (rollback also failed: %v)", from, err, rbErr)
+			}
+			return "", fmt.Errorf("preserve existing db sidecar %s: %w", from, err)
 		}
+		moved = append(moved, move{from: from, to: to})
 	}
 	return preservedAs, nil
+}
+
+// preserveTargetFree reports whether candidate is available to become a
+// preserve-rename destination: neither the main file nor either -wal/-shm
+// sidecar target may already exist there.
+func preserveTargetFree(candidate string) (bool, error) {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if _, err := os.Stat(candidate + suffix); err == nil {
+			return false, nil
+		} else if !os.IsNotExist(err) {
+			return false, fmt.Errorf("stat %s: %w", candidate+suffix, err)
+		}
+	}
+	return true, nil
 }
 
 // latestRotatingBackup returns the newest canonical rotating backup
