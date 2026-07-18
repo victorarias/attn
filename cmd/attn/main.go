@@ -475,11 +475,19 @@ func runPTYWorker() {
 }
 
 func runDaemonCommand() {
-	if len(os.Args) >= 3 && os.Args[2] == "ensure" {
-		runDaemonEnsure()
+	if len(os.Args) < 3 {
+		runDaemon()
 		return
 	}
-	runDaemon()
+	switch os.Args[2] {
+	case "ensure":
+		runDaemonEnsure()
+	case "stop":
+		runDaemonStop()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown daemon subcommand %q (expected: ensure, stop)\n", os.Args[2])
+		os.Exit(1)
+	}
 }
 
 func runDaemon() {
@@ -512,6 +520,23 @@ func runDaemonEnsure() {
 		os.Exit(1)
 	}
 	printJSON(result)
+}
+
+func runDaemonStop() {
+	result, err := daemonctl.Stop(config.PIDPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "daemon stop error: %v\n", err)
+		os.Exit(1)
+	}
+	if result.Stopped {
+		if result.Forced {
+			fmt.Printf("stopped daemon (pid %d) (force-killed)\n", result.PID)
+		} else {
+			fmt.Printf("stopped daemon (pid %d)\n", result.PID)
+		}
+		return
+	}
+	fmt.Printf("daemon %s\n", result.Note)
 }
 
 func runWSRelay() {
@@ -591,6 +616,7 @@ commands:
   db <command>                      database maintenance (restore from backup)
   vision-check <image> <question>   answer a question about an image (single LLM call)
   daemon <command>                  manage the daemon
+	  daemon ensure|stop                ensure the daemon is running, or stop it
   profile <status|resolve|list>     show / resolve the active profile's resources
   profile-env <profile|--unset>     print shell commands for selecting a profile
   version                           print version information

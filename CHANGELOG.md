@@ -9,6 +9,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-18]
 
 ### Fixed
+- **`attn daemon stop` now actually stops the daemon.** Previously the
+  subcommand didn't exist: running it would try to *start* a daemon instead —
+  silently launching one in the foreground if none was running, or erroring
+  "daemon already running" if one was. It now stops the current profile's
+  daemon, matching the guidance `attn db restore` gives. Unknown `attn daemon`
+  subcommands now fail with an error instead of starting a daemon.
 - **Orphaned session workers now clean themselves up.** A per-session PTY worker
   whose daemon is gone for good (e.g. a torn-down test profile, or a daemon that
   was killed and never restarted) previously kept running forever, accumulating
