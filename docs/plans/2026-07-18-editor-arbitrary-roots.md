@@ -38,11 +38,29 @@ directory. The storage concept (keeper, journal, knowledge base) stays bound to
   from the effective notebook root.
 - tileParams becomes `{ root?, path? }` JSON; a bare string tileParams keeps
   meaning "path under the notebook root" (back-compat with persisted tiles).
+- Authorization boundary: an explicit `root` names an arbitrary absolute
+  directory, so path validation alone isn't sufficient — any accepted local
+  WebSocket client could otherwise read, write, delete, index, or watch files
+  anywhere on disk via the daemon. Every `fs_*` command that accepts a
+  non-default `root` (including `fs_index`, `fs_watch`, `fs_unwatch`) requires
+  the authenticated app identity — the existing `IsBrowserHost()` boundary used
+  for the Tauri client — before honoring it. Omitted/empty `root` (today's
+  notebook-only behavior) stays available to any accepted client, unchanged.
+  An unauthenticated client requesting a non-default root gets a protocol
+  error, not a silent notebook-root fallback.
+
+## Verification
+
+- PR1 lands negative protocol tests in the daemon slice: an ordinary/untrusted
+  WebSocket client is proven unable to operate (read, write, index, or watch)
+  on an arbitrary root. Subsequent PRs adding `root`-aware commands extend
+  this coverage rather than assuming it.
 
 ## PRs
 
 - [ ] PR1 daemon: `root` on fs_* + fs_read_asset + `fs_changed`, per-root store
-      cache, root validation, protocol bump
+      cache, root validation, `IsBrowserHost()` authorization gate for
+      non-default roots, negative protocol tests, protocol bump
 - [ ] PR2 daemon: per-root watcher registry, generalized trackable,
       `fs_watch`/`fs_unwatch`
 - [ ] PR3 daemon: `fs_index` bounded recursive file index
