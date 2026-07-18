@@ -38,9 +38,10 @@ const selfWriteTTL = 3 * time.Second
 // onChange (which broadcasts notebook_changed) and drives NoteSelfWrite from its
 // write handlers.
 type Watcher struct {
-	root     string
-	debounce time.Duration
-	onChange func(paths []string)
+	root      string
+	debounce  time.Duration
+	cleanPath func(string) (string, error)
+	onChange  func(paths []string)
 
 	fsw *fsnotify.Watcher
 
@@ -73,8 +74,19 @@ type SelfWrite struct {
 // NewWatcher starts watching root (which must already exist) and every
 // non-dotdir subdirectory under it, coalescing events over debounce before
 // calling onChange. Close stops it. It errors if root does not exist or is not a
-// directory, rather than silently watching nothing.
+// directory, rather than silently watching nothing. Only .md files are
+// trackable (the notebook's rule); see NewWatcherWithCleaner for a generic root.
 func NewWatcher(root string, debounce time.Duration, onChange func(paths []string)) (*Watcher, error) {
+	return NewWatcherWithCleaner(root, debounce, CleanPath, onChange)
+}
+
+// NewWatcherWithCleaner is NewWatcher with an injectable path-cleaning rule.
+// cleanPath decides which filesystem paths are trackable: it is handed a
+// root-relative slash-path and either returns the canonical form to key events
+// on, or an error to skip the path entirely. Passing CleanPath (the .md rule)
+// reproduces NewWatcher's behavior; a permissive cleaner (e.g. fsdoc.CleanPath)
+// makes the watcher generic over every file under root.
+func NewWatcherWithCleaner(root string, debounce time.Duration, cleanPath func(string) (string, error), onChange func(paths []string)) (*Watcher, error) {
 	clean := filepath.Clean(root)
 	if info, err := os.Stat(clean); err != nil {
 		return nil, fmt.Errorf("notebook watcher: %w", err)
@@ -88,6 +100,7 @@ func NewWatcher(root string, debounce time.Duration, onChange func(paths []strin
 	w := &Watcher{
 		root:       clean,
 		debounce:   debounce,
+		cleanPath:  cleanPath,
 		onChange:   onChange,
 		fsw:        fsw,
 		selfWrites: make(map[string]selfWriteRecord),
@@ -114,7 +127,7 @@ func (w *Watcher) NoteSelfWrite(writes ...SelfWrite) {
 	defer w.mu.Unlock()
 	exp := w.now().Add(selfWriteTTL)
 	for _, sw := range writes {
-		clean, err := CleanPath(sw.Rel)
+		clean, err := w.cleanPath(sw.Rel)
 		if err != nil {
 			continue
 		}
@@ -173,11 +186,11 @@ func (w *Watcher) handleEvent(ev fsnotify.Event, pending map[string]struct{}) {
 				return // skip .attn/ and any dotdir subtree
 			}
 			// Surface whatever addTree discovered even if the walk aborted partway
-			// (e.g. a permission error on a sibling subdir): the .md files found
-			// before the failure are real notes whose parent dirs are already
+			// (e.g. a permission error on a sibling subdir): the files found before
+			// the failure are real trackable paths whose parent dirs are already
 			// watched, so dropping them would silently miss external edits.
-			mdFiles, _ := w.addTree(ev.Name)
-			for _, rel := range mdFiles {
+			files, _ := w.addTree(ev.Name)
+			for _, rel := range files {
 				pending[rel] = struct{}{}
 			}
 			return
@@ -259,10 +272,10 @@ func (w *Watcher) diskHash(rel string) string {
 }
 
 // addTree adds a watch for dir and every non-dotdir subdirectory, returning the
-// notebook-relative paths of the .md files it contains (so files that appear
+// root-relative paths of the trackable files it contains (so files that appear
 // alongside a freshly created directory are not missed).
 func (w *Watcher) addTree(dir string) ([]string, error) {
-	var mdFiles []string
+	var files []string
 	err := filepath.WalkDir(dir, func(p string, dirent fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -278,21 +291,23 @@ func (w *Watcher) addTree(dir string) ([]string, error) {
 			return nil
 		}
 		if rel, ok := w.trackable(p); ok {
-			mdFiles = append(mdFiles, rel)
+			files = append(files, rel)
 		}
 		return nil
 	})
-	return mdFiles, err
+	return files, err
 }
 
-// trackable reports whether an absolute path is a notebook note (a .md file with
-// no dotfile/dotdir segment under the root) and returns its clean relative path.
+// trackable reports whether an absolute path is trackable under this watcher's
+// cleanPath rule (no dotfile/dotdir segment under the root, plus whatever else
+// cleanPath enforces — e.g. .md-only for the notebook rule) and returns its
+// clean relative path.
 func (w *Watcher) trackable(absPath string) (string, bool) {
 	rel, err := filepath.Rel(w.root, absPath)
 	if err != nil {
 		return "", false
 	}
-	clean, err := CleanPath(filepath.ToSlash(rel))
+	clean, err := w.cleanPath(filepath.ToSlash(rel))
 	if err != nil {
 		return "", false
 	}

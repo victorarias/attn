@@ -1025,6 +1025,62 @@ type FsRenameResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type FsUnwatchMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
+}
+
+type FsUnwatchResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type FsWatchMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
+}
+
+type FsWatchResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type FsWriteMessage struct {
 	// BaseHash corresponds to the JSON schema field "base_hash".
 	BaseHash *string `json:"base_hash,omitempty,omitzero"`

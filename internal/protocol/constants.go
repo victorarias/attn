@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "167"
+const ProtocolVersion = "168"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -88,6 +88,8 @@ const (
 	CmdFsRename                              = "fs_rename"
 	CmdFsDelete                              = "fs_delete"
 	CmdFsExists                              = "fs_exists"
+	CmdFsWatch                               = "fs_watch"
+	CmdFsUnwatch                             = "fs_unwatch"
 	CmdUnregister                            = "unregister"
 	CmdState                                 = "state"
 	CmdSetSessionResumeID                    = "set_session_resume_id"
@@ -235,6 +237,8 @@ const (
 	EventFsRenameResult                  = "fs_rename_result"
 	EventFsDeleteResult                  = "fs_delete_result"
 	EventFsExistsResult                  = "fs_exists_result"
+	EventFsWatchResult                   = "fs_watch_result"
+	EventFsUnwatchResult                 = "fs_unwatch_result"
 	EventFsChanged                       = "fs_changed"
 	EventPRsUpdated                      = "prs_updated"
 	EventReposUpdated                    = "repos_updated"
@@ -698,6 +702,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdFsExists:
 		var msg FsExistsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdFsWatch:
+		var msg FsWatchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdFsUnwatch:
+		var msg FsUnwatchMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

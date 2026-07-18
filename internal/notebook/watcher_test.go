@@ -272,7 +272,7 @@ func TestAddTreeReturnsPartialFilesOnWalkError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = fsw.Close() })
-	w := &Watcher{root: filepath.Clean(root), fsw: fsw}
+	w := &Watcher{root: filepath.Clean(root), fsw: fsw, cleanPath: CleanPath}
 
 	mdFiles, walkErr := w.addTree(root)
 	if walkErr == nil {

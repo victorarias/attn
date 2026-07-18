@@ -71,11 +71,12 @@ func (d *Daemon) resolveFsRoot(client *wsClient, raw string) (string, error) {
 
 // fsStoreFor returns the daemon's generic filesystem Store for rawRoot,
 // resolving it first (see resolveFsRoot). Stores are cached per resolved root
-// so writes to the same root serialize through one in-process writer. Only the
-// notebook root gets the shared external-edit watcher today (ensureNotebookWatcher);
-// other roots get a Store but no watcher — that lands with the non-text editor
-// work (PR2). Returns the resolved root alongside the store so callers can key
-// broadcasts and notebook-coupling decisions on it without re-resolving.
+// so writes to the same root serialize through one in-process writer. The
+// notebook root always gets the shared external-edit watcher
+// (ensureNotebookWatcher); other roots only get a live watcher once a client
+// holds them open via fs_watch (see fs_watch.go). Returns the resolved root
+// alongside the store so callers can key broadcasts and notebook-coupling
+// decisions on it without re-resolving.
 func (d *Daemon) fsStoreFor(client *wsClient, rawRoot string) (*fsdoc.Store, string, error) {
 	root, err := d.resolveFsRoot(client, rawRoot)
 	if err != nil {
@@ -258,11 +259,14 @@ func (d *Daemon) sendFsWriteWSResult(client *wsClient, requestID, path, content,
 				result.Hash = protocol.Ptr(hash)
 				if d.isNotebookRoot(root) {
 					// Content-aware self-write so the shared watcher does not surface this
-					// UI edit as an external one. NoteSelfWrite keys on the notebook's
-					// CleanPath, so it only registers a .md path — which is exactly the set
-					// the watcher can report today; a non-.md write fires no watcher event,
-					// so there is nothing to suppress for it either way.
+					// UI edit as an external one. The notebook watcher now runs a generic
+					// cleaner (fsdoc.CleanPath, see ensureNotebookWatcher), so this also
+					// suppresses a non-.md write from echoing back as external.
 					d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: changed, Hash: hash})
+				} else if w := d.fsWatcherFor(root); w != nil {
+					// Same suppression for a generic editor root under an active fs_watch:
+					// without it, a UI fs_write would echo back as its own external edit.
+					w.NoteSelfWrite(notebook.SelfWrite{Rel: changed, Hash: hash})
 				}
 				d.broadcastFsChanged(root, originUI, changed)
 			}
@@ -300,6 +304,11 @@ func (d *Daemon) sendFsRenameWSResult(client *wsClient, requestID, oldPath, newP
 					notebook.SelfWrite{Rel: oldRel},
 					notebook.SelfWrite{Rel: newRel, Hash: hash},
 				)
+			} else if w := d.fsWatcherFor(root); w != nil {
+				w.NoteSelfWrite(
+					notebook.SelfWrite{Rel: oldRel},
+					notebook.SelfWrite{Rel: newRel, Hash: hash},
+				)
 			}
 			err = store.Rename(oldRel, newRel)
 			if err == nil {
@@ -329,6 +338,8 @@ func (d *Daemon) sendFsDeleteWSResult(client *wsClient, requestID, path, rawRoot
 		inNotebook := d.isNotebookRoot(root)
 		if inNotebook {
 			d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: rel})
+		} else if w := d.fsWatcherFor(root); w != nil {
+			w.NoteSelfWrite(notebook.SelfWrite{Rel: rel})
 		}
 		err = store.Delete(rel)
 		if err == nil {

@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '167';
+export const PROTOCOL_VERSION = '168';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -435,6 +435,13 @@ export interface FsDeleteResult {
 export interface FsExistsResult {
   path: string;
   exists: boolean;
+}
+
+// The resolved absolute root an fs_watch/fs_unwatch applied to. Mirrors the
+// daemon's protocol.FsWatchResultMessage/FsUnwatchResultMessage (root only —
+// there is no other result payload).
+export interface FsWatchResult {
+  root: string;
 }
 
 interface UseDaemonSocketOptions {
@@ -1685,6 +1692,27 @@ export function useDaemonSocket({
               });
             } else {
               pending.reject(new Error(data.error || 'Filesystem exists check failed'));
+            }
+            break;
+          }
+
+          case 'fs_watch_result':
+          case 'fs_unwatch_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const prefix = data.event === 'fs_watch_result' ? 'fs_watch' : 'fs_unwatch';
+            const key = `${prefix}:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && data.root) {
+              pending.resolve({ root: data.root });
+            } else {
+              pending.reject(new Error(data.error || 'Filesystem watch action failed'));
             }
             break;
           }
@@ -4749,6 +4777,53 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // Subscribe this client to fs_changed broadcasts for root (undefined/empty =
+  // the notebook root, which is always watched already). Refcounted on the
+  // daemon side, so repeat calls and multiple subscribers share one watcher; pair
+  // with sendFsUnwatch when live updates are no longer needed.
+  const sendFsWatch = useCallback((root?: string): Promise<FsWatchResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('fs_watch');
+      const key = `fs_watch:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'fs_watch', request_id: requestId, ...(root ? { root } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Filesystem watch timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  // Drop this client's subscription from sendFsWatch. A success no-op if this
+  // client never watched root, or root is the notebook root (always watched
+  // independent of subscriptions).
+  const sendFsUnwatch = useCallback((root?: string): Promise<FsWatchResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('fs_unwatch');
+      const key = `fs_unwatch:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'fs_unwatch', request_id: requestId, ...(root ? { root } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Filesystem unwatch timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // Get recent locations from daemon
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
@@ -5274,6 +5349,8 @@ export function useDaemonSocket({
     sendFsRename,
     sendFsDelete,
     sendFsExists,
+    sendFsWatch,
+    sendFsUnwatch,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,

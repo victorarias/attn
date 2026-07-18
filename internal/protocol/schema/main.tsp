@@ -1162,6 +1162,26 @@ model FsExistsMessage {
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
+// Subscribe this client to fs_changed broadcasts for a root: starts a live
+// watcher on first subscriber, refcounted per client so multiple subscribers (or
+// repeat calls) share one watcher. The notebook root is always watched already,
+// so fs_watch on it is a success no-op. Pair with fs_unwatch when the client no
+// longer needs live updates for that root.
+model FsWatchMessage {
+  cmd: "fs_watch";
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+// Drop this client's subscription from fs_watch. The watcher for a root closes
+// once no client holds it open (including on client disconnect). Unwatching a
+// root this client never watched is a success no-op.
+model FsUnwatchMessage {
+  cmd: "fs_unwatch";
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -2972,11 +2992,31 @@ model FsExistsResultMessage {
   result?: FsExistsResult;
 }
 
+// Result of fs_watch. root is the resolved absolute root on success, so the
+// frontend can key its subscription state on the same value fs_changed.root
+// carries.
+model FsWatchResultMessage {
+  event: "fs_watch_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  root?: string;
+}
+
+// Result of fs_unwatch.
+model FsUnwatchResultMessage {
+  event: "fs_unwatch_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  root?: string;
+}
+
 // Broadcast when files under the root change. origin is agent|ui|external, the
-// same vocabulary as notebook_changed. NOTE: today this rides the notebook
-// watcher, which only surfaces .md paths, so a non-.md external edit does not yet
-// emit fs_changed; generalizing the watcher to all files lands with the non-text
-// editor work.
+// same vocabulary as notebook_changed. Fires for every changed path regardless of
+// file type: under the notebook root this rides the always-on notebook watcher;
+// under any other root it fires only while at least one client holds that root
+// open via fs_watch.
 model FsChangedMessage {
   event: "fs_changed";
   paths: string[];
@@ -3170,6 +3210,8 @@ alias DaemonEvent =
   | FsRenameResultMessage
   | FsDeleteResultMessage
   | FsExistsResultMessage
+  | FsWatchResultMessage
+  | FsUnwatchResultMessage
   | FsChangedMessage
   | TaskListResultMessage
   | TaskRetryResultMessage

@@ -781,6 +781,7 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 	defer func() {
 		d.dropPendingInitialState(client)
 		d.cleanupRemoteGitStatusSubscription(client)
+		d.dropFsWatchClient(client)
 		d.detachAllSessions(client)
 		close(client.recv) // signal wsMsgPump to exit
 		d.wsHub.unregister <- client
@@ -957,6 +958,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdFsExists:
 		fsExists := msg.(*protocol.FsExistsMessage)
 		go d.sendFsExistsWSResult(client, protocol.Deref(fsExists.RequestID), fsExists.Path, protocol.Deref(fsExists.Root))
+	case protocol.CmdFsWatch:
+		fsWatch := msg.(*protocol.FsWatchMessage)
+		go d.handleFsWatch(client, protocol.Deref(fsWatch.RequestID), protocol.Deref(fsWatch.Root))
+	case protocol.CmdFsUnwatch:
+		fsUnwatch := msg.(*protocol.FsUnwatchMessage)
+		go d.handleFsUnwatch(client, protocol.Deref(fsUnwatch.RequestID), protocol.Deref(fsUnwatch.Root))
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:
