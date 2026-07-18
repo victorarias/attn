@@ -17,6 +17,7 @@ import { formattingKeymap } from './formatting';
 import { frontmatterCard } from './frontmatterCard';
 import { imageWidget } from './imageWidget';
 import { liveMarkdownPreview } from './liveMarkdownPreview';
+import { noteDir } from './linkResolver';
 import { markdownTables } from './tableWidget';
 import { computeMinimalEdit } from './minimalEdit';
 
@@ -80,6 +81,9 @@ interface LiveMarkdownEditorProps {
   // "missing" verdicts so a link to a just-created note re-checks. (A change counter,
   // not data — only its identity change matters.)
   revalidateSignal?: number;
+  // Root-relative path of the note being edited, used to resolve bare-relative link
+  // targets against its directory. Defaults to '' (the notebook root).
+  notePath?: string;
   ariaLabel?: string;
   autoFocus?: boolean;
   // Called with the new open state whenever the in-editor search panel opens or
@@ -173,6 +177,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
   existsFile,
   resolveImageSrc,
   revalidateSignal,
+  notePath,
   ariaLabel,
   autoFocus,
   onSearchOpenChange,
@@ -234,13 +239,13 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       markdownTables(),
       imageWidget({ resolveSrc: resolveImageSrc }),
       liveMarkdownPreview({ onFollowLink }),
-      brokenLinks({ existsFile }),
+      brokenLinks({ existsFile, baseDir: noteDir(notePath ?? '') }),
       search({ top: true }),
       keymap.of(macSearchKeymap),
       formattingKeymap(),
       editorTheme,
     ],
-    [onFollowLink, existsFile, resolveImageSrc],
+    [onFollowLink, existsFile, resolveImageSrc, notePath],
   );
 
   // When the notebook changed on disk, ask the broken-link checker to re-verify any

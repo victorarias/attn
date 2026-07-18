@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { NotebookBrowser, parseNotebookHref } from './NotebookBrowser';
+import { NotebookBrowser } from './NotebookBrowser';
 import type { FsEntry, FsExistsResult, FsReadAssetResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
 
 // The live editor is CodeMirror-backed, which cannot mount under happy-dom (its
@@ -799,26 +799,8 @@ describe('NotebookBrowser', () => {
 
 });
 
-describe('parseNotebookHref', () => {
-  it('classifies a root-absolute .md target as in-notebook navigation', () => {
-    expect(parseNotebookHref('/knowledge/areas/foo.md')).toEqual({ kind: 'note', path: 'knowledge/areas/foo.md', anchor: undefined });
-  });
-
-  it('strips an anchor from a note target', () => {
-    expect(parseNotebookHref('/knowledge/areas/foo.md#why')).toEqual({ kind: 'note', path: 'knowledge/areas/foo.md', anchor: 'why' });
-  });
-
-  it('treats a bare fragment as an in-page anchor', () => {
-    expect(parseNotebookHref('#section')).toEqual({ kind: 'fragment', anchor: 'section' });
-  });
-
-  it('treats http(s) and relative targets as external', () => {
-    expect(parseNotebookHref('https://example.com').kind).toBe('external');
-    expect(parseNotebookHref('./relative.md').kind).toBe('external');
-    // A root-absolute path that is not a .md file is not in-notebook navigation.
-    expect(parseNotebookHref('/etc/passwd').kind).toBe('external');
-  });
-});
+// Link-classification logic (parseNotebookHref) moved to the shared
+// resolveNotebookLink and is covered by linkResolver.test.ts.
 
 // Stage 5 chrome: the manual edge-rail folds, the header chief pulse, and the note
 // kind badge. The fold ANIMATION and grid collapse are a real-browser concern

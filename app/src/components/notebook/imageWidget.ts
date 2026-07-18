@@ -16,7 +16,6 @@ import { ensureSyntaxTree } from '@codemirror/language';
 import { type EditorState, type Extension, type Range, StateField } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import type { SyntaxNode } from '@lezer/common';
-import { notebookLinkPath } from './brokenLinks';
 
 export interface ImageTarget {
   lineFrom: number;
@@ -26,9 +25,11 @@ export interface ImageTarget {
 }
 
 export interface ImageWidgetOptions {
-  // Resolve a notebook-relative src (already stripped of #fragment/?query) to a
-  // displayable src (typically a data: URI), or null when it can't be resolved.
-  // Absent, a null resolution, or a rejection all render the broken placeholder.
+  // Resolve a raw, not-yet-normalized notebook-relative src (still needs #fragment/
+  // ?query stripping and baseDir-relative resolution — the caller does both, via
+  // linkResolver) to a displayable src (typically a data: URI), or null when it
+  // can't be resolved. Absent, a null resolution, or a rejection all render the
+  // broken placeholder.
   resolveSrc?: (src: string) => Promise<string | null>;
 }
 
@@ -173,16 +174,19 @@ class ImageWidget extends WidgetType {
       return container;
     }
 
-    const path = notebookLinkPath(src);
-    if (!path || !this.resolveSrc) {
+    // Not a direct src: hand the raw (still baseDir-relative) src straight to
+    // resolveSrc, which is the ONE place that resolves it (against the note's
+    // directory) — resolving here too would double-apply and mis-clamp a `..`
+    // src before the real baseDir is known.
+    if (!this.resolveSrc) {
       renderBroken();
       return container;
     }
 
-    let pending = this.cache.get(path);
+    let pending = this.cache.get(src);
     if (!pending) {
-      pending = this.resolveSrc(path).catch(() => null);
-      this.cache.set(path, pending);
+      pending = this.resolveSrc(src).catch(() => null);
+      this.cache.set(src, pending);
     }
     pending.then((resolved) => {
       // The widget's DOM may already have been torn down (navigation, re-render, or

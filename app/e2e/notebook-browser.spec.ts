@@ -445,4 +445,61 @@ test.describe('NotebookBrowser (fs surface)', () => {
     await page.keyboard.type('typed after reload', { delay: 8 });
     await expect(page.locator('.cm-content')).toContainText('typed after reload');
   });
+
+  test('mod-click on a bare-relative link navigates to the sibling note (resolved against the linking note\'s directory)', async ({ page }) => {
+    // Regression: parseNotebookHref required a leading '/' + '.md' for in-notebook
+    // navigation, so a bare `sibling.md` link was classified external and handed to
+    // window.open instead of navigating. resolveNotebookLink resolves it against the
+    // linking note's own directory (knowledge/areas), landing on knowledge/areas/bar.md.
+    await page.addInitScript(() => {
+      (window as unknown as { __OPENED__: string[] }).__OPENED__ = [];
+      window.open = ((url?: string | URL) => {
+        (window as unknown as { __OPENED__: string[] }).__OPENED__.push(String(url));
+        return null;
+      }) as typeof window.open;
+    });
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+
+    // Open the linking note (knowledge/areas/foo.md) via the Cmd+P finder.
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Meta+p');
+    await page.locator('.notebook-finder-input').fill('foo');
+    await expect(page.locator('.notebook-finder-option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { level: 2, name: 'foo' })).toBeVisible();
+    await page.waitForSelector('.cm-md-link[data-href="bar.md"]');
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.locator('.cm-md-link[data-href="bar.md"]').click({ modifiers: [modifier] });
+
+    await expect(page.getByRole('heading', { level: 2, name: 'bar' })).toBeVisible();
+    await expect(page.locator('.cm-content')).toContainText('Sibling of foo');
+    // Never fell through to opening it as an external URL.
+    expect(await page.evaluate(() => (window as unknown as { __OPENED__: string[] }).__OPENED__)).toEqual([]);
+  });
+
+  test('mod-click on a #heading link scrolls that heading into view', async ({ page }) => {
+    await page.goto('/test-harness/?component=NotebookBrowser');
+    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
+    await page.getByRole('heading', { level: 2, name: 'index' }).waitFor();
+
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Meta+p');
+    await page.locator('.notebook-finder-input').fill('foo');
+    await expect(page.locator('.notebook-finder-option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { level: 2, name: 'foo' })).toBeVisible();
+    await page.waitForSelector('.cm-content');
+
+    const scrollTop = () => page.locator('.cm-scroller').evaluate((el) => (el as HTMLElement).scrollTop);
+    await page.locator('.cm-scroller').evaluate((el) => { (el as HTMLElement).scrollTop = 0; });
+    await expect.poll(scrollTop).toBeLessThan(40);
+
+    const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
+    await page.locator('.cm-md-link[data-href="#down-below"]').click({ modifiers: [modifier] });
+
+    await expect.poll(scrollTop, { timeout: 2000 }).toBeGreaterThan(150);
+  });
 });

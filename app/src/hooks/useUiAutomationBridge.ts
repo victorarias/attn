@@ -1130,21 +1130,36 @@ async function dragSplitDivider(
 }
 
 function clickElement(element: HTMLElement) {
-  element.dispatchEvent(new MouseEvent('mousedown', {
+  clickElementWithModifiers(element);
+}
+
+interface ClickModifiers {
+  meta?: boolean;
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+}
+
+// Like clickElement, but dispatches at the element's center with optional
+// modifier keys (for mod-click link navigation etc).
+function clickElementWithModifiers(element: HTMLElement, modifiers?: ClickModifiers) {
+  const rect = element.getBoundingClientRect();
+  const clientX = rect.x + rect.width / 2;
+  const clientY = rect.y + rect.height / 2;
+  const init: MouseEventInit = {
     bubbles: true,
     cancelable: true,
     view: window,
-  }));
-  element.dispatchEvent(new MouseEvent('mouseup', {
-    bubbles: true,
-    cancelable: true,
-    view: window,
-  }));
-  element.dispatchEvent(new MouseEvent('click', {
-    bubbles: true,
-    cancelable: true,
-    view: window,
-  }));
+    clientX,
+    clientY,
+    metaKey: modifiers?.meta ?? false,
+    ctrlKey: modifiers?.ctrl ?? false,
+    shiftKey: modifiers?.shift ?? false,
+    altKey: modifiers?.alt ?? false,
+  };
+  element.dispatchEvent(new MouseEvent('mousedown', init));
+  element.dispatchEvent(new MouseEvent('mouseup', init));
+  element.dispatchEvent(new MouseEvent('click', init));
 }
 
 function setInputValue(element: HTMLInputElement, value: string) {
@@ -1629,6 +1644,37 @@ export function useUiAutomationBridge({
         return captureDomScreenshotData(
           typeof payload.selector === 'string' ? payload.selector : undefined,
         );
+      case 'dom_click': {
+        const selector = typeof payload.selector === 'string' ? payload.selector : null;
+        if (!selector) throw new Error('dom_click requires selector');
+        const element = document.querySelector(selector);
+        if (!(element instanceof HTMLElement)) {
+          throw new Error(`dom_click selector not found in DOM: ${selector}`);
+        }
+        const modifiers = (payload.modifiers ?? {}) as ClickModifiers;
+        clickElementWithModifiers(element, modifiers);
+        await settleUi(2);
+        return { clicked: true, bounds: rectSnapshot(element) };
+      }
+      case 'dom_type': {
+        const selector = typeof payload.selector === 'string' ? payload.selector : null;
+        const text = typeof payload.text === 'string' ? payload.text : null;
+        if (!selector) throw new Error('dom_type requires selector');
+        if (text === null) throw new Error('dom_type requires text');
+        const element = document.querySelector(selector);
+        if (!element) {
+          throw new Error(`dom_type selector not found in DOM: ${selector}`);
+        }
+        if (element instanceof HTMLInputElement) {
+          setInputValue(element, text);
+        } else if (element instanceof HTMLTextAreaElement) {
+          setControlValue(element, text);
+        } else {
+          throw new Error(`dom_type target is not an input or textarea: ${selector}`);
+        }
+        await settleUi(2);
+        return { typed: text };
+      }
       case 'get_window_bounds': {
         if (!isTauri()) {
           return null;
