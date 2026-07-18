@@ -17,6 +17,7 @@ import (
 
 	creackpty "github.com/creack/pty"
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/launchenv"
 )
 
 const (
@@ -171,10 +172,10 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	}
 
 	agent := normalizeAgent(opts.Agent, len(opts.ExternalCommand) > 0)
-	attnPath := ""
-	if agent != "shell" {
-		attnPath = resolveAttnPath()
-	}
+	// Every PTY, including an ordinary shell pane, resolves bare `attn` to the
+	// installation that launched it. Managed-agent identity remains conditional
+	// in buildSpawnEnv below.
+	attnPath := launchenv.ActiveAttnExecutable()
 
 	m.mu.Lock()
 	if _, exists := m.sessions[opts.ID]; exists {
@@ -188,18 +189,32 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	cmdEnv := buildSpawnEnv(loginShell, opts, agent, attnPath, m.logf)
 
 	var (
-		cmd       *exec.Cmd
-		ptmx      *os.File
-		lastErr   error
-		usedShell string
+		cmd          *exec.Cmd
+		ptmx         *os.File
+		lastErr      error
+		usedShell    string
+		deferCleanup func()
 	)
 	for i, shellPath := range shellCandidates {
-		cmd = buildSpawnCommand(opts, agent, shellPath, attnPath, cmdEnv)
+		attemptEnv := cmdEnv
+		var cleanup func()
+		if agent == "shell" {
+			launch, err := prepareShellPaneLaunch(shellPath, cmdEnv)
+			if err != nil {
+				lastErr = err
+				return fmt.Errorf("prepare terminal shell %s: %w", shellPath, err)
+			}
+			cmd = launch.command
+			attemptEnv = launch.env
+			cleanup = launch.cleanup
+		} else {
+			cmd = buildSpawnCommand(opts, agent, shellPath, attnPath, cmdEnv)
+		}
 		cmd.Dir = opts.CWD
 		if strings.TrimSpace(opts.ExternalCWD) != "" {
 			cmd.Dir = opts.ExternalCWD
 		}
-		cmd.Env = cmdEnv
+		cmd.Env = attemptEnv
 
 		ptmx, lastErr = creackpty.StartWithSize(cmd, &creackpty.Winsize{
 			Cols: opts.Cols,
@@ -207,7 +222,13 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		})
 		if lastErr == nil {
 			usedShell = shellPath
+			if cleanup != nil {
+				deferCleanup = cleanup
+			}
 			break
+		}
+		if cleanup != nil {
+			cleanup()
 		}
 
 		if i < len(shellCandidates)-1 && shouldFallbackShell(lastErr) {
@@ -235,6 +256,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		exited:      make(chan struct{}),
 		startedAt:   time.Now(),
 		theme:       opts.Theme,
+		cleanup:     deferCleanup,
 	}
 	session.screen = newVirtualScreen(opts.Cols, opts.Rows)
 
@@ -468,8 +490,21 @@ func buildSpawnCommand(opts SpawnOptions, agent, shellPath, attnPath string, env
 		args = append(args, "--initial-prompt-file", opts.InitialPromptFile)
 	}
 
+	return exec.Command(shellPath, "-l", "-c", postLoginExecCommand(env, args))
+}
+
+// postLoginExecCommand restores the launch PATH after shell login startup has
+// run. This makes the active attn directory authoritative even when a login
+// profile prepends a stale installation. The command itself is exec'd so the
+// PTY remains attached to the actual agent or interactive shell process.
+func postLoginExecCommand(env []string, args []string) string {
 	cmdline := "exec " + shellJoin(args)
-	return exec.Command(shellPath, "-l", "-c", cmdline)
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "PATH=") {
+			return "export PATH=" + shellQuote(strings.TrimPrefix(entry, "PATH=")) + "; " + cmdline
+		}
+	}
+	return cmdline
 }
 
 func resolveExternalCommandPath(command string, env []string) (string, bool) {
@@ -489,7 +524,7 @@ func resolveExternalCommandPath(command string, env []string) (string, bool) {
 			}
 			candidates = append(candidates, filepath.Join(dir, command))
 		}
-		return firstExecutablePath(candidates)
+		return launchenv.FirstExecutablePath(candidates)
 	}
 	return "", false
 }
@@ -543,6 +578,13 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 	// core is ghostty and now supports OSC 8, so advertise that deterministically.
 	env = filterEnvKeys(env, "TERM_PROGRAM_VERSION")
 	env = mergeEnvironment(env, []string{"TERM=xterm-256color", "TERM_PROGRAM=ghostty"})
+	env = launchenv.WithActiveAttnFirst(env, wrapperPath)
+	if agent == "shell" {
+		// A terminal pane gets the same CLI resolution guarantee as an agent, but
+		// it is not an agent session. Do not let an inherited managed-session
+		// identity make ordinary shell commands report against another session.
+		env = filterEnvKeys(env, "ATTN_SESSION_ID", "ATTN_AGENT")
+	}
 	if agent != "shell" {
 		env = mergeEnvironment(env, []string{
 			"ATTN_INSIDE_APP=1",
@@ -552,12 +594,6 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 		})
 		if wrapperPath != "" {
 			env = mergeEnvironment(env, []string{"ATTN_WRAPPER_PATH=" + wrapperPath})
-			// Ensure the directory containing attn is in PATH so that
-			// tools (e.g. Claude Code skills) can find it as a bare command
-			// even when installed only inside the .app bundle.
-			if dir := filepath.Dir(wrapperPath); dir != "" && dir != "." {
-				env = prependPath(env, dir)
-			}
 		}
 
 		executable := configuredExecutableForAgent(opts, agent)
@@ -663,24 +699,6 @@ func mergeEnvironment(base, overlay []string) []string {
 	return merged
 }
 
-// prependPath adds dir to the front of the PATH variable in env,
-// avoiding duplicates.
-func prependPath(env []string, dir string) []string {
-	for i, entry := range env {
-		if strings.HasPrefix(entry, "PATH=") {
-			existing := entry[5:]
-			for _, p := range strings.Split(existing, string(os.PathListSeparator)) {
-				if p == dir {
-					return env // already present
-				}
-			}
-			env[i] = "PATH=" + dir + string(os.PathListSeparator) + existing
-			return env
-		}
-	}
-	return append(env, "PATH="+dir)
-}
-
 func filterEnvKeys(env []string, keys ...string) []string {
 	drop := make(map[string]struct{}, len(keys))
 	for _, k := range keys {
@@ -731,45 +749,6 @@ func shouldFallbackShell(err error) bool {
 		errors.Is(err, syscall.EACCES) ||
 		errors.Is(err, syscall.ENOENT) ||
 		errors.Is(err, exec.ErrNotFound)
-}
-
-func resolveAttnPath() string {
-	candidates := make([]string, 0, 4)
-	if wrapperPath := strings.TrimSpace(os.Getenv("ATTN_WRAPPER_PATH")); wrapperPath != "" {
-		candidates = append(candidates, wrapperPath)
-	}
-	if exe, err := os.Executable(); err == nil && exe != "" {
-		candidates = append(candidates, exe)
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, ".local", "bin", "attn"))
-	}
-	if path, err := exec.LookPath("attn"); err == nil && path != "" {
-		candidates = append(candidates, path)
-	}
-	if resolved, ok := firstExecutablePath(candidates); ok {
-		return resolved
-	}
-	return "attn"
-}
-
-func firstExecutablePath(candidates []string) (string, bool) {
-	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		info, err := os.Stat(candidate)
-		if err != nil || info.IsDir() {
-			continue
-		}
-		// On unix, require execute bits. Windows doesn't expose unix mode bits.
-		if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		return candidate, true
-	}
-	return "", false
 }
 
 func shellJoin(args []string) string {

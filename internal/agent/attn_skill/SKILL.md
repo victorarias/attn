@@ -12,13 +12,13 @@ the matching reference file rather than reading every reference.
 
 Check that the current shell is managed by attn:
 
-    "$ATTN_WRAPPER_PATH" presence
+    attn presence
 
-Inside attn, prefer `"$ATTN_WRAPPER_PATH"` for every command. Fall back to
-`attn` on `PATH` only when `ATTN_WRAPPER_PATH` is unset.
+Every attn-launched process puts its active attn binary first on `PATH`, so use
+bare `attn` for normal commands.
 
-If a command reports an unknown subcommand or shows another tool's help, check
-`attn --version` and `which -a attn`, then use `ATTN_WRAPPER_PATH`.
+If a command reports an unknown subcommand or version, check `attn --version`
+and `which -a attn`; recover with `"$ATTN_WRAPPER_PATH"` when it is set.
 
 ## Confirm Your Role First
 

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"github.com/victorarias/attn/internal/launchenv"
 )
 
 // DefaultContextWindowCap is the auto-compaction token threshold attn applies to
@@ -216,7 +218,7 @@ func headlessEnvironment(provider string) []string {
 			env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+strconv.Itoa(window))
 		}
 	}
-	return env
+	return launchenv.WithActiveAttnFirst(env, launchenv.ActiveAttnExecutable())
 }
 
 func classifyHeadlessFailure(output string) string {
