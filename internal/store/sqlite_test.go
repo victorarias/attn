@@ -842,7 +842,7 @@ func TestMigration52RenamesKeeperBackupsAndRealignsSentinel(t *testing.T) {
 		t.Fatalf("unrecord migration 52: %v", err)
 	}
 
-	if err := migrateDB(s.db); err != nil {
+	if err := migrateDB(s.db, dbPath); err != nil {
 		t.Fatalf("migrateDB error: %v", err)
 	}
 
@@ -904,7 +904,7 @@ func TestMigration53AddsClosedStateColumnIdempotently(t *testing.T) {
 	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 53`); err != nil {
 		t.Fatalf("unrecord migration 53: %v", err)
 	}
-	if err := migrateDB(s.db); err != nil {
+	if err := migrateDB(s.db, dbPath); err != nil {
 		t.Fatalf("re-run migrateDB after unrecording 53: %v", err)
 	}
 	if !hasClosedState() {

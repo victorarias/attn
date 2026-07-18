@@ -6,6 +6,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-18]
+
+### Added
+- **Automatic rotating database backups.** The daemon now snapshots its SQLite
+  database every 6 hours (keeping the last 12) and takes an extra safety
+  snapshot right before any database migration, so session, ticket, and
+  workspace state can be recovered if the database is ever lost or corrupted.
+
 ## [2026-07-16]
 
 ### Added

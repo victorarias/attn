@@ -72,6 +72,12 @@ const (
 	forcedStopSuppressTTL  = 30 * time.Second
 	branchMonitorInterval  = 15 * time.Second
 
+	// backupInterval is how often the daemon takes a rotating snapshot of the
+	// SQLite store in the background. backupKeep is how many rotating
+	// snapshots survive pruning (older ones are deleted). See backup.go.
+	backupInterval = 6 * time.Hour
+	backupKeep     = 12
+
 	startupRecoveryRetryMax       = 2
 	startupRecoveryRetryDelay     = 500 * time.Millisecond
 	deferredRecoveryMaxAttempts   = 3
@@ -855,6 +861,10 @@ func (d *Daemon) Start() error {
 
 	// Start branch monitoring
 	go d.monitorBranches()
+
+	// Rotating SQLite backups: one immediately at startup, then every
+	// backupInterval. A failure here must never crash or wedge the daemon.
+	go d.runDatabaseBackupLoop()
 
 	// Orphaned-ticket sweep backstop: catches non-terminal tickets whose owning
 	// session died where the session-end seam couldn't run (pre-feature orphans,
