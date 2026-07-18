@@ -62,11 +62,17 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"ticket status ready_for_review",
 		"ticket status completed",
 		"ticket status failed",
+		"strong terminal evidence",
+		"requested PR merged",
+		"use `ready_for_review`",
 		"Do not report ticket status for ordinary",
 	} {
 		if !strings.Contains(delegatedAgent, expected) {
 			t.Fatalf("delegated-agent reference missing %q: %q", expected, delegatedAgent)
 		}
+	}
+	if strings.Contains(delegatedAgent, "ask the user to confirm") {
+		t.Fatalf("delegated-agent reference retained mandatory confirmation gate: %q", delegatedAgent)
 	}
 	// The chief-of-staff coordination guidance (surface vs act boundary and the
 	// prose-review exception) moved to the always-on system prompt
@@ -88,6 +94,8 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		"backlog",                 // the unbound-todo lane
 		"Only when the user asks", // user-triggered boundary
 		"deliverable",             // deliverable-type shaping guidance
+		"evidence decides it",     // completion threshold, not a ritual gate
+		"requested PR merged",     // objective terminal evidence example
 	} {
 		if !strings.Contains(tickets, expected) {
 			t.Fatalf("tickets reference missing %q: %q", expected, tickets)

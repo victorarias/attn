@@ -28,8 +28,8 @@ the working column. Report when you:
     "$ATTN_WRAPPER_PATH" ticket status in_progress --comment \
       "Implemented the parser and tests pass. Next: review the error wording."
 
-When work needs input, is ready for review, completes, or fails, report the
-matching state:
+When work needs input, is ready for review, clearly completes, or fails, report
+the matching state:
 
     "$ATTN_WRAPPER_PATH" ticket status needs_input \
       --comment "Core implementation is ready locally; which event contract should be used?"
@@ -38,7 +38,7 @@ matching state:
       --comment "Parser implementation is ready for review"
 
     "$ATTN_WRAPPER_PATH" ticket status completed \
-      --comment "Parser implemented and focused tests pass"
+      --comment "The requested PR merged and no follow-up remains"
 
     "$ATTN_WRAPPER_PATH" ticket status failed \
       --comment "Implementation cannot continue because the required API was removed"
@@ -46,6 +46,13 @@ matching state:
 Reporting moves your bound ticket to the matching column so the chief sees your
 progress on the board. Keep the comment concrete: outcome, evidence, and next
 action.
+
+Use `completed` when strong terminal evidence shows the requested outcome is done
+and no review or decision remains — for example, Victor accepted the work, the
+requested PR merged, or an equivalent objective completion signal is clear. A
+separate confirmation ritual is unnecessary when that evidence already exists. If
+you merely finished implementation but acceptance, review, or another decision is
+still pending, use `ready_for_review`.
 
 To move a ticket other than your own, add `--ticket <id>` (any ticket, no
 ownership gate) — same as `ticket comment <id>` reaching across tickets.

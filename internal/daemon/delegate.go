@@ -524,9 +524,12 @@ source. Use ` + "`" + `ticket attach` + "`" + ` for other artifacts. Keep the re
 source current, and report meaningful edits, renames, or deletions through ticket
 status or a ticket comment so the chief can react.
 
-Closing a ticket is the user's call, not yours: when you believe the work is
-done, ask the user to confirm and wait for their go-ahead before you report the
-completed state. Report the other states as they happen.
+Report ` + "`" + `completed` + "`" + ` when strong terminal evidence shows the requested outcome is
+done and no review or decision remains — for example, the user accepted the work or
+the requested PR merged. You do not need a separate closure confirmation when that
+evidence is already clear. If you merely finished your implementation but acceptance,
+review, or another decision is still pending, report ` + "`" + `ready_for_review` + "`" + ` instead.
+Report the other states as they happen.
 
 Continue the assigned work after reporting unless you are blocked or waiting on
 the user.`

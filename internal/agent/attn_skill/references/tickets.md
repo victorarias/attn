@@ -36,9 +36,12 @@ How much to prescribe, what "done" is, and who reviews all change with the kind 
 | refactor / migration | transform complete, behavior preserved | hand over before/after and invariants | here you *do* prescribe; list the behaviors that must survive | the user, lighter |
 | prototype | a decision or a feel; throwaway | hand over the thing and learning when durable | the question being de-risked; tests optional | informal |
 
-Deliverable type also predicts the terminal status: research and prose often go straight
-to **done** (the artifact is the proof); code lands in **in review** because someone else
-validates it.
+Deliverable type also predicts the terminal status, but evidence decides it. Use
+**done** when the requested outcome has strong terminal evidence and no review or
+decision remains — for example, Victor accepted it or the requested PR merged. Use
+**in review** when implementation is finished but acceptance or another decision is
+still pending. Research and prose may therefore go straight to done when the accepted
+artifact is itself the proof; unreviewed code normally lands in review.
 
 ## Handing over artifacts
 

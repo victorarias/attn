@@ -2,11 +2,20 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/victorarias/attn/internal/config"
 )
+
+var profileRoutingOverrides = []string{
+	"ATTN_SOCKET_PATH",
+	"ATTN_DB_PATH",
+	"ATTN_CONFIG_PATH",
+	"ATTN_WS_PORT",
+	"ATTN_PLUGIN_DIR",
+}
 
 // runProfileEnv emits shell commands for sourcing the profile into a shell.
 // Usage:
@@ -46,11 +55,7 @@ func runProfileEnvArgs(args []string) {
 
 	arg := strings.TrimSpace(filtered[0])
 	if arg == "--unset" || arg == "none" || arg == "default" {
-		if fishMode {
-			fmt.Println("set -e ATTN_PROFILE")
-		} else {
-			fmt.Println("unset ATTN_PROFILE")
-		}
+		writeProfileEnv(os.Stdout, "", fishMode)
 		return
 	}
 
@@ -62,11 +67,33 @@ func runProfileEnvArgs(args []string) {
 		os.Exit(1)
 	}
 
-	if fishMode {
-		fmt.Printf("set -gx ATTN_PROFILE %s\n", arg)
-	} else {
-		fmt.Printf("export ATTN_PROFILE=%s\n", arg)
+	writeProfileEnv(os.Stdout, arg, fishMode)
+}
+
+// writeProfileEnv emits a complete profile selection. Explicit routing
+// overrides are cleared first because attn-managed sessions inherit the current
+// daemon's ATTN_SOCKET_PATH, and that override otherwise wins over ATTN_PROFILE.
+func writeProfileEnv(w io.Writer, profile string, fishMode bool) {
+	for _, name := range profileRoutingOverrides {
+		if fishMode {
+			fmt.Fprintf(w, "set -e %s\n", name)
+		} else {
+			fmt.Fprintf(w, "unset %s\n", name)
+		}
 	}
+	if fishMode {
+		if profile == "" {
+			fmt.Fprintln(w, "set -e ATTN_PROFILE")
+			return
+		}
+		fmt.Fprintf(w, "set -gx ATTN_PROFILE %s\n", profile)
+		return
+	}
+	if profile == "" {
+		fmt.Fprintln(w, "unset ATTN_PROFILE")
+		return
+	}
+	fmt.Fprintf(w, "export ATTN_PROFILE=%s\n", profile)
 }
 
 func printProfileEnvHelp() {
@@ -79,5 +106,7 @@ Usage:
   attn profile-env --fish --unset | source     # fish: set -e ATTN_PROFILE
 
 Profile names must match [a-z0-9][a-z0-9-]{0,15}. "dev" is reserved for the
-development sibling install (port 29849, data dir ~/.attn-dev).`)
+development sibling install (port 29849, data dir ~/.attn-dev). Selecting or
+clearing a profile also clears inherited ATTN socket, database, config, websocket
+port, and plugin-directory overrides so the selected profile is authoritative.`)
 }

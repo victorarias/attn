@@ -6,7 +6,10 @@ agents run attn — and its tests — side by side without colliding.
 
 **One knob: `ATTN_PROFILE`.** Set it once in a shell and every entrypoint (CLI,
 daemon, frontend e2e, real-app harness, build) targets the same isolated world.
-You never set per-entrypoint profile variables by hand.
+You never set per-entrypoint profile variables by hand. `profile-env` first
+clears inherited explicit routing overrides (`ATTN_SOCKET_PATH`, `ATTN_DB_PATH`,
+`ATTN_CONFIG_PATH`, `ATTN_WS_PORT`, and `ATTN_PLUGIN_DIR`) so the selected profile
+actually wins, including inside an attn-managed session.
 
 ```
 attn profile-env agent7 | source     # fish:  set ATTN_PROFILE=agent7

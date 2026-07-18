@@ -42,6 +42,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   can be named explicitly, tracked files are never deleted automatically, and
   byte-identical copies from the old lifecycle are retired during migration while
   divergent copies are preserved.
+- **Ticket completion now follows clear outcome evidence instead of a confirmation
+  ritual.** Agents may complete work that Victor accepted, whose requested PR
+  merged, or that has an equivalent objective terminal signal; finished work still
+  awaiting review remains in review.
+
+### Fixed
+- **Switching profiles from inside attn no longer keeps talking to the inherited
+  daemon.** `attn profile-env` clears explicit socket and resource overrides before
+  selecting the profile, so the printed profile and the daemon receiving commands
+  cannot silently disagree.
 
 ## [2026-07-16]
 

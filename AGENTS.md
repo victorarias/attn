@@ -5,7 +5,11 @@ Repository guidance for coding agents working in this repo.
 ## Build And Test
 
 ```bash
-# source/dev install
+# non-production source/dev install (pre-authorized)
+make dev
+make install-daemon-dev
+
+# production install (requires Victor's approval)
 make install
 make install-daemon
 
@@ -25,7 +29,7 @@ go test ./internal/store -run TestList
 
 - attn supports macOS only. Do not add Windows or Linux compatibility code unless explicitly requested.
 
-Use `make install` as the default source/dev install path; it rebuilds and installs the app bundle and ensures the bundled daemon is running. Use `make install-daemon` when only daemon/runtime code changed and you want the faster sidecar-only loop.
+Use `make dev` as the default source/dev install path; it rebuilds and installs the isolated dev app bundle and ensures its daemon is running. Use `make install-daemon-dev` when only daemon/runtime code changed and you want the faster sidecar-only loop. Bare `make install` and `make install-daemon` target production and require Victor's approval.
 
 ### Iterating On Attn Itself (Attn-On-Attn Testing)
 
@@ -42,7 +46,7 @@ The dev install is fully isolated: its own bundle identifier (`com.attn.manager.
 
 Run full app builds and installs via `make` or `make dev` outside the sandbox. These commands need access to the user's macOS keychain so `security find-identity` can select the stable code-signing identity. Inside the sandbox, identity discovery can incorrectly return nothing, causing certificate creation or ad-hoc signing and breaking the app's persistent macOS permissions.
 
-To make CLI commands (`attn`, `attn list`, etc.) target the dev daemon in your shell, run `eval "$(./attn profile-env dev)"` (bash/zsh) or `./attn profile-env --fish dev | source` (fish). Any `attn` subcommand then prints a one-line `[attn profile=dev ...]` banner so you can always see which daemon you're talking to. Unset with `eval "$(attn profile-env --unset)"`.
+To make CLI commands (`attn`, `attn list`, etc.) target the dev daemon in your shell, run `eval "$(./attn profile-env dev)"` (bash/zsh) or `./attn profile-env --fish dev | source` (fish). The command clears inherited explicit routing overrides such as `ATTN_SOCKET_PATH` before selecting the profile; this matters inside an attn-managed session, which inherits its current daemon socket. Any `attn` subcommand then prints a one-line `[attn profile=dev ...]` banner so you can verify which daemon you are touching. Unset with `eval "$(attn profile-env --unset)"`.
 
 `dev` is just one named profile. `ATTN_PROFILE` selects an isolated world (data dir, socket, port, app bundle) for **every** entrypoint, so multiple agents can run side by side. Run `attn profile` to see where you are, `attn profile list` for all profiles, and `attn profile resolve --json` for the machine-readable resolution. See **[docs/profiles.md](docs/profiles.md)** for the full model, the per-agent test recipe, and the safety rules.
 
