@@ -388,7 +388,14 @@ func acquireDaemonLock(pidPath string) (release func(), err error) {
 	}
 	if flockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr != nil {
 		lockFile.Close()
-		return nil, fmt.Errorf("the attn daemon is running; stop it first (quit the app, or `attn daemon stop`) before restoring the database")
+		if errors.Is(flockErr, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("the attn daemon is running; stop it first (quit the app, or `attn daemon stop`) before restoring the database")
+		}
+		// Any other flock failure means we cannot determine whether a
+		// daemon holds the lock. Fail closed rather than risk racing a
+		// live daemon: never proceed with the restore on an inconclusive
+		// lock result.
+		return nil, fmt.Errorf("cannot determine daemon state: %w", flockErr)
 	}
 	var once sync.Once
 	release = func() {
