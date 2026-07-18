@@ -120,6 +120,14 @@ Your agents can work as a team, not just side by side:
 
 - **Shared workspace context** — a living brief agents read and keep current, so a new session orients itself without you re-explaining the task.
 - **Delegation** — an agent can spin up a fresh, visible session with a focused brief (`attn delegate`) instead of cramming everything into one context.
+
+Delegation is retry-safe. The CLI generates and immediately prints a stable
+request ID before repository or worktree preparation; orchestration callers can
+provide their own with `--request-id <id>`. If the command is interrupted after
+acceptance, repeat the same command with that ID or inspect it with `attn delegate
+status <request-or-operation-id>`. Reusing an ID never creates a second ticket or
+session. Attn also refuses to place another active session in the same worktree
+unless `--allow-worktree-reuse` explicitly confirms that exceptional choice.
 - **[Chief of staff](#put-a-manager-in-charge-of-your-agents)** — a manager for your agents. It helps shape the plan and keeps one coherent picture; you choose the handoffs.
 - **In-app browser** — `attn browser open <url>` docks a real browser an agent can drive; log in once and it persists.
 

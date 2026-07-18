@@ -627,6 +627,7 @@ model TodosMessage {
 
 model DelegateMessage {
   cmd: "delegate";
+  request_id: string; // Stable caller-supplied idempotency key for one logical delegation
   source_session_id: string;
   brief: string;
   agent?: string;
@@ -638,6 +639,12 @@ model DelegateMessage {
   worktree?: DelegateWorktreeRequest;
   `model`?: string; // Pin the delegated agent's model (alias or full id); empty = agent default
   effort?: string; // Pin the delegated agent's reasoning effort; empty = agent default
+  allow_worktree_reuse?: boolean; // Exceptional opt-in to share an existing worktree
+}
+
+model DelegateStatusMessage {
+  cmd: "delegate_status";
+  id: string; // Request id or daemon-issued operation id
 }
 
 // SetTicketStatusMessage moves a ticket to the column for a reported work
@@ -2690,6 +2697,7 @@ model Response {
   error?: string;
   data?: string;
   delegate_result?: DelegateResult;
+  delegation_operation?: DelegationOperation;
   workspace_context_result?: WorkspaceContextResult;
   workspace_context_maintenance_result?: WorkspaceContextMaintenanceResult;
   workspace_contexts?: WorkspaceContext[];
@@ -2744,11 +2752,40 @@ model DelegateResult {
   worktree_created?: boolean;
 }
 
+enum DelegationOperationState {
+  accepted,
+  preparing,
+  completed,
+  failed,
+}
+
+model DelegationOperation {
+  operation_id: string;
+  request_id: string;
+  state: DelegationOperationState;
+  progress: string;
+  session_id: string;
+  workspace_id?: string;
+  ticket_id?: string;
+  worktree_path?: string;
+  result?: DelegateResult;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 model DelegateResultMessage {
   event: "delegate_result";
   success: boolean;
   error?: string;
   result?: DelegateResult;
+}
+
+model DelegationOperationMessage {
+  event: "delegation_operation";
+  success: boolean;
+  error?: string;
+  operation?: DelegationOperation;
 }
 
 model WorkspaceContextResult {

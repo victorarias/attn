@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
@@ -628,18 +629,59 @@ func runDelegate() {
 		writeDelegateHelp(os.Stdout)
 		return
 	}
+	if len(os.Args) >= 3 && os.Args[2] == "status" {
+		if len(os.Args) != 4 || strings.TrimSpace(os.Args[3]) == "" {
+			fmt.Fprintln(os.Stderr, "delegate status: usage: attn delegate status <request-or-operation-id>")
+			os.Exit(2)
+		}
+		result, err := client.New("").DelegationStatus(os.Args[3])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "delegate status: %v\n", err)
+			os.Exit(1)
+		}
+		printJSON(result)
+		return
+	}
 	warnIfDaemonVersionMismatch()
 	args, err := parseDelegateArgs(os.Args[2:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "delegate: %v\n", err)
 		os.Exit(2)
 	}
-	result, err := client.New("").Delegate(args.sourceSessionID, args.brief, args.options)
+	c := client.New("")
+	// Print the caller-owned recovery key before crossing the transport. The
+	// daemon may durably accept the request even if this process never receives
+	// its response; this line is what makes that unknown outcome recoverable.
+	fmt.Fprintf(os.Stderr, "delegation request: request_id=%s\n", args.options.RequestID)
+	operation, err := c.StartDelegation(args.sourceSessionID, args.brief, args.options)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "delegate: %v\n", err)
 		os.Exit(1)
 	}
-	printJSON(result)
+	fmt.Fprintf(os.Stderr, "delegation accepted: request_id=%s operation_id=%s session_id=%s\n",
+		operation.RequestID, operation.OperationID, operation.SessionID)
+	lastProgress := ""
+	for operation.State == protocol.DelegationOperationStateAccepted || operation.State == protocol.DelegationOperationStatePreparing {
+		if operation.Progress != "" && operation.Progress != lastProgress {
+			fmt.Fprintf(os.Stderr, "delegation progress: %s\n", operation.Progress)
+			lastProgress = operation.Progress
+		}
+		time.Sleep(250 * time.Millisecond)
+		operation, err = c.DelegationStatus(operation.OperationID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "delegate: outcome unknown; inspect or retry with --request-id %s: %v\n", args.options.RequestID, err)
+			os.Exit(1)
+		}
+	}
+	if operation.State == protocol.DelegationOperationStateFailed {
+		fmt.Fprintf(os.Stderr, "delegate: %s (request_id=%s)\n", protocol.Deref(operation.Error), operation.RequestID)
+		os.Exit(1)
+	}
+	if operation.Result == nil {
+		fmt.Fprintln(os.Stderr, "delegate: completed operation has no result")
+		os.Exit(1)
+	}
+	printJSON(operation.Result)
 }
 
 func writeDelegateHelp(w io.Writer) {
@@ -660,6 +702,7 @@ worktree options:
   --worktree-path <path>     override the generated sibling path
 
 session options:
+	--request-id <id>          stable retry key (generated and printed when omitted; op- is reserved)
   --agent <name>             configured prompt-capable built-in or plugin agent
   --model <name>             pin the agent's model (alias or full id, e.g.
                              "opus" or "claude-opus-4-8"; defaults to the
@@ -672,6 +715,10 @@ session options:
                              unique; defaults to the directory name)
   --source-session <id>      source session (defaults to ATTN_SESSION_ID)
   --yolo                     bypass agent approval prompts
+	--allow-worktree-reuse     explicitly allow another active session to share the worktree
+
+inspection:
+  attn delegate status <request-or-operation-id>
 `)
 }
 
@@ -2259,6 +2306,8 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	worktreeRepo := fs.String("repo", "", "main repository for --worktree (defaults to source repository)")
 	worktreeStart := fs.String("from", "", "starting ref for --worktree")
 	worktreePath := fs.String("worktree-path", "", "custom path for --worktree")
+	requestID := fs.String("request-id", "", "stable delegation request id")
+	allowWorktreeReuse := fs.Bool("allow-worktree-reuse", false, "allow active sessions to share a worktree")
 	if err := fs.Parse(args); err != nil {
 		return delegateCLIArgs{}, err
 	}
@@ -2293,6 +2342,10 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	repo := strings.TrimSpace(*worktreeRepo)
 	startingFrom := strings.TrimSpace(*worktreeStart)
 	customWorktreePath := strings.TrimSpace(*worktreePath)
+	stableRequestID := strings.TrimSpace(*requestID)
+	if stableRequestID == "" {
+		stableRequestID = uuid.NewString()
+	}
 	if explicitWorkspace != "" && (*newWorkspace || customCWD != "") {
 		return delegateCLIArgs{}, errors.New("--workspace cannot be combined with --new-workspace or --cwd")
 	}
@@ -2311,18 +2364,20 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		sourceSessionID: source,
 		brief:           brief,
 		options: client.DelegateOptions{
-			Agent:        strings.TrimSpace(*agentName),
-			Model:        strings.TrimSpace(*model),
-			Effort:       strings.TrimSpace(*effort),
-			Label:        strings.TrimSpace(*name),
-			Yolo:         *yolo,
-			Placement:    placement,
-			WorkspaceID:  explicitWorkspace,
-			CWD:          customCWD,
-			WorktreeRepo: repo,
-			Worktree:     branch,
-			WorktreePath: customWorktreePath,
-			StartingFrom: startingFrom,
+			RequestID:          stableRequestID,
+			Agent:              strings.TrimSpace(*agentName),
+			Model:              strings.TrimSpace(*model),
+			Effort:             strings.TrimSpace(*effort),
+			Label:              strings.TrimSpace(*name),
+			Yolo:               *yolo,
+			Placement:          placement,
+			WorkspaceID:        explicitWorkspace,
+			CWD:                customCWD,
+			WorktreeRepo:       repo,
+			Worktree:           branch,
+			WorktreePath:       customWorktreePath,
+			StartingFrom:       startingFrom,
+			AllowWorktreeReuse: *allowWorktreeReuse,
 		},
 	}, nil
 }

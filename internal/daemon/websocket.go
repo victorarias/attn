@@ -880,6 +880,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleClientHello(client, msg.(*protocol.ClientHelloMessage))
 	case protocol.CmdDelegate:
 		go d.handleDelegateWS(client, msg.(*protocol.DelegateMessage))
+	case protocol.CmdDelegateStatus:
+		go d.handleDelegateStatusWS(client, msg.(*protocol.DelegateStatusMessage))
 	case protocol.CmdWorkspaceContextCheckout:
 		go func() {
 			result, err := d.checkoutWorkspaceContext(msg.(*protocol.WorkspaceContextCheckoutMessage))

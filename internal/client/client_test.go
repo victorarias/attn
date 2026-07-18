@@ -348,17 +348,20 @@ func TestClient_Delegate(t *testing.T) {
 
 		json.NewEncoder(conn).Encode(protocol.Response{
 			Ok: true,
-			DelegateResult: &protocol.DelegateResult{
-				SessionID:   "delegated-session",
-				WorkspaceID: "workspace-1",
-				Directory:   "/tmp/project",
-				Placement:   "new_workspace",
+			DelegationOperation: &protocol.DelegationOperation{
+				OperationID: "operation-1", RequestID: "request-1", SessionID: "delegated-session",
+				State: protocol.DelegationOperationStateCompleted,
+				Result: &protocol.DelegateResult{
+					SessionID: "delegated-session", WorkspaceID: "workspace-1",
+					Directory: "/tmp/project", Placement: "new_workspace",
+				},
 			},
 		})
 	}()
 
 	c := New(sockPath)
 	result, err := c.Delegate("source-session", "Investigate the parser", DelegateOptions{
+		RequestID:    "request-1",
 		Agent:        "codex",
 		Model:        "gpt-5.2-codex",
 		Effort:       "high",
