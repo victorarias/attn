@@ -4,12 +4,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/victorarias/attn/internal/toolhome"
 )
 
 func writeClaudeTranscriptFixture(t *testing.T, sessionID string) {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 	projDir := filepath.Join(home, ".claude", "projects", "proj")
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatalf("mkdir transcript dir: %v", err)
@@ -26,7 +28,7 @@ func TestClaudeResumeAvailable(t *testing.T) {
 	claude := &Claude{}
 
 	// Empty home: no transcript for this id -> not resumable.
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv(toolhome.EnvVar, t.TempDir())
 	if ResumeAvailable(claude, "no-transcript-id") {
 		t.Fatal("ResumeAvailable should be false when no transcript exists")
 	}

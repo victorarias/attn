@@ -30,6 +30,7 @@ import (
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/toolhome"
 	"github.com/victorarias/attn/internal/workspacelayout"
 	"nhooyr.io/websocket"
 )
@@ -128,8 +129,19 @@ func TestMain(m *testing.M) {
 	}
 	config.ScopeTestEnvironment(dataDir)
 
+	// Same story for toolhome.Dir() (~/.claude, ~/.codex, ~/.copilot,
+	// ~/.agents skill installs, transcript lookups): default every daemon
+	// test to a throwaway tool-home dir. Tests exercising specific transcript
+	// fixtures override this with their own t.Setenv(toolhome.EnvVar, ...).
+	toolHomeDir, err := os.MkdirTemp("", "attn-test-toolhome-*")
+	if err != nil {
+		panic("daemon: TestMain: MkdirTemp: " + err.Error())
+	}
+	_ = os.Setenv(toolhome.EnvVar, toolHomeDir)
+
 	code := m.Run()
 	os.RemoveAll(dataDir)
+	os.RemoveAll(toolHomeDir)
 	os.Exit(code)
 }
 
@@ -4551,7 +4563,7 @@ func TestDaemon_SettingsIncludePTYBackendMode(t *testing.T) {
 
 func TestDaemon_SettingsWithClaudeAvailability_InstallsClaudeSkill(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 
 	binDir := t.TempDir()
 	claudePath := filepath.Join(binDir, "claude")
@@ -4578,7 +4590,7 @@ func TestDaemon_SettingsWithClaudeAvailability_InstallsClaudeSkill(t *testing.T)
 
 func TestDaemon_SettingsWithCodexAvailability_InstallsCodexSkill(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 
 	binDir := t.TempDir()
 	codexPath := filepath.Join(binDir, "codex")

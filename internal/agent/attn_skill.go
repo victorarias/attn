@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/victorarias/attn/internal/toolhome"
 )
 
 //go:embed attn_skill
@@ -82,7 +84,7 @@ func pruneOrphanedSkillFiles(skillDir string, expected map[string]bool) error {
 }
 
 func ensureAttnClaudeSkillInstalled() error {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := toolhome.Dir()
 	if err != nil {
 		return fmt.Errorf("resolve home directory for Claude skills: %w", err)
 	}
@@ -90,7 +92,7 @@ func ensureAttnClaudeSkillInstalled() error {
 }
 
 func ensureAttnCodexSkillInstalled() error {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := toolhome.Dir()
 	if err != nil {
 		return fmt.Errorf("resolve home directory for agent skills: %w", err)
 	}
@@ -98,7 +100,7 @@ func ensureAttnCodexSkillInstalled() error {
 }
 
 func ensureAttnCopilotSkillInstalled() error {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := toolhome.Dir()
 	if err != nil {
 		return fmt.Errorf("resolve home directory for Copilot skills: %w", err)
 	}

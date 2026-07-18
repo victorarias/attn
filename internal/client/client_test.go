@@ -494,6 +494,10 @@ func TestClient_ConnectError_HintsOtherProfileWhenLive(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
 
+	// Intentionally exempt from the toolhome seam: DataDirForProfile is
+	// deliberately HOME-based for cross-profile probing (read-only path
+	// construction, no writes through the tool-dotfile paths toolhome guards),
+	// so HOME is its only lever. See config.go's DataDirForProfile comments.
 	t.Setenv("HOME", tmp)            // so SocketPathForProfile("") → $tmp/.attn/attn.sock
 	t.Setenv("ATTN_PROFILE", "dev")  // current profile is dev
 	t.Setenv("ATTN_SOCKET_PATH", "") // don't let an env override mask the default resolution
