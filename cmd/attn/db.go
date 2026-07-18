@@ -381,12 +381,19 @@ func stageBackupCopy(src, dstPath string) (stagedPath string, err error) {
 // The lock file is never unlinked here — only unlocked and closed — so a
 // second acquireDaemonLock always contends on the same inode rather than
 // racing a delete-then-recreate against a concurrent acquirer.
+//
+// flockFn is indirected to syscall.Flock so tests can inject a non-EWOULDBLOCK
+// failure (e.g. standing in for ENOLCK) without needing real OS-level
+// conditions to trigger it — EWOULDBLOCK is the only signal that means a live
+// daemon actually holds the lock.
+var flockFn = syscall.Flock
+
 func acquireDaemonLock(pidPath string) (release func(), err error) {
 	lockFile, err := os.OpenFile(pidPath, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("open pid file %s: %w", pidPath, err)
 	}
-	if flockErr := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr != nil {
+	if flockErr := flockFn(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr != nil {
 		lockFile.Close()
 		if errors.Is(flockErr, syscall.EWOULDBLOCK) {
 			return nil, fmt.Errorf("the attn daemon is running; stop it first (quit the app, or `attn daemon stop`) before restoring the database")

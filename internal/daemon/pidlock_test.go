@@ -75,6 +75,11 @@ func TestDaemon_ReleasePIDLock_DoesNotOrphanAConcurrentHolder(t *testing.T) {
 	}
 	defer restoreHolder.Close()
 
+	restoreHolderInfo, err := restoreHolder.Stat()
+	if err != nil {
+		t.Fatalf("stat restore stand-in fd: %v", err)
+	}
+
 	// The daemon shuts down and releases.
 	d.releasePIDLock()
 
@@ -82,6 +87,15 @@ func TestDaemon_ReleasePIDLock_DoesNotOrphanAConcurrentHolder(t *testing.T) {
 	// merely blocked by the daemon's lock, not by a missing/replaced file.
 	if err := syscall.Flock(int(restoreHolder.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatalf("restore stand-in flock after daemon release: %v", err)
+	}
+
+	// Belt-and-suspenders: confirm the pathname still resolves to the same
+	// inode the stand-in's fd is holding the lock on, rather than relying
+	// solely on the flock success above.
+	if pathInfo, err := os.Stat(pidPath); err != nil {
+		t.Fatalf("stat pid path after release: %v", err)
+	} else if !os.SameFile(restoreHolderInfo, pathInfo) {
+		t.Fatal("releasePIDLock changed the inode at pidPath; restore stand-in's held fd now refers to an orphaned inode")
 	}
 
 	// A new daemon startup attempting to acquire the lock at the same
