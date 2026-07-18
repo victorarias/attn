@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -362,7 +363,7 @@ func attachPlan(sourceSession string, args ticketAttachPlanArgs, plan planAttach
 		}
 		return output, nil
 	}
-	retired, err := retireNotebookPlanSource(plan.SourcePath, canonicalPath)
+	retired, err := retireNotebookPlanSource(plan, canonicalPath)
 	if err != nil {
 		return nil, fmt.Errorf("Notebook artifact is canonical at %q but staging source %q was not retired: %w", canonicalPath, plan.SourcePath, err)
 	}
@@ -398,21 +399,41 @@ func retireLegacyNotebookPlanCopy(sourcePath, referencePath string) (string, boo
 	return legacyPath, true, nil
 }
 
-func retireNotebookPlanSource(sourcePath, canonicalPath string) (bool, error) {
-	if err := verifySameFileContent(sourcePath, canonicalPath); err != nil {
+func retireNotebookPlanSource(plan planAttachment, canonicalPath string) (bool, error) {
+	if err := verifySameFileContent(plan.SourcePath, canonicalPath); err != nil {
 		return false, err
 	}
-	samePath, err := pathsReferToSameFile(sourcePath, canonicalPath)
+	samePath, err := pathsReferToSameFile(plan.SourcePath, canonicalPath)
 	if err != nil {
 		return false, err
 	}
 	if samePath {
 		return false, nil
 	}
-	if err := os.Remove(sourcePath); err != nil {
+	if plan.RepoRoot != "" {
+		if err := requireGitPathUntracked(plan.RepoRoot, plan.RepoPath); err != nil {
+			return false, err
+		}
+	}
+	if err := os.Remove(plan.SourcePath); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// requireGitPathUntracked enforces the no-tracked-source deletion promise at
+// the deletion edge. Exit code 1 is git ls-files' expected "not tracked"
+// result; every other failure is ambiguous and therefore preserves the file.
+func requireGitPathUntracked(repoRoot, repoPath string) error {
+	_, err := attngit.Output(attngit.OpMetadata, repoRoot, "ls-files", "--error-unmatch", "--", repoPath)
+	if err == nil {
+		return fmt.Errorf("refusing to retire tracked file %q after Notebook promotion", repoPath)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return nil
+	}
+	return fmt.Errorf("verify Git ownership for %q before retirement: %w", repoPath, err)
 }
 
 func verifySameFileContent(left, right string) error {

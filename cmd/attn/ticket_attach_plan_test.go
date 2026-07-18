@@ -120,7 +120,8 @@ func TestRetireNotebookPlanSourceRequiresByteIdenticalCopy(t *testing.T) {
 	writePlanTestFile(t, source, "# Source\n")
 	writePlanTestFile(t, canonical, "# Different\n")
 
-	retired, err := retireNotebookPlanSource(source, canonical)
+	plan := planAttachment{SourcePath: source}
+	retired, err := retireNotebookPlanSource(plan, canonical)
 	if err == nil || retired {
 		t.Fatalf("mismatched retirement = (%v, %v), want retained error", retired, err)
 	}
@@ -129,12 +130,58 @@ func TestRetireNotebookPlanSourceRequiresByteIdenticalCopy(t *testing.T) {
 	}
 
 	writePlanTestFile(t, canonical, "# Source\n")
-	retired, err = retireNotebookPlanSource(source, canonical)
+	retired, err = retireNotebookPlanSource(plan, canonical)
 	if err != nil || !retired {
 		t.Fatalf("verified retirement = (%v, %v), want retired", retired, err)
 	}
 	if _, statErr := os.Stat(source); !os.IsNotExist(statErr) {
 		t.Fatalf("source still exists after verified retirement: %v", statErr)
+	}
+}
+
+func TestRetireNotebookPlanSourcePreservesSourceTrackedAfterInspection(t *testing.T) {
+	repo := initPlanTestRepo(t)
+	source := filepath.Join(repo, "plan.md")
+	canonical := filepath.Join(t.TempDir(), "plan.md")
+	writePlanTestFile(t, source, "# Plan\n")
+	writePlanTestFile(t, canonical, "# Plan\n")
+
+	plan, err := inspectPlanAttachment(source, repo, planAuthorityNotebook)
+	if err != nil {
+		t.Fatalf("inspectPlanAttachment: %v", err)
+	}
+	runPlanTestGit(t, repo, "add", "plan.md")
+
+	retired, err := retireNotebookPlanSource(plan, canonical)
+	if err == nil || retired || !strings.Contains(err.Error(), "refusing to retire tracked file") {
+		t.Fatalf("tracked-after-inspection retirement = (%v, %v), want retained error", retired, err)
+	}
+	if _, statErr := os.Stat(source); statErr != nil {
+		t.Fatalf("newly tracked source was removed: %v", statErr)
+	}
+}
+
+func TestRetireNotebookPlanSourcePreservesSourceWhenGitOwnershipCheckFails(t *testing.T) {
+	repo := initPlanTestRepo(t)
+	source := filepath.Join(repo, "plan.md")
+	canonical := filepath.Join(t.TempDir(), "plan.md")
+	writePlanTestFile(t, source, "# Plan\n")
+	writePlanTestFile(t, canonical, "# Plan\n")
+
+	plan, err := inspectPlanAttachment(source, repo, planAuthorityNotebook)
+	if err != nil {
+		t.Fatalf("inspectPlanAttachment: %v", err)
+	}
+	if err := os.Rename(filepath.Join(repo, ".git"), filepath.Join(repo, ".git-disabled")); err != nil {
+		t.Fatal(err)
+	}
+
+	retired, err := retireNotebookPlanSource(plan, canonical)
+	if err == nil || retired || !strings.Contains(err.Error(), "verify Git ownership") {
+		t.Fatalf("ambiguous Git ownership retirement = (%v, %v), want retained error", retired, err)
+	}
+	if _, statErr := os.Stat(source); statErr != nil {
+		t.Fatalf("source removed after Git ownership failure: %v", statErr)
 	}
 }
 
