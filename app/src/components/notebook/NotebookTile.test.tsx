@@ -1,4 +1,5 @@
 import { render, waitFor } from '@testing-library/react';
+import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotebookTile } from './NotebookTile';
 import {
@@ -16,9 +17,20 @@ const surfaceCalls = vi.hoisted(() => [] as Array<{
   backlinksNotebook?: unknown;
   sendToChief?: unknown;
 }>);
+// Records one entry per NotebookSurface mount (not per render): a plain push
+// in the render body would double-count every re-render caused by the
+// resolvedRoot/daemon state updates already exercised above, so remount
+// detection needs its own list driven by React's own mount lifecycle
+// (an empty-deps useEffect), which only re-fires when React tears the
+// element down and builds a fresh instance — exactly what `key={root}`
+// on NotebookSurface in NotebookTile.tsx is meant to force on root change.
+const surfaceMounts = vi.hoisted(() => [] as number[]);
 vi.mock('../NotebookSurface', () => ({
   NotebookSurface: (props: { changeSignal?: number; backlinksNotebook?: unknown; sendToChief?: unknown }) => {
     surfaceCalls.push(props);
+    useEffect(() => {
+      surfaceMounts.push(surfaceMounts.length);
+    }, []);
     return <div data-testid="notebook-surface" data-change-signal={props.changeSignal} />;
   },
 }));
@@ -77,6 +89,7 @@ function makeHarness(opts: {
 
 afterEach(() => {
   surfaceCalls.length = 0;
+  surfaceMounts.length = 0;
   vi.restoreAllMocks();
 });
 
@@ -292,5 +305,80 @@ describe('NotebookTile off-root capability gating', () => {
     const lastCall = surfaceCalls[surfaceCalls.length - 1];
     expect(lastCall.backlinksNotebook).toBeDefined();
     expect(lastCall.sendToChief).toBeDefined();
+  });
+});
+
+describe('NotebookTile remounts NotebookSurface on root change', () => {
+  // Regression coverage for a wrong-root-write risk flagged in PR #588 review:
+  // NotebookSurface's init effect deps are `[active]` only, so switching an
+  // already-mounted tile's root via the header switcher previously left
+  // selectedPath/note/draft state carrying over from the old root while the
+  // daemon rebinds underneath it — the next autosave could write the old
+  // document's buffer to the same relative path under the NEW root.
+  // NotebookTile.tsx now keys NotebookSurface on the raw `root` prop so a
+  // root change forces React to tear down and rebuild the surface instance
+  // (fresh selection/note/draft, fresh init effect). These tests assert the
+  // remount actually happens (and doesn't spuriously happen) rather than
+  // just asserting the key prop's value.
+
+  it('remounts NotebookSurface when root changes', async () => {
+    const harness = makeHarness({ effectiveNotebookRoot: '/notebook-root' });
+    const { rerender } = render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" root="/a" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+    await waitFor(() => expect(surfaceMounts.length).toBe(1));
+
+    rerender(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" root="/b" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(surfaceMounts.length).toBe(2));
+  });
+
+  it('does not remount NotebookSurface on a rerender with the same root', async () => {
+    const harness = makeHarness({ effectiveNotebookRoot: '/notebook-root' });
+    const { rerender } = render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" root="/a" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+    await waitFor(() => expect(surfaceMounts.length).toBe(1));
+
+    // Rerender with an unrelated prop change (onOpenFile identity) but the
+    // same root: this must not remount, guarding against keying on
+    // something that isn't stable across ordinary re-renders.
+    rerender(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" root="/a" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    // Give any spurious effect a tick to fire before asserting it didn't.
+    await waitFor(() => expect(surfaceCalls.length).toBeGreaterThan(1));
+    expect(surfaceMounts.length).toBe(1);
+  });
+
+  it('does not remount when fs_watch resolves the root to a normalized form (e.g. /tmp -> /private/tmp)', async () => {
+    const harness = makeHarness({
+      effectiveNotebookRoot: '/notebook-root',
+      watchResolvesTo: (root) => root.replace(/^\/tmp\//, '/private/tmp/'),
+    });
+    render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" root="/tmp/x" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+    await waitFor(() => expect(surfaceMounts.length).toBe(1));
+
+    // The daemon rebuild after resolution re-renders the (same-keyed)
+    // element with a new daemon instance — that's a normal re-render, not
+    // a remount, so surfaceMounts must stay at 1.
+    await waitFor(() => expect(harness.makeDaemon).toHaveBeenCalledWith('/private/tmp/x'));
+    await waitFor(() => expect(surfaceCalls.length).toBeGreaterThan(1));
+    expect(surfaceMounts.length).toBe(1);
   });
 });

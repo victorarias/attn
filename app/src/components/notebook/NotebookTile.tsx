@@ -94,6 +94,19 @@ export function NotebookTile({
 
   return (
     <NotebookSurface
+      // Remount on root change: NotebookSurface's init effect only depends on
+      // `active`, so without a key change, switching roots via the header
+      // switcher leaves selectedPath/note/draft carrying over from the old
+      // root while the daemon rebinds underneath — the next autosave can then
+      // write the old document's buffer to the same relative path under the
+      // NEW root. Keying on `root` forces a fresh mount (fresh state, fresh
+      // init effect) on every root change.
+      //
+      // This is the RAW `root` prop, not effectiveRoot/resolvedRoot above:
+      // fs_watch_result can normalize the path (e.g. /tmp -> /private/tmp
+      // on macOS), and that normalization must never itself trigger a
+      // remount — only a real root change (a new raw prop value) should.
+      key={root ?? ''}
       variant="tile"
       active
       initialPath={initialPath}
