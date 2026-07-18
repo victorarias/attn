@@ -269,6 +269,95 @@ func TestStop_RefusesOwnProcessTree(t *testing.T) {
 	// signal was attempted, which the error path guarantees.
 }
 
+// TestStop_NonDaemonHolderSentinel is the must-catch regression for the
+// restore-vs-stop race figgyster flagged: a pid file seeded with the pid of
+// a genuinely live process (standing in for a stale daemon pid left behind
+// by a crash), whose flock is then taken by a non-daemon holder (standing in
+// for `attn db restore` via acquireDaemonLock) that overwrites the content
+// with NonDaemonHolderSentinel before blocking. Stop must see the sentinel,
+// not the pid that was there before the holder took the lock, and must
+// never signal it — even though the lock is genuinely held (EWOULDBLOCK),
+// which alone used to be treated as "safe to trust the pid on disk".
+func TestStop_NonDaemonHolderSentinel(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "attn.pid")
+
+	// A live process whose pid stands in for a stale daemon pid left on
+	// disk by a crash — this is what Stop must NOT signal.
+	stalePidHolder := exec.Command("sleep", "30")
+	if err := stalePidHolder.Start(); err != nil {
+		t.Fatalf("start sleep helper: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = stalePidHolder.Process.Kill()
+		_, _ = stalePidHolder.Process.Wait()
+	})
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(stalePidHolder.Process.Pid)), 0644); err != nil {
+		t.Fatalf("seed stale pid file: %v", err)
+	}
+
+	// A non-daemon holder (e.g. `attn db restore`) takes the lock and
+	// stamps the sentinel over that stale pid, mirroring acquireDaemonLock.
+	spawnStopHelper(t, pidPath, "lock-write-pid", "ATTN_STOP_TEST_HELPER_WRITE_PID="+NonDaemonHolderSentinel)
+	waitForPIDFileContent(t, pidPath, NonDaemonHolderSentinel, 5*time.Second)
+	waitForFlockHeld(t, pidPath, 5*time.Second)
+
+	result, err := Stop(pidPath)
+	if err != nil {
+		t.Fatalf("Stop() error = %v, want nil", err)
+	}
+	if result.Stopped {
+		t.Fatalf("Stop() = %+v, want Stopped=false (must not signal a pid the current lock holder didn't write)", result)
+	}
+	if !strings.Contains(result.Note, "another attn process") {
+		t.Fatalf("Stop().Note = %q, want it to mention the lock being held by another attn process", result.Note)
+	}
+	if !isAlive(stalePidHolder.Process.Pid) {
+		t.Fatal("stale-pid-holder process is gone: Stop() signaled a pid the current lock holder never wrote")
+	}
+}
+
+// TestStop_NonContentionFlockErrorFailsClosed proves a flock failure other
+// than EWOULDBLOCK (e.g. ENOLCK) is indeterminate and must not be treated as
+// "no one holds the lock, the pid is stale" — that would let Stop signal a
+// pid it has no actual proof is safe to signal.
+func TestStop_NonContentionFlockErrorFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "attn.pid")
+
+	helper := exec.Command("sleep", "30")
+	if err := helper.Start(); err != nil {
+		t.Fatalf("start sleep helper: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = helper.Process.Kill()
+		_, _ = helper.Process.Wait()
+	})
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(helper.Process.Pid)), 0644); err != nil {
+		t.Fatalf("write pid file: %v", err)
+	}
+
+	originalFlockFn := flockFn
+	flockFn = func(fd int, how int) error {
+		return syscall.ENOLCK
+	}
+	t.Cleanup(func() { flockFn = originalFlockFn })
+
+	result, err := Stop(pidPath)
+	if err == nil {
+		t.Fatalf("Stop() = %+v, err = nil, want an indeterminate-state error", result)
+	}
+	if !strings.Contains(err.Error(), "cannot determine daemon state") {
+		t.Fatalf("Stop() error = %v, want it to mention the indeterminate-state message", err)
+	}
+	if result.Stopped {
+		t.Fatalf("Stop() = %+v, want Stopped=false", result)
+	}
+	if !isAlive(helper.Process.Pid) {
+		t.Fatal("helper process is gone: Stop() signaled a pid on an inconclusive flock result")
+	}
+}
+
 // TestStop_MalformedPIDFile proves malformed content under a held lock is an
 // error, and (implicitly, since no pid could even be parsed) nothing was
 // signaled.

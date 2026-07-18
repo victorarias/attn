@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/victorarias/attn/internal/daemonctl"
 )
 
 // testPidPath returns a not-yet-created pid-file path in dir: passing it to
@@ -505,6 +507,29 @@ func TestAcquireDaemonLock_ExcludesConcurrentRestore(t *testing.T) {
 		t.Fatalf("expected acquireDaemonLock to succeed after release, got: %v", err)
 	}
 	afterRelease()
+}
+
+// TestAcquireDaemonLock_StampsNonDaemonHolderSentinel proves acquireDaemonLock
+// overwrites whatever pid content is on disk (in this case a stale pid left
+// by a previous daemon) with daemonctl.NonDaemonHolderSentinel as soon as it
+// takes the lock. This is the property daemonctl.Stop relies on: while a
+// non-daemon holder like `attn db restore` owns the lock, Stop must never
+// trust the pid that was there before — it must see the sentinel instead.
+func TestAcquireDaemonLock_StampsNonDaemonHolderSentinel(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "attn.pid")
+	writeFile(t, pidPath, "99999") // stale pid from a previous daemon
+
+	release, err := acquireDaemonLock(pidPath)
+	if err != nil {
+		t.Fatalf("acquireDaemonLock error: %v", err)
+	}
+	defer release()
+
+	got := readFile(t, pidPath)
+	if got != daemonctl.NonDaemonHolderSentinel {
+		t.Fatalf("pid file content = %q while lock held, want sentinel %q", got, daemonctl.NonDaemonHolderSentinel)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {
