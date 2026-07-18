@@ -8,6 +8,8 @@ import {
   getNormalizedPaneBounds,
   getSplitDividers,
   hasPane,
+  parseNotebookTileParams,
+  serializeNotebookTileParams,
   workspaceSnapshotFromDaemonWorkspace,
   type TerminalLayoutNode,
 } from './workspace';
@@ -259,5 +261,52 @@ describe('docked tiles', () => {
     });
     // A split whose second child fails to parse yields no usable tree.
     expect(snapshot.workspace.layoutTree).toBeNull();
+  });
+});
+
+describe('notebook tile params (parse/serialize)', () => {
+  it('round-trips the legacy bare-path format for a rootless tile', () => {
+    const raw = 'knowledge/areas/foo.md';
+    const parsed = parseNotebookTileParams(raw);
+    expect(parsed).toEqual({ path: raw });
+    expect(serializeNotebookTileParams(parsed)).toBe(raw);
+  });
+
+  it('round-trips the {root, path} JSON envelope for a root-bound tile', () => {
+    const raw = serializeNotebookTileParams({ root: '/Users/victor/code/attn', path: 'README.md' });
+    expect(raw.startsWith('{')).toBe(true);
+    const parsed = parseNotebookTileParams(raw);
+    expect(parsed).toEqual({ root: '/Users/victor/code/attn', path: 'README.md' });
+    expect(serializeNotebookTileParams(parsed)).toBe(raw);
+  });
+
+  it('treats a malformed JSON-looking string as a legacy bare path', () => {
+    const raw = '{not valid json';
+    expect(parseNotebookTileParams(raw)).toEqual({ path: raw });
+  });
+
+  it('serializes a root with no open path as {root} only', () => {
+    const raw = serializeNotebookTileParams({ root: '/tmp/some-root' });
+    expect(JSON.parse(raw)).toEqual({ root: '/tmp/some-root' });
+    expect(parseNotebookTileParams(raw)).toEqual({ root: '/tmp/some-root' });
+  });
+
+  it('treats empty/null/undefined raw as no params', () => {
+    expect(parseNotebookTileParams(undefined)).toEqual({});
+    expect(parseNotebookTileParams(null)).toEqual({});
+    expect(parseNotebookTileParams('')).toEqual({});
+  });
+
+  it('preserves a tile\'s root across a path update (open-file round trip)', () => {
+    // Simulates WorkspaceDockTile's onOpenFile: parse the current params, keep
+    // `root`, and reserialize with the newly opened path.
+    const initial = parseNotebookTileParams(serializeNotebookTileParams({ root: '/repo', path: 'a.md' }));
+    const afterOpen = serializeNotebookTileParams({ root: initial.root, path: 'b.md' });
+    expect(parseNotebookTileParams(afterOpen)).toEqual({ root: '/repo', path: 'b.md' });
+  });
+
+  it('ignores unknown fields in the JSON envelope', () => {
+    const raw = JSON.stringify({ root: '/repo', path: 'a.md', bogus: 'nope' });
+    expect(parseNotebookTileParams(raw)).toEqual({ root: '/repo', path: 'a.md' });
   });
 });

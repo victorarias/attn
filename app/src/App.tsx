@@ -133,6 +133,28 @@ export function latestPresentationBySessionId(notices: Presentation[]): Map<stri
   }
   return bySessionId;
 }
+// The per-root fs_changed signal key: the daemon-resolved root verbatim, or
+// `effectiveNotebookRoot` when the event carries no root (the daemon's
+// notebook-root events, and — as a safety fallback — any malformed event
+// missing the field). A rootless tile and the fullscreen browser look
+// themselves up with the same normalization (root='' → effectiveNotebookRoot),
+// so they land on this key too.
+export function fsChangeSignalKey(root: string, effectiveNotebookRoot: string): string {
+  return root || effectiveNotebookRoot;
+}
+
+// Pure reducer for the per-root fs_changed signal map: bumps only the key the
+// event resolves to, leaving every other root's counter untouched so a tile
+// bound to root A never re-renders for a change under root B.
+export function bumpFsChangeSignal(
+  signals: Record<string, number>,
+  root: string,
+  effectiveNotebookRoot: string,
+): Record<string, number> {
+  const key = fsChangeSignalKey(root, effectiveNotebookRoot);
+  return { ...signals, [key]: (signals[key] || 0) + 1 };
+}
+
 const TERMINAL_AGENT: SessionAgent = 'shell';
 
 type LocationPickerPurpose = 'workspace' | 'session';
@@ -510,11 +532,14 @@ function App() {
     sessionExitHandlerRef.current?.(info);
   }, []);
 
-  // Bumped on every fs_changed event so the Notebook browser's filesystem tree
-  // re-lists and the open file reloads (covers agent writes and external edits to
-  // any file under the root). The browser reads via the generic fs surface, so
-  // fs_changed — not notebook_changed — is its refresh signal.
-  const [fsChangeSignal, setFsChangeSignal] = useState(0);
+  // Bumped per-root on every fs_changed event so a Notebook surface (the
+  // fullscreen browser, or a tile bound to that same root) re-lists its
+  // filesystem tree and reloads its open file — without bumping surfaces bound
+  // to an unrelated root. Keyed by the daemon-resolved root string; an
+  // fs_changed with an empty/missing root is normalized to the effective
+  // notebook root (see bumpFsChangeSignal below), matching how a rootless
+  // tile/the fullscreen browser look themselves up.
+  const [fsChangeSignals, setFsChangeSignals] = useState<Record<string, number>>({});
   // Bumped on every tasks_changed broadcast so an open Tasks panel
   // re-fetches the durable runner's task list (covers any lifecycle transition).
   const [notebookTaskChangeSignal, setTaskChangeSignal] = useState(0);
@@ -567,6 +592,8 @@ function App() {
     sendFsDelete,
     sendFsExists,
     sendFsReadAsset,
+    sendFsWatch,
+    sendFsUnwatch,
     sendTaskList,
     sendTaskRetry,
     sendNotificationList,
@@ -622,9 +649,14 @@ function App() {
     onPresentationAdded: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
     onPresentationUpdated: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
     // The daemon tags each fs_changed with an origin ("ui"/"agent"/"external"), but
-    // every origin is treated the same here: bump a signal so an open browser
-    // re-lists its tree and reloads the open file. Covers any file under the root.
-    onFsChanged: () => setFsChangeSignal((n) => n + 1),
+    // every origin is treated the same here: bump the signal for whichever root
+    // changed, so only browsers/tiles bound to that root re-list and reload. An
+    // empty/missing root (treated as notebook-root for safety) is normalized to
+    // the effective notebook root, matching how a rootless tile/the fullscreen
+    // browser key their own lookups (see notebookSurfaceDaemon below).
+    onFsChanged: (_origin, _paths, root) => {
+      setFsChangeSignals((prev) => bumpFsChangeSignal(prev, root, settings['notebook.root.effective'] || ''));
+    },
     // A task lifecycle transition broadcast bumps the signal so an open Tasks panel
     // refetches the runner's list (the broadcast itself is payload-free).
     onTasksChanged: () => setTaskChangeSignal((n) => n + 1),
@@ -765,6 +797,8 @@ function App() {
         sendFsDelete={sendFsDelete}
         sendFsExists={sendFsExists}
         sendFsReadAsset={sendFsReadAsset}
+        sendFsWatch={sendFsWatch}
+        sendFsUnwatch={sendFsUnwatch}
         sendTaskList={sendTaskList}
         sendTaskRetry={sendTaskRetry}
         sendNotificationList={sendNotificationList}
@@ -774,7 +808,7 @@ function App() {
         sendNotebookBacklinks={sendNotebookBacklinks}
         sendNotebookToChief={sendNotebookToChief}
         sendNotebookList={sendNotebookList}
-        fsChangeSignal={fsChangeSignal}
+        fsChangeSignals={fsChangeSignals}
         notebookTaskChangeSignal={notebookTaskChangeSignal}
         sendGetRecentLocations={sendGetRecentLocations}
         sendBrowseDirectory={sendBrowseDirectory}
@@ -880,6 +914,8 @@ interface AppContentProps {
   sendFsDelete: ReturnType<typeof useDaemonSocket>['sendFsDelete'];
   sendFsExists: ReturnType<typeof useDaemonSocket>['sendFsExists'];
   sendFsReadAsset: ReturnType<typeof useDaemonSocket>['sendFsReadAsset'];
+  sendFsWatch: ReturnType<typeof useDaemonSocket>['sendFsWatch'];
+  sendFsUnwatch: ReturnType<typeof useDaemonSocket>['sendFsUnwatch'];
   sendTaskList: ReturnType<typeof useDaemonSocket>['sendTaskList'];
   sendTaskRetry: ReturnType<typeof useDaemonSocket>['sendTaskRetry'];
   sendNotificationList: ReturnType<typeof useDaemonSocket>['sendNotificationList'];
@@ -889,7 +925,7 @@ interface AppContentProps {
   sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
   sendNotebookToChief: ReturnType<typeof useDaemonSocket>['sendNotebookToChief'];
   sendNotebookList: ReturnType<typeof useDaemonSocket>['sendNotebookList'];
-  fsChangeSignal: number;
+  fsChangeSignals: Record<string, number>;
   notebookTaskChangeSignal: number;
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
   sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
@@ -989,6 +1025,8 @@ function AppContent({
   sendFsDelete,
   sendFsExists,
   sendFsReadAsset,
+  sendFsWatch,
+  sendFsUnwatch,
   sendTaskList,
   sendTaskRetry,
   sendNotificationList,
@@ -998,7 +1036,7 @@ function AppContent({
   sendNotebookBacklinks,
   sendNotebookToChief,
   sendNotebookList,
-  fsChangeSignal,
+  fsChangeSignals,
   notebookTaskChangeSignal,
   sendGetRecentLocations,
   sendBrowseDirectory,
@@ -3340,20 +3378,28 @@ sendFetchPRDetails,
       && !boardSurfaceOpen,
   });
 
-  // The daemon surface shared by the fullscreen Notebook and every notebook tile.
-  // Memoized so tiles re-render only when a callback identity or a change signal
-  // actually moves.
-  const notebookSurfaceDaemon = useMemo(() => ({
-    listDir: sendFsList,
-    readFile: sendFsRead,
-    writeFile: sendFsWrite,
-    existsFile: sendFsExists,
-    readAsset: sendFsReadAsset,
+  // The daemon's resolved notebook storage root (settings['notebook.root.effective']).
+  // An fs_changed with no root, and a tile with no explicit root, both key off this
+  // value — see setFsChangeSignals above and makeNotebookSurfaceDaemon below.
+  const effectiveNotebookRoot = settings['notebook.root.effective'] || '';
+
+  // Builds the daemon surface for the fullscreen Notebook and every notebook
+  // tile, bound to `root` (undefined = the notebook storage root, unchanged
+  // behavior). Memoized so a tile's daemon instance is stable across renders
+  // that don't touch its own root's change signal.
+  const makeNotebookSurfaceDaemon = useCallback((root?: string) => ({
+    listDir: (path: string) => sendFsList(path, root),
+    readFile: (path: string) => sendFsRead(path, root),
+    writeFile: (path: string, content: string, baseHash?: string) => sendFsWrite(path, content, baseHash, root),
+    existsFile: (path: string) => sendFsExists(path, root),
+    readAsset: (path: string) => sendFsReadAsset(path, root),
+    // Notebook-storage-only commands (see NotebookSurfaceContext's boundary
+    // note): bound to the notebook root regardless of `root`.
     backlinksNotebook: sendNotebookBacklinks,
     sendToChief: sendNotebookToChief,
     // Argless walk = empty prefix = the whole vault, for the in-tile finder index.
     listFiles: sendNotebookList,
-    changeSignal: fsChangeSignal,
+    changeSignal: fsChangeSignals[fsChangeSignalKey(root || '', effectiveNotebookRoot)] || 0,
   }), [
     sendFsList,
     sendFsRead,
@@ -3363,12 +3409,24 @@ sendFetchPRDetails,
     sendNotebookBacklinks,
     sendNotebookToChief,
     sendNotebookList,
-    fsChangeSignal,
+    fsChangeSignals,
+    effectiveNotebookRoot,
   ]);
+
+  const notebookSurfaceContextValue = useMemo(() => ({
+    makeDaemon: makeNotebookSurfaceDaemon,
+    effectiveNotebookRoot,
+    sendFsWatch,
+    sendFsUnwatch,
+  }), [makeNotebookSurfaceDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch]);
+
+  // The fullscreen browser is always notebook-rooted — same signal a rootless
+  // tile would resolve to via makeNotebookSurfaceDaemon(undefined).
+  const notebookRootChangeSignal = fsChangeSignals[fsChangeSignalKey('', effectiveNotebookRoot)] || 0;
 
   return (
     <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendMuteAuthor={sendMuteAuthor} sendPRVisited={sendPRVisited}>
-    <NotebookSurfaceProvider value={notebookSurfaceDaemon}>
+    <NotebookSurfaceProvider value={notebookSurfaceContextValue}>
     <div className="app" ref={appShellRef} tabIndex={-1} style={{ outline: 'none' }} onPointerDownCapture={handleAppPointerDownCapture}>
       {/* Error banner for version mismatch */}
       {connectionError && (
@@ -3785,7 +3843,7 @@ sendFetchPRDetails,
         backlinksNotebook={sendNotebookBacklinks}
         sendToChief={sendNotebookToChief}
         listFiles={sendNotebookList}
-        changeSignal={fsChangeSignal}
+        changeSignal={notebookRootChangeSignal}
         chiefActive={notebookChiefActive}
       />
       <TicketBoardSurface

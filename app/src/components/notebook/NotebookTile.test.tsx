@@ -1,0 +1,164 @@
+import { render, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NotebookTile } from './NotebookTile';
+import {
+  NotebookSurfaceProvider,
+  type NotebookSurfaceContextValue,
+  type NotebookSurfaceDaemon,
+} from '../../contexts/NotebookSurfaceContext';
+import type { FsWatchResult } from '../../hooks/useDaemonSocket';
+
+// NotebookSurface itself (CodeMirror-backed tree/editor/finder) is covered by
+// NotebookBrowser.test.tsx; here we only need to observe what NotebookTile
+// hands it, so stub it to a thin recorder.
+const surfaceCalls = vi.hoisted(() => [] as Array<{ changeSignal?: number }>);
+vi.mock('../NotebookSurface', () => ({
+  NotebookSurface: (props: { changeSignal?: number }) => {
+    surfaceCalls.push(props);
+    return <div data-testid="notebook-surface" data-change-signal={props.changeSignal} />;
+  },
+}));
+
+function fakeDaemon(changeSignal = 0): NotebookSurfaceDaemon {
+  return {
+    listDir: vi.fn().mockResolvedValue([]),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    existsFile: vi.fn(),
+    readAsset: vi.fn(),
+    backlinksNotebook: vi.fn(),
+    sendToChief: vi.fn(),
+    listFiles: vi.fn(),
+    changeSignal,
+  };
+}
+
+interface Harness {
+  value: NotebookSurfaceContextValue;
+  makeDaemon: ReturnType<typeof vi.fn>;
+  sendFsWatch: ReturnType<typeof vi.fn>;
+  sendFsUnwatch: ReturnType<typeof vi.fn>;
+  callLog: string[];
+}
+
+function makeHarness(opts: {
+  effectiveNotebookRoot?: string;
+  watchResolvesTo?: (root: string) => string;
+  watchRejects?: boolean;
+} = {}): Harness {
+  const callLog: string[] = [];
+  const resolveRoot = opts.watchResolvesTo ?? ((root: string) => root);
+  const makeDaemon = vi.fn((_root?: string) => fakeDaemon());
+  const sendFsWatch = vi.fn((root?: string): Promise<FsWatchResult> => {
+    callLog.push(`watch:${root}`);
+    if (opts.watchRejects) {
+      return Promise.reject(new Error('watch cap reached'));
+    }
+    return Promise.resolve({ root: resolveRoot(root || '') });
+  });
+  const sendFsUnwatch = vi.fn((root?: string): Promise<FsWatchResult> => {
+    callLog.push(`unwatch:${root}`);
+    return Promise.resolve({ root: root || '' });
+  });
+  const value: NotebookSurfaceContextValue = {
+    makeDaemon,
+    effectiveNotebookRoot: opts.effectiveNotebookRoot ?? '/notebook-root',
+    sendFsWatch,
+    sendFsUnwatch,
+  };
+  return { value, makeDaemon, sendFsWatch, sendFsUnwatch, callLog };
+}
+
+afterEach(() => {
+  surfaceCalls.length = 0;
+  vi.restoreAllMocks();
+});
+
+describe('NotebookTile root-bound daemon + watch lifecycle', () => {
+  it('binds the daemon via makeDaemon(root) and never watches a rootless (notebook-rooted) tile', async () => {
+    const harness = makeHarness();
+    render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(surfaceCalls.length).toBeGreaterThan(0));
+    expect(harness.makeDaemon).toHaveBeenCalledWith(undefined);
+    expect(harness.sendFsWatch).not.toHaveBeenCalled();
+    expect(harness.sendFsUnwatch).not.toHaveBeenCalled();
+  });
+
+  it('never watches a tile explicitly bound to the effective notebook root (server already watches it)', async () => {
+    const harness = makeHarness({ effectiveNotebookRoot: '/notebook-root' });
+    render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath="a.md" root="/notebook-root" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(surfaceCalls.length).toBeGreaterThan(0));
+    expect(harness.makeDaemon).toHaveBeenCalledWith('/notebook-root');
+    expect(harness.sendFsWatch).not.toHaveBeenCalled();
+  });
+
+  it('watches an arbitrary root on mount and unwatches the resolved root on unmount', async () => {
+    const harness = makeHarness({
+      effectiveNotebookRoot: '/notebook-root',
+      // fs_watch_result may normalize the path (e.g. resolve symlinks/trailing slash).
+      watchResolvesTo: () => '/repo-resolved',
+    });
+    const { unmount } = render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath={null} root="/repo" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(harness.sendFsWatch).toHaveBeenCalledWith('/repo'));
+
+    unmount();
+
+    await waitFor(() => expect(harness.sendFsUnwatch).toHaveBeenCalledWith('/repo-resolved'));
+    // Mount-then-unmount ordering: watch strictly precedes the matching unwatch.
+    expect(harness.callLog).toEqual(['watch:/repo', 'unwatch:/repo-resolved']);
+  });
+
+  it('unwatches the previously resolved root and re-watches the new one when root changes', async () => {
+    const harness = makeHarness({
+      effectiveNotebookRoot: '/notebook-root',
+      watchResolvesTo: (root) => `${root}-resolved`,
+    });
+    const { rerender } = render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath={null} root="/repo-a" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+    await waitFor(() => expect(harness.sendFsWatch).toHaveBeenCalledWith('/repo-a'));
+
+    rerender(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath={null} root="/repo-b" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(harness.sendFsUnwatch).toHaveBeenCalledWith('/repo-a-resolved'));
+    await waitFor(() => expect(harness.sendFsWatch).toHaveBeenCalledWith('/repo-b'));
+    expect(harness.callLog).toEqual(['watch:/repo-a', 'unwatch:/repo-a-resolved', 'watch:/repo-b']);
+  });
+
+  it('survives a watch failure (e.g. the daemon watch cap) without throwing — the tile still renders', async () => {
+    const harness = makeHarness({ effectiveNotebookRoot: '/notebook-root', watchRejects: true });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    render(
+      <NotebookSurfaceProvider value={harness.value}>
+        <NotebookTile initialPath={null} root="/repo" onOpenFile={() => {}} />
+      </NotebookSurfaceProvider>,
+    );
+
+    await waitFor(() => expect(harness.sendFsWatch).toHaveBeenCalledWith('/repo'));
+    await waitFor(() => expect(warnSpy).toHaveBeenCalled());
+    expect(warnSpy.mock.calls[0][0]).toMatch(/^\[NotebookTile\]/);
+    expect(surfaceCalls.length).toBeGreaterThan(0);
+  });
+});

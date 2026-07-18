@@ -429,6 +429,56 @@ export function tileIdsFromLayoutJSON(layoutJSON: string, kind?: TileKind): stri
     .map((tile) => tile.tileId);
 }
 
+// A notebook tile's parsed tileParams: `root` is set only for a tile pinned to
+// an arbitrary filesystem root (editor-over-arbitrary-roots); its absence
+// means the tile renders the notebook-storage root, same as before this
+// shape existed. `path` is the tile's currently open file, relative to
+// whichever root applies.
+export interface NotebookTileParams {
+  root?: string;
+  path?: string;
+}
+
+// parseNotebookTileParams decodes a persisted notebook tile's tileParams.
+// Two encodings coexist on purpose: pre-arbitrary-roots tiles persisted a bare
+// path string (no JSON envelope), and every tile still round-trips through
+// that legacy shape when it has no root — see serializeNotebookTileParams.
+// A JSON-looking string that fails to parse is treated as a (verbatim, if
+// unusual) legacy path rather than dropped, so a malformed persisted value
+// degrades to "reopen this path" instead of "lose the tile's file".
+export function parseNotebookTileParams(raw: string | undefined | null): NotebookTileParams {
+  if (!raw) {
+    return {};
+  }
+  if (raw.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const result: NotebookTileParams = {};
+      if (typeof parsed.root === 'string' && parsed.root) {
+        result.root = parsed.root;
+      }
+      if (typeof parsed.path === 'string' && parsed.path) {
+        result.path = parsed.path;
+      }
+      return result;
+    } catch {
+      return { path: raw };
+    }
+  }
+  return { path: raw };
+}
+
+// serializeNotebookTileParams is the inverse of parseNotebookTileParams. A
+// rootless tile (the common case today) keeps persisting the legacy bare-path
+// format so its params stay readable by, and round-trip through, code that
+// still expects the pre-arbitrary-roots shape.
+export function serializeNotebookTileParams(params: NotebookTileParams): string {
+  if (params.root) {
+    return JSON.stringify(params.path ? { root: params.root, path: params.path } : { root: params.root });
+  }
+  return params.path || '';
+}
+
 function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
   return panes
     .filter((pane) => pane.kind === 'agent' && typeof pane.runtime_id === 'string' && typeof pane.session_id === 'string')
