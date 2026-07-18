@@ -2062,6 +2062,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleState(conn, msg.(*protocol.StateMessage))
 	case protocol.CmdSetSessionResumeID:
 		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
+	case protocol.CmdSessionInstructions:
+		d.handleSessionInstructions(conn, msg.(*protocol.SessionInstructionsMessage))
 	case protocol.CmdStop:
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos:

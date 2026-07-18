@@ -695,6 +695,20 @@ type EnsureRepoResultMessage struct {
 	TargetPath *string `json:"target_path,omitempty,omitzero"`
 }
 
+type EvidenceExcerpt struct {
+	// Author corresponds to the JSON schema field "author".
+	Author string `json:"author"`
+
+	// Quote corresponds to the JSON schema field "quote".
+	Quote string `json:"quote"`
+
+	// Timestamp corresponds to the JSON schema field "timestamp".
+	Timestamp *string `json:"timestamp,omitempty,omitzero"`
+
+	// TurnID corresponds to the JSON schema field "turn_id".
+	TurnID string `json:"turn_id"`
+}
+
 type FetchPRDetailsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -3229,6 +3243,10 @@ type Response struct {
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty,omitzero"`
 
+	// SessionInstructionsResult corresponds to the JSON schema field
+	// "session_instructions_result".
+	SessionInstructionsResult *SessionInstructionsResult `json:"session_instructions_result,omitempty,omitzero"`
+
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
@@ -3401,6 +3419,41 @@ type SessionExitedMessage struct {
 
 	// Signal corresponds to the JSON schema field "signal".
 	Signal *string `json:"signal,omitempty,omitzero"`
+}
+
+type SessionInstructionsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Question corresponds to the JSON schema field "question".
+	Question string `json:"question"`
+
+	// TargetSessionID corresponds to the JSON schema field "target_session_id".
+	TargetSessionID string `json:"target_session_id"`
+}
+
+type SessionInstructionsResult struct {
+	// Answer corresponds to the JSON schema field "answer".
+	Answer string `json:"answer"`
+
+	// Evidence corresponds to the JSON schema field "evidence".
+	Evidence []EvidenceExcerpt `json:"evidence"`
+
+	// Model corresponds to the JSON schema field "model".
+	Model string `json:"model"`
+
+	// ReasoningEffort corresponds to the JSON schema field "reasoning_effort".
+	ReasoningEffort string `json:"reasoning_effort"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// TranscriptFingerprint corresponds to the JSON schema field
+	// "transcript_fingerprint".
+	TranscriptFingerprint string `json:"transcript_fingerprint"`
+
+	// TranscriptPath corresponds to the JSON schema field "transcript_path".
+	TranscriptPath string `json:"transcript_path"`
 }
 
 type SessionRegisteredMessage struct {

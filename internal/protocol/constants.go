@@ -94,6 +94,7 @@ const (
 	CmdUnregister                            = "unregister"
 	CmdState                                 = "state"
 	CmdSetSessionResumeID                    = "set_session_resume_id"
+	CmdSessionInstructions                   = "session_instructions"
 	CmdStop                                  = "stop"
 	CmdTodos                                 = "todos"
 	CmdQuery                                 = "query"
@@ -746,6 +747,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdSetSessionResumeID:
 		var msg SetSessionResumeIDMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSessionInstructions:
+		var msg SessionInstructionsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

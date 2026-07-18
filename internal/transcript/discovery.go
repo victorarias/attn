@@ -13,11 +13,10 @@ import (
 // FindCodexTranscript searches Codex session logs for the most recent session
 // matching the given cwd and start time. Returns empty string if not found.
 func FindCodexTranscript(cwd string, startedAt time.Time) string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
+	sessionsDir := codexSessionsDir()
+	if sessionsDir == "" {
 		return ""
 	}
-	sessionsDir := filepath.Join(homeDir, ".codex", "sessions")
 
 	type codexLine struct {
 		Type      string `json:"type"`
@@ -109,6 +108,60 @@ func FindCodexTranscript(cwd string, startedAt time.Time) string {
 		return bestPath
 	}
 	return fallbackPath
+}
+
+// FindCodexTranscriptForResume resolves a transcript by the native Codex
+// session id recorded in its session_meta event. Unlike cwd/time discovery it
+// cannot select a plausible neighbouring session.
+func FindCodexTranscriptForResume(resumeID string) string {
+	resumeID = strings.TrimSpace(resumeID)
+	if resumeID == "" {
+		return ""
+	}
+	sessionsDir := codexSessionsDir()
+	if sessionsDir == "" {
+		return ""
+	}
+	var found string
+	_ = filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") || found != "" {
+			return nil
+		}
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return nil
+		}
+		defer f.Close()
+		line, readErr := bufio.NewReader(f).ReadBytes('\n')
+		if readErr != nil && len(line) == 0 {
+			return nil
+		}
+		var entry struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ID string `json:"id"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(line), &entry) == nil && entry.Type == "session_meta" && strings.TrimSpace(entry.Payload.ID) == resumeID {
+			found = path
+		}
+		return nil
+	})
+	return found
+}
+
+// codexSessionsDir follows Codex's CODEX_HOME override when present. This is
+// necessary for isolated profiles and test environments; the default remains
+// the native ~/.codex/sessions location.
+func codexSessionsDir() string {
+	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
+		return filepath.Join(codexHome, "sessions")
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(homeDir, ".codex", "sessions")
 }
 
 func pathsEquivalent(a, b string) bool {

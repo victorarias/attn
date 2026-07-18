@@ -143,3 +143,45 @@ func TestCodexHeadlessArgsUsesWorkspaceWriteAndDropsMCPPin(t *testing.T) {
 		`mcp_servers.attn_context.default_tools_approval_mode="approve"`,
 	)
 }
+
+func TestCodexToolFreeHeadlessArgsExposeOnlyThePrompt(t *testing.T) {
+	args := codexToolFreeHeadlessArgs(HeadlessTaskRequest{
+		Model:           "gpt-test",
+		ReasoningEffort: "low",
+		Prompt:          "judge these supplied turns",
+		WorkDir:         "/tmp/scratch",
+		ExtraWritableRoots: []string{
+			"/must-not-be-writable",
+		},
+	}, 12345)
+
+	assertContainsAll(t, "Codex tool-free args", args,
+		"exec",
+		"--json",
+		"--ephemeral",
+		"--ignore-user-config",
+		"--ignore-rules",
+		"--strict-config",
+		"--skip-git-repo-check",
+		"--sandbox",
+		"read-only",
+		`approval_policy="never"`,
+		`model_reasoning_effort="low"`,
+		"features.shell_tool=false",
+		"features.unified_exec=false",
+		`web_search="disabled"`,
+		"features.apps=false",
+		"features.plugins=false",
+		"features.browser_use=false",
+		"features.standalone_web_search=false",
+		"model_auto_compact_token_limit=12345",
+		"gpt-test",
+		"judge these supplied turns",
+	)
+	assertContainsNone(t, "Codex tool-free args", args,
+		"workspace-write",
+		"--add-dir",
+		"/must-not-be-writable",
+		"mcp_servers.",
+	)
+}

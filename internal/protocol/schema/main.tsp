@@ -595,6 +595,12 @@ model SetSessionResumeIDMessage {
   resume_session_id: string;
 }
 
+model SessionInstructionsMessage {
+  cmd: "session_instructions";
+  target_session_id: string;
+  question: string;
+}
+
 model StopMessage {
   cmd: "stop";
   id: string;
@@ -2684,6 +2690,24 @@ model Response {
   ticket_take_result?: TicketTakeResult;
   present_open_result?: PresentOpenResult;
   present_feedback_result?: PresentFeedbackResult;
+  session_instructions_result?: SessionInstructionsResult;
+}
+
+model EvidenceExcerpt {
+  turn_id: string;
+  author: string;
+  quote: string;
+  timestamp?: string;
+}
+
+model SessionInstructionsResult {
+  answer: string;
+  evidence: EvidenceExcerpt[];
+  session_id: string;
+  transcript_path: string;
+  transcript_fingerprint: string;
+  `model`: string;
+  reasoning_effort: string;
 }
 
 model DelegateResult {

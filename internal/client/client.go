@@ -121,6 +121,23 @@ func (c *Client) SetSessionResumeID(id, resumeSessionID string) error {
 	return err
 }
 
+// SessionInstructions asks one bounded question of another session's native
+// conversation. The daemon owns transcript lookup and model execution.
+func (c *Client) SessionInstructions(targetSessionID, question string) (*protocol.SessionInstructionsResult, error) {
+	resp, err := c.send(protocol.SessionInstructionsMessage{
+		Cmd:             protocol.CmdSessionInstructions,
+		TargetSessionID: targetSessionID,
+		Question:        question,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.SessionInstructionsResult == nil {
+		return nil, errors.New("daemon returned no session instructions result")
+	}
+	return resp.SessionInstructionsResult, nil
+}
+
 // SendStop sends a stop signal with transcript path for classification
 func (c *Client) SendStop(id, transcriptPath string) error {
 	msg := protocol.StopMessage{
