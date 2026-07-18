@@ -9,9 +9,9 @@
 import { useCallback, useMemo, useState, useEffect } from 'react';
 // Pull in the app's design tokens so the surface renders with the real theme.
 import '../../src/App.css';
-import { NotebookSurfaceProvider, type NotebookSurfaceDaemon } from '../../src/contexts/NotebookSurfaceContext';
+import { NotebookSurfaceProvider, type NotebookSurfaceDaemon, type NotebookSurfaceContextValue } from '../../src/contexts/NotebookSurfaceContext';
 import { NotebookTile } from '../../src/components/notebook/NotebookTile';
-import type { FsEntry, FsExistsResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../../src/hooks/useDaemonSocket';
+import type { FsEntry, FsExistsResult, FsReadAssetResult, FsReadResult, FsWatchResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../../src/hooks/useDaemonSocket';
 import type { HarnessProps } from '../types';
 
 const TREE: Record<string, FsEntry[]> = {
@@ -66,6 +66,7 @@ export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProp
     return { path, hash: 'h2', conflict: false };
   }, []);
   const existsFile = useCallback(async (path: string): Promise<FsExistsResult> => ({ path, exists: true }), []);
+  const readAsset = useCallback(async (path: string): Promise<FsReadAssetResult> => ({ path, mimeType: 'image/png', dataBase64: '' }), []);
   const backlinksNotebook = useCallback(async (): Promise<NotebookEntry[]> => [], []);
   const sendToChief = useCallback(async (selection: string, sourcePath?: string): Promise<NotebookSendToChiefResult> => {
     window.__HARNESS__.recordCall('sendToChief', [selection, sourcePath]);
@@ -78,11 +79,23 @@ export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProp
     readFile,
     writeFile,
     existsFile,
+    readAsset,
     backlinksNotebook,
     sendToChief,
     listFiles,
     changeSignal: 0,
-  }), [listDir, readFile, writeFile, existsFile, backlinksNotebook, sendToChief, listFiles]);
+  }), [listDir, readFile, writeFile, existsFile, readAsset, backlinksNotebook, sendToChief, listFiles]);
+
+  const sendFsWatch = useCallback(async (root?: string): Promise<FsWatchResult> => ({ root: root ?? '' }), []);
+  const sendFsUnwatch = useCallback(async (root?: string): Promise<FsWatchResult> => ({ root: root ?? '' }), []);
+
+  const surfaceValue = useMemo<NotebookSurfaceContextValue>(() => ({
+    makeDaemon: () => daemon,
+    effectiveNotebookRoot: '',
+    sendFsWatch,
+    sendFsUnwatch,
+    connectionGeneration: 0,
+  }), [daemon, sendFsWatch, sendFsUnwatch]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', 'dark');
@@ -94,7 +107,7 @@ export function NotebookTileHarness({ onReady, setTriggerRerender }: HarnessProp
   return (
     <div style={{ position: 'fixed', inset: 0, display: 'flex', background: 'var(--color-bg-app)' }}>
       <div style={{ width, height: '100%', overflow: 'hidden' }} data-testid="notebook-tile-frame">
-        <NotebookSurfaceProvider value={daemon}>
+        <NotebookSurfaceProvider value={surfaceValue}>
           <NotebookTile
             initialPath={initialPath}
             onOpenFile={(path) => window.__HARNESS__.recordCall('openFile', [path])}

@@ -869,6 +869,12 @@ export function useDaemonSocket({
   const profileMismatchRef = useRef<boolean>(false);
   const profileCheckedRef = useRef<boolean>(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  // Bumped on every successful WebSocket connect (including reconnects). The
+  // daemon deliberately drops explicit fs_watch refs when a client's socket
+  // disconnects, so any consumer that needs a durable server-side
+  // subscription across reconnects (e.g. NotebookTile's arbitrary-root
+  // fs_watch) must re-issue it whenever this generation changes.
+  const [connectionGeneration, setConnectionGeneration] = useState(0);
   const [hasReceivedInitialState, setHasReceivedInitialState] = useState(false);
   const [rateLimit, setRateLimit] = useState<RateLimitState | null>(null);
   const [warnings, setWarnings] = useState<DaemonWarning[]>([]);
@@ -1134,6 +1140,7 @@ export function useDaemonSocket({
       console.log('[Daemon] WebSocket connected');
       daemonRestartInProgressRef.current = false;
       setConnectionError(null);
+      setConnectionGeneration((prev) => prev + 1);
       reconnectDelayRef.current = 1000; // Reset to 1s on successful connect
       reconnectAttemptsRef.current = 0;
       circuitOpenRef.current = false;
@@ -5338,6 +5345,7 @@ export function useDaemonSocket({
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
+    connectionGeneration,
     hasReceivedInitialState,
     settings: settingsRef.current,
     rateLimit,

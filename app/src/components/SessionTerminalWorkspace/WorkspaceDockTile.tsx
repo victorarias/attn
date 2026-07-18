@@ -7,7 +7,7 @@ import type {
   RefObject,
 } from 'react';
 import { browserHostLabel, claimBrowserHostFocus, controlBrowserHost } from '../../browser/host';
-import type { TileContentState, TileLeaf } from '../../types/workspace';
+import { parseNotebookTileParams, serializeNotebookTileParams, type TileContentState, type TileLeaf } from '../../types/workspace';
 import { deriveTileTitle } from '../../utils/tilePresentation';
 import { BrowserTileBody } from './BrowserTileBody';
 import { MarkdownReader } from '../MarkdownReader';
@@ -107,7 +107,12 @@ export function WorkspaceDockTile({
     }
   }, [workspaceId, tile.tileId, tile.tileKind, tile.tileParams, onRequestContent]);
 
-  const path = content?.path || tile.tileParams || '';
+  // Notebook tileParams may be the legacy bare-path string or the {root, path}
+  // JSON envelope a root-bound tile persists — parse either way so the header
+  // tooltip and annotation transport see the plain open path, not raw JSON.
+  const path = content?.path
+    || (tile.tileKind === 'notebook' ? parseNotebookTileParams(tile.tileParams).path : tile.tileParams)
+    || '';
   const title = deriveTileTitle(tile, content);
   const browserLabel = browserHostLabel(workspaceId, tile.tileId);
   const [browserAddress, setBrowserAddress] = useState(tile.tileParams || '');
@@ -476,14 +481,23 @@ export function WorkspaceDockTile({
         ) : tile.tileKind === 'notebook' ? (
           // The notebook tile self-serves its content over the fs surface (via
           // context); the only tile→params write is the opened file's path.
-          <NotebookTile
-            initialPath={tile.tileParams || null}
-            onOpenFile={(openedPath) => {
-              void Promise.resolve(onUpdateParams?.(openedPath)).catch((error) => {
-                console.warn('[WorkspaceDockTile] Failed to persist notebook path:', error);
-              });
-            }}
-          />
+          // tileParams may be the legacy bare-path string (rootless tile) or the
+          // {root, path} JSON envelope a root-bound tile persists.
+          (() => {
+            const { root, path: openPath } = parseNotebookTileParams(tile.tileParams);
+            return (
+              <NotebookTile
+                initialPath={openPath || null}
+                root={root}
+                onOpenFile={(openedPath) => {
+                  const nextParams = serializeNotebookTileParams({ root, path: openedPath });
+                  void Promise.resolve(onUpdateParams?.(nextParams)).catch((error) => {
+                    console.warn('[WorkspaceDockTile] Failed to persist notebook path:', error);
+                  });
+                }}
+              />
+            );
+          })()
         ) : (
           <div className="workspace-dock-tile-message">Unsupported tile: {tile.tileKind}</div>
         )}

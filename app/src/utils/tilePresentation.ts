@@ -1,4 +1,4 @@
-import type { TileContentState, TileLeaf } from '../types/workspace';
+import { parseNotebookTileParams, type TileContentState, type TileLeaf } from '../types/workspace';
 
 export function tilePathBasename(path: string): string {
   const trimmed = path.replace(/\/+$/, '');
@@ -51,9 +51,12 @@ export function deriveTileTitle(tile: TileLeaf, content?: TileContentState): str
     if (fromContent) return fromContent;
   }
   // A notebook tile self-serves its content, so there's no `content` to title from:
-  // show the open file's name, or a plain label before anything is opened.
+  // show the open file's name, or a plain label before anything is opened. Params
+  // may be the legacy bare-path string or the {root, path} JSON envelope a
+  // root-bound tile persists — parse either way to reach the open path.
   if (tile.tileKind === 'notebook') {
-    return tile.tileParams ? tilePathBasename(tile.tileParams) : 'Notebook';
+    const { path } = parseNotebookTileParams(tile.tileParams);
+    return path ? tilePathBasename(path) : 'Notebook';
   }
   const path = content?.path || tile.tileParams || '';
   return path ? tilePathBasename(path) : tile.tileKind;
