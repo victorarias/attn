@@ -55,7 +55,10 @@ Both sides are plugins; neither harness gets forked or patched:
 
 State flips from inference to declaration: today attn *deduces* claude's state
 from hooks, heuristics, and a stop-time classifier; the pi extension *reports*
-it. Fewer guessing layers, same authority model.
+it — declared state is authoritative, with no classifier fallback. What
+survives of classification is a service, not a guess: when the agent stops,
+the plugin can ask attn to read the last turn and enrich the stop — done, or
+waiting on a reply — so the user understands *why* the session went quiet.
 
 ## The capabilities (each gets its own doc)
 
@@ -66,7 +69,8 @@ it. Fewer guessing layers, same authority model.
 - **Subagent orchestration.** Fan-out and delegation inside the session.
   Prior art exists in the pi ecosystem — we adapt, not invent.
 - **Skills and commands.** pi speaks the same skills spec; the existing
-  corpus should largely carry over, curated rather than rewritten.
+  corpus carries over as-is for the trial, curated from real use rather than
+  ported upfront.
 - **Compaction, tuned.** Native in pi and fully overridable; shape it to
   Victor's conventions.
 - **Background eyes.** Monitors and background commands that wake the main
@@ -115,7 +119,7 @@ Each rock opens with its own alignment + implementation doc.
 - [ ] **Safety envelope + auto mode** — the autonomy dial.
 - [ ] **Subagents** — adapted from ecosystem prior art.
 - [ ] **Background eyes** — monitors that wake the agent.
-- [ ] **Skills curation** — carry over what matters.
+- [ ] **Skills** — trial the existing corpus as-is; curate from real use.
 - [ ] **Daily-driver trial** — live in it; the feedback loop that reorders
       everything above.
 - [ ] **Compaction tuning and workflows** — likely last; needs the most
@@ -123,14 +127,11 @@ Each rock opens with its own alignment + implementation doc.
 
 ## Open questions
 
-- How much of the existing skills corpus carries over unmodified, and is a
-  shared skills directory the right move?
-- Does the stop-time classifier still run for pi sessions once state is
-  declared, or does it become redundant?
-- Packaging granularity: one package with many extensions, or a small family
-  under one install? Decide when the second capability lands.
 - The safety envelope's exact policy vocabulary — designed fresh in its own
   doc, not inherited from claude's permission modes.
+- The shape of the stop-enrichment service (how the plugin asks attn to
+  classify a stop as done vs. waiting on a reply) — designed in the
+  citizenship doc.
 - **Blindspots (ground before the first chunk):** pi's extension runtime under
   long-lived real sessions; pi's release cadence and API stability in
   practice; how pi's TUI behaves under attn's PTY geometry rules compared to
