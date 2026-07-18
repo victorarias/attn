@@ -566,7 +566,7 @@ func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget,
 	}
 
 	if state.Stale {
-		if _, err := runSSH(ctx, sshTarget, profile, remoteSocketConfigScript()+`rm -f "$socket_path" "$pid_path"`); err != nil {
+		if _, err := runSSH(ctx, sshTarget, profile, removeStaleRemoteSocketScript()); err != nil {
 			return err
 		}
 		state = remoteDaemonState{}
@@ -628,7 +628,9 @@ func (b *Bootstrapper) startRemoteDaemon(ctx context.Context, sshTarget, profile
 }
 
 // stopRemoteDaemonScript returns the shell script that stops the remote daemon
-// for a given profile.
+// for a given profile. It deliberately leaves the PID file in place after
+// stopping the daemon — see the comment on the stale-cleanup branch in
+// ensureRemoteDaemonRunning for why unlinking it would be unsafe.
 func stopRemoteDaemonScript(profile string) string {
 	port := config.WSPortForProfile(profile)
 	return remoteSocketConfigScript() + fmt.Sprintf(`
@@ -651,7 +653,7 @@ for pid in $seen_pids; do
   kill -0 "$pid" 2>/dev/null || continue
   kill -9 "$pid" 2>/dev/null || true
 done
-rm -f "$socket_path" "$pid_path"
+rm -f "$socket_path"
 `, port)
 }
 
@@ -669,8 +671,22 @@ func (b *Bootstrapper) restartRemoteDaemon(ctx context.Context, sshTarget, profi
 		time.Sleep(500 * time.Millisecond)
 		_, _ = runSSH(ctx, sshTarget, profile, fmt.Sprintf("kill -9 %s 2>/dev/null || true", shellQuote(pid)))
 	}
-	if _, err := runSSH(ctx, sshTarget, profile, remoteSocketConfigScript()+`rm -f "$socket_path" "$pid_path"`); err != nil {
+	if _, err := runSSH(ctx, sshTarget, profile, removeStaleRemoteSocketScript()); err != nil {
 		return err
 	}
 	return b.startRemoteDaemon(ctx, sshTarget, profile)
+}
+
+// removeStaleRemoteSocketScript returns the shell script fragment used to
+// clear the way for a fresh remote daemon start. It deliberately unlinks
+// only the socket, never the PID path: the PID file's flock (not its
+// presence on disk) is the sole mutual-exclusion mechanism a remote daemon
+// and a concurrent `attn db restore` on that same host share. Unlinking the
+// PID path here — right before a subsequent daemon start reopens the
+// pathname with O_CREATE — would let a restore holding the old inode's
+// flock go uncontended against a new daemon's freshly created inode at the
+// same pathname. See internal/daemonctl/ensure.go's removeStaleSocketFiles
+// for the identical local-daemon invariant.
+func removeStaleRemoteSocketScript() string {
+	return remoteSocketConfigScript() + `rm -f "$socket_path"`
 }
