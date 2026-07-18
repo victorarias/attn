@@ -102,7 +102,20 @@ func TestMain(m *testing.M) {
 	// explicitly override these with t.Setenv.
 	_ = os.Setenv("ATTN_PTY_BACKEND", "embedded")
 	_ = os.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "1")
-	os.Exit(m.Run())
+
+	// Scope every test in this package to an explicit temp data dir so no
+	// daemon test can resolve config.DataDir() to the real ~/.attn — see
+	// docs/plans/2026-07-18-db-loss-mitigation.md. Individual tests that need
+	// their own isolation layer a t.Setenv("ATTN_DATA_DIR", ...) on top.
+	dataDir, err := os.MkdirTemp("", "attn-test-data-*")
+	if err != nil {
+		panic("daemon: TestMain: MkdirTemp: " + err.Error())
+	}
+	_ = os.Setenv("ATTN_DATA_DIR", dataDir)
+
+	code := m.Run()
+	os.RemoveAll(dataDir)
+	os.Exit(code)
 }
 
 // waitForSocket waits for a unix socket to be ready for connections.

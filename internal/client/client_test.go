@@ -534,15 +534,20 @@ func TestClient_SocketPath(t *testing.T) {
 	// Set binary name for test
 	config.SetBinaryName("attn")
 
-	// Test default socket path
-	t.Setenv("HOME", "/home/testuser")
+	// DefaultSocketPath() = config.SocketPath(), which composes off
+	// ATTN_DATA_DIR; assert that composition directly instead of redirecting
+	// HOME (config's own tests pin the HOME-derived default formula without
+	// touching the go-test data-dir backstop — see
+	// TestDefaultAttnDir_SplitsByProfile in internal/config).
+	dataDir := t.TempDir()
+	t.Setenv("ATTN_DATA_DIR", dataDir)
 	t.Setenv("ATTN_PROFILE", "")
 	t.Setenv("ATTN_SOCKET_PATH", "")
 	t.Setenv("ATTN_CONFIG_PATH", filepath.Join(t.TempDir(), "missing-config.json"))
 	config.ReloadForTesting()
 
 	path := DefaultSocketPath()
-	expected := "/home/testuser/.attn/attn.sock"
+	expected := filepath.Join(dataDir, "attn.sock")
 	if path != expected {
 		t.Errorf("DefaultSocketPath() = %q, want %q", path, expected)
 	}

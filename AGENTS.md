@@ -101,6 +101,20 @@ DEBUG=debug attn -s test
 - do not use `log.Printf()` for daemon logging because stderr is discarded in background mode
 - use prefixed `console.log/warn/error` in frontend code and inspect via Tauri DevTools
 
+### Test Data-Dir Scoping
+
+Tests must never resolve `config.DataDir()` (or anything derived from it —
+`DBPath`, `SocketPath`, `PluginDir`, `LogPath`, ...) to the real `~/.attn`: a
+2026-07-18 daemon test did exactly that and destroyed the production
+database. Scoping goes through `ATTN_DATA_DIR`, never by redirecting `HOME`.
+Every package whose tests reach `config.DataDir()` sets a per-run temp dir as
+the default via `TestMain` (`os.Setenv("ATTN_DATA_DIR", <temp dir>)` before
+`m.Run()`); individual tests layer `t.Setenv("ATTN_DATA_DIR", t.TempDir())`
+on top for extra isolation. `config.DataDir()` panics under `go test` if
+`ATTN_DATA_DIR` isn't set — a presence check, not a path comparison — so a
+package that forgets this fails loudly instead of writing to prod. See
+[docs/plans/2026-07-18-db-loss-mitigation.md](docs/plans/2026-07-18-db-loss-mitigation.md).
+
 ### Frontend Instrumentation (disk-based)
 
 For hard-to-reproduce UI bugs, prefer disk-based JSONL logs over `console.log` — agents can read files but not DevTools. Write to `$APPLOCALDATA/debug/<name>.jsonl` using Tauri's `writeTextFile`. See `app/src/utils/terminalDiagnosticsLog.ts` and `app/src/utils/terminalLinkHitTestLog.ts` for the pattern. Remove temporary instrumentation once the bug is resolved.

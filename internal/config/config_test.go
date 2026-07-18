@@ -9,15 +9,20 @@ import (
 )
 
 func TestDBPath_DefaultsToAttnDir(t *testing.T) {
-	// Clear any env vars
+	// DBPath() = filepath.Join(attnDir(), "attn.db") when unoverridden; assert
+	// that composition against the ATTN_DATA_DIR-scoped data dir rather than
+	// the real $HOME (attnDir()'s HOME-derivation formula itself is covered
+	// by TestDefaultAttnDir_SplitsByProfile without touching go test's
+	// data-dir backstop).
+	dataDir := t.TempDir()
+	t.Setenv("ATTN_DATA_DIR", dataDir)
 	os.Unsetenv("ATTN_DB_PATH")
 	os.Unsetenv("ATTN_CONFIG_PATH")
 	os.Unsetenv("ATTN_PROFILE")
 
 	path := DBPath()
 
-	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".attn", "attn.db")
+	expected := filepath.Join(dataDir, "attn.db")
 	if path != expected {
 		t.Errorf("DBPath() = %q, want %q", path, expected)
 	}
@@ -35,14 +40,15 @@ func TestDBPath_EnvVarOverridesDefault(t *testing.T) {
 }
 
 func TestSocketPath_DefaultsToAttnDir(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATTN_DATA_DIR", dataDir)
 	os.Unsetenv("ATTN_SOCKET_PATH")
 	os.Unsetenv("ATTN_CONFIG_PATH")
 	os.Unsetenv("ATTN_PROFILE")
 
 	path := SocketPath()
 
-	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".attn", "attn.sock")
+	expected := filepath.Join(dataDir, "attn.sock")
 	if path != expected {
 		t.Errorf("SocketPath() = %q, want %q", path, expected)
 	}
@@ -89,8 +95,7 @@ func TestValidateDaemonIsolation_AllowsForeignSocketRootWithIsolatedDB(t *testin
 }
 
 func TestValidateDaemonIsolation_RejectsRelativeDBPathInProfileDir(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
+	t.Setenv("ATTN_DATA_DIR", t.TempDir())
 	t.Setenv("ATTN_PROFILE", "")
 	t.Setenv("ATTN_SOCKET_PATH", filepath.Join(t.TempDir(), "attn.sock"))
 	t.Setenv("ATTN_DB_PATH", "attn.db")
@@ -125,11 +130,12 @@ func TestValidateDaemonIsolation_AllowsSocketOverrideInsideProfileDataDir(t *tes
 }
 
 func TestPluginDir_DefaultsToAttnDir(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATTN_DATA_DIR", dataDir)
 	os.Unsetenv("ATTN_PLUGIN_DIR")
 	os.Unsetenv("ATTN_PROFILE")
 
-	home, _ := os.UserHomeDir()
-	want := filepath.Join(home, ".attn", "plugins")
+	want := filepath.Join(dataDir, "plugins")
 	if got := PluginDir(); got != want {
 		t.Errorf("PluginDir() = %q, want %q", got, want)
 	}
@@ -264,8 +270,28 @@ func TestValidateProfile_RejectsBadNames(t *testing.T) {
 	}
 }
 
-func TestAttnDir_SplitsByProfile(t *testing.T) {
+// TestDefaultAttnDir_SplitsByProfile pins the HOME-derivation formula
+// attnDir() falls back to when ATTN_DATA_DIR is unset. It calls the pure
+// defaultAttnDir helper directly (no env var, no I/O) instead of exercising
+// attnDir()/DataDir(), which the go-test backstop refuses to resolve without
+// an explicit ATTN_DATA_DIR override.
+func TestDefaultAttnDir_SplitsByProfile(t *testing.T) {
 	home, _ := os.UserHomeDir()
+
+	if got, want := defaultAttnDir(""), filepath.Join(home, ".attn"); got != want {
+		t.Errorf("defaultAttnDir(\"\") = %q, want %q", got, want)
+	}
+	if got, want := defaultAttnDir("dev"), filepath.Join(home, ".attn-dev"); got != want {
+		t.Errorf("defaultAttnDir(\"dev\") = %q, want %q", got, want)
+	}
+}
+
+// TestAttnDir_DerivedPathsAllInheritDataDir asserts every attnDir()-derived
+// path (socket, DB, log) composes off the same base, regardless of profile —
+// the property that lets ATTN_DATA_DIR override every derived path at once.
+func TestAttnDir_DerivedPathsAllInheritDataDir(t *testing.T) {
+	wantDir := t.TempDir()
+	t.Setenv("ATTN_DATA_DIR", wantDir)
 	os.Unsetenv("ATTN_SOCKET_PATH")
 	os.Unsetenv("ATTN_DB_PATH")
 	os.Unsetenv("ATTN_CONFIG_PATH")
@@ -273,7 +299,6 @@ func TestAttnDir_SplitsByProfile(t *testing.T) {
 	t.Setenv("ATTN_PROFILE", "dev")
 	reloadConfig()
 
-	wantDir := filepath.Join(home, ".attn-dev")
 	if got := DataDir(); got != wantDir {
 		t.Errorf("DataDir() = %q, want %q", got, wantDir)
 	}

@@ -37,7 +37,9 @@ func TestPrintProfileBanner_MentionsProfileSocketAndPort(t *testing.T) {
 }
 
 func TestCollapseHome(t *testing.T) {
-	t.Setenv("HOME", "/Users/victor")
+	// Pure formula test: pass home explicitly instead of redirecting the
+	// real HOME env var (see collapseHomeRelativeTo).
+	home := "/Users/victor"
 	cases := map[string]string{
 		"/Users/victor":                     "~",
 		"/Users/victor/.attn-dev":           "~/.attn-dev",
@@ -46,8 +48,8 @@ func TestCollapseHome(t *testing.T) {
 		"/tmp/other":                        "/tmp/other",
 	}
 	for in, want := range cases {
-		if got := CollapseHome(in); got != want {
-			t.Errorf("CollapseHome(%q) = %q, want %q", in, got, want)
+		if got := collapseHomeRelativeTo(in, home); got != want {
+			t.Errorf("collapseHomeRelativeTo(%q, %q) = %q, want %q", in, home, got, want)
 		}
 	}
 }

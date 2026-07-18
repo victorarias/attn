@@ -10,13 +10,20 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 )
 
 var binaryName string
 
 func init() {
 	binaryName = filepath.Base(os.Args[0])
-	loadConfig()
+	// Deliberately does NOT call loadConfig() here: package init() runs
+	// before any test's TestMain, so an eager load would hit attnDir()'s
+	// go-test backstop before a package ever gets a chance to set
+	// ATTN_DATA_DIR. Config loading is instead lazy — see
+	// ensureConfigLoaded — triggered by the first call to a function that
+	// actually needs it (DBPath, SocketPath), which by then runs inside a
+	// test body/TestMain, not package init.
 }
 
 // BinaryName returns the name of the running binary (e.g., "attn")
@@ -37,8 +44,26 @@ type configFile struct {
 
 var (
 	loadedConfig configFile
+	configLoaded bool
 	configMu     sync.RWMutex
 )
+
+// ensureConfigLoaded performs the first, lazy load of config.json, unless it
+// has already been loaded (by this or an explicit reloadConfig() call).
+// Callers that read loadedConfig (DBPath, SocketPath) must call this before
+// reading it. Lazy rather than init()-time so the first load happens inside
+// a test body/TestMain (after ATTN_DATA_DIR is set) rather than at package
+// init, which runs before any TestMain and would otherwise trip the
+// attnDir() test backstop unconditionally, in every package that merely
+// imports config.
+func ensureConfigLoaded() {
+	configMu.RLock()
+	loaded := configLoaded
+	configMu.RUnlock()
+	if !loaded {
+		loadConfig()
+	}
+}
 
 // loadConfig loads configuration from file
 func loadConfig() {
@@ -47,6 +72,7 @@ func loadConfig() {
 
 	// Reset to empty
 	loadedConfig = configFile{}
+	configLoaded = true
 
 	configPath := os.Getenv("ATTN_CONFIG_PATH")
 	if configPath == "" {
@@ -224,16 +250,59 @@ func NormalizeProfileName(name string) (string, error) {
 	return canonical, nil
 }
 
-// attnDir returns the base directory for attn files. Profile-aware:
-// default profile → ~/.attn, named profile → ~/.attn-<profile>.
+// attnDir returns the base directory for attn files. This is the single
+// chokepoint every derived path (socket, DB, plugins, logs, PID, workers,
+// ...) funnels through, so ATTN_DATA_DIR and the test backstop below only
+// need to live in one place.
+//
+// Precedence:
+//  1. ATTN_DATA_DIR env var, if set and non-empty — highest precedence,
+//     above ATTN_PROFILE derivation. Returned verbatim (filepath.Clean'd).
+//  2. Profile-aware default: ~/.attn, or ~/.attn-<profile> for a named
+//     profile.
 func attnDir() string {
+	if override := strings.TrimSpace(os.Getenv("ATTN_DATA_DIR")); override != "" {
+		return filepath.Clean(override)
+	}
+	requireExplicitDataDirUnderTest()
+	return defaultAttnDir(Profile())
+}
+
+// requireExplicitDataDirUnderTest panics if called from a test binary
+// (testing.Testing()) without ATTN_DATA_DIR set. This is the backstop for
+// the 2026-07-18 incident where a daemon test resolved config.DataDir()
+// straight to the real ~/.attn and destroyed the production database.
+//
+// It is a presence check only — no path comparison, no HOME inspection —
+// so it can't be fooled by symlinks or unusual HOMEs, and it catches every
+// package (including ones that don't exist yet) that forgets to scope its
+// data dir.
+//
+// If you hit this panic: set ATTN_DATA_DIR to a temp dir, either in a
+// package TestMain (os.Setenv, so it applies to the whole package) or in an
+// individual test via t.Setenv for extra per-test isolation. Never redirect
+// HOME to work around this — see docs/plans/2026-07-18-db-loss-mitigation.md.
+func requireExplicitDataDirUnderTest() {
+	if testing.Testing() && strings.TrimSpace(os.Getenv("ATTN_DATA_DIR")) == "" {
+		panic("config: ATTN_DATA_DIR is not set under go test — tests must never resolve the real data dir. " +
+			"Set ATTN_DATA_DIR to a temp dir (os.Setenv in a package TestMain, or t.Setenv per-test). " +
+			"Never redirect HOME to work around this: see docs/plans/2026-07-18-db-loss-mitigation.md")
+	}
+}
+
+// defaultAttnDir computes the profile-aware default data dir from the real
+// $HOME, ignoring ATTN_DATA_DIR and the test backstop entirely. It is a pure
+// function of (HOME, profile) with no I/O, so it's safe to call directly
+// from tests that want to assert the default-derivation formula without
+// tripping requireExplicitDataDirUnderTest.
+func defaultAttnDir(profile string) string {
 	home, err := os.UserHomeDir()
 	base := "/tmp/.attn"
 	if err == nil {
 		base = filepath.Join(home, ".attn")
 	}
-	if p := Profile(); p != "" {
-		return base + "-" + p
+	if profile != "" {
+		return base + "-" + profile
 	}
 	return base
 }
@@ -256,6 +325,12 @@ func PluginDir() string {
 // profile name (without reading ATTN_PROFILE). Pass "" for the default
 // profile. Callers use this to probe whether the *other* profile's
 // daemon is running, for friendlier error messages.
+//
+// This function deliberately bypasses the attnDir() chokepoint and therefore
+// does not honor ATTN_DATA_DIR overrides or the go-test backstop. The
+// *ForProfile helpers must probe other profiles' directories for cross-profile
+// error messages and must not honor the current process's ATTN_DATA_DIR override.
+// Tests must never write through this path.
 func DataDirForProfile(profile string) string {
 	home, err := os.UserHomeDir()
 	base := "/tmp/.attn"
@@ -276,6 +351,10 @@ func DataDirForProfile(profile string) string {
 // name, independent of the current process's ATTN_PROFILE. Used for
 // cross-profile probing in error messages; does not consult env overrides
 // or the config file.
+//
+// This function deliberately bypasses the attnDir() chokepoint and therefore
+// does not honor ATTN_DATA_DIR overrides or the go-test backstop. It must not
+// honor the current process's override. Tests must never write through this path.
 func SocketPathForProfile(profile string) string {
 	return filepath.Join(DataDirForProfile(profile), "attn.sock")
 }
@@ -289,6 +368,7 @@ func DBPath() string {
 	}
 
 	// 2. Config file
+	ensureConfigLoaded()
 	configMu.RLock()
 	configPath := loadedConfig.DBPath
 	configMu.RUnlock()
@@ -309,6 +389,7 @@ func SocketPath() string {
 	}
 
 	// 2. Config file
+	ensureConfigLoaded()
 	configMu.RLock()
 	configPath := loadedConfig.SocketPath
 	configMu.RUnlock()
@@ -371,7 +452,11 @@ func comparableDaemonIsolationPath(path string) (string, error) {
 	return filepath.Clean(absolute), nil
 }
 
-// StatePath returns the legacy state file path (for migration/cleanup)
+// StatePath returns the legacy state file path (for migration/cleanup).
+//
+// This function deliberately bypasses the attnDir() chokepoint and therefore
+// does not honor ATTN_DATA_DIR overrides or the go-test backstop. Tests must
+// never write through this path.
 func StatePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
