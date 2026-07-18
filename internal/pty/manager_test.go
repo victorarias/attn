@@ -464,6 +464,65 @@ command -v attn > "$RESULT_PATH"
 	}
 }
 
+func TestPrepareShellPaneLaunch_ReassertsPathAfterRealBashStartup(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("attn supports macOS; this exercises the system bash startup contract")
+	}
+	const bashPath = "/bin/bash"
+	if _, err := os.Stat(bashPath); err != nil {
+		t.Skipf("system bash is unavailable: %v", err)
+	}
+	root := t.TempDir()
+	activeDir := filepath.Join(root, "active")
+	staleDir := filepath.Join(root, "stale")
+	userHome := filepath.Join(root, "home")
+	resultPath := filepath.Join(root, "resolved-attn")
+	for _, dir := range []string{activeDir, staleDir, userHome} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %s: %v", dir, err)
+		}
+	}
+	activeAttn := filepath.Join(activeDir, "attn")
+	if err := os.WriteFile(activeAttn, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write active attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, "attn"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write stale attn: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userHome, ".bashrc"), []byte("PATH=\"$STALE_ATTN_DIR:$PATH\"\nexport PATH\n"), 0o600); err != nil {
+		t.Fatalf("write user bashrc: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userHome, ".bash_profile"), []byte(". \"$HOME/.bashrc\"\n"), 0o600); err != nil {
+		t.Fatalf("write user bash profile: %v", err)
+	}
+
+	env := []string{
+		"PATH=" + activeDir + string(os.PathListSeparator) + staleDir + string(os.PathListSeparator) + "/usr/bin:/bin",
+		"HOME=" + userHome,
+		"STALE_ATTN_DIR=" + staleDir,
+		"RESULT_PATH=" + resultPath,
+	}
+	launch, err := prepareShellPaneLaunch(bashPath, env)
+	if err != nil {
+		t.Fatalf("prepare bash pane launch: %v", err)
+	}
+	defer launch.cleanup()
+	args := append([]string(nil), launch.command.Args[1:]...)
+	args = append(args, "-i", "-c", "shopt -q login_shell || exit 8; command -v attn > \"$RESULT_PATH\"")
+	launch.command = exec.Command(launch.command.Path, args...)
+	launch.command.Env = launch.env
+	if output, err := launch.command.CombinedOutput(); err != nil {
+		t.Fatalf("run real bash startup: %v\n%s", err, output)
+	}
+	resolved, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("read resolved attn: %v", err)
+	}
+	if got := strings.TrimSpace(string(resolved)); got != activeAttn {
+		t.Fatalf("bare attn resolved to %q after real bash startup, want active wrapper %q", got, activeAttn)
+	}
+}
+
 func TestPrepareShellPaneLaunch_ReassertsPathAfterRealFishStartup(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("attn supports macOS; this exercises the installed fish startup contract")
