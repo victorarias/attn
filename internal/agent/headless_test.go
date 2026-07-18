@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/victorarias/attn/internal/toolhome"
 )
 
 func writeHeadlessArgsRecorder(t *testing.T) (string, string) {
@@ -81,10 +83,8 @@ func TestCodexRunHeadlessTaskScopesToolsAndConfiguration(t *testing.T) {
 
 func TestHeadlessEnvironment_CodexSetsDefaultHomeWhenUnset(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
+	homeDir := t.TempDir()
+	t.Setenv(toolhome.EnvVar, homeDir)
 	if !environmentContains(headlessEnvironment("codex"), "CODEX_HOME") {
 		t.Fatal("Codex headless environment did not set CODEX_HOME")
 	}

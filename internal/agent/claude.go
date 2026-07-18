@@ -16,6 +16,7 @@ import (
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/toolhome"
 	"github.com/victorarias/attn/internal/transcript"
 )
 
@@ -696,7 +697,7 @@ func copyTranscriptForResume(resumeSessionID, cwd string) error {
 }
 
 func claudeProjectDir(cwd string) string {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := toolhome.Dir()
 	if err != nil {
 		return ""
 	}

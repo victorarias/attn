@@ -14,6 +14,7 @@ import (
 
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/toolhome"
 	"github.com/victorarias/attn/internal/transcript"
 )
 
@@ -95,13 +96,7 @@ func writeCopilotSessionState(t *testing.T, homeDir, sessionID, cwd string, star
 
 func TestFindCopilotTranscript_PrefersClosestStartTime(t *testing.T) {
 	homeDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
+	t.Setenv(toolhome.EnvVar, homeDir)
 
 	cwd := "/repo/project"
 	startedAt := time.Date(2026, 2, 8, 15, 30, 0, 0, time.UTC)
@@ -135,13 +130,7 @@ func TestFindCopilotTranscript_PrefersClosestStartTime(t *testing.T) {
 
 func TestFindCopilotTranscript_FallsBackToNewestModTime(t *testing.T) {
 	homeDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
+	t.Setenv(toolhome.EnvVar, homeDir)
 
 	cwd := "/repo/project"
 	startedAt := time.Date(2026, 2, 8, 15, 30, 0, 0, time.UTC)
@@ -175,13 +164,7 @@ func TestFindCopilotTranscript_FallsBackToNewestModTime(t *testing.T) {
 
 func TestResolveCopilotTranscript_PrefersResumeSessionPath(t *testing.T) {
 	homeDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
+	t.Setenv(toolhome.EnvVar, homeDir)
 
 	startedAt := time.Date(2026, 2, 8, 15, 30, 0, 0, time.UTC)
 	resumeID := "resume-session-id"
@@ -207,13 +190,7 @@ func TestResolveCopilotTranscript_PrefersResumeSessionPath(t *testing.T) {
 
 func TestResolveCopilotTranscript_FallsBackWhenResumePathMissing(t *testing.T) {
 	homeDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
+	t.Setenv(toolhome.EnvVar, homeDir)
 
 	cwd := "/repo/project"
 	startedAt := time.Date(2026, 2, 8, 15, 30, 0, 0, time.UTC)

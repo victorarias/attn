@@ -10,6 +10,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/toolhome"
 )
 
 // resumeSpawnForSession returns the spawn opts recorded for sessionID at or after
@@ -156,10 +157,10 @@ func TestTicketResumeFallsBackToPickerWhenTranscriptGone(t *testing.T) {
 
 	d.unregisterSession(leafID, syscall.SIGTERM)
 	d.persistResumeSessionID(leafID, leafID)
-	// Point HOME at an empty home so claude's transcript lookup finds nothing for
-	// the mirrored id: it is not resumable, so the spawn must fall back to the
-	// cwd-scoped picker instead of `claude -r <dead-id>`.
-	t.Setenv("HOME", t.TempDir())
+	// Point ATTN_TOOL_HOME at an empty home so claude's transcript lookup finds
+	// nothing for the mirrored id: it is not resumable, so the spawn must fall
+	// back to the cwd-scoped picker instead of `claude -r <dead-id>`.
+	t.Setenv(toolhome.EnvVar, t.TempDir())
 	since := spawnCount(backend)
 
 	outcome, err := d.resumeTicket(ticket.ID)
