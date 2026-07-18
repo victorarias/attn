@@ -771,6 +771,9 @@ type FsChangedMessage struct {
 
 	// Paths corresponds to the JSON schema field "paths".
 	Paths []string `json:"paths"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root string `json:"root"`
 }
 
 type FsDeleteMessage struct {
@@ -782,6 +785,9 @@ type FsDeleteMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
 }
 
 type FsDeleteResult struct {
@@ -832,6 +838,9 @@ type FsExistsMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
 }
 
 type FsExistsResult struct {
@@ -868,6 +877,9 @@ type FsListMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
 }
 
 type FsListResultMessage struct {
@@ -896,6 +908,9 @@ type FsReadAssetMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
 }
 
 type FsReadAssetResult struct {
@@ -935,6 +950,9 @@ type FsReadMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
 }
 
 type FsReadResult struct {
@@ -977,6 +995,9 @@ type FsRenameMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
 }
 
 type FsRenameResult struct {
@@ -1019,6 +1040,9 @@ type FsWriteMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
 }
 
 type FsWriteResult struct {

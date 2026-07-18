@@ -2935,15 +2935,15 @@ describe('useDaemonSocket fs surface', () => {
     unmount();
   });
 
-  it('invokes onFsChanged with origin and paths', async () => {
+  it('invokes onFsChanged with origin, paths, and root', async () => {
     const onFsChanged = vi.fn();
     const { unmount } = renderFsHook({ onFsChanged });
     const ws = await waitForOpenSocket();
 
     act(() => {
-      ws.emit({ event: 'fs_changed', origin: 'ui', paths: ['notes/todo.txt'] });
+      ws.emit({ event: 'fs_changed', origin: 'ui', paths: ['notes/todo.txt'], root: '/Users/x/attn-notebook' });
     });
-    expect(onFsChanged).toHaveBeenCalledWith('ui', ['notes/todo.txt']);
+    expect(onFsChanged).toHaveBeenCalledWith('ui', ['notes/todo.txt'], '/Users/x/attn-notebook');
     unmount();
   });
 });

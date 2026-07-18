@@ -156,7 +156,9 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 	d.notifyTicketObservers(ticketID)
 	d.broadcastTicketsUpdated()
 	d.broadcastNotebookChanged(originAgent, changedPaths...)
-	d.broadcastFsChanged(originAgent, changedPaths...)
+	if root, rootErr := d.notebookRoot(); rootErr == nil {
+		d.broadcastFsChanged(root, originAgent, changedPaths...)
+	}
 
 	return &protocol.TicketAttachResult{
 		TicketID:     ticketID,

@@ -476,23 +476,85 @@ func validateNotebookRoot(value string) error {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
-	path := value
+	_, err := normalizeExternalRoot(value)
+	if err != nil {
+		return fmt.Errorf("notebook.root %w", err)
+	}
+	return nil
+}
+
+// normalizeExternalRoot expands a leading "~/" against the user's home
+// directory, requires the result to be an absolute path, cleans it, and
+// rejects a path that is (or is inside) the attn data dir — an external root
+// must live OUTSIDE ~/.attn[-profile] so it stays a plain, externally-syncable
+// directory a dotfile-skipping scanner won't miss. Empty input is the
+// caller's concern: it returns ("", nil) unchanged.
+//
+// Errors are unprefixed (e.g. "must be an absolute path") so each caller can
+// prefix them with its own vocabulary (notebook.root vs fs root).
+func normalizeExternalRoot(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", nil
+	}
+	path := trimmed
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return fmt.Errorf("cannot determine home directory: %w", err)
+			return "", fmt.Errorf("cannot determine home directory: %w", err)
 		}
 		path = filepath.Join(home, path[2:])
 	}
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("notebook.root must be an absolute path")
+		return "", fmt.Errorf("must be an absolute path")
 	}
 	dataDir := config.DataDir()
 	clean := filepath.Clean(path)
 	if clean == dataDir || strings.HasPrefix(clean, dataDir+string(filepath.Separator)) {
-		return fmt.Errorf("notebook.root must be outside the attn data dir (%s)", dataDir)
+		return "", fmt.Errorf("must be outside the attn data dir (%s)", dataDir)
 	}
-	return nil
+	// fsdoc.Store deliberately permits symlinked roots, so a purely lexical
+	// comparison above can be defeated by a symlink into the data dir (e.g. a
+	// root under /tmp whose target is ~/.attn). Re-check on canonicalized
+	// forms; the canonical value is used ONLY for this comparison — we still
+	// return the original cleaned (non-canonical) path below so legitimate
+	// symlinked roots keep their own spelling.
+	canonRoot := canonicalizeForComparison(clean)
+	canonData := canonicalizeForComparison(dataDir)
+	if canonRoot == canonData || strings.HasPrefix(canonRoot, canonData+string(filepath.Separator)) {
+		return "", fmt.Errorf("must be outside the attn data dir (%s)", dataDir)
+	}
+	return clean, nil
+}
+
+// canonicalizeForComparison resolves path to its canonical form for
+// containment checks: symlinks in the deepest existing ancestor are resolved
+// and any not-yet-existing remainder is re-joined lexically. Used ONLY for
+// comparison against the (equally canonicalized) attn data dir — the returned
+// value is never handed to callers as the root, so legitimate symlinked roots
+// keep their original spelling.
+func canonicalizeForComparison(path string) string {
+	clean := filepath.Clean(path)
+	ancestor := clean
+	var remainder []string
+	for {
+		if _, err := os.Stat(ancestor); err == nil {
+			break
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			// Reached the root without finding an existing ancestor; fall back
+			// to the lexically cleaned input.
+			return clean
+		}
+		remainder = append([]string{filepath.Base(ancestor)}, remainder...)
+		ancestor = parent
+	}
+	resolved, err := filepath.EvalSymlinks(ancestor)
+	if err != nil {
+		return clean
+	}
+	return filepath.Join(append([]string{resolved}, remainder...)...)
 }
 
 // validateNotebookCronFrequency accepts an empty value (use the default) or a

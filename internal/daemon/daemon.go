@@ -196,11 +196,12 @@ type Daemon struct {
 	notebookWatcherMu   sync.Mutex
 	notebookWatcher     *notebook.Watcher
 	notebookWatchedRoot string
-	// fsStore is the generic filesystem view over the SAME root as the notebook
-	// (notebook.root). It is the raw layer beneath the curated notebook surface;
-	// both share the one root watcher started by ensureNotebookWatcher.
+	// fsStores is the generic filesystem view, keyed by resolved absolute root.
+	// The notebook-root entry is the raw layer beneath the curated notebook
+	// surface and shares the one root watcher started by ensureNotebookWatcher;
+	// other roots (arbitrary editor roots) get their own Store but no watcher yet.
 	fsMu                sync.Mutex
-	fsStore             *fsdoc.Store
+	fsStores            map[string]*fsdoc.Store
 	pendingInitialWS    map[*wsClient]struct{}
 	startedOnce         sync.Once
 	startedCh           chan struct{}

@@ -90,6 +90,18 @@ func (c *wsClient) setBrowserHostAuthenticated(authenticated bool) {
 	c.browserHostAuthenticated = authenticated
 }
 
+// isTrustedAppClient reports whether this connection is the authenticated attn
+// app itself: trusted Tauri origin, per-profile browser-host secret verified via
+// client_hello, and the tauri-app client kind. It is IsBrowserHost minus the
+// browser-host capability — identity, not feature opt-in. Arbitrary fs roots
+// are gated on it: without this, any accepted local WebSocket client could use
+// fs_* {root} to read or overwrite files anywhere in the user's home.
+func (c *wsClient) isTrustedAppClient() bool {
+	c.identityMu.RLock()
+	defer c.identityMu.RUnlock()
+	return c.trustedTauriOrigin && c.browserHostAuthenticated && c.clientKind == "tauri-app"
+}
+
 func websocketReadLimit(client *wsClient) int64 {
 	if client.IsBrowserHost() {
 		return maxBrowserHostWebSocketReadBytes
@@ -926,25 +938,25 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		go d.handleTicketResume(client, msg.(*protocol.TicketResumeMessage))
 	case protocol.CmdFsList:
 		fsList := msg.(*protocol.FsListMessage)
-		go d.sendFsListWSResult(client, protocol.Deref(fsList.RequestID), protocol.Deref(fsList.Path))
+		go d.sendFsListWSResult(client, protocol.Deref(fsList.RequestID), protocol.Deref(fsList.Path), protocol.Deref(fsList.Root))
 	case protocol.CmdFsRead:
 		fsRead := msg.(*protocol.FsReadMessage)
-		go d.sendFsReadWSResult(client, protocol.Deref(fsRead.RequestID), fsRead.Path)
+		go d.sendFsReadWSResult(client, protocol.Deref(fsRead.RequestID), fsRead.Path, protocol.Deref(fsRead.Root))
 	case protocol.CmdFsReadAsset:
 		fsReadAsset := msg.(*protocol.FsReadAssetMessage)
-		go d.sendFsReadAssetWSResult(client, protocol.Deref(fsReadAsset.RequestID), fsReadAsset.Path)
+		go d.sendFsReadAssetWSResult(client, protocol.Deref(fsReadAsset.RequestID), fsReadAsset.Path, protocol.Deref(fsReadAsset.Root))
 	case protocol.CmdFsWrite:
 		fsWrite := msg.(*protocol.FsWriteMessage)
-		go d.sendFsWriteWSResult(client, protocol.Deref(fsWrite.RequestID), fsWrite.Path, fsWrite.Content, protocol.Deref(fsWrite.BaseHash))
+		go d.sendFsWriteWSResult(client, protocol.Deref(fsWrite.RequestID), fsWrite.Path, fsWrite.Content, protocol.Deref(fsWrite.BaseHash), protocol.Deref(fsWrite.Root))
 	case protocol.CmdFsRename:
 		fsRename := msg.(*protocol.FsRenameMessage)
-		go d.sendFsRenameWSResult(client, protocol.Deref(fsRename.RequestID), fsRename.Path, fsRename.NewPath)
+		go d.sendFsRenameWSResult(client, protocol.Deref(fsRename.RequestID), fsRename.Path, fsRename.NewPath, protocol.Deref(fsRename.Root))
 	case protocol.CmdFsDelete:
 		fsDelete := msg.(*protocol.FsDeleteMessage)
-		go d.sendFsDeleteWSResult(client, protocol.Deref(fsDelete.RequestID), fsDelete.Path)
+		go d.sendFsDeleteWSResult(client, protocol.Deref(fsDelete.RequestID), fsDelete.Path, protocol.Deref(fsDelete.Root))
 	case protocol.CmdFsExists:
 		fsExists := msg.(*protocol.FsExistsMessage)
-		go d.sendFsExistsWSResult(client, protocol.Deref(fsExists.RequestID), fsExists.Path)
+		go d.sendFsExistsWSResult(client, protocol.Deref(fsExists.RequestID), fsExists.Path, protocol.Deref(fsExists.Root))
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:
