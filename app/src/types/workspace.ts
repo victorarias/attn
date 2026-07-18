@@ -479,6 +479,58 @@ export function serializeNotebookTileParams(params: NotebookTileParams): string 
   return params.path || '';
 }
 
+// resolveEditorTileRoot picks the root a freshly-docked ⌘⌥N editor tile should
+// open at: the active workspace's directory, so the tile browses the tree the
+// user is actually working in rather than forcing a jump to notebook storage.
+// Returns undefined (rootless — notebook-rooted) when the directory is unset
+// or already equals the notebook root: those tiles keep the always-on
+// notebook watcher and notebook-only affordances (backlinks, etc.) instead of
+// being pinned to a redundant explicit root.
+export function resolveEditorTileRoot(
+  workspaceDirectory: string | undefined,
+  effectiveNotebookRoot: string,
+): string | undefined {
+  const trimmed = workspaceDirectory?.trim();
+  if (!trimmed || trimmed === effectiveNotebookRoot) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+// localWorkspaceDirectory gates a workspace's directory to the local
+// filesystem, defaulting to locked (undefined) until locality is positively
+// proven — not the other way around. None of the sendFs* calls (sendFsIndex,
+// sendFsList, etc.) are endpoint-aware; they always execute against the
+// locally-connected daemon, so handing a remote directory to them can read or
+// write the wrong machine's files.
+//
+// A workspace's own record carries no endpoint marker: listWorkspaces appends
+// hubManager.RemoteWorkspaces() to the local workspace list independently of
+// sessions, and protocol.Workspace has no endpoint_id field at all. So the
+// only signal available here is the workspace's live sessions, and absence of
+// a session is absence of evidence, not evidence of locality — a retained
+// sessionless workspace (attn keeps pinned/tile-only workspaces after their
+// last session ends) must stay locked rather than default to passing its
+// directory through.
+//
+// Returns directory only when a session on this workspace positively proves
+// locality (an empty/absent endpoint_id) AND no session on this workspace
+// proves it remote. The second condition also covers the duplicate-id corner:
+// raw workspace ids can repeat across endpoints (disambiguated only by their
+// sessions), so if a remote twin's session shares this workspace_id, we can't
+// tell whose directory the caller's bare-id lookup actually grabbed — stay
+// locked rather than guess.
+export function localWorkspaceDirectory(
+  directory: string | undefined,
+  sessions: ReadonlyArray<{ workspace_id?: string | null; endpoint_id?: string | null }>,
+  workspaceId: string,
+): string | undefined {
+  const workspaceSessions = sessions.filter((session) => session.workspace_id === workspaceId);
+  const provenLocal = workspaceSessions.some((session) => !session.endpoint_id);
+  const provenRemote = workspaceSessions.some((session) => !!session.endpoint_id);
+  return provenLocal && !provenRemote ? directory : undefined;
+}
+
 function agentTerminalsFromPanes(panes: PaneElement[]): AgentTerminal[] {
   return panes
     .filter((pane) => pane.kind === 'agent' && typeof pane.runtime_id === 'string' && typeof pane.session_id === 'string')

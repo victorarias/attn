@@ -337,7 +337,7 @@ func TestParseWorkspaceLayoutMoveLeafToWorkspace(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceLayoutDockTileIgnoresInjectedParams(t *testing.T) {
+func TestParseWorkspaceLayoutDockTileParamsRoundTrip(t *testing.T) {
 	input := `{"cmd":"workspace_layout_dock_tile","workspace_id":"ws1","anchor_pane_id":"pane-a","edge":"right","tile_id":"tile-md","tile_kind":"markdown","tile_params":"/abs/file.md"}`
 	_, data, err := ParseMessage([]byte(input))
 	if err != nil {
@@ -346,6 +346,9 @@ func TestParseWorkspaceLayoutDockTileIgnoresInjectedParams(t *testing.T) {
 	msg := data.(*WorkspaceLayoutDockTileMessage)
 	if msg.WorkspaceID != "ws1" || msg.TileID != "tile-md" || msg.TileKind != "markdown" {
 		t.Errorf("fields = %q/%q/%q, want ws1/tile-md/markdown", msg.WorkspaceID, msg.TileID, msg.TileKind)
+	}
+	if Deref(msg.TileParams) != "/abs/file.md" {
+		t.Errorf("tile_params = %q, want /abs/file.md", Deref(msg.TileParams))
 	}
 }
 

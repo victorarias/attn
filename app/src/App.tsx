@@ -47,7 +47,7 @@ import {
   readWarmWorkspaceLimit,
   writeWarmWorkspaceLimit,
 } from './utils/terminalVirtualization';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo, type FsIndexResult, type NotebookEntry } from './hooks/useDaemonSocket';
 import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
@@ -61,7 +61,7 @@ import {
 import { persistExcludedGridSessions, readExcludedGridSessions } from './components/grid/gridMembership';
 import type { HiddenGridSession } from './components/grid/GridHiddenSessions';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
-import { hasPane, workspaceSnapshotFromDaemonWorkspace, type TerminalSplitDirection } from './types/workspace';
+import { hasPane, workspaceSnapshotFromDaemonWorkspace, resolveEditorTileRoot, localWorkspaceDirectory, serializeNotebookTileParams, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -153,6 +153,19 @@ export function bumpFsChangeSignal(
 ): Record<string, number> {
   const key = fsChangeSignalKey(root, effectiveNotebookRoot);
   return { ...signals, [key]: (signals[key] || 0) + 1 };
+}
+
+// Adapts fs_index (a flat, root-scoped file listing) to the shape the ⌘P
+// finder and NotebookBrowser already expect from notebook_list. size is
+// always 0: fs_index deliberately omits stat() per entry to stay fast over
+// large repos, and nothing downstream of the finder reads it. A truncated
+// result still renders — an incomplete list beats none — but is flagged to
+// the console so a silently-cut-off finder doesn't look like a bug report.
+export function fsIndexToNotebookEntries(result: FsIndexResult): NotebookEntry[] {
+  if (result.truncated) {
+    console.warn('[App] fs_index truncated for', result.root, '— finder list is incomplete');
+  }
+  return result.files.map((path) => ({ path, size: 0 }));
 }
 
 const TERMINAL_AGENT: SessionAgent = 'shell';
@@ -594,13 +607,13 @@ function App() {
     sendFsReadAsset,
     sendFsWatch,
     sendFsUnwatch,
+    sendFsIndex,
     sendTaskList,
     sendTaskRetry,
     sendNotificationList,
     sendNotificationMarkRead,
     sendNotebookBacklinks,
     sendNotebookToChief,
-    sendNotebookList,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -801,6 +814,7 @@ function App() {
         sendFsReadAsset={sendFsReadAsset}
         sendFsWatch={sendFsWatch}
         sendFsUnwatch={sendFsUnwatch}
+        sendFsIndex={sendFsIndex}
         sendTaskList={sendTaskList}
         sendTaskRetry={sendTaskRetry}
         sendNotificationList={sendNotificationList}
@@ -809,7 +823,6 @@ function App() {
         notificationsChangeSignal={notificationsChangeSignal}
         sendNotebookBacklinks={sendNotebookBacklinks}
         sendNotebookToChief={sendNotebookToChief}
-        sendNotebookList={sendNotebookList}
         fsChangeSignals={fsChangeSignals}
         notebookTaskChangeSignal={notebookTaskChangeSignal}
         sendGetRecentLocations={sendGetRecentLocations}
@@ -919,6 +932,7 @@ interface AppContentProps {
   sendFsReadAsset: ReturnType<typeof useDaemonSocket>['sendFsReadAsset'];
   sendFsWatch: ReturnType<typeof useDaemonSocket>['sendFsWatch'];
   sendFsUnwatch: ReturnType<typeof useDaemonSocket>['sendFsUnwatch'];
+  sendFsIndex: ReturnType<typeof useDaemonSocket>['sendFsIndex'];
   sendTaskList: ReturnType<typeof useDaemonSocket>['sendTaskList'];
   sendTaskRetry: ReturnType<typeof useDaemonSocket>['sendTaskRetry'];
   sendNotificationList: ReturnType<typeof useDaemonSocket>['sendNotificationList'];
@@ -927,7 +941,6 @@ interface AppContentProps {
   notificationsChangeSignal: number;
   sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
   sendNotebookToChief: ReturnType<typeof useDaemonSocket>['sendNotebookToChief'];
-  sendNotebookList: ReturnType<typeof useDaemonSocket>['sendNotebookList'];
   fsChangeSignals: Record<string, number>;
   notebookTaskChangeSignal: number;
   sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
@@ -1031,6 +1044,7 @@ function AppContent({
   sendFsReadAsset,
   sendFsWatch,
   sendFsUnwatch,
+  sendFsIndex,
   sendTaskList,
   sendTaskRetry,
   sendNotificationList,
@@ -1039,7 +1053,6 @@ function AppContent({
   notificationsChangeSignal,
   sendNotebookBacklinks,
   sendNotebookToChief,
-  sendNotebookList,
   fsChangeSignals,
   notebookTaskChangeSignal,
   sendGetRecentLocations,
@@ -1953,18 +1966,44 @@ sendFetchPRDetails,
   // and the ActionMenu items — both above that derivation — can use it.
   const activeWorkspaceIdRef = useRef<string | null>(null);
 
+  // Mirrors daemonWorkspaces for handleOpenNotebookTile below, same reasoning as
+  // activeWorkspaceIdRef: daemonWorkspaces updates on every workspace/session
+  // change, and depending on it directly would rebind the dock-tile callback (and
+  // any shortcut registered against it) far more often than the workspace-dir
+  // default actually needs.
+  const daemonWorkspacesRef = useRef<DaemonWorkspace[]>([]);
+
+  // Same reasoning as daemonWorkspacesRef: lets handleOpenNotebookTile read the
+  // current session list (to gate a workspace's directory to local-only, see
+  // localWorkspaceDirectory) without rebinding the callback on every session
+  // change.
+  const daemonSessionsRef = useRef<DaemonSession[]>([]);
+
   // Dock a fresh Notebook tile into the active workspace. A unique tile id every
   // time: the daemon treats a duplicate id as a move, so a shared id would just
-  // relocate the first tile instead of opening a second.
+  // relocate the first tile instead of opening a second. Defaults the tile's root
+  // to the active workspace's directory (⌘⌥N per the arbitrary-roots plan) so it
+  // opens on the tree the user is working in; falls back to the notebook root
+  // (rootless tileParams) when the workspace has no directory, the directory
+  // belongs to a remote endpoint (see localWorkspaceDirectory), or the directory
+  // already matches the notebook root — see resolveEditorTileRoot.
   const handleOpenNotebookTile = useCallback(() => {
     const workspaceId = activeWorkspaceIdRef.current;
     if (!workspaceId) return;
     const tileId = `notebook-tile-${crypto.randomUUID()}`;
-    void sendWorkspaceDockTile(workspaceId, tileId, 'notebook', { edge: 'right', ratio: 0.4 })
+    const workspace = daemonWorkspacesRef.current.find((w) => w.id === workspaceId);
+    const localDirectory = localWorkspaceDirectory(workspace?.directory, daemonSessionsRef.current, workspaceId);
+    const effectiveNotebookRoot = settings['notebook.root.effective'] || '';
+    const root = resolveEditorTileRoot(localDirectory, effectiveNotebookRoot);
+    void sendWorkspaceDockTile(workspaceId, tileId, 'notebook', {
+      edge: 'right',
+      ratio: 0.4,
+      tileParams: root ? serializeNotebookTileParams({ root }) : undefined,
+    })
       .catch((error) => {
         console.warn('[App] Failed to dock notebook tile:', error);
       });
-  }, [sendWorkspaceDockTile]);
+  }, [sendWorkspaceDockTile, settings]);
 
   const actionMenuItems = useMemo<ActionMenuItem[]>(() => [
     {
@@ -2791,6 +2830,17 @@ sendFetchPRDetails,
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
+
+  // daemonWorkspacesRef mirrors daemonWorkspaces for handleOpenNotebookTile — see
+  // its declaration for why a ref instead of a direct dependency.
+  useEffect(() => {
+    daemonWorkspacesRef.current = daemonWorkspaces;
+  }, [daemonWorkspaces]);
+  // daemonSessionsRef mirrors daemonSessions for handleOpenNotebookTile — see
+  // its declaration for why a ref instead of a direct dependency.
+  useEffect(() => {
+    daemonSessionsRef.current = daemonSessions;
+  }, [daemonSessions]);
   useEffect(() => {
     if (view === 'session' && activeWorkspaceId) {
       sendWorkspaceSelected(activeWorkspaceId);
@@ -3391,18 +3441,22 @@ sendFetchPRDetails,
   // tile, bound to `root` (undefined = the notebook storage root, unchanged
   // behavior). Memoized so a tile's daemon instance is stable across renders
   // that don't touch its own root's change signal.
+  //
+  // listFiles is root-scoped (fs_index over `root`, or the notebook root when
+  // omitted) — the ⌘P finder browses whatever tree the tile is pinned to, per
+  // the arbitrary-roots plan. backlinksNotebook and sendToChief stay bound to
+  // the notebook storage root regardless of `root`: backlinks only exist
+  // between notebook notes, and "send to chief" appends to the notebook inbox,
+  // so both are meaningless (and left un-widened) off the notebook root.
   const makeNotebookSurfaceDaemon = useCallback((root?: string) => ({
     listDir: (path: string) => sendFsList(path, root),
     readFile: (path: string) => sendFsRead(path, root),
     writeFile: (path: string, content: string, baseHash?: string) => sendFsWrite(path, content, baseHash, root),
     existsFile: (path: string) => sendFsExists(path, root),
     readAsset: (path: string) => sendFsReadAsset(path, root),
-    // Notebook-storage-only commands (see NotebookSurfaceContext's boundary
-    // note): bound to the notebook root regardless of `root`.
     backlinksNotebook: sendNotebookBacklinks,
     sendToChief: sendNotebookToChief,
-    // Argless walk = empty prefix = the whole vault, for the in-tile finder index.
-    listFiles: sendNotebookList,
+    listFiles: () => sendFsIndex(root).then(fsIndexToNotebookEntries),
     changeSignal: fsChangeSignals[fsChangeSignalKey(root || '', effectiveNotebookRoot)] || 0,
   }), [
     sendFsList,
@@ -3412,7 +3466,7 @@ sendFetchPRDetails,
     sendFsReadAsset,
     sendNotebookBacklinks,
     sendNotebookToChief,
-    sendNotebookList,
+    sendFsIndex,
     fsChangeSignals,
     effectiveNotebookRoot,
   ]);
@@ -3428,6 +3482,13 @@ sendFetchPRDetails,
   // The fullscreen browser is always notebook-rooted — same signal a rootless
   // tile would resolve to via makeNotebookSurfaceDaemon(undefined).
   const notebookRootChangeSignal = fsChangeSignals[fsChangeSignalKey('', effectiveNotebookRoot)] || 0;
+
+  // The fullscreen browser's finder source: fs_index with root omitted, same
+  // notebook-rooted behavior as makeNotebookSurfaceDaemon's listFiles above.
+  const notebookBrowserListFiles = useCallback(
+    () => sendFsIndex().then(fsIndexToNotebookEntries),
+    [sendFsIndex],
+  );
 
   return (
     <DaemonProvider sendPRAction={sendPRAction} sendMutePR={sendMutePR} sendMuteRepo={sendMuteRepo} sendMuteAuthor={sendMuteAuthor} sendPRVisited={sendPRVisited}>
@@ -3585,6 +3646,7 @@ sendFetchPRDetails,
                   <SessionTerminalWorkspace
                     ref={setWorkspaceRef(workspace.id)}
                     workspaceId={workspace.id}
+                    workspaceDirectory={localWorkspaceDirectory(workspace.directory, daemonSessions, workspace.id)}
                     workspaceSessions={workspace.sessions.map((entry) => ({
                       id: entry.id,
                       label: entry.label,
@@ -3847,7 +3909,7 @@ sendFetchPRDetails,
         readAsset={sendFsReadAsset}
         backlinksNotebook={sendNotebookBacklinks}
         sendToChief={sendNotebookToChief}
-        listFiles={sendNotebookList}
+        listFiles={notebookBrowserListFiles}
         changeSignal={notebookRootChangeSignal}
         chiefActive={notebookChiefActive}
       />

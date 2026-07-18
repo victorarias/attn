@@ -4747,6 +4747,7 @@ export interface WorkspaceLayoutDockTileMessage {
     ratio?:         number;
     tile_id:        string;
     tile_kind:      string;
+    tile_params?:   string;
     workspace_id:   string;
     [property: string]: any;
 }
@@ -10538,6 +10539,7 @@ const typeMap: any = {
         { json: "ratio", js: "ratio", typ: u(undefined, 3.14) },
         { json: "tile_id", js: "tile_id", typ: "" },
         { json: "tile_kind", js: "tile_kind", typ: "" },
+        { json: "tile_params", js: "tile_params", typ: u(undefined, "") },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "WorkspaceLayoutFocusPaneMessage": o([

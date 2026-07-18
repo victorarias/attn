@@ -112,6 +112,25 @@
   border-color: var(--color-border-focus);
 }
 
+.workspace-dock-tile-root-picker {
+  height: 24px;
+  max-width: 140px;
+  padding: 2px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-editor);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  outline: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-dock-tile-root-picker:focus {
+  border-color: var(--color-border-focus);
+}
+
 .workspace-dock-tile-send-button {
   height: 24px;
   padding: 2px 10px;

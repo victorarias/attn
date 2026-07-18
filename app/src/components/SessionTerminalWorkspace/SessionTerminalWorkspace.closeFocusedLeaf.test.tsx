@@ -1,8 +1,33 @@
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/react';
 import { SessionTerminalWorkspace } from './index';
 import { createPaneRuntimeEventRouterController } from './paneRuntimeEventRouter';
 import { tileContentKey, type TerminalWorkspaceState } from '../../types/workspace';
+import { NotebookSurfaceProvider, type NotebookSurfaceContextValue } from '../../contexts/NotebookSurfaceContext';
+
+// The docked markdown tile below reads effectiveNotebookRoot unconditionally
+// via useNotebookSurfaceContext — real usage is always under App's provider.
+const testSurfaceValue: NotebookSurfaceContextValue = {
+  makeDaemon: () => ({
+    listDir: vi.fn(),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    existsFile: vi.fn(),
+    readAsset: vi.fn(),
+    backlinksNotebook: vi.fn(),
+    sendToChief: vi.fn(),
+    listFiles: vi.fn(),
+    changeSignal: 0,
+  }),
+  effectiveNotebookRoot: '',
+  sendFsWatch: vi.fn(),
+  sendFsUnwatch: vi.fn(),
+  connectionGeneration: 0,
+};
+function NotebookSurfaceTestWrapper({ children }: { children: ReactNode }) {
+  return <NotebookSurfaceProvider value={testSurfaceValue}>{children}</NotebookSurfaceProvider>;
+}
 
 // The terminal surface pulls in the Ghostty WASM model; stub it so the import
 // graph stays light in jsdom (this spec only cares about Cmd+W routing).
@@ -60,6 +85,7 @@ function renderSplit(overrides: { onClosePane?: () => void; onUndockTile?: (tile
       }}
       onRequestTileContent={vi.fn()}
     />,
+    { wrapper: NotebookSurfaceTestWrapper },
   );
   return { ...utils, onClosePane, onUndockTile };
 }

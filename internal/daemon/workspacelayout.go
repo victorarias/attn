@@ -442,9 +442,11 @@ func dockEdgeToSplit(edge protocol.WorkspaceLayoutDockEdge) (workspacelayout.Dir
 }
 
 func (d *Daemon) handleWorkspaceLayoutDockTile(client *wsClient, msg *protocol.WorkspaceLayoutDockTileMessage) {
-	params := ""
-	if snapshot := d.store.GetWorkspaceLayout(msg.WorkspaceID); snapshot != nil {
-		params, _ = workspacelayout.TileParamsByID(snapshot.Layout, strings.TrimSpace(msg.TileID))
+	params := strings.TrimSpace(protocol.Deref(msg.TileParams))
+	if params == "" {
+		if snapshot := d.store.GetWorkspaceLayout(msg.WorkspaceID); snapshot != nil {
+			params, _ = workspacelayout.TileParamsByID(snapshot.Layout, strings.TrimSpace(msg.TileID))
+		}
 	}
 	err := d.dockTile(msg.WorkspaceID, msg.AnchorPaneID, msg.TileID, msg.TileKind, params, "", msg.Edge, msg.Ratio)
 	d.sendWorkspaceLayoutTileActionResult(client, protocol.CmdWorkspaceLayoutDockTile, msg.WorkspaceID, msg.TileID, err)

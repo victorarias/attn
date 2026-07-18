@@ -1,9 +1,33 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { forwardRef, useEffect, useImperativeHandle } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionTerminalWorkspace } from './SessionTerminalWorkspace';
 import type { PaneRuntimeEventRouter } from './SessionTerminalWorkspace/paneRuntimeEventRouter';
 import { type TerminalWorkspaceState } from '../types/workspace';
+import { NotebookSurfaceProvider, type NotebookSurfaceContextValue } from '../contexts/NotebookSurfaceContext';
+
+// A docked tile (markdown, below) reads effectiveNotebookRoot unconditionally
+// via useNotebookSurfaceContext — real usage is always under App's provider.
+const testSurfaceValue: NotebookSurfaceContextValue = {
+  makeDaemon: () => ({
+    listDir: vi.fn(),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    existsFile: vi.fn(),
+    readAsset: vi.fn(),
+    backlinksNotebook: vi.fn(),
+    sendToChief: vi.fn(),
+    listFiles: vi.fn(),
+    changeSignal: 0,
+  }),
+  effectiveNotebookRoot: '',
+  sendFsWatch: vi.fn(),
+  sendFsUnwatch: vi.fn(),
+  connectionGeneration: 0,
+};
+function NotebookSurfaceTestWrapper({ children }: { children: ReactNode }) {
+  return <NotebookSurfaceProvider value={testSurfaceValue}>{children}</NotebookSurfaceProvider>;
+}
 const SESSION_PANE_ID = 'pane-session';
 function createSingleAgentWorkspace(): TerminalWorkspaceState {
   return {
@@ -695,7 +719,8 @@ describe('SessionTerminalWorkspace', () => {
         onClosePane={vi.fn()}
         onFocusPane={vi.fn()}
         onNavigateOutOfSession={vi.fn()}
-      />
+      />,
+      { wrapper: NotebookSurfaceTestWrapper },
     );
     const panes = container.querySelector('.session-terminal-panes') as HTMLElement;
     vi.spyOn(panes, 'getBoundingClientRect').mockReturnValue({
@@ -783,7 +808,8 @@ describe('SessionTerminalWorkspace', () => {
         onFocusPane={vi.fn()}
         onMoveLeaf={onMoveLeaf}
         onNavigateOutOfSession={vi.fn()}
-      />
+      />,
+      { wrapper: NotebookSurfaceTestWrapper },
     );
     const panes = container.querySelector('.session-terminal-panes') as HTMLElement;
     vi.spyOn(panes, 'getBoundingClientRect').mockReturnValue({

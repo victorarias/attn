@@ -22,8 +22,10 @@ export interface NotebookSurfaceDaemon {
   readAsset: (path: string) => Promise<FsReadAssetResult>;
   backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
   sendToChief: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
-  // Walk the whole vault (flat list of notes, with titles) for a tile's fuzzy finder.
-  // Notebook-storage only (see the boundary note below) — unaffected by `root`.
+  // Flat file list for a tile's ⌘P finder, root-scoped: fs_index over this
+  // daemon's `root` (or the notebook root when `root` is undefined). See the
+  // boundary note below — unlike backlinksNotebook/sendToChief, this one DOES
+  // follow `root`.
   listFiles: () => Promise<NotebookEntry[]>;
   // Bumps when an fs_changed broadcast arrives for this daemon's root, so an
   // open tile reloads its file. Scoped per-root: a root-bound tile only sees
@@ -36,13 +38,16 @@ export interface NotebookSurfaceDaemon {
 // call carries `root` down to the daemon; `changeSignal` is likewise sliced to
 // events for that root.
 //
-// CRITICAL BOUNDARY: backlinksNotebook, sendToChief, and listFiles are
-// Notebook-storage commands on the daemon side (notebook_backlinks,
-// notebook_send_to_chief, notebook_list) — they are bound to the notebook
-// root exactly as before regardless of the `root` argument here. Passing an
-// arbitrary filesystem root into those notebook_* commands is out of scope
-// and forbidden; UI for them on a non-notebook-rooted tile is gated off
-// separately (see the arbitrary-roots plan's authorization-boundary note).
+// CRITICAL BOUNDARY: backlinksNotebook and sendToChief are Notebook-storage
+// commands on the daemon side (notebook_backlinks, notebook_send_to_chief) —
+// they stay bound to the notebook root exactly as before regardless of the
+// `root` argument here. Backlinks only exist between notebook notes and "send
+// to chief" appends to the notebook inbox, so widening either to an arbitrary
+// filesystem root is out of scope and forbidden; UI for them on a
+// non-notebook-rooted tile is gated off separately (see the arbitrary-roots
+// plan's authorization-boundary note). listFiles is DIFFERENT: it now sources
+// fs_index, which the daemon resolves through the same root-scoped chokepoint
+// as every other fs_* command, so it follows `root` like listDir/readFile/etc.
 export type MakeNotebookSurfaceDaemon = (root?: string) => NotebookSurfaceDaemon;
 
 export interface NotebookSurfaceContextValue {
