@@ -659,6 +659,26 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		observer_key TEXT PRIMARY KEY,
 		last_attention_at TEXT NOT NULL
 	)`},
+	{70, "create delegation operations table", `CREATE TABLE IF NOT EXISTS delegation_operations (
+		request_id TEXT PRIMARY KEY,
+		operation_id TEXT NOT NULL UNIQUE,
+		request_json TEXT NOT NULL,
+		state TEXT NOT NULL,
+		progress TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		ticket_id TEXT NOT NULL DEFAULT '',
+		worktree_path TEXT NOT NULL DEFAULT '',
+		worktree_owned INTEGER NOT NULL DEFAULT 0,
+		result_json TEXT NOT NULL DEFAULT '',
+		error TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_delegation_operations_operation_id
+		ON delegation_operations(operation_id);`},
+	{71, "add delegation worktree ownership token", ""},
+	{72, "add delegation initiating chief identity", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -870,6 +890,16 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 65 {
 			if err := applyMigration65(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 71 {
+			if err := applyMigration71(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 72 {
+			if err := applyMigration72(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -1179,6 +1209,44 @@ func applyMigration65(tx *sql.Tx) error {
 		return nil
 	}
 	_, err = tx.Exec(`ALTER TABLE presentation_rounds ADD COLUMN verdict TEXT`)
+	return err
+}
+
+func applyMigration71(tx *sql.Tx) error {
+	exists, err := tableExists(tx, "delegation_operations")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	hasColumn, err := columnExists(tx, "delegation_operations", "worktree_token")
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+	_, err = tx.Exec(`ALTER TABLE delegation_operations ADD COLUMN worktree_token TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+func applyMigration72(tx *sql.Tx) error {
+	exists, err := tableExists(tx, "delegation_operations")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	hasColumn, err := columnExists(tx, "delegation_operations", "chief_session_id")
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+	_, err = tx.Exec(`ALTER TABLE delegation_operations ADD COLUMN chief_session_id TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 

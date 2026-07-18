@@ -955,6 +955,84 @@ func TestDelegateTruncatesLongWorktreeDefaultName(t *testing.T) {
 	}
 }
 
+func TestDelegateRejectsActiveWorktreeCollisionWithoutExplicitReuse(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
+	consumeDelegatedPrompt(t, backend)
+	worktreePath := filepath.Join(root, "repo--shared")
+	base := protocol.DelegateMessage{
+		Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID, Brief: "First owner.",
+		Agent: protocol.Ptr("codex"), Label: protocol.Ptr("owner"), Placement: protocol.Ptr(delegationPlacementNew),
+		Worktree: &protocol.DelegateWorktreeRequest{Repo: protocol.Ptr(mainRepo), Branch: "feat/shared", Path: protocol.Ptr(worktreePath)},
+	}
+	if _, err := d.delegate(&base); err != nil {
+		t.Fatalf("first delegate: %v", err)
+	}
+
+	retry := base
+	retry.Brief = "Unintentional second owner."
+	retry.Label = protocol.Ptr("collision")
+	retry.Placement = protocol.Ptr(delegationPlacementCurrent)
+	if _, err := d.delegate(&retry); err == nil || !strings.Contains(err.Error(), "--allow-worktree-reuse") {
+		t.Fatalf("collision error=%v, want explicit reuse guidance", err)
+	}
+	retry.AllowWorktreeReuse = protocol.Ptr(true)
+	result, err := d.delegate(&retry)
+	if err != nil {
+		t.Fatalf("explicit reuse: %v", err)
+	}
+	if result.Directory != git.CanonicalizePath(worktreePath) {
+		t.Fatalf("directory=%q want %q", result.Directory, worktreePath)
+	}
+
+	byCWD := protocol.DelegateMessage{
+		Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID, Brief: "CWD collision.",
+		Agent: protocol.Ptr("codex"), Label: protocol.Ptr("cwd-collision"),
+		Placement: protocol.Ptr(delegationPlacementNew), Cwd: protocol.Ptr(worktreePath),
+	}
+	if main := git.GetMainRepoFromWorktree(worktreePath); main == "" {
+		t.Fatal("test setup did not produce a linked worktree")
+	}
+	if !d.store.HasSessionInDirectory(git.CanonicalizePath(worktreePath)) {
+		t.Fatal("test setup has no active session in shared worktree")
+	}
+	if protocol.Deref(byCWD.AllowWorktreeReuse) {
+		t.Fatal("cwd collision unexpectedly opted into reuse")
+	}
+	if _, err := d.delegate(&byCWD); err == nil || !strings.Contains(err.Error(), "--allow-worktree-reuse") {
+		t.Fatalf("cwd collision error=%v, want explicit reuse guidance", err)
+	}
+	byCWD.AllowWorktreeReuse = protocol.Ptr(true)
+	if _, err := d.delegate(&byCWD); err != nil {
+		t.Fatalf("explicit cwd reuse: %v", err)
+	}
+
+	subdir := filepath.Join(worktreePath, "nested", "package")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bySubdir := protocol.DelegateMessage{
+		Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID, Brief: "Nested CWD collision.",
+		Agent: protocol.Ptr("codex"), Label: protocol.Ptr("nested-collision"),
+		Placement: protocol.Ptr(delegationPlacementNew), Cwd: protocol.Ptr(subdir),
+	}
+	if _, err := d.delegate(&bySubdir); err == nil || !strings.Contains(err.Error(), git.CanonicalizePath(worktreePath)) {
+		t.Fatalf("nested cwd collision error=%v, want resolved worktree root", err)
+	}
+	bySubdir.AllowWorktreeReuse = protocol.Ptr(true)
+	if _, err := d.delegate(&bySubdir); err != nil {
+		t.Fatalf("explicit nested cwd reuse: %v", err)
+	}
+}
+
 func TestTruncateDelegationName(t *testing.T) {
 	cases := []struct {
 		name  string

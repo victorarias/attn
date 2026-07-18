@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import generated protocol types from "./file";
+//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
 //
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
@@ -32,7 +32,11 @@
 //   const delegateMessage = Convert.toDelegateMessage(json);
 //   const delegateResult = Convert.toDelegateResult(json);
 //   const delegateResultMessage = Convert.toDelegateResultMessage(json);
+//   const delegateStatusMessage = Convert.toDelegateStatusMessage(json);
 //   const delegateWorktreeRequest = Convert.toDelegateWorktreeRequest(json);
+//   const delegationOperation = Convert.toDelegationOperation(json);
+//   const delegationOperationMessage = Convert.toDelegationOperationMessage(json);
+//   const delegationOperationState = Convert.toDelegationOperationState(json);
 //   const deleteWorktreeMessage = Convert.toDeleteWorktreeMessage(json);
 //   const deleteWorktreeResultMessage = Convert.toDeleteWorktreeResultMessage(json);
 //   const detachSessionMessage = Convert.toDetachSessionMessage(json);
@@ -740,18 +744,20 @@ export interface DaemonWarning {
 }
 
 export interface DelegateMessage {
-    agent?:            string;
-    brief:             string;
-    cmd:               DelegateMessageCmd;
-    cwd?:              string;
-    effort?:           string;
-    label?:            string;
-    model?:            string;
-    placement?:        string;
-    source_session_id: string;
-    workspace_id?:     string;
-    worktree?:         DelegateMessageWorktree;
-    yolo_mode?:        boolean;
+    agent?:                string;
+    allow_worktree_reuse?: boolean;
+    brief:                 string;
+    cmd:                   DelegateMessageCmd;
+    cwd?:                  string;
+    effort?:               string;
+    label?:                string;
+    model?:                string;
+    placement?:            string;
+    request_id:            string;
+    source_session_id:     string;
+    workspace_id?:         string;
+    worktree?:             DelegateMessageWorktree;
+    yolo_mode?:            boolean;
     [property: string]: any;
 }
 
@@ -799,11 +805,72 @@ export interface DelegateResultObject {
     [property: string]: any;
 }
 
+export interface DelegateStatusMessage {
+    cmd: DelegateStatusMessageCmd;
+    id:  string;
+    [property: string]: any;
+}
+
+export enum DelegateStatusMessageCmd {
+    DelegateStatus = "delegate_status",
+}
+
 export interface DelegateWorktreeRequest {
     branch:         string;
     path?:          string;
     repo?:          string;
     starting_from?: string;
+    [property: string]: any;
+}
+
+export interface DelegationOperation {
+    created_at:     string;
+    error?:         string;
+    operation_id:   string;
+    progress:       string;
+    request_id:     string;
+    result?:        DelegateResultObject;
+    session_id:     string;
+    state:          DelegationOperationState;
+    ticket_id?:     string;
+    updated_at:     string;
+    workspace_id?:  string;
+    worktree_path?: string;
+    [property: string]: any;
+}
+
+export enum DelegationOperationState {
+    Accepted = "accepted",
+    Completed = "completed",
+    Failed = "failed",
+    Preparing = "preparing",
+}
+
+export interface DelegationOperationMessage {
+    error?:     string;
+    event:      DelegationOperationMessageEvent;
+    operation?: DelegationOperationObject;
+    success:    boolean;
+    [property: string]: any;
+}
+
+export enum DelegationOperationMessageEvent {
+    DelegationOperation = "delegation_operation",
+}
+
+export interface DelegationOperationObject {
+    created_at:     string;
+    error?:         string;
+    operation_id:   string;
+    progress:       string;
+    request_id:     string;
+    result?:        DelegateResultObject;
+    session_id:     string;
+    state:          DelegationOperationState;
+    ticket_id?:     string;
+    updated_at:     string;
+    workspace_id?:  string;
+    worktree_path?: string;
     [property: string]: any;
 }
 
@@ -1736,7 +1803,7 @@ export enum GitOperationStatus {
 
 export interface GitOperationFinishedMessage {
     event:     GitOperationFinishedMessageEvent;
-    operation: Operation;
+    operation: GitOperationFinishedMessageOperation;
     [property: string]: any;
 }
 
@@ -1744,7 +1811,7 @@ export enum GitOperationFinishedMessageEvent {
     GitOperationFinished = "git_operation_finished",
 }
 
-export interface Operation {
+export interface GitOperationFinishedMessageOperation {
     duration_ms?: number;
     endpoint_id?: string;
     error?:       string;
@@ -1759,7 +1826,7 @@ export interface Operation {
 
 export interface GitOperationStartedMessage {
     event:     GitOperationStartedMessageEvent;
-    operation: Operation;
+    operation: GitOperationFinishedMessageOperation;
     [property: string]: any;
 }
 
@@ -3295,6 +3362,7 @@ export interface Response {
     authors?:                              AuthorElement[];
     data?:                                 string;
     delegate_result?:                      DelegateResultObject;
+    delegation_operation?:                 DelegationOperationObject;
     error?:                                string;
     journal_append_result?:                JournalAppendResultObject;
     notebook_entries?:                     NotebookEntryElement[];
@@ -4387,7 +4455,7 @@ export interface WebSocketEvent {
     last_seq?:                 number;
     modified?:                 string;
     name?:                     string;
-    operation?:                Operation;
+    operation?:                GitOperationFinishedMessageOperation;
     original?:                 string;
     pane_id?:                  string;
     path?:                     string;
@@ -5335,12 +5403,44 @@ export class Convert {
         return JSON.stringify(uncast(value, r("DelegateResultMessage")), null, 2);
     }
 
+    public static toDelegateStatusMessage(json: string): DelegateStatusMessage {
+        return cast(JSON.parse(json), r("DelegateStatusMessage"));
+    }
+
+    public static delegateStatusMessageToJson(value: DelegateStatusMessage): string {
+        return JSON.stringify(uncast(value, r("DelegateStatusMessage")), null, 2);
+    }
+
     public static toDelegateWorktreeRequest(json: string): DelegateWorktreeRequest {
         return cast(JSON.parse(json), r("DelegateWorktreeRequest"));
     }
 
     public static delegateWorktreeRequestToJson(value: DelegateWorktreeRequest): string {
         return JSON.stringify(uncast(value, r("DelegateWorktreeRequest")), null, 2);
+    }
+
+    public static toDelegationOperation(json: string): DelegationOperation {
+        return cast(JSON.parse(json), r("DelegationOperation"));
+    }
+
+    public static delegationOperationToJson(value: DelegationOperation): string {
+        return JSON.stringify(uncast(value, r("DelegationOperation")), null, 2);
+    }
+
+    public static toDelegationOperationMessage(json: string): DelegationOperationMessage {
+        return cast(JSON.parse(json), r("DelegationOperationMessage"));
+    }
+
+    public static delegationOperationMessageToJson(value: DelegationOperationMessage): string {
+        return JSON.stringify(uncast(value, r("DelegationOperationMessage")), null, 2);
+    }
+
+    public static toDelegationOperationState(json: string): DelegationOperationState {
+        return cast(JSON.parse(json), r("DelegationOperationState"));
+    }
+
+    public static delegationOperationStateToJson(value: DelegationOperationState): string {
+        return JSON.stringify(uncast(value, r("DelegationOperationState")), null, 2);
     }
 
     public static toDeleteWorktreeMessage(json: string): DeleteWorktreeMessage {
@@ -8257,6 +8357,7 @@ const typeMap: any = {
     ], "any"),
     "DelegateMessage": o([
         { json: "agent", js: "agent", typ: u(undefined, "") },
+        { json: "allow_worktree_reuse", js: "allow_worktree_reuse", typ: u(undefined, true) },
         { json: "brief", js: "brief", typ: "" },
         { json: "cmd", js: "cmd", typ: r("DelegateMessageCmd") },
         { json: "cwd", js: "cwd", typ: u(undefined, "") },
@@ -8264,6 +8365,7 @@ const typeMap: any = {
         { json: "label", js: "label", typ: u(undefined, "") },
         { json: "model", js: "model", typ: u(undefined, "") },
         { json: "placement", js: "placement", typ: u(undefined, "") },
+        { json: "request_id", js: "request_id", typ: "" },
         { json: "source_session_id", js: "source_session_id", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
         { json: "worktree", js: "worktree", typ: u(undefined, r("DelegateMessageWorktree")) },
@@ -8297,11 +8399,49 @@ const typeMap: any = {
         { json: "workspace_id", js: "workspace_id", typ: "" },
         { json: "worktree_created", js: "worktree_created", typ: u(undefined, true) },
     ], "any"),
+    "DelegateStatusMessage": o([
+        { json: "cmd", js: "cmd", typ: r("DelegateStatusMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
     "DelegateWorktreeRequest": o([
         { json: "branch", js: "branch", typ: "" },
         { json: "path", js: "path", typ: u(undefined, "") },
         { json: "repo", js: "repo", typ: u(undefined, "") },
         { json: "starting_from", js: "starting_from", typ: u(undefined, "") },
+    ], "any"),
+    "DelegationOperation": o([
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "operation_id", js: "operation_id", typ: "" },
+        { json: "progress", js: "progress", typ: "" },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "result", js: "result", typ: u(undefined, r("DelegateResultObject")) },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "state", js: "state", typ: r("DelegationOperationState") },
+        { json: "ticket_id", js: "ticket_id", typ: u(undefined, "") },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+        { json: "worktree_path", js: "worktree_path", typ: u(undefined, "") },
+    ], "any"),
+    "DelegationOperationMessage": o([
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("DelegationOperationMessageEvent") },
+        { json: "operation", js: "operation", typ: u(undefined, r("DelegationOperationObject")) },
+        { json: "success", js: "success", typ: true },
+    ], "any"),
+    "DelegationOperationObject": o([
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "operation_id", js: "operation_id", typ: "" },
+        { json: "progress", js: "progress", typ: "" },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "result", js: "result", typ: u(undefined, r("DelegateResultObject")) },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "state", js: "state", typ: r("DelegationOperationState") },
+        { json: "ticket_id", js: "ticket_id", typ: u(undefined, "") },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+        { json: "worktree_path", js: "worktree_path", typ: u(undefined, "") },
     ], "any"),
     "DeleteWorktreeMessage": o([
         { json: "cmd", js: "cmd", typ: r("GitOperationKind") },
@@ -8852,9 +8992,9 @@ const typeMap: any = {
     ], "any"),
     "GitOperationFinishedMessage": o([
         { json: "event", js: "event", typ: r("GitOperationFinishedMessageEvent") },
-        { json: "operation", js: "operation", typ: r("Operation") },
+        { json: "operation", js: "operation", typ: r("GitOperationFinishedMessageOperation") },
     ], "any"),
-    "Operation": o([
+    "GitOperationFinishedMessageOperation": o([
         { json: "duration_ms", js: "duration_ms", typ: u(undefined, 0) },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -8867,7 +9007,7 @@ const typeMap: any = {
     ], "any"),
     "GitOperationStartedMessage": o([
         { json: "event", js: "event", typ: r("GitOperationStartedMessageEvent") },
-        { json: "operation", js: "operation", typ: r("Operation") },
+        { json: "operation", js: "operation", typ: r("GitOperationFinishedMessageOperation") },
     ], "any"),
     "GitStatusUpdateMessage": o([
         { json: "directory", js: "directory", typ: "" },
@@ -9767,6 +9907,7 @@ const typeMap: any = {
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
         { json: "data", js: "data", typ: u(undefined, "") },
         { json: "delegate_result", js: "delegate_result", typ: u(undefined, r("DelegateResultObject")) },
+        { json: "delegation_operation", js: "delegation_operation", typ: u(undefined, r("DelegationOperationObject")) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "journal_append_result", js: "journal_append_result", typ: u(undefined, r("JournalAppendResultObject")) },
         { json: "notebook_entries", js: "notebook_entries", typ: u(undefined, a(r("NotebookEntryElement"))) },
@@ -10420,7 +10561,7 @@ const typeMap: any = {
         { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
         { json: "modified", js: "modified", typ: u(undefined, "") },
         { json: "name", js: "name", typ: u(undefined, "") },
-        { json: "operation", js: "operation", typ: u(undefined, r("Operation")) },
+        { json: "operation", js: "operation", typ: u(undefined, r("GitOperationFinishedMessageOperation")) },
         { json: "original", js: "original", typ: u(undefined, "") },
         { json: "pane_id", js: "pane_id", typ: u(undefined, "") },
         { json: "path", js: "path", typ: u(undefined, "") },
@@ -10923,6 +11064,18 @@ const typeMap: any = {
     ],
     "DelegateResultMessageEvent": [
         "delegate_result",
+    ],
+    "DelegateStatusMessageCmd": [
+        "delegate_status",
+    ],
+    "DelegationOperationState": [
+        "accepted",
+        "completed",
+        "failed",
+        "preparing",
+    ],
+    "DelegationOperationMessageEvent": [
+        "delegation_operation",
     ],
     "GitOperationKind": [
         "delete_worktree",

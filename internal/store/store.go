@@ -429,7 +429,7 @@ func (s *Store) HasSessionInDirectory(directory string) bool {
 
 	if s.db == nil {
 		for _, session := range s.sessions {
-			if session.Directory == directory {
+			if session.Directory == directory && session.State != protocol.SessionStateIdle {
 				return true
 			}
 		}
@@ -437,7 +437,7 @@ func (s *Store) HasSessionInDirectory(directory string) bool {
 	}
 
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE directory = ?`, directory).Scan(&count)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE directory = ? AND state != ?`, directory, string(protocol.SessionStateIdle)).Scan(&count)
 	if err != nil {
 		return false
 	}

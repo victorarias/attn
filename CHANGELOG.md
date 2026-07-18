@@ -6,6 +6,17 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-19]
+
+### Fixed
+- **Retried delegations no longer create duplicate agents or tickets.** `attn
+  delegate` now prints a durable request and operation identity before slow
+  worktree preparation, shows concise progress while it waits, and lets callers
+  retry or inspect an unknown outcome by that identity. Concurrent retries
+  converge on the same session, interrupted preparation resumes after a daemon
+  restart, terminal failures stay terminal, and sharing an active worktree now
+  requires the explicit `--allow-worktree-reuse` override.
+
 ## [2026-07-18]
 
 ### Fixed

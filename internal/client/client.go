@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -162,24 +163,32 @@ func (c *Client) UpdateTodos(id string, todos []string) error {
 }
 
 type DelegateOptions struct {
-	Agent        string
-	Model        string
-	Effort       string
-	Label        string
-	Yolo         bool
-	Placement    string
-	WorkspaceID  string
-	CWD          string
-	WorktreeRepo string
-	Worktree     string
-	WorktreePath string
-	StartingFrom string
+	RequestID          string
+	Agent              string
+	Model              string
+	Effort             string
+	Label              string
+	Yolo               bool
+	Placement          string
+	WorkspaceID        string
+	CWD                string
+	WorktreeRepo       string
+	Worktree           string
+	WorktreePath       string
+	StartingFrom       string
+	AllowWorktreeReuse bool
 }
 
-// Delegate starts another agent with an initial brief and optional placement.
-func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (*protocol.DelegateResult, error) {
+// StartDelegation durably accepts a delegation and returns before slow worktree
+// preparation. The operation can be polled by either request or operation id.
+func (c *Client) StartDelegation(sourceSessionID, brief string, opts DelegateOptions) (*protocol.DelegationOperation, error) {
+	requestID := strings.TrimSpace(opts.RequestID)
+	if requestID == "" {
+		requestID = uuid.NewString()
+	}
 	msg := protocol.DelegateMessage{
 		Cmd:             protocol.CmdDelegate,
+		RequestID:       requestID,
 		SourceSessionID: sourceSessionID,
 		Brief:           brief,
 	}
@@ -197,6 +206,9 @@ func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (
 	}
 	if opts.Yolo {
 		msg.YoloMode = protocol.Ptr(true)
+	}
+	if opts.AllowWorktreeReuse {
+		msg.AllowWorktreeReuse = protocol.Ptr(true)
 	}
 	if value := strings.TrimSpace(opts.Placement); value != "" {
 		msg.Placement = protocol.Ptr(value)
@@ -225,10 +237,44 @@ func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (
 	if err != nil {
 		return nil, err
 	}
-	if resp.DelegateResult == nil {
-		return nil, errors.New("daemon returned no delegation result")
+	if resp.DelegationOperation == nil {
+		return nil, errors.New("daemon returned no delegation operation")
 	}
-	return resp.DelegateResult, nil
+	return resp.DelegationOperation, nil
+}
+
+func (c *Client) DelegationStatus(id string) (*protocol.DelegationOperation, error) {
+	resp, err := c.send(protocol.DelegateStatusMessage{Cmd: protocol.CmdDelegateStatus, ID: strings.TrimSpace(id)})
+	if err != nil {
+		return nil, err
+	}
+	if resp.DelegationOperation == nil {
+		return nil, errors.New("daemon returned no delegation operation")
+	}
+	return resp.DelegationOperation, nil
+}
+
+// Delegate preserves the original blocking API for in-process callers while
+// using the durable accepted operation underneath.
+func (c *Client) Delegate(sourceSessionID, brief string, opts DelegateOptions) (*protocol.DelegateResult, error) {
+	op, err := c.StartDelegation(sourceSessionID, brief, opts)
+	if err != nil {
+		return nil, err
+	}
+	for op.State == protocol.DelegationOperationStateAccepted || op.State == protocol.DelegationOperationStatePreparing {
+		time.Sleep(100 * time.Millisecond)
+		op, err = c.DelegationStatus(op.OperationID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if op.State == protocol.DelegationOperationStateFailed {
+		return nil, fmt.Errorf("delegation failed: %s", protocol.Deref(op.Error))
+	}
+	if op.Result == nil {
+		return nil, errors.New("completed delegation has no result")
+	}
+	return op.Result, nil
 }
 
 // SetTicketStatus reports a work state and moves a ticket to the matching
