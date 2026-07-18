@@ -25,18 +25,32 @@ func newFsDaemon(t *testing.T) *Daemon {
 	return d
 }
 
+// trustedFsClient returns a wsClient identified — via the real identity
+// setters, not by poking identityMu-guarded fields directly — as the
+// authenticated attn app itself (isTrustedAppClient() == true). The fs
+// surface's explicit-root gate requires exactly this identity; ordinary
+// clients (browser tabs, other local processes) must not pass it.
+func trustedFsClient(bufSize int) *wsClient {
+	client := &wsClient{send: make(chan outboundMessage, bufSize), trustedTauriOrigin: true}
+	client.setBrowserHostAuthenticated(true)
+	client.setIdentity("tauri-app", "test", nil)
+	return client
+}
+
 // fsWriteCAS performs a hash-CAS fs_write over the WS path and returns the decoded
 // result event (a successful result may carry conflict=true). Uses a throwaway
-// client; the origin=ui broadcast goes to the hub, not this client.
+// trusted client; the origin=ui broadcast goes to the hub, not this client.
 func fsWriteCAS(t *testing.T, d *Daemon, path, content, baseHash string) protocol.FsWriteResultMessage {
 	t.Helper()
 	return fsWriteCASRoot(t, d, path, content, baseHash, "")
 }
 
 // fsWriteCASRoot is fsWriteCAS with an explicit root (empty = notebook root).
+// Uses a trusted app client so root tests exercise root resolution, not the
+// separate auth-gate tests below.
 func fsWriteCASRoot(t *testing.T, d *Daemon, path, content, baseHash, root string) protocol.FsWriteResultMessage {
 	t.Helper()
-	client := &wsClient{send: make(chan outboundMessage, 8)}
+	client := trustedFsClient(8)
 	d.sendFsWriteWSResult(client, "setup-fs-write", path, content, baseHash, root)
 	var res protocol.FsWriteResultMessage
 	readNotebookWSEvent(t, client.send, &res)
@@ -49,10 +63,11 @@ func listFs(t *testing.T, d *Daemon, dir string) []protocol.FsEntry {
 	return listFsRoot(t, d, dir, "")
 }
 
-// listFsRoot is listFs with an explicit root (empty = notebook root).
+// listFsRoot is listFs with an explicit root (empty = notebook root). Uses a
+// trusted app client; see fsWriteCASRoot.
 func listFsRoot(t *testing.T, d *Daemon, dir, root string) []protocol.FsEntry {
 	t.Helper()
-	client := &wsClient{send: make(chan outboundMessage, 8)}
+	client := trustedFsClient(8)
 	d.sendFsListWSResult(client, "setup-fs-list", dir, root)
 	var res protocol.FsListResultMessage
 	readNotebookWSEvent(t, client.send, &res)
@@ -527,7 +542,7 @@ func TestFsCommandsWithExplicitRootActOnThatDirectory(t *testing.T) {
 		t.Fatalf("list under explicit root = %+v", entries)
 	}
 
-	client := &wsClient{send: make(chan outboundMessage, 4)}
+	client := trustedFsClient(4)
 	d.sendFsReadWSResult(client, "r1", "notes/todo.txt", externalRoot)
 	var read protocol.FsReadResultMessage
 	readNotebookWSEvent(t, client.send, &read)
@@ -614,11 +629,13 @@ func TestFsCommandsOmittedRootResolvesToNotebookRoot(t *testing.T) {
 // A relative root, and a root inside config.DataDir(), must both be rejected —
 // the same validation notebook.root enforces. Without this, a client could point
 // the fs surface at attn's own data dir (defeating the "notebook must live
-// outside .attn" invariant) or at an ambiguous relative path.
+// outside .attn" invariant) or at an ambiguous relative path. Uses a trusted app
+// client so this exercises path validation specifically, not the separate
+// auth-gate tests below.
 func TestFsCommandsRejectInvalidRoots(t *testing.T) {
 	d := newFsDaemon(t)
 
-	client := &wsClient{send: make(chan outboundMessage, 4)}
+	client := trustedFsClient(4)
 	d.sendFsListWSResult(client, "rel", "", "relative/path")
 	var relRes protocol.FsListResultMessage
 	readNotebookWSEvent(t, client.send, &relRes)
@@ -627,12 +644,106 @@ func TestFsCommandsRejectInvalidRoots(t *testing.T) {
 	}
 
 	insideDataDir := filepath.Join(config.DataDir(), "notebook")
-	client2 := &wsClient{send: make(chan outboundMessage, 4)}
+	client2 := trustedFsClient(4)
 	d.sendFsListWSResult(client2, "indatadir", "", insideDataDir)
 	var dataDirRes protocol.FsListResultMessage
 	readNotebookWSEvent(t, client2.send, &dataDirRes)
 	if dataDirRes.Success || dataDirRes.Error == nil {
 		t.Fatalf("fs_list(root inside data dir) = %+v, want failure", dataDirRes)
+	}
+}
+
+// An explicit root turns the fs surface into an arbitrary-file API, so it must be
+// gated on the caller being the authenticated attn app itself — not just any
+// accepted local WebSocket client (a browser tab, or any other local process that
+// completes the handshake). Without this gate, fs_read/{root} would let such a
+// client read any file the OS lets the daemon process read.
+func TestFsReadWithExplicitRootDeniedForUntrustedClient(t *testing.T) {
+	d := newFsDaemon(t)
+	externalRoot := t.TempDir()
+	secretPath := filepath.Join(externalRoot, "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("top secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsReadWSResult(client, "r1", "secret.txt", externalRoot)
+	var res protocol.FsReadResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil {
+		t.Fatalf("fs_read(explicit root, untrusted client) = %+v, want failure", res)
+	}
+	if !strings.Contains(*res.Error, "authenticated") {
+		t.Fatalf("fs_read(explicit root, untrusted client) error = %q, want it to mention the authenticated app", *res.Error)
+	}
+}
+
+// The write side of the same gate: an untrusted client must not be able to
+// CREATE a file anywhere on disk via an explicit root, and the attempted write
+// must never touch the filesystem (not merely reported as an error).
+func TestFsWriteWithExplicitRootDeniedForUntrustedClientAndFileNotCreated(t *testing.T) {
+	d := newFsDaemon(t)
+	externalRoot := t.TempDir()
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsWriteWSResult(client, "w1", "pwned.txt", "attacker-controlled content", "", externalRoot)
+	var res protocol.FsWriteResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil {
+		t.Fatalf("fs_write(explicit root, untrusted client) = %+v, want failure", res)
+	}
+	if !strings.Contains(*res.Error, "authenticated") {
+		t.Fatalf("fs_write(explicit root, untrusted client) error = %q, want it to mention the authenticated app", *res.Error)
+	}
+	if _, err := os.Stat(filepath.Join(externalRoot, "pwned.txt")); !os.IsNotExist(err) {
+		t.Fatalf("fs_write(explicit root, untrusted client) must not create the file, stat err = %v", err)
+	}
+}
+
+// The SAME untrusted client must still succeed with root omitted — the auth
+// gate is scoped to the explicit-root escape hatch, not the fs surface as a
+// whole. Regressing this would break every existing fs_* caller, none of which
+// authenticate as the app today.
+func TestFsCommandsOmittedRootStillWorksForUntrustedClient(t *testing.T) {
+	d := newFsDaemon(t)
+	notebookRoot, err := d.notebookRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.sendFsWriteWSResult(client, "w1", "notes/todo.txt", "buy milk", "", "")
+	var res protocol.FsWriteResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.Result == nil || res.Result.Conflict {
+		t.Fatalf("fs_write(omitted root, untrusted client) = %+v, want success", res)
+	}
+	if _, err := os.Stat(filepath.Join(notebookRoot, "notes", "todo.txt")); err != nil {
+		t.Fatalf("file did not land under the notebook root: %v", err)
+	}
+}
+
+// A client that has the browser-host secret and the right origin but declared a
+// non-tauri-app client kind (e.g. it spoofed/omitted client_hello's kind) must
+// still be denied. This catches the gate collapsing to token-only — checking just
+// trustedTauriOrigin+browserHostAuthenticated without clientKind would let any
+// client that merely obtained the secret claim arbitrary roots.
+func TestFsCommandsExplicitRootDeniedForNonTauriAppClientKind(t *testing.T) {
+	d := newFsDaemon(t)
+	externalRoot := t.TempDir()
+
+	client := &wsClient{send: make(chan outboundMessage, 4), trustedTauriOrigin: true}
+	client.setBrowserHostAuthenticated(true)
+	client.setIdentity("not-tauri-app", "test", nil)
+
+	d.sendFsListWSResult(client, "l1", "", externalRoot)
+	var res protocol.FsListResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil {
+		t.Fatalf("fs_list(explicit root, non-tauri-app clientKind) = %+v, want failure", res)
+	}
+	if !strings.Contains(*res.Error, "authenticated") {
+		t.Fatalf("fs_list(explicit root, non-tauri-app clientKind) error = %q, want it to mention the authenticated app", *res.Error)
 	}
 }
 
@@ -660,7 +771,7 @@ func TestFsRenameDeleteNotebookCouplingIsRootConditional(t *testing.T) {
 	// Drain the seed write's own fs_changed(a.md) so the rename's broadcast below
 	// is the one actually asserted on.
 	waitForFsChange(t, hubClient.send, originUI)
-	renameClient := &wsClient{send: make(chan outboundMessage, 4)}
+	renameClient := trustedFsClient(4)
 	d.sendFsRenameWSResult(renameClient, "rn1", "a.md", "b.md", externalRoot)
 	var renameRes protocol.FsRenameResultMessage
 	readNotebookWSEvent(t, renameClient.send, &renameRes)
@@ -673,7 +784,7 @@ func TestFsRenameDeleteNotebookCouplingIsRootConditional(t *testing.T) {
 	}
 
 	// --- foreign root: delete ---
-	deleteClient := &wsClient{send: make(chan outboundMessage, 4)}
+	deleteClient := trustedFsClient(4)
 	d.sendFsDeleteWSResult(deleteClient, "d1", "b.md", externalRoot)
 	var deleteRes protocol.FsDeleteResultMessage
 	readNotebookWSEvent(t, deleteClient.send, &deleteRes)

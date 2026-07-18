@@ -90,6 +90,18 @@ func (c *wsClient) setBrowserHostAuthenticated(authenticated bool) {
 	c.browserHostAuthenticated = authenticated
 }
 
+// isTrustedAppClient reports whether this connection is the authenticated attn
+// app itself: trusted Tauri origin, per-profile browser-host secret verified via
+// client_hello, and the tauri-app client kind. It is IsBrowserHost minus the
+// browser-host capability — identity, not feature opt-in. Arbitrary fs roots
+// are gated on it: without this, any accepted local WebSocket client could use
+// fs_* {root} to read or overwrite files anywhere in the user's home.
+func (c *wsClient) isTrustedAppClient() bool {
+	c.identityMu.RLock()
+	defer c.identityMu.RUnlock()
+	return c.trustedTauriOrigin && c.browserHostAuthenticated && c.clientKind == "tauri-app"
+}
+
 func websocketReadLimit(client *wsClient) int64 {
 	if client.IsBrowserHost() {
 		return maxBrowserHostWebSocketReadBytes

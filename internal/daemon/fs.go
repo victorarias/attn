@@ -47,12 +47,20 @@ var assetMimeTypes = map[string]string{
 }
 
 // resolveFsRoot resolves the raw root a fs_* command asked to operate under:
-// empty/blank means "the notebook root" (today's behavior, unchanged); a
-// non-empty value must be a normalized-clean absolute path outside the attn
-// data dir, same rule as notebook.root, worded for the fs surface.
-func (d *Daemon) resolveFsRoot(raw string) (string, error) {
+// empty/blank means "the notebook root" (today's behavior, unchanged, and
+// available to ANY client). A non-empty value is an arbitrary filesystem root
+// request, so it is gated on client being the authenticated attn app itself
+// (see isTrustedAppClient) before it is even validated — without this, any
+// accepted local WebSocket client could use fs_* {root} to read or overwrite
+// files anywhere in the user's home. Once past that gate, the value must be a
+// normalized-clean absolute path outside the attn data dir, same rule as
+// notebook.root, worded for the fs surface.
+func (d *Daemon) resolveFsRoot(client *wsClient, raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return d.notebookRoot()
+	}
+	if !client.isTrustedAppClient() {
+		return "", fmt.Errorf("fs root requires the authenticated attn app client")
 	}
 	resolved, err := normalizeExternalRoot(raw)
 	if err != nil {
@@ -68,8 +76,8 @@ func (d *Daemon) resolveFsRoot(raw string) (string, error) {
 // other roots get a Store but no watcher — that lands with the non-text editor
 // work (PR2). Returns the resolved root alongside the store so callers can key
 // broadcasts and notebook-coupling decisions on it without re-resolving.
-func (d *Daemon) fsStoreFor(rawRoot string) (*fsdoc.Store, string, error) {
-	root, err := d.resolveFsRoot(rawRoot)
+func (d *Daemon) fsStoreFor(client *wsClient, rawRoot string) (*fsdoc.Store, string, error) {
+	root, err := d.resolveFsRoot(client, rawRoot)
 	if err != nil {
 		return nil, "", err
 	}
@@ -105,7 +113,7 @@ func (d *Daemon) broadcastFsChanged(root, origin string, paths ...string) {
 // fs_list_result event correlated by requestID.
 func (d *Daemon) sendFsListWSResult(client *wsClient, requestID, path, rawRoot string) {
 	var entries []protocol.FsEntry
-	store, _, err := d.fsStoreFor(rawRoot)
+	store, _, err := d.fsStoreFor(client, rawRoot)
 	if err == nil {
 		var list []fsdoc.Entry
 		if list, err = store.List(path); err == nil {
@@ -128,7 +136,7 @@ func (d *Daemon) sendFsListWSResult(client *wsClient, requestID, path, rawRoot s
 // correlated by requestID.
 func (d *Daemon) sendFsReadWSResult(client *wsClient, requestID, path, rawRoot string) {
 	var result *protocol.FsReadResult
-	store, _, err := d.fsStoreFor(rawRoot)
+	store, _, err := d.fsStoreFor(client, rawRoot)
 	if err == nil {
 		var content []byte
 		var hash string
@@ -156,7 +164,7 @@ func (d *Daemon) sendFsReadAssetWSResult(client *wsClient, requestID, path, rawR
 	mimeType, err := assetMimeTypeFor(path)
 	if err == nil {
 		var store *fsdoc.Store
-		if store, _, err = d.fsStoreFor(rawRoot); err == nil {
+		if store, _, err = d.fsStoreFor(client, rawRoot); err == nil {
 			var content []byte
 			if content, _, err = store.ReadWithLimit(path, maxAssetBytes); err == nil {
 				if len(content) > maxAssetBytes {
@@ -227,7 +235,7 @@ func assetMessageFits(requestID, path, mimeType string, rawLen int) (bool, error
 // broadcasts fs_changed(origin=ui).
 func (d *Daemon) sendFsWriteWSResult(client *wsClient, requestID, path, content, baseHash, rawRoot string) {
 	var result *protocol.FsWriteResult
-	store, root, err := d.fsStoreFor(rawRoot)
+	store, root, err := d.fsStoreFor(client, rawRoot)
 	if err == nil {
 		// Normalize the path to the canonical form fs_list/fs_changed key on, so the
 		// echoed result.path and the broadcast match it (not the raw leading-slash
@@ -277,7 +285,7 @@ func (d *Daemon) sendFsRenameWSResult(client *wsClient, requestID, oldPath, newP
 	newRel, newErr := fsdoc.CleanPath(newPath)
 	err := errors.Join(oldErr, newErr)
 	var result *protocol.FsRenameResult
-	store, root, storeErr := d.fsStoreFor(rawRoot)
+	store, root, storeErr := d.fsStoreFor(client, rawRoot)
 	if err == nil {
 		err = storeErr
 	}
@@ -313,7 +321,7 @@ func (d *Daemon) sendFsRenameWSResult(client *wsClient, requestID, oldPath, newP
 func (d *Daemon) sendFsDeleteWSResult(client *wsClient, requestID, path, rawRoot string) {
 	rel, err := fsdoc.CleanPath(path)
 	var result *protocol.FsDeleteResult
-	store, root, storeErr := d.fsStoreFor(rawRoot)
+	store, root, storeErr := d.fsStoreFor(client, rawRoot)
 	if err == nil {
 		err = storeErr
 	}
@@ -345,7 +353,7 @@ func (d *Daemon) sendFsDeleteWSResult(client *wsClient, requestID, path, rawRoot
 // the frontend treats as "unknown, leave the link unflagged", not as "missing".
 func (d *Daemon) sendFsExistsWSResult(client *wsClient, requestID, path, rawRoot string) {
 	var result *protocol.FsExistsResult
-	store, _, err := d.fsStoreFor(rawRoot)
+	store, _, err := d.fsStoreFor(client, rawRoot)
 	if err == nil {
 		var exists bool
 		if exists, err = store.Exists(path); err == nil {
