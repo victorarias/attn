@@ -13,6 +13,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   database every 6 hours (keeping the last 12) and takes an extra safety
   snapshot right before any database migration, so session, ticket, and
   workspace state can be recovered if the database is ever lost or corrupted.
+- **Restore the database from a backup.** `attn db restore [path|latest]`
+  restores `attn.db` from a rotating snapshot (the newest one by default),
+  refusing while the daemon is running and always preserving the previous
+  database file rather than deleting it. Settings now also surface the
+  timestamp of the most recent successful backup.
 
 ## [2026-07-16]
 

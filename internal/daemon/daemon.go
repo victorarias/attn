@@ -279,6 +279,13 @@ type Daemon struct {
 	browserControlMu sync.Mutex
 	browserControl   map[string]browserControlPending
 
+	// lastBackupMu guards lastBackupAt, the UTC timestamp of the most recent
+	// successful performDatabaseBackup call. Zero value means no backup has
+	// succeeded yet this process lifetime. Surfaced read-only in the settings
+	// payload as SettingDBLastBackupAt (see ws_settings.go).
+	lastBackupMu sync.Mutex
+	lastBackupAt time.Time
+
 	// Durable workflow engine IPC state. The engine runs in a separate process
 	// (the `attn workflow run` CLI); the daemon persists, coalesced-broadcasts
 	// run updates to the read-only UI, and relays cancel to the engine sink.

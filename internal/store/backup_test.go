@@ -173,7 +173,7 @@ func TestBackupNow_Rotation(t *testing.T) {
 		if e.Name() == filepath.Base(newPath) {
 			sawNew = true
 		}
-		if isRotatingBackupName(e.Name()) {
+		if IsRotatingBackupName(e.Name()) {
 			rotating = append(rotating, e.Name())
 		}
 	}
@@ -265,5 +265,98 @@ func TestMigrateDB_PreMigrationBackup(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no pre-migration backup found in %s, entries: %v", backupDir, entries)
+	}
+}
+
+// TestBackupPreMigration_CapsSnapshots proves that after backupPreMigration
+// runs, older attn-premigration-*.db files in the same dir beyond the newest
+// backupPremigrationKeep are pruned by their trailing timestamp (not by
+// mtime or whole-filename sort, which would misorder across differing
+// version-number digit widths), while rotating attn-<timestamp>.db backups
+// are left untouched.
+func TestBackupPreMigration_CapsSnapshots(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "attn.db")
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewWithDB error: %v", err)
+	}
+	defer s.Close()
+
+	backupDir := filepath.Join(filepath.Dir(dbPath), "backups")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatalf("mkdir backups dir: %v", err)
+	}
+
+	// Seed 7 fake pre-migration files with distinct timestamps, deliberately
+	// using version numbers of differing digit widths (9 vs 10 vs 100) so a
+	// whole-filename sort would misorder them relative to a timestamp sort.
+	versions := []int{9, 10, 100, 11, 12, 13, 14}
+	var seeded []string
+	for i, v := range versions {
+		ts := fmt.Sprintf("202601%02d-000000", i+1)
+		name := fmt.Sprintf("attn-premigration-%d-%s.db", v, ts)
+		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("fake"), 0644); err != nil {
+			t.Fatalf("seed premigration file %s: %v", name, err)
+		}
+		seeded = append(seeded, name)
+	}
+	// oldest-first by index/timestamp: seeded[0]..seeded[6]
+
+	// A rotating backup must never be touched by the premigration prune.
+	rotatingName := backupNamePrefix + "20260101-000000" + backupNameSuffix
+	if err := os.WriteFile(filepath.Join(backupDir, rotatingName), []byte("fake"), 0644); err != nil {
+		t.Fatalf("seed rotating file: %v", err)
+	}
+
+	// Force migrateDB down its "pending migrations" path against a real
+	// file, same technique as TestMigrateDB_PreMigrationBackup.
+	latest := latestSchemaVersion()
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version = ?`, latest); err != nil {
+		t.Fatalf("unrecord latest migration: %v", err)
+	}
+	if err := migrateDB(s.db, dbPath); err != nil {
+		t.Fatalf("migrateDB error: %v", err)
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatalf("read backups dir: %v", err)
+	}
+
+	var premigration []string
+	sawRotating := false
+	for _, e := range entries {
+		if e.Name() == rotatingName {
+			sawRotating = true
+			continue
+		}
+		if strings.HasPrefix(e.Name(), premigrationNamePrefix) {
+			premigration = append(premigration, e.Name())
+		}
+	}
+
+	if !sawRotating {
+		t.Fatal("rotating backup was removed by premigration prune; it must be untouched")
+	}
+
+	// One new premigration snapshot was written by migrateDB itself, so the
+	// total before prune is len(seeded)+1 = 8; after capping to
+	// backupPremigrationKeep = 5, exactly 5 must remain.
+	if len(premigration) != backupPremigrationKeep {
+		t.Fatalf("premigration snapshots after prune = %d, want %d (%v)", len(premigration), backupPremigrationKeep, premigration)
+	}
+
+	// The oldest 3 of the 7 seeded files must be gone (8 total - 5 kept = 3
+	// removed, and the new snapshot's timestamp sorts after all seeded ones).
+	for _, name := range seeded[:3] {
+		if _, err := os.Stat(filepath.Join(backupDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("expected oldest premigration file %s to be pruned, stat err = %v", name, err)
+		}
+	}
+	// The newest 4 of the 7 seeded files must survive.
+	for _, name := range seeded[3:] {
+		if _, err := os.Stat(filepath.Join(backupDir, name)); err != nil {
+			t.Fatalf("expected premigration file %s to survive prune: %v", name, err)
+		}
 	}
 }
