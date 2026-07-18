@@ -403,8 +403,12 @@ func TestAcquireDaemonLock_HeldByAnotherProcess(t *testing.T) {
 		t.Fatalf("flock pid file: %v", err)
 	}
 
-	if _, err := acquireDaemonLock(pidPath); err == nil {
+	_, err = acquireDaemonLock(pidPath)
+	if err == nil {
 		t.Fatal("expected acquireDaemonLock to refuse while another fd holds the flock")
+	}
+	if !strings.Contains(err.Error(), "daemon is running") {
+		t.Fatalf("expected EWOULDBLOCK contention to be classified as \"daemon is running\", got: %v", err)
 	}
 
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN); err != nil {
