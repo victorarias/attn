@@ -497,6 +497,20 @@ export function resolveEditorTileRoot(
   return trimmed;
 }
 
+// Resolve the workspace record for a bare active-workspace id, for callers
+// that need to trust the record's locality (localWorkspaceDirectory). The
+// active-workspace selection carries no endpoint identity, so when the same
+// id names both a local and a remote twin we cannot know which one is
+// actually active — fail closed (undefined) rather than adopt the local
+// twin's directory for a workspace that may be the remote one.
+export function soleWorkspaceForId<T extends { id: string }>(
+  workspaces: ReadonlyArray<T>,
+  workspaceId: string,
+): T | undefined {
+  const matches = workspaces.filter((w) => w.id === workspaceId);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 // localWorkspaceDirectory gates a workspace's directory to the local
 // filesystem, defaulting to locked (undefined) until locality is positively
 // proven — not the other way around. None of the sendFs* calls (sendFsIndex,
@@ -515,9 +529,9 @@ export function resolveEditorTileRoot(
 //
 // Returns directory only when the workspace exists and its endpoint_id is
 // absent/empty (local). Callers doing an id-based lookup across a workspace
-// list that may contain duplicate-id remote twins should filter by
-// !endpoint_id themselves before calling this (see the duplicate-id find in
-// App.tsx) — this function trusts whatever workspace record it's handed.
+// list that may contain duplicate-id remote twins should resolve the record
+// with soleWorkspaceForId first (see App.tsx handleOpenNotebookTile) — this
+// function trusts whatever workspace record it's handed.
 export function localWorkspaceDirectory(
   workspace: { directory?: string | null; endpoint_id?: string | null } | undefined,
 ): string | undefined {

@@ -61,7 +61,7 @@ import {
 import { persistExcludedGridSessions, readExcludedGridSessions } from './components/grid/gridMembership';
 import type { HiddenGridSession } from './components/grid/GridHiddenSessions';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
-import { hasPane, workspaceSnapshotFromDaemonWorkspace, resolveEditorTileRoot, localWorkspaceDirectory, serializeNotebookTileParams, type TerminalSplitDirection } from './types/workspace';
+import { hasPane, workspaceSnapshotFromDaemonWorkspace, resolveEditorTileRoot, localWorkspaceDirectory, soleWorkspaceForId, serializeNotebookTileParams, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -1985,10 +1985,13 @@ sendFetchPRDetails,
     const workspaceId = activeWorkspaceIdRef.current;
     if (!workspaceId) return;
     const tileId = `notebook-tile-${crypto.randomUUID()}`;
-    // endpoint-aware find: raw workspace ids can repeat across a remote twin
-    // mirrored by the hub, so filter to the local record before trusting its
-    // directory (see localWorkspaceDirectory).
-    const workspace = daemonWorkspacesRef.current.find((w) => w.id === workspaceId && !w.endpoint_id);
+    // Duplicate ids across endpoints are unresolvable from a bare active id
+    // (activeWorkspaceIdRef carries no endpoint identity), so any twin
+    // ambiguity forfeits the workspace-dir default — the tile falls back to
+    // the Notebook root instead of risking adopting a remote twin's
+    // directory. localWorkspaceDirectory still rejects a sole-but-remote
+    // record on top of this.
+    const workspace = soleWorkspaceForId(daemonWorkspacesRef.current, workspaceId);
     const localDirectory = localWorkspaceDirectory(workspace);
     const effectiveNotebookRoot = settings['notebook.root.effective'] || '';
     const root = resolveEditorTileRoot(localDirectory, effectiveNotebookRoot);
