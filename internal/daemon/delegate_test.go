@@ -167,11 +167,17 @@ func TestChiefOfStaffDelegateBindsTicketAndPrompt(t *testing.T) {
 		strings.Contains(prompt, "dispatch ") {
 		t.Fatalf("tracked initial prompt = %q", prompt)
 	}
-	// The agent must not close a ticket on its own — completing is gated on the user.
-	if !strings.Contains(prompt, "ask the user to confirm") {
-		t.Fatalf("tracked initial prompt missing confirm-before-complete guidance = %q", prompt)
+	// Completion follows strong terminal evidence, not a mandatory confirmation
+	// ritual; implementation finished while review remains maps to in-review.
+	for _, expected := range []string{"strong terminal evidence", "user accepted the work", "requested PR merged", "ready_for_review"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("tracked initial prompt missing evidence-based completion guidance %q: %q", expected, prompt)
+		}
 	}
-	for _, expected := range []string{"ticket attach --file", "returned Notebook paths are canonical", "meaningful edits, renames, or deletions"} {
+	if strings.Contains(prompt, "ask the user to confirm") {
+		t.Fatalf("tracked initial prompt retained mandatory confirmation gate: %q", prompt)
+	}
+	for _, expected := range []string{"ticket attach-plan --file", "--scope <affected-component>", "committed repository plan stays canonical in Git", "never deletes a tracked", "meaningful edits, renames, or deletions"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("tracked initial prompt missing %q: %q", expected, prompt)
 		}

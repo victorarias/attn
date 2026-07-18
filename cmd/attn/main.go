@@ -659,7 +659,7 @@ func hasHelpFlag(args []string) bool {
 }
 
 // runTicket routes `attn ticket <command>`: `status` (the agent's forward channel
-// onto its own bound ticket), `inbox`, `attach`, `new` (mint a standalone, unbound
+// onto its own bound ticket), `inbox`, `attach`, `attach-plan`, `new` (mint a standalone, unbound
 // backlog ticket without delegating), and `comment` (post a one-shot note onto any
 // ticket by id).
 func runTicket() {
@@ -699,6 +699,12 @@ func runTicket() {
 			return
 		}
 		runTicketAttach(os.Args[3:])
+	case "attach-plan":
+		if hasHelpFlag(os.Args[3:]) {
+			writeTicketHelp(os.Stdout)
+			return
+		}
+		runTicketAttachPlan(os.Args[3:])
 	case "new":
 		if hasHelpFlag(os.Args[3:]) {
 			writeTicketHelp(os.Stdout)
@@ -1543,6 +1549,14 @@ commands:
         [--state <work-state>] [--comment <text>] [--session <id>] [--json]
 		copy artifact files into a ticket's canonical Notebook directory,
         record one durable attachment, and optionally change ticket state
+  attach-plan --file <path> [--scope <path>]
+        [--authority auto|repository|notebook] [--ticket <id>]
+        [--state <work-state>] [--comment <text>] [--session <id>] [--json]
+        choose one canonical home for a Markdown plan or design: keep committed
+        repository plans in Git and attach a Notebook reference, or promote an
+        untracked staging file into the Notebook and retire the verified source;
+        use --scope for the affected component in a monorepo; a byte-identical
+        legacy Notebook copy is retired when replaced by a repository reference
   new --title <t> [--description <d>] [--id <slug>] [--session <id>] [--json]
         create an unbound backlog ticket in todo (no agent, no session)
   comment <ticket-id> --message <text> [--session <id>] [--json]

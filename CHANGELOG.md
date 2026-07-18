@@ -35,6 +35,23 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   with a switcher (workspace / Notebook / browse), and ⌘P fuzzy-finds across
   the whole open root. Notebook-only affordances — backlinks and send-to-chief
   — still appear only when you're browsing your actual Notebook.
+- **Delegated plans now have one explicit source of truth.** `attn ticket
+  attach-plan` keeps committed plans in repositories that already document work in
+  Git and adds a provenance reference to the ticket; otherwise it promotes the plan
+  into the Notebook and retires the verified untracked staging file. Monorepo scopes
+  can be named explicitly, tracked files are never deleted automatically, and
+  byte-identical copies from the old lifecycle are retired during migration while
+  divergent copies are preserved.
+- **Ticket completion now follows clear outcome evidence instead of a confirmation
+  ritual.** Agents may complete work that Victor accepted, whose requested PR
+  merged, or that has an equivalent objective terminal signal; finished work still
+  awaiting review remains in review.
+
+### Fixed
+- **Switching profiles from inside attn no longer keeps talking to the inherited
+  daemon.** `attn profile-env` clears explicit socket and resource overrides before
+  selecting the profile, so the printed profile and the daemon receiving commands
+  cannot silently disagree.
 
 ## [2026-07-16]
 

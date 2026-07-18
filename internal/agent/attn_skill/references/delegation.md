@@ -27,9 +27,10 @@ also arm a Monitor on `attn ticket inbox --watch` to consume updates sooner. Ord
 delegation needs none of that.
 
 For a chief-tracked delegation that returns a durable plan, read the ticket before
-continuing: `attn ticket show <ticket-id>` lists the files currently in
-the ticket's Notebook directory. Pass those canonical paths in follow-on briefs so
-the next agent updates the same plan instead of creating a conversational copy.
+continuing. `attn ticket show <ticket-id>` lists its Notebook artifacts. If one is a
+repository-reference card, pass its Git path, branch, and introducing commit in the
+follow-on brief and say that Git remains canonical. Otherwise pass the canonical
+Notebook path. The next agent edits that authority instead of creating a copy.
 
 ## Brief Workflow
 

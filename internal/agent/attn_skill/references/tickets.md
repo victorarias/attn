@@ -36,35 +36,50 @@ How much to prescribe, what "done" is, and who reviews all change with the kind 
 | refactor / migration | transform complete, behavior preserved | hand over before/after and invariants | here you *do* prescribe; list the behaviors that must survive | the user, lighter |
 | prototype | a decision or a feel; throwaway | hand over the thing and learning when durable | the question being de-risked; tests optional | informal |
 
-Deliverable type also predicts the terminal status: research and prose often go straight
-to **done** (the artifact is the proof); code lands in **in review** because someone else
-validates it.
+Deliverable type also predicts the terminal status, but evidence decides it. Use
+**done** when the requested outcome has strong terminal evidence and no review or
+decision remains — for example, Victor accepted it or the requested PR merged. Use
+**in review** when implementation is finished but acceptance or another decision is
+still pending. Research and prose may therefore go straight to done when the accepted
+artifact is itself the proof; unreviewed code normally lands in review.
 
 ## Handing over artifacts
 
-`attn ticket attach` is the durable producer-to-ticket operation:
+For a Markdown plan or design, use the canonical-source operation:
 
-    "$ATTN_WRAPPER_PATH" ticket attach \
+    "$ATTN_WRAPPER_PATH" ticket attach-plan \
       --file docs/plans/design.md \
-      --file docs/plans/rollout.md \
+      --scope services/catalog \
       --ticket <ticket-id> \
       --state ready_for_review \
       --comment "Decision context for the chief."
 
 - Omit `--ticket` to use your own bound ticket; include it to target any known
   ticket, matching `ticket status --ticket` and `ticket comment`.
-- Repeat `--file` to submit several files in one attachment.
+- `--authority auto` is the default. It keeps a committed plan in Git when the
+  applicable scope has a repository documentation convention, attaching a Notebook
+  reference with path, branch, and introducing commit. Otherwise it promotes the
+  plan into the Notebook and retires its verified untracked staging source.
+- When a new repository reference replaces an older copied attachment, a
+  byte-identical legacy Notebook copy is retired and recorded on the ticket. A
+  divergent copy is preserved for explicit reconciliation.
+- In a monorepo, `--scope` must name the affected component so unrelated sibling
+  documentation does not establish the convention.
+- Explicit user or repository guidance wins. Record it with `--authority repository`
+  or `--authority notebook` when needed. A tracked file is never deleted implicitly.
 - `--state` uses the reporting vocabulary: `in_progress`, `needs_input`,
   `ready_for_review`, `completed`, or `failed`.
 - `--comment` is short decision context. Put the full reasoning in the Markdown.
-- The receipt's Notebook paths are canonical. Current artifacts are whatever
-  regular `.md` files exist directly in `tickets/<ticket-id>/` when the ticket is
-  read.
-- Retrying an identical attachment returns its existing receipt. A destination with
-  different bytes is never overwritten; choose a new filename and retry.
+- The receipt names the authority. Edit the referenced Git file for repository-owned
+  plans; edit the returned Notebook file for Notebook-owned plans.
 
-After attaching, edit, rename, or delete the canonical files with ordinary file
-tools. Report meaningful changes on the ticket so participants know to re-read it.
+Use `attn ticket attach` for other artifacts and deliberate snapshots. It accepts
+repeatable `--file` flags, copies files into the ticket's Notebook directory, and
+does not retire the sources. A same-name destination with different bytes is never
+overwritten.
+
+After attaching, edit only the canonical source. Report meaningful changes on the
+ticket so participants know to re-read it.
 
 ## Creating a ticket
 
