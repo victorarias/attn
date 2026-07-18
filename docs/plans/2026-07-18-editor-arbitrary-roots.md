@@ -76,10 +76,10 @@ directory. The storage concept (keeper, journal, knowledge base) stays bound to
 - [x] PR6 frontend (#588): off-root affordance gating, Editor labels + settings copy,
       changelog, packaged-app bridge-only scenario (editor over a workspace
       root)
-- [ ] PR7 daemon+frontend: endpoint_id on protocol.Workspace (populated for
+- [x] PR7 daemon+frontend (#590): endpoint_id on protocol.Workspace (populated for
       hub remote workspaces) so localWorkspaceDirectory can restore the
       workspace-dir default for sessionless local pinned workspaces
-      (fast-follow committed in PR #585 review) (this PR)
+      (fast-follow committed in PR #585 review)
 
 ## Open Questions
 
