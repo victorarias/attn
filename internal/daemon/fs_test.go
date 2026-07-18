@@ -653,6 +653,102 @@ func TestFsCommandsRejectInvalidRoots(t *testing.T) {
 	}
 }
 
+// fsdoc.Store deliberately permits symlinked roots, so the data-dir exclusion
+// in normalizeExternalRoot cannot be a purely lexical comparison: a root that
+// LOOKS external but is actually a symlink into config.DataDir() (or a subdir
+// of it) must still be rejected — otherwise fs_delete could reach attn.db
+// through the alias. Covers both the read-only path (fs_list) and the
+// mutating path (fs_delete), and asserts the delete never touches the data
+// dir file.
+func TestFsCommandsRejectSymlinkedRootIntoDataDir(t *testing.T) {
+	d := newFsDaemon(t)
+
+	sentinel := filepath.Join(config.DataDir(), "attn.db")
+	if err := os.WriteFile(sentinel, []byte("sqlite-ish"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Symlink directly at the data dir.
+	linkDir := t.TempDir()
+	directLink := filepath.Join(linkDir, "editor-root")
+	if err := os.Symlink(config.DataDir(), directLink); err != nil {
+		t.Fatal(err)
+	}
+
+	client := trustedFsClient(4)
+	d.sendFsListWSResult(client, "l1", "", directLink)
+	var listRes protocol.FsListResultMessage
+	readNotebookWSEvent(t, client.send, &listRes)
+	if listRes.Success || listRes.Error == nil {
+		t.Fatalf("fs_list(symlink into data dir) = %+v, want failure", listRes)
+	}
+	if !strings.Contains(*listRes.Error, "outside the attn data dir") {
+		t.Fatalf("fs_list(symlink into data dir) error = %q, want it to mention the data dir exclusion", *listRes.Error)
+	}
+
+	deleteClient := trustedFsClient(4)
+	d.sendFsDeleteWSResult(deleteClient, "d1", "attn.db", directLink)
+	var deleteRes protocol.FsDeleteResultMessage
+	readNotebookWSEvent(t, deleteClient.send, &deleteRes)
+	if deleteRes.Success || deleteRes.Error == nil {
+		t.Fatalf("fs_delete(symlink into data dir) = %+v, want failure", deleteRes)
+	}
+	if !strings.Contains(*deleteRes.Error, "outside the attn data dir") {
+		t.Fatalf("fs_delete(symlink into data dir) error = %q, want it to mention the data dir exclusion", *deleteRes.Error)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("fs_delete(symlink into data dir) must not touch the data dir, stat err = %v", err)
+	}
+
+	// Symlink to a SUBDIR of the data dir (nested alias) must also be rejected.
+	subdir := filepath.Join(config.DataDir(), "workers")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nestedLink := filepath.Join(linkDir, "editor-root-nested")
+	if err := os.Symlink(subdir, nestedLink); err != nil {
+		t.Fatal(err)
+	}
+	nestedClient := trustedFsClient(4)
+	d.sendFsListWSResult(nestedClient, "l2", "", nestedLink)
+	var nestedRes protocol.FsListResultMessage
+	readNotebookWSEvent(t, nestedClient.send, &nestedRes)
+	if nestedRes.Success || nestedRes.Error == nil {
+		t.Fatalf("fs_list(symlink into data dir subdir) = %+v, want failure", nestedRes)
+	}
+	if !strings.Contains(*nestedRes.Error, "outside the attn data dir") {
+		t.Fatalf("fs_list(symlink into data dir subdir) error = %q, want it to mention the data dir exclusion", *nestedRes.Error)
+	}
+}
+
+// A symlink to a normal external directory (not aliasing the data dir) must
+// keep working: the canonicalization added for the data-dir exclusion check
+// must not become a general "no symlinked roots" ban. macOS matters here
+// specifically because t.TempDir() lives under /var/folders, itself reached
+// via a /private symlink — so this exercises the exact canonicalize-both-sides
+// path the fix relies on, not just a synthetic case.
+func TestFsCommandsAcceptLegitimateSymlinkedRoot(t *testing.T) {
+	d := newFsDaemon(t)
+
+	target := t.TempDir()
+	linkParent := t.TempDir()
+	link := filepath.Join(linkParent, "editor-root")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	client := trustedFsClient(4)
+	d.sendFsWriteWSResult(client, "w1", "note.md", "hello", "", link)
+	var res protocol.FsWriteResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.Result == nil || res.Result.Conflict {
+		t.Fatalf("fs_write(legitimate symlinked root) = %+v, want success", res)
+	}
+	if _, err := os.Stat(filepath.Join(target, "note.md")); err != nil {
+		t.Fatalf("file did not land under the symlink target: %v", err)
+	}
+}
+
 // An explicit root turns the fs surface into an arbitrary-file API, so it must be
 // gated on the caller being the authenticated attn app itself — not just any
 // accepted local WebSocket client (a browser tab, or any other local process that

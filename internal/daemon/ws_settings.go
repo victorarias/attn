@@ -513,7 +513,48 @@ func normalizeExternalRoot(value string) (string, error) {
 	if clean == dataDir || strings.HasPrefix(clean, dataDir+string(filepath.Separator)) {
 		return "", fmt.Errorf("must be outside the attn data dir (%s)", dataDir)
 	}
+	// fsdoc.Store deliberately permits symlinked roots, so a purely lexical
+	// comparison above can be defeated by a symlink into the data dir (e.g. a
+	// root under /tmp whose target is ~/.attn). Re-check on canonicalized
+	// forms; the canonical value is used ONLY for this comparison — we still
+	// return the original cleaned (non-canonical) path below so legitimate
+	// symlinked roots keep their own spelling.
+	canonRoot := canonicalizeForComparison(clean)
+	canonData := canonicalizeForComparison(dataDir)
+	if canonRoot == canonData || strings.HasPrefix(canonRoot, canonData+string(filepath.Separator)) {
+		return "", fmt.Errorf("must be outside the attn data dir (%s)", dataDir)
+	}
 	return clean, nil
+}
+
+// canonicalizeForComparison resolves path to its canonical form for
+// containment checks: symlinks in the deepest existing ancestor are resolved
+// and any not-yet-existing remainder is re-joined lexically. Used ONLY for
+// comparison against the (equally canonicalized) attn data dir — the returned
+// value is never handed to callers as the root, so legitimate symlinked roots
+// keep their original spelling.
+func canonicalizeForComparison(path string) string {
+	clean := filepath.Clean(path)
+	ancestor := clean
+	var remainder []string
+	for {
+		if _, err := os.Stat(ancestor); err == nil {
+			break
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			// Reached the root without finding an existing ancestor; fall back
+			// to the lexically cleaned input.
+			return clean
+		}
+		remainder = append([]string{filepath.Base(ancestor)}, remainder...)
+		ancestor = parent
+	}
+	resolved, err := filepath.EvalSymlinks(ancestor)
+	if err != nil {
+		return clean
+	}
+	return filepath.Join(append([]string{resolved}, remainder...)...)
 }
 
 // validateNotebookCronFrequency accepts an empty value (use the default) or a
