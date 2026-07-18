@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import FocusTrap from 'focus-trap-react';
 import type { FsEntry, FsExistsResult, FsReadAssetResult, FsReadResult, FsWriteResult, NotebookEntry, NotebookSendToChiefResult } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
@@ -56,12 +56,16 @@ export interface NotebookSurfaceProps {
   // Only consulted for a non-direct src (not http(s)/data:/protocol-relative).
   readAsset: (path: string) => Promise<FsReadAssetResult>;
   // Backlinks ("Linked from") for a markdown note. Notebook-specific (walks .md link
-  // graphs), so it is only consulted for .md files.
-  backlinksNotebook: (path: string) => Promise<NotebookEntry[]>;
+  // graphs), so it is only consulted for .md files. Optional: a caller that omits it
+  // (an off-root tile — see NotebookTile) gets no backlinks rail at all; the surface
+  // stays root-unaware and simply renders the affordances it's handed.
+  backlinksNotebook?: (path: string) => Promise<NotebookEntry[]>;
   // Hand a highlighted selection to the daemon to deliver to the chief of staff
   // (appends to the chief inbox note + best-effort live PTY nudge). The UI never
   // messages the chief directly. sourcePath is the note the selection came from.
-  sendToChief: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
+  // Optional: a caller that omits it (an off-root tile) gets no floating "Send to
+  // chief" button at all.
+  sendToChief?: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
   // Increments whenever an fs_changed event arrives, so an open browser re-lists the
   // tree (handled by FileTree) and reloads the open file (covering agent and external
   // writes).
@@ -90,9 +94,23 @@ const AUTOSAVE_DELAY_MS = 700;
 // Outcome of persisting the buffer. On-demand callers (navigate/close) MUST react
 // to 'conflict'/'error' — a CAS conflict cannot be silently dropped, or the user's
 // edits vanish behind a navigation/close without the banner ever showing.
-type PersistOutcome = 'saved' | 'conflict' | 'error' | 'noop';
+export type PersistOutcome = 'saved' | 'conflict' | 'error' | 'noop';
 
-export function NotebookSurface({
+// Imperative escape hatch for callers that need to flush the dirty buffer AHEAD
+// of a state transition they own (e.g. NotebookTile's root switcher, which must
+// persist the outgoing root's edit before swapping tileParams — see
+// WorkspaceDockTile.tsx). Everything else about persistence stays internal;
+// this is the one seam.
+export interface NotebookSurfaceHandle {
+  // Persists the dirty buffer (if any) against its synced base, via the same
+  // persist path the navigate/close flush already uses. Resolves 'noop' when
+  // there's nothing dirty (already in sync). On 'conflict' or 'error' the
+  // surface's own banner is already showing — the caller must abort whatever
+  // transition prompted the flush rather than proceeding past the failure.
+  flushPendingSave: () => Promise<PersistOutcome>;
+}
+
+export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurfaceProps>(function NotebookSurface({
   variant,
   active,
   initialPath,
@@ -108,7 +126,7 @@ export function NotebookSurface({
   changeSignal = 0,
   listFiles,
   chiefActive,
-}: NotebookSurfaceProps) {
+}: NotebookSurfaceProps, ref) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [note, setNote] = useState<FsReadResult | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
@@ -326,7 +344,8 @@ export function NotebookSurface({
     }
     // Backlinks are a markdown-note concept; only walk the link graph for .md files.
     // A backlinks failure must not blank the file — it just yields no backlinks.
-    if (isMarkdownPath(path)) {
+    // Absent (an off-root tile) is a no-op: no fetch, backlinks stay empty.
+    if (isMarkdownPath(path) && backlinksNotebook) {
       setBacklinksLoading(true);
       void backlinksNotebook(path)
         .then((entries) => {
@@ -445,6 +464,10 @@ export function NotebookSurface({
   // the latest persist without a forward declaration.
   persistRef.current = persist;
 
+  useImperativeHandle(ref, () => ({
+    flushPendingSave: () => persistRef.current?.() ?? Promise.resolve('noop'),
+  }), []);
+
   // Discard the local buffer and reload the current on-disk version (the conflict
   // reconcile "reload from disk" path).
   const reloadFromDisk = useCallback(async () => {
@@ -513,7 +536,8 @@ export function NotebookSurface({
     setDraft(fresh.content);
     setNoteError(null);
     // Content moved, so links may have too — re-walk backlinks for a markdown note.
-    if (isMarkdownPath(path)) {
+    // Absent (an off-root tile) is a no-op: no fetch, backlinks stay empty.
+    if (isMarkdownPath(path) && backlinksNotebook) {
       setBacklinksLoading(true);
       void backlinksNotebook(path)
         .then((entries) => {
@@ -533,7 +557,7 @@ export function NotebookSurface({
   // appends it to the chief inbox note and best-effort nudges a live chief; the
   // UI only surfaces the outcome and never messages the chief directly.
   const sendSelectionToChief = useCallback(async () => {
-    if (!chiefSel) return;
+    if (!chiefSel || !sendToChief) return;
     const path = selectedPathRef.current ?? undefined;
     // Freeze the load token (as writeBuffer does) so an outcome that resolves after
     // the user navigated away doesn't flash on the now-selected file.
@@ -761,10 +785,12 @@ export function NotebookSurface({
   }, [loadFile]);
 
   // The editor reports its current selection (or null when collapsed); float the
-  // "Send to chief" action over it.
+  // "Send to chief" action over it. Inert when sendToChief is absent (an off-root
+  // tile) — never tracks a selection, so the floating button can never render.
   const handleSelectionChange = useCallback((selection: LiveSelection | null) => {
+    if (!sendToChief) return;
     setChiefSel(selection);
-  }, []);
+  }, [sendToChief]);
 
   // Resolve an inline image's src for the live editor's image widget: strip any
   // #fragment/?query tail (notebookLinkPath — same rule brokenLinks uses), then read
@@ -799,7 +825,10 @@ export function NotebookSurface({
   const showBinaryPlaceholder = selectedPath !== null && selectedKind === 'binary';
   // The context rail (outline + backlinks) is a markdown-document affordance; a text
   // or binary file shows neither, so it keeps the two-pane layout (no empty rail).
-  const showRail = selectedKind === 'markdown' && !!note;
+  // Also gated on backlinksNotebook being provided: an off-root tile (NotebookTile)
+  // omits it, and the rail's Backlinks section has no other source, so the whole
+  // rail (Outline included) is withheld rather than showing a half-capable rail.
+  const showRail = selectedKind === 'markdown' && !!note && !!backlinksNotebook;
   // A single live save indicator (the error itself is surfaced by its own banner).
   const saveStatus = saveError
     ? null
@@ -1079,7 +1108,7 @@ export function NotebookSurface({
     </div>
   );
 
-  const floatingChief = chiefSel ? (
+  const floatingChief = chiefSel && sendToChief ? (
     <button
       type="button"
       className="notebook-browser-send-chief"
@@ -1159,7 +1188,7 @@ export function NotebookSurface({
       </FocusTrap>
     </div>
   );
-}
+});
 
 function basename(path: string): string {
   const name = path.slice(path.lastIndexOf('/') + 1);

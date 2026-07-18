@@ -2008,9 +2008,9 @@ sendFetchPRDetails,
   const actionMenuItems = useMemo<ActionMenuItem[]>(() => [
     {
       id: 'notebook-tile',
-      title: 'Open Notebook tile',
-      description: 'Dock the notebook beside your terminals in this workspace',
-      keywords: ['notebook', 'tile', 'knowledge', 'journal', 'dock', 'split'],
+      title: 'Open Editor tile',
+      description: 'Dock an editor beside your terminals, opened on any folder',
+      keywords: ['notebook', 'editor', 'tile', 'knowledge', 'journal', 'dock', 'split'],
       icon: <ContextActionIcon />,
       shortcut: [shortcutTokens('notebook.openTile')],
       run: handleOpenNotebookTile,

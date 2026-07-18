@@ -43,9 +43,10 @@ export interface NotebookSurfaceDaemon {
 // they stay bound to the notebook root exactly as before regardless of the
 // `root` argument here. Backlinks only exist between notebook notes and "send
 // to chief" appends to the notebook inbox, so widening either to an arbitrary
-// filesystem root is out of scope and forbidden; UI for them on a
-// non-notebook-rooted tile is gated off separately (see the arbitrary-roots
-// plan's authorization-boundary note). listFiles is DIFFERENT: it now sources
+// filesystem root is out of scope and forbidden; NotebookTile omits both
+// capabilities (passes undefined) when its tile is bound to an off-root
+// (non-notebook) root, so NotebookSurface never renders their UI there (see
+// the arbitrary-roots plan's authorization-boundary note). listFiles is DIFFERENT: it now sources
 // fs_index, which the daemon resolves through the same root-scoped chokepoint
 // as every other fs_* command, so it follows `root` like listDir/readFile/etc.
 export type MakeNotebookSurfaceDaemon = (root?: string) => NotebookSurfaceDaemon;

@@ -19,10 +19,24 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 // The root picker's body (NotebookTile → NotebookSurface, CodeMirror-backed)
 // is exercised elsewhere (NotebookTile.test.tsx, NotebookBrowser.test.tsx);
-// stub it here so these tests exercise only the header switcher.
-vi.mock('../NotebookSurface', () => ({
-  NotebookSurface: () => <div data-testid="notebook-surface" />,
+// stub it here so these tests exercise only the header switcher. NotebookTile
+// forwards its ref straight through to NotebookSurface (see NotebookTile.tsx),
+// so this stub is also the fake ref handle the root-switcher flush-then-switch
+// tests below drive via notebookSurfaceStub.flushPendingSave.
+const notebookSurfaceStub = vi.hoisted(() => ({
+  flushPendingSave: vi.fn(async (): Promise<'saved' | 'conflict' | 'error' | 'noop'> => 'noop'),
 }));
+vi.mock('../NotebookSurface', async () => {
+  const { forwardRef, useImperativeHandle } = await import('react');
+  return {
+    NotebookSurface: forwardRef(function MockNotebookSurface(_props: unknown, ref: React.Ref<{ flushPendingSave: () => Promise<string> }>) {
+      useImperativeHandle(ref, () => ({
+        flushPendingSave: notebookSurfaceStub.flushPendingSave,
+      }), []);
+      return <div data-testid="notebook-surface" />;
+    }),
+  };
+});
 
 // WorkspaceDockTile reads effectiveNotebookRoot for its (notebook-only) root
 // switcher unconditionally via useNotebookSurfaceContext — the real app always
@@ -231,6 +245,10 @@ describe('deriveTileTitle', () => {
     expect(deriveTileTitle({ type: 'tile', tileId: 'tile-x', tileKind: 'markdown' }, undefined)).toBe('markdown');
   });
 
+  it('falls back to "Editor" for a notebook tile with no open file yet', () => {
+    expect(deriveTileTitle({ type: 'tile', tileId: 'tile-notebook', tileKind: 'notebook' }, undefined)).toBe('Editor');
+  });
+
   it('uses the host as the title for a browser tile', () => {
     expect(deriveTileTitle({
       type: 'tile',
@@ -408,6 +426,8 @@ describe('WorkspaceDockTile browser integration', () => {
 describe('WorkspaceDockTile notebook root switcher', () => {
   beforeEach(() => {
     vi.mocked(open).mockReset();
+    notebookSurfaceStub.flushPendingSave.mockReset();
+    notebookSurfaceStub.flushPendingSave.mockResolvedValue('noop');
   });
 
   function renderNotebookTile(opts: {
@@ -475,10 +495,12 @@ describe('WorkspaceDockTile notebook root switcher', () => {
 
     fireEvent.change(picker(), { target: { value: '' } });
 
-    expect(onUpdateParams).toHaveBeenCalledWith(serializeNotebookTileParams({ root: undefined }));
+    // The handler now awaits flushPendingSave() (PR #588 second review round)
+    // before calling onUpdateParams, so the call lands after a microtask.
+    await waitFor(() => expect(onUpdateParams).toHaveBeenCalledWith(serializeNotebookTileParams({ root: undefined })));
   });
 
-  it('selecting the workspace directory writes it as the root without the open path', () => {
+  it('selecting the workspace directory writes it as the root without the open path', async () => {
     const { onUpdateParams } = renderNotebookTile({
       tileParams: serializeNotebookTileParams({ root: undefined, path: 'notes.md' }),
       workspaceDirectory: '/Users/victor/code/attn',
@@ -486,7 +508,9 @@ describe('WorkspaceDockTile notebook root switcher', () => {
 
     fireEvent.change(picker(), { target: { value: '/Users/victor/code/attn' } });
 
-    expect(onUpdateParams).toHaveBeenCalledWith(serializeNotebookTileParams({ root: '/Users/victor/code/attn' }));
+    // The handler now awaits flushPendingSave() (PR #588 second review round)
+    // before calling onUpdateParams, so the call lands after a microtask.
+    await waitFor(() => expect(onUpdateParams).toHaveBeenCalledWith(serializeNotebookTileParams({ root: '/Users/victor/code/attn' })));
   });
 
   it('Browse… persists the chosen directory as the root', async () => {
@@ -508,6 +532,56 @@ describe('WorkspaceDockTile notebook root switcher', () => {
     fireEvent.change(picker(), { target: { value: '__browse__' } });
 
     await waitFor(() => expect(open).toHaveBeenCalled());
+    expect(onUpdateParams).not.toHaveBeenCalled();
+  });
+
+  // PR #588 second review round: the header switcher must flush the outgoing
+  // root's dirty buffer (via NotebookTile's forwarded ref) BEFORE swapping
+  // tileParams, and abort the swap on a conflict/error rather than letting an
+  // edit vanish behind the root switch. NotebookSurface is stubbed above, and
+  // NotebookTile forwards its ref straight through to it, so
+  // notebookSurfaceStub.flushPendingSave is the fake ref handle here.
+  it('flushes the dirty buffer, then updates params, in that order, when flushPendingSave resolves "saved"', async () => {
+    const callOrder: string[] = [];
+    notebookSurfaceStub.flushPendingSave.mockImplementation(async () => {
+      callOrder.push('flush');
+      return 'saved';
+    });
+    const onUpdateParams = vi.fn(async (params: string) => {
+      callOrder.push(`params:${params}`);
+    });
+    renderNotebookTile({ workspaceDirectory: '/Users/victor/code/attn', onUpdateParams });
+
+    fireEvent.change(picker(), { target: { value: '/Users/victor/code/attn' } });
+
+    await waitFor(() => expect(onUpdateParams).toHaveBeenCalled());
+    expect(callOrder).toEqual([
+      'flush',
+      `params:${serializeNotebookTileParams({ root: '/Users/victor/code/attn' })}`,
+    ]);
+  });
+
+  it('never calls onUpdateParams when flushPendingSave resolves "conflict"', async () => {
+    notebookSurfaceStub.flushPendingSave.mockResolvedValue('conflict');
+    const { onUpdateParams } = renderNotebookTile({ workspaceDirectory: '/Users/victor/code/attn' });
+
+    fireEvent.change(picker(), { target: { value: '/Users/victor/code/attn' } });
+
+    await waitFor(() => expect(notebookSurfaceStub.flushPendingSave).toHaveBeenCalled());
+    // Give the (absent) params update a tick to fire before asserting it didn't.
+    await act(async () => { await Promise.resolve(); });
+    expect(onUpdateParams).not.toHaveBeenCalled();
+  });
+
+  it('never calls onUpdateParams via Browse… when flushPendingSave resolves "error"', async () => {
+    notebookSurfaceStub.flushPendingSave.mockResolvedValue('error');
+    vi.mocked(open).mockResolvedValue('/tmp/chosen-root');
+    const { onUpdateParams } = renderNotebookTile({ workspaceDirectory: '/Users/victor/code/attn' });
+
+    fireEvent.change(picker(), { target: { value: '__browse__' } });
+
+    await waitFor(() => expect(notebookSurfaceStub.flushPendingSave).toHaveBeenCalled());
+    await act(async () => { await Promise.resolve(); });
     expect(onUpdateParams).not.toHaveBeenCalled();
   });
 });

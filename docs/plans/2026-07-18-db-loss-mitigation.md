@@ -30,17 +30,20 @@ safety net.
 
 Follow-ups (rotation awareness — no infinite copies anywhere):
 
-- [ ] Cap pre-migration snapshots too. They are exempt from the keep-12 prune
-      today, which is unbounded over time. Prune to the last **5**
-      pre-migration snapshots (they only accrue one per migration, but
+- [x] Cap pre-migration snapshots too (#582). They are exempt from the
+      keep-12 prune today, which is unbounded over time. Prune to the last
+      **5** pre-migration snapshots (they only accrue one per migration, but
       "exempt" must not mean "immortal").
-- [ ] Restore path: `attn db restore <backup|latest>` — stop-daemon-safe copy
-      of a snapshot back into place (refuses while a daemon holds the DB), so
-      recovery is one command instead of an incident script.
-- [ ] Surfacing: expose last-successful-backup age (settings/status payload).
-      A backup loop that silently fails for weeks is a safety net that isn't
-      there; the app can show a warning when the newest snapshot is stale
-      (> 24h).
+- [x] Restore path (#582): `attn db restore <backup|latest>` — stop-daemon-safe
+      copy of a snapshot back into place (refuses while a daemon holds the
+      DB), so recovery is one command instead of an incident script.
+- [x] Surfacing (#582): expose last-successful-backup age (settings/status
+      payload). A backup loop that silently fails for weeks is a safety net
+      that isn't there; the app can show a warning when the newest snapshot
+      is stale (> 24h).
+
+pid-lock hardening follow-ups (orphan unlink-race regression, restore-lock
+error classification) landed via #586/#587.
 
 ## 2. Tooling: Tests Can Never Touch The Real Data Dir
 

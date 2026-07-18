@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
-import { NotebookSurface } from '../NotebookSurface';
+import { NotebookSurface, type NotebookSurfaceHandle } from '../NotebookSurface';
 
 // NotebookTile is the in-workspace shape of the Notebook: a `tile`-variant
 // NotebookSurface wired to the daemon via context. It reopens to `initialPath`
@@ -13,16 +13,22 @@ import { NotebookSurface } from '../NotebookSurface';
 // the daemon unconditionally, but nothing else is, so a tile is the one
 // deciding when it needs live updates for its root and dropping that
 // subscription when it stops needing them.
-export function NotebookTile({
-  initialPath,
-  root,
-  onOpenFile,
-}: {
+export const NotebookTile = forwardRef<NotebookSurfaceHandle, {
   initialPath: string | null;
   root?: string;
   onOpenFile: (path: string) => void;
-}) {
+}>(function NotebookTile({
+  initialPath,
+  root,
+  onOpenFile,
+}, ref) {
   const { makeDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch, connectionGeneration } = useNotebookSurfaceContext();
+
+  // Off-root: this tile is pinned to a filesystem root other than the notebook
+  // storage root. Notebook-only affordances (backlinks, send-to-chief) are
+  // gated off below — mirrors the same root-vs-notebook-root comparison the
+  // fs_watch effect uses (line ~46) so on-root/off-root agree everywhere.
+  const offRoot = !!root && root !== effectiveNotebookRoot;
 
   // fs_watch_result may normalize `root` (e.g. macOS resolving /tmp to
   // /private/tmp) — and fs_changed events for this subscription carry that
@@ -88,6 +94,23 @@ export function NotebookTile({
 
   return (
     <NotebookSurface
+      // Remount on root change: NotebookSurface's init effect only depends on
+      // `active`, so without a key change, switching roots via the header
+      // switcher leaves selectedPath/note/draft carrying over from the old
+      // root while the daemon rebinds underneath — the next autosave can then
+      // write the old document's buffer to the same relative path under the
+      // NEW root. Keying on `root` forces a fresh mount (fresh state, fresh
+      // init effect) on every root change.
+      //
+      // This is the RAW `root` prop, not effectiveRoot/resolvedRoot above:
+      // fs_watch_result can normalize the path (e.g. /tmp -> /private/tmp
+      // on macOS), and that normalization must never itself trigger a
+      // remount — only a real root change (a new raw prop value) should.
+      // The root switcher (WorkspaceDockTile) awaits flushPendingSave()
+      // BEFORE updating params, so the old instance persists to the old
+      // root before this key ever changes.
+      key={root ?? ''}
+      ref={ref}
       variant="tile"
       active
       initialPath={initialPath}
@@ -97,10 +120,10 @@ export function NotebookTile({
       writeFile={daemon.writeFile}
       existsFile={daemon.existsFile}
       readAsset={daemon.readAsset}
-      backlinksNotebook={daemon.backlinksNotebook}
-      sendToChief={daemon.sendToChief}
+      backlinksNotebook={offRoot ? undefined : daemon.backlinksNotebook}
+      sendToChief={offRoot ? undefined : daemon.sendToChief}
       changeSignal={daemon.changeSignal}
       listFiles={daemon.listFiles}
     />
   );
-}
+});

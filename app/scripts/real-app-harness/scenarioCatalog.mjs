@@ -48,6 +48,11 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-notebook-editor-undo'],
   },
   {
+    id: 'editor-workspace-root',
+    label: 'Editor tile over an arbitrary workspace root (off-root gating + positive control)',
+    command: ['pnpm', 'run', 'real-app:scenario-editor-workspace-root'],
+  },
+  {
     id: 'autoclose-on-exit',
     label: 'Auto-close on clean exit, keep failed exits',
     command: ['pnpm', 'run', 'real-app:scenario-autoclose-on-exit'],
