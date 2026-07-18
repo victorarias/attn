@@ -61,7 +61,7 @@ import {
 import { persistExcludedGridSessions, readExcludedGridSessions } from './components/grid/gridMembership';
 import type { HiddenGridSession } from './components/grid/GridHiddenSessions';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
-import { hasPane, workspaceSnapshotFromDaemonWorkspace, resolveEditorTileRoot, localWorkspaceDirectory, serializeNotebookTileParams, type TerminalSplitDirection } from './types/workspace';
+import { hasPane, workspaceSnapshotFromDaemonWorkspace, resolveEditorTileRoot, localWorkspaceDirectory, soleWorkspaceForId, serializeNotebookTileParams, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -1973,12 +1973,6 @@ sendFetchPRDetails,
   // default actually needs.
   const daemonWorkspacesRef = useRef<DaemonWorkspace[]>([]);
 
-  // Same reasoning as daemonWorkspacesRef: lets handleOpenNotebookTile read the
-  // current session list (to gate a workspace's directory to local-only, see
-  // localWorkspaceDirectory) without rebinding the callback on every session
-  // change.
-  const daemonSessionsRef = useRef<DaemonSession[]>([]);
-
   // Dock a fresh Notebook tile into the active workspace. A unique tile id every
   // time: the daemon treats a duplicate id as a move, so a shared id would just
   // relocate the first tile instead of opening a second. Defaults the tile's root
@@ -1991,8 +1985,14 @@ sendFetchPRDetails,
     const workspaceId = activeWorkspaceIdRef.current;
     if (!workspaceId) return;
     const tileId = `notebook-tile-${crypto.randomUUID()}`;
-    const workspace = daemonWorkspacesRef.current.find((w) => w.id === workspaceId);
-    const localDirectory = localWorkspaceDirectory(workspace?.directory, daemonSessionsRef.current, workspaceId);
+    // Duplicate ids across endpoints are unresolvable from a bare active id
+    // (activeWorkspaceIdRef carries no endpoint identity), so any twin
+    // ambiguity forfeits the workspace-dir default — the tile falls back to
+    // the Notebook root instead of risking adopting a remote twin's
+    // directory. localWorkspaceDirectory still rejects a sole-but-remote
+    // record on top of this.
+    const workspace = soleWorkspaceForId(daemonWorkspacesRef.current, workspaceId);
+    const localDirectory = localWorkspaceDirectory(workspace);
     const effectiveNotebookRoot = settings['notebook.root.effective'] || '';
     const root = resolveEditorTileRoot(localDirectory, effectiveNotebookRoot);
     void sendWorkspaceDockTile(workspaceId, tileId, 'notebook', {
@@ -2836,11 +2836,6 @@ sendFetchPRDetails,
   useEffect(() => {
     daemonWorkspacesRef.current = daemonWorkspaces;
   }, [daemonWorkspaces]);
-  // daemonSessionsRef mirrors daemonSessions for handleOpenNotebookTile — see
-  // its declaration for why a ref instead of a direct dependency.
-  useEffect(() => {
-    daemonSessionsRef.current = daemonSessions;
-  }, [daemonSessions]);
   useEffect(() => {
     if (view === 'session' && activeWorkspaceId) {
       sendWorkspaceSelected(activeWorkspaceId);
@@ -3646,7 +3641,7 @@ sendFetchPRDetails,
                   <SessionTerminalWorkspace
                     ref={setWorkspaceRef(workspace.id)}
                     workspaceId={workspace.id}
-                    workspaceDirectory={localWorkspaceDirectory(workspace.directory, daemonSessions, workspace.id)}
+                    workspaceDirectory={localWorkspaceDirectory({ directory: workspace.directory, endpoint_id: workspace.endpointId })}
                     workspaceSessions={workspace.sessions.map((entry) => ({
                       id: entry.id,
                       label: entry.label,

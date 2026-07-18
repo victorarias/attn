@@ -190,6 +190,12 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 	if got[0].ID != "ws-a" || got[1].ID != "ws-b" {
 		t.Fatalf("RemoteWorkspaces() ids = %q, %q, want ws-a, ws-b", got[0].ID, got[1].ID)
 	}
+	if got[0].EndpointID == nil || *got[0].EndpointID != first.ID {
+		t.Fatalf("RemoteWorkspaces()[0].EndpointID = %v, want %q", got[0].EndpointID, first.ID)
+	}
+	if got[1].EndpointID == nil || *got[1].EndpointID != second.ID {
+		t.Fatalf("RemoteWorkspaces()[1].EndpointID = %v, want %q", got[1].EndpointID, second.ID)
+	}
 
 	if endpointID, ok := manager.EndpointIDForSession("missing"); ok || endpointID != "" {
 		t.Fatalf("EndpointIDForSession(missing) = (%q, %v), want ('', false)", endpointID, ok)
@@ -220,6 +226,60 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 	got = manager.RemoteWorkspaces()
 	if len(got) != 1 || got[0].ID != "ws-b" {
 		t.Fatalf("RemoteWorkspaces() after clear = %+v, want only ws-b", got)
+	}
+}
+
+// TestManagerStampsEndpointIDOnIngest verifies the hub always overwrites
+// EndpointID with the ingesting endpoint's own id — never trusting a
+// remote-supplied value — for both replaceRemoteWorkspaces and
+// upsertRemoteWorkspace, and that stamping does not defeat the
+// workspaceLayoutsEqual change-detection short-circuit (re-ingesting an
+// identical workspace still reports no change).
+func TestManagerStampsEndpointIDOnIngest(t *testing.T) {
+	endpointStore := store.New()
+	first, err := endpointStore.AddEndpoint("gpu-box", "gpu", "")
+	if err != nil {
+		t.Fatalf("AddEndpoint(first) error = %v", err)
+	}
+
+	manager := NewManager(endpointStore, nil, nil, nil, nil)
+
+	workspace := protocol.Workspace{
+		ID:         "ws-a",
+		Title:      "GPU review",
+		Directory:  "/srv/repo",
+		Status:     protocol.WorkspaceStatusWorking,
+		EndpointID: protocol.Ptr("bogus-spoofed-id"),
+	}
+
+	if changed := manager.replaceRemoteWorkspaces(first.ID, []protocol.Workspace{workspace}); !changed {
+		t.Fatal("replaceRemoteWorkspaces reported no change on first ingest")
+	}
+	got := manager.RemoteWorkspace("ws-a")
+	if got == nil || got.EndpointID == nil || *got.EndpointID != first.ID {
+		t.Fatalf("RemoteWorkspace(ws-a).EndpointID = %v, want %q (bogus pre-set value must be overwritten)", got, first.ID)
+	}
+
+	// Re-ingesting the identical (still bogus-tagged) workspace must not
+	// report a change: stamping happens before the equality comparison, so
+	// stamped-vs-stamped still compares equal.
+	if changed := manager.replaceRemoteWorkspaces(first.ID, []protocol.Workspace{workspace}); changed {
+		t.Fatal("replaceRemoteWorkspaces reported a change re-ingesting an identical workspace")
+	}
+
+	// upsertRemoteWorkspace must also overwrite a spoofed EndpointID.
+	if changed := manager.upsertRemoteWorkspace(first.ID, protocol.Workspace{
+		ID:         "ws-c",
+		Title:      "Upserted",
+		Directory:  "/srv/repo2",
+		Status:     protocol.WorkspaceStatusIdle,
+		EndpointID: protocol.Ptr("also-bogus"),
+	}); !changed {
+		t.Fatal("upsertRemoteWorkspace reported no change")
+	}
+	upserted := manager.RemoteWorkspace("ws-c")
+	if upserted == nil || upserted.EndpointID == nil || *upserted.EndpointID != first.ID {
+		t.Fatalf("RemoteWorkspace(ws-c).EndpointID = %v, want %q (bogus pre-set value must be overwritten)", upserted, first.ID)
 	}
 }
 

@@ -4811,6 +4811,9 @@ type Workspace struct {
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
 
+	// EndpointID corresponds to the JSON schema field "endpoint_id".
+	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
+
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 

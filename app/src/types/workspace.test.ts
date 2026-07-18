@@ -9,6 +9,7 @@ import {
   getSplitDividers,
   hasPane,
   localWorkspaceDirectory,
+  soleWorkspaceForId,
   parseNotebookTileParams,
   resolveEditorTileRoot,
   serializeNotebookTileParams,
@@ -331,38 +332,54 @@ describe('resolveEditorTileRoot', () => {
 });
 
 describe('localWorkspaceDirectory', () => {
-  it('returns undefined for a sessionless workspace (absence of evidence is not evidence of locality)', () => {
-    expect(localWorkspaceDirectory('/Users/victor/code/attn', [], 'ws-1')).toBeUndefined();
+  it('returns undefined for a remote workspace (endpoint_id set)', () => {
+    const workspace = { directory: '/Users/victor/code/attn', endpoint_id: 'remote-mac' };
+    expect(localWorkspaceDirectory(workspace)).toBeUndefined();
   });
 
-  it('returns undefined when the workspace has only a session with a non-empty endpoint_id', () => {
-    const sessions = [{ workspace_id: 'ws-1', endpoint_id: 'remote-mac' }];
-    expect(localWorkspaceDirectory('/home/victor/code/attn', sessions, 'ws-1')).toBeUndefined();
+  it('returns the directory for a local workspace with an empty-string endpoint_id', () => {
+    const workspace = { directory: '/Users/victor/code/attn', endpoint_id: '' };
+    expect(localWorkspaceDirectory(workspace)).toBe('/Users/victor/code/attn');
   });
 
-  it('returns undefined when the workspace has both a local and a remote session (duplicate-id corner)', () => {
-    const sessions = [
-      { workspace_id: 'ws-1', endpoint_id: '' },
-      { workspace_id: 'ws-1', endpoint_id: 'remote-mac' },
+  it('returns the directory for a local workspace with an absent endpoint_id', () => {
+    const workspace = { directory: '/Users/victor/code/attn' };
+    expect(localWorkspaceDirectory(workspace)).toBe('/Users/victor/code/attn');
+  });
+
+  it('returns undefined for an undefined workspace', () => {
+    expect(localWorkspaceDirectory(undefined)).toBeUndefined();
+  });
+
+});
+
+describe('soleWorkspaceForId + localWorkspaceDirectory (active-id locality)', () => {
+  it('does not adopt the local twin\'s directory when a remote twin shares the active id', () => {
+    const workspaces = [
+      { id: 'ws-1', directory: '/local/dir' },
+      { id: 'ws-1', directory: '/remote/dir', endpoint_id: 'remote-mac' },
     ];
-    expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBeUndefined();
+    const resolved = soleWorkspaceForId(workspaces, 'ws-1');
+    expect(resolved).toBeUndefined();
+    expect(localWorkspaceDirectory(resolved)).toBeUndefined();
   });
 
-  it('returns the directory when a session on the workspace has an empty-string endpoint_id', () => {
-    const sessions = [{ workspace_id: 'ws-1', endpoint_id: '' }];
-    expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBe('/Users/victor/code/attn');
+  it('returns the directory for a sole local record', () => {
+    const workspaces = [{ id: 'ws-1', directory: '/Users/victor/code/attn' }];
+    const resolved = soleWorkspaceForId(workspaces, 'ws-1');
+    expect(localWorkspaceDirectory(resolved)).toBe('/Users/victor/code/attn');
   });
 
-  it('returns the directory when a session on the workspace has an absent endpoint_id', () => {
-    const sessions = [{ workspace_id: 'ws-1' }];
-    expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBe('/Users/victor/code/attn');
+  it('returns undefined for a sole remote record', () => {
+    const workspaces = [{ id: 'ws-1', directory: '/remote/dir', endpoint_id: 'remote-mac' }];
+    const resolved = soleWorkspaceForId(workspaces, 'ws-1');
+    expect(localWorkspaceDirectory(resolved)).toBeUndefined();
   });
 
-  it('returns the directory when the only remote session belongs to a different workspace', () => {
-    const sessions = [
-      { workspace_id: 'ws-1' },
-      { workspace_id: 'ws-2', endpoint_id: 'remote-mac' },
-    ];
-    expect(localWorkspaceDirectory('/Users/victor/code/attn', sessions, 'ws-1')).toBe('/Users/victor/code/attn');
+  it('returns undefined when the id is absent from the list', () => {
+    const workspaces = [{ id: 'ws-2', directory: '/Users/victor/code/attn' }];
+    const resolved = soleWorkspaceForId(workspaces, 'ws-1');
+    expect(resolved).toBeUndefined();
+    expect(localWorkspaceDirectory(resolved)).toBeUndefined();
   });
 });

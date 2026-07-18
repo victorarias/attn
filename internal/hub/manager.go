@@ -1208,6 +1208,7 @@ func (m *Manager) replaceRemoteWorkspaces(id string, workspaces []protocol.Works
 	}
 	next := make(map[string]protocol.Workspace, len(workspaces))
 	for _, workspace := range workspaces {
+		workspace.EndpointID = protocol.Ptr(id)
 		next[workspace.ID] = workspace
 	}
 	if workspaceLayoutsEqual(runtime.workspaces, next) {
@@ -1249,6 +1250,7 @@ func (m *Manager) upsertRemoteWorkspace(id string, workspace protocol.Workspace)
 	if runtime.workspaces == nil {
 		runtime.workspaces = make(map[string]protocol.Workspace)
 	}
+	workspace.EndpointID = protocol.Ptr(id)
 	runtime.workspaces[workspace.ID] = workspace
 	return true
 }

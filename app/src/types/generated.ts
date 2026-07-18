@@ -1892,14 +1892,15 @@ export interface WarningElement {
 }
 
 export interface WorkspaceElement {
-    directory: string;
-    id:        string;
-    layout?:   Layout;
-    muted:     boolean;
-    pinned:    boolean;
-    rank:      string;
-    status:    WorkspaceStatus;
-    title:     string;
+    directory:    string;
+    endpoint_id?: string;
+    id:           string;
+    layout?:      Layout;
+    muted:        boolean;
+    pinned:       boolean;
+    rank:         string;
+    status:       WorkspaceStatus;
+    title:        string;
     [property: string]: any;
 }
 
@@ -4588,14 +4589,15 @@ export enum WorkflowRunUpsertMessageCmd {
 }
 
 export interface Workspace {
-    directory: string;
-    id:        string;
-    layout?:   Layout;
-    muted:     boolean;
-    pinned:    boolean;
-    rank:      string;
-    status:    WorkspaceStatus;
-    title:     string;
+    directory:    string;
+    endpoint_id?: string;
+    id:           string;
+    layout?:      Layout;
+    muted:        boolean;
+    pinned:       boolean;
+    rank:         string;
+    status:       WorkspaceStatus;
+    title:        string;
     [property: string]: any;
 }
 
@@ -8916,6 +8918,7 @@ const typeMap: any = {
     ], "any"),
     "WorkspaceElement": o([
         { json: "directory", js: "directory", typ: "" },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
         { json: "layout", js: "layout", typ: u(undefined, r("Layout")) },
         { json: "muted", js: "muted", typ: true },
@@ -10528,6 +10531,7 @@ const typeMap: any = {
     ], "any"),
     "Workspace": o([
         { json: "directory", js: "directory", typ: "" },
+        { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
         { json: "layout", js: "layout", typ: u(undefined, r("Layout")) },
         { json: "muted", js: "muted", typ: true },
