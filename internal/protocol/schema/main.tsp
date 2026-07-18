@@ -1182,6 +1182,17 @@ model FsUnwatchMessage {
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
+// Bounded recursive file index of a root, for the ⌘P finder. No
+// client-controlled limit — the entry cap is a server-side constant
+// (maxFsIndexEntries). Root resolution goes through the same resolveFsRoot
+// chokepoint as every other fs_* command, so an explicit root is gated on the
+// authenticated app client.
+model FsIndexMessage {
+  cmd: "fs_index";
+  root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
 model DelegateWorktreeRequest {
   repo?: string;
   branch: string;
@@ -3012,6 +3023,20 @@ model FsUnwatchResultMessage {
   root?: string;
 }
 
+// Result of fs_index. root is the resolved absolute root (echoed for
+// correlation with the request). files are root-relative slash paths, files
+// only (no directories), sorted lexicographically. truncated is true when the
+// walk hit the server-side entry cap before finishing.
+model FsIndexResultMessage {
+  event: "fs_index_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  root: string;
+  files: string[];
+  truncated: boolean;
+}
+
 // Broadcast when files under the root change. origin is agent|ui|external, the
 // same vocabulary as notebook_changed. Fires for every changed path regardless of
 // file type: under the notebook root this rides the always-on notebook watcher;
@@ -3212,6 +3237,7 @@ alias DaemonEvent =
   | FsExistsResultMessage
   | FsWatchResultMessage
   | FsUnwatchResultMessage
+  | FsIndexResultMessage
   | FsChangedMessage
   | TaskListResultMessage
   | TaskRetryResultMessage

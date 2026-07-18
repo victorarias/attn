@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '168';
+export const PROTOCOL_VERSION = '169';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -442,6 +442,16 @@ export interface FsExistsResult {
 // there is no other result payload).
 export interface FsWatchResult {
   root: string;
+}
+
+// Result of fs_index: a bounded recursive file index of root, for the ⌘P
+// finder. Mirrors the daemon's protocol.FsIndexResultMessage. files are
+// root-relative slash paths, files only, sorted lexicographically. truncated
+// is true when the walk hit the server-side entry cap before finishing.
+export interface FsIndexResult {
+  root: string;
+  files: string[];
+  truncated: boolean;
 }
 
 interface UseDaemonSocketOptions {
@@ -1713,6 +1723,29 @@ export function useDaemonSocket({
               pending.resolve({ root: data.root });
             } else {
               pending.reject(new Error(data.error || 'Filesystem watch action failed'));
+            }
+            break;
+          }
+
+          case 'fs_index_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `fs_index:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve({
+                root: data.root,
+                files: data.files || [],
+                truncated: !!data.truncated,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Filesystem index failed'));
             }
             break;
           }
@@ -4824,6 +4857,29 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // Bounded recursive file index of root (undefined/empty = the notebook
+  // root), for the ⌘P finder. No client-controlled limit — the daemon caps
+  // entries server-side and reports truncated=true if the walk was cut short.
+  const sendFsIndex = useCallback((root?: string): Promise<FsIndexResult> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('fs_index');
+      const key = `fs_index:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'fs_index', request_id: requestId, ...(root ? { root } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Filesystem index timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   // Get recent locations from daemon
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
@@ -5351,6 +5407,7 @@ export function useDaemonSocket({
     sendFsExists,
     sendFsWatch,
     sendFsUnwatch,
+    sendFsIndex,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
