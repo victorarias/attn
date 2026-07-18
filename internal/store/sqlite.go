@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -683,7 +684,7 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 	}
 
 	// Run versioned migrations
-	if err := migrateDB(db); err != nil {
+	if err := migrateDB(db, dbPath); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -692,8 +693,10 @@ func OpenDB(dbPath string) (*sql.DB, error) {
 }
 
 // migrateDB runs all pending migrations in order.
-// It tracks applied migrations in the schema_migrations table.
-func migrateDB(db *sql.DB) error {
+// It tracks applied migrations in the schema_migrations table. dbPath is used
+// only to locate a pre-migration backup directory alongside the database
+// file; it is ignored (no backup attempted) for the in-memory database.
+func migrateDB(db *sql.DB, dbPath string) error {
 	// Detect and handle legacy databases (created before migration system existed)
 	if err := seedLegacyDB(db); err != nil {
 		return fmt.Errorf("seeding legacy db: %w", err)
@@ -703,6 +706,22 @@ func migrateDB(db *sql.DB) error {
 	currentVersion, err := getCurrentVersion(db)
 	if err != nil {
 		return fmt.Errorf("getting schema version: %w", err)
+	}
+
+	// Take a pre-migration snapshot before mutating an existing, non-empty
+	// database. A brand-new DB (currentVersion 0) has nothing to protect, and
+	// :memory: has no on-disk directory to snapshot into — both are skipped.
+	// A failed backup must never block startup: log and proceed with
+	// migrations regardless.
+	if currentVersion > 0 && dbPath != "" && dbPath != ":memory:" && len(migrations) > 0 {
+		latest := migrations[len(migrations)-1].version
+		if currentVersion < latest {
+			if path, err := backupPreMigration(db, dbPath, currentVersion); err != nil {
+				log.Printf("[store] pre-migration backup failed (schema v%d -> v%d): %v; proceeding with migrations", currentVersion, latest, err)
+			} else {
+				log.Printf("[store] pre-migration backup written to %s (schema v%d -> v%d)", path, currentVersion, latest)
+			}
+		}
 	}
 
 	// Run pending migrations
