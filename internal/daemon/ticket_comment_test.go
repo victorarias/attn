@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // syncConn is a net.Conn whose writes append to an in-memory buffer and never
@@ -113,5 +114,34 @@ func TestAgentCommentDoesNotSubscribeCommenter(t *testing.T) {
 		if b.TicketID == ticketY {
 			t.Fatalf("commenter's inbox carried events for a ticket it only commented on: %+v", b)
 		}
+	}
+}
+
+func TestStandaloneTicketCreatorGetsUnreadCommentIndicator(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	_, creatorID, _ := delegateForNotify(t, d, "codex")
+	d.store.UpdateState(creatorID, protocol.StateIdle)
+	d.setSelectedSession(creatorID)
+	ticket, err := d.store.CreateTicket(store.Ticket{
+		ID: "standalone", Title: "Standalone", Status: store.TicketStatusTodo,
+	}, creatorID, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	commenterID := "commenter"
+	d.store.Add(&protocol.Session{ID: commenterID, Label: commenterID, Agent: protocol.SessionAgentShell, Directory: t.TempDir(), State: protocol.StateWorking})
+
+	resp := callTicketComment(t, d, commenterID, ticket.ID, "please review")
+	if !resp.Ok {
+		t.Fatalf("comment response = %+v", resp)
+	}
+	decorated := d.sessionForBroadcast(d.store.Get(creatorID))
+	if decorated == nil || !protocol.Deref(decorated.TicketUnread) {
+		t.Fatalf("creator session = %+v, want unread ticket indicator", decorated)
+	}
+	if decorated.NudgeFiresAt != nil {
+		t.Fatalf("selected creator armed countdown at %s", *decorated.NudgeFiresAt)
 	}
 }

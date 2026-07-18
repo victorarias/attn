@@ -127,10 +127,10 @@ interface SessionTerminalWorkspaceProps {
   // renders; the chip's overlay only opens when these are present.
   ticketActions?: {
     fetchTicket: (ticketId: string) => Promise<Ticket>;
-    onChangeStatus: (ticketId: string, status: Ticket['status'], comment?: string) => Promise<void>;
-    onAddComment: (ticketId: string, comment: string) => Promise<void>;
-    onEditDescription: (ticketId: string, description: string) => Promise<void>;
-    onAttach?: (ticketId: string, paths: string[], state?: string, comment?: string) => Promise<unknown>;
+    onChangeStatus: (ticketId: string, status: Ticket['status'], expectedEventSeq: number, comment?: string) => Promise<void>;
+    onAddComment: (ticketId: string, comment: string, expectedEventSeq: number) => Promise<void>;
+    onEditDescription: (ticketId: string, description: string, expectedEventSeq: number) => Promise<void>;
+    onAttach?: (ticketId: string, paths: string[], state?: string, comment?: string, expectedEventSeq?: number) => Promise<unknown>;
     onRenameArtifact?: (path: string, newPath: string) => Promise<unknown>;
     onDeleteArtifact?: (path: string) => Promise<unknown>;
     onOpenArtifact?: (path: string) => void;

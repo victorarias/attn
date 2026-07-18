@@ -11,12 +11,22 @@ import (
 )
 
 func callTicketInbox(t *testing.T, d *Daemon, sessionID string) []protocol.TicketEventBundle {
+	return callTicketInboxMode(t, d, sessionID, nil)
+}
+
+func callTicketInboxMode(t *testing.T, d *Daemon, sessionID string, mode *protocol.TicketInboxMode) []protocol.TicketEventBundle {
+	return callTicketInboxRequest(t, d, sessionID, mode, nil)
+}
+
+func callTicketInboxRequest(t *testing.T, d *Daemon, sessionID string, mode *protocol.TicketInboxMode, watchIntervalMS *string) []protocol.TicketEventBundle {
 	t.Helper()
 	server, clientConn := net.Pipe()
 	go func() {
 		d.handleTicketInbox(server, &protocol.TicketInboxMessage{
 			Cmd:             protocol.CmdTicketInbox,
 			SourceSessionID: sessionID,
+			Mode:            mode,
+			WatchIntervalMs: watchIntervalMS,
 		})
 		_ = server.Close()
 	}()

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ticketnotify"
 )
 
 // currentNudgeTimer returns the session's armed countdown timer, or nil when none is
@@ -17,6 +18,28 @@ func currentNudgeTimer(d *Daemon, sessionID string) *time.Timer {
 		return c.timer
 	}
 	return nil
+}
+
+func currentNudgeDeadline(d *Daemon, sessionID string) time.Time {
+	d.nudgeMu.Lock()
+	defer d.nudgeMu.Unlock()
+	if c, ok := d.nudgeCountdowns[sessionID]; ok {
+		return c.firesAt
+	}
+	return time.Time{}
+}
+
+func waitForNudgeDeadline(t *testing.T, d *Daemon, sessionID string) time.Time {
+	t.Helper()
+	limit := time.Now().Add(time.Second)
+	for time.Now().Before(limit) {
+		if deadline := currentNudgeDeadline(d, sessionID); !deadline.IsZero() {
+			return deadline
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("no nudge deadline armed for %s", sessionID)
+	return time.Time{}
 }
 
 // fireNudgeNow simulates the countdown timer firing immediately, by invoking the fire
@@ -115,9 +138,54 @@ func TestNudgeCountdownResumesOnSwitchAway(t *testing.T) {
 
 	d.setSelectedSession(chiefID) // switch away
 
-	if currentNudgeTimer(d, agentID) == nil {
-		t.Fatal("countdown did not resume after switching away from the session")
+	waitForNudgeDeadline(t, d, agentID)
+}
+
+func TestBufferedNudgePreservesDeadlineAcrossSelectionPause(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Second
+	d.ticketBufferWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	chiefID, agentID, _ := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	if _, err := ticketnotify.ConsumeAll(d.store, d.ticketObserversForSession(chiefID), time.Now()); err != nil {
+		t.Fatal(err)
 	}
+	attentionAt := time.Now().Add(-10 * time.Minute)
+	if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(chiefID), attentionAt); err != nil {
+		t.Fatal(err)
+	}
+	d.setSelectedSession(chiefID)
+	commentOnTicket(t, d, ticketID, "buffer this")
+	if deadline := currentNudgeDeadline(d, chiefID); !deadline.IsZero() {
+		t.Fatalf("selected chief armed deadline %s", deadline)
+	}
+
+	d.setSelectedSession(agentID)
+	deadline := waitForNudgeDeadline(t, d, chiefID)
+	want := attentionAt.Add(time.Hour)
+	// Store timestamps use RFC3339 second precision, so the durable round-trip
+	// may trim the sub-second component.
+	if delta := deadline.Sub(want); delta < -time.Second || delta > time.Second {
+		t.Fatalf("resumed deadline = %s, want %s", deadline, want)
+	}
+}
+
+func TestRebuildTicketDeliverySchedulesRearmsUnread(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	_, agentID, _ := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	d.store.UpdateState(agentID, protocol.StateIdle)
+	commentOnTicket(t, d, ticketID, "survive restart")
+	d.cancelNudgeCountdown(agentID, "simulate daemon restart")
+	if currentNudgeTimer(d, agentID) != nil {
+		t.Fatal("countdown still armed before rebuild")
+	}
+
+	d.rebuildTicketDeliverySchedules()
+	waitForNudgeDeadline(t, d, agentID)
 }
 
 // Switching TO a session with a running countdown pauses it (no auto-fire while the
@@ -296,6 +364,9 @@ func TestTriggerNudgeFiresImmediately(t *testing.T) {
 	}
 	if currentNudgeTimer(d, agentID) != nil {
 		t.Fatal("trigger_nudge left a countdown running")
+	}
+	if _, found, err := d.store.TicketDeliveryAttention(d.ticketAttentionKey(agentID)); err != nil || !found {
+		t.Fatalf("trigger_nudge did not record attention: found=%v err=%v", found, err)
 	}
 }
 

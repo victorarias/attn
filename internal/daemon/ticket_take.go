@@ -53,8 +53,11 @@ func (d *Daemon) handleTicketTake(conn net.Conn, msg *protocol.TicketTakeMessage
 	// be noise. Report success so a redundant take is a harmless retry.
 	if previous == sourceSessionID {
 		_ = json.NewEncoder(conn).Encode(protocol.Response{
-			Ok:               true,
-			TicketTakeResult: &protocol.TicketTakeResult{TicketID: ticketID, PreviousAssignee: previous},
+			Ok: true,
+			TicketTakeResult: &protocol.TicketTakeResult{
+				TicketID: ticketID, PreviousAssignee: previous,
+				UnreadCount: protocol.Ptr(d.targetTicketUnreadCount(sourceSessionID, ticketID)),
+			},
 		})
 		return
 	}
@@ -68,8 +71,11 @@ func (d *Daemon) handleTicketTake(conn net.Conn, msg *protocol.TicketTakeMessage
 		return
 	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok:               true,
-		TicketTakeResult: &protocol.TicketTakeResult{TicketID: ticketID, PreviousAssignee: previous},
+		Ok: true,
+		TicketTakeResult: &protocol.TicketTakeResult{
+			TicketID: ticketID, PreviousAssignee: previous,
+			UnreadCount: protocol.Ptr(d.targetTicketUnreadCount(sourceSessionID, ticketID)),
+		},
 	})
 	// The assigned event was authored by the taker, so notifyTicketObservers
 	// excludes it (no self-nudge) and fans out to the ticket's other participants —

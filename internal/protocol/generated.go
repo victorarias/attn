@@ -3863,6 +3863,9 @@ type Ticket struct {
 	// LastAgentID corresponds to the JSON schema field "last_agent_id".
 	LastAgentID string `json:"last_agent_id"`
 
+	// LatestEventSeq corresponds to the JSON schema field "latest_event_seq".
+	LatestEventSeq *int `json:"latest_event_seq,omitempty,omitzero"`
+
 	// ProjectID corresponds to the JSON schema field "project_id".
 	ProjectID string `json:"project_id"`
 
@@ -3929,6 +3932,9 @@ type TicketAddCommentMessage struct {
 	// Comment corresponds to the JSON schema field "comment".
 	Comment string `json:"comment"`
 
+	// ExpectedEventSeq corresponds to the JSON schema field "expected_event_seq".
+	ExpectedEventSeq *int `json:"expected_event_seq,omitempty,omitzero"`
+
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 
@@ -3962,6 +3968,9 @@ type TicketAttachMessage struct {
 	// Comment corresponds to the JSON schema field "comment".
 	Comment *string `json:"comment,omitempty,omitzero"`
 
+	// ExpectedEventSeq corresponds to the JSON schema field "expected_event_seq".
+	ExpectedEventSeq *int `json:"expected_event_seq,omitempty,omitzero"`
+
 	// Files corresponds to the JSON schema field "files".
 	Files []TicketAttachFile `json:"files"`
 
@@ -3981,6 +3990,9 @@ type TicketAttachMessage struct {
 type TicketAttachResult struct {
 	// Artifacts corresponds to the JSON schema field "artifacts".
 	Artifacts []TicketArtifact `json:"artifacts"`
+
+	// CatchUp corresponds to the JSON schema field "catch_up".
+	CatchUp *TicketEventBundle `json:"catch_up,omitempty,omitzero"`
 
 	// Deduplicated corresponds to the JSON schema field "deduplicated".
 	Deduplicated bool `json:"deduplicated"`
@@ -4022,6 +4034,9 @@ type TicketChangeStatusMessage struct {
 	// Comment corresponds to the JSON schema field "comment".
 	Comment *string `json:"comment,omitempty,omitzero"`
 
+	// ExpectedEventSeq corresponds to the JSON schema field "expected_event_seq".
+	ExpectedEventSeq *int `json:"expected_event_seq,omitempty,omitzero"`
+
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 
@@ -4047,6 +4062,9 @@ type TicketCommentMessage struct {
 }
 
 type TicketCommentResult struct {
+	// CatchUp corresponds to the JSON schema field "catch_up".
+	CatchUp *TicketEventBundle `json:"catch_up,omitempty,omitzero"`
+
 	// TicketID corresponds to the JSON schema field "ticket_id".
 	TicketID string `json:"ticket_id"`
 }
@@ -4085,6 +4103,9 @@ type TicketEditDescriptionMessage struct {
 
 	// Description corresponds to the JSON schema field "description".
 	Description string `json:"description"`
+
+	// ExpectedEventSeq corresponds to the JSON schema field "expected_event_seq".
+	ExpectedEventSeq *int `json:"expected_event_seq,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
@@ -4140,9 +4161,20 @@ type TicketInboxMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// Mode corresponds to the JSON schema field "mode".
+	Mode *TicketInboxMode `json:"mode,omitempty,omitzero"`
+
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID string `json:"source_session_id"`
+
+	// WatchIntervalMs corresponds to the JSON schema field "watch_interval_ms".
+	WatchIntervalMs *string `json:"watch_interval_ms,omitempty,omitzero"`
 }
+
+type TicketInboxMode string
+
+const TicketInboxModeExplicit TicketInboxMode = "explicit"
+const TicketInboxModeWatch TicketInboxMode = "watch"
 
 type TicketInboxResult struct {
 	// Bundles corresponds to the JSON schema field "bundles".
@@ -4248,6 +4280,9 @@ const TicketStatusFailed TicketStatus = "failed"
 const TicketStatusInReview TicketStatus = "in_review"
 
 type TicketStatusResult struct {
+	// CatchUp corresponds to the JSON schema field "catch_up".
+	CatchUp *TicketEventBundle `json:"catch_up,omitempty,omitzero"`
+
 	// Status corresponds to the JSON schema field "status".
 	Status TicketStatus `json:"status"`
 
@@ -4272,6 +4307,9 @@ type TicketSubscribeMessage struct {
 type TicketSubscribeResult struct {
 	// TicketID corresponds to the JSON schema field "ticket_id".
 	TicketID string `json:"ticket_id"`
+
+	// UnreadCount corresponds to the JSON schema field "unread_count".
+	UnreadCount *int `json:"unread_count,omitempty,omitzero"`
 }
 
 type TicketTakeMessage struct {
@@ -4294,6 +4332,9 @@ type TicketTakeResult struct {
 
 	// TicketID corresponds to the JSON schema field "ticket_id".
 	TicketID string `json:"ticket_id"`
+
+	// UnreadCount corresponds to the JSON schema field "unread_count".
+	UnreadCount *int `json:"unread_count,omitempty,omitzero"`
 }
 
 type TicketUnsubscribeMessage struct {

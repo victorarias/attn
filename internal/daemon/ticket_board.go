@@ -154,18 +154,19 @@ func (d *Daemon) sendGetTicketWSResult(client *wsClient, requestID, ticketID str
 // hydrated separately from the filesystem for full reads.
 func ticketToProtocol(t *store.Ticket) protocol.Ticket {
 	pt := protocol.Ticket{
-		ID:          t.ID,
-		Title:       t.Title,
-		Description: t.Description,
-		Status:      protocol.TicketStatus(t.Status),
-		Assignee:    t.Assignee,
-		Cwd:         t.Cwd,
-		LastAgentID: t.LastAgentID,
-		ProjectID:   t.ProjectID,
-		CreatedAt:   t.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:   t.UpdatedAt.Format(time.RFC3339),
-		Activity:    make([]protocol.TicketActivity, 0, len(t.Activity)),
-		Artifacts:   make([]protocol.TicketArtifact, 0),
+		ID:             t.ID,
+		Title:          t.Title,
+		Description:    t.Description,
+		Status:         protocol.TicketStatus(t.Status),
+		Assignee:       t.Assignee,
+		Cwd:            t.Cwd,
+		LastAgentID:    t.LastAgentID,
+		ProjectID:      t.ProjectID,
+		CreatedAt:      t.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:      t.UpdatedAt.Format(time.RFC3339),
+		LatestEventSeq: protocol.Ptr(int(t.LatestEventSeq)),
+		Activity:       make([]protocol.TicketActivity, 0, len(t.Activity)),
+		Artifacts:      make([]protocol.TicketArtifact, 0),
 	}
 	if t.ClosedAt != nil {
 		pt.ClosedAt = protocol.Ptr(t.ClosedAt.Format(time.RFC3339))

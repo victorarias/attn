@@ -143,6 +143,36 @@ func TestTicketAttachRetryReturnsExistingReceipt(t *testing.T) {
 	}
 }
 
+func TestTicketAttachCatchUpRollsBackInstalledFile(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	root := t.TempDir()
+	d.store.SetSetting(SettingNotebookRoot, root)
+	_, agentID, _ := delegateForNotify(t, d, "codex")
+	ticketID := boundTicketID(t, d, agentID)
+	if _, err := d.store.AddTicketComment(ticketID, "chief-peer", "new decision", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	source := attachSource(t, t.TempDir(), "design.md", "decision")
+	msg := &protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: agentID, Files: []protocol.TicketAttachFile{source}}
+
+	first := callTicketAttach(t, d, msg)
+	if !first.Ok || first.TicketAttachResult == nil || first.TicketAttachResult.CatchUp == nil {
+		t.Fatalf("first response = %+v, want catch-up", first)
+	}
+	destination := filepath.Join(root, "tickets", ticketID, "design.md")
+	if _, err := os.Stat(destination); !os.IsNotExist(err) {
+		t.Fatalf("conflicting attach left destination behind: %v", err)
+	}
+
+	retry := callTicketAttach(t, d, msg)
+	if !retry.Ok || retry.TicketAttachResult == nil || retry.TicketAttachResult.CatchUp != nil {
+		t.Fatalf("retry response = %+v", retry)
+	}
+	if _, err := os.Stat(destination); err != nil {
+		t.Fatalf("retry did not install destination: %v", err)
+	}
+}
+
 func TestTicketAttachPreservesDifferentExistingArtifact(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	root := t.TempDir()
@@ -193,6 +223,7 @@ func TestTicketAttachDispatchesFromWebSocketAsUser(t *testing.T) {
 	payload, _ := json.Marshal(protocol.TicketAttachMessage{
 		Cmd: protocol.CmdTicketAttach, SourceSessionID: store.TicketAuthorYou,
 		TicketID: protocol.Ptr("ui-ticket"), Files: []protocol.TicketAttachFile{source}, RequestID: protocol.Ptr("h1"),
+		ExpectedEventSeq: currentTicketEventSeq(t, d, "ui-ticket"),
 	})
 	d.handleClientMessage(client, payload)
 	var result protocol.TicketAttachResultMessage

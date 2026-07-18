@@ -170,7 +170,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '171';
+export const PROTOCOL_VERSION = '172';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 interface PRActionResult {
@@ -4418,24 +4418,33 @@ export function useDaemonSocket({
   }, [nextRequestID]);
 
   const sendTicketChangeStatus = useCallback(
-    (ticketId: string, status: Ticket['status'], comment?: string): Promise<void> =>
+    (ticketId: string, status: Ticket['status'], expectedEventSeq?: number, comment?: string): Promise<void> =>
       sendTicketAction('ticket_change_status', {
         ticket_id: ticketId,
         status,
+        ...(expectedEventSeq !== undefined ? { expected_event_seq: expectedEventSeq } : {}),
         ...(comment ? { comment } : {}),
       }),
     [sendTicketAction],
   );
 
   const sendTicketAddComment = useCallback(
-    (ticketId: string, comment: string): Promise<void> =>
-      sendTicketAction('ticket_add_comment', { ticket_id: ticketId, comment }),
+    (ticketId: string, comment: string, expectedEventSeq?: number): Promise<void> =>
+      sendTicketAction('ticket_add_comment', {
+        ticket_id: ticketId,
+        comment,
+        ...(expectedEventSeq !== undefined ? { expected_event_seq: expectedEventSeq } : {}),
+      }),
     [sendTicketAction],
   );
 
   const sendTicketEditDescription = useCallback(
-    (ticketId: string, description: string): Promise<void> =>
-      sendTicketAction('ticket_edit_description', { ticket_id: ticketId, description }),
+    (ticketId: string, description: string, expectedEventSeq?: number): Promise<void> =>
+      sendTicketAction('ticket_edit_description', {
+        ticket_id: ticketId,
+        description,
+        ...(expectedEventSeq !== undefined ? { expected_event_seq: expectedEventSeq } : {}),
+      }),
     [sendTicketAction],
   );
 
@@ -4444,6 +4453,7 @@ export function useDaemonSocket({
     paths: string[],
     state?: string,
     comment?: string,
+    expectedEventSeq?: number,
   ): Promise<unknown> => new Promise((resolve, reject) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4458,6 +4468,7 @@ export function useDaemonSocket({
       request_id: requestId,
       source_session_id: 'you',
       ticket_id: ticketId,
+      ...(expectedEventSeq !== undefined ? { expected_event_seq: expectedEventSeq } : {}),
       files: paths.map((sourcePath) => ({
         source_path: sourcePath,
         filename: sourcePath.split(/[\\/]/).pop() || sourcePath,

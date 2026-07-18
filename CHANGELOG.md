@@ -52,6 +52,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   ritual.** Agents may complete work that Victor accepted, whose requested PR
   merged, or that has an equivalent objective terminal signal; finished work still
   awaiting review remains in review.
+- **Ticket notifications now protect attention without delaying the agent doing the work.** The current assignee keeps immediate delivery, while chiefs, subscribers, and other participants coalesce unread activity into one 30-minute observer-wide window. Explicit inbox reads remain immediate, and inbox watches share delivery with nudges without duplicate wake-ups.
+- **Ticket updates now make agents read intervening activity before writing.** Status, comment, and attachment commands show unread updates and require a deliberate retry; app edits reject stale ticket details and refresh them before retry. Taking or subscribing to a ticket reports unread history without consuming it.
 
 ### Fixed
 - **Switching profiles from inside attn no longer keeps talking to the inherited
@@ -64,7 +66,6 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Added
 - **Black or stuck UI failures now leave useful evidence on disk.** Agent switches capture delayed app-shell health snapshots alongside the existing terminal renderer diagnostics, including frontend crashes, event-loop stalls, and native browser visibility. A React render failure now shows a persistent error screen instead of leaving an unexplained black window.
 - **Ask a bounded question about another Codex session.** `attn session instructions <session-id> --question "..."` reads that session's conversation and returns a concise Luna answer with exact supporting excerpts, transcript identity, and a fingerprint. It fails closed when the transcript, model response, or evidence cannot be verified.
-
 ## [2026-07-15]
 
 ### Added

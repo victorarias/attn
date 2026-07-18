@@ -158,9 +158,10 @@ func TestCodexNudgeRoundtrip(t *testing.T) {
 	// ticket, authored as "you" — an event the agent did not author, so it is unread.
 	client := &wsClient{send: make(chan outboundMessage, 8)}
 	d.handleTicketAddComment(client, &protocol.TicketAddCommentMessage{
-		Cmd:      protocol.CmdTicketAddComment,
-		TicketID: ticketID,
-		Comment:  "please take a look at the failing test",
+		Cmd:              protocol.CmdTicketAddComment,
+		TicketID:         ticketID,
+		Comment:          "please take a look at the failing test",
+		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
 	})
 
 	// 1) The idle codex agent was nudged by the chief's comment on its ticket (after
@@ -264,7 +265,7 @@ func TestDelegatedAgentNotNudgedByOwnDeliveredBrief(t *testing.T) {
 
 	// The agent settles after its initial run; the went-idle path re-runs the notify
 	// decision for it. With the brief consumed at delegation, there is nothing unread.
-	d.notifyTicketSession(a, time.Now())
+	d.notifyUnreadTicketSession(a, time.Now())
 
 	if wasNudged(inputs(a)) {
 		t.Fatal("delegated agent was doorbelled about its own already-delivered brief")
@@ -279,9 +280,10 @@ func commentOnTicket(t *testing.T, d *Daemon, ticketID, comment string) {
 	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 8)}
 	d.handleTicketAddComment(client, &protocol.TicketAddCommentMessage{
-		Cmd:      protocol.CmdTicketAddComment,
-		TicketID: ticketID,
-		Comment:  comment,
+		Cmd:              protocol.CmdTicketAddComment,
+		TicketID:         ticketID,
+		Comment:          comment,
+		ExpectedEventSeq: currentTicketEventSeq(t, d, ticketID),
 	})
 }
 
@@ -412,12 +414,55 @@ func TestTicketWatchDrainClearsSharedCountdown(t *testing.T) {
 	if currentNudgeTimer(d, agentID) == nil {
 		t.Fatal("shared countdown was not armed for Claude")
 	}
-	callTicketInbox(t, d, agentID) // equivalent to the watch's consuming poll
+	watch := protocol.TicketInboxModeWatch
+	callTicketInboxMode(t, d, agentID, &watch)
 	if currentNudgeTimer(d, agentID) != nil {
 		t.Fatal("watch drain did not clear the shared countdown")
 	}
 	if wasNudged(inputs(agentID)) {
 		t.Fatal("watch-drained queue was still doorbelled")
+	}
+}
+
+func TestLiveWatchLeaseWinsCountdownRaceAndConsumesOnce(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	_, agentID, inputs := delegateForNotify(t, d, "claude")
+	ticketID := boundTicketID(t, d, agentID)
+	d.store.UpdateState(agentID, protocol.StateWorking)
+	watch := protocol.TicketInboxModeWatch
+	if bundles := callTicketInboxMode(t, d, agentID, &watch); len(bundles) != 0 {
+		t.Fatalf("initial watch = %+v, want empty lease refresh", bundles)
+	}
+
+	commentOnTicket(t, d, ticketID, "take a look")
+	fireNudgeNow(t, d, agentID)
+	if wasNudged(inputs(agentID)) {
+		t.Fatal("countdown doorbelled while the live watch lease owned delivery")
+	}
+	bundles := callTicketInboxMode(t, d, agentID, &watch)
+	if len(bundles) != 1 || bundles[0].TicketID != ticketID {
+		t.Fatalf("watch delivery = %+v, want one ticket bundle", bundles)
+	}
+	if again := callTicketInboxMode(t, d, agentID, &watch); len(again) != 0 {
+		t.Fatalf("second watch delivery = %+v, want acknowledged empty queue", again)
+	}
+}
+
+func TestWatchLeaseCoversReportedSlowPollingInterval(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	_, agentID, _ := delegateForNotify(t, d, "claude")
+	watch := protocol.TicketInboxModeWatch
+	interval := "30000"
+	started := time.Now()
+	callTicketInboxRequest(t, d, agentID, &watch, &interval)
+
+	d.deliveryMu.Lock()
+	leaseUntil := d.watchLeaseUntil[agentID]
+	d.deliveryMu.Unlock()
+	if leaseUntil.Before(started.Add(44 * time.Second)) {
+		t.Fatalf("slow-watch lease expires at %s, want interval plus jitter grace", leaseUntil)
 	}
 }
 

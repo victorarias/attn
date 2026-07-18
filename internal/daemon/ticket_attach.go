@@ -53,6 +53,13 @@ func (d *Daemon) handleTicketAttach(conn net.Conn, msg *protocol.TicketAttachMes
 // must name the ticket explicitly.
 func (d *Daemon) handleTicketAttachWS(client *wsClient, msg *protocol.TicketAttachMessage) {
 	requestID := protocol.Deref(msg.RequestID)
+	if err := requireExpectedTicketEventSeq(msg.ExpectedEventSeq); err != nil {
+		d.sendToClient(client, protocol.TicketAttachResultMessage{
+			Event: protocol.EventTicketAttachResult, RequestID: requestID,
+			Success: false, Error: protocol.Ptr(err.Error()),
+		})
+		return
+	}
 	result, err := d.submitTicketAttach(msg, store.TicketAuthorYou, false)
 	reply := protocol.TicketAttachResultMessage{
 		Event:     protocol.EventTicketAttachResult,
@@ -84,9 +91,10 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 	if ticketID == "" {
 		return nil, errors.New("ticket_id is required")
 	}
-	if ticket, err := d.store.GetTicket(ticketID); err != nil {
+	currentTicket, err := d.store.GetTicket(ticketID)
+	if err != nil {
 		return nil, err
-	} else if ticket == nil {
+	} else if currentTicket == nil {
 		return nil, fmt.Errorf("ticket not found: %s", ticketID)
 	}
 	if len(msg.Files) == 0 {
@@ -137,11 +145,37 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 		rollbackInstalledAttachFiles(staged)
 		return nil, err
 	}
-	record, err := d.store.SubmitTicketAttach(ticketID, author, fingerprint, detail, activityComment, status, time.Now())
+	options := expectedTicketMutationOptions(msg.ExpectedEventSeq)
+	if resolveBound {
+		options = d.ticketMutationOptions(author)
+	}
+	d.deliveryMu.Lock()
+	record, outcome, err := d.store.SubmitTicketAttachWithOptions(
+		ticketID, author, fingerprint, detail, activityComment, status,
+		options, time.Now(),
+	)
 	if err != nil {
+		d.deliveryMu.Unlock()
 		rollbackInstalledAttachFiles(staged)
 		return nil, err
 	}
+	if len(outcome.ConflictEvents) > 0 {
+		rollbackInstalledAttachFiles(staged)
+		d.afterTicketMutationCatchUpLocked(author, outcome.ConflictEvents)
+		d.deliveryMu.Unlock()
+		currentStatus := currentTicket.Status
+		if current, getErr := d.store.GetTicket(ticketID); getErr == nil && current != nil {
+			currentStatus = current.Status
+		}
+		return &protocol.TicketAttachResult{
+			TicketID:    ticketID,
+			Artifacts:   []protocol.TicketArtifact{},
+			Fingerprint: fingerprint,
+			State:       protocol.TicketStatus(currentStatus),
+			CatchUp:     ticketMutationCatchUp(ticketID, outcome.ConflictEvents),
+		}, nil
+	}
+	d.deliveryMu.Unlock()
 
 	artifacts := make([]protocol.TicketArtifact, 0, len(staged))
 	changedPaths := make([]string, 0, len(staged))

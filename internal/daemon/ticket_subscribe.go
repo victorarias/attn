@@ -36,8 +36,11 @@ func (d *Daemon) handleTicketSubscribe(conn net.Conn, msg *protocol.TicketSubscr
 		return
 	}
 	_ = json.NewEncoder(conn).Encode(protocol.Response{
-		Ok:                    true,
-		TicketSubscribeResult: &protocol.TicketSubscribeResult{TicketID: ticketID},
+		Ok: true,
+		TicketSubscribeResult: &protocol.TicketSubscribeResult{
+			TicketID:    ticketID,
+			UnreadCount: protocol.Ptr(d.targetTicketUnreadCount(sourceSessionID, ticketID)),
+		},
 	})
 }
 

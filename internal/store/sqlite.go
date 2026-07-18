@@ -655,6 +655,10 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		tombstone_generation INTEGER NOT NULL DEFAULT 0,
 		updated_at TEXT NOT NULL
 	)`},
+	{69, "create ticket delivery attention table", `CREATE TABLE IF NOT EXISTS ticket_delivery_attention (
+		observer_key TEXT PRIMARY KEY,
+		last_attention_at TEXT NOT NULL
+	)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

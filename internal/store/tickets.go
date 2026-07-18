@@ -110,6 +110,9 @@ type Ticket struct {
 	// by the reconciliation classifier. Provenance + dedupe lock in one; cleared
 	// when the ticket is reassigned or its assignee session respawns (re-arm).
 	ReconciledAt *time.Time
+	// LatestEventSeq is populated by GetTicket for optimistic app mutations.
+	// Bare list rows leave it at zero.
+	LatestEventSeq int64
 
 	Activity    []TicketActivity   // populated by GetTicket
 	Attachments []TicketAttachment // populated by GetTicket
@@ -331,6 +334,9 @@ func (s *Store) GetTicket(id string) (*Ticket, error) {
 	if ticket.Attachments, err = s.ticketAttachments(id); err != nil {
 		return nil, err
 	}
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM ticket_events WHERE ticket_id = ?`, id).Scan(&ticket.LatestEventSeq); err != nil {
+		return nil, err
+	}
 	return ticket, nil
 }
 
@@ -532,30 +538,27 @@ func (s *Store) ClearTicketReconciliationForAssignee(assignee string) error {
 // visible on the board again, never a hidden zombie immune to the TTL sweep.
 // Returns the updated ticket row.
 func (s *Store) SetTicketStatus(id string, to TicketStatus, author, comment string, now time.Time) (*Ticket, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	updated, _, err := s.SetTicketStatusWithOptions(id, to, author, comment, TicketMutationOptions{}, now)
+	return updated, err
+}
 
-	if s.db == nil {
-		return nil, nil
-	}
+func (s *Store) SetTicketStatusWithOptions(
+	id string,
+	to TicketStatus,
+	author, comment string,
+	options TicketMutationOptions,
+	now time.Time,
+) (*Ticket, TicketMutationOutcome, error) {
 	if !to.IsValid() {
-		return nil, fmt.Errorf("%w: %q", ErrInvalidTicketStatus, to)
+		return nil, TicketMutationOutcome{}, fmt.Errorf("%w: %q", ErrInvalidTicketStatus, to)
 	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	current, err := setTicketStatusTx(tx, id, to, author, comment, now)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return current, nil
+	var updated *Ticket
+	outcome, err := s.withTicketMutation(id, options, now, func(tx *sql.Tx) error {
+		var mutationErr error
+		updated, mutationErr = setTicketStatusTx(tx, id, to, author, comment, now)
+		return mutationErr
+	})
+	return updated, outcome, err
 }
 
 func setTicketStatusTx(tx *sql.Tx, id string, to TicketStatus, author, comment string, now time.Time) (*Ticket, error) {
@@ -611,19 +614,11 @@ func setTicketStatusTx(tx *sql.Tx, id string, to TicketStatus, author, comment s
 // AddTicketComment appends a freeform comment to the activity thread and bumps
 // the ticket's updated_at. Returns the new activity entry.
 func (s *Store) AddTicketComment(id, author, comment string, now time.Time) (*TicketActivity, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	activity, _, err := s.AddTicketCommentWithOptions(id, author, comment, TicketMutationOptions{}, now)
+	return activity, err
+}
 
-	if s.db == nil {
-		return nil, nil
-	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
+func addTicketCommentTx(tx *sql.Tx, id, author, comment string, now time.Time) (*TicketActivity, error) {
 	if err := touchTicketTx(tx, id, now); err != nil {
 		return nil, err
 	}
@@ -646,9 +641,6 @@ func (s *Store) AddTicketComment(id, author, comment string, now time.Time) (*Ti
 	}, now); err != nil {
 		return nil, err
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
 	return &TicketActivity{
 		ID:        activityID,
 		TicketID:  id,
@@ -659,18 +651,44 @@ func (s *Store) AddTicketComment(id, author, comment string, now time.Time) (*Ti
 	}, nil
 }
 
+func (s *Store) AddTicketCommentWithOptions(
+	id, author, comment string,
+	options TicketMutationOptions,
+	now time.Time,
+) (*TicketActivity, TicketMutationOutcome, error) {
+	var activity *TicketActivity
+	outcome, err := s.withTicketMutation(id, options, now, func(tx *sql.Tx) error {
+		var mutationErr error
+		activity, mutationErr = addTicketCommentTx(tx, id, author, comment, now)
+		return mutationErr
+	})
+	return activity, outcome, err
+}
+
 // EditTicketDescription replaces the ticket's brief, bumps updated_at, and emits a
 // description_edited event authored by author. Detail carries the new brief so the
 // event is self-describing AND so the dedup signature distinguishes one re-brief
 // from another — without it, two consecutive edits would look identical and the
 // second (a real re-brief / steer) would be silently deduped away.
 func (s *Store) EditTicketDescription(id, description, author string, now time.Time) error {
-	return s.updateTicketFieldWithEvent(id, "description", description, TicketEvent{
+	_, err := s.EditTicketDescriptionWithOptions(id, description, author, TicketMutationOptions{}, now)
+	return err
+}
+
+func (s *Store) EditTicketDescriptionWithOptions(
+	id, description, author string,
+	options TicketMutationOptions,
+	now time.Time,
+) (TicketMutationOutcome, error) {
+	evt := TicketEvent{
 		TicketID: id,
 		Kind:     TicketEventDescriptionEdited,
 		Author:   author,
 		Detail:   description,
-	}, now)
+	}
+	return s.withTicketMutation(id, options, now, func(tx *sql.Tx) error {
+		return updateTicketFieldWithEventTx(tx, id, "description", description, evt, now)
+	})
 }
 
 // AssignTicket sets (or clears, with "") the assignee, bumps updated_at, and emits
@@ -840,28 +858,43 @@ func (s *Store) SubmitTicketAttach(
 	status *TicketStatus,
 	now time.Time,
 ) (*TicketAttachResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	result, _, err := s.SubmitTicketAttachWithOptions(
+		ticketID, author, fingerprint, detail, activityComment, status,
+		TicketMutationOptions{}, now,
+	)
+	return result, err
+}
 
-	if s.db == nil {
-		return nil, nil
-	}
+func (s *Store) SubmitTicketAttachWithOptions(
+	ticketID, author, fingerprint, detail, activityComment string,
+	status *TicketStatus,
+	options TicketMutationOptions,
+	now time.Time,
+) (*TicketAttachResult, TicketMutationOutcome, error) {
 	if strings.TrimSpace(fingerprint) == "" {
-		return nil, errors.New("attach fingerprint required")
+		return nil, TicketMutationOutcome{}, errors.New("attach fingerprint required")
 	}
 	if status != nil && !status.IsValid() {
-		return nil, fmt.Errorf("%w: %q", ErrInvalidTicketStatus, *status)
+		return nil, TicketMutationOutcome{}, fmt.Errorf("%w: %q", ErrInvalidTicketStatus, *status)
 	}
+	var result *TicketAttachResult
+	outcome, err := s.withTicketMutation(ticketID, options, now, func(tx *sql.Tx) error {
+		var mutationErr error
+		result, mutationErr = submitTicketAttachTx(tx, ticketID, author, fingerprint, detail, activityComment, status, now)
+		return mutationErr
+	})
+	return result, outcome, err
+}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
+func submitTicketAttachTx(
+	tx *sql.Tx,
+	ticketID, author, fingerprint, detail, activityComment string,
+	status *TicketStatus,
+	now time.Time,
+) (*TicketAttachResult, error) {
 	var existingSeq int64
 	var existingStatus string
-	err = tx.QueryRow(`
+	err := tx.QueryRow(`
 		SELECT seq, to_status FROM ticket_events
 		WHERE ticket_id = ? AND kind = ? AND detail LIKE ?
 		ORDER BY seq DESC LIMIT 1
@@ -910,9 +943,6 @@ func (s *Store) SubmitTicketAttach(
 			return nil, updateErr
 		}
 		resultStatus = updated.Status
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 	return &TicketAttachResult{EventSeq: eventSeq, Status: resultStatus}, nil
 }
@@ -1027,6 +1057,13 @@ func (s *Store) updateTicketFieldWithEvent(id, column, value string, evt TicketE
 	}
 	defer tx.Rollback()
 
+	if err := updateTicketFieldWithEventTx(tx, id, column, value, evt, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func updateTicketFieldWithEventTx(tx *sql.Tx, id, column, value string, evt TicketEvent, now time.Time) error {
 	res, err := tx.Exec(
 		`UPDATE tickets SET `+column+` = ?, updated_at = ? WHERE id = ?`,
 		value, formatTicketTime(now), id,
@@ -1040,7 +1077,7 @@ func (s *Store) updateTicketFieldWithEvent(id, column, value string, evt TicketE
 	if _, _, err := appendTicketEventTx(tx, evt, now); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // touchTicketTx bumps updated_at within a transaction, returning ErrTicketNotFound

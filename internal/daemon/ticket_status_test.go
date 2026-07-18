@@ -115,6 +115,29 @@ func TestSetTicketStatusMovesBoundTicket(t *testing.T) {
 	}
 }
 
+func TestSetTicketStatusCatchesUpBeforeMutating(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	sessionID := delegateBoundSession(t, d)
+	ticketID := boundTicketID(t, d, sessionID)
+	if _, err := d.store.AddTicketComment(ticketID, "chief-peer", "read this first", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	first := callSetTicketStatus(t, d, sessionID, string(protocol.DispatchWorkStateReadyForReview), "should not land")
+	if !first.Ok || first.TicketStatusResult == nil || first.TicketStatusResult.CatchUp == nil {
+		t.Fatalf("first response = %+v, want catch-up", first)
+	}
+	ticket, _ := d.store.GetTicket(ticketID)
+	if ticket.Status != store.TicketStatusWorking {
+		t.Fatalf("conflicting status changed ticket to %s", ticket.Status)
+	}
+
+	retry := callSetTicketStatus(t, d, sessionID, string(protocol.DispatchWorkStateReadyForReview), "now reviewed")
+	if !retry.Ok || retry.TicketStatusResult == nil || retry.TicketStatusResult.CatchUp != nil || retry.TicketStatusResult.Status != protocol.TicketStatusInReview {
+		t.Fatalf("retry response = %+v", retry)
+	}
+}
+
 // A completed report closes the ticket (terminal Done), after which the session
 // has no active ticket and a further report is rejected.
 func TestSetTicketStatusCompletedClosesTicket(t *testing.T) {

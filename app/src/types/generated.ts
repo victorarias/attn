@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateWorktreeRequest, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./file";
+//   import generated protocol types from "./file";
 //
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
@@ -268,6 +268,7 @@
 //   const ticketEventBundle = Convert.toTicketEventBundle(json);
 //   const ticketEventKind = Convert.toTicketEventKind(json);
 //   const ticketInboxMessage = Convert.toTicketInboxMessage(json);
+//   const ticketInboxMode = Convert.toTicketInboxMode(json);
 //   const ticketInboxResult = Convert.toTicketInboxResult(json);
 //   const ticketListMessage = Convert.toTicketListMessage(json);
 //   const ticketListResult = Convert.toTicketListResult(json);
@@ -1833,21 +1834,22 @@ export interface RepoElement {
 }
 
 export interface TicketElement {
-    activity:       ActivityElement[];
-    archived_at?:   string;
-    artifacts:      ArtifactElement[];
-    assignee:       string;
-    closed_at?:     string;
-    created_at:     string;
-    cwd:            string;
-    description:    string;
-    id:             string;
-    last_agent_id:  string;
-    project_id:     string;
-    reconciled_at?: string;
-    status:         TicketStatus;
-    title:          string;
-    updated_at:     string;
+    activity:          ActivityElement[];
+    archived_at?:      string;
+    artifacts:         ArtifactElement[];
+    assignee:          string;
+    closed_at?:        string;
+    created_at:        string;
+    cwd:               string;
+    description:       string;
+    id:                string;
+    last_agent_id:     string;
+    latest_event_seq?: number;
+    project_id:        string;
+    reconciled_at?:    string;
+    status:            TicketStatus;
+    title:             string;
+    updated_at:        string;
     [property: string]: any;
 }
 
@@ -3377,6 +3379,7 @@ export interface EvidenceElement {
 
 export interface TicketAttachResultObject {
     artifacts:    ArtifactElement[];
+    catch_up?:    CatchUp;
     deduplicated: boolean;
     event_seq:    number;
     fingerprint:  string;
@@ -3385,25 +3388,7 @@ export interface TicketAttachResultObject {
     [property: string]: any;
 }
 
-export interface TicketCommentResultObject {
-    ticket_id: string;
-    [property: string]: any;
-}
-
-export interface TicketCreateResultObject {
-    status:    TicketStatus;
-    ticket_id: string;
-    title:     string;
-    [property: string]: any;
-}
-
-export interface TicketInboxResultObject {
-    bundles:                BundleElement[];
-    last_user_activity_at?: string;
-    [property: string]: any;
-}
-
-export interface BundleElement {
+export interface CatchUp {
     events:    EventElement[];
     ticket_id: string;
     [property: string]: any;
@@ -3430,6 +3415,25 @@ export enum TicketEventKind {
     StatusChanged = "status_changed",
 }
 
+export interface TicketCommentResultObject {
+    catch_up?: CatchUp;
+    ticket_id: string;
+    [property: string]: any;
+}
+
+export interface TicketCreateResultObject {
+    status:    TicketStatus;
+    ticket_id: string;
+    title:     string;
+    [property: string]: any;
+}
+
+export interface TicketInboxResultObject {
+    bundles:                CatchUp[];
+    last_user_activity_at?: string;
+    [property: string]: any;
+}
+
 export interface TicketListResultObject {
     tickets: TicketElement[];
     [property: string]: any;
@@ -3441,19 +3445,22 @@ export interface TicketShowResultObject {
 }
 
 export interface TicketStatusResultObject {
+    catch_up?: CatchUp;
     status:    TicketStatus;
     ticket_id: string;
     [property: string]: any;
 }
 
 export interface TicketSubscribeResultObject {
-    ticket_id: string;
+    ticket_id:     string;
+    unread_count?: number;
     [property: string]: any;
 }
 
 export interface TicketTakeResultObject {
     previous_assignee: string;
     ticket_id:         string;
+    unread_count?:     number;
     [property: string]: any;
 }
 
@@ -3922,21 +3929,22 @@ export enum TasksChangedMessageEvent {
 }
 
 export interface Ticket {
-    activity:       ActivityElement[];
-    archived_at?:   string;
-    artifacts:      ArtifactElement[];
-    assignee:       string;
-    closed_at?:     string;
-    created_at:     string;
-    cwd:            string;
-    description:    string;
-    id:             string;
-    last_agent_id:  string;
-    project_id:     string;
-    reconciled_at?: string;
-    status:         TicketStatus;
-    title:          string;
-    updated_at:     string;
+    activity:          ActivityElement[];
+    archived_at?:      string;
+    artifacts:         ArtifactElement[];
+    assignee:          string;
+    closed_at?:        string;
+    created_at:        string;
+    cwd:               string;
+    description:       string;
+    id:                string;
+    last_agent_id:     string;
+    latest_event_seq?: number;
+    project_id:        string;
+    reconciled_at?:    string;
+    status:            TicketStatus;
+    title:             string;
+    updated_at:        string;
     [property: string]: any;
 }
 
@@ -3964,10 +3972,11 @@ export interface TicketActivity {
 }
 
 export interface TicketAddCommentMessage {
-    cmd:         TicketAddCommentMessageCmd;
-    comment:     string;
-    request_id?: string;
-    ticket_id:   string;
+    cmd:                 TicketAddCommentMessageCmd;
+    comment:             string;
+    expected_event_seq?: number;
+    request_id?:         string;
+    ticket_id:           string;
     [property: string]: any;
 }
 
@@ -3989,13 +3998,14 @@ export interface TicketAttachFile {
 }
 
 export interface TicketAttachMessage {
-    cmd:               TicketAttachMessageCmd;
-    comment?:          string;
-    files:             FileObject[];
-    request_id?:       string;
-    source_session_id: string;
-    state?:            DispatchWorkState;
-    ticket_id?:        string;
+    cmd:                 TicketAttachMessageCmd;
+    comment?:            string;
+    expected_event_seq?: number;
+    files:               FileObject[];
+    request_id?:         string;
+    source_session_id:   string;
+    state?:              DispatchWorkState;
+    ticket_id?:          string;
     [property: string]: any;
 }
 
@@ -4011,6 +4021,7 @@ export interface FileObject {
 
 export interface TicketAttachResult {
     artifacts:    ArtifactElement[];
+    catch_up?:    CatchUp;
     deduplicated: boolean;
     event_seq:    number;
     fingerprint:  string;
@@ -4033,11 +4044,12 @@ export enum TicketAttachResultMessageEvent {
 }
 
 export interface TicketChangeStatusMessage {
-    cmd:         TicketChangeStatusMessageCmd;
-    comment?:    string;
-    request_id?: string;
-    status:      TicketStatus;
-    ticket_id:   string;
+    cmd:                 TicketChangeStatusMessageCmd;
+    comment?:            string;
+    expected_event_seq?: number;
+    request_id?:         string;
+    status:              TicketStatus;
+    ticket_id:           string;
     [property: string]: any;
 }
 
@@ -4058,6 +4070,7 @@ export enum TicketCommentMessageCmd {
 }
 
 export interface TicketCommentResult {
+    catch_up?: CatchUp;
     ticket_id: string;
     [property: string]: any;
 }
@@ -4083,10 +4096,11 @@ export interface TicketCreateResult {
 }
 
 export interface TicketEditDescriptionMessage {
-    cmd:         TicketEditDescriptionMessageCmd;
-    description: string;
-    request_id?: string;
-    ticket_id:   string;
+    cmd:                 TicketEditDescriptionMessageCmd;
+    description:         string;
+    expected_event_seq?: number;
+    request_id?:         string;
+    ticket_id:           string;
     [property: string]: any;
 }
 
@@ -4113,8 +4127,10 @@ export interface TicketEventBundle {
 }
 
 export interface TicketInboxMessage {
-    cmd:               TicketInboxMessageCmd;
-    source_session_id: string;
+    cmd:                TicketInboxMessageCmd;
+    mode?:              TicketInboxMode;
+    source_session_id:  string;
+    watch_interval_ms?: string;
     [property: string]: any;
 }
 
@@ -4122,8 +4138,13 @@ export enum TicketInboxMessageCmd {
     TicketInbox = "ticket_inbox",
 }
 
+export enum TicketInboxMode {
+    Explicit = "explicit",
+    Watch = "watch",
+}
+
 export interface TicketInboxResult {
-    bundles:                BundleElement[];
+    bundles:                CatchUp[];
     last_user_activity_at?: string;
     [property: string]: any;
 }
@@ -4201,6 +4222,7 @@ export interface TicketShowResult {
 }
 
 export interface TicketStatusResult {
+    catch_up?: CatchUp;
     status:    TicketStatus;
     ticket_id: string;
     [property: string]: any;
@@ -4218,7 +4240,8 @@ export enum TicketSubscribeMessageCmd {
 }
 
 export interface TicketSubscribeResult {
-    ticket_id: string;
+    ticket_id:     string;
+    unread_count?: number;
     [property: string]: any;
 }
 
@@ -4237,6 +4260,7 @@ export enum TicketTakeMessageCmd {
 export interface TicketTakeResult {
     previous_assignee: string;
     ticket_id:         string;
+    unread_count?:     number;
     [property: string]: any;
 }
 
@@ -7199,6 +7223,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("TicketInboxMessage")), null, 2);
     }
 
+    public static toTicketInboxMode(json: string): TicketInboxMode {
+        return cast(JSON.parse(json), r("TicketInboxMode"));
+    }
+
+    public static ticketInboxModeToJson(value: TicketInboxMode): string {
+        return JSON.stringify(uncast(value, r("TicketInboxMode")), null, 2);
+    }
+
     public static toTicketInboxResult(json: string): TicketInboxResult {
         return cast(JSON.parse(json), r("TicketInboxResult"));
     }
@@ -8892,6 +8924,7 @@ const typeMap: any = {
         { json: "description", js: "description", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "last_agent_id", js: "last_agent_id", typ: "" },
+        { json: "latest_event_seq", js: "latest_event_seq", typ: u(undefined, 0) },
         { json: "project_id", js: "project_id", typ: "" },
         { json: "reconciled_at", js: "reconciled_at", typ: u(undefined, "") },
         { json: "status", js: "status", typ: r("TicketStatus") },
@@ -9804,25 +9837,14 @@ const typeMap: any = {
     ], "any"),
     "TicketAttachResultObject": o([
         { json: "artifacts", js: "artifacts", typ: a(r("ArtifactElement")) },
+        { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "deduplicated", js: "deduplicated", typ: true },
         { json: "event_seq", js: "event_seq", typ: 0 },
         { json: "fingerprint", js: "fingerprint", typ: "" },
         { json: "state", js: "state", typ: r("TicketStatus") },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
-    "TicketCommentResultObject": o([
-        { json: "ticket_id", js: "ticket_id", typ: "" },
-    ], "any"),
-    "TicketCreateResultObject": o([
-        { json: "status", js: "status", typ: r("TicketStatus") },
-        { json: "ticket_id", js: "ticket_id", typ: "" },
-        { json: "title", js: "title", typ: "" },
-    ], "any"),
-    "TicketInboxResultObject": o([
-        { json: "bundles", js: "bundles", typ: a(r("BundleElement")) },
-        { json: "last_user_activity_at", js: "last_user_activity_at", typ: u(undefined, "") },
-    ], "any"),
-    "BundleElement": o([
+    "CatchUp": o([
         { json: "events", js: "events", typ: a(r("EventElement")) },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
@@ -9836,6 +9858,19 @@ const typeMap: any = {
         { json: "ticket_id", js: "ticket_id", typ: "" },
         { json: "to_status", js: "to_status", typ: u(undefined, r("TicketStatus")) },
     ], "any"),
+    "TicketCommentResultObject": o([
+        { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
+        { json: "ticket_id", js: "ticket_id", typ: "" },
+    ], "any"),
+    "TicketCreateResultObject": o([
+        { json: "status", js: "status", typ: r("TicketStatus") },
+        { json: "ticket_id", js: "ticket_id", typ: "" },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "TicketInboxResultObject": o([
+        { json: "bundles", js: "bundles", typ: a(r("CatchUp")) },
+        { json: "last_user_activity_at", js: "last_user_activity_at", typ: u(undefined, "") },
+    ], "any"),
     "TicketListResultObject": o([
         { json: "tickets", js: "tickets", typ: a(r("TicketElement")) },
     ], "any"),
@@ -9843,15 +9878,18 @@ const typeMap: any = {
         { json: "ticket", js: "ticket", typ: r("TicketElement") },
     ], "any"),
     "TicketStatusResultObject": o([
+        { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "status", js: "status", typ: r("TicketStatus") },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
     "TicketSubscribeResultObject": o([
         { json: "ticket_id", js: "ticket_id", typ: "" },
+        { json: "unread_count", js: "unread_count", typ: u(undefined, 0) },
     ], "any"),
     "TicketTakeResultObject": o([
         { json: "previous_assignee", js: "previous_assignee", typ: "" },
         { json: "ticket_id", js: "ticket_id", typ: "" },
+        { json: "unread_count", js: "unread_count", typ: u(undefined, 0) },
     ], "any"),
     "TicketUnsubscribeResultObject": o([
         { json: "ticket_id", js: "ticket_id", typ: "" },
@@ -10123,6 +10161,7 @@ const typeMap: any = {
         { json: "description", js: "description", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "last_agent_id", js: "last_agent_id", typ: "" },
+        { json: "latest_event_seq", js: "latest_event_seq", typ: u(undefined, 0) },
         { json: "project_id", js: "project_id", typ: "" },
         { json: "reconciled_at", js: "reconciled_at", typ: u(undefined, "") },
         { json: "status", js: "status", typ: r("TicketStatus") },
@@ -10147,6 +10186,7 @@ const typeMap: any = {
     "TicketAddCommentMessage": o([
         { json: "cmd", js: "cmd", typ: r("TicketAddCommentMessageCmd") },
         { json: "comment", js: "comment", typ: "" },
+        { json: "expected_event_seq", js: "expected_event_seq", typ: u(undefined, 0) },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
@@ -10162,6 +10202,7 @@ const typeMap: any = {
     "TicketAttachMessage": o([
         { json: "cmd", js: "cmd", typ: r("TicketAttachMessageCmd") },
         { json: "comment", js: "comment", typ: u(undefined, "") },
+        { json: "expected_event_seq", js: "expected_event_seq", typ: u(undefined, 0) },
         { json: "files", js: "files", typ: a(r("FileObject")) },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "source_session_id", js: "source_session_id", typ: "" },
@@ -10174,6 +10215,7 @@ const typeMap: any = {
     ], "any"),
     "TicketAttachResult": o([
         { json: "artifacts", js: "artifacts", typ: a(r("ArtifactElement")) },
+        { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "deduplicated", js: "deduplicated", typ: true },
         { json: "event_seq", js: "event_seq", typ: 0 },
         { json: "fingerprint", js: "fingerprint", typ: "" },
@@ -10190,6 +10232,7 @@ const typeMap: any = {
     "TicketChangeStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("TicketChangeStatusMessageCmd") },
         { json: "comment", js: "comment", typ: u(undefined, "") },
+        { json: "expected_event_seq", js: "expected_event_seq", typ: u(undefined, 0) },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "status", js: "status", typ: r("TicketStatus") },
         { json: "ticket_id", js: "ticket_id", typ: "" },
@@ -10201,6 +10244,7 @@ const typeMap: any = {
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
     "TicketCommentResult": o([
+        { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
     "TicketCreateMessage": o([
@@ -10218,6 +10262,7 @@ const typeMap: any = {
     "TicketEditDescriptionMessage": o([
         { json: "cmd", js: "cmd", typ: r("TicketEditDescriptionMessageCmd") },
         { json: "description", js: "description", typ: "" },
+        { json: "expected_event_seq", js: "expected_event_seq", typ: u(undefined, 0) },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
@@ -10237,10 +10282,12 @@ const typeMap: any = {
     ], "any"),
     "TicketInboxMessage": o([
         { json: "cmd", js: "cmd", typ: r("TicketInboxMessageCmd") },
+        { json: "mode", js: "mode", typ: u(undefined, r("TicketInboxMode")) },
         { json: "source_session_id", js: "source_session_id", typ: "" },
+        { json: "watch_interval_ms", js: "watch_interval_ms", typ: u(undefined, "") },
     ], "any"),
     "TicketInboxResult": o([
-        { json: "bundles", js: "bundles", typ: a(r("BundleElement")) },
+        { json: "bundles", js: "bundles", typ: a(r("CatchUp")) },
         { json: "last_user_activity_at", js: "last_user_activity_at", typ: u(undefined, "") },
     ], "any"),
     "TicketListMessage": o([
@@ -10282,6 +10329,7 @@ const typeMap: any = {
         { json: "ticket", js: "ticket", typ: r("TicketElement") },
     ], "any"),
     "TicketStatusResult": o([
+        { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "status", js: "status", typ: r("TicketStatus") },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
@@ -10292,6 +10340,7 @@ const typeMap: any = {
     ], "any"),
     "TicketSubscribeResult": o([
         { json: "ticket_id", js: "ticket_id", typ: "" },
+        { json: "unread_count", js: "unread_count", typ: u(undefined, 0) },
     ], "any"),
     "TicketTakeMessage": o([
         { json: "cmd", js: "cmd", typ: r("TicketTakeMessageCmd") },
@@ -10302,6 +10351,7 @@ const typeMap: any = {
     "TicketTakeResult": o([
         { json: "previous_assignee", js: "previous_assignee", typ: "" },
         { json: "ticket_id", js: "ticket_id", typ: "" },
+        { json: "unread_count", js: "unread_count", typ: u(undefined, 0) },
     ], "any"),
     "TicketUnsubscribeMessage": o([
         { json: "cmd", js: "cmd", typ: r("TicketUnsubscribeMessageCmd") },
@@ -11456,6 +11506,10 @@ const typeMap: any = {
     ],
     "TicketInboxMessageCmd": [
         "ticket_inbox",
+    ],
+    "TicketInboxMode": [
+        "explicit",
+        "watch",
     ],
     "TicketListMessageCmd": [
         "ticket_list",

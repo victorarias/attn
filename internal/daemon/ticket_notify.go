@@ -1,10 +1,10 @@
 package daemon
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/victorarias/attn/internal/store"
-	"github.com/victorarias/attn/internal/ticketnotify"
 )
 
 // ticketNudgePrompt is the fixed doorbell typed into a nudge-eligible agent: a
@@ -12,6 +12,76 @@ import (
 // queue with `attn ticket inbox`. This is the doorbell rule — the daemon signals,
 // it never streams the message into the PTY.
 const ticketNudgePrompt = "📋 New ticket activity — run `attn ticket inbox` to catch up."
+
+// defaultTicketBufferWindow is the interruption budget for every observer that
+// is not currently assigned to the ticket. The assignee keeps the short nudge
+// countdown because it is the agent actively doing the work.
+const defaultTicketBufferWindow = 30 * time.Minute
+const ticketWatchLeaseWindow = 5 * time.Second
+
+func ticketWatchLeaseWindowFor(intervalMS *string) time.Duration {
+	if intervalMS == nil {
+		return ticketWatchLeaseWindow
+	}
+	milliseconds, err := strconv.ParseInt(*intervalMS, 10, 64)
+	if err != nil || milliseconds <= 0 {
+		return ticketWatchLeaseWindow
+	}
+	const maxDuration = time.Duration(1<<63 - 1)
+	if milliseconds > int64(maxDuration/time.Millisecond) {
+		return maxDuration
+	}
+	interval := time.Duration(milliseconds) * time.Millisecond
+	grace := interval / 2
+	if grace < time.Second {
+		grace = time.Second
+	}
+	if interval > maxDuration-grace {
+		return maxDuration
+	}
+	return interval + grace
+}
+
+func (d *Daemon) ticketBufferWindow() time.Duration {
+	if d.ticketBufferWindowOverride > 0 {
+		return d.ticketBufferWindowOverride
+	}
+	return defaultTicketBufferWindow
+}
+
+// ticketAttentionKey intentionally follows the durable chief role across chief
+// session transfer. Other observers use their ordinary session identity.
+func (d *Daemon) ticketAttentionKey(sessionID string) string {
+	if d.isChiefOfStaffSession(sessionID) {
+		return store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)
+	}
+	return sessionID
+}
+
+func (d *Daemon) ticketDeadline(sessionID, ticketID string, unreadAt, now time.Time) (time.Time, bool, error) {
+	ticket, err := d.store.GetTicket(ticketID)
+	if err != nil || ticket == nil {
+		return time.Time{}, false, err
+	}
+	if ticket.Assignee == sessionID {
+		return now.Add(d.nudgeWindow()), true, nil
+	}
+	attention, found, err := d.store.TicketDeliveryAttention(d.ticketAttentionKey(sessionID))
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	deadline := now.Add(d.nudgeWindow())
+	if found {
+		if buffered := attention.LastAttentionAt.Add(d.ticketBufferWindow()); buffered.After(deadline) {
+			deadline = buffered
+		}
+	} else if !unreadAt.IsZero() {
+		if buffered := unreadAt.Add(d.ticketBufferWindow()); buffered.After(deadline) {
+			deadline = buffered
+		}
+	}
+	return deadline, false, nil
+}
 
 // ticketNudger adapts the daemon's doorbell primitive to ticketnotify.Nudger.
 type ticketNudger struct{ d *Daemon }
@@ -67,11 +137,7 @@ func (d *Daemon) notifyTicketSession(sessionID string, now time.Time) {
 	// the delivery mechanism, so an active agent and an optional watcher both surface
 	// the unread marker.
 	d.refreshTicketUnread(sessionID)
-	observers := d.ticketObserversForSession(sessionID)
-	_, err := ticketnotify.NotifyAny(d.store, observers, observers[0], isNudgeDeliveryAllowed(string(session.State)), ticketNudger{d}, now)
-	if err != nil {
-		d.logf("ticket notify: %s: %v", sessionID, err)
-	}
+	d.notifyUnreadTicketSession(sessionID, now)
 }
 
 // syncNudgeForState cancels a queued doorbell only while a session is waiting for
@@ -82,5 +148,58 @@ func (d *Daemon) syncNudgeForState(sessionID, state string) {
 		d.cancelNudgeCountdown(sessionID, "waiting for approval")
 		return
 	}
-	go d.notifyTicketSession(sessionID, time.Now())
+	go d.notifyUnreadTicketSession(sessionID, time.Now())
+}
+
+// notifyUnreadTicketSession rebuilds a deadline after an approval wait or daemon
+// recovery, when there is no single triggering ticket. It derives the earliest
+// eligible deadline from durable unread events instead of persisting a scheduler.
+func (d *Daemon) notifyUnreadTicketSession(sessionID string, now time.Time) {
+	d.deliveryMu.Lock()
+	defer d.deliveryMu.Unlock()
+	d.notifyUnreadTicketSessionLocked(sessionID, now)
+}
+
+// notifyUnreadTicketSessionLocked is the serialized form used by catch-up paths
+// that already hold deliveryMu. Keeping the unread scan, attention read, deadline
+// calculation, and timer arm in one critical section prevents an old calculation
+// from re-arming an earlier countdown after a concurrent consume advances the
+// observer's attention clock.
+func (d *Daemon) notifyUnreadTicketSessionLocked(sessionID string, now time.Time) {
+	if d.store == nil {
+		return
+	}
+	session := d.store.Get(sessionID)
+	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
+		return
+	}
+	var deadline time.Time
+	immediate := false
+	pending := make(map[int64]struct{})
+	for _, observer := range d.ticketObserversForSession(sessionID) {
+		events, err := d.store.UnreadTicketEventsFor(observer.ID, observer.AuthorID)
+		if err != nil {
+			d.logf("ticket notify rebuild: %s: %v", sessionID, err)
+			return
+		}
+		for _, event := range events {
+			pending[event.Seq] = struct{}{}
+			candidate, assigned, err := d.ticketDeadline(sessionID, event.TicketID, event.CreatedAt, now)
+			if err != nil {
+				continue
+			}
+			if deadline.IsZero() || candidate.Before(deadline) {
+				deadline, immediate = candidate, assigned
+			}
+		}
+	}
+	if !deadline.IsZero() {
+		if d.ticketRebuildBeforeArmHook != nil {
+			d.ticketRebuildBeforeArmHook(sessionID, deadline)
+		}
+		if d.debugLogging {
+			d.logf("ticket delivery: observer=%s session=%s class=%s pending=%d deadline=%s channel=countdown outcome=armed", d.ticketAttentionKey(sessionID), sessionID, map[bool]string{true: "assignee", false: "buffered"}[immediate], len(pending), deadline.Format(time.RFC3339))
+		}
+		d.armNudgeCountdownAt(sessionID, deadline)
+	}
 }

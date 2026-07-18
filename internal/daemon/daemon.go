@@ -184,18 +184,22 @@ type Daemon struct {
 	// doorbellMu serializes authoritative session-state commits with a complete
 	// doorbell write. This keeps a pending_approval report from interleaving
 	// between the prompt and its trailing Enter.
-	doorbellMu          sync.Mutex
-	nudgeMu             sync.Mutex
-	nudgeCountdowns     map[string]*nudgeCountdown     // presence == a running (unpaused) countdown
-	unreadCache         map[string]bool                // per-session unread ticket activity, for cheap broadcast decoration
-	nudgeWindowOverride time.Duration                  // 0 => defaultNudgeCountdownWindow; a short test override otherwise
-	nudgeFireHook       func(sessionID, action string) // tests only: invoked at the end of a countdown fire
-	lastInputMu         sync.Mutex
-	lastUserInputAt     map[string]time.Time // per-session keystroke recency — the fire-time splice guard
-	recoveryMu          sync.RWMutex
-	recovering          bool
-	notebookMu          sync.Mutex
-	notebookStore       *notebook.Store
+	doorbellMu                 sync.Mutex
+	nudgeMu                    sync.Mutex
+	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
+	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
+	deliveryMu                 sync.Mutex                                 // serializes consumes, catch-up, deadline rebuilds, and nudge fire-time checks
+	watchLeaseUntil            map[string]time.Time                       // ephemeral live-watch lease per session
+	nudgeWindowOverride        time.Duration                              // 0 => defaultNudgeCountdownWindow; a short test override otherwise
+	ticketBufferWindowOverride time.Duration                              // 0 => defaultTicketBufferWindow; test-only override
+	nudgeFireHook              func(sessionID, action string)             // tests only: invoked at the end of a countdown fire
+	ticketRebuildBeforeArmHook func(sessionID string, deadline time.Time) // tests only: invoked while deliveryMu is held
+	lastInputMu                sync.Mutex
+	lastUserInputAt            map[string]time.Time // per-session keystroke recency — the fire-time splice guard
+	recoveryMu                 sync.RWMutex
+	recovering                 bool
+	notebookMu                 sync.Mutex
+	notebookStore              *notebook.Store
 	// notebookWatcher observes notebook.root for external edits; guarded by its
 	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
 	// without nesting locks. Lazily started on first notebook use.
@@ -994,6 +998,7 @@ func (d *Daemon) pluginDriverReportsState(agent protocol.SessionAgent) bool {
 }
 
 func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
+	defer d.rebuildTicketDeliverySchedules()
 	recoveryReport, recoverErr := d.recoverPTYBackend(10 * time.Second)
 	if recoverErr != nil {
 		d.logf("PTY backend recovery failed: %v", recoverErr)
@@ -1035,6 +1040,18 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 	// Pruning flipped recovered sessions to idle in the store; refresh the
 	// cached workspace rollups so InitialState matches.
 	d.reseedWorkspaceStatuses()
+}
+
+func (d *Daemon) rebuildTicketDeliverySchedules() {
+	if d.store == nil {
+		return
+	}
+	now := time.Now()
+	for _, session := range d.store.List("") {
+		if session != nil {
+			d.notifyUnreadTicketSession(session.ID, now)
+		}
+	}
 }
 
 func (d *Daemon) recoverPTYBackend(timeout time.Duration) (ptybackend.RecoveryReport, error) {
