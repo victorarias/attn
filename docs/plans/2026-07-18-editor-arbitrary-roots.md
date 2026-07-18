@@ -38,32 +38,37 @@ directory. The storage concept (keeper, journal, knowledge base) stays bound to
   from the effective notebook root.
 - tileParams becomes `{ root?, path? }` JSON; a bare string tileParams keeps
   meaning "path under the notebook root" (back-compat with persisted tiles).
-- Authorization boundary: an explicit `root` names an arbitrary absolute
-  directory, so path validation alone isn't sufficient — any accepted local
-  WebSocket client could otherwise read, write, delete, index, or watch files
-  anywhere on disk via the daemon. Every `fs_*` command that accepts a
-  non-default `root` (including `fs_index`, `fs_watch`, `fs_unwatch`) requires
-  the authenticated app identity — the existing `IsBrowserHost()` boundary used
-  for the Tauri client — before honoring it. Omitted/empty `root` (today's
-  notebook-only behavior) stays available to any accepted client, unchanged.
-  An unauthenticated client requesting a non-default root gets a protocol
-  error, not a silent notebook-root fallback.
-
-## Verification
-
-- PR1 lands negative protocol tests in the daemon slice: an ordinary/untrusted
-  WebSocket client is proven unable to operate (read, write, index, or watch)
-  on an arbitrary root. Subsequent PRs adding `root`-aware commands extend
-  this coverage rather than assuming it.
+- **Arbitrary roots are gated on the authenticated app client.** An explicit
+  `root` on any fs command (`fs_list/read/read_asset/write/rename/delete/
+  exists`, and later `fs_watch`/`fs_unwatch`/`fs_index`) is honored only for
+  the connection that proves it is the attn app itself: trusted Tauri origin
+  at accept time, plus the per-profile browser-host secret verified in
+  `client_hello` (constant-time compare against `config.BrowserHostToken()`),
+  plus `client_kind == "tauri-app"` — i.e. the existing `IsBrowserHost`
+  identity minus the browser-tile capability bit, exposed as
+  `wsClient.isTrustedAppClient()`. Enforcement lives in the single
+  root-resolution chokepoint (`resolveFsRoot(client, raw)` /
+  `fsStoreFor(client, raw)`), so every current and future root-taking command
+  inherits the gate and cannot bypass it. An omitted/empty root still resolves
+  to the Notebook root for every accepted client, unchanged — back-compat is
+  preserved. Each PR that adds a root-taking command must ship negative
+  protocol tests proving an ordinary (unauthenticated) WS client is denied
+  explicit roots (read AND write paths, plus watch/index when they land)
+  while omitted-root behavior is unaffected. PR1 carries the predicate,
+  chokepoint, and the first negative tests; PR2 (watch) and PR3 (index) each
+  add their own denial test.
 
 ## PRs
 
 - [ ] PR1 daemon: `root` on fs_* + fs_read_asset + `fs_changed`, per-root store
-      cache, root validation, `IsBrowserHost()` authorization gate for
-      non-default roots, negative protocol tests, protocol bump
+      cache, root validation, protocol bump + auth gate: explicit roots
+      require the authenticated app client (isTrustedAppClient), with
+      negative protocol tests
 - [ ] PR2 daemon: per-root watcher registry, generalized trackable,
-      `fs_watch`/`fs_unwatch`
-- [ ] PR3 daemon: `fs_index` bounded recursive file index
+      `fs_watch`/`fs_unwatch` (fs_watch inherits the root auth gate via
+      resolveFsRoot + its own denial test)
+- [ ] PR3 daemon: `fs_index` bounded recursive file index (fs_index inherits
+      the root auth gate + denial test)
 - [ ] PR4 frontend: tile root plumbing (tileParams `{root, path}` + string
       back-compat), root-aware fs calls, `fs_changed` root filtering
 - [ ] PR5 frontend: workspace-directory default for ⌘⌥N, header root switcher,
