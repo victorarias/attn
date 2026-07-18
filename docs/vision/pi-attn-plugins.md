@@ -30,26 +30,17 @@ opaque state. pi is small, open, and extensible at every seam that matters.
 Owning the harness layer as *plugins* — not a fork — buys the leverage without
 the maintenance treadmill.
 
-## The central decision: plugin suite, not a fork
+## The central decision: a plugin suite
 
-**Decision: one main attn package for pi, composing focused extensions** —
-installed with a single `pi install`, each capability a piece that stands
-alone. Everything this vision wants maps onto pi's supported extension surface;
-the verified feature-by-feature mapping informs each capability's own doc.
+**One main attn package for pi, composing focused extensions** — installed
+with a single `pi install`, each capability a piece that stands alone.
+Everything this vision wants maps onto pi's supported extension surface; the
+verified feature-by-feature mapping informs each capability's own doc.
 
-**Rejected: forking pi.** openclaw is the cautionary tale, not the template:
-it embedded pi in-process, fought version churn and nested control loops, and
-ended up vendoring the entire runtime. But it forked because it bet its product
-on *owning* the loop — compaction policy, retries, failover, persistence. attn
-needs none of that ownership; it needs signals, steering, and capabilities,
-which is exactly what extensions provide. If a future need ever crosses into
-loop-ownership territory, that's a new decision made then, with openclaw's
-scars as the price list.
-
-**Also rejected (for now): RPC-first embedding.** pi can run headless with a
-host rendering the conversation; that's a much larger build than attn needs,
-and it doesn't remove the need for on-disk extensions anyway. It stays
-available if a Present-style native rendering of pi sessions ever wants it.
+Plugins are the whole bet: attn wants signals, steering, and capabilities —
+never ownership of the agent loop. (Forking pi and RPC-first embedding were
+considered and rejected on exactly that line; openclaw's history of vendoring
+pi is the price list for crossing it.)
 
 ## The shape: two plugin systems meet in the middle
 
@@ -68,10 +59,9 @@ it. Fewer guessing layers, same authority model.
 
 ## The capabilities (each gets its own doc)
 
-- **Autonomy with a safety envelope.** Not a permissioning system — no
-  approving things one by one. A simple policy declares what's inherently
-  safe: the worktree pi has open is the agent's to read and write, no
-  ceremony. Everything outside the envelope — bash, anything that reaches
+- **Autonomy with a safety envelope.** A simple policy declares what's
+  inherently safe: the worktree pi has open is the agent's to read and write,
+  no ceremony. Everything outside the envelope — bash, anything that reaches
   further — rides auto mode. Easy, safe defaults; pressure off.
 - **Subagent orchestration.** Fan-out and delegation inside the session.
   Prior art exists in the pi ecosystem — we adapt, not invent.
