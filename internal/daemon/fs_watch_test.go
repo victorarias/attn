@@ -58,13 +58,14 @@ func assertNoFsChangedForRoot(t *testing.T, ch chan outboundMessage, root, origi
 
 // fs_watch on a generic (non-notebook) root starts a live watcher whose external
 // edits surface as fs_changed(origin=external) for ANY file type — catching a
-// watcher that failed to start, or one still filtered to .md-only paths.
+// watcher that failed to start, or one still filtered to .md-only paths. The
+// event is delivered to the subscribed client directly, not via the hub
+// broadcast: a generic root's fs_changed audience is the watch's own
+// subscriber set (see TestFsWatchAudienceRestrictedToSubscribers), not every
+// connected client.
 func TestFsWatchExternalEditSurfacesForAnyFileType(t *testing.T) {
 	d := newFsDaemon(t)
 	root := t.TempDir()
-	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
-	d.wsHub.clients[hubClient] = true
-	go d.wsHub.run()
 
 	watchClient := trustedFsClient(8)
 	res := fsWatch(t, d, watchClient, "w1", root)
@@ -76,10 +77,40 @@ func TestFsWatchExternalEditSurfacesForAnyFileType(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ev := waitForFsChangeWithRoot(t, hubClient.send, originExternal)
+	ev := waitForFsChangeWithRoot(t, watchClient.send, originExternal)
 	if ev.Root != root || !slices.Contains(ev.Paths, "note.txt") {
 		t.Fatalf("external fs_changed = %+v, want root=%q paths containing note.txt", ev, root)
 	}
+}
+
+// The audience restriction that fixes the trust-boundary leak: a generic
+// root's fs_changed must reach only clients that hold an fs_watch ref on that
+// root. A second connected (and even trusted) client that never subscribed —
+// and the hub's broadcast path — must see nothing, even though the notebook
+// root's fs_changed still goes to everyone.
+func TestFsWatchAudienceRestrictedToSubscribers(t *testing.T) {
+	d := newFsDaemon(t)
+	root := t.TempDir()
+	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
+	d.wsHub.clients[hubClient] = true
+	go d.wsHub.run()
+
+	watchClient := trustedFsClient(8)
+	nonSubscriber := trustedFsClient(8)
+	if res := fsWatch(t, d, watchClient, "w1", root); !res.Success {
+		t.Fatalf("fs_watch = %+v", res)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "note.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := waitForFsChangeWithRoot(t, watchClient.send, originExternal)
+	if ev.Root != root || !slices.Contains(ev.Paths, "note.txt") {
+		t.Fatalf("subscriber fs_changed = %+v, want root=%q paths containing note.txt", ev, root)
+	}
+	assertNoFsChangedForRoot(t, hubClient.send, root, originExternal, 700*time.Millisecond)
+	assertNoFsChangedForRoot(t, nonSubscriber.send, root, originExternal, 700*time.Millisecond)
 }
 
 // Once fs_unwatch drops the last ref on a root, its watcher must actually stop:
@@ -88,9 +119,6 @@ func TestFsWatchExternalEditSurfacesForAnyFileType(t *testing.T) {
 func TestFsUnwatchStopsWatcherAtZeroRefs(t *testing.T) {
 	d := newFsDaemon(t)
 	root := t.TempDir()
-	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
-	d.wsHub.clients[hubClient] = true
-	go d.wsHub.run()
 
 	client := trustedFsClient(8)
 	if res := fsWatch(t, d, client, "w1", root); !res.Success {
@@ -103,7 +131,7 @@ func TestFsUnwatchStopsWatcherAtZeroRefs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "after-unwatch.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	assertNoFsChangedForRoot(t, hubClient.send, root, originExternal, 700*time.Millisecond)
+	assertNoFsChangedForRoot(t, client.send, root, originExternal, 700*time.Millisecond)
 }
 
 // Two clients watching the same root: dropping one client's refs (as disconnect
@@ -113,9 +141,6 @@ func TestFsUnwatchStopsWatcherAtZeroRefs(t *testing.T) {
 func TestFsWatchRefcountedAcrossClients(t *testing.T) {
 	d := newFsDaemon(t)
 	root := t.TempDir()
-	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
-	d.wsHub.clients[hubClient] = true
-	go d.wsHub.run()
 
 	clientA := trustedFsClient(8)
 	clientB := trustedFsClient(8)
@@ -131,7 +156,7 @@ func TestFsWatchRefcountedAcrossClients(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "still-watched.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	ev := waitForFsChangeWithRoot(t, hubClient.send, originExternal)
+	ev := waitForFsChangeWithRoot(t, clientB.send, originExternal)
 	if ev.Root != root || !slices.Contains(ev.Paths, "still-watched.txt") {
 		t.Fatalf("fs_changed after dropping one client = %+v", ev)
 	}
@@ -142,7 +167,7 @@ func TestFsWatchRefcountedAcrossClients(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "no-longer-watched.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	assertNoFsChangedForRoot(t, hubClient.send, root, originExternal, 700*time.Millisecond)
+	assertNoFsChangedForRoot(t, clientB.send, root, originExternal, 700*time.Millisecond)
 }
 
 // A WS fs_write to a watched generic root must not echo back as its own
@@ -152,9 +177,6 @@ func TestFsWatchRefcountedAcrossClients(t *testing.T) {
 func TestFsWatchSelfWriteNotEchoedAsExternal(t *testing.T) {
 	d := newFsDaemon(t)
 	root := t.TempDir()
-	hubClient := &wsClient{send: make(chan outboundMessage, 64)}
-	d.wsHub.clients[hubClient] = true
-	go d.wsHub.run()
 
 	watchClient := trustedFsClient(8)
 	if res := fsWatch(t, d, watchClient, "w1", root); !res.Success {
@@ -165,11 +187,11 @@ func TestFsWatchSelfWriteNotEchoedAsExternal(t *testing.T) {
 		t.Fatalf("write = %+v", res.Result)
 	}
 
-	ev := waitForFsChangeWithRoot(t, hubClient.send, originUI)
+	ev := waitForFsChangeWithRoot(t, watchClient.send, originUI)
 	if !slices.Contains(ev.Paths, "own.txt") {
 		t.Fatalf("ui fs_changed = %+v, want own.txt", ev)
 	}
-	assertNoFsChangedForRoot(t, hubClient.send, root, originExternal, 700*time.Millisecond)
+	assertNoFsChangedForRoot(t, watchClient.send, root, originExternal, 700*time.Millisecond)
 }
 
 // The notebook root's watcher is now generic: an external edit to a non-.md file

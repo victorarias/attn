@@ -98,16 +98,26 @@ func (d *Daemon) fsStoreFor(client *wsClient, rawRoot string) (*fsdoc.Store, str
 	return store, root, nil
 }
 
-// broadcastFsChanged announces a filesystem change to all websocket clients.
-// origin is agent|ui|external, the same vocabulary as notebook_changed. root is
-// the resolved absolute root the change happened under.
+// broadcastFsChanged announces a filesystem change under root. For the
+// notebook root this goes to every websocket client, matching legacy
+// notebook_changed fan-out. For any other root — reachable only through an
+// explicit fs_watch, which resolveFsRoot gates on the trusted app client —
+// the absolute root path and changed paths are sensitive, so the event is
+// sent only to clients currently holding an fs_watch ref on that root; a
+// connected client that never subscribed sees nothing. origin is
+// agent|ui|external, the same vocabulary as notebook_changed.
 func (d *Daemon) broadcastFsChanged(root, origin string, paths ...string) {
-	d.broadcastMessage(protocol.FsChangedMessage{
+	msg := protocol.FsChangedMessage{
 		Event:  protocol.EventFsChanged,
 		Paths:  paths,
 		Origin: origin,
 		Root:   root,
-	})
+	}
+	if d.isNotebookRoot(root) {
+		d.broadcastMessage(msg)
+		return
+	}
+	d.sendFsChangedToWatchers(root, msg)
 }
 
 // sendFsListWSResult lists one directory's immediate children and replies with an

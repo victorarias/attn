@@ -169,3 +169,25 @@ func (d *Daemon) fsWatcherFor(root string) *notebook.Watcher {
 	}
 	return entry.watcher
 }
+
+// sendFsChangedToWatchers delivers msg only to the clients currently holding
+// an fs_watch ref on root — the audience restriction that keeps a generic
+// editor root's absolute path and changed paths from leaking to a connected
+// client that never subscribed to it. A no-op if root has no live registry
+// entry (e.g. the last subscriber unwatched between the change firing and
+// this call).
+func (d *Daemon) sendFsChangedToWatchers(root string, msg protocol.FsChangedMessage) {
+	d.fsWatchMu.Lock()
+	entry, ok := d.fsWatchers[root]
+	var clients []*wsClient
+	if ok {
+		clients = make([]*wsClient, 0, len(entry.refs))
+		for c := range entry.refs {
+			clients = append(clients, c)
+		}
+	}
+	d.fsWatchMu.Unlock()
+	for _, c := range clients {
+		d.sendToClient(c, msg)
+	}
+}
