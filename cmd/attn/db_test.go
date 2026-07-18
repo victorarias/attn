@@ -410,6 +410,9 @@ func TestAcquireDaemonLock_HeldByAnotherProcess(t *testing.T) {
 	if !strings.Contains(err.Error(), "daemon is running") {
 		t.Fatalf("expected EWOULDBLOCK contention to be classified as \"daemon is running\", got: %v", err)
 	}
+	if strings.Contains(err.Error(), "cannot determine daemon state") {
+		t.Fatalf("expected EWOULDBLOCK contention not to use the indeterminate-state message, got: %v", err)
+	}
 
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN); err != nil {
 		t.Fatalf("unlock pid file: %v", err)
@@ -420,6 +423,36 @@ func TestAcquireDaemonLock_HeldByAnotherProcess(t *testing.T) {
 		t.Fatalf("expected acquireDaemonLock to succeed after the lock was released, got: %v", err)
 	}
 	release()
+}
+
+// TestAcquireDaemonLock_NonContentionFlockErrorIsNotMisreportedAsRunning
+// proves acquireDaemonLock does not conflate every flock failure with "the
+// daemon is running": only EWOULDBLOCK (the actual contention signal) gets
+// that operator-facing message. Any other flock error must surface as
+// "cannot determine daemon state" instead, since telling the user to stop a
+// daemon that may not even exist would be misleading. Exercised by swapping
+// in a fake flock function that returns a non-EWOULDBLOCK error, mirroring
+// how an exotic failure (e.g. ENOLCK) would present.
+func TestAcquireDaemonLock_NonContentionFlockErrorIsNotMisreportedAsRunning(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "attn.pid")
+
+	restore := flockFn
+	flockFn = func(fd int, how int) error {
+		return syscall.ENOLCK
+	}
+	defer func() { flockFn = restore }()
+
+	_, err := acquireDaemonLock(pidPath)
+	if err == nil {
+		t.Fatal("expected acquireDaemonLock to refuse on a non-contention flock error")
+	}
+	if !strings.Contains(err.Error(), "cannot determine daemon state") {
+		t.Fatalf("acquireDaemonLock() error = %q, want the indeterminate-state message for a non-EWOULDBLOCK flock error", err)
+	}
+	if strings.Contains(err.Error(), "daemon is running") {
+		t.Fatalf("acquireDaemonLock() error = %q, should not claim daemon liveness on an indeterminate flock error", err)
+	}
 }
 
 // TestAcquireDaemonLock_ExcludesConcurrentRestore proves the lock is held —
