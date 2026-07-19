@@ -25,6 +25,7 @@ export GOMAXPROCS="$test_gomaxprocs"
 
 go_bin="$(command -v go)"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/attn-go-test.XXXXXX")"
+# shellcheck disable=SC2329 # invoked indirectly by trap
 cleanup() {
   rm -rf "$test_root"
 }
@@ -32,9 +33,14 @@ trap cleanup EXIT
 
 # Scope the entire test process tree away from production ~/.attn. Package
 # TestMain functions add their own isolation, but the runner must also protect
-# packages and subprocesses before any package-level setup executes.
-mkdir -p "$test_root/data"
-export ATTN_DATA_DIR="$test_root/data"
+# packages and subprocesses before any package-level setup executes. Keep the
+# outer path stable so Go can reuse successful test results; TestMain still
+# replaces it with a fresh per-process directory whenever tests actually run.
+runner_hash="$(shasum -a 256 "$root/scripts/test-go.sh" | awk '{ print $1 }')"
+cache_namespace="$(printf '%s\n%s\n%s\n' "$root" "$($go_bin env GOVERSION)" "$runner_hash" | shasum -a 256 | awk '{ print $1 }')"
+test_cache_root="${TMPDIR:-/tmp}/attn-go-test-cache/$cache_namespace"
+mkdir -p "$test_cache_root/data"
+export ATTN_DATA_DIR="$test_cache_root/data"
 unset ATTN_DB_PATH ATTN_SOCKET_PATH ATTN_CONFIG_PATH ATTN_PLUGIN_DIR
 
 # Tests should exercise Git itself, not an environment-specific command wrapper.
@@ -52,9 +58,18 @@ if [ ! -x "$test_git" ]; then
   echo "test Git is not executable: $test_git" >&2
   exit 2
 fi
-mkdir -p "$test_root/bin"
-ln -s "$test_git" "$test_root/bin/git"
-export PATH="$test_root/bin:$PATH"
+test_git_hash="$(shasum -a 256 "$test_git" | awk '{ print $1 }')"
+test_git_key="$(printf '%s\n%s\n' "$test_git" "$test_git_hash" | shasum -a 256 | awk '{ print $1 }')"
+test_bin_dir="$test_cache_root/git/$test_git_key"
+mkdir -p "$test_bin_dir"
+if [ ! -e "$test_bin_dir/git" ]; then
+  ln -s "$test_git" "$test_bin_dir/git" 2>/dev/null || true
+fi
+if [ ! -L "$test_bin_dir/git" ] || [ "$(readlink "$test_bin_dir/git")" != "$test_git" ]; then
+  echo "cached test Git does not point to $test_git: $test_bin_dir/git" >&2
+  exit 2
+fi
+export PATH="$test_bin_dir:$PATH"
 
 short_mode=false
 for arg in "$@"; do
@@ -64,10 +79,32 @@ for arg in "$@"; do
 done
 
 # The daemon's process-level E2E tests need the real attn executable. Build it
-# once for all shards instead of independently inside each test.
-if [ "$short_mode" = false ] && [ -z "${ATTN_E2E_BIN:-}" ]; then
-  export ATTN_E2E_BIN="$test_root/attn"
-  "$go_bin" build -o "$ATTN_E2E_BIN" ./cmd/attn
+# once for all shards instead of independently inside each test. Normalize an
+# explicitly supplied binary the same way. The content-addressed path stays
+# stable for unchanged code and changes whenever the executable changes, so
+# daemon result-cache hits cannot hide a new binary at an unchanged source path.
+if [ "$short_mode" = false ]; then
+  source_e2e_bin="${ATTN_E2E_BIN:-}"
+  if [ -z "$source_e2e_bin" ]; then
+    source_e2e_bin="$test_root/attn"
+    "$go_bin" build -o "$source_e2e_bin" ./cmd/attn
+  elif [ ! -x "$source_e2e_bin" ]; then
+    echo "ATTN_E2E_BIN is not executable: $source_e2e_bin" >&2
+    exit 2
+  fi
+  e2e_hash="$(shasum -a 256 "$source_e2e_bin" | awk '{ print $1 }')"
+  e2e_cache_dir="$test_cache_root/e2e/$e2e_hash"
+  mkdir -p "$e2e_cache_dir"
+  cached_e2e_hash=""
+  if [ -f "$e2e_cache_dir/attn" ]; then
+    cached_e2e_hash="$(shasum -a 256 "$e2e_cache_dir/attn" | awk '{ print $1 }')"
+  fi
+  if [ "$cached_e2e_hash" != "$e2e_hash" ]; then
+    cp "$source_e2e_bin" "$e2e_cache_dir/attn.$$.tmp"
+    chmod +x "$e2e_cache_dir/attn.$$.tmp"
+    mv -f "$e2e_cache_dir/attn.$$.tmp" "$e2e_cache_dir/attn"
+  fi
+  export ATTN_E2E_BIN="$e2e_cache_dir/attn"
 fi
 
 packages_file="$test_root/packages"

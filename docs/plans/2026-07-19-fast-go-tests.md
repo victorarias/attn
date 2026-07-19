@@ -62,6 +62,11 @@ make / pre-commit
 - [x] Remeasure the focused tests and ten complete cache-controlled runs.
 - [x] Prototype compiling the daemon test binary once for all shards; reject it
   if the measured gain does not justify duplicating Go's flag rewriting.
+- [x] Stabilize only the runner's outer isolation paths so unchanged daemon
+  shards can use Go's result cache while executed tests keep fresh temp dirs.
+- [x] Prove cache invalidation when the E2E binary or direct Git executable
+  changes, plus concurrent-run isolation.
+- [x] Measure the unchanged-hook warm path and a cache-controlled changed path.
 
 ## Results
 
@@ -106,6 +111,24 @@ run-to-run variance and does not justify maintaining a partial reimplementation
 of Go's build/test flag rewriting, changing daemon test-cache behavior, or
 degrading package-aware output. The runner change was therefore removed.
 
+The hook-oriented cache pass instead kept Go in charge and stabilized only the
+runner's outer environment. `ATTN_DATA_DIR` now points at a non-production cache
+namespace while every executing package `TestMain` still replaces it with a
+fresh per-process temp directory. The direct Git path is keyed by both path and
+binary content, and the shared E2E executable is copied to a content-addressed
+path, so changing either external input invalidates the test results that read
+it. An explicitly supplied `ATTN_E2E_BIN` is normalized through the same path.
+
+After one population run, five unchanged full runs passed in 5.19–6.36s with a
+5.80s median and all 44 package results cached. The final runner revision took
+30.61s to populate its new namespace and 5.77s on the immediate 44/44 cached
+rerun. `-count=1` still forced all tests to run and passed in 33.11s. Two
+simultaneous cache-miss runners both passed, covering ten concurrent daemon
+shards without sharing runtime data. A cmd-only mutation invalidated only the
+two daemon shards that read the changed E2E binary; a semantics-preserving
+alternate Git executable invalidated all Git-reading shards. Both mutation
+probes passed and were removed.
+
 ## Success Criteria
 
 - [x] The same default Go test coverage passes ten consecutive cache-controlled runs.
@@ -130,3 +153,6 @@ degrading package-aware output. The runner change was therefore removed.
   41.85s for six/four.
 - Keep the Go driver responsible for compiling and invoking every test binary;
   compiling the daemon binary once did not produce a material wall-time gain.
+- Cache only stable outer inputs. Runtime data remains unique per executing test
+  process, while content-addressed external executables prevent cached results
+  from hiding changed Git or E2E behavior.
