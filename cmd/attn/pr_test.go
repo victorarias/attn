@@ -25,7 +25,7 @@ func (f *fakeReadinessSource) Fetch(context.Context, prWaitOptions) (*prReadines
 }
 
 // snapshotPayload wraps GraphQL fragments in the envelope gh api graphql emits.
-func snapshotPayload(head, checks, reviews, comments, threads string) []byte {
+func snapshotPayload(head, checks, reviews, comments string) []byte {
 	if checks == "" {
 		checks = `{"__typename":"CheckRun","name":"CI","status":"COMPLETED","conclusion":"SUCCESS"}`
 	}
@@ -34,9 +34,22 @@ func snapshotPayload(head, checks, reviews, comments, threads string) []byte {
       "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{
         "pageInfo":{"hasNextPage":false},"nodes":[%s]}}}}]},
       "reviews":{"nodes":[%s]},
-      "comments":{"nodes":[%s]},
-      "reviewThreads":{"nodes":[%s]}
-    }}}}`, head, checks, reviews, comments, threads)
+      "comments":{"nodes":[%s]}
+    }}}}`, head, checks, reviews, comments)
+}
+
+// reviewNode builds one review. GitHub attaches every inline comment to a
+// freshly submitted review, including a reply to a long-dormant thread, and
+// wraps a standalone inline comment in a review with no body of its own.
+func reviewNode(id, state, body, at, author, oid, inline string) string {
+	return fmt.Sprintf(`{"id":%q,"state":%q,"bodyText":%q,"submittedAt":%q,
+	  "author":{"__typename":"User","login":%q},"commit":{"oid":%q},
+	  "comments":{"pageInfo":{"hasNextPage":false},"nodes":[%s]}}`,
+		id, state, body, at, author, oid, inline)
+}
+
+func inlineNode(id, at, author string) string {
+	return fmt.Sprintf(`{"id":%q,"createdAt":%q,"author":{"__typename":"User","login":%q}}`, id, at, author)
 }
 
 func TestParsePRSnapshotRequiresGreenChecksAndCurrentHeadApproval(t *testing.T) {
@@ -45,12 +58,14 @@ func TestParsePRSnapshotRequiresGreenChecksAndCurrentHeadApproval(t *testing.T) 
 	checks := `{"__typename":"CheckRun","name":"Daemon","status":"COMPLETED","conclusion":"SUCCESS"},
 	           {"__typename":"CheckRun","name":"Frontend","status":"COMPLETED","conclusion":"SKIPPED"},
 	           {"__typename":"StatusContext","context":"license","state":"SUCCESS"}`
-	reviews := `{"id":"r1","state":"APPROVED","submittedAt":"2026-07-19T10:00:00Z","author":{"__typename":"User","login":"figgyster"},"commit":{"oid":"` + oldHead + `"}},
-	            {"id":"r2","state":"CHANGES_REQUESTED","submittedAt":"2026-07-19T11:00:00Z","author":{"__typename":"User","login":"figgyster"},"commit":{"oid":"` + head + `"}},
-	            {"id":"r3","state":"APPROVED","submittedAt":"2026-07-19T12:00:00Z","author":{"__typename":"User","login":"Figgyster"},"commit":{"oid":"` + head + `"}}`
+	reviews := strings.Join([]string{
+		reviewNode("r1", "APPROVED", "", "2026-07-19T10:00:00Z", "figgyster", oldHead, ""),
+		reviewNode("r2", "CHANGES_REQUESTED", "", "2026-07-19T11:00:00Z", "figgyster", head, ""),
+		reviewNode("r3", "APPROVED", "", "2026-07-19T12:00:00Z", "Figgyster", head, ""),
+	}, ",")
 
 	opts := prWaitOptions{Reviewer: "figgyster"}
-	readiness, err := parsePRSnapshot(snapshotPayload(head, checks, reviews, "", ""), opts)
+	readiness, err := parsePRSnapshot(snapshotPayload(head, checks, reviews, ""), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +75,7 @@ func TestParsePRSnapshotRequiresGreenChecksAndCurrentHeadApproval(t *testing.T) 
 
 	// The same reviews bound to a superseded commit must not satisfy the gate.
 	staleReviews := strings.ReplaceAll(reviews, `"oid":"`+head+`"`, `"oid":"`+oldHead+`"`)
-	readiness, err = parsePRSnapshot(snapshotPayload(head, checks, staleReviews, "", ""), opts)
+	readiness, err = parsePRSnapshot(snapshotPayload(head, checks, staleReviews, ""), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,14 +86,14 @@ func TestParsePRSnapshotRequiresGreenChecksAndCurrentHeadApproval(t *testing.T) 
 
 func TestParsePRSnapshotCollectsHumanCommentsAndDropsBots(t *testing.T) {
 	head := strings.Repeat("a", 40)
-	reviews := `{"id":"r1","state":"COMMENTED","bodyText":"a real review remark","submittedAt":"2026-07-19T10:00:00Z","author":{"__typename":"User","login":"figgyster"},"commit":{"oid":"` + head + `"}}`
+	reviews := reviewNode("r1", "COMMENTED", "a real review remark", "2026-07-19T10:00:00Z", "figgyster", head,
+		inlineNode("t1", "2026-07-19T11:00:00Z", "figgyster"))
 	comments := `{"id":"c1","createdAt":"2026-07-19T09:00:00Z","author":{"__typename":"User","login":"victorarias"}},
 	             {"id":"c2","createdAt":"2026-07-19T09:30:00Z","author":{"__typename":"Bot","login":"chatgpt-codex-connector"}},
 	             {"id":"c3","createdAt":"2026-07-19T09:45:00Z","author":{"__typename":"User","login":"noisy-human"}}`
-	threads := `{"comments":{"nodes":[{"id":"t1","createdAt":"2026-07-19T11:00:00Z","author":{"__typename":"User","login":"figgyster"}}]}}`
 
 	opts := prWaitOptions{Reviewer: "figgyster", IgnoreAuthors: []string{"NOISY-HUMAN"}}
-	readiness, err := parsePRSnapshot(snapshotPayload(head, "", reviews, comments, threads), opts)
+	readiness, err := parsePRSnapshot(snapshotPayload(head, "", reviews, comments), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,10 +117,10 @@ func TestParsePRSnapshotCollectsHumanCommentsAndDropsBots(t *testing.T) {
 // Reporting both made one remark read as "2 new comments".
 func TestParsePRSnapshotDoesNotDoubleCountInlineCommentWrapper(t *testing.T) {
 	head := strings.Repeat("a", 40)
-	wrapper := `{"id":"r1","state":"COMMENTED","bodyText":"","submittedAt":"2026-07-19T19:33:19Z","author":{"__typename":"User","login":"victorarias"},"commit":{"oid":"` + head + `"}}`
-	threads := `{"comments":{"nodes":[{"id":"t1","createdAt":"2026-07-19T19:33:19Z","author":{"__typename":"User","login":"victorarias"}}]}}`
+	wrapper := reviewNode("r1", "COMMENTED", "", "2026-07-19T19:33:19Z", "victorarias", head,
+		inlineNode("t1", "2026-07-19T19:33:19Z", "victorarias"))
 
-	readiness, err := parsePRSnapshot(snapshotPayload(head, "", wrapper, "", threads), prWaitOptions{Reviewer: "figgyster"})
+	readiness, err := parsePRSnapshot(snapshotPayload(head, "", wrapper, ""), prWaitOptions{Reviewer: "figgyster"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,9 +129,59 @@ func TestParsePRSnapshotDoesNotDoubleCountInlineCommentWrapper(t *testing.T) {
 	}
 }
 
+// A reply to a thread older than any newest-N slice of reviewThreads must still
+// be seen. GitHub attaches the reply to a freshly submitted review, so sourcing
+// inline comments from reviews rather than threads makes thread age irrelevant.
+func TestParsePRSnapshotSeesReplyOnLongDormantThread(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	nodes := make([]string, 0, 130)
+	// 128 old reviews, each opening a thread, would push the first thread far
+	// outside a 100-thread window.
+	for i := range 128 {
+		nodes = append(nodes, reviewNode(
+			fmt.Sprintf("old-r%d", i), "COMMENTED", "", "2026-01-01T00:00:00Z", "victorarias", head,
+			inlineNode(fmt.Sprintf("old-t%d", i), "2026-01-01T00:00:00Z", "victorarias")))
+	}
+	// The reply lands on thread old-t0, but arrives as the newest review.
+	nodes = append(nodes, reviewNode("reply-r", "COMMENTED", "", "2026-07-19T20:00:00Z", "figgyster", head,
+		inlineNode("reply-t", "2026-07-19T20:00:00Z", "figgyster")))
+
+	readiness, err := parsePRSnapshot(snapshotPayload(head, "", strings.Join(nodes, ","), ""), prWaitOptions{Reviewer: "figgyster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var baseline []prComment
+	for _, comment := range readiness.Comments {
+		if comment.ID != "reply-t" {
+			baseline = append(baseline, comment)
+		}
+	}
+	seen := map[string]bool{}
+	for _, comment := range baseline {
+		seen[comment.ID] = true
+	}
+	fresh := unseenPRComments(readiness.Comments, seen)
+	if len(fresh) != 1 || fresh[0].ID != "reply-t" {
+		t.Fatalf("reply on a dormant thread was missed: fresh = %#v", fresh)
+	}
+}
+
+func TestParsePRSnapshotFailsClosedOnReviewCommentTruncation(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	review := reviewNode("r1", "COMMENTED", "", "2026-07-19T10:00:00Z", "victorarias", head,
+		inlineNode("t1", "2026-07-19T10:00:00Z", "victorarias"))
+	truncated := strings.Replace(review, `"pageInfo":{"hasNextPage":false}`, `"pageInfo":{"hasNextPage":true}`, 1)
+
+	if _, err := parsePRSnapshot(snapshotPayload(head, "", truncated, ""), prWaitOptions{Reviewer: "figgyster"}); err == nil ||
+		!strings.Contains(err.Error(), "without truncation") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestParsePRSnapshotFailsClosedForUnknownCheckState(t *testing.T) {
 	checks := `{"__typename":"CheckRun","name":"CI","status":"COMPLETED","conclusion":"NEW_STATE"}`
-	readiness, err := parsePRSnapshot(snapshotPayload("abc", checks, "", "", ""), prWaitOptions{Reviewer: "r"})
+	readiness, err := parsePRSnapshot(snapshotPayload("abc", checks, "", ""), prWaitOptions{Reviewer: "r"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +191,7 @@ func TestParsePRSnapshotFailsClosedForUnknownCheckState(t *testing.T) {
 }
 
 func TestParsePRSnapshotFailsClosedOnCheckTruncation(t *testing.T) {
-	payload := snapshotPayload("abc", "", "", "", "")
+	payload := snapshotPayload("abc", "", "", "")
 	truncated := bytes.Replace(payload, []byte(`"hasNextPage":false`), []byte(`"hasNextPage":true`), 1)
 	if _, err := parsePRSnapshot(truncated, prWaitOptions{Reviewer: "r"}); err == nil ||
 		!strings.Contains(err.Error(), "without truncation") {

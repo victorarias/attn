@@ -342,9 +342,9 @@ query($owner:String!,$name:String!,$number:Int!){
         pageInfo{hasNextPage}
         nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}
       }}}}}
-      reviews(last:100){nodes{id state bodyText submittedAt author{__typename login} commit{oid}}}
+      reviews(last:100){nodes{id state bodyText submittedAt author{__typename login} commit{oid}
+        comments(first:100){pageInfo{hasNextPage} nodes{id createdAt author{__typename login}}}}}
       comments(last:100){nodes{id createdAt author{__typename login}}}
-      reviewThreads(last:100){nodes{comments(last:100){nodes{id createdAt author{__typename login}}}}}
     }}}`
 
 func (ghPRReadinessSource) Fetch(ctx context.Context, opts prWaitOptions) (*prReadiness, error) {
@@ -418,6 +418,12 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 							Commit      struct {
 								OID string `json:"oid"`
 							} `json:"commit"`
+							Comments struct {
+								PageInfo struct {
+									HasNextPage bool `json:"hasNextPage"`
+								} `json:"pageInfo"`
+								Nodes []prGraphQLComment `json:"nodes"`
+							} `json:"comments"`
 						} `json:"nodes"`
 					} `json:"reviews"`
 					Comments struct {
@@ -472,22 +478,34 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 	sort.Slice(result.Checks, func(i, j int) bool { return result.Checks[i].Name < result.Checks[j].Name })
 	result.CheckState = summarizePRChecks(result.Checks)
 
-	// Reviews, comments, and threads use last:100, so truncation drops only the
-	// oldest entries. A superseded review or a long-read comment cannot be the
-	// actionable update, so that boundary is safe to accept.
+	// Reviews and issue comments use last:100, so truncation drops only the
+	// oldest entries, which cannot be the actionable update.
+	//
+	// Inline comments deliberately come from the reviews that carry them rather
+	// than from reviewThreads. A thread's position is fixed when the thread
+	// starts but comments can be appended to it forever, so a reply to an old
+	// thread falls outside any newest-N slice of threads and would be missed.
+	// Every inline comment, including a reply to a long-dormant thread, arrives
+	// attached to a freshly submitted review, and reviews are submission
+	// ordered. Sourcing them here makes thread age irrelevant.
 	var latest time.Time
 	for _, review := range pr.Reviews.Nodes {
 		state := strings.ToUpper(review.State)
+		// A review with no text of its own is just the wrapper GitHub creates
+		// around an inline comment; its comments are reported below, so
+		// counting the wrapper too would report one remark twice.
+		if strings.TrimSpace(review.BodyText) != "" {
+			result.Comments = appendPRComment(result.Comments, prGraphQLComment{
+				ID: review.ID, CreatedAt: review.SubmittedAt, Author: review.Author,
+			}, "review", opts)
+		}
+		if review.Comments.PageInfo.HasNextPage {
+			return nil, errors.New("a review carries more than 100 comments; new comments cannot be detected without truncation")
+		}
+		for _, comment := range review.Comments.Nodes {
+			result.Comments = appendPRComment(result.Comments, comment, "inline", opts)
+		}
 		if state == "COMMENTED" {
-			// Posting a standalone inline comment makes GitHub wrap it in a
-			// bodyless COMMENTED review. Counting that wrapper would report one
-			// human remark twice, so only a review with its own text counts;
-			// the inline comments it holds arrive via reviewThreads.
-			if strings.TrimSpace(review.BodyText) != "" {
-				result.Comments = appendPRComment(result.Comments, prGraphQLComment{
-					ID: review.ID, CreatedAt: review.SubmittedAt, Author: review.Author,
-				}, "review", opts)
-			}
 			continue
 		}
 		if !strings.EqualFold(review.Author.Login, opts.Reviewer) || review.Commit.OID != result.HeadSHA ||
@@ -503,11 +521,6 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 	}
 	for _, comment := range pr.Comments.Nodes {
 		result.Comments = appendPRComment(result.Comments, comment, "issue", opts)
-	}
-	for _, thread := range pr.ReviewThreads.Nodes {
-		for _, comment := range thread.Comments.Nodes {
-			result.Comments = appendPRComment(result.Comments, comment, "inline", opts)
-		}
 	}
 	sort.Slice(result.Comments, func(i, j int) bool {
 		return result.Comments[i].CreatedAt.Before(result.Comments[j].CreatedAt)
