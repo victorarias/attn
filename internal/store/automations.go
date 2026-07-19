@@ -47,6 +47,23 @@ type AutomationReviewRequestCandidate struct {
 	Cycle      int
 }
 
+func (s *Store) AutomationReviewRequestNeedsClaim(definitionID, subjectKey string, cycle int) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return false, errors.New("automation persistence unavailable")
+	}
+	var active, currentCycle, acceptedCycle int
+	err := s.db.QueryRow(`SELECT active,cycle,accepted_cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &currentCycle, &acceptedCycle)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return active == 1 && currentCycle == cycle && acceptedCycle < cycle, nil
+}
+
 func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bool, now time.Time) (*AutomationDefinition, error) {
 	s.mu.Lock()
 	locked := true

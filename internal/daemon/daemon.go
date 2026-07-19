@@ -97,15 +97,17 @@ const (
 
 // Daemon manages Claude sessions
 type Daemon struct {
-	socketPath       string
-	pidPath          string
-	pidFile          *os.File // Held open with flock for exclusive access
-	dataRoot         string
-	daemonInstanceID string
-	store            *store.Store
-	automationMu     sync.Mutex // serializes idempotent ensure/adopt delivery per profile
-	automationRepoMu sync.Mutex
-	automationRepos  map[string]*sync.Mutex
+	socketPath                 string
+	pidPath                    string
+	pidFile                    *os.File // Held open with flock for exclusive access
+	dataRoot                   string
+	daemonInstanceID           string
+	store                      *store.Store
+	automationMu               sync.Mutex // serializes idempotent ensure/adopt delivery per profile
+	automationObservationMu    sync.Mutex
+	automationObservationLocks map[string]*sync.Mutex
+	automationRepoMu           sync.Mutex
+	automationRepos            map[string]*sync.Mutex
 	// automationDeliveryHook replaces only the final delivery call in focused
 	// provider-observation tests; production always leaves it nil.
 	automationDeliveryHook func(*store.AutomationRun) error
