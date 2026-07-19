@@ -225,6 +225,10 @@ func TestAutomationOccurrenceInputIsStructurallySeparateFromPrompt(t *testing.T)
 	if !strings.Contains(prompt, path) || !strings.Contains(prompt, "untrusted data") {
 		t.Fatalf("prompt does not carry the constrained data reference: %q", prompt)
 	}
+	localOnlyPrompt := automationSessionPrompt("Review the change.", path, true)
+	if !strings.Contains(localOnlyPrompt, "local-only") || !strings.Contains(localOnlyPrompt, "Do not post, approve, comment, push") || !strings.Contains(localOnlyPrompt, "later explicit user action") {
+		t.Fatalf("PR-review prompt lacks the fixed local-only policy: %q", localOnlyPrompt)
+	}
 }
 
 func TestEnsureAutomationSessionPassesOneUnattendedContract(t *testing.T) {
