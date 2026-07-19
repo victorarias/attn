@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/pty"
 )
 
@@ -104,6 +105,7 @@ type Config struct {
 	ExternalCommand   []string
 	ExternalEnv       []string
 	ExternalCWD       string
+	UnattendedLaunch  launchcontract.UnattendedLaunchSpec
 
 	RegistryPath   string
 	SocketPath     string
@@ -296,6 +298,7 @@ func (r *Runtime) run(ctx context.Context) error {
 		ExternalCommand:   r.cfg.ExternalCommand,
 		ExternalEnv:       r.cfg.ExternalEnv,
 		ExternalCWD:       r.cfg.ExternalCWD,
+		UnattendedLaunch:  r.cfg.UnattendedLaunch,
 	}); err != nil {
 		return fmt.Errorf("spawn PTY session: %w", err)
 	}
@@ -353,8 +356,12 @@ func (r *Runtime) run(ctx context.Context) error {
 	entry.ClaudeExecutable = r.cfg.ClaudeExecutable
 	entry.CodexExecutable = r.cfg.CodexExecutable
 	entry.CopilotExecutable = r.cfg.CopilotExecutable
-	entry.Model = strings.TrimSpace(os.Getenv("ATTN_MODEL"))
-	entry.Effort = strings.TrimSpace(os.Getenv("ATTN_EFFORT"))
+	if r.cfg.UnattendedLaunch.IsZero() {
+		entry.Model = strings.TrimSpace(os.Getenv("ATTN_MODEL"))
+		entry.Effort = strings.TrimSpace(os.Getenv("ATTN_EFFORT"))
+	} else {
+		entry.UnattendedLaunch = r.cfg.UnattendedLaunch
+	}
 	if err := WriteRegistryAtomic(r.cfg.RegistryPath, entry); err != nil {
 		return err
 	}
@@ -417,6 +424,14 @@ func (r *Runtime) validate() error {
 	}
 	if strings.TrimSpace(r.cfg.CWD) == "" {
 		return errors.New("missing --cwd")
+	}
+	if !r.cfg.UnattendedLaunch.IsZero() {
+		if err := r.cfg.UnattendedLaunch.Validate(); err != nil {
+			return err
+		}
+		if !strings.EqualFold(strings.TrimSpace(r.cfg.Agent), strings.TrimSpace(r.cfg.UnattendedLaunch.Agent)) {
+			return fmt.Errorf("unattended launch agent %q does not match worker agent %q", r.cfg.UnattendedLaunch.Agent, r.cfg.Agent)
+		}
 	}
 	if strings.TrimSpace(r.cfg.RegistryPath) == "" {
 		return errors.New("missing --registry-path")

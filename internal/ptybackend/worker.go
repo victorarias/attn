@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptyworker"
 )
@@ -413,6 +414,10 @@ func (b *WorkerBackend) spawnArgs(opts SpawnOptions, session *workerSession) ([]
 		}
 		args = append(args, "--external-command-json", string(encoded))
 	}
+	args, err := appendUnattendedLaunchArgs(args, opts.UnattendedLaunch)
+	if err != nil {
+		return nil, err
+	}
 	if opts.ExternalCWD != "" {
 		args = append(args, "--external-cwd", opts.ExternalCWD)
 	}
@@ -420,6 +425,9 @@ func (b *WorkerBackend) spawnArgs(opts SpawnOptions, session *workerSession) ([]
 }
 
 func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
+	if err := validateUnattendedSpawnOptions(opts); err != nil {
+		return err
+	}
 	if err := validateSessionID(opts.ID); err != nil {
 		return err
 	}
@@ -580,6 +588,20 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		return errors.New("worker exited before ready")
 	}
 	return fmt.Errorf("worker did not become ready: %w", lastErr)
+}
+
+func appendUnattendedLaunchArgs(args []string, launch launchcontract.UnattendedLaunchSpec) ([]string, error) {
+	if launch.IsZero() {
+		return args, nil
+	}
+	if err := launch.Validate(); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(launch)
+	if err != nil {
+		return nil, fmt.Errorf("encode unattended launch contract: %w", err)
+	}
+	return append(args, "--unattended-launch-json", string(encoded)), nil
 }
 
 func withoutEnvironmentKeys(env []string, keys ...string) []string {
@@ -1027,6 +1049,7 @@ func (b *WorkerBackend) SessionLaunchParams(ctx context.Context, sessionID strin
 		CopilotExecutable: entry.CopilotExecutable,
 		Model:             entry.Model,
 		Effort:            entry.Effort,
+		UnattendedLaunch:  entry.UnattendedLaunch,
 	}, nil
 }
 

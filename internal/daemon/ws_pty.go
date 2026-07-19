@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/git"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -461,8 +462,7 @@ func buildSpawnSessionRecord(msg *protocol.SpawnSessionMessage, agent, cwd, labe
 }
 
 type internalSpawnPolicy struct {
-	autoApprove           bool
-	trustWorkingDirectory bool
+	unattendedLaunch launchcontract.UnattendedLaunchSpec
 }
 
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
@@ -598,8 +598,7 @@ func (d *Daemon) handleSpawnSessionWithPolicy(client *wsClient, msg *protocol.Sp
 		LoginShellEnv:     d.cachedLoginShellEnv(),
 
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
-		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)) || policy.autoApprove,
-		TrustWorkingDirectory:   policy.trustWorkingDirectory,
+		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
 		Model:                   strings.TrimSpace(protocol.Deref(msg.Model)),
 		Effort:                  strings.TrimSpace(protocol.Deref(msg.Effort)),
 	}
@@ -632,6 +631,28 @@ func (d *Daemon) handleSpawnSessionWithPolicy(client *wsClient, msg *protocol.Sp
 		// No per-spawn pin (delegation); a chief launch falls back to the
 		// chief_effort_<agent> setting.
 		spawnOpts.Effort = d.chiefLaunchEffort(agent, isChief)
+	}
+	if launch := policy.unattendedLaunch; !launch.IsZero() {
+		if err := launch.Validate(); err != nil {
+			d.sendSpawnFailure(client, msg.ID, err)
+			return
+		}
+		if !strings.EqualFold(agent, launch.Agent) {
+			d.sendSpawnFailure(client, msg.ID, fmt.Errorf("unattended launch agent %q does not match spawn agent %q", launch.Agent, agent))
+			return
+		}
+		if strings.TrimSpace(protocol.Deref(msg.Model)) != strings.TrimSpace(launch.Model) ||
+			strings.TrimSpace(protocol.Deref(msg.Effort)) != strings.TrimSpace(launch.Effort) ||
+			strings.TrimSpace(configuredExecutable) != strings.TrimSpace(launch.Executable) {
+			d.sendSpawnFailure(client, msg.ID, errors.New("spawn message disagrees with unattended launch contract"))
+			return
+		}
+		spawnOpts.AutoApprove = false
+		spawnOpts.TrustWorkingDirectory = false
+		spawnOpts.Model = ""
+		spawnOpts.Effort = ""
+		spawnOpts.Executable = ""
+		spawnOpts.UnattendedLaunch = launch
 	}
 	// A chief launch caps its context window (chief_context_window_cap); non-chief
 	// launches stay uncapped so delegated interactive agents are never affected.

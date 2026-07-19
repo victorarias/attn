@@ -14,6 +14,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -393,6 +394,31 @@ func TestBuildReloadSpawnOptionsCarriesChiefContextWindowCap(t *testing.T) {
 			t.Fatalf("ChiefContextWindowCap = %d, want 0 (non-chief reload must stay uncapped)", opts.ChiefContextWindowCap)
 		}
 	})
+}
+
+func TestBuildReloadSpawnOptionsPreservesUnattendedContractAsUnit(t *testing.T) {
+	spec := launchcontract.UnattendedLaunchSpec{
+		Agent: "codex", Model: "gpt-test", Effort: "high", Executable: "/opt/codex",
+		ApprovalProductMode: launchcontract.ApprovalAuto, ApprovalDriverMode: launchcontract.ApprovalAutoReview,
+		DirectoryTrust: launchcontract.TrustConfiguredDirectory, Recovery: launchcontract.RecoveryAdoptOrRestartFresh,
+	}
+	backend := &fakeReloadBackend{params: ptybackend.SessionLaunchParams{
+		Recorded: true, YoloMode: true, Model: "stale-model", Effort: "low", UnattendedLaunch: spec,
+	}}
+	d := newReloadTestDaemon(t, backend)
+	addReloadSession(d, "automation", protocol.SessionAgentCodex, protocol.SessionStateWorking)
+	d.store.SetSetting(SettingAutoApproveEnabled, "false")
+
+	opts, err := d.buildReloadSpawnOptions(d.store.Get("automation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(opts.UnattendedLaunch, spec) {
+		t.Fatalf("reloaded contract = %#v, want %#v", opts.UnattendedLaunch, spec)
+	}
+	if opts.YoloMode || opts.AutoApprove || opts.Model != "" || opts.Effort != "" || opts.Executable != "" {
+		t.Fatalf("parallel launch fields survived reload: %#v", opts)
+	}
 }
 
 func TestReloadSessionAgentSkipsWhenNoLiveWorker(t *testing.T) {

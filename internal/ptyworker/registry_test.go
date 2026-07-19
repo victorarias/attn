@@ -2,7 +2,10 @@ package ptyworker
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/victorarias/attn/internal/launchcontract"
 )
 
 func TestWriteAndReadRegistry(t *testing.T) {
@@ -11,6 +14,11 @@ func TestWriteAndReadRegistry(t *testing.T) {
 	entry.OwnerPID = 333
 	entry.OwnerStartedAt = "2026-02-11T00:00:00Z"
 	entry.OwnerNonce = "nonce-123"
+	entry.UnattendedLaunch = launchcontract.UnattendedLaunchSpec{
+		Agent: "codex", Model: "gpt-test", Effort: "high",
+		ApprovalProductMode: launchcontract.ApprovalAuto, ApprovalDriverMode: launchcontract.ApprovalAutoReview,
+		DirectoryTrust: launchcontract.TrustConfiguredDirectory, Recovery: launchcontract.RecoveryAdoptOrRestartFresh,
+	}
 	if err := WriteRegistryAtomic(path, entry); err != nil {
 		t.Fatalf("WriteRegistryAtomic() error: %v", err)
 	}
@@ -35,5 +43,8 @@ func TestWriteAndReadRegistry(t *testing.T) {
 	}
 	if got.OwnerNonce != entry.OwnerNonce {
 		t.Fatalf("owner_nonce = %q, want %q", got.OwnerNonce, entry.OwnerNonce)
+	}
+	if !reflect.DeepEqual(got.UnattendedLaunch, entry.UnattendedLaunch) {
+		t.Fatalf("unattended launch = %#v, want %#v", got.UnattendedLaunch, entry.UnattendedLaunch)
 	}
 }

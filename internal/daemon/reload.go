@@ -294,7 +294,7 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 		resumeSessionID = ""
 	}
 
-	return ptybackend.SpawnOptions{
+	opts := ptybackend.SpawnOptions{
 		ID:                      sessionID,
 		CWD:                     session.Directory,
 		Agent:                   agent,
@@ -320,7 +320,22 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 		// role here to stay consistent with that RPC; non-chief sessions resolve
 		// to 0 (uncapped), matching delegated/ordinary reloads.
 		ChiefContextWindowCap: d.chiefContextWindowCap(d.isChiefOfStaffSession(sessionID)),
-	}, nil
+	}
+	if !params.UnattendedLaunch.IsZero() {
+		if err := params.UnattendedLaunch.Validate(); err != nil {
+			return ptybackend.SpawnOptions{}, fmt.Errorf("invalid recorded unattended launch contract: %w", err)
+		}
+		if !strings.EqualFold(agent, params.UnattendedLaunch.Agent) {
+			return ptybackend.SpawnOptions{}, fmt.Errorf("recorded unattended launch agent %q does not match session agent %q", params.UnattendedLaunch.Agent, agent)
+		}
+		opts.YoloMode = false
+		opts.Executable = ""
+		opts.Model = ""
+		opts.Effort = ""
+		opts.AutoApprove = false
+		opts.UnattendedLaunch = params.UnattendedLaunch
+	}
+	return opts, nil
 }
 
 type preparedPluginReload struct {
