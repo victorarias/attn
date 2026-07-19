@@ -33,7 +33,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   sessions move, so it could name a repository the workspace had nothing to do
   with. The repository now comes from the sessions already in that workspace,
   and a workspace whose sessions span several repositories asks for `--repo`
-  instead of silently picking one.
+  instead of silently picking one. Delegating into an existing workspace now
+  starts the branch from the repository's default branch: those sessions may sit
+  in several worktrees of one repository, and starting from whichever one the
+  daemon happened to list first was arbitrary. Pass `--from` to start elsewhere.
 - **Retried delegations no longer create duplicate agents or tickets.** `attn
   delegate` now prints a durable request and operation identity before slow
   worktree preparation, shows concise progress while it waits, and lets callers
