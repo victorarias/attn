@@ -202,6 +202,27 @@ func (c *Client) SessionInstructions(targetSessionID, question string) (*protoco
 	return resp.SessionInstructionsResult, nil
 }
 
+// SessionTranscript reads one provider-neutral, redacted transcript page
+// strictly after the opaque cursor. Repeating with NextCursor is lossless and
+// idempotent across daemon restarts while the native transcript is unchanged.
+func (c *Client) SessionTranscript(targetSessionID, afterCursor string) (*protocol.SessionTranscriptResult, error) {
+	msg := protocol.SessionTranscriptMessage{
+		Cmd:             protocol.CmdSessionTranscript,
+		TargetSessionID: targetSessionID,
+	}
+	if strings.TrimSpace(afterCursor) != "" {
+		msg.AfterCursor = protocol.Ptr(strings.TrimSpace(afterCursor))
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SessionTranscriptResult == nil {
+		return nil, errors.New("daemon returned no session transcript result")
+	}
+	return resp.SessionTranscriptResult, nil
+}
+
 // SendStop sends a stop signal with transcript path for classification
 func (c *Client) SendStop(id, transcriptPath string) error {
 	msg := protocol.StopMessage{

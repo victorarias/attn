@@ -165,6 +165,21 @@ func TestParseRegister(t *testing.T) {
 	}
 }
 
+func TestParseSessionTranscript(t *testing.T) {
+	input := `{"cmd":"session_transcript","target_session_id":"session-1","after_cursor":"v1:0123456789abcdef0123456789abcdef:42:0"}`
+	cmd, data, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if cmd != CmdSessionTranscript {
+		t.Fatalf("cmd = %q, want %q", cmd, CmdSessionTranscript)
+	}
+	msg, ok := data.(*SessionTranscriptMessage)
+	if !ok || msg.TargetSessionID != "session-1" || Deref(msg.AfterCursor) != "v1:0123456789abcdef0123456789abcdef:42:0" {
+		t.Fatalf("message = %#v", data)
+	}
+}
+
 func TestParseDelegatePlacementAndWorktree(t *testing.T) {
 	input := `{"cmd":"delegate","source_session_id":"source-1","brief":"Investigate this","agent":"codex","placement":"new_workspace","worktree":{"repo":"/repo","branch":"feat/delegated","starting_from":"main"}}`
 	cmd, data, err := ParseMessage([]byte(input))
