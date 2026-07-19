@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -172,10 +173,10 @@ func TestGitHubReviewClaimAndTicketEventAreIdempotent(t *testing.T) {
 	}
 	// Use the existing run to exercise transactional event dedupe without
 	// requiring another provider cycle in this focused test.
-	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, first.ID, "automation:review", now); err != nil {
+	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, first.ID, "/tmp/occ-1.json", "automation:review", now); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, first.ID, "automation:review", now.Add(time.Minute)); err != nil {
+	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, first.ID, "/tmp/occ-1.json", "automation:review", now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	events, err := s.TicketEventsSince(0)
@@ -184,6 +185,9 @@ func TestGitHubReviewClaimAndTicketEventAreIdempotent(t *testing.T) {
 	}
 	if len(events) != 2 {
 		t.Fatalf("events=%#v, want created plus one occurrence", events)
+	}
+	if !strings.Contains(events[1].Comment, "/tmp/occ-1.json") {
+		t.Fatalf("occurrence event does not expose structured input path: %#v", events[1])
 	}
 }
 
@@ -247,10 +251,10 @@ func TestContinuationOccurrenceRecordsOnTerminalTicketExactlyOnce(t *testing.T) 
 	if second.TicketID != first.TicketID || second.SessionID != first.SessionID {
 		t.Fatalf("second run did not reuse binding: first=%#v second=%#v", first, second)
 	}
-	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, second.ID, "automation:review", now.Add(3*time.Minute)); err != nil {
+	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, second.ID, "/tmp/occ-2.json", "automation:review", now.Add(3*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, second.ID, "automation:review", now.Add(4*time.Minute)); err != nil {
+	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, second.ID, "/tmp/occ-2.json", "automation:review", now.Add(4*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	ticket, err := s.GetTicket(first.TicketID)
@@ -259,6 +263,9 @@ func TestContinuationOccurrenceRecordsOnTerminalTicketExactlyOnce(t *testing.T) 
 	}
 	if len(ticket.Activity) != 1 {
 		t.Fatalf("activity=%#v, want one occurrence comment", ticket.Activity)
+	}
+	if !strings.Contains(ticket.Activity[0].Comment, "/tmp/occ-2.json") {
+		t.Fatalf("occurrence activity does not expose structured input path: %#v", ticket.Activity[0])
 	}
 	if removed, err := s.SweepExpiredTickets(now.Add(2*time.Hour), time.Hour); err != nil || removed != 1 {
 		t.Fatalf("sweep removed=%d err=%v", removed, err)

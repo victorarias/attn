@@ -362,7 +362,7 @@ func (s *Store) ClaimGitHubReviewAutomationRun(definitionID, subjectKey string, 
 // already-bound ticket exactly once. The run remains the forward provenance link;
 // the ticket's immutable automation_run_id continues to identify the run that
 // originally created the worker.
-func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, author string, now time.Time) error {
+func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, occurrencePath, author string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
@@ -389,7 +389,8 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, a
 		return err
 	}
 	if inserted == 1 {
-		if _, err := addTicketCommentTx(tx, ticketID, author, "Accepted automation occurrence "+runID+" for the existing reviewer.", now); err != nil {
+		comment := "Accepted automation occurrence " + runID + " for the existing reviewer. Structured occurrence input: " + occurrencePath
+		if _, err := addTicketCommentTx(tx, ticketID, author, comment, now); err != nil {
 			return err
 		}
 	}

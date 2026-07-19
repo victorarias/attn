@@ -412,7 +412,11 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 		if req.ContinuityKey == "" {
 			return errors.New("automation ticket already exists without a continuity binding")
 		}
-		if err := d.store.EnsureAutomationContinuationTicket(req.IDs.TicketID, req.IDs.SessionID, req.RunID, author, time.Now()); err != nil {
+		inputPath, err := d.ensureAutomationOccurrenceInput(req)
+		if err != nil {
+			return err
+		}
+		if err := d.store.EnsureAutomationContinuationTicket(req.IDs.TicketID, req.IDs.SessionID, req.RunID, inputPath, author, time.Now()); err != nil {
 			return err
 		}
 		// The ticket event is the durable payload. Use the ordinary content-free

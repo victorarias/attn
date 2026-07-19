@@ -537,7 +537,7 @@ func TestSuccessfulContinuationReopensOriginTicketAfterDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, second.ID, "automation:review", now.Add(3*time.Minute)); err != nil {
+	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, second.ID, "/tmp/occ-2.json", "automation:review", now.Add(3*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	d := &Daemon{store: s, wsHub: newWSHub()}
