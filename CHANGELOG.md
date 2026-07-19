@@ -17,6 +17,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   the terminal. Forking or starting a new session inside pi keeps attn's
   resume token current.
 
+### Changed
+- **Later review requests return to a safe existing reviewer.** Per-PR
+  automations now resume a stopped reviewer with its recorded transcript and
+  pinned unattended policy, reopen archived tickets after successful delivery,
+  and preserve reviewer changes in the owned worktree. Missing worktrees,
+  unavailable transcripts, and changed pull-request heads fail visibly instead
+  of silently starting in the wrong context.
+
 ## [2026-07-19]
 
 ### Added

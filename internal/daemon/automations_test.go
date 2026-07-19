@@ -18,8 +18,36 @@ import (
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 )
+
+type automationResumeBackend struct {
+	*fakeSpawnBackend
+	snapshotCalls int
+}
+
+func (b *automationResumeBackend) Snapshot(context.Context, string) (ptybackend.AttachInfo, error) {
+	b.snapshotCalls++
+	if b.snapshotCalls == 1 {
+		return ptybackend.AttachInfo{ScreenSnapshot: []byte(codexDirectoryTrustPrompt)}, nil
+	}
+	return ptybackend.AttachInfo{ScreenSnapshot: []byte("reviewer ready")}, nil
+}
+
+func testAutomationLaunch(agent string) automation.EffectiveLaunch {
+	driverMode := launchcontract.ApprovalAuto
+	if agent == string(protocol.SessionAgentCodex) {
+		driverMode = launchcontract.ApprovalAutoReview
+	}
+	return automation.EffectiveLaunch{
+		Agent: agent, Model: "review-model", Effort: "high",
+		ApprovalProductMode: launchcontract.ApprovalAuto,
+		ApprovalDriverMode:  driverMode,
+		DirectoryTrust:      launchcontract.TrustConfiguredDirectory,
+		Recovery:            launchcontract.RecoveryAdoptOrRestartFresh,
+	}
+}
 
 func TestPrepareRepositoryWorktreeUsesLocalOverrideAndExactRevision(t *testing.T) {
 	root := t.TempDir()
@@ -860,6 +888,190 @@ func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T
 	}
 	if len(ticket.Activity) != 0 {
 		t.Fatalf("unsafe continuation published ticket activity before validation: %#v", ticket.Activity)
+	}
+}
+
+func TestStoppedContinuationResumesRecordedReviewerWithPinnedContract(t *testing.T) {
+	d := newDaemonForTest(t)
+	backend := &automationResumeBackend{fakeSpawnBackend: &fakeSpawnBackend{}}
+	d.ptyBackend = backend
+	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := d.store.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	origin, _, err := d.store.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if _, err := d.store.EnsureAutomationTicket(store.Ticket{ID: origin.TicketID, Title: "Review", Status: store.TicketStatusDone, Assignee: origin.SessionID, Cwd: directory, LastAgentID: "codex", AutomationRunID: origin.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{Cmd: protocol.CmdRegisterWorkspace, ID: origin.WorkspaceID, Title: "review", Directory: directory})
+	d.store.Add(&protocol.Session{ID: origin.SessionID, Agent: protocol.SessionAgentCodex, Directory: directory, WorkspaceID: origin.WorkspaceID})
+	d.store.SetResumeSessionID(origin.SessionID, "codex-rollout-1")
+
+	req := automation.WorkRequest{
+		RunID: "run-2", DefinitionID: def.ID, SubjectKey: subject, ContinuityKey: subject,
+		Prompt: "Review locally", Context: json.RawMessage(`{}`), Launch: testAutomationLaunch("codex"),
+		IDs: automation.DeliveryIDs{TicketID: origin.TicketID, SessionID: origin.SessionID, WorkspaceID: origin.WorkspaceID, PaneID: origin.PaneID},
+	}
+	if err := d.EnsureSession(context.Background(), req, directory); err != nil {
+		t.Fatal(err)
+	}
+	spawn, ok := backend.LastSpawn()
+	if !ok || spawn.ResumeSessionID != "codex-rollout-1" || spawn.UnattendedLaunch != req.Launch {
+		t.Fatalf("resume spawn=%#v ok=%v", spawn, ok)
+	}
+}
+
+func TestStoppedContinuationRequiresAvailableTranscript(t *testing.T) {
+	d := newDaemonForTest(t)
+	req := automation.WorkRequest{Launch: testAutomationLaunch("claude"), IDs: automation.DeliveryIDs{SessionID: "session-1"}}
+	d.store.Add(&protocol.Session{ID: req.IDs.SessionID, Agent: protocol.SessionAgentClaude})
+	d.store.SetResumeSessionID(req.IDs.SessionID, "missing-transcript")
+	if _, err := d.automationResumeSessionID(req); err == nil || !strings.Contains(err.Error(), "transcript is unavailable") {
+		t.Fatalf("unavailable transcript err=%v", err)
+	}
+	d.store.SetResumeSessionID(req.IDs.SessionID, "")
+	if _, err := d.automationResumeSessionID(req); err == nil || !strings.Contains(err.Error(), "without a recorded transcript") {
+		t.Fatalf("missing transcript id err=%v", err)
+	}
+}
+
+func TestSuccessfulContinuationReopensArchivedTicket(t *testing.T) {
+	s := store.New()
+	now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	if _, err := s.CreateTicket(store.Ticket{ID: "ticket-1", Title: "Review", Status: store.TicketStatusDone, Assignee: "session-1", AutomationRunID: "run-1"}, "automation:review", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ArchiveTicket("ticket-1", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	req := automation.WorkRequest{RunID: "run-2", DefinitionID: "review", ContinuityKey: "github.com/owner/repo#42", IDs: automation.DeliveryIDs{TicketID: "ticket-1"}}
+	if err := d.activateAutomationContinuationTicket(req); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := s.GetTicket("ticket-1")
+	if err != nil || ticket == nil || ticket.Status != store.TicketStatusWorking || ticket.ArchivedAt != nil {
+		t.Fatalf("reopened archived ticket=%#v err=%v", ticket, err)
+	}
+}
+
+func setupContinuationWorktree(t *testing.T) (*Daemon, automation.WorkRequest, string) {
+	t.Helper()
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, repo, "init")
+	runGitDaemon(t, repo, "commit", "--allow-empty", "-m", "snapshot")
+	runGitDaemon(t, repo, "remote", "add", "origin", "git@github.com:owner/repo.git")
+	revisionBytes, err := attngit.Output(attngit.OpMetadata, repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := strings.TrimSpace(string(revisionBytes))
+	payload, _ := json.Marshal(automation.PullRequestInput{
+		Provider: "github", Host: "github.com", Owner: "owner", Repository: "repo", Number: 42,
+		URL: "https://github.com/owner/repo/pull/42", State: "open", HeadSHA: revision,
+	})
+	location := automation.LocationSpec{Type: "repository_worktree", RepositorySources: automation.RepositorySources{
+		Default: automation.RepositorySource{Type: "managed_cache"},
+		Overrides: map[string]automation.RepositorySource{
+			"github.com/owner/repo": {Type: "local_clone", Path: repo},
+		},
+	}}
+	d := newDaemonForTest(t)
+	d.dataRoot = filepath.Join(root, "profile")
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := d.store.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	origin, _, err := d.store.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, string(payload), `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstReq := automation.WorkRequest{RunID: origin.ID, DefinitionID: def.ID, SubjectKey: subject, ContinuityKey: subject, Context: payload, Location: location, Launch: testAutomationLaunch("codex"), IDs: automation.DeliveryIDs{TicketID: origin.TicketID, SessionID: origin.SessionID, WorkspaceID: origin.WorkspaceID, PaneID: origin.PaneID}}
+	prepared, err := d.PrepareLocation(context.Background(), firstReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.store.EnsureAutomationTicket(store.Ticket{ID: origin.TicketID, Title: "Review", Status: store.TicketStatusDone, Assignee: origin.SessionID, Cwd: prepared.Directory, LastAgentID: "codex", AutomationRunID: origin.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.MarkAutomationRunDelivered(origin.ID, string(prepared.Resolved), now); err != nil {
+		t.Fatal(err)
+	}
+	continuation := firstReq
+	continuation.RunID = "run-2"
+	return d, continuation, prepared.Directory
+}
+
+func TestContinuationPreservesOwnedDirtyWorktree(t *testing.T) {
+	d, req, worktree := setupContinuationWorktree(t)
+	if err := os.WriteFile(filepath.Join(worktree, "review-notes.txt"), []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := d.PrepareLocation(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Directory != worktree {
+		t.Fatalf("continuation worktree=%q want=%q", prepared.Directory, worktree)
+	}
+	if data, err := os.ReadFile(filepath.Join(worktree, "review-notes.txt")); err != nil || string(data) != "keep me" {
+		t.Fatalf("dirty evidence changed: data=%q err=%v", data, err)
+	}
+}
+
+func TestContinuationFailsWhenOwnedWorktreeIsMissing(t *testing.T) {
+	d, req, worktree := setupContinuationWorktree(t)
+	if err := os.RemoveAll(worktree); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.PrepareLocation(context.Background(), req); err == nil || !strings.Contains(err.Error(), "worktree is missing") {
+		t.Fatalf("missing worktree err=%v", err)
+	}
+}
+
+func TestWithdrawnBeforeLaunchReRequestCreatesFirstWorktree(t *testing.T) {
+	d, req, worktree := setupContinuationWorktree(t)
+	ticket, err := d.store.GetTicket(req.IDs.TicketID)
+	if err != nil || ticket == nil {
+		t.Fatalf("ticket=%#v err=%v", ticket, err)
+	}
+	if err := d.store.MarkAutomationRunFailed(ticket.AutomationRunID, store.AutomationReviewWithdrawnError, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(worktree); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := d.PrepareLocation(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Directory != worktree {
+		t.Fatalf("re-request worktree=%q want=%q", prepared.Directory, worktree)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("first worktree was not provisioned: %v", err)
 	}
 }
 
