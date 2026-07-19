@@ -630,11 +630,11 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 		cloneURL := "https://" + identity + ".git"
 		mainRepo, _, err = attngit.EnsureManagedClone(cloneURL, target, identity, authorization)
 		if err != nil {
-			return automation.PreparedLocation{}, fmt.Errorf("managed repository cache: %w", err)
+			return automation.PreparedLocation{}, &retryableAutomationDeliveryError{cause: fmt.Errorf("managed repository cache: %w", err)}
 		}
 	}
 	if err := attngit.EnsurePullRequestRevision(mainRepo, "origin", pr.Number, pr.HeadSHA, authorization); err != nil {
-		return automation.PreparedLocation{}, err
+		return automation.PreparedLocation{}, &retryableAutomationDeliveryError{cause: err}
 	}
 	repoName := pr.Repository
 	root := strings.TrimSpace(d.dataRoot)
@@ -652,7 +652,7 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 		}
 	}
 	if _, err := attngit.EnsureAutomationSessionWorktree(mainRepo, worktree, pr.HeadSHA, authorization, sessionPersisted); err != nil {
-		return automation.PreparedLocation{}, err
+		return automation.PreparedLocation{}, &retryableAutomationDeliveryError{cause: err}
 	}
 	resolved, _ := json.Marshal(automation.ResolvedLocation{
 		Type: "repository_worktree", Repository: identity, ConfiguredSource: source,
