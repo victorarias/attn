@@ -89,3 +89,34 @@ func TestRunGitOutputRedactsCredentialURLsInLogsAndTimeouts(t *testing.T) {
 		t.Fatalf("redacted URL missing from log/error output:\n%s", combined)
 	}
 }
+
+func TestHTTPAuthorizationUsesProcessEnvironmentNotArgumentsOrLogs(t *testing.T) {
+	fakeBin := t.TempDir()
+	capture := filepath.Join(fakeBin, "capture")
+	fakeGit := filepath.Join(fakeBin, "git")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$GIT_CONFIG_KEY_0\" \"$GIT_CONFIG_VALUE_0\" \"$@\" > \"$ATTN_GIT_TEST_CAPTURE\"\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("ATTN_GIT_TEST_CAPTURE", capture)
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+	header := "Basic dummy-secret-value"
+	var logs []string
+	SetLogFunc(func(format string, args ...interface{}) { logs = append(logs, fmt.Sprintf(format, args...)) })
+	defer SetLogFunc(nil)
+	if _, err := runGitCombinedWithHTTPAuthorization(OpNetwork, "", "https://github.com/owner/repo.git", header, "fetch", "origin", "ref"); err != nil {
+		t.Fatal(err)
+	}
+	captured, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(captured), "http.https://github.com/.extraHeader\n"+header) {
+		t.Fatalf("authorization was not passed through git config env: %q", captured)
+	}
+	combinedLogs := strings.Join(logs, "\n")
+	if strings.Contains(string(captured), header+"\nfetch") == false || strings.Contains(combinedLogs, "dummy-secret-value") {
+		t.Fatalf("authorization transport/logging mismatch capture=%q logs=%q", captured, combinedLogs)
+	}
+}

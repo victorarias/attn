@@ -492,6 +492,7 @@ export interface AutomationRunMessage {
     cmd:           AutomationRunMessageCmd;
     definition_id: string;
     input_json?:   string;
+    pr_url?:       string;
     request_id:    string;
     [property: string]: any;
 }
@@ -8305,6 +8306,7 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("AutomationRunMessageCmd") },
         { json: "definition_id", js: "definition_id", typ: "" },
         { json: "input_json", js: "input_json", typ: u(undefined, "") },
+        { json: "pr_url", js: "pr_url", typ: u(undefined, "") },
         { json: "request_id", js: "request_id", typ: "" },
     ], "any"),
     "AutomationShowMessage": o([

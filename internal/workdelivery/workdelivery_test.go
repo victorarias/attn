@@ -23,8 +23,11 @@ func (f *fakePorts) step(s string) error {
 func (f *fakePorts) EnsureTicket(context.Context, automation.WorkRequest) error {
 	return f.step("ticket")
 }
-func (f *fakePorts) PrepareLocation(context.Context, automation.WorkRequest) (string, error) {
-	return "/tmp", f.step("location")
+func (f *fakePorts) PrepareLocation(context.Context, automation.WorkRequest) (automation.PreparedLocation, error) {
+	return automation.PreparedLocation{Directory: "/tmp", Resolved: []byte(`{"type":"directory","path":"/tmp"}`)}, f.step("location")
+}
+func (f *fakePorts) BindTicketLocation(context.Context, automation.WorkRequest, automation.PreparedLocation) error {
+	return f.step("bind")
 }
 func (f *fakePorts) EnsureWorkspace(context.Context, automation.WorkRequest, string) error {
 	return f.step("workspace")
@@ -42,7 +45,7 @@ func TestDeliveryIsTicketFirstAndStopsAtFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"ticket", "location", "workspace", "pane", "session", "verify"}
+	want := []string{"ticket", "location", "bind", "workspace", "pane", "session", "verify"}
 	if !reflect.DeepEqual(p.calls, want) {
 		t.Fatalf("calls=%v", p.calls)
 	}
@@ -51,7 +54,7 @@ func TestDeliveryIsTicketFirstAndStopsAtFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected failure")
 	}
-	if !reflect.DeepEqual(p.calls, []string{"ticket", "location", "workspace"}) {
+	if !reflect.DeepEqual(p.calls, []string{"ticket", "location", "bind", "workspace"}) {
 		t.Fatalf("calls=%v", p.calls)
 	}
 }

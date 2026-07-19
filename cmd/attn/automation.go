@@ -46,18 +46,23 @@ func runAutomationCommand() {
 		data, err = c.AutomationShow(os.Args[3])
 	case "run":
 		if len(os.Args) < 4 {
-			err = fmt.Errorf("usage: attn automation run <definition-id> [--input-file <file>] [--request-id <id>]")
+			err = fmt.Errorf("usage: attn automation run <definition-id> [--input-file <file> | --pr-url <url>] [--request-id <id>]")
 			break
 		}
 		definitionID := os.Args[3]
 		fs := flag.NewFlagSet("automation run", flag.ContinueOnError)
 		inputFile := fs.String("input-file", "", "structured occurrence JSON")
+		prURL := fs.String("pr-url", "", "resolve one GitHub pull request into structured occurrence input")
 		requestID := fs.String("request-id", "", "stable idempotency key to reuse when retrying an uncertain request")
 		if e := fs.Parse(os.Args[4:]); e != nil {
 			os.Exit(2)
 		}
 		if len(fs.Args()) != 0 {
-			err = fmt.Errorf("usage: attn automation run <definition-id> [--input-file <file>] [--request-id <id>]")
+			err = fmt.Errorf("usage: attn automation run <definition-id> [--input-file <file> | --pr-url <url>] [--request-id <id>]")
+			break
+		}
+		if *inputFile != "" && *prURL != "" {
+			err = fmt.Errorf("--input-file and --pr-url are mutually exclusive")
 			break
 		}
 		input := "{}"
@@ -72,7 +77,11 @@ func runAutomationCommand() {
 		if *requestID == "" {
 			*requestID = uuid.NewString()
 		}
-		data, err = c.AutomationRun(definitionID, *requestID, input)
+		if *prURL != "" {
+			data, err = c.AutomationRunPullRequest(definitionID, *requestID, *prURL)
+		} else {
+			data, err = c.AutomationRun(definitionID, *requestID, input)
+		}
 	case "runs":
 		if len(os.Args) != 4 {
 			err = fmt.Errorf("usage: attn automation runs <definition-id>")

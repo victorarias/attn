@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/victorarias/attn/internal/automation"
+	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
@@ -46,6 +48,11 @@ func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error
 	if spec.Launch.Driver != "codex" && spec.Launch.Driver != "claude" {
 		return nil, fmt.Errorf("agent %q does not support automation automatic approval", spec.Launch.Driver)
 	}
+	for identity, source := range spec.Location.RepositorySources.Overrides {
+		if _, err := attngit.ValidateLocalClone(source.Path, identity); err != nil {
+			return nil, fmt.Errorf("repository override %s: %w", identity, err)
+		}
+	}
 	return d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), spec.Enabled, time.Now())
 }
 
@@ -74,10 +81,24 @@ func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, inp
 	if err != nil {
 		return nil, err
 	}
+	subjectKey := ""
+	canonicalInput := input
+	if spec.Location.Type == "repository_worktree" {
+		pr, err := automation.ParsePullRequestInput(json.RawMessage(input))
+		if err != nil {
+			return nil, err
+		}
+		canonical, err := json.Marshal(pr)
+		if err != nil {
+			return nil, err
+		}
+		canonicalInput = string(canonical)
+		subjectKey = pr.SubjectKey()
+	}
 	snapshotJSON, _ := json.Marshal(snapshot)
 	runID := uuid.NewString()
 	ids := store.AutomationRunReservation{RunID: runID, OccurrenceID: uuid.NewString(), TicketID: "auto-" + strings.ReplaceAll(runID[:18], "-", ""), SessionID: uuid.NewString(), WorkspaceID: "workspace-" + uuid.NewString(), PaneID: "pane-" + uuid.NewString()}
-	run, _, err := d.store.ClaimManualAutomationRun(definitionID, requestID, input, def.Revision, string(snapshotJSON), time.Now(), ids)
+	run, _, err := d.store.ClaimManualAutomationRun(definitionID, requestID, subjectKey, canonicalInput, def.Revision, string(snapshotJSON), time.Now(), ids)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +115,71 @@ func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, inp
 		return d.handleAutomationDeliveryError(run, err)
 	}
 	return d.store.GetAutomationRun(run.ID)
+}
+
+func (d *Daemon) automationRunPullRequest(ctx context.Context, definitionID, requestID, rawURL string) (*store.AutomationRun, error) {
+	if strings.TrimSpace(requestID) == "" {
+		return nil, errors.New("request_id is required")
+	}
+	if existing, err := d.store.GetManualAutomationRun(definitionID, requestID); err != nil {
+		return nil, err
+	} else if existing != nil {
+		occurrence, err := d.store.GetAutomationOccurrence(existing.OccurrenceID)
+		if err != nil || occurrence == nil {
+			return nil, errors.Join(errors.New("existing automation occurrence missing"), err)
+		}
+		return d.automationRun(ctx, definitionID, requestID, occurrence.PayloadJSON)
+	}
+	def, err := d.store.GetAutomationDefinition(definitionID)
+	if err != nil || def == nil {
+		if err == nil {
+			err = fmt.Errorf("automation %q not found", definitionID)
+		}
+		return nil, err
+	}
+	var spec automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(def.SpecJSON), &spec); err != nil {
+		return nil, err
+	}
+	if spec.Location.Type != "repository_worktree" {
+		return nil, errors.New("--pr-url requires a repository_worktree automation")
+	}
+	host, owner, repository, number, err := automation.ParsePullRequestURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if d.ghRegistry == nil {
+		return nil, fmt.Errorf("GitHub host %s is not authenticated", host)
+	}
+	client, ok := d.ghRegistry.Get(host)
+	if !ok {
+		return nil, fmt.Errorf("GitHub host %s is not authenticated", host)
+	}
+	snapshot, err := client.FetchPullRequestSnapshot(owner+"/"+repository, number)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot.Number != number || !strings.EqualFold(snapshot.BaseRepository, owner+"/"+repository) {
+		return nil, errors.New("GitHub response does not match requested pull request")
+	}
+	if snapshot.State != "open" {
+		return nil, fmt.Errorf("pull request is %s; only open pull requests can be reviewed", snapshot.State)
+	}
+	input := automation.PullRequestInput{
+		Provider: "github", Host: host, Owner: owner, Repository: repository, Number: number,
+		URL: strings.TrimSuffix(rawURL, "/"), Title: snapshot.Title, Body: snapshot.Body,
+		Author: snapshot.Author, Draft: snapshot.Draft, State: snapshot.State,
+		HeadSHA: snapshot.HeadSHA, HeadRef: snapshot.HeadRef, HeadRepository: snapshot.HeadRepository,
+		BaseSHA: snapshot.BaseSHA, BaseRef: snapshot.BaseRef,
+	}
+	canonical, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := automation.ParsePullRequestInput(canonical); err != nil {
+		return nil, err
+	}
+	return d.automationRun(ctx, definitionID, requestID, string(canonical))
 }
 
 func (d *Daemon) handleAutomationDeliveryError(run *store.AutomationRun, deliveryErr error) (*store.AutomationRun, error) {
@@ -139,17 +225,19 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 	if err := json.Unmarshal([]byte(run.SnapshotJSON), &snapshot); err != nil {
 		return err
 	}
-	var payload string
-	if err := d.store.AutomationOccurrencePayload(run.OccurrenceID, &payload); err != nil {
+	occurrence, err := d.store.GetAutomationOccurrence(run.OccurrenceID)
+	if err != nil {
 		return err
 	}
-	req := automation.WorkRequest{RunID: run.ID, DefinitionID: run.DefinitionID, Prompt: snapshot.Prompt, Context: json.RawMessage(payload), Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID}}
+	if occurrence == nil {
+		return errors.New("automation occurrence missing")
+	}
+	req := automation.WorkRequest{RunID: run.ID, DefinitionID: run.DefinitionID, SubjectKey: occurrence.SubjectKey, Prompt: snapshot.Prompt, Context: json.RawMessage(occurrence.PayloadJSON), Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID}}
 	result, err := (workdelivery.Service{Ports: d}).Deliver(ctx, req)
 	if err != nil {
 		return err
 	}
-	resolved, _ := json.Marshal(map[string]string{"type": "directory", "path": result.Directory})
-	if err := d.store.MarkAutomationRunDelivered(run.ID, string(resolved), time.Now()); err != nil {
+	if err := d.store.MarkAutomationRunDelivered(run.ID, string(result.Resolved), time.Now()); err != nil {
 		return err
 	}
 	d.broadcastTicketsUpdated()
@@ -167,18 +255,105 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 	_, err = d.store.EnsureAutomationTicket(store.Ticket{ID: req.IDs.TicketID, Title: def.Name, Description: req.Prompt, Status: store.TicketStatusWorking, Assignee: req.IDs.SessionID, Cwd: req.Location.Path, LastAgentID: req.Launch.Driver, AutomationRunID: req.RunID}, "automation:"+req.DefinitionID, store.TicketRoleChiefOfStaff, time.Now())
 	return err
 }
-func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) (string, error) {
-	if req.Location.Type != "directory" {
-		return "", fmt.Errorf("unsupported location %q", req.Location.Type)
+func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) (automation.PreparedLocation, error) {
+	if req.Location.Type == "directory" {
+		directory, err := validateDelegationDirectory(req.Location.Path)
+		if err != nil {
+			return automation.PreparedLocation{}, err
+		}
+		if directory != filepath.Clean(req.Location.Path) {
+			return automation.PreparedLocation{}, fmt.Errorf("automation location no longer resolves to its approved directory")
+		}
+		resolved, _ := json.Marshal(automation.ResolvedLocation{Type: "directory", Path: directory})
+		return automation.PreparedLocation{Directory: directory, Resolved: resolved}, nil
 	}
-	directory, err := validateDelegationDirectory(req.Location.Path)
+	if req.Location.Type != "repository_worktree" {
+		return automation.PreparedLocation{}, fmt.Errorf("unsupported location %q", req.Location.Type)
+	}
+	pr, err := automation.ParsePullRequestInput(req.Context)
 	if err != nil {
-		return "", err
+		return automation.PreparedLocation{}, err
 	}
-	if directory != filepath.Clean(req.Location.Path) {
-		return "", fmt.Errorf("automation location no longer resolves to its approved directory")
+	identity := pr.RepositoryIdentity()
+	authorization := ""
+	if d.ghRegistry != nil {
+		if client, ok := d.ghRegistry.Get(pr.Host); ok {
+			authorization = client.GitHTTPSAuthorizationHeader()
+		}
 	}
-	return directory, nil
+	d.automationRepoMu.Lock()
+	if d.automationRepos == nil {
+		d.automationRepos = make(map[string]*sync.Mutex)
+	}
+	repoLock := d.automationRepos[identity]
+	if repoLock == nil {
+		repoLock = &sync.Mutex{}
+		d.automationRepos[identity] = repoLock
+	}
+	d.automationRepoMu.Unlock()
+	repoLock.Lock()
+	defer repoLock.Unlock()
+	source := req.Location.RepositorySources.Default
+	mainRepo := ""
+	if override, ok := req.Location.RepositorySources.Overrides[identity]; ok {
+		source = override
+		mainRepo, err = attngit.ValidateLocalClone(source.Path, identity)
+		if err != nil {
+			return automation.PreparedLocation{}, fmt.Errorf("local repository override: %w", err)
+		}
+		remoteURL, remoteErr := attngit.Output(attngit.OpMetadata, mainRepo, "remote", "get-url", "origin")
+		if remoteErr != nil {
+			return automation.PreparedLocation{}, fmt.Errorf("read local repository origin: %w", remoteErr)
+		}
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(string(remoteURL))), "https://") && authorization == "" {
+			return automation.PreparedLocation{}, &retryableAutomationDeliveryError{cause: fmt.Errorf("GitHub host %s is not authenticated", pr.Host)}
+		}
+	} else {
+		if authorization == "" {
+			return automation.PreparedLocation{}, &retryableAutomationDeliveryError{cause: fmt.Errorf("GitHub host %s is not authenticated", pr.Host)}
+		}
+		root := strings.TrimSpace(d.dataRoot)
+		if root == "" {
+			root = filepath.Dir(d.socketPath)
+		}
+		target := filepath.Join(root, "automation", "repos", attngit.RepositoryCacheKey(identity), "repo")
+		cloneURL := "https://" + identity + ".git"
+		mainRepo, _, err = attngit.EnsureManagedClone(cloneURL, target, identity, authorization)
+		if err != nil {
+			return automation.PreparedLocation{}, fmt.Errorf("managed repository cache: %w", err)
+		}
+	}
+	if err := attngit.EnsurePullRequestRevision(mainRepo, "origin", pr.Number, pr.HeadSHA, authorization); err != nil {
+		return automation.PreparedLocation{}, err
+	}
+	repoName := pr.Repository
+	root := strings.TrimSpace(d.dataRoot)
+	if root == "" {
+		root = filepath.Dir(d.socketPath)
+	}
+	worktree := filepath.Join(root, "automation", "worktrees", req.IDs.SessionID, repoName)
+	sessionPersisted := false
+	if d.store != nil {
+		if existing := d.store.Get(req.IDs.SessionID); existing != nil {
+			if filepath.Clean(existing.Directory) != filepath.Clean(worktree) || existing.WorkspaceID != req.IDs.WorkspaceID || string(existing.Agent) != req.Launch.Driver {
+				return automation.PreparedLocation{}, fmt.Errorf("persisted session does not match automation snapshot")
+			}
+			sessionPersisted = true
+		}
+	}
+	if _, err := attngit.EnsureAutomationSessionWorktree(mainRepo, worktree, pr.HeadSHA, authorization, sessionPersisted); err != nil {
+		return automation.PreparedLocation{}, err
+	}
+	resolved, _ := json.Marshal(automation.ResolvedLocation{
+		Type: "repository_worktree", Repository: identity, ConfiguredSource: source,
+		MainRepository: mainRepo, Worktree: worktree, Revision: pr.HeadSHA,
+		ProviderRef: fmt.Sprintf("refs/pull/%d/head", pr.Number),
+	})
+	return automation.PreparedLocation{Directory: worktree, Revision: pr.HeadSHA, Resolved: resolved}, nil
+}
+
+func (d *Daemon) BindTicketLocation(_ context.Context, req automation.WorkRequest, location automation.PreparedLocation) error {
+	return d.store.SetTicketSession(req.IDs.TicketID, location.Directory, req.Launch.Driver, time.Now())
 }
 func (d *Daemon) EnsureWorkspace(_ context.Context, req automation.WorkRequest, directory string) error {
 	if existing := d.store.GetWorkspace(req.IDs.WorkspaceID); existing != nil {
@@ -197,7 +372,11 @@ func (d *Daemon) EnsureWorkspace(_ context.Context, req automation.WorkRequest, 
 	return nil
 }
 func (d *Daemon) EnsurePane(_ context.Context, req automation.WorkRequest) error {
-	pane, err := d.addWorkspaceSessionPane(&protocol.WorkspaceLayoutAddSessionPaneMessage{Cmd: protocol.CmdWorkspaceLayoutAddSessionPane, WorkspaceID: req.IDs.WorkspaceID, PaneID: protocol.Ptr(req.IDs.PaneID), SessionID: req.IDs.SessionID, Title: protocol.Ptr(filepath.Base(req.Location.Path))})
+	title := filepath.Base(req.Location.Path)
+	if title == "." || title == "" {
+		title = req.SubjectKey
+	}
+	pane, err := d.addWorkspaceSessionPane(&protocol.WorkspaceLayoutAddSessionPaneMessage{Cmd: protocol.CmdWorkspaceLayoutAddSessionPane, WorkspaceID: req.IDs.WorkspaceID, PaneID: protocol.Ptr(req.IDs.PaneID), SessionID: req.IDs.SessionID, Title: protocol.Ptr(title)})
 	if err != nil {
 		return err
 	}
@@ -352,6 +531,9 @@ func (d *Daemon) VerifyDelivery(_ context.Context, req automation.WorkRequest, d
 	if ticket.ID != req.IDs.TicketID || ticket.Assignee != req.IDs.SessionID {
 		return fmt.Errorf("ticket links disagree")
 	}
+	if filepath.Clean(ticket.Cwd) != filepath.Clean(directory) {
+		return fmt.Errorf("ticket location disagrees")
+	}
 	session := d.store.Get(req.IDs.SessionID)
 	if session == nil || session.WorkspaceID != req.IDs.WorkspaceID || filepath.Clean(session.Directory) != filepath.Clean(directory) {
 		return fmt.Errorf("session links disagree")
@@ -381,6 +563,11 @@ func (d *Daemon) recoverAutomations() {
 	}
 }
 
+func recoverAutomationsAfterGitHubReady(ready <-chan struct{}, recover func()) {
+	<-ready
+	recover()
+}
+
 func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 	var data any
 	var err error
@@ -395,7 +582,15 @@ func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 		data, err = d.store.GetAutomationDefinition(m.DefinitionID)
 	case protocol.CmdAutomationRun:
 		m := msg.(*protocol.AutomationRunMessage)
-		data, err = d.automationRun(context.Background(), m.DefinitionID, m.RequestID, protocol.Deref(m.InputJson))
+		if strings.TrimSpace(protocol.Deref(m.PRURL)) != "" && strings.TrimSpace(protocol.Deref(m.InputJson)) != "" {
+			err = errors.New("pr_url and input_json are mutually exclusive")
+			break
+		}
+		if strings.TrimSpace(protocol.Deref(m.PRURL)) != "" {
+			data, err = d.automationRunPullRequest(context.Background(), m.DefinitionID, m.RequestID, protocol.Deref(m.PRURL))
+		} else {
+			data, err = d.automationRun(context.Background(), m.DefinitionID, m.RequestID, protocol.Deref(m.InputJson))
+		}
 	case protocol.CmdAutomationRunList:
 		m := msg.(*protocol.AutomationRunListMessage)
 		data, err = d.store.ListAutomationRuns(m.DefinitionID)

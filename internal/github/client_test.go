@@ -20,6 +20,17 @@ func TestNewClient_UsesProvidedToken(t *testing.T) {
 	}
 }
 
+func TestGitHTTPSAuthorizationHeader(t *testing.T) {
+	client, err := NewClient("http://example.com", "secret-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := client.GitHTTPSAuthorizationHeader()
+	if header == "" || contains(header, "secret-token") || header != GitHTTPSAuthorizationHeader("secret-token") {
+		t.Fatalf("unexpected authorization header %q", header)
+	}
+}
+
 func TestNewClient_DefaultsToGitHubAPI(t *testing.T) {
 	// Use a real-looking token (not "test-token") since test-token is blocked
 	// when targeting real GitHub API
@@ -77,6 +88,38 @@ func TestClient_doRequest_SetsHeaders(t *testing.T) {
 	}
 	if capturedHeaders.Get("X-GitHub-Api-Version") != "2022-11-28" {
 		t.Errorf("X-GitHub-Api-Version header missing or wrong")
+	}
+}
+
+func TestFetchPullRequestSnapshotUsesOneReadOnlyRequest(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/owner/repo/pulls/42" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if r.ContentLength > 0 {
+			t.Fatalf("read-only request had body length %d", r.ContentLength)
+		}
+		_, _ = w.Write([]byte(`{
+          "number":42,"html_url":"https://github.com/owner/repo/pull/42",
+          "title":"Review me","body":"Provider data","draft":false,"state":"open",
+          "user":{"login":"author"},
+          "head":{"sha":"0123456789abcdef0123456789abcdef01234567","ref":"topic","repo":{"full_name":"fork/repo"}},
+          "base":{"sha":"89abcdef0123456789abcdef0123456789abcdef","ref":"main","repo":{"full_name":"owner/repo"}}
+        }`))
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "test-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := client.FetchPullRequestSnapshot("owner/repo", 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || snapshot.HeadRepository != "fork/repo" || snapshot.BaseRepository != "owner/repo" || snapshot.HeadSHA != "0123456789abcdef0123456789abcdef01234567" {
+		t.Fatalf("requests=%d snapshot=%#v", requests, snapshot)
 	}
 }
 

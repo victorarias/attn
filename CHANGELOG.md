@@ -36,6 +36,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   producing output defers it.
 
 ### Added
+- **Manual PR-review automations now work from an exact isolated checkout.** Run
+  a repository-worktree definition with `attn automation run <id> --pr-url
+  <url>` to resolve the current PR head through a read-only GitHub request and
+  launch the local reviewer in a detached per-session worktree. Definitions can
+  use a profile-managed repository cache or explicit validated local-clone
+  overrides; the run records the source, main repository, worktree, and pinned
+  revision without posting or changing anything on GitHub.
 - **CLI-driven automations can prepare visible work before it needs attention.**
   Apply a durable manual definition with `attn automation apply`, run it on
   demand, and inspect its immutable run history. Each run creates an ordinary

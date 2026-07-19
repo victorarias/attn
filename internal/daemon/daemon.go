@@ -104,6 +104,8 @@ type Daemon struct {
 	daemonInstanceID string
 	store            *store.Store
 	automationMu     sync.Mutex // serializes idempotent ensure/adopt delivery per profile
+	automationRepoMu sync.Mutex
+	automationRepos  map[string]*sync.Mutex
 	listener         net.Listener
 	httpServer       *http.Server
 	httpHandler      http.Handler
@@ -861,10 +863,26 @@ func (d *Daemon) Start() error {
 	go d.ensureTailscaleServeFromSettingsAndBroadcast()
 	d.hubManager.Start(d.doneContext())
 
+	// Repository-worktree automation recovery may need GitHub credentials to
+	// clone or fetch a private repository. Keep host discovery asynchronous so
+	// the daemon can begin accepting connections, but make recovery wait for the
+	// initial discovery attempt to finish before it can terminally fail a run.
+	githubHostsReady := make(chan struct{})
+	go func() {
+		defer close(githubHostsReady)
+		if err := d.refreshGitHubHosts(); err != nil {
+			d.logf("Initial GitHub host discovery failed: %v", err)
+		}
+		// Start PR polling after initial host discovery
+		go d.pollPRs()
+		// Start periodic host refresh
+		go d.refreshGitHubHostsLoop()
+	}()
+
 	recoveryStartedAt := time.Now()
 	go func() {
 		d.performStartupPTYRecovery(recoveryStartedAt)
-		d.recoverAutomations()
+		recoverAutomationsAfterGitHubReady(githubHostsReady, d.recoverAutomations)
 		d.setRecovering(false)
 		// A pending delegation may have spawned its stable runtime ID just
 		// before the daemon stopped. Resume only after worker reconciliation has
@@ -874,17 +892,6 @@ func (d *Daemon) Start() error {
 	}()
 
 	// Note: No background persistence needed - SQLite persists immediately
-
-	// Discover GitHub hosts and refresh periodically (async to not block accept loop)
-	go func() {
-		if err := d.refreshGitHubHosts(); err != nil {
-			d.logf("Initial GitHub host discovery failed: %v", err)
-		}
-		// Start PR polling after initial host discovery
-		go d.pollPRs()
-		// Start periodic host refresh
-		go d.refreshGitHubHostsLoop()
-	}()
 
 	// Start branch monitoring
 	go d.monitorBranches()
@@ -1799,6 +1806,10 @@ func (d *Daemon) refreshGitHubHostsLoop() {
 			if err := d.refreshGitHubHosts(); err != nil {
 				d.logf("GitHub host refresh failed: %v", err)
 			}
+			// Authentication may have been temporarily unavailable during startup.
+			// Pending automation delivery is stable-ID idempotent, so retry it after
+			// every host refresh rather than terminally stranding a private PR run.
+			d.recoverAutomations()
 		}
 	}
 }

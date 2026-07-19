@@ -9,7 +9,16 @@ import (
 // Clone clones a repository to the specified path.
 // Returns error if path already exists or clone fails.
 func Clone(cloneURL, targetPath string) error {
+	return cloneWithHTTPAuthorization(cloneURL, targetPath, "")
+}
+
+func cloneWithHTTPAuthorization(cloneURL, targetPath, authorization string) error {
 	targetPath = ExpandPath(targetPath)
+	var err error
+	authorization, err = authorizationForGitURL(cloneURL, authorization)
+	if err != nil {
+		return err
+	}
 
 	// Check if target already exists
 	if _, err := os.Stat(targetPath); err == nil {
@@ -22,7 +31,7 @@ func Clone(cloneURL, targetPath string) error {
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
 
-	if out, err := runGitCombined(OpClone, "", "clone", cloneURL, targetPath); err != nil {
+	if out, err := runGitCombinedWithHTTPAuthorization(OpClone, "", cloneURL, authorization, "clone", cloneURL, targetPath); err != nil {
 		return fmt.Errorf("git clone failed: %s", string(out))
 	}
 

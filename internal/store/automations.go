@@ -33,6 +33,11 @@ type AutomationRun struct {
 	DeliveredAt                              *time.Time
 }
 
+type AutomationOccurrence struct {
+	ID, DefinitionID, Provider, OccurrenceKey, SubjectKey, PayloadJSON string
+	ObservedAt, CreatedAt                                              time.Time
+}
+
 type AutomationRunReservation struct {
 	RunID, OccurrenceID, TicketID, SessionID, WorkspaceID, PaneID string
 }
@@ -126,7 +131,7 @@ func (s *Store) ListAutomationDefinitions() ([]AutomationDefinition, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) ClaimManualAutomationRun(definitionID, requestID, payloadJSON string, expectedRevision int, snapshotJSON string, observedAt time.Time, ids AutomationRunReservation) (*AutomationRun, bool, error) {
+func (s *Store) ClaimManualAutomationRun(definitionID, requestID, subjectKey, payloadJSON string, expectedRevision int, snapshotJSON string, observedAt time.Time, ids AutomationRunReservation) (*AutomationRun, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
@@ -160,7 +165,7 @@ func (s *Store) ClaimManualAutomationRun(definitionID, requestID, payloadJSON st
 		return nil, false, fmt.Errorf("automation %q is disabled", definitionID)
 	}
 	now := formatTicketTime(observedAt)
-	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'manual',?, '',?,?,?)`, ids.OccurrenceID, definitionID, key, now, payloadJSON, now); err != nil {
+	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'manual',?,?,?,?,?)`, ids.OccurrenceID, definitionID, key, subjectKey, now, payloadJSON, now); err != nil {
 		return nil, false, err
 	}
 	if _, err = tx.Exec(`INSERT INTO automation_runs(id,definition_id,occurrence_id,definition_revision,snapshot_json,state,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?,?,?,?)`, ids.RunID, definitionID, ids.OccurrenceID, revision, snapshotJSON, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
@@ -202,6 +207,22 @@ func (s *Store) GetAutomationRun(id string) (*AutomationRun, error) {
 		return nil, nil
 	}
 	return s.getAutomationRunUnlocked(id)
+}
+func (s *Store) GetManualAutomationRun(definitionID, requestID string) (*AutomationRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	var runID string
+	err := s.db.QueryRow(`SELECT r.id FROM automation_occurrences o JOIN automation_runs r ON r.occurrence_id=o.id WHERE o.definition_id=? AND o.provider='manual' AND o.occurrence_key=?`, definitionID, "manual:"+requestID).Scan(&runID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.getAutomationRunUnlocked(runID)
 }
 func (s *Store) ListAutomationRuns(definitionID string) ([]AutomationRun, error) {
 	s.mu.RLock()
@@ -265,4 +286,27 @@ func (s *Store) AutomationOccurrencePayload(id string, out *string) error {
 		return errors.New("automation persistence unavailable")
 	}
 	return s.db.QueryRow(`SELECT payload_json FROM automation_occurrences WHERE id=?`, id).Scan(out)
+}
+
+func (s *Store) GetAutomationOccurrence(id string) (*AutomationOccurrence, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, errors.New("automation persistence unavailable")
+	}
+	var occurrence AutomationOccurrence
+	var observedAt, createdAt string
+	err := s.db.QueryRow(`SELECT id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at FROM automation_occurrences WHERE id=?`, id).Scan(
+		&occurrence.ID, &occurrence.DefinitionID, &occurrence.Provider, &occurrence.OccurrenceKey,
+		&occurrence.SubjectKey, &observedAt, &occurrence.PayloadJSON, &createdAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	occurrence.ObservedAt = parseTicketTime(observedAt)
+	occurrence.CreatedAt = parseTicketTime(createdAt)
+	return &occurrence, nil
 }
