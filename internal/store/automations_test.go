@@ -87,6 +87,9 @@ func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 	if first.TicketID != firstIDs.TicketID || first.SessionID != firstIDs.SessionID {
 		t.Fatalf("first run links = %#v", first)
 	}
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Review", Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
 	candidates, err = s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
 	if err != nil || len(candidates) != 0 {
 		t.Fatalf("duplicate poll candidates = %#v err=%v", candidates, err)
@@ -113,6 +116,50 @@ func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 	occurrence, err := s.GetAutomationOccurrence(second.OccurrenceID)
 	if err != nil || occurrence == nil || occurrence.OccurrenceKey != "review_requested:github.com/owner/repo#42:2" {
 		t.Fatalf("second occurrence = %#v err=%v", occurrence, err)
+	}
+}
+
+func TestGitHubReviewClaimWaitsForInitialTicketBeforeAcceptingNewCycle(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	first, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil || !created {
+		t.Fatalf("first claim created=%v err=%v", created, err)
+	}
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("second candidates=%#v err=%v", candidates, err)
+	}
+	secondIDs := AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "unused-ticket", SessionID: "unused-session", WorkspaceID: "unused-workspace", PaneID: "unused-pane"}
+	if run, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(2*time.Minute), secondIDs); err == nil || created || run != nil || !strings.Contains(err.Error(), "has not created its ticket") {
+		t.Fatalf("overtaking claim run=%#v created=%v err=%v", run, created, err)
+	}
+	needsClaim, err := s.AutomationReviewRequestNeedsClaim(def.ID, subject, candidates[0].Cycle)
+	if err != nil || !needsClaim {
+		t.Fatalf("blocked cycle must remain retryable: needsClaim=%v err=%v", needsClaim, err)
+	}
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Review", Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", TicketRoleChiefOfStaff, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	second, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(4*time.Minute), secondIDs)
+	if err != nil || !created || second == nil {
+		t.Fatalf("retried claim run=%#v created=%v err=%v", second, created, err)
+	}
+	if second.TicketID != first.TicketID || second.SessionID != first.SessionID {
+		t.Fatalf("retried claim lost continuity: first=%#v second=%#v", first, second)
 	}
 }
 

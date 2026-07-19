@@ -345,6 +345,26 @@ func (s *Store) ClaimGitHubReviewAutomationRun(definitionID, subjectKey string, 
 	if enabled == 0 {
 		return nil, false, fmt.Errorf("automation %q is disabled", definitionID)
 	}
+	// A later request cycle must not overtake the initial delivery for this
+	// subject. The continuity binding can exist before its ticket does; accepting
+	// another cycle in that window would make delivery mistake a not-yet-created
+	// ticket for a swept one. Leave the edge unaccepted so a later provider
+	// refresh retries it after the pending run settles or creates its ticket.
+	var undeliveredPredecessor int
+	if err := tx.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM automation_runs r
+			JOIN automation_occurrences o ON o.id=r.occurrence_id
+			WHERE r.definition_id=? AND o.subject_key=? AND r.state='pending'
+			  AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.id=r.ticket_id)
+		)
+	`, definitionID, subjectKey).Scan(&undeliveredPredecessor); err != nil {
+		return nil, false, err
+	}
+	if undeliveredPredecessor != 0 {
+		return nil, false, errors.New("an earlier automation run for this subject has not created its ticket yet")
+	}
 	ids := reserved
 	var createdAt, updatedAt string
 	err = tx.QueryRow(`SELECT ticket_id,session_id,workspace_id,pane_id,created_at,updated_at FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?`, definitionID, subjectKey).Scan(&ids.TicketID, &ids.SessionID, &ids.WorkspaceID, &ids.PaneID, &createdAt, &updatedAt)
