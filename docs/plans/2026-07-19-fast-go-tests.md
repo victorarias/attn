@@ -67,6 +67,9 @@ make / pre-commit
 - [x] Prove cache invalidation when the E2E binary or direct Git executable
   changes, plus concurrent-run isolation.
 - [x] Measure the unchanged-hook warm path and a cache-controlled changed path.
+- [ ] Make pre-commit's temporary E2E build metadata deterministic.
+- [ ] Enable the tracked `.githooks/pre-commit` for every attn worktree.
+- [ ] Commit through the installed hook and measure its cache behavior.
 
 ## Results
 

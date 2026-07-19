@@ -35,7 +35,8 @@ changed_matching() {
 
 configure_pkg_config() {
   if ! command -v pkg-config >/dev/null 2>&1 && command -v pkgconf >/dev/null 2>&1; then
-    export PKG_CONFIG="$(command -v pkgconf)"
+    PKG_CONFIG="$(command -v pkgconf)"
+    export PKG_CONFIG
   fi
 
   if [ -z "${PKG_CONFIG_PATH:-}" ] && [ -d "$HOME/.nix-profile/lib/pkgconfig" ]; then
@@ -62,7 +63,9 @@ ensure_no_unstaged_changes() {
 
 format_go_files() {
   local go_files=()
-  mapfile -t go_files < <(changed_matching '\.go$')
+  while IFS= read -r file; do
+    go_files+=("$file")
+  done < <(changed_matching '\.go$')
   if [ "${#go_files[@]}" -eq 0 ]; then
     return
   fi
@@ -75,7 +78,9 @@ format_go_files() {
 format_rust_files() {
   local pattern="$1"
   local rust_files=()
-  mapfile -t rust_files < <(changed_matching "$pattern")
+  while IFS= read -r file; do
+    rust_files+=("$file")
+  done < <(changed_matching "$pattern")
   if [ "${#rust_files[@]}" -eq 0 ]; then
     return
   fi
@@ -86,6 +91,9 @@ format_rust_files() {
 }
 
 tmp_bin=""
+# This binary is a test artifact, not a release. Stable metadata lets Go reuse
+# daemon E2E results when the staged source and all other inputs are unchanged.
+test_build_time="1970-01-01T00:00:00Z"
 cleanup_tmp_bin() {
   if [ -n "$tmp_bin" ]; then
     rm -f "$tmp_bin"
@@ -100,7 +108,7 @@ ensure_e2e_binary() {
 
   header "Go build for E2E"
   tmp_bin="$(mktemp -t attn-precommit.XXXXXX)"
-  make -C "$root" build OUTPUT="$tmp_bin"
+  make -C "$root" build OUTPUT="$tmp_bin" BUILD_TIME="$test_build_time"
   export ATTN_E2E_BIN="$tmp_bin"
 }
 
@@ -144,7 +152,7 @@ if [ "$run_daemon_checks" = true ]; then
 
   header "Go build"
   tmp_bin="$(mktemp -t attn-precommit.XXXXXX)"
-  make -C "$root" build OUTPUT="$tmp_bin"
+  make -C "$root" build OUTPUT="$tmp_bin" BUILD_TIME="$test_build_time"
   if [ -z "${ATTN_E2E_BIN:-}" ]; then
     export ATTN_E2E_BIN="$tmp_bin"
   fi
@@ -165,7 +173,9 @@ fi
 if [ "$run_shell_checks" = true ]; then
   header "Shell syntax"
   shell_files=()
-  mapfile -t shell_files < <(changed_matching '(^|/)[^/]+\.sh$|^\.githooks/pre-commit$')
+  while IFS= read -r file; do
+    shell_files+=("$file")
+  done < <(changed_matching '(^|/)[^/]+\.sh$|^\.githooks/pre-commit$')
   if [ "${#shell_files[@]}" -gt 0 ]; then
     bash -n "${shell_files[@]}"
   fi
