@@ -170,6 +170,12 @@ func executePRCommand(args []string, stdout, stderr io.Writer) int {
 func reportPROutcome(result *prReadiness, outcome prOutcome, opts prWaitOptions, stdout io.Writer) int {
 	detail := describePROutcome(result, outcome, opts)
 	if opts.JSON {
+		// "comments" reports what arrived during the wait. On any other outcome
+		// the observation still carries the baseline, which is not news.
+		fresh := []prComment{}
+		if outcome == outcomeComment {
+			fresh = result.Comments
+		}
 		payload := map[string]any{
 			"outcome": string(outcome),
 			"pr":      result.Number,
@@ -185,7 +191,7 @@ func reportPROutcome(result *prReadiness, outcome prOutcome, opts prWaitOptions,
 				"state":    result.ReviewState,
 				"reviewer": result.Reviewer,
 			},
-			"comments": result.Comments,
+			"comments": fresh,
 		}
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
@@ -336,7 +342,7 @@ query($owner:String!,$name:String!,$number:Int!){
         pageInfo{hasNextPage}
         nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}
       }}}}}
-      reviews(last:100){nodes{id state submittedAt author{__typename login} commit{oid}}}
+      reviews(last:100){nodes{id state bodyText submittedAt author{__typename login} commit{oid}}}
       comments(last:100){nodes{id createdAt author{__typename login}}}
       reviewThreads(last:100){nodes{comments(last:100){nodes{id createdAt author{__typename login}}}}}
     }}}`
@@ -406,6 +412,7 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 						Nodes []struct {
 							ID          string          `json:"id"`
 							State       string          `json:"state"`
+							BodyText    string          `json:"bodyText"`
 							SubmittedAt time.Time       `json:"submittedAt"`
 							Author      prGraphQLAuthor `json:"author"`
 							Commit      struct {
@@ -472,9 +479,15 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 	for _, review := range pr.Reviews.Nodes {
 		state := strings.ToUpper(review.State)
 		if state == "COMMENTED" {
-			result.Comments = appendPRComment(result.Comments, prGraphQLComment{
-				ID: review.ID, CreatedAt: review.SubmittedAt, Author: review.Author,
-			}, "review", opts)
+			// Posting a standalone inline comment makes GitHub wrap it in a
+			// bodyless COMMENTED review. Counting that wrapper would report one
+			// human remark twice, so only a review with its own text counts;
+			// the inline comments it holds arrive via reviewThreads.
+			if strings.TrimSpace(review.BodyText) != "" {
+				result.Comments = appendPRComment(result.Comments, prGraphQLComment{
+					ID: review.ID, CreatedAt: review.SubmittedAt, Author: review.Author,
+				}, "review", opts)
+			}
 			continue
 		}
 		if !strings.EqualFold(review.Author.Login, opts.Reviewer) || review.Commit.OID != result.HeadSHA ||

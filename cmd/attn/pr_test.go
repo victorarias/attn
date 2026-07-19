@@ -71,7 +71,7 @@ func TestParsePRSnapshotRequiresGreenChecksAndCurrentHeadApproval(t *testing.T) 
 
 func TestParsePRSnapshotCollectsHumanCommentsAndDropsBots(t *testing.T) {
 	head := strings.Repeat("a", 40)
-	reviews := `{"id":"r1","state":"COMMENTED","submittedAt":"2026-07-19T10:00:00Z","author":{"__typename":"User","login":"figgyster"},"commit":{"oid":"` + head + `"}}`
+	reviews := `{"id":"r1","state":"COMMENTED","bodyText":"a real review remark","submittedAt":"2026-07-19T10:00:00Z","author":{"__typename":"User","login":"figgyster"},"commit":{"oid":"` + head + `"}}`
 	comments := `{"id":"c1","createdAt":"2026-07-19T09:00:00Z","author":{"__typename":"User","login":"victorarias"}},
 	             {"id":"c2","createdAt":"2026-07-19T09:30:00Z","author":{"__typename":"Bot","login":"chatgpt-codex-connector"}},
 	             {"id":"c3","createdAt":"2026-07-19T09:45:00Z","author":{"__typename":"User","login":"noisy-human"}}`
@@ -95,6 +95,22 @@ func TestParsePRSnapshotCollectsHumanCommentsAndDropsBots(t *testing.T) {
 	// A COMMENTED review carries no verdict and must not move the review state.
 	if readiness.ReviewState != "waiting" {
 		t.Fatalf("COMMENTED review changed review state: %#v", readiness)
+	}
+}
+
+// GitHub wraps a standalone inline comment in a bodyless COMMENTED review.
+// Reporting both made one remark read as "2 new comments".
+func TestParsePRSnapshotDoesNotDoubleCountInlineCommentWrapper(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	wrapper := `{"id":"r1","state":"COMMENTED","bodyText":"","submittedAt":"2026-07-19T19:33:19Z","author":{"__typename":"User","login":"victorarias"},"commit":{"oid":"` + head + `"}}`
+	threads := `{"comments":{"nodes":[{"id":"t1","createdAt":"2026-07-19T19:33:19Z","author":{"__typename":"User","login":"victorarias"}}]}}`
+
+	readiness, err := parsePRSnapshot(snapshotPayload(head, "", wrapper, "", threads), prWaitOptions{Reviewer: "figgyster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(readiness.Comments) != 1 || readiness.Comments[0].ID != "t1" || readiness.Comments[0].Kind != "inline" {
+		t.Fatalf("comments = %#v, want the inline comment alone", readiness.Comments)
 	}
 }
 
@@ -242,16 +258,19 @@ func TestReportPROutcomeWritesPlainTextAndJSON(t *testing.T) {
 		t.Fatalf("plain output = %q", got)
 	}
 
+	// Baseline comments on the observation are not news on a non-comment outcome.
+	result.Comments = []prComment{{ID: "c1", Author: "victorarias", Kind: "issue"}}
 	var encoded bytes.Buffer
 	code := reportPROutcome(result, outcomeChangesRequested, prWaitOptions{JSON: true}, &encoded)
 	if code != prWaitExitChangesRequested {
 		t.Fatalf("exit code = %d", code)
 	}
 	var payload struct {
-		Outcome string `json:"outcome"`
-		Head    string `json:"head"`
-		Detail  string `json:"detail"`
-		Review  struct {
+		Outcome  string      `json:"outcome"`
+		Head     string      `json:"head"`
+		Detail   string      `json:"detail"`
+		Comments []prComment `json:"comments"`
+		Review   struct {
 			Reviewer string `json:"reviewer"`
 		} `json:"review"`
 	}
@@ -261,6 +280,9 @@ func TestReportPROutcomeWritesPlainTextAndJSON(t *testing.T) {
 	if payload.Outcome != "changes_requested" || payload.Head != head || payload.Review.Reviewer != "figgyster" ||
 		!strings.Contains(payload.Detail, "requested changes") {
 		t.Fatalf("payload = %#v", payload)
+	}
+	if len(payload.Comments) != 0 {
+		t.Fatalf("baseline comments reported as new: %#v", payload.Comments)
 	}
 }
 
