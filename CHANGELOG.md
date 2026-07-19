@@ -9,6 +9,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-19]
 
 ### Added
+- **pi can run as an attn session.** The new bundled `attn-pi` plugin drives
+  the pi coding agent: create pi sessions with an optional initial prompt,
+  pin the model and thinking effort, and resume a past session with its pins
+  re-applied. Enable it with `attn plugin install-bundled attn-pi`. Requires
+  pi 0.80.10 or newer; resuming refuses to run on an older pi version than
+  the session last used.
 - **Waiting on a pull request returns as soon as something needs you.** `attn pr
   wait-ready` watches checks, reviews, and comments in one request and stops at
   the first actionable update: a failing check, a review requesting changes, a
