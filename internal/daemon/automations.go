@@ -545,6 +545,7 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 		if err := d.store.EnsureAutomationContinuationTicket(req.IDs.TicketID, req.IDs.SessionID, req.RunID, inputPath, author, time.Now()); err != nil {
 			return err
 		}
+		d.broadcastTicketsUpdated()
 		// The ticket event is the durable payload. Use the ordinary content-free
 		// doorbell so an idle live reviewer learns that a new cycle is waiting.
 		d.notifyTicketObservers(req.IDs.TicketID)
