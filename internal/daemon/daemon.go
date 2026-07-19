@@ -129,12 +129,16 @@ type Daemon struct {
 	classifiedMu     sync.Mutex
 	classifiedTurn   map[string]string
 	classifyingTurn  map[string]string
-	longRunMu        sync.Mutex
-	longRun          map[string]longRunSession
-	forcedStopMu     sync.Mutex
-	forcedStop       map[string]time.Time
-	pendingResumeMu  sync.Mutex
-	pendingResumeID  map[string]string
+	// classificationTranscriptExtractor is a private test seam for exercising
+	// classification outcomes without waiting on an agent driver's retry policy.
+	// Production leaves it nil and uses extractLastAssistantMessage below.
+	classificationTranscriptExtractor func(*protocol.Session, string, int, time.Time) (string, string, error)
+	longRunMu                         sync.Mutex
+	longRun                           map[string]longRunSession
+	forcedStopMu                      sync.Mutex
+	forcedStop                        map[string]time.Time
+	pendingResumeMu                   sync.Mutex
+	pendingResumeID                   map[string]string
 	// Orphaned-ticket reconciliation (docs/plans/2026-07-01-orphaned-ticket-
 	// reconciliation.md): when an owning session dies with a non-terminal ticket,
 	// a capped headless classifier judges the dead transcript against the brief.
@@ -231,6 +235,7 @@ type Daemon struct {
 	plugins             *pluginRegistry
 	pluginSupervisorMu  sync.Mutex
 	pluginSupervisor    *pluginSupervisor
+	pluginHealthEnabled bool
 	pluginDriverMu      sync.Mutex
 	pluginLaunching     map[string]pluginSessionLaunch
 	pluginReports       map[string][]pendingPluginReport
@@ -574,35 +579,36 @@ func New(socketPath string) *Daemon {
 	manager := pty.NewManager(pty.DefaultScrollbackSize, logger.Infof)
 
 	d := &Daemon{
-		socketPath:         socketPath,
-		pidPath:            pidPath,
-		dataRoot:           dataRoot,
-		store:              sessionStore,
-		wsHub:              newWSHub(),
-		done:               make(chan struct{}),
-		logger:             logger,
-		debugLogging:       logger != nil && logger.DebugEnabled(),
-		ghRegistry:         github.NewClientRegistry(),
-		hubManager:         nil,
-		repoCaches:         make(map[string]*repoCache),
-		gitCoord:           newGitCoordinator(),
-		warnings:           startupWarnings,
-		workflowDirty:      make(map[string]bool),
-		workflowEngineConn: make(map[string]workflowEngineSink),
-		ptyBackend:         ptybackend.NewEmbedded(manager),
-		transcriptWatch:    make(map[string]*transcriptWatcher),
-		pendingInitialWS:   make(map[*wsClient]struct{}),
-		startedCh:          make(chan struct{}),
-		classifiedTurn:     make(map[string]string),
-		classifyingTurn:    make(map[string]string),
-		longRun:            make(map[string]longRunSession),
-		forcedStop:         make(map[string]time.Time),
-		pendingResumeID:    make(map[string]string),
-		tailscale:          newTailscaleRuntime(),
-		plugins:            newPluginRegistry(),
-		pluginDir:          pluginDirForSocket(socketPath),
-		bundledPluginDir:   bundledPluginDirForExecutable(),
-		workspaces:         newWorkspaceRegistry(),
+		socketPath:          socketPath,
+		pidPath:             pidPath,
+		dataRoot:            dataRoot,
+		store:               sessionStore,
+		wsHub:               newWSHub(),
+		done:                make(chan struct{}),
+		logger:              logger,
+		debugLogging:        logger != nil && logger.DebugEnabled(),
+		ghRegistry:          github.NewClientRegistry(),
+		hubManager:          nil,
+		repoCaches:          make(map[string]*repoCache),
+		gitCoord:            newGitCoordinator(),
+		warnings:            startupWarnings,
+		workflowDirty:       make(map[string]bool),
+		workflowEngineConn:  make(map[string]workflowEngineSink),
+		ptyBackend:          ptybackend.NewEmbedded(manager),
+		transcriptWatch:     make(map[string]*transcriptWatcher),
+		pendingInitialWS:    make(map[*wsClient]struct{}),
+		startedCh:           make(chan struct{}),
+		classifiedTurn:      make(map[string]string),
+		classifyingTurn:     make(map[string]string),
+		longRun:             make(map[string]longRunSession),
+		forcedStop:          make(map[string]time.Time),
+		pendingResumeID:     make(map[string]string),
+		tailscale:           newTailscaleRuntime(),
+		plugins:             newPluginRegistry(),
+		pluginHealthEnabled: true,
+		pluginDir:           pluginDirForSocket(socketPath),
+		bundledPluginDir:    bundledPluginDirForExecutable(),
+		workspaces:          newWorkspaceRegistry(),
 	}
 	// Production wiring for the orphaned-ticket reconciliation classifier. Test
 	// constructors leave this nil so unit tests never shell out to a real CLI.
@@ -2518,7 +2524,11 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 
 	// Parse transcript for last assistant message
 	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
-	lastMessage, assistantTurnID, err := d.extractLastAssistantMessage(session, resolvedTranscriptPath, 500, classificationStartTime)
+	extract := d.extractLastAssistantMessage
+	if d.classificationTranscriptExtractor != nil {
+		extract = d.classificationTranscriptExtractor
+	}
+	lastMessage, assistantTurnID, err := extract(session, resolvedTranscriptPath, 500, classificationStartTime)
 	if err != nil {
 		if errors.Is(err, agentdriver.ErrNoNewAssistantTurn) {
 			d.logf("classifySessionState: no new assistant turn for session %s, skipping classification", sessionID)

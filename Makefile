@@ -47,16 +47,16 @@ GOTESTSUM=$(HOME)/go/bin/gotestsum
 $(GOTESTSUM):
 	go install gotest.tools/gotestsum@latest
 
-test: $(GOTESTSUM)
-	$(GOTESTSUM) --format testdox -- ./...
+test:
+	./scripts/test-go.sh
 
 # Verbose test output (shows all test names as they run)
-test-v: $(GOTESTSUM)
-	$(GOTESTSUM) --format standard-verbose -- ./...
+test-v:
+	./scripts/test-go.sh -v
 
-# Quick test (dots only, fastest)
-test-quick: $(GOTESTSUM)
-	$(GOTESTSUM) --format dots -- ./...
+# Quick test (compact package output)
+test-quick:
+	./scripts/test-go.sh
 
 # Watch mode - re-runs tests on file changes
 test-watch: $(GOTESTSUM)

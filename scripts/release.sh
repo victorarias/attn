@@ -157,7 +157,7 @@ echo "Refreshing lockfiles..."
 
 if [[ "$SKIP_TESTS" -eq 0 ]]; then
   echo "Running validation..."
-  go test ./...
+  ./scripts/test-go.sh
   (cd app && pnpm run build)
   (cd app && pnpm test)
 fi

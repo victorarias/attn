@@ -542,20 +542,27 @@ func TestDelegateThreadsModelAndEffortIntoPluginDriver(t *testing.T) {
 	requestDone := make(chan struct{})
 	go func() {
 		defer close(requestDone)
-		request := decodeJSONRPCMessage(t, client)
-		if request.Method != "driver.spawn" {
-			t.Errorf("method=%q, want driver.spawn", request.Method)
+		for {
+			request := decodeJSONRPCMessage(t, client)
+			if request.Method == pluginHealthMethod {
+				respondPluginRequest(t, client, request, pluginHealthResult{OK: true})
+				continue
+			}
+			if request.Method != "driver.spawn" {
+				t.Errorf("method=%q, want driver.spawn", request.Method)
+				return
+			}
+			var got pluginDriverSpawnParams
+			if err := json.Unmarshal(request.Params, &got); err != nil {
+				t.Errorf("decode plugin spawn params: %v", err)
+				return
+			}
+			if got.Model != "spotify-glm/zai-org/GLM-5.2-FP8" || got.Effort != "low" {
+				t.Errorf("plugin spawn pins=%q/%q, want selected model/low", got.Model, got.Effort)
+			}
+			respondPluginRequest(t, client, request, pluginDriverSpawnResult{Argv: []string{"fixture"}})
 			return
 		}
-		var got pluginDriverSpawnParams
-		if err := json.Unmarshal(request.Params, &got); err != nil {
-			t.Errorf("decode plugin spawn params: %v", err)
-			return
-		}
-		if got.Model != "spotify-glm/zai-org/GLM-5.2-FP8" || got.Effort != "low" {
-			t.Errorf("plugin spawn pins=%q/%q, want selected model/low", got.Model, got.Effort)
-		}
-		respondPluginRequest(t, client, request, pluginDriverSpawnResult{Argv: []string{"fixture"}})
 	}()
 
 	if _, err := d.delegate(&protocol.DelegateMessage{
@@ -679,7 +686,7 @@ func TestDelegateWebSocketCommandReturnsResult(t *testing.T) {
 		if result.Result.WorkspaceID != "workspace-source" {
 			t.Fatalf("workspace = %q, want workspace-source", result.Result.WorkspaceID)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for delegate_result")
 	}
 }

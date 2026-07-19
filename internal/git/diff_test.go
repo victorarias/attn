@@ -11,6 +11,7 @@ import (
 // Test helper functions (pure functions, no git needed)
 
 func TestParseGitStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		code     string
 		expected string
@@ -38,6 +39,7 @@ func TestParseGitStatus(t *testing.T) {
 }
 
 func TestParseGitPorcelainStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		xy       string
 		expected string
@@ -68,6 +70,7 @@ func TestParseGitPorcelainStatus(t *testing.T) {
 }
 
 func TestExtractRenamePath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected string
@@ -102,6 +105,7 @@ func TestExtractRenamePath(t *testing.T) {
 // Integration tests with actual git repos
 
 func TestGetBranchDiffFiles_CommittedChanges(t *testing.T) {
+	t.Parallel()
 	// Create temp git repo
 	dir := t.TempDir()
 	runGit(t, dir, "init")
@@ -137,6 +141,7 @@ func TestGetBranchDiffFiles_CommittedChanges(t *testing.T) {
 }
 
 func TestGetBranchDiffFiles_UncommittedChanges(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 
@@ -169,6 +174,7 @@ func TestGetBranchDiffFiles_UncommittedChanges(t *testing.T) {
 }
 
 func TestGetBranchDiffFiles_MixedChanges(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 
@@ -224,6 +230,7 @@ func TestGetBranchDiffFiles_MixedChanges(t *testing.T) {
 }
 
 func TestGetBranchDiffFiles_DeletedFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 
@@ -258,6 +265,7 @@ func TestGetBranchDiffFiles_DeletedFile(t *testing.T) {
 }
 
 func TestGetBranchDiffFiles_UntrackedFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	runGit(t, dir, "commit", "--allow-empty", "-m", "init")
@@ -287,6 +295,7 @@ func TestGetBranchDiffFiles_UntrackedFile(t *testing.T) {
 }
 
 func TestGetBranchDiffFiles_NoChanges(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	runGit(t, dir, "commit", "--allow-empty", "-m", "init")
@@ -304,6 +313,7 @@ func TestGetBranchDiffFiles_NoChanges(t *testing.T) {
 }
 
 func TestGetBranchDiffFiles_InvalidBaseRef(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	runGit(t, dir, "commit", "--allow-empty", "-m", "init")
@@ -324,6 +334,7 @@ func TestGetBranchDiffFiles_InvalidBaseRef(t *testing.T) {
 }
 
 func TestGetBranchDiffFiles_LineStats(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	runGit(t, dir, "commit", "--allow-empty", "-m", "init")

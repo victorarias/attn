@@ -626,7 +626,25 @@ func (c *Claude) ExtractLastAssistantForClassification(
 	classificationStart time.Time,
 	lastClassifiedTurnID string,
 ) (content string, turnID string, err error) {
-	deadline := time.Now().Add(claudeTranscriptRetryWindow)
+	return c.extractLastAssistantForClassification(
+		transcriptPath,
+		maxChars,
+		classificationStart,
+		lastClassifiedTurnID,
+		claudeTranscriptRetryWindow,
+		claudeTranscriptRetryInterval,
+	)
+}
+
+func (c *Claude) extractLastAssistantForClassification(
+	transcriptPath string,
+	maxChars int,
+	classificationStart time.Time,
+	lastClassifiedTurnID string,
+	retryWindow time.Duration,
+	retryInterval time.Duration,
+) (content string, turnID string, err error) {
+	deadline := time.Now().Add(retryWindow)
 	minAssistantTimestamp := classificationStart.Add(-claudeTranscriptFreshnessSkew)
 	lastClassified := strings.TrimSpace(lastClassifiedTurnID)
 	for {
@@ -649,7 +667,7 @@ func (c *Claude) ExtractLastAssistantForClassification(
 			}
 			return "", "", turnErr
 		}
-		time.Sleep(claudeTranscriptRetryInterval)
+		time.Sleep(retryInterval)
 	}
 }
 

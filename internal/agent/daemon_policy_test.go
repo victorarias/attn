@@ -205,12 +205,13 @@ func TestExtractLastAssistantForClassification_ClaudeNoNewTurn(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 
-	_, _, err := ExtractLastAssistantForClassification(
-		Get("claude"),
+	_, _, err := (&Claude{}).extractLastAssistantForClassification(
 		path,
 		500,
 		time.Now(),
 		"turn-1",
+		0,
+		0,
 	)
 	if !errors.Is(err, ErrNoNewAssistantTurn) {
 		t.Fatalf("expected ErrNoNewAssistantTurn, got %v", err)

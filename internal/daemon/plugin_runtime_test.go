@@ -120,7 +120,7 @@ entrypoint = "src/index.ts"
 }
 
 func TestDaemon_StartInstalledPlugins_SpawnsProviderPlugin(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19971")
+	useFreeWSPort(t)
 	t.Setenv("ATTN_PLUGIN_HELPER", "1")
 	t.Setenv("ATTN_TEST_HELPER_BINARY", os.Args[0])
 
@@ -154,7 +154,7 @@ func TestDaemon_StartInstalledPlugins_SpawnsProviderPlugin(t *testing.T) {
 }
 
 func TestDaemon_StartInstalledPlugins_RestartsCleanExitWithNewGeneration(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19972")
+	useFreeWSPort(t)
 	t.Setenv("ATTN_PLUGIN_HELPER", "1")
 	t.Setenv("ATTN_TEST_HELPER_BINARY", os.Args[0])
 

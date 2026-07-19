@@ -568,7 +568,9 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 		return
 	}
 	d.broadcastPluginsUpdated()
-	go d.monitorPluginHealth(plugin)
+	if d.pluginHealthEnabled {
+		go d.monitorPluginHealth(plugin)
+	}
 
 	for {
 		data, err := readSocketFrame(reader)

@@ -22,6 +22,8 @@ import (
 )
 
 func TestWithoutEnvironmentKeysRemovesInheritedLaunchPins(t *testing.T) {
+	t.Parallel()
+
 	got := withoutEnvironmentKeys([]string{
 		"PATH=/bin",
 		"ATTN_MODEL=inherited",
@@ -1309,44 +1311,37 @@ func TestWorkerBackend_Spawn_CleansUpUnreadyWorkerProcess(t *testing.T) {
 }
 
 // TestWorkerBackend_Spawn_PassesThemeFlagsOnlyWhenSet covers the --theme-*
-// flag round-trip in Spawn(): a fake worker binary dumps its argv to a file
-// instead of running, so the assertion never depends on worker readiness.
+// flag round-trip in Spawn() without starting a worker process.
 func TestWorkerBackend_Spawn_PassesThemeFlagsOnlyWhenSet(t *testing.T) {
+	t.Parallel()
+
 	root := newWorkerBackendTestRoot(t)
-	argsFile := filepath.Join(root, "args.txt")
-	scriptPath := filepath.Join(root, "fake-worker.sh")
-	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > \"$ATTN_TEST_ARGS_FILE\"\n" +
-		"exit 1\n"
-	if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil {
-		t.Fatalf("WriteFile(fake worker script) error: %v", err)
-	}
-	t.Setenv("ATTN_TEST_ARGS_FILE", argsFile)
 
 	backend, err := NewWorker(WorkerBackendConfig{
 		DataRoot:         root,
 		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		BinaryPath:       scriptPath,
 	})
 	if err != nil {
 		t.Fatalf("NewWorker() error: %v", err)
 	}
+	session := &workerSession{
+		SessionID:    "sess-theme",
+		RegistryPath: filepath.Join(root, "registry.json"),
+		SocketPath:   filepath.Join(root, "worker.sock"),
+		ControlToken: "test-token",
+	}
 
-	prevSpawnReadyTimeout := spawnReadyTimeout
-	spawnReadyTimeout = 2 * time.Second
-	defer func() { spawnReadyTimeout = prevSpawnReadyTimeout }()
-
-	// The fake worker never writes a ready registry, so Spawn always errors —
-	// only the recorded argv (written before exit) matters here.
-	_ = backend.Spawn(context.Background(), SpawnOptions{
+	argv, err := backend.spawnArgs(SpawnOptions{
 		ID:    "sess-theme-set",
 		Agent: "shell",
 		CWD:   root,
 		Cols:  80,
 		Rows:  24,
 		Theme: pty.TerminalTheme{Foreground: "#aabbcc", Background: "#001122", Cursor: "#334455"},
-	})
-	argv := readSpawnArgsFile(t, argsFile)
+	}, session)
+	if err != nil {
+		t.Fatalf("spawnArgs(theme set) error: %v", err)
+	}
 	wantFlags := map[string]string{
 		"--theme-foreground": "#aabbcc",
 		"--theme-background": "#001122",
@@ -1358,15 +1353,16 @@ func TestWorkerBackend_Spawn_PassesThemeFlagsOnlyWhenSet(t *testing.T) {
 		}
 	}
 
-	_ = os.Remove(argsFile)
-	_ = backend.Spawn(context.Background(), SpawnOptions{
+	argv, err = backend.spawnArgs(SpawnOptions{
 		ID:    "sess-theme-unset",
 		Agent: "shell",
 		CWD:   root,
 		Cols:  80,
 		Rows:  24,
-	})
-	argv = readSpawnArgsFile(t, argsFile)
+	}, session)
+	if err != nil {
+		t.Fatalf("spawnArgs(theme unset) error: %v", err)
+	}
 	for _, flag := range []string{"--theme-foreground", "--theme-background", "--theme-cursor"} {
 		for _, arg := range argv {
 			if arg == flag {
@@ -1374,24 +1370,6 @@ func TestWorkerBackend_Spawn_PassesThemeFlagsOnlyWhenSet(t *testing.T) {
 			}
 		}
 	}
-}
-
-func readSpawnArgsFile(t *testing.T, path string) []string {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	var data []byte
-	var err error
-	for time.Now().Before(deadline) {
-		data, err = os.ReadFile(path)
-		if err == nil {
-			break
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	if err != nil {
-		t.Fatalf("timed out reading spawn args file %s: %v", path, err)
-	}
-	return strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 }
 
 func argAfterFlag(argv []string, flag string) string {

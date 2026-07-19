@@ -71,6 +71,7 @@ func TestEnsureDetachedWorktreeAtRevisionRecoversFreshStaleMetadata(t *testing.T
 }
 
 func TestListWorktrees(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	mainDir := filepath.Join(tmpDir, "main")
 	if err := os.MkdirAll(mainDir, 0755); err != nil {
@@ -107,6 +108,7 @@ func TestListWorktrees(t *testing.T) {
 }
 
 func TestCreateWorktree(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	mainDir := filepath.Join(tmpDir, "main")
 	if err := os.MkdirAll(mainDir, 0755); err != nil {
@@ -137,6 +139,7 @@ func TestCreateWorktree(t *testing.T) {
 }
 
 func TestDeleteWorktree(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	mainDir := filepath.Join(tmpDir, "main")
 	if err := os.MkdirAll(mainDir, 0755); err != nil {
@@ -163,6 +166,7 @@ func TestDeleteWorktree(t *testing.T) {
 }
 
 func TestDeleteWorktreeDirtyRequiresForce(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	mainDir := filepath.Join(tmpDir, "main")
 	if err := os.MkdirAll(mainDir, 0755); err != nil {
@@ -199,6 +203,7 @@ func TestDeleteWorktreeDirtyRequiresForce(t *testing.T) {
 }
 
 func TestGenerateWorktreePath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		mainRepo string
 		branch   string
@@ -217,6 +222,7 @@ func TestGenerateWorktreePath(t *testing.T) {
 }
 
 func TestResolveMainRepoPath_WithMainRepo(t *testing.T) {
+	t.Parallel()
 	mainDir := t.TempDir()
 	runGit(t, mainDir, "init")
 	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
@@ -228,6 +234,7 @@ func TestResolveMainRepoPath_WithMainRepo(t *testing.T) {
 }
 
 func TestResolveMainRepoPath_WithWorktree(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	mainDir := filepath.Join(tmpDir, "hurdy-gurdy")
 	if err := os.MkdirAll(mainDir, 0755); err != nil {
