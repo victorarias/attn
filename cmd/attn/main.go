@@ -708,7 +708,8 @@ placement:
 worktree options:
   combine with any placement (current, --workspace, or --new-workspace);
   combining with --cwd creates a worktree of the repo at that directory
-  --repo <path>              main repository (defaults to the workspace repository)
+  --repo <path>              main repository (defaults to the repository the
+                             target workspace's sessions are in)
   --from <ref>               branch or ref to start from
   --worktree-path <path>     override the generated sibling path
 
@@ -2314,7 +2315,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	workspaceID := fs.String("workspace", "", "place the delegated agent in an existing workspace")
 	cwd := fs.String("cwd", "", "use an existing directory in a new workspace")
 	worktreeBranch := fs.String("worktree", "", "create a worktree with this branch for the delegated session")
-	worktreeRepo := fs.String("repo", "", "main repository for --worktree (defaults to source repository)")
+	worktreeRepo := fs.String("repo", "", "main repository for --worktree (defaults to the target's session repository)")
 	worktreeStart := fs.String("from", "", "starting ref for --worktree")
 	worktreePath := fs.String("worktree-path", "", "custom path for --worktree")
 	requestID := fs.String("request-id", "", "stable delegation request id")

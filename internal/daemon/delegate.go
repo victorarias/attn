@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -262,6 +263,57 @@ func verifyDelegationWorktreeOwner(worktreePath, token string) error {
 		return fmt.Errorf("delegation worktree owner marker does not match")
 	}
 	return nil
+}
+
+// delegationWorktreeBase resolves the directory whose git repository a worktree
+// delegated into an existing workspace should branch from.
+//
+// A workspace's stored Directory is the location it was last registered at, not
+// a claim about the repositories its sessions occupy. It is overwritten on every
+// re-registration (unlike title/rank/muted/pinned, which are deliberately
+// preserved), it is inherited wholesale when a pane is dragged out into a new
+// workspace, and it is never recomputed when a member session moves into a
+// worktree. It can therefore name a repository no member session has ever been
+// in, and trusting it here silently created worktrees in unrelated repositories.
+//
+// The member sessions are the authority instead: they carry a directory that is
+// re-derived from the real cwd on every register and spawn. When they disagree
+// on a main repository the choice is genuinely ambiguous, so fail and ask for
+// --repo rather than guess — a confusing error beats a silent misplacement.
+func (d *Daemon) delegationWorktreeBase(workspaceID, workspaceDirectory string) (string, error) {
+	firstDirectoryFor := map[string]string{}
+	var repos []string
+	// SessionsInWorkspace orders by id, so the representative directory picked
+	// for a single-repo workspace is stable across runs.
+	for _, sessionID := range d.store.SessionsInWorkspace(workspaceID) {
+		session := d.store.Get(sessionID)
+		if session == nil || strings.TrimSpace(session.Directory) == "" {
+			continue
+		}
+		root, err := git.GetRepoRoot(session.Directory)
+		if err != nil {
+			continue
+		}
+		repo := git.ResolveMainRepoPath(root)
+		if _, seen := firstDirectoryFor[repo]; seen {
+			continue
+		}
+		firstDirectoryFor[repo] = session.Directory
+		repos = append(repos, repo)
+	}
+
+	switch len(repos) {
+	case 0:
+		// An empty or non-git workspace offers nothing better; fall back to the
+		// stored directory so the caller's own repo check reports it as before.
+		return workspaceDirectory, nil
+	case 1:
+		return firstDirectoryFor[repos[0]], nil
+	default:
+		sort.Strings(repos)
+		return "", fmt.Errorf("workspace %s spans multiple repositories (%s); pass --repo to choose which one the worktree branches from",
+			workspaceID, strings.Join(repos, ", "))
+	}
 }
 
 func (d *Daemon) createDelegationWorktree(baseDirectory string, request *protocol.DelegateWorktreeRequest, operationID, ownedPath string, worktreeOwned bool, ownedToken string, allowReuse bool) (string, bool, error) {
@@ -539,8 +591,22 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		}
 	}
 
+	// The workspace record's directory is a registration artifact, not a repo
+	// authority (see delegationWorktreeBase). Only an existing-workspace
+	// placement would otherwise infer a repo from it; current/new placements
+	// already base off a real session directory or an explicit --cwd.
+	worktreeBase := directory
+	if msg.Worktree != nil && placement == delegationPlacementExisting &&
+		strings.TrimSpace(protocol.Deref(msg.Worktree.Repo)) == "" {
+		resolvedBase, baseErr := d.delegationWorktreeBase(workspaceID, directory)
+		if baseErr != nil {
+			return nil, baseErr
+		}
+		worktreeBase = resolvedBase
+	}
+
 	if msg.Worktree != nil {
-		worktreePath, created, createErr := d.createDelegationWorktree(directory, msg.Worktree, operationID, ownedWorktreePath, worktreeOwned, worktreeToken, protocol.Deref(msg.AllowWorktreeReuse))
+		worktreePath, created, createErr := d.createDelegationWorktree(worktreeBase, msg.Worktree, operationID, ownedWorktreePath, worktreeOwned, worktreeToken, protocol.Deref(msg.AllowWorktreeReuse))
 		if createErr != nil {
 			return nil, createErr
 		}

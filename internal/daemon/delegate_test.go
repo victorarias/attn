@@ -1637,3 +1637,195 @@ func TestDelegateTruncatesLongDirectoryDefaultName(t *testing.T) {
 		t.Fatalf("delegated session = %+v, want label %q", session, wantName)
 	}
 }
+
+// initDelegationRepo creates a real git repository with one commit.
+func initDelegationRepo(t *testing.T, root, name string) string {
+	t.Helper()
+	repo := filepath.Join(root, name)
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", name, err)
+	}
+	runGitDaemon(t, repo, "init")
+	runGitDaemon(t, repo, "commit", "--allow-empty", "-m", "init")
+	return git.CanonicalizePath(repo)
+}
+
+// addWorkspaceSessionAt spawns an extra session into an existing workspace at
+// the given directory, the way a real pane in that workspace would exist.
+func addWorkspaceSessionAt(t *testing.T, d *Daemon, workspaceID, sessionID, cwd string) {
+	t.Helper()
+	client := newWorkspaceProtocolTestClient()
+	paneID := "pane-" + sessionID
+	d.handleWorkspaceLayoutAddSessionPane(client, &protocol.WorkspaceLayoutAddSessionPaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutAddSessionPane,
+		WorkspaceID: workspaceID,
+		PaneID:      protocol.Ptr(paneID),
+		SessionID:   sessionID,
+		Title:       protocol.Ptr(sessionID),
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutAddSessionPane, workspaceID, paneID, true)
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd:         protocol.CmdSpawnSession,
+		ID:          sessionID,
+		Cwd:         cwd,
+		WorkspaceID: workspaceID,
+		Agent:       protocol.AgentShellValue,
+		Cols:        80,
+		Rows:        24,
+		Label:       protocol.Ptr(sessionID),
+	})
+	expectSpawnResult(t, client, sessionID, true)
+}
+
+// TestDelegateWorktreeIgnoresStaleWorkspaceDirectory is the regression test for
+// a worktree landing in the wrong repository. The target workspace holds a
+// session in repoA, but its stored directory has drifted to repoB — which is
+// what production does, since AddWorkspace overwrites directory on every
+// re-registration and never recomputes it from member sessions.
+//
+// The worktree must be created off repoA (where the workspace's session
+// actually lives), and nothing at all may appear beside repoB.
+func TestDelegateWorktreeIgnoresStaleWorkspaceDirectory(t *testing.T) {
+	root := t.TempDir()
+	repoA := initDelegationRepo(t, root, "repo-a")
+	repoB := initDelegationRepo(t, root, "repo-b")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	targetWorkspaceID := "workspace-target"
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Target",
+		Directory: repoA,
+	})
+	addWorkspaceSessionAt(t, d, targetWorkspaceID, "session-target", repoA)
+	// Drift the stored directory to an unrelated repo, exactly as a
+	// re-registration does in production.
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Target",
+		Directory: repoB,
+	})
+	if workspace := d.store.GetWorkspace(targetWorkspaceID); workspace == nil || workspace.Directory != repoB {
+		t.Fatalf("precondition: workspace directory = %+v, want %q", workspace, repoB)
+	}
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Work on the repo this workspace actually uses.",
+		Placement:       protocol.Ptr(delegationPlacementExisting),
+		WorkspaceID:     protocol.Ptr(targetWorkspaceID),
+		Label:           protocol.Ptr("delegated"),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Branch: "feat/right-repo",
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+
+	wantPath := git.CanonicalizePath(git.GenerateWorktreePath(repoA, "feat/right-repo"))
+	if result.Directory != wantPath {
+		t.Fatalf("worktree directory = %q, want %q (off repoA)", result.Directory, wantPath)
+	}
+	if main := git.GetMainRepoFromWorktree(result.Directory); git.CanonicalizePath(main) != repoA {
+		t.Fatalf("worktree main repo = %q, want %q", main, repoA)
+	}
+	// The decisive assertion: no worktree may exist anywhere beside repoB.
+	strayPath := git.CanonicalizePath(git.GenerateWorktreePath(repoB, "feat/right-repo"))
+	if _, statErr := os.Stat(strayPath); !os.IsNotExist(statErr) {
+		t.Fatalf("worktree created in the wrong repository at %s", strayPath)
+	}
+}
+
+// TestDelegateWorktreeAmbiguousWorkspaceRepoRequiresRepo covers the case the
+// member sessions cannot settle: they span two repositories, so there is no
+// defensible inference. Fail and name --repo rather than pick one silently.
+func TestDelegateWorktreeAmbiguousWorkspaceRepoRequiresRepo(t *testing.T) {
+	root := t.TempDir()
+	repoA := initDelegationRepo(t, root, "repo-a")
+	repoB := initDelegationRepo(t, root, "repo-b")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	targetWorkspaceID := "workspace-target"
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Target",
+		Directory: repoA,
+	})
+	addWorkspaceSessionAt(t, d, targetWorkspaceID, "session-a", repoA)
+	addWorkspaceSessionAt(t, d, targetWorkspaceID, "session-b", repoB)
+
+	_, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Ambiguous repo.",
+		Placement:       protocol.Ptr(delegationPlacementExisting),
+		WorkspaceID:     protocol.Ptr(targetWorkspaceID),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Branch: "feat/ambiguous",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "pass --repo") {
+		t.Fatalf("delegate() error = %v, want an ambiguous-repository error naming --repo", err)
+	}
+	for _, repo := range []string{repoA, repoB} {
+		strayPath := git.CanonicalizePath(git.GenerateWorktreePath(repo, "feat/ambiguous"))
+		if _, statErr := os.Stat(strayPath); !os.IsNotExist(statErr) {
+			t.Fatalf("worktree created at %s despite ambiguous repository", strayPath)
+		}
+	}
+}
+
+// TestDelegateWorktreeExplicitRepoOverridesWorkspaceSessions confirms --repo
+// still wins over the inferred repository.
+func TestDelegateWorktreeExplicitRepoOverridesWorkspaceSessions(t *testing.T) {
+	root := t.TempDir()
+	repoA := initDelegationRepo(t, root, "repo-a")
+	repoB := initDelegationRepo(t, root, "repo-b")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	targetWorkspaceID := "workspace-target"
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Target",
+		Directory: repoA,
+	})
+	addWorkspaceSessionAt(t, d, targetWorkspaceID, "session-target", repoA)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Explicit repo wins.",
+		Placement:       protocol.Ptr(delegationPlacementExisting),
+		WorkspaceID:     protocol.Ptr(targetWorkspaceID),
+		Label:           protocol.Ptr("delegated"),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Repo:   protocol.Ptr(repoB),
+			Branch: "feat/explicit",
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	wantPath := git.CanonicalizePath(git.GenerateWorktreePath(repoB, "feat/explicit"))
+	if result.Directory != wantPath {
+		t.Fatalf("worktree directory = %q, want %q (off explicit --repo)", result.Directory, wantPath)
+	}
+}

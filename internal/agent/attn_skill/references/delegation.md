@@ -130,7 +130,10 @@ with any placement:
 
 Worktree options:
 
-- `--repo <path>` chooses the main repository (defaults to the workspace's repo).
+- `--repo <path>` chooses the main repository. It defaults to the repository the
+  target's existing sessions are in — the session you delegate alongside, not the
+  workspace's recorded directory. Delegation fails and asks for `--repo` when
+  those sessions span more than one repository.
 - `--from <ref>` chooses the starting branch or ref.
 - `--worktree-path <path>` chooses an explicit worktree location.
 

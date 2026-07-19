@@ -26,6 +26,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   selected agent model and effort without changing the environment.
 
 ### Fixed
+- **Delegated worktrees no longer land in an unrelated repository.** When `attn
+  delegate --workspace <id> --worktree <branch>` ran without `--repo`, it chose
+  the repository from the workspace's recorded directory — a value that is
+  rewritten every time the workspace is registered and never updated when its
+  sessions move, so it could name a repository the workspace had nothing to do
+  with. The repository now comes from the sessions already in that workspace,
+  and a workspace whose sessions span several repositories asks for `--repo`
+  instead of silently picking one.
 - **Retried delegations no longer create duplicate agents or tickets.** `attn
   delegate` now prints a durable request and operation identity before slow
   worktree preparation, shows concise progress while it waits, and lets callers
