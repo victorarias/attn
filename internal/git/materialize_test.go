@@ -45,6 +45,37 @@ func TestEnsureManagedCloneDoesNotReplaceMismatchedExistingTarget(t *testing.T) 
 	}
 }
 
+func TestEnsureManagedCloneReturnsPublishedPathThroughSymlinkedParent(t *testing.T) {
+	root := t.TempDir()
+	realParent := filepath.Join(root, "real-profile")
+	if err := os.MkdirAll(realParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkedParent := filepath.Join(root, "linked-profile")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Fatal(err)
+	}
+
+	staging := filepath.Join(linkedParent, "cache", ".clone-staged", "repo")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, staging, "init")
+	runGit(t, staging, "commit", "--allow-empty", "-m", "init")
+	runGit(t, staging, "remote", "add", "origin", "https://github.com/owner/repo.git")
+	target := filepath.Join(linkedParent, "cache", "repo")
+	mainRepo, err := publishManagedClone(staging, target, "github.com/owner/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mainRepo != CanonicalizePath(target) {
+		t.Fatalf("main repo = %q, want published %q", mainRepo, CanonicalizePath(target))
+	}
+	if _, err := os.Stat(mainRepo); err != nil {
+		t.Fatalf("returned repository path is not live: %v", err)
+	}
+}
+
 func TestEnsurePullRequestRevisionKeepsAvailableSnapshotAfterRefMoves(t *testing.T) {
 	root := t.TempDir()
 	origin := filepath.Join(root, "origin.git")

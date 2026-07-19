@@ -92,12 +92,20 @@ func EnsureManagedClone(cloneURL, target, expectedIdentity, authorization string
 	if err := cloneWithHTTPAuthorization(cloneURL, staging, authorization); err != nil {
 		return "", false, err
 	}
-	mainRepo, err := ValidateLocalClone(staging, expectedIdentity)
-	if err != nil {
-		return "", false, err
+	mainRepo, err := publishManagedClone(staging, target, expectedIdentity)
+	return mainRepo, err == nil, err
+}
+
+func publishManagedClone(staging, target, expectedIdentity string) (string, error) {
+	if _, err := ValidateLocalClone(staging, expectedIdentity); err != nil {
+		return "", err
 	}
 	if err := os.Rename(staging, target); err != nil {
-		return "", false, fmt.Errorf("publish managed clone: %w", err)
+		return "", fmt.Errorf("publish managed clone: %w", err)
 	}
-	return strings.Replace(mainRepo, staging, target, 1), true, nil
+	mainRepo, err := ValidateLocalClone(target, expectedIdentity)
+	if err != nil {
+		return "", fmt.Errorf("validate published managed clone: %w", err)
+	}
+	return mainRepo, nil
 }
