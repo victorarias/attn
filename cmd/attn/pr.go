@@ -18,9 +18,13 @@ import (
 )
 
 const (
-	prWaitExitFailed  = 1
-	prWaitExitUsage   = 2
-	prWaitExitTimeout = 124
+	prWaitExitApproved         = 0
+	prWaitExitChecksFailed     = 1
+	prWaitExitUsage            = 2
+	prWaitExitChangesRequested = 3
+	prWaitExitComment          = 4
+	prWaitExitError            = 5
+	prWaitExitTimeout          = 124
 
 	checksNone    = "none"
 	checksPending = "pending"
@@ -28,12 +32,56 @@ const (
 	checksFailed  = "failed"
 )
 
-type prCheck struct{ Name, State string }
+// prOutcome is the actionable update that ended the wait. The waiter exists to
+// return as soon as a human needs to do something, not only when the pull
+// request is mergeable.
+type prOutcome string
+
+const (
+	outcomeApproved         prOutcome = "approved"
+	outcomeChecksFailed     prOutcome = "checks_failed"
+	outcomeChangesRequested prOutcome = "changes_requested"
+	outcomeComment          prOutcome = "comment"
+	outcomeClosed           prOutcome = "closed"
+	outcomeTimeout          prOutcome = "timeout"
+)
+
+func (o prOutcome) exitCode() int {
+	switch o {
+	case outcomeApproved:
+		return prWaitExitApproved
+	case outcomeChecksFailed:
+		return prWaitExitChecksFailed
+	case outcomeChangesRequested:
+		return prWaitExitChangesRequested
+	case outcomeComment:
+		return prWaitExitComment
+	case outcomeTimeout:
+		return prWaitExitTimeout
+	default:
+		return prWaitExitError
+	}
+}
+
+type prCheck struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// prComment is any commentary surface: a standalone PR comment, an inline
+// review-thread comment, or a review submitted without a verdict.
+type prComment struct {
+	ID        string    `json:"-"`
+	Author    string    `json:"author"`
+	Kind      string    `json:"kind"`
+	CreatedAt time.Time `json:"created_at"`
+}
 
 type prReadiness struct {
 	Number, State, HeadSHA, CheckState, Reviewer, ReviewState string
 	Draft                                                     bool
 	Checks                                                    []prCheck
+	Comments                                                  []prComment
 }
 
 func (r *prReadiness) ready() bool {
@@ -45,13 +93,37 @@ type prReadinessSource interface {
 }
 
 type prWaitOptions struct {
-	Target, Repo, Reviewer string
-	Timeout, Interval      time.Duration
+	Host, Owner, Name string
+	Number            int
+	Reviewer          string
+	IgnoreAuthors     []string
+	Timeout, Interval time.Duration
+	JSON              bool
+}
+
+func (o prWaitOptions) ignored(author string) bool {
+	for _, ignored := range o.IgnoreAuthors {
+		if strings.EqualFold(ignored, author) {
+			return true
+		}
+	}
+	return false
 }
 
 type ghPRReadinessSource struct{}
 
-var errPRChecksFailed = errors.New("checks failed")
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string { return strings.Join(*s, ",") }
+
+func (s *stringSliceFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("author must not be empty")
+	}
+	*s = append(*s, value)
+	return nil
+}
 
 func runPRCommand() {
 	code := executePRCommand(os.Args[2:], os.Stdout, os.Stderr)
@@ -79,23 +151,103 @@ func executePRCommand(args []string, stdout, stderr io.Writer) int {
 		return prWaitExitUsage
 	}
 
+	// Progress must never contaminate a JSON result on stdout.
+	progress := stdout
+	if opts.JSON {
+		progress = stderr
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
 	defer cancel()
-	result, err := waitForPRReady(ctx, ghPRReadinessSource{}, opts, stdout)
-	switch {
-	case err == nil:
-		fmt.Fprintf(stdout, "READY pr=#%s head=%s checks=%d approval=%s\n", result.Number, result.HeadSHA, len(result.Checks), result.Reviewer)
-		return 0
-	case errors.Is(err, context.DeadlineExceeded):
-		fmt.Fprintf(stderr, "pr wait-ready: timed out after %s\n", opts.Timeout)
-		return prWaitExitTimeout
-	case errors.Is(err, errPRChecksFailed):
-		fmt.Fprintf(stderr, "pr wait-ready: checks failed on current head %s\n", result.HeadSHA)
-		return prWaitExitFailed
-	default:
+	result, outcome, err := waitForPRActionable(ctx, ghPRReadinessSource{}, opts, progress)
+	if err != nil {
 		fmt.Fprintf(stderr, "pr wait-ready: %v\n", err)
-		return prWaitExitFailed
+		return prWaitExitError
 	}
+	return reportPROutcome(result, outcome, opts, stdout)
+}
+
+func reportPROutcome(result *prReadiness, outcome prOutcome, opts prWaitOptions, stdout io.Writer) int {
+	detail := describePROutcome(result, outcome, opts)
+	if opts.JSON {
+		// "comments" reports what arrived during the wait. On any other outcome
+		// the observation still carries the baseline, which is not news.
+		fresh := []prComment{}
+		if outcome == outcomeComment {
+			fresh = result.Comments
+		}
+		payload := map[string]any{
+			"outcome": string(outcome),
+			"pr":      result.Number,
+			"head":    result.HeadSHA,
+			"state":   result.State,
+			"draft":   result.Draft,
+			"detail":  detail,
+			"checks": map[string]any{
+				"state": result.CheckState,
+				"items": result.Checks,
+			},
+			"review": map[string]any{
+				"state":    result.ReviewState,
+				"reviewer": result.Reviewer,
+			},
+			"comments": fresh,
+		}
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(payload); err != nil {
+			return prWaitExitError
+		}
+		return outcome.exitCode()
+	}
+	fmt.Fprintf(stdout, "%s: %s\n", outcome, detail)
+	return outcome.exitCode()
+}
+
+func describePROutcome(result *prReadiness, outcome prOutcome, opts prWaitOptions) string {
+	head := shortSHA(result.HeadSHA)
+	switch outcome {
+	case outcomeApproved:
+		return fmt.Sprintf("%s approved %s; %d checks green", result.Reviewer, head, len(result.Checks))
+	case outcomeChangesRequested:
+		return fmt.Sprintf("%s requested changes on %s", result.Reviewer, head)
+	case outcomeChecksFailed:
+		return fmt.Sprintf("%s failed on %s", strings.Join(failedCheckNames(result.Checks), ", "), head)
+	case outcomeComment:
+		return describePRComments(result.Comments)
+	case outcomeClosed:
+		return fmt.Sprintf("pull request is %s", result.State)
+	case outcomeTimeout:
+		return fmt.Sprintf("no actionable update after %s (checks=%s review=%s)", opts.Timeout, result.CheckState, result.ReviewState)
+	default:
+		return string(outcome)
+	}
+}
+
+func describePRComments(comments []prComment) string {
+	authors := make([]string, 0, len(comments))
+	seen := map[string]bool{}
+	for _, comment := range comments {
+		if !seen[comment.Author] {
+			seen[comment.Author] = true
+			authors = append(authors, comment.Author)
+		}
+	}
+	noun := "comments"
+	if len(comments) == 1 {
+		noun = "comment"
+	}
+	return fmt.Sprintf("%d new %s from %s", len(comments), noun, strings.Join(authors, ", "))
+}
+
+func failedCheckNames(checks []prCheck) []string {
+	var names []string
+	for _, check := range checks {
+		if check.State == checksFailed {
+			names = append(names, check.Name)
+		}
+	}
+	return names
 }
 
 func isHelpArg(arg string) bool { return arg == "-h" || arg == "--help" }
@@ -107,6 +259,9 @@ func parsePRWaitArgs(args []string) (prWaitOptions, error) {
 	reviewer := fs.String("reviewer", "", "required reviewer login")
 	timeout := fs.Duration("timeout", 30*time.Minute, "maximum wait")
 	interval := fs.Duration("interval", 20*time.Second, "poll interval")
+	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	var ignore stringSliceFlag
+	fs.Var(&ignore, "ignore-author", "comment author to ignore (repeatable)")
 
 	target := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -127,92 +282,233 @@ func parsePRWaitArgs(args []string) (prWaitOptions, error) {
 		return prWaitOptions{}, errors.New("--timeout and --interval must be positive")
 	}
 
+	opts := prWaitOptions{
+		Reviewer:      strings.TrimSpace(*reviewer),
+		IgnoreAuthors: ignore,
+		Timeout:       *timeout,
+		Interval:      *interval,
+		JSON:          *asJSON,
+	}
 	if strings.HasPrefix(target, "https://") {
 		host, owner, repository, number, err := automation.ParsePullRequestURL(target)
 		if err != nil {
 			return prWaitOptions{}, err
 		}
-		target = fmt.Sprintf("https://%s/%s/%s/pull/%d", host, owner, repository, number)
-	} else {
-		number, err := strconv.Atoi(target)
-		if err != nil || number <= 0 {
-			return prWaitOptions{}, errors.New("pull request number must be positive")
-		}
-		if strings.TrimSpace(*repo) == "" {
-			return prWaitOptions{}, errors.New("--repo is required when the target is a number")
-		}
+		opts.Host, opts.Owner, opts.Name, opts.Number = host, owner, repository, number
+		return opts, nil
 	}
-	return prWaitOptions{Target: target, Repo: strings.TrimSpace(*repo), Reviewer: strings.TrimSpace(*reviewer), Timeout: *timeout, Interval: *interval}, nil
+	number, err := strconv.Atoi(target)
+	if err != nil || number <= 0 {
+		return prWaitOptions{}, errors.New("pull request number must be positive")
+	}
+	if strings.TrimSpace(*repo) == "" {
+		return prWaitOptions{}, errors.New("--repo is required when the target is a number")
+	}
+	host, owner, name, err := parseRepoFlag(*repo)
+	if err != nil {
+		return prWaitOptions{}, err
+	}
+	opts.Host, opts.Owner, opts.Name, opts.Number = host, owner, name, number
+	return opts, nil
 }
 
-func (ghPRReadinessSource) Fetch(ctx context.Context, opts prWaitOptions) (*prReadiness, error) {
-	args := []string{"pr", "view", opts.Target}
-	if opts.Repo != "" {
-		args = append(args, "--repo", opts.Repo)
+func parseRepoFlag(repo string) (host, owner, name string, err error) {
+	parts := strings.Split(strings.Trim(strings.TrimSpace(repo), "/"), "/")
+	switch len(parts) {
+	case 2:
+		host, owner, name = "", parts[0], parts[1]
+	case 3:
+		host, owner, name = parts[0], parts[1], parts[2]
+	default:
+		return "", "", "", errors.New("--repo must be [host/]owner/repository")
 	}
-	args = append(args, "--json", "number,state,isDraft,headRefOid,statusCheckRollup,reviews")
+	if owner == "" || name == "" {
+		return "", "", "", errors.New("--repo must be [host/]owner/repository")
+	}
+	return host, owner, name, nil
+}
+
+// prSnapshotQuery collects head, checks, reviews, and every comment surface in
+// one round trip so a poll cannot mix signals from different commits, and so
+// bot authorship is authoritative. `gh pr view --json comments` strips the
+// "[bot]" suffix and omits the author type, which makes bots indistinguishable
+// from humans; GraphQL's __typename does not.
+const prSnapshotQuery = `
+query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      number state isDraft headRefOid
+      commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){
+        pageInfo{hasNextPage}
+        nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}
+      }}}}}
+      reviews(last:100){nodes{id state bodyText submittedAt author{__typename login} commit{oid}
+        comments(first:100){pageInfo{hasNextPage} nodes{id createdAt author{__typename login}}}}}
+      comments(last:100){nodes{id createdAt author{__typename login}}}
+    }}}`
+
+func (ghPRReadinessSource) Fetch(ctx context.Context, opts prWaitOptions) (*prReadiness, error) {
+	args := []string{"api", "graphql",
+		"-f", "query=" + prSnapshotQuery,
+		"-F", "owner=" + opts.Owner,
+		"-F", "name=" + opts.Name,
+		"-F", "number=" + strconv.Itoa(opts.Number),
+	}
+	if opts.Host != "" {
+		args = append(args, "--hostname", opts.Host)
+	}
 	output, err := exec.CommandContext(ctx, "gh", args...).CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("gh pr view: %s", strings.TrimSpace(string(output)))
+		return nil, fmt.Errorf("gh api graphql: %s", strings.TrimSpace(string(output)))
 	}
-	return parseGHPRReadiness(output, opts.Reviewer)
+	return parsePRSnapshot(output, opts)
 }
 
-func parseGHPRReadiness(output []byte, reviewer string) (*prReadiness, error) {
+type prGraphQLAuthor struct {
+	TypeName string `json:"__typename"`
+	Login    string `json:"login"`
+}
+
+type prGraphQLComment struct {
+	ID        string          `json:"id"`
+	CreatedAt time.Time       `json:"createdAt"`
+	Author    prGraphQLAuthor `json:"author"`
+}
+
+func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 	var payload struct {
-		Number     json.Number `json:"number"`
-		State      string      `json:"state"`
-		IsDraft    bool        `json:"isDraft"`
-		HeadRefOID string      `json:"headRefOid"`
-		Checks     []struct {
-			TypeName   string `json:"__typename"`
-			Name       string
-			Context    string
-			Status     string
-			Conclusion string
-			State      string
-		} `json:"statusCheckRollup"`
-		Reviews []struct {
-			State       string
-			SubmittedAt time.Time
-			Author      struct{ Login string }
-			Commit      struct{ OID string }
-		}
+		Data struct {
+			Repository struct {
+				PullRequest *struct {
+					Number     json.Number `json:"number"`
+					State      string      `json:"state"`
+					IsDraft    bool        `json:"isDraft"`
+					HeadRefOID string      `json:"headRefOid"`
+					Commits    struct {
+						Nodes []struct {
+							Commit struct {
+								StatusCheckRollup *struct {
+									Contexts struct {
+										PageInfo struct {
+											HasNextPage bool `json:"hasNextPage"`
+										} `json:"pageInfo"`
+										Nodes []struct {
+											TypeName   string `json:"__typename"`
+											Name       string `json:"name"`
+											Context    string `json:"context"`
+											Status     string `json:"status"`
+											Conclusion string `json:"conclusion"`
+											State      string `json:"state"`
+										} `json:"nodes"`
+									} `json:"contexts"`
+								} `json:"statusCheckRollup"`
+							} `json:"commit"`
+						} `json:"nodes"`
+					} `json:"commits"`
+					Reviews struct {
+						Nodes []struct {
+							ID          string          `json:"id"`
+							State       string          `json:"state"`
+							BodyText    string          `json:"bodyText"`
+							SubmittedAt time.Time       `json:"submittedAt"`
+							Author      prGraphQLAuthor `json:"author"`
+							Commit      struct {
+								OID string `json:"oid"`
+							} `json:"commit"`
+							Comments struct {
+								PageInfo struct {
+									HasNextPage bool `json:"hasNextPage"`
+								} `json:"pageInfo"`
+								Nodes []prGraphQLComment `json:"nodes"`
+							} `json:"comments"`
+						} `json:"nodes"`
+					} `json:"reviews"`
+					Comments struct {
+						Nodes []prGraphQLComment `json:"nodes"`
+					} `json:"comments"`
+					ReviewThreads struct {
+						Nodes []struct {
+							Comments struct {
+								Nodes []prGraphQLComment `json:"nodes"`
+							} `json:"comments"`
+						} `json:"nodes"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 	if err := json.Unmarshal(output, &payload); err != nil {
-		return nil, fmt.Errorf("parse gh pr view: %w", err)
+		return nil, fmt.Errorf("parse gh api graphql: %w", err)
 	}
-	if payload.Number == "" || payload.HeadRefOID == "" {
-		return nil, errors.New("gh pr view returned no PR number or head SHA")
+	if len(payload.Errors) > 0 {
+		return nil, fmt.Errorf("gh api graphql: %s", payload.Errors[0].Message)
 	}
-	// gh requests the first 100 nodes for both connections but omits pageInfo
-	// from its JSON output. Refuse the boundary instead of silently accepting a
-	// snapshot that may have hidden checks or reviews.
-	if len(payload.Checks) >= 100 || len(payload.Reviews) >= 100 {
-		return nil, errors.New("PR has at least 100 checks or reviews; readiness cannot be verified without truncation")
+	pr := payload.Data.Repository.PullRequest
+	if pr == nil || pr.Number == "" || pr.HeadRefOID == "" {
+		return nil, errors.New("gh api graphql returned no PR number or head SHA")
 	}
 
 	result := &prReadiness{
-		Number: payload.Number.String(), State: strings.ToLower(payload.State), Draft: payload.IsDraft,
-		HeadSHA: payload.HeadRefOID, Reviewer: reviewer, ReviewState: "waiting",
+		Number: pr.Number.String(), State: strings.ToLower(pr.State), Draft: pr.IsDraft,
+		HeadSHA: pr.HeadRefOID, Reviewer: opts.Reviewer, ReviewState: "waiting",
 	}
-	for _, check := range payload.Checks {
-		name, state := "status:"+check.Context, statusState(check.State)
-		if check.TypeName == "CheckRun" {
-			name, state = "check:"+check.Name, checkRunState(check.Status, check.Conclusion)
+
+	if len(pr.Commits.Nodes) > 0 {
+		if rollup := pr.Commits.Nodes[0].Commit.StatusCheckRollup; rollup != nil {
+			// Checks are fetched first:100. Truncation here could hide a
+			// failing check, so refuse rather than report a false green.
+			if rollup.Contexts.PageInfo.HasNextPage {
+				return nil, errors.New("PR has more than 100 checks; readiness cannot be verified without truncation")
+			}
+			for _, check := range rollup.Contexts.Nodes {
+				name, state := "status:"+check.Context, statusState(check.State)
+				if check.TypeName == "CheckRun" {
+					name, state = "check:"+check.Name, checkRunState(check.Status, check.Conclusion)
+				}
+				result.Checks = append(result.Checks, prCheck{Name: name, State: state})
+			}
 		}
-		result.Checks = append(result.Checks, prCheck{Name: name, State: state})
 	}
 	sort.Slice(result.Checks, func(i, j int) bool { return result.Checks[i].Name < result.Checks[j].Name })
 	result.CheckState = summarizePRChecks(result.Checks)
 
+	// Reviews and issue comments use last:100, so truncation drops only the
+	// oldest entries, which cannot be the actionable update.
+	//
+	// Inline comments deliberately come from the reviews that carry them rather
+	// than from reviewThreads. A thread's position is fixed when the thread
+	// starts but comments can be appended to it forever, so a reply to an old
+	// thread falls outside any newest-N slice of threads and would be missed.
+	// Every inline comment, including a reply to a long-dormant thread, arrives
+	// attached to a freshly submitted review, and reviews are submission
+	// ordered. Sourcing them here makes thread age irrelevant.
 	var latest time.Time
-	for _, review := range payload.Reviews {
+	for _, review := range pr.Reviews.Nodes {
 		state := strings.ToUpper(review.State)
-		if !strings.EqualFold(review.Author.Login, reviewer) || review.Commit.OID != result.HeadSHA ||
+		// A review with no text of its own is just the wrapper GitHub creates
+		// around an inline comment; its comments are reported below, so
+		// counting the wrapper too would report one remark twice.
+		if strings.TrimSpace(review.BodyText) != "" {
+			result.Comments = appendPRComment(result.Comments, prGraphQLComment{
+				ID: review.ID, CreatedAt: review.SubmittedAt, Author: review.Author,
+			}, "review", opts)
+		}
+		if review.Comments.PageInfo.HasNextPage {
+			return nil, errors.New("a review carries more than 100 comments; new comments cannot be detected without truncation")
+		}
+		for _, comment := range review.Comments.Nodes {
+			result.Comments = appendPRComment(result.Comments, comment, "inline", opts)
+		}
+		if state == "COMMENTED" {
+			continue
+		}
+		if !strings.EqualFold(review.Author.Login, opts.Reviewer) || review.Commit.OID != result.HeadSHA ||
 			(state != "APPROVED" && state != "CHANGES_REQUESTED") || review.SubmittedAt.Before(latest) {
 			continue
 		}
@@ -223,7 +519,27 @@ func parseGHPRReadiness(output []byte, reviewer string) (*prReadiness, error) {
 			result.ReviewState = "changes_requested"
 		}
 	}
+	for _, comment := range pr.Comments.Nodes {
+		result.Comments = appendPRComment(result.Comments, comment, "issue", opts)
+	}
+	sort.Slice(result.Comments, func(i, j int) bool {
+		return result.Comments[i].CreatedAt.Before(result.Comments[j].CreatedAt)
+	})
 	return result, nil
+}
+
+// appendPRComment keeps only comments a human needs to answer. Bot authorship
+// comes from __typename; the token owner is deliberately NOT filtered, because
+// the operator and the agent share one token and the operator's own comment is
+// the most actionable event there is. Self-waking is prevented by the baseline
+// instead: anything present when the wait starts is never reported.
+func appendPRComment(comments []prComment, node prGraphQLComment, kind string, opts prWaitOptions) []prComment {
+	if node.ID == "" || node.Author.TypeName != "User" || opts.ignored(node.Author.Login) {
+		return comments
+	}
+	return append(comments, prComment{
+		ID: node.ID, Author: node.Author.Login, Kind: kind, CreatedAt: node.CreatedAt,
+	})
 }
 
 func checkRunState(status, conclusion string) string {
@@ -267,35 +583,71 @@ func summarizePRChecks(checks []prCheck) string {
 	return result
 }
 
-func waitForPRReady(ctx context.Context, source prReadinessSource, opts prWaitOptions, out io.Writer) (*prReadiness, error) {
+// waitForPRActionable returns on the first actionable update. The error return
+// is reserved for the waiter itself failing; every product outcome, including a
+// timeout, comes back as a prOutcome so the caller can report it uniformly.
+func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prWaitOptions, progress io.Writer) (*prReadiness, prOutcome, error) {
 	var lastLine, lastHead string
+	var baseline map[string]bool
+	last := &prReadiness{Number: strconv.Itoa(opts.Number), Reviewer: opts.Reviewer, CheckState: checksNone, ReviewState: "waiting"}
+
 	for {
 		observation, err := source.Fetch(ctx, opts)
 		if err != nil {
-			return observation, err
+			if errors.Is(err, context.DeadlineExceeded) {
+				return last, outcomeTimeout, nil
+			}
+			return last, "", err
 		}
+		last = observation
+
 		if lastHead != "" && lastHead != observation.HeadSHA {
-			fmt.Fprintf(out, "head changed %s -> %s; reset\n", shortSHA(lastHead), shortSHA(observation.HeadSHA))
+			// A new head invalidates prior approval and check results, but not
+			// comments: a comment stays actionable regardless of what was pushed.
+			fmt.Fprintf(progress, "head changed %s -> %s; reset\n", shortSHA(lastHead), shortSHA(observation.HeadSHA))
 		}
 		lastHead = observation.HeadSHA
-		line := readinessLine(observation)
-		if line != lastLine {
-			fmt.Fprintln(out, line)
+
+		if line := readinessLine(observation); line != lastLine {
+			fmt.Fprintln(progress, line)
 			lastLine = line
 		}
-		if observation.State != "open" {
-			return observation, fmt.Errorf("pull request is %s", observation.State)
+
+		if baseline == nil {
+			baseline = make(map[string]bool, len(observation.Comments))
+			for _, comment := range observation.Comments {
+				baseline[comment.ID] = true
+			}
+		} else if fresh := unseenPRComments(observation.Comments, baseline); len(fresh) > 0 {
+			observation.Comments = fresh
+			return observation, outcomeComment, nil
 		}
-		if observation.CheckState == checksFailed {
-			return observation, errPRChecksFailed
+
+		switch {
+		case observation.State != "open":
+			return observation, outcomeClosed, nil
+		case observation.CheckState == checksFailed:
+			return observation, outcomeChecksFailed, nil
+		case observation.ReviewState == "changes_requested":
+			return observation, outcomeChangesRequested, nil
+		case observation.ready():
+			return observation, outcomeApproved, nil
 		}
-		if observation.ready() {
-			return observation, nil
-		}
+
 		if err := waitPRPoll(ctx, opts.Interval); err != nil {
-			return observation, err
+			return observation, outcomeTimeout, nil
 		}
 	}
+}
+
+func unseenPRComments(comments []prComment, baseline map[string]bool) []prComment {
+	var fresh []prComment
+	for _, comment := range comments {
+		if !baseline[comment.ID] {
+			fresh = append(fresh, comment)
+		}
+	}
+	return fresh
 }
 
 func waitPRPoll(ctx context.Context, interval time.Duration) error {
@@ -340,15 +692,21 @@ func shortSHA(sha string) string {
 func writePRHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn pr wait-ready <number-or-url> --reviewer <login> [options]
 
-Wait until one pull request snapshot has green checks and an approval from the
-required reviewer on that exact head commit.
+Wait until a pull request has an actionable update: a failing check, a review
+requesting changes, a new human comment, or approval on a green exact head.
 
 options:
   --repo [host/]owner/repository  required with a pull request number
-  --reviewer login               required reviewer
-  --timeout duration             maximum wait (default 30m)
-  --interval duration            poll interval (default 20s)
+  --reviewer login                required reviewer
+  --timeout duration              maximum wait (default 30m)
+  --interval duration             poll interval (default 20s)
+  --ignore-author login           comment author to ignore (repeatable)
+  --json                          emit the result as JSON on stdout
 
-exit: 0 ready; 1 failed or closed; 2 usage; 124 timeout
+Bot comments are ignored. Comments already present when the wait starts are the
+baseline and never reported; only comments posted during the wait are.
+
+exit: 0 approved; 1 checks failed; 2 usage; 3 changes requested; 4 new comment;
+      5 error; 124 timeout
 `)
 }

@@ -9,10 +9,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-19]
 
 ### Added
-- **PR readiness can be checked with one trustworthy gate.** `attn pr
-  wait-ready` reports check and review transitions, resets when the pull request
-  head changes, and succeeds only when one exact head is green and approved by
-  the required reviewer.
+- **Waiting on a pull request returns as soon as something needs you.** `attn pr
+  wait-ready` watches checks, reviews, and comments in one request and stops at
+  the first actionable update: a failing check, a review requesting changes, a
+  new comment from a person, or approval on a green exact head. Each outcome has
+  its own exit code, with `--json` for the full detail. Comments from bots are
+  ignored, as are comments already on the pull request when the wait begins.
 - **Live agent transcripts are inspectable from the CLI.** `attn session
   transcript <session-id>` prints timestamped conversation, tool, and error
   events across supported agents, with `--follow` for live updates and opaque

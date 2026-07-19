@@ -73,8 +73,12 @@ Use the bundled CLI, not an unrelated `attn` on `PATH`. Preflight is diagnostic;
 fix reported tool/path/routing/daemon/protocol failures before treating scenario
 output as product evidence.
 
-For a GitHub merge gate, run `attn pr wait-ready <pr> --repo <owner/repo>
---reviewer <login>` once; do not poll checks and reviews separately.
+To wait on a GitHub PR, run `attn pr wait-ready <pr> --repo <owner/repo>
+--reviewer <login>` once; do not poll checks, reviews, and comments separately.
+It returns on the first actionable update and reports which one by exit code:
+`0` approved, `1` checks failed, `3` changes requested, `4` new human comment,
+`124` timeout. Bot comments are ignored; comments already present when the wait
+starts are the baseline.
 
 ### Packaged-app harness
 
