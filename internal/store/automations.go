@@ -304,6 +304,28 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		if _, err := tx.Exec(`UPDATE automation_review_request_edges SET active=0,updated_at=? WHERE definition_id=? AND subject_key=?`, updatedRaw, definitionID, subjectKey); err != nil {
 			return nil, err
 		}
+		if _, err := tx.Exec(`
+			UPDATE automation_runs
+			SET state='failed',last_error='GitHub review request withdrawn before delivery',updated_at=?
+			WHERE state='pending' AND id IN (
+				SELECT r.id
+				FROM automation_runs r
+				JOIN automation_occurrences o ON o.id=r.occurrence_id
+				WHERE r.definition_id=? AND o.provider='github' AND o.subject_key=?
+			)
+		`, updatedRaw, definitionID, subjectKey); err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(`
+			DELETE FROM automation_continuity_bindings
+			WHERE definition_id=? AND continuity_key=?
+			  AND NOT EXISTS (
+				SELECT 1 FROM tickets
+				WHERE tickets.id=automation_continuity_bindings.ticket_id
+			  )
+		`, definitionID, subjectKey); err != nil {
+			return nil, err
+		}
 	}
 	rows, err = tx.Query(`SELECT subject_key,cycle FROM automation_review_request_edges WHERE definition_id=? AND host=? AND active=1 AND accepted_cycle < cycle ORDER BY subject_key`, definitionID, host)
 	if err != nil {
@@ -328,6 +350,32 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		return nil, err
 	}
 	return candidates, nil
+}
+
+func (s *Store) GitHubReviewAutomationRunStillRequested(runID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return false, errors.New("automation persistence unavailable")
+	}
+	var occurrenceKey, subjectKey string
+	var active, cycle, acceptedCycle int
+	err := s.db.QueryRow(`
+		SELECT o.occurrence_key,o.subject_key,e.active,e.cycle,e.accepted_cycle
+		FROM automation_runs r
+		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		JOIN automation_review_request_edges e
+		  ON e.definition_id=r.definition_id AND e.subject_key=o.subject_key
+		WHERE r.id=? AND o.provider='github'
+	`, runID).Scan(&occurrenceKey, &subjectKey, &active, &cycle, &acceptedCycle)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	wantKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)
+	return active == 1 && acceptedCycle == cycle && occurrenceKey == wantKey, nil
 }
 
 func (s *Store) ClaimGitHubReviewAutomationRun(definitionID, subjectKey string, cycle, expectedRevision int, payloadJSON, snapshotJSON string, observedAt time.Time, reserved AutomationRunReservation) (*AutomationRun, bool, error) {

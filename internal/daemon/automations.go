@@ -274,7 +274,9 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 			bySubject[subject] = pr
 			subjects = append(subjects, subject)
 		}
+		d.automationMu.Lock()
 		candidates, err := d.store.ReconcileAutomationReviewRequests(definition.ID, host, subjects, observedAt)
+		d.automationMu.Unlock()
 		if err != nil {
 			d.logf("automation GitHub observation reconcile %s: %v", definition.ID, err)
 			continue
@@ -430,6 +432,15 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 	}
 	if occurrence == nil {
 		return errors.New("automation occurrence missing")
+	}
+	if occurrence.Provider == "github" {
+		stillRequested, err := d.store.GitHubReviewAutomationRunStillRequested(run.ID)
+		if err != nil {
+			return err
+		}
+		if !stillRequested {
+			return errors.New("GitHub review request was withdrawn before delivery")
+		}
 	}
 	continuityKey := ""
 	if snapshot.Policy.Continuity == "per_subject" {

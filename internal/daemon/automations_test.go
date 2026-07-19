@@ -468,6 +468,9 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	d := &Daemon{store: s, ghRegistry: registry}
 	d.automationDeliveryHook = func(run *store.AutomationRun) error {
 		delivered.Add(1)
+		if _, err := s.EnsureAutomationTicket(store.Ticket{ID: run.TicketID, Title: "Review", Status: store.TicketStatusWorking, Assignee: run.SessionID, AutomationRunID: run.ID}, "automation:requested-review", store.TicketRoleChiefOfStaff, time.Now()); err != nil {
+			return err
+		}
 		return s.MarkAutomationRunDelivered(run.ID, `{"type":"test"}`, time.Now())
 	}
 	demand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
