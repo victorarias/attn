@@ -97,38 +97,43 @@ const (
 
 // Daemon manages Claude sessions
 type Daemon struct {
-	socketPath       string
-	pidPath          string
-	pidFile          *os.File // Held open with flock for exclusive access
-	dataRoot         string
-	daemonInstanceID string
-	store            *store.Store
-	automationMu     sync.Mutex // serializes idempotent ensure/adopt delivery per profile
-	automationRepoMu sync.Mutex
-	automationRepos  map[string]*sync.Mutex
-	listener         net.Listener
-	httpServer       *http.Server
-	httpHandler      http.Handler
-	diagServer       *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
-	wsHub            *wsHub
-	done             chan struct{}
-	logger           *logging.Logger
-	debugLogging     bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
-	ghRegistry       *github.ClientRegistry
-	hubManager       *hub.Manager
-	classifier       Classifier // Optional, uses package-level classifier.Classify if nil
-	repoCaches       map[string]*repoCache
-	repoCacheMu      sync.RWMutex
-	gitCoordMu       sync.Mutex
-	gitCoord         *gitCoordinator
-	warnings         []protocol.DaemonWarning
-	warningsMu       sync.RWMutex
-	ptyBackend       ptybackend.Backend
-	watchersMu       sync.Mutex
-	transcriptWatch  map[string]*transcriptWatcher
-	classifiedMu     sync.Mutex
-	classifiedTurn   map[string]string
-	classifyingTurn  map[string]string
+	socketPath                 string
+	pidPath                    string
+	pidFile                    *os.File // Held open with flock for exclusive access
+	dataRoot                   string
+	daemonInstanceID           string
+	store                      *store.Store
+	automationMu               sync.Mutex // serializes idempotent ensure/adopt delivery per profile
+	automationObservationMu    sync.Mutex
+	automationObservationLocks map[string]*sync.Mutex
+	automationRepoMu           sync.Mutex
+	automationRepos            map[string]*sync.Mutex
+	// automationDeliveryHook replaces only the final delivery call in focused
+	// provider-observation tests; production always leaves it nil.
+	automationDeliveryHook func(*store.AutomationRun) error
+	listener               net.Listener
+	httpServer             *http.Server
+	httpHandler            http.Handler
+	diagServer             *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
+	wsHub                  *wsHub
+	done                   chan struct{}
+	logger                 *logging.Logger
+	debugLogging           bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
+	ghRegistry             *github.ClientRegistry
+	hubManager             *hub.Manager
+	classifier             Classifier // Optional, uses package-level classifier.Classify if nil
+	repoCaches             map[string]*repoCache
+	repoCacheMu            sync.RWMutex
+	gitCoordMu             sync.Mutex
+	gitCoord               *gitCoordinator
+	warnings               []protocol.DaemonWarning
+	warningsMu             sync.RWMutex
+	ptyBackend             ptybackend.Backend
+	watchersMu             sync.Mutex
+	transcriptWatch        map[string]*transcriptWatcher
+	classifiedMu           sync.Mutex
+	classifiedTurn         map[string]string
+	classifyingTurn        map[string]string
 	// classificationTranscriptExtractor is a private test seam for exercising
 	// classification outcomes without waiting on an agent driver's retry policy.
 	// Production leaves it nil and uses extractLastAssistantMessage below.
@@ -1620,7 +1625,28 @@ func (d *Daemon) removePTYSession(sessionID string) error {
 }
 
 func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
-	d.stopTranscriptWatcher(sessionID)
+	if err := d.terminateSessionChecked(sessionID, sig); err != nil {
+		d.logf("terminate session failed for %s: %v", sessionID, err)
+		// Legacy callers forget the session even when termination cannot be
+		// confirmed. Restore their intentional-close evidence before the ticket
+		// reconciliation seam sees the discarded row; checked ownership-sensitive
+		// callers bypass this wrapper and keep the cleared marks on a surviving PTY.
+		d.markForcedStopClassification(sessionID)
+		if d.store != nil {
+			d.store.MarkSessionIntentionalClose(sessionID, time.Now())
+		}
+		// The watcher must not outlive the legacy caller's discarded record.
+		d.stopTranscriptWatcher(sessionID)
+		if d.ptyBackend != nil {
+			_ = d.ptyBackend.Remove(context.Background(), sessionID)
+		}
+	}
+}
+
+// terminateSessionChecked stops a runtime without discarding its durable
+// session record when termination cannot be confirmed. Ownership-sensitive
+// callers can then retry instead of spawning a second process with the same ID.
+func (d *Daemon) terminateSessionChecked(sessionID string, sig syscall.Signal) error {
 	d.markForcedStopClassification(sessionID)
 	// Also record the intentional close durably, BEFORE the kill: the in-memory
 	// forced-stop mark above expires after 30s and dies with the daemon, but the
@@ -1633,8 +1659,9 @@ func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	}
 
 	if d.ptyBackend == nil {
+		d.stopTranscriptWatcher(sessionID)
 		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
-		return
+		return nil
 	}
 	err := d.ptyBackend.Kill(context.Background(), sessionID, sig)
 	if err == nil || errors.Is(err, pty.ErrSessionNotFound) {
@@ -1643,9 +1670,20 @@ func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
 	}
 	if err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
-		d.logf("terminate session failed for %s: %v", sessionID, err)
+		d.clearForcedStopClassification(sessionID)
+		if d.store != nil {
+			d.store.ClearSessionIntentionalClose(sessionID)
+		}
+		return err
 	}
-	_ = d.ptyBackend.Remove(context.Background(), sessionID)
+	// Kill is now confirmed (or the runtime was already absent). Until this point
+	// a checked caller may need to retain a surviving session after a hard error,
+	// including its transcript-driven state/classification watcher.
+	d.stopTranscriptWatcher(sessionID)
+	if err := d.ptyBackend.Remove(context.Background(), sessionID); err != nil && !errors.Is(err, pty.ErrSessionNotFound) && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protocol.Session {
@@ -1654,6 +1692,11 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 		session = d.hubManager.RemoteSession(sessionID)
 	}
 	d.terminateSession(sessionID, sig)
+	d.forgetSession(sessionID)
+	return session
+}
+
+func (d *Daemon) forgetSession(sessionID string) {
 	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
 	if d.hubManager != nil {
@@ -1662,7 +1705,6 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 	d.clearLongRunTracking(sessionID)
 	d.clearClassifiedTurn(sessionID)
 	d.clearClassifyingTurn(sessionID)
-	return session
 }
 
 func (d *Daemon) removeReapedSession(sessionID string) {
@@ -2845,6 +2887,12 @@ func (d *Daemon) consumeForcedStopClassification(sessionID string) bool {
 	return now.Sub(markedAt) <= forcedStopSuppressTTL
 }
 
+func (d *Daemon) clearForcedStopClassification(sessionID string) {
+	d.forcedStopMu.Lock()
+	defer d.forcedStopMu.Unlock()
+	delete(d.forcedStop, sessionID)
+}
+
 func (d *Daemon) sessionNeedsReviewAfterLongRun(sessionID string) bool {
 	d.longRunMu.Lock()
 	defer d.longRunMu.Unlock()
@@ -3091,6 +3139,11 @@ func (d *Daemon) sendError(conn net.Conn, errMsg string) {
 	json.NewEncoder(conn).Encode(resp)
 }
 
+type successfulPRObservation struct {
+	prs        []*protocol.PR
+	observedAt time.Time
+}
+
 func (d *Daemon) pollPRs() {
 	if !d.githubAvailable() {
 		d.log("GitHub client not available, PR polling disabled")
@@ -3121,6 +3174,7 @@ func (d *Daemon) doPRPoll() {
 	}
 
 	var allPRs []*protocol.PR
+	observedByHost := make(map[string]successfulPRObservation)
 	skippedHosts := make(map[string]bool)
 	var earliestReset time.Time
 
@@ -3139,6 +3193,10 @@ func (d *Daemon) doPRPoll() {
 			continue
 		}
 
+		// Order observations by when their provider fetch began. A slower, older
+		// response must not supersede a newer explicit refresh that already recorded
+		// withdrawn demand.
+		observedAt := time.Now()
 		prs, err := client.FetchAll()
 		if err != nil {
 			if errors.Is(err, github.ErrRateLimited) {
@@ -3168,6 +3226,7 @@ func (d *Daemon) doPRPoll() {
 		}
 
 		allPRs = append(allPRs, prs...)
+		observedByHost[host] = successfulPRObservation{prs: prs, observedAt: observedAt}
 	}
 
 	if !earliestReset.IsZero() {
@@ -3206,6 +3265,14 @@ func (d *Daemon) doPRPoll() {
 		}
 	}
 	d.logf("PR poll: %d PRs (%d waiting)", len(currentPRs), waiting)
+
+	// Automations consume the same successful provider refresh. Run delivery off
+	// the polling goroutine so an unattended agent startup cannot delay the next
+	// PR refresh or websocket update.
+	for host, observation := range observedByHost {
+		host, observation := host, observation
+		go d.observeGitHubReviewRequests(host, observation.prs, observation.observedAt)
+	}
 
 	// Run detail refresh after list poll
 	d.doDetailRefresh()
@@ -3512,6 +3579,7 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 	}
 
 	var allPRs []*protocol.PR
+	observedByHost := make(map[string]successfulPRObservation)
 	skippedHosts := make(map[string]bool)
 	var firstErr error
 	successCount := 0
@@ -3521,6 +3589,7 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 		if !ok {
 			continue
 		}
+		observedAt := time.Now()
 		prs, err := client.FetchAll()
 		if err != nil {
 			d.logf("PR refresh error for %s: %v", host, err)
@@ -3532,6 +3601,7 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 		}
 		successCount++
 		allPRs = append(allPRs, prs...)
+		observedByHost[host] = successfulPRObservation{prs: prs, observedAt: observedAt}
 	}
 
 	if len(skippedHosts) > 0 {
@@ -3559,6 +3629,10 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 	})
 
 	d.logf("PR refresh: %d PRs fetched", len(currentPRs))
+	for host, observation := range observedByHost {
+		host, observation := host, observation
+		go d.observeGitHubReviewRequests(host, observation.prs, observation.observedAt)
+	}
 	if successCount == 0 && firstErr != nil {
 		return fmt.Errorf("failed to fetch PRs: %w", firstErr)
 	}

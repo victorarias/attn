@@ -24,6 +24,7 @@
 //	go run ./scripts/wsctl screen --id I
 //	go run ./scripts/wsctl input --id I --text T [--enter]
 //	go run ./scripts/wsctl list
+//	go run ./scripts/wsctl refresh-prs
 package main
 
 import (
@@ -73,6 +74,8 @@ func main() {
 		err = input(args)
 	case "list":
 		err = list(args)
+	case "refresh-prs":
+		err = refreshPRs(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -101,6 +104,7 @@ Commands:
   screen --id I
   input --id I --text T [--enter]
   list
+  refresh-prs
 `, wsURL())
 }
 
@@ -379,6 +383,22 @@ func list(_ []string) error {
 		"sessions":   event["sessions"],
 	}, "", "  ")
 	fmt.Println(string(pretty))
+	return nil
+}
+
+func refreshPRs(args []string) error {
+	if len(args) != 0 {
+		return errors.New("refresh-prs takes no arguments")
+	}
+	response, err := sendAndWait(map[string]any{"cmd": "refresh_prs"}, "refresh_prs_result", "", 60*time.Second)
+	if err != nil {
+		return err
+	}
+	if success, _ := response["success"].(bool); !success {
+		message, _ := response["error"].(string)
+		return fmt.Errorf("refresh PRs failed: %s", message)
+	}
+	fmt.Println("PR refresh completed")
 	return nil
 }
 

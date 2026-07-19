@@ -87,7 +87,7 @@ func TestOpenDB_CreatesSchema(t *testing.T) {
 	defer db.Close()
 
 	// Verify tables exist by querying them
-	tables := []string{"sessions", "prs", "repos", "workspace_contexts", "workspace_keeper_compact_backups", "profile_roles", "chief_of_staff_dispatches", "chief_of_staff_dispatch_messages", "delegation_operations"}
+	tables := []string{"sessions", "prs", "repos", "workspace_contexts", "workspace_keeper_compact_backups", "profile_roles", "chief_of_staff_dispatches", "chief_of_staff_dispatch_messages", "delegation_operations", "automation_provider_cursors", "automation_review_request_edges", "automation_continuity_bindings", "automation_ticket_occurrence_events"}
 	for _, table := range tables {
 		var count int
 		err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count)

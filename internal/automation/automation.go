@@ -32,7 +32,13 @@ type DefinitionSpec struct {
 	Policy     PolicySpec   `yaml:"policy" json:"policy"`
 }
 type TriggerSpec struct {
-	Type string `yaml:"type" json:"type"`
+	Type         string               `yaml:"type" json:"type"`
+	Repositories RepositoryFilterSpec `yaml:"repositories,omitempty" json:"repositories,omitempty"`
+}
+type RepositoryFilterSpec struct {
+	Mode    string   `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Include []string `yaml:"include,omitempty" json:"include,omitempty"`
+	Exclude []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
 }
 type LaunchSpec struct {
 	Driver     string `yaml:"driver" json:"driver"`
@@ -97,8 +103,17 @@ func ValidateDefinition(s *DefinitionSpec) error {
 	if strings.TrimSpace(s.Name) == "" {
 		return errors.New("name is required")
 	}
-	if s.Trigger.Type != "manual" {
-		return errors.New("Slice 1 supports only trigger.type manual")
+	switch s.Trigger.Type {
+	case "manual":
+		if s.Trigger.Repositories.Mode != "" || len(s.Trigger.Repositories.Include) > 0 || len(s.Trigger.Repositories.Exclude) > 0 {
+			return errors.New("manual trigger cannot configure repositories")
+		}
+	case "github_review_requested":
+		if err := validateRepositoryFilter(&s.Trigger.Repositories); err != nil {
+			return err
+		}
+	default:
+		return errors.New("trigger.type must be manual or github_review_requested")
 	}
 	if strings.TrimSpace(s.Prompt) == "" {
 		return errors.New("prompt is required")
@@ -149,13 +164,86 @@ func ValidateDefinition(s *DefinitionSpec) error {
 	if s.Policy.Continuity == "" {
 		s.Policy.Continuity = "fresh"
 	}
-	if s.Policy.Continuity != "fresh" {
-		return errors.New("Slice 1 supports only policy.continuity fresh")
-	}
 	if s.Policy.Overlap != "" && s.Policy.Overlap != "coalesce" {
 		return errors.New("policy.overlap must be coalesce")
 	}
+	if s.Trigger.Type == "github_review_requested" {
+		if s.Location.Type != "repository_worktree" {
+			return errors.New("github_review_requested trigger requires repository_worktree location")
+		}
+		if s.Policy.Continuity != "per_subject" {
+			return errors.New("github_review_requested trigger requires policy.continuity per_subject")
+		}
+		if s.Policy.CatchUp != "latest" {
+			return errors.New("github_review_requested trigger requires policy.catch_up latest")
+		}
+	} else if s.Policy.Continuity != "fresh" {
+		return errors.New("manual trigger supports only policy.continuity fresh")
+	}
 	return nil
+}
+
+func validateRepositoryFilter(filter *RepositoryFilterSpec) error {
+	if filter.Mode == "" {
+		filter.Mode = "all_accessible"
+	}
+	if filter.Mode != "all_accessible" {
+		return errors.New("trigger.repositories.mode must be all_accessible")
+	}
+	canonicalize := func(field string, values []string) ([]string, error) {
+		seen := make(map[string]bool, len(values))
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			identity, err := CanonicalRepositoryIdentity(value)
+			if err != nil {
+				return nil, fmt.Errorf("trigger.repositories.%s entry %q: %w", field, value, err)
+			}
+			if seen[identity] {
+				return nil, fmt.Errorf("duplicate trigger.repositories.%s entry %q", field, identity)
+			}
+			seen[identity] = true
+			out = append(out, identity)
+		}
+		return out, nil
+	}
+	var err error
+	if filter.Include, err = canonicalize("include", filter.Include); err != nil {
+		return err
+	}
+	if filter.Exclude, err = canonicalize("exclude", filter.Exclude); err != nil {
+		return err
+	}
+	excluded := make(map[string]bool, len(filter.Exclude))
+	for _, identity := range filter.Exclude {
+		excluded[identity] = true
+	}
+	for _, identity := range filter.Include {
+		if excluded[identity] {
+			return fmt.Errorf("repository %q cannot be both included and excluded", identity)
+		}
+	}
+	return nil
+}
+
+func (filter RepositoryFilterSpec) Matches(identity string) bool {
+	canonical, err := CanonicalRepositoryIdentity(identity)
+	if err != nil {
+		return false
+	}
+	for _, excluded := range filter.Exclude {
+		if excluded == canonical {
+			return false
+		}
+	}
+	if len(filter.Include) == 0 {
+		return true
+	}
+	for _, included := range filter.Include {
+		if included == canonical {
+			return true
+		}
+	}
+	return false
 }
 
 func canonicalizeDirectory(path *string, field string) error {

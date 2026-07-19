@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -228,6 +229,24 @@ func TestUnregisterSessionIntentionalCloseDoesNotCrashTicket(t *testing.T) {
 	}
 	if !strings.Contains(comments[0], "the session was closed (user close or teardown)") {
 		t.Fatalf("comment framed as %q, want the clean-close framing", comments[0])
+	}
+}
+
+func TestUnregisterSessionKillFailureStillDoesNotCrashTicket(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	sessionID := delegateBoundSession(t, d)
+	ticketID := boundTicketID(t, d, sessionID)
+	d.store.UpdateState(sessionID, protocol.StateWorking)
+	d.ptyBackend = &fakeSpawnBackend{sessionIDs: []string{sessionID}, killErr: errors.New("kill unavailable")}
+
+	d.unregisterSession(sessionID, syscall.SIGTERM)
+
+	ticket, err := d.store.GetTicket(ticketID)
+	if err != nil || ticket == nil {
+		t.Fatalf("GetTicket: %v, %v", ticket, err)
+	}
+	if ticket.Status == store.TicketStatusCrashed {
+		t.Fatal("legacy intentional close with a failed kill crash-stamped the ticket")
 	}
 }
 
