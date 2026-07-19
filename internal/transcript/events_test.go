@@ -63,6 +63,61 @@ func TestReadEventPageCodexNormalizesAndRedacts(t *testing.T) {
 	}
 }
 
+func TestReadEventPageCodexResponseItemAssistantOnly(t *testing.T) {
+	path := writeEventTranscript(t,
+		`{"timestamp":"2026-07-19T10:00:00Z","type":"session_meta","payload":{"id":"native-id"}}`,
+		`{"timestamp":"2026-07-19T10:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"First output."},{"type":"output_text","text":"Second output."}]}}`,
+	)
+
+	page, err := ReadEventPage(path, "codex", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 {
+		t.Fatalf("events = %#v, want one assistant event", page.Events)
+	}
+	event := page.Events[0]
+	if event.Kind != EventKindAssistant || event.Role != "assistant" || event.Text != "First output.\nSecond output." {
+		t.Fatalf("assistant event = %#v", event)
+	}
+}
+
+func TestReadEventPageCodexDeduplicatesPairedAssistantAcrossFollowPoll(t *testing.T) {
+	path := writeEventTranscript(t,
+		`{"timestamp":"2026-07-19T10:00:00Z","type":"session_meta","payload":{"id":"native-id"}}`,
+		`{"timestamp":"2026-07-19T10:00:01Z","type":"event_msg","payload":{"type":"agent_message","message":"checking now"}}`,
+	)
+
+	first, err := ReadEventPage(path, "codex", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Events) != 1 || first.Events[0].Text != "checking now" || !first.AtEnd {
+		t.Fatalf("first poll = %#v", first)
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, writeErr := f.WriteString(`{"timestamp":"2026-07-19T10:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"checking now"}]}}` + "\n")
+	closeErr := f.Close()
+	if writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+
+	second, err := ReadEventPage(path, "codex", first.NextCursor, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Events) != 0 || !second.AtEnd {
+		t.Fatalf("paired response_item was not suppressed: %#v", second)
+	}
+}
+
 func TestReadEventPageCursorResumesWithoutDuplicates(t *testing.T) {
 	path := writeEventTranscript(t,
 		`{"type":"session_meta","payload":{"id":"native-id"}}`,

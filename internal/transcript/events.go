@@ -111,6 +111,10 @@ func ReadEventPage(path, agent, cursor string, maxEvents int) (EventPage, error)
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return EventPage{}, err
 	}
+	previousEvent, hasPreviousEvent, err := previousNormalizedEvent(f, agent, offset)
+	if err != nil {
+		return EventPage{}, err
+	}
 
 	page := EventPage{Events: []Event{}, NextCursor: strings.TrimSpace(cursor)}
 	reader := bufio.NewReader(f)
@@ -128,9 +132,18 @@ func ReadEventPage(path, agent, cursor string, maxEvents int) (EventPage, error)
 		lineOffset := offset
 		nextOffset := offset + int64(len(record))
 		line := bytes.TrimSpace(record)
-		allEvents := parseEventLine(agent, line)
+		parsed := parseEventLine(agent, line)
+		allEvents := parsed.events
+		if parsed.dedupeAssistantEcho && hasPreviousEvent &&
+			previousEvent.Kind == EventKindAssistant && previousEvent.Text == allEvents[0].Text {
+			allEvents = nil
+		}
 		if skipEvents > len(allEvents) {
 			return EventPage{}, ErrInvalidCursor
+		}
+		if skipEvents > 0 {
+			previousEvent = allEvents[skipEvents-1]
+			hasPreviousEvent = true
 		}
 		events := allEvents[skipEvents:]
 
@@ -145,6 +158,10 @@ func ReadEventPage(path, agent, cursor string, maxEvents int) (EventPage, error)
 		page.Events = append(page.Events, events...)
 		if len(events) > 0 {
 			page.NextCursor = events[len(events)-1].Cursor
+		}
+		if len(allEvents) > 0 {
+			previousEvent = allEvents[len(allEvents)-1]
+			hasPreviousEvent = true
 		}
 
 		if len(page.Events) >= maxEvents {
@@ -164,6 +181,62 @@ func ReadEventPage(path, agent, cursor string, maxEvents int) (EventPage, error)
 			return EventPage{}, readErr
 		}
 	}
+}
+
+func previousNormalizedEvent(f *os.File, agent string, before int64) (Event, bool, error) {
+	for before > 0 {
+		line, start, ok, err := previousCompleteLine(f, before)
+		if err != nil {
+			return Event{}, false, err
+		}
+		if !ok {
+			return Event{}, false, nil
+		}
+		parsed := parseEventLine(agent, bytes.TrimSpace(line))
+		if len(parsed.events) > 0 {
+			return parsed.events[len(parsed.events)-1], true, nil
+		}
+		before = start
+	}
+	return Event{}, false, nil
+}
+
+func previousCompleteLine(f *os.File, before int64) ([]byte, int64, bool, error) {
+	end := before
+	var last [1]byte
+	if _, err := f.ReadAt(last[:], end-1); err != nil {
+		return nil, 0, false, err
+	}
+	if last[0] == '\n' {
+		end--
+	}
+	if end <= 0 {
+		return nil, 0, false, nil
+	}
+
+	const chunkSize int64 = 4096
+	for searchEnd := end; searchEnd > 0; {
+		searchStart := max(int64(0), searchEnd-chunkSize)
+		chunk := make([]byte, searchEnd-searchStart)
+		if _, err := f.ReadAt(chunk, searchStart); err != nil {
+			return nil, 0, false, err
+		}
+		if newline := bytes.LastIndexByte(chunk, '\n'); newline >= 0 {
+			start := searchStart + int64(newline) + 1
+			line := make([]byte, end-start)
+			if _, err := f.ReadAt(line, start); err != nil {
+				return nil, 0, false, err
+			}
+			return line, start, true, nil
+		}
+		searchEnd = searchStart
+	}
+
+	line := make([]byte, end)
+	if _, err := f.ReadAt(line, 0); err != nil {
+		return nil, 0, false, err
+	}
+	return line, 0, true, nil
 }
 
 func transcriptFingerprint(f *os.File) (string, bool, error) {
@@ -233,24 +306,33 @@ type eventContentBlock struct {
 	IsError   bool            `json:"is_error"`
 }
 
-func parseEventLine(agent string, line []byte) []Event {
+type parsedEventLine struct {
+	events              []Event
+	dedupeAssistantEcho bool
+}
+
+func parseEventLine(agent string, line []byte) parsedEventLine {
 	if len(line) == 0 {
-		return nil
+		return parsedEventLine{}
 	}
 	var envelope eventEnvelope
 	if err := json.Unmarshal(line, &envelope); err != nil {
-		return nil
+		return parsedEventLine{}
 	}
 
 	switch strings.ToLower(strings.TrimSpace(agent)) {
 	case "claude":
-		return parseClaudeEvent(envelope)
+		return parsedEventLine{events: parseClaudeEvent(envelope)}
 	case "copilot":
-		return parseCopilotEvent(envelope)
+		return parsedEventLine{events: parseCopilotEvent(envelope)}
 	case "codex":
-		return parseCodexEvent(envelope)
+		events := parseCodexEvent(envelope)
+		return parsedEventLine{
+			events:              events,
+			dedupeAssistantEcho: envelope.Type == "response_item" && len(events) == 1 && events[0].Kind == EventKindAssistant,
+		}
 	default:
-		return nil
+		return parsedEventLine{}
 	}
 }
 
@@ -276,18 +358,24 @@ func parseCodexEvent(envelope eventEnvelope) []Event {
 		}
 	case "response_item":
 		var payload struct {
-			Type   string          `json:"type"`
-			Name   string          `json:"name"`
-			CallID string          `json:"call_id"`
-			Input  json.RawMessage `json:"input"`
-			Output json.RawMessage `json:"output"`
-			Status string          `json:"status"`
-			Error  string          `json:"error"`
+			Type    string          `json:"type"`
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+			Name    string          `json:"name"`
+			CallID  string          `json:"call_id"`
+			Input   json.RawMessage `json:"input"`
+			Output  json.RawMessage `json:"output"`
+			Status  string          `json:"status"`
+			Error   string          `json:"error"`
 		}
 		if json.Unmarshal(envelope.Payload, &payload) != nil {
 			return nil
 		}
 		switch payload.Type {
+		case "message":
+			if payload.Role == "assistant" {
+				return textEvent(envelope.Timestamp, EventKindAssistant, "assistant", extractEventContentText(payload.Content))
+			}
 		case "custom_tool_call", "function_call":
 			return []Event{{
 				Timestamp:  envelope.Timestamp,
@@ -449,8 +537,12 @@ func extractEventMessageText(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &message) != nil {
 		return ""
 	}
+	return extractEventContentText(message.Content)
+}
+
+func extractEventContentText(raw json.RawMessage) string {
 	var parts []string
-	for _, block := range decodeEventContent(message.Content) {
+	for _, block := range decodeEventContent(raw) {
 		if strings.TrimSpace(block.Text) != "" {
 			parts = append(parts, block.Text)
 		}
