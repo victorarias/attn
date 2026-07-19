@@ -241,7 +241,7 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 		bySubject := make(map[string]*protocol.PR)
 		var subjects []string
 		for _, pr := range prs {
-			if pr == nil || pr.Role != protocol.PRRoleReviewer || pr.Reason != protocol.PRReasonReviewNeeded || pr.State != protocol.PRStateWaiting {
+			if pr == nil || pr.ApprovedByMe || pr.Role != protocol.PRRoleReviewer || pr.Reason != protocol.PRReasonReviewNeeded || pr.State != protocol.PRStateWaiting {
 				continue
 			}
 			identity, err := automation.CanonicalRepositoryIdentity(host + "/" + pr.Repo)
@@ -287,7 +287,7 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 				d.logf("automation GitHub observation fetch %s: %v", candidate.SubjectKey, err)
 				continue
 			}
-			if providerSnapshot.Number != pr.Number || !strings.EqualFold(providerSnapshot.BaseRepository, pr.Repo) || providerSnapshot.State != "open" {
+			if providerSnapshot.Number != pr.Number || !strings.EqualFold(providerSnapshot.BaseRepository, pr.Repo) || providerSnapshot.State != "open" || providerSnapshot.Draft {
 				observationLock.Unlock()
 				d.logf("automation GitHub observation ignored mismatched snapshot for %s", candidate.SubjectKey)
 				continue

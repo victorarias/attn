@@ -361,6 +361,8 @@ func TestAutomationRecoveryWaitsForInitialGitHubDiscovery(t *testing.T) {
 
 func TestGitHubReviewObservationDedupesPollsAndReusesReviewer(t *testing.T) {
 	var snapshotGETs atomic.Int32
+	var snapshotDraft atomic.Bool
+	snapshotDraft.Store(true)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/owner/repo/pulls/42" {
 			http.NotFound(w, r)
@@ -368,7 +370,11 @@ func TestGitHubReviewObservationDedupesPollsAndReusesReviewer(t *testing.T) {
 		}
 		snapshotGETs.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.com/owner/repo/pull/42","title":"Change","body":"untrusted","state":"open","draft":false,"user":{"login":"author"},"head":{"sha":"0123456789abcdef0123456789abcdef01234567","ref":"feature","repo":{"full_name":"owner/repo"}},"base":{"sha":"89abcdef0123456789abcdef0123456789abcdef","ref":"main","repo":{"full_name":"owner/repo"}}}`))
+		draft := "false"
+		if snapshotDraft.Load() {
+			draft = "true"
+		}
+		_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.com/owner/repo/pull/42","title":"Change","body":"untrusted","state":"open","draft":` + draft + `,"user":{"login":"author"},"head":{"sha":"0123456789abcdef0123456789abcdef01234567","ref":"feature","repo":{"full_name":"owner/repo"}},"base":{"sha":"89abcdef0123456789abcdef0123456789abcdef","ref":"main","repo":{"full_name":"owner/repo"}}}`))
 	}))
 	defer server.Close()
 	client, err := github.NewClientForHost("github.com", server.URL, "token")
@@ -407,9 +413,19 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	}
 	demand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
 	observedAt := time.Now()
+	approvedDemand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, ApprovedByMe: true, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
+	d.observeGitHubReviewRequests("github.com", approvedDemand, observedAt)
+	if snapshotGETs.Load() != 0 || delivered.Load() != 0 {
+		t.Fatalf("completed review snapshot GETs=%d deliveries=%d", snapshotGETs.Load(), delivered.Load())
+	}
 	d.observeGitHubReviewRequests("github.com", demand, observedAt)
-	d.observeGitHubReviewRequests("github.com", demand, observedAt)
-	if snapshotGETs.Load() != 1 || delivered.Load() != 1 {
+	if snapshotGETs.Load() != 1 || delivered.Load() != 0 {
+		t.Fatalf("draft snapshot GETs=%d deliveries=%d", snapshotGETs.Load(), delivered.Load())
+	}
+	snapshotDraft.Store(false)
+	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(time.Second))
+	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(time.Second))
+	if snapshotGETs.Load() != 2 || delivered.Load() != 1 {
 		t.Fatalf("duplicate poll snapshot GETs=%d deliveries=%d", snapshotGETs.Load(), delivered.Load())
 	}
 	firstRuns, err := s.ListAutomationRuns("requested-review")
@@ -420,7 +436,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	// adopts the original per-subject ticket/session/workspace/pane binding.
 	d.observeGitHubReviewRequests("github.com", nil, observedAt.Add(time.Minute))
 	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(2*time.Minute))
-	if snapshotGETs.Load() != 2 || delivered.Load() != 2 {
+	if snapshotGETs.Load() != 3 || delivered.Load() != 2 {
 		t.Fatalf("re-request snapshot GETs=%d deliveries=%d", snapshotGETs.Load(), delivered.Load())
 	}
 	runs, err := s.ListAutomationRuns("requested-review")
