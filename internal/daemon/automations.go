@@ -410,6 +410,9 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 		continuityKey = occurrence.SubjectKey
 	}
 	req := automation.WorkRequest{RunID: run.ID, DefinitionID: run.DefinitionID, SubjectKey: occurrence.SubjectKey, ContinuityKey: continuityKey, Prompt: snapshot.Prompt, Context: json.RawMessage(occurrence.PayloadJSON), Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID}}
+	if err := d.validateAutomationContinuation(req); err != nil {
+		return err
+	}
 	result, err := (workdelivery.Service{Ports: d}).Deliver(ctx, req)
 	if err != nil {
 		return err
@@ -422,6 +425,63 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 	}
 	d.broadcastTicketsUpdated()
 	return nil
+}
+
+// validateAutomationContinuation fails unsafe later cycles before workdelivery's
+// ticket-first side effects. PrepareLocation and EnsureSession repeat the critical
+// checks as defense in depth after the durable event has been accepted.
+func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) error {
+	if req.ContinuityKey == "" {
+		return nil
+	}
+	ticket, err := d.store.GetTicket(req.IDs.TicketID)
+	if err != nil {
+		return err
+	}
+	if ticket == nil {
+		hasPrior, err := d.store.HasPriorAutomationContinuityRun(req.DefinitionID, req.ContinuityKey, req.RunID)
+		if err != nil {
+			return err
+		}
+		if hasPrior {
+			return errors.New("automation continuity ticket is missing; refusing to reuse its session or worktree")
+		}
+		return nil
+	}
+	if ticket.AutomationRunID == "" || ticket.AutomationRunID == req.RunID {
+		return nil
+	}
+	origin, err := d.store.GetAutomationRun(ticket.AutomationRunID)
+	if err != nil {
+		return err
+	}
+	if origin == nil {
+		return errors.New("continuity origin run missing")
+	}
+	originOccurrence, err := d.store.GetAutomationOccurrence(origin.OccurrenceID)
+	if err != nil || originOccurrence == nil {
+		return errors.Join(errors.New("continuity origin occurrence missing"), err)
+	}
+	originPR, err := automation.ParsePullRequestInput(json.RawMessage(originOccurrence.PayloadJSON))
+	if err != nil {
+		return fmt.Errorf("continuity origin payload: %w", err)
+	}
+	currentPR, err := automation.ParsePullRequestInput(req.Context)
+	if err != nil {
+		return err
+	}
+	if originPR.HeadSHA != currentPR.HeadSHA {
+		return errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+	}
+	if d.ptyBackend == nil {
+		return errors.New("reviewer continuity cannot verify the existing session")
+	}
+	for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
+		if liveID == req.IDs.SessionID {
+			return nil
+		}
+	}
+	return errors.New("reviewer continuity requires the existing session to still be live")
 }
 
 func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) error {

@@ -598,3 +598,49 @@ func TestMissingContinuityTicketFailsBeforeReusingBoundArtifacts(t *testing.T) {
 		t.Fatalf("swept ticket was recreated: ticket=%#v err=%v", ticket, err)
 	}
 }
+
+func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T) {
+	s := store.New()
+	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	const firstPayload = `{"provider":"github","host":"github.com","owner":"owner","repository":"repo","number":42,"url":"https://github.com/owner/repo/pull/42","state":"open","head_sha":"0123456789abcdef0123456789abcdef01234567"}`
+	const secondPayload = `{"provider":"github","host":"github.com","owner":"owner","repository":"repo","number":42,"url":"https://github.com/owner/repo/pull/42","state":"open","head_sha":"89abcdef0123456789abcdef0123456789abcdef"}`
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	first, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, firstPayload, `{}`, now, store.AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: first.TicketID, Title: "Review", Status: store.TicketStatusDone, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("second candidates=%#v err=%v", candidates, err)
+	}
+	second, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, secondPayload, `{}`, now.Add(2*time.Minute), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{store: s, ptyBackend: &fakeSpawnBackend{sessionIDs: []string{first.SessionID}}}
+	req := automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Context: json.RawMessage(secondPayload), IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}
+	err = d.validateAutomationContinuation(req)
+	if err == nil || !strings.Contains(err.Error(), "changed pull-request revision") {
+		t.Fatalf("changed-head preflight err=%v", err)
+	}
+	ticket, err := s.GetTicket(first.TicketID)
+	if err != nil || ticket == nil {
+		t.Fatalf("ticket=%#v err=%v", ticket, err)
+	}
+	if len(ticket.Activity) != 0 {
+		t.Fatalf("unsafe continuation published ticket activity before validation: %#v", ticket.Activity)
+	}
+}
