@@ -260,6 +260,16 @@ func TestContinuationOccurrenceRecordsOnTerminalTicketExactlyOnce(t *testing.T) 
 	if len(ticket.Activity) != 1 {
 		t.Fatalf("activity=%#v, want one occurrence comment", ticket.Activity)
 	}
+	if removed, err := s.SweepExpiredTickets(now.Add(2*time.Hour), time.Hour); err != nil || removed != 1 {
+		t.Fatalf("sweep removed=%d err=%v", removed, err)
+	}
+	var orphanEvents int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM automation_ticket_occurrence_events WHERE ticket_id=?`, first.TicketID).Scan(&orphanEvents); err != nil {
+		t.Fatal(err)
+	}
+	if orphanEvents != 0 {
+		t.Fatalf("sweep left %d automation occurrence event rows", orphanEvents)
+	}
 }
 
 func TestGitHubReviewCursorOrdersObservationsWithinOneSecond(t *testing.T) {
