@@ -260,6 +260,10 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, true, now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	stale, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(90*time.Second))
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("pre-enable observation crossed enable fence: candidates=%#v err=%v", stale, err)
+	}
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(3*time.Minute))
 	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 2 {
 		t.Fatalf("re-enabled latest catch-up candidates=%#v err=%v", candidates, err)

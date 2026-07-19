@@ -102,6 +102,16 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bo
 	if err != nil {
 		return nil, err
 	}
+	if enabled {
+		// Fence provider snapshots that began before this definition became
+		// active (or was reapplied). Observation timestamps are captured before
+		// provider fetches, so an in-flight stale refresh cannot launch work under
+		// a newly enabled revision.
+		fence := now.UTC().Format(time.RFC3339Nano)
+		if _, err := tx.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'github_review_requested','*',?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at`, id, fence); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -223,6 +233,20 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 	defer tx.Rollback()
 	observedRaw := observedAt.UTC().Format(time.RFC3339Nano)
 	updatedRaw := formatTicketTime(observedAt)
+	var enableFenceRaw string
+	err = tx.QueryRow(`SELECT observed_at FROM automation_provider_cursors WHERE definition_id=? AND provider='github_review_requested' AND scope='*'`, definitionID).Scan(&enableFenceRaw)
+	if err == nil {
+		enableFence, parseErr := time.Parse(time.RFC3339Nano, enableFenceRaw)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse automation enable fence: %w", parseErr)
+		}
+		if observedAt.Before(enableFence) {
+			return nil, nil
+		}
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
 	var cursorRaw string
 	err = tx.QueryRow(`SELECT observed_at FROM automation_provider_cursors WHERE definition_id=? AND provider='github_review_requested' AND scope=?`, definitionID, host).Scan(&cursorRaw)
 	if err == nil {
