@@ -67,9 +67,9 @@ make / pre-commit
 - [x] Prove cache invalidation when the E2E binary or direct Git executable
   changes, plus concurrent-run isolation.
 - [x] Measure the unchanged-hook warm path and a cache-controlled changed path.
-- [ ] Make pre-commit's temporary E2E build metadata deterministic.
-- [ ] Enable the tracked `.githooks/pre-commit` for every attn worktree.
-- [ ] Commit through the installed hook and measure its cache behavior.
+- [x] Make pre-commit's temporary E2E build metadata deterministic.
+- [x] Enable the tracked `.githooks/pre-commit` for every attn worktree.
+- [x] Commit through the installed hook and measure its cache behavior.
 
 ## Results
 
@@ -132,6 +132,23 @@ two daemon shards that read the changed E2E binary; a semantics-preserving
 alternate Git executable invalidated all Git-reading shards. Both mutation
 probes passed and were removed.
 
+The tracked `.githooks/pre-commit` is now enabled through the repository's
+shared `core.hooksPath=.githooks`, which resolves each worktree's own checked-out
+hook instead of a script from the main worktree. The hook already routes by
+staged path: Go-affecting changes run build plus the full Go suite, while
+unrelated commits skip that bucket. Enabling it exposed and fixed two dormant
+portability issues in `scripts/pre-commit.sh`: macOS Bash 3 lacks `mapfile`, and
+one exported command substitution masked its status under ShellCheck.
+
+Pre-commit E2E binaries now use fixed test-only build metadata and
+`-buildvcs=false`; two builds were byte-identical. Production and release
+metadata are unchanged. The first real commit through the installed hook passed
+in 28.97s. An exact retry of the same staged state passed in 4.97s, while a new
+staged hook change took 27–30s because it correctly produced a new test-input
+identity. The practical contract is therefore about 30s for newly changed
+daemon-bucket inputs, about 5s for an exact cached retry, and effectively no Go
+cost for staged paths outside the daemon bucket.
+
 ## Success Criteria
 
 - [x] The same default Go test coverage passes ten consecutive cache-controlled runs.
@@ -159,3 +176,6 @@ probes passed and were removed.
 - Cache only stable outer inputs. Runtime data remains unique per executing test
   process, while content-addressed external executables prevent cached results
   from hiding changed Git or E2E behavior.
+- Use Git's existing tracked `.githooks` seam rather than adding a hook manager.
+  The relative hooks path keeps hook code worktree-local while configuration is
+  shared by the repository.
