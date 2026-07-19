@@ -607,7 +607,7 @@ func writeHelp(w io.Writer) {
 
 commands:
   presence                          check whether the current shell runs inside attn
-	  session instructions <id>        answer a question from a session's conversation
+	  session <command>                 inspect a session's conversation
   delegate --brief-file <path>      start another agent with a delegated brief
   journal append --entry <text>     serialized append to the daily notebook journal
   workspace context <command>       edit shared workspace context

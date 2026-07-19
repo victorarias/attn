@@ -613,6 +613,14 @@ model SessionInstructionsMessage {
   question: string;
 }
 
+// Reads provider-neutral, redacted transcript events strictly after the opaque
+// cursor. The daemon owns native transcript discovery and cursor validation.
+model SessionTranscriptMessage {
+  cmd: "session_transcript";
+  target_session_id: string;
+  after_cursor?: string;
+}
+
 model StopMessage {
   cmd: "stop";
   id: string;
@@ -2730,6 +2738,7 @@ model Response {
   present_open_result?: PresentOpenResult;
   present_feedback_result?: PresentFeedbackResult;
   session_instructions_result?: SessionInstructionsResult;
+  session_transcript_result?: SessionTranscriptResult;
 }
 
 model EvidenceExcerpt {
@@ -2747,6 +2756,26 @@ model SessionInstructionsResult {
   transcript_fingerprint: string;
   `model`: string;
   reasoning_effort: string;
+}
+
+// Stable transcript contract. Provider-specific JSONL records never cross the
+// daemon boundary; new runtimes normalize into these existing event kinds.
+model SessionTranscriptEvent {
+  cursor: string;
+  timestamp?: string;
+  kind: string; // "user" | "assistant" | "tool_call" | "tool_result" | "error"
+  role?: string;
+  text?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  is_error?: boolean;
+}
+
+model SessionTranscriptResult {
+  session_id: string;
+  events: SessionTranscriptEvent[];
+  next_cursor: string;
+  at_end: boolean;
 }
 
 model DelegateResult {

@@ -8,6 +8,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-19]
 
+### Added
+- **Live agent transcripts are inspectable from the CLI.** `attn session
+  transcript <session-id>` prints timestamped conversation, tool, and error
+  events across supported agents, with `--follow` for live updates and opaque
+  cursors for safe resumption. Provider-specific records stay behind the daemon
+  boundary, and secrets are redacted before output.
+
 ### Fixed
 - **Retried delegations no longer create duplicate agents or tickets.** `attn
   delegate` now prints a durable request and operation identity before slow

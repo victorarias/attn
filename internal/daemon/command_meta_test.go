@@ -12,6 +12,8 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdUnregister,
 		protocol.CmdState,
 		protocol.CmdSetSessionResumeID,
+		protocol.CmdSessionInstructions,
+		protocol.CmdSessionTranscript,
 		protocol.CmdStop,
 		protocol.CmdTodos,
 		protocol.CmdQuery,

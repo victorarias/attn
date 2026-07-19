@@ -3367,6 +3367,10 @@ type Response struct {
 	// "session_instructions_result".
 	SessionInstructionsResult *SessionInstructionsResult `json:"session_instructions_result,omitempty,omitzero"`
 
+	// SessionTranscriptResult corresponds to the JSON schema field
+	// "session_transcript_result".
+	SessionTranscriptResult *SessionTranscriptResult `json:"session_transcript_result,omitempty,omitzero"`
+
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
@@ -3616,6 +3620,57 @@ type SessionTodosUpdatedMessage struct {
 
 	// Session corresponds to the JSON schema field "session".
 	Session Session `json:"session"`
+}
+
+type SessionTranscriptEvent struct {
+	// Cursor corresponds to the JSON schema field "cursor".
+	Cursor string `json:"cursor"`
+
+	// IsError corresponds to the JSON schema field "is_error".
+	IsError *bool `json:"is_error,omitempty,omitzero"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// Role corresponds to the JSON schema field "role".
+	Role *string `json:"role,omitempty,omitzero"`
+
+	// Text corresponds to the JSON schema field "text".
+	Text *string `json:"text,omitempty,omitzero"`
+
+	// Timestamp corresponds to the JSON schema field "timestamp".
+	Timestamp *string `json:"timestamp,omitempty,omitzero"`
+
+	// ToolCallID corresponds to the JSON schema field "tool_call_id".
+	ToolCallID *string `json:"tool_call_id,omitempty,omitzero"`
+
+	// ToolName corresponds to the JSON schema field "tool_name".
+	ToolName *string `json:"tool_name,omitempty,omitzero"`
+}
+
+type SessionTranscriptMessage struct {
+	// AfterCursor corresponds to the JSON schema field "after_cursor".
+	AfterCursor *string `json:"after_cursor,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// TargetSessionID corresponds to the JSON schema field "target_session_id".
+	TargetSessionID string `json:"target_session_id"`
+}
+
+type SessionTranscriptResult struct {
+	// AtEnd corresponds to the JSON schema field "at_end".
+	AtEnd bool `json:"at_end"`
+
+	// Events corresponds to the JSON schema field "events".
+	Events []SessionTranscriptEvent `json:"events"`
+
+	// NextCursor corresponds to the JSON schema field "next_cursor".
+	NextCursor string `json:"next_cursor"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
 }
 
 type SessionUnregisteredMessage struct {
