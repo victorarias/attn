@@ -340,6 +340,65 @@ func TestRetryableAutomationDeliveryKeepsRunAndTicketActive(t *testing.T) {
 	}
 }
 
+func TestDisabledAutomationRefusesRecoveredPendingDelivery(t *testing.T) {
+	s := store.New()
+	now := time.Now()
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, def.SpecJSON, false, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	deliveryErr := d.deliverAutomationRun(context.Background(), run)
+	if deliveryErr == nil || !strings.Contains(deliveryErr.Error(), "definition is disabled") {
+		t.Fatalf("disabled delivery err=%v", deliveryErr)
+	}
+	failed, err := d.handleAutomationDeliveryError(run, deliveryErr)
+	if err == nil || failed == nil || failed.State != "failed" {
+		t.Fatalf("failed run=%#v err=%v", failed, err)
+	}
+}
+
+func TestAutomationApplyDisableFailsQueuedPendingRun(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := `api_version: attn.dev/automations/v1alpha1
+id: queued
+name: Queued
+enabled: true
+trigger: {type: manual}
+prompt: Check locally.
+launch: {driver: codex}
+location: {type: directory, path: "` + t.TempDir() + `"}
+policy: {continuity: fresh, catch_up: none, overlap: coalesce}
+`
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, time.Now(), store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.automationApply(strings.Replace(raw, "enabled: true", "enabled: false", 1)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetAutomationRun(run.ID)
+	if err != nil || got == nil || got.State != "failed" || !strings.Contains(got.LastError, "disabled before delivery") {
+		t.Fatalf("disabled queued run=%#v err=%v", got, err)
+	}
+}
+
 func TestAutomationRecoveryWaitsForInitialGitHubDiscovery(t *testing.T) {
 	ready := make(chan struct{})
 	recovered := make(chan struct{})

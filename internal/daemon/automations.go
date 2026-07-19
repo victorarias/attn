@@ -54,7 +54,26 @@ func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error
 			return nil, fmt.Errorf("repository override %s: %w", identity, err)
 		}
 	}
-	return d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), spec.Enabled, time.Now())
+	d.automationMu.Lock()
+	defer d.automationMu.Unlock()
+	definition, err := d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), spec.Enabled, time.Now())
+	if err != nil || spec.Enabled {
+		return definition, err
+	}
+	pending, err := d.store.ListPendingAutomationRuns()
+	if err != nil {
+		return definition, err
+	}
+	for i := range pending {
+		run := pending[i]
+		if run.DefinitionID != spec.ID {
+			continue
+		}
+		if _, failErr := d.failAutomationRun(&run, errors.New("automation definition disabled before delivery")); failErr != nil {
+			err = errors.Join(err, failErr)
+		}
+	}
+	return definition, err
 }
 
 func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, input string) (*store.AutomationRun, error) {
@@ -390,6 +409,13 @@ func (d *Daemon) failAutomationRun(run *store.AutomationRun, deliveryErr error) 
 }
 
 func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.AutomationRun) error {
+	definition, err := d.store.GetAutomationDefinition(run.DefinitionID)
+	if err != nil {
+		return err
+	}
+	if definition == nil || !definition.Enabled {
+		return errors.New("automation definition is disabled; refusing pending delivery")
+	}
 	var snapshot automation.Snapshot
 	if err := json.Unmarshal([]byte(run.SnapshotJSON), &snapshot); err != nil {
 		return err
