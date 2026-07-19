@@ -13,14 +13,14 @@ separate browser surface for an explicit attn-browser request.
 5. Collect the cheapest fresh evidence that proves the result.
 
 ```sh
-"$ATTN_WRAPPER_PATH" browser open http://localhost:3000
-"$ATTN_WRAPPER_PATH" browser snapshot
-"$ATTN_WRAPPER_PATH" browser find --using role --value textbox --name Search
-"$ATTN_WRAPPER_PATH" browser type --element attn-element-1 --text "query"
-"$ATTN_WRAPPER_PATH" browser click --element attn-element-2
-"$ATTN_WRAPPER_PATH" browser wait --using text --value Results --state visible
-"$ATTN_WRAPPER_PATH" browser reload
-"$ATTN_WRAPPER_PATH" browser screenshot ./attn-browser.png
+attn browser open http://localhost:3000
+attn browser snapshot
+attn browser find --using role --value textbox --name Search
+attn browser type --element attn-element-1 --text "query"
+attn browser click --element attn-element-2
+attn browser wait --using text --value Results --state visible
+attn browser reload
+attn browser screenshot ./attn-browser.png
 ```
 
 Use `browser snapshot` for state and locators. Use screenshots when visual
@@ -29,8 +29,8 @@ layout matters; do not request both by default.
 For lower-level WebDriver-shaped actions:
 
 ```sh
-"$ATTN_WRAPPER_PATH" browser command get_title
-"$ATTN_WRAPPER_PATH" browser command find_element \
+attn browser command get_title
+attn browser command find_element \
   --params '{"using":"label","value":"Email"}'
 ```
 

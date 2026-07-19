@@ -47,7 +47,7 @@ artifact is itself the proof; unreviewed code normally lands in review.
 
 For a Markdown plan or design, use the canonical-source operation:
 
-    "$ATTN_WRAPPER_PATH" ticket attach-plan \
+    attn ticket attach-plan \
       --file docs/plans/design.md \
       --scope services/catalog \
       --ticket <ticket-id> \

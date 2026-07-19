@@ -156,7 +156,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 		}
 	}
 	saveCommand := `cp "$context_file" "$saved_context"`
-	refreshCommand := `"$ATTN_WRAPPER_PATH" workspace context show --force`
+	refreshCommand := `attn workspace context show --force`
 	if strings.Index(workspaceContext, saveCommand) >= strings.Index(workspaceContext, refreshCommand) {
 		t.Fatalf("workspace context reference must save local edits before force-refreshing: %q", workspaceContext)
 	}

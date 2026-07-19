@@ -38,7 +38,7 @@ Prefer a brief file so the task can be drafted and revised before submission:
 
     brief_file="$(mktemp "${TMPDIR:-/tmp}/attn-delegate.XXXXXX")"
     # Write a concise task, relevant context, constraints, and expected output.
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file"
+    attn delegate --brief-file "$brief_file"
 
 The brief should let the delegated agent start immediately. Include:
 
@@ -60,8 +60,8 @@ Use `--brief <text>` only for short, simple tasks.
 
 The source agent is used by default. Select another supported agent with:
 
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --agent claude
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --agent codex
+    attn delegate --brief-file "$brief_file" --agent claude
+    attn delegate --brief-file "$brief_file" --agent codex
 
 Plugin agents work only when they declare delegated initial-prompt support.
 Copilot delegation is currently unsupported.
@@ -69,7 +69,7 @@ Copilot delegation is currently unsupported.
 `--model` and `--effort` pin the delegated agent's model and reasoning effort
 for that delegation only; omitted, the agent uses its own defaults:
 
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
+    attn delegate --brief-file "$brief_file" \
       --agent claude --model opus --effort high
 
 `--model` takes an alias or a full model id. `--effort` takes the agent's
@@ -85,7 +85,7 @@ labels, directories, and workspace IDs to identify domain workspaces the user
 already has (e.g. code reviews, goalie rotation, triage). When the delegated
 task matches an existing workspace's domain, place it there with `--workspace`:
 
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --workspace <workspace-id>
+    attn delegate --brief-file "$brief_file" --workspace <workspace-id>
 
 When delegating multiple independent items in parallel, route each agent to the
 workspace that fits its domain rather than creating a new workspace per item.
@@ -94,15 +94,15 @@ If no existing workspace fits, use one of:
 
 No placement flag — adds the session to the current workspace:
 
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file"
+    attn delegate --brief-file "$brief_file"
 
 Create a separate workspace using the source directory:
 
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --new-workspace
+    attn delegate --brief-file "$brief_file" --new-workspace
 
 Create a workspace at an existing directory:
 
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" --cwd /path/to/project
+    attn delegate --brief-file "$brief_file" --cwd /path/to/project
 
 `attn list` marks sessions in hidden workspaces with `workspace_muted: true`.
 When the source session is the chief of staff, delegating into a muted existing
@@ -113,19 +113,19 @@ Ordinary delegation preserves the workspace's current mute state.
 with any placement:
 
     # worktree in the current workspace
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
+    attn delegate --brief-file "$brief_file" \
       --worktree feat/delegated-task
 
     # worktree in an existing workspace
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
+    attn delegate --brief-file "$brief_file" \
       --workspace <workspace-id> --worktree feat/delegated-task
 
     # worktree in a new workspace
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
+    attn delegate --brief-file "$brief_file" \
       --new-workspace --worktree feat/delegated-task
 
     # worktree of the repo at an existing directory
-    "$ATTN_WRAPPER_PATH" delegate --brief-file "$brief_file" \
+    attn delegate --brief-file "$brief_file" \
       --cwd /path/to/project --worktree feat/delegated-task
 
 Worktree options:

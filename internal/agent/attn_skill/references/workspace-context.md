@@ -74,13 +74,13 @@ a session-local snapshot and may become stale when another session publishes.
 If the path is unavailable, recover it with:
 
 ```sh
-context_file="$("$ATTN_WRAPPER_PATH" workspace context show)"
+context_file="$(attn workspace context show)"
 ```
 
 After editing the file, inspect its state:
 
 ```sh
-"$ATTN_WRAPPER_PATH" workspace context status
+attn workspace context status
 ```
 
 Use the result as a decision:
@@ -91,8 +91,8 @@ Use the result as a decision:
 - `modified=true, stale=true`: use the conflict workflow below.
 
 ```sh
-"$ATTN_WRAPPER_PATH" workspace context update
-"$ATTN_WRAPPER_PATH" workspace context status
+attn workspace context update
+attn workspace context status
 ```
 
 The successful final state is `modified=false`, `stale=false`, with `revision`
@@ -104,10 +104,10 @@ Never run `show --force` on a modified checkout until its contents are saved;
 that command replaces the local file.
 
 ```sh
-context_file="$("$ATTN_WRAPPER_PATH" workspace context show)"
+context_file="$(attn workspace context show)"
 saved_context="$(mktemp "${TMPDIR:-/tmp}/attn-context.XXXXXX")"
 cp "$context_file" "$saved_context"
-"$ATTN_WRAPPER_PATH" workspace context show --force >/dev/null
+attn workspace context show --force >/dev/null
 ```
 
 Merge the durable changes from `"$saved_context"` into the refreshed
@@ -115,8 +115,8 @@ Merge the durable changes from `"$saved_context"` into the refreshed
 duplication, then publish and verify:
 
 ```sh
-"$ATTN_WRAPPER_PATH" workspace context update
-"$ATTN_WRAPPER_PATH" workspace context status
+attn workspace context update
+attn workspace context status
 rm -f "$saved_context"
 ```
 

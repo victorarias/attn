@@ -98,6 +98,6 @@ record durable decisions in the knowledge base as you make them, and keep the
 day's journal current with your cross-workspace view. The keeper already narrates
 each workspace's own work into the journal, so write at a chief-of-staff
 altitude — what moved across workspaces, what you delegated and decided — not a
-per-workspace play-by-play. You remain profile-wide — you may `"$ATTN_WRAPPER_PATH"
+per-workspace play-by-play. You remain profile-wide — you may `attn
 workspace context show --session <id>` for a specific workspace you step into, but
 that is opt-in.
