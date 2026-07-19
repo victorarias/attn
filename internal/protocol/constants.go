@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "173"
+const ProtocolVersion = "174"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -157,6 +157,11 @@ const (
 	CmdWorkflowRunGet                        = "workflow_run_get"
 	CmdWorkflowRunList                       = "workflow_run_list"
 	CmdWorkflowRunCancel                     = "workflow_run_cancel"
+	CmdAutomationApply                       = "automation_apply"
+	CmdAutomationList                        = "automation_list"
+	CmdAutomationShow                        = "automation_show"
+	CmdAutomationRun                         = "automation_run"
+	CmdAutomationRunList                     = "automation_run_list"
 	CmdSpawnSession                          = "spawn_session"
 	CmdAttachSession                         = "attach_session"
 	CmdDetachSession                         = "detach_session"
@@ -193,6 +198,8 @@ const (
 	CmdSetWorkspaceRank                      = "set_workspace_rank"
 	CmdSetChiefOfStaff                       = "set_chief_of_staff"
 )
+
+const EventAutomationActionResult = "automation_action_result"
 
 // WebSocket Events (daemon -> client)
 const (
@@ -392,6 +399,37 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdDelegate:
 		var msg DelegateMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutomationApply:
+		var msg AutomationApplyMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+	case CmdAutomationList:
+		var msg AutomationListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+	case CmdAutomationShow:
+		var msg AutomationShowMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+	case CmdAutomationRun:
+		var msg AutomationRunMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+	case CmdAutomationRunList:
+		var msg AutomationRunListMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

@@ -57,6 +57,17 @@ func TestCodexBuildCommand_IncludesConfigOverridesBeforeResume(t *testing.T) {
 	}
 }
 
+func TestCodexConfigOverrides_TrustsConfiguredWorkingDirectory(t *testing.T) {
+	overrides := (&Codex{}).GenerateConfigOverrides(SpawnOpts{
+		SessionID:             "automation-session",
+		CWD:                   `/tmp/a directory`,
+		TrustWorkingDirectory: true,
+	})
+	if !slices.Contains(overrides, `projects."/tmp/a directory".trust_level="trusted"`) {
+		t.Fatalf("overrides = %#v, want working-directory trust override", overrides)
+	}
+}
+
 func TestClaudeBuildCommand_AppendsWorkspaceContextSystemPrompt(t *testing.T) {
 	opts := SpawnOpts{
 		SessionID:            "sess-1",

@@ -145,6 +145,43 @@ func TestMigrations_Idempotent(t *testing.T) {
 	}
 }
 
+func TestMigration73RepairsAutomationProfileMigration70Collision(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-73-collision.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() setup error = %v", err)
+	}
+	if _, err := db.Exec(`
+		DROP TABLE delegation_operations;
+		DELETE FROM schema_migrations WHERE version >= 71;
+	`); err != nil {
+		db.Close()
+		t.Fatalf("seed migration 70 collision: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close seeded db: %v", err)
+	}
+
+	migrated, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() repair migration 70 collision: %v", err)
+	}
+	defer migrated.Close()
+
+	for _, column := range []string{"worktree_token", "chief_session_id"} {
+		var count int
+		if err := migrated.QueryRow(
+			`SELECT COUNT(*) FROM pragma_table_info('delegation_operations') WHERE name = ?`,
+			column,
+		).Scan(&count); err != nil {
+			t.Fatalf("query delegation_operations.%s: %v", column, err)
+		}
+		if count != 1 {
+			t.Fatalf("delegation_operations.%s count = %d, want 1", column, count)
+		}
+	}
+}
+
 func TestMigration67RenamesTicketArtifactRecords(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "migration-67.db")
 	db, err := OpenDB(dbPath)

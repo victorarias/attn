@@ -239,6 +239,9 @@ func main() {
 	case "workflow":
 		maybePrintProfileBanner()
 		runWorkflow()
+	case "automation":
+		maybePrintProfileBanner()
+		runAutomationCommand()
 	case "plugin":
 		maybePrintProfileBanner()
 		runPluginCommand()
@@ -611,6 +614,7 @@ commands:
   open <file.md> [--session <id>]   show a markdown file in attn
   browser <command>                 open and control the in-app browser
   workflow <command>                run, inspect, and resume durable workflows
+  automation <command>              manage and run durable automations
   list                              list sessions and workspaces
   present <command>                 open a review presentation and read feedback
   debug <command>                   probe debug artifacts (incidents, logs)
@@ -2992,18 +2996,21 @@ func runAgentDirectly(requestedAgent string) {
 	// The daemon's worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED when the
 	// workflows_enabled setting is on. This launch path is the worker process, so
 	// the env var (not a store read) carries the gate here.
-	opts.InjectWorkflowGuidance = strings.TrimSpace(os.Getenv("ATTN_WORKFLOW_GUIDANCE_ENABLED")) == "1"
+	opts.InjectWorkflowGuidance = consumeOneShotBoolEnv("ATTN_WORKFLOW_GUIDANCE_ENABLED")
 	// Likewise the worker exports ATTN_AUTO_APPROVE when the auto_approve_enabled
 	// setting is on, so the launched agent starts in its native auto-approve mode.
-	opts.AutoApprove = strings.TrimSpace(os.Getenv("ATTN_AUTO_APPROVE")) == "1"
+	opts.AutoApprove = consumeOneShotBoolEnv("ATTN_AUTO_APPROVE")
+	// Unattended daemon-owned launches may explicitly trust their configured
+	// working directory so the agent reaches the supplied prompt without a UI gate.
+	opts.TrustWorkingDirectory = consumeOneShotBoolEnv("ATTN_TRUST_WORKING_DIRECTORY")
 	// ATTN_MODEL pins the launch's model (chief_model_<agent> for chief
 	// launches, delegate --model for delegations); ATTN_EFFORT pins the
 	// reasoning effort (delegate --effort).
-	opts.Model = strings.TrimSpace(os.Getenv("ATTN_MODEL"))
-	opts.Effort = strings.TrimSpace(os.Getenv("ATTN_EFFORT"))
+	opts.Model = consumeOneShotEnv("ATTN_MODEL")
+	opts.Effort = consumeOneShotEnv("ATTN_EFFORT")
 	// ATTN_CHIEF_AUTO_COMPACT_WINDOW caps the chief's context window. The worker
 	// exports it only for chief launches, so a delegated agent never sees it.
-	if window := strings.TrimSpace(os.Getenv("ATTN_CHIEF_AUTO_COMPACT_WINDOW")); window != "" {
+	if window := consumeOneShotEnv("ATTN_CHIEF_AUTO_COMPACT_WINDOW"); window != "" {
 		if n, err := strconv.Atoi(window); err == nil && n > 0 {
 			opts.AutoCompactWindow = n
 		}
@@ -3078,6 +3085,16 @@ func runAgentDirectly(requestedAgent string) {
 		}
 		os.Exit(1)
 	}
+}
+
+func consumeOneShotBoolEnv(key string) bool {
+	return consumeOneShotEnv(key) == "1"
+}
+
+func consumeOneShotEnv(key string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	_ = os.Unsetenv(key)
+	return value
 }
 
 func resolveWrapperPath() string {

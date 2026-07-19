@@ -435,6 +435,36 @@ func TestWorkspaceSessionProtocolSpawnFailureMarksPaneFailed(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSessionProtocolRespawnFailureRestoresExistingSession(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.ptyBackend = &failingSpawnBackend{err: errors.New("boom")}
+	client := newWorkspaceProtocolTestClient()
+	workspaceID := "workspace-respawn-fails"
+	originalDirectory := t.TempDir()
+	requestedDirectory := t.TempDir()
+	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: workspaceID, Title: "Respawn", Directory: originalDirectory,
+	})
+	original := &protocol.Session{
+		ID: "existing-session", Label: "preserved", Agent: protocol.SessionAgentShell,
+		Directory: originalDirectory, WorkspaceID: workspaceID, State: protocol.SessionStateIdle,
+		StateSince: "before", StateUpdatedAt: "before", LastSeen: "before",
+	}
+	if err := d.store.AddChecked(original); err != nil {
+		t.Fatal(err)
+	}
+
+	d.handleSpawnSession(client, &protocol.SpawnSessionMessage{
+		Cmd: protocol.CmdSpawnSession, ID: original.ID, Label: protocol.Ptr("replacement"),
+		Cwd: requestedDirectory, Agent: protocol.AgentShellValue, WorkspaceID: workspaceID, Cols: 80, Rows: 24,
+	})
+	expectSpawnResult(t, client, original.ID, false)
+	got := d.store.Get(original.ID)
+	if got == nil || got.Directory != originalDirectory || got.Label != original.Label || got.LastSeen != original.LastSeen {
+		t.Fatalf("session after failed respawn = %+v, want restored %+v", got, original)
+	}
+}
+
 func TestWorkspaceSessionProtocolRejectsShellSpawnWithoutWorkspace(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ptyBackend = &fakeSpawnBackend{}

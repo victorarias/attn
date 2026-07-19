@@ -1,0 +1,96 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+
+	"github.com/google/uuid"
+	"github.com/victorarias/attn/internal/client"
+)
+
+func automationUsage() { fmt.Fprint(os.Stderr, "usage: attn automation <apply|list|show|run|runs>\n") }
+func runAutomationCommand() {
+	if len(os.Args) < 3 {
+		automationUsage()
+		os.Exit(2)
+	}
+	c := client.New(client.DefaultSocketPath())
+	var data json.RawMessage
+	var err error
+	switch os.Args[2] {
+	case "apply":
+		fs := flag.NewFlagSet("automation apply", flag.ContinueOnError)
+		file := fs.String("file", "", "definition YAML")
+		if e := fs.Parse(os.Args[3:]); e != nil {
+			os.Exit(2)
+		}
+		if *file == "" {
+			err = fmt.Errorf("--file is required")
+			break
+		}
+		raw, e := os.ReadFile(*file)
+		if e != nil {
+			err = e
+			break
+		}
+		data, err = c.AutomationApply(string(raw))
+	case "list":
+		data, err = c.AutomationList()
+	case "show":
+		if len(os.Args) != 4 {
+			err = fmt.Errorf("usage: attn automation show <definition-id>")
+			break
+		}
+		data, err = c.AutomationShow(os.Args[3])
+	case "run":
+		if len(os.Args) < 4 {
+			err = fmt.Errorf("usage: attn automation run <definition-id> [--input-file <file>] [--request-id <id>]")
+			break
+		}
+		definitionID := os.Args[3]
+		fs := flag.NewFlagSet("automation run", flag.ContinueOnError)
+		inputFile := fs.String("input-file", "", "structured occurrence JSON")
+		requestID := fs.String("request-id", "", "stable idempotency key to reuse when retrying an uncertain request")
+		if e := fs.Parse(os.Args[4:]); e != nil {
+			os.Exit(2)
+		}
+		if len(fs.Args()) != 0 {
+			err = fmt.Errorf("usage: attn automation run <definition-id> [--input-file <file>] [--request-id <id>]")
+			break
+		}
+		input := "{}"
+		if *inputFile != "" {
+			raw, e := os.ReadFile(*inputFile)
+			if e != nil {
+				err = e
+				break
+			}
+			input = string(raw)
+		}
+		if *requestID == "" {
+			*requestID = uuid.NewString()
+		}
+		data, err = c.AutomationRun(definitionID, *requestID, input)
+	case "runs":
+		if len(os.Args) != 4 {
+			err = fmt.Errorf("usage: attn automation runs <definition-id>")
+			break
+		}
+		data, err = c.AutomationRuns(os.Args[3])
+	default:
+		err = fmt.Errorf("unknown automation command %q", os.Args[2])
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "automation: %v\n", err)
+		os.Exit(1)
+	}
+	var pretty any
+	if json.Unmarshal(data, &pretty) == nil {
+		encoded, _ := json.MarshalIndent(pretty, "", "  ")
+		fmt.Println(string(encoded))
+		return
+	}
+	fmt.Println(string(data))
+}

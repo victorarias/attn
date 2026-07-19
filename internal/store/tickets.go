@@ -93,18 +93,19 @@ const (
 // Ticket is the durable record. Activity and Attachments are populated by
 // GetTicket; list operations leave them nil for cheapness.
 type Ticket struct {
-	ID          string
-	Title       string
-	Description string
-	Status      TicketStatus
-	Assignee    string // bound session id (delegated work), "you" (human), or "" when unassigned; the session-id form is the resume key
-	Cwd         string // last session's working dir (for resume)
-	LastAgentID string // last session's agent id (for resume)
-	ProjectID   string // future grouping; "" when ungrouped
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	ClosedAt    *time.Time // set on entering a terminal status; drives the TTL
-	ArchivedAt  *time.Time // set when manually cleared from the board
+	ID              string
+	Title           string
+	Description     string
+	Status          TicketStatus
+	Assignee        string // bound session id (delegated work), "you" (human), or "" when unassigned; the session-id form is the resume key
+	Cwd             string // last session's working dir (for resume)
+	LastAgentID     string // last session's agent id (for resume)
+	ProjectID       string // future grouping; "" when ungrouped
+	AutomationRunID string // immutable provenance for automation-created work; empty for ordinary tickets
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	ClosedAt        *time.Time // set on entering a terminal status; drives the TTL
+	ArchivedAt      *time.Time // set when manually cleared from the board
 	// ReconciledAt is the machine-reconciliation flag: set (atomically, via
 	// ClaimTicketReconciliation) when a dead owning session's outcome was judged
 	// by the reconciliation classifier. Provenance + dedupe lock in one; cleared
@@ -208,6 +209,17 @@ func (s *Store) CreateRoleOwnedTicket(t Ticket, author, ownerRole string, now ti
 	return s.createTicket(t, author, strings.TrimSpace(ownerRole), now)
 }
 
+// EnsureAutomationTicket creates or adopts the unique ticket for an automation run.
+func (s *Store) EnsureAutomationTicket(t Ticket, author, ownerRole string, now time.Time) (*Ticket, error) {
+	if t.AutomationRunID == "" {
+		return nil, errors.New("automation run id required")
+	}
+	if existing, err := s.GetTicketByAutomationRunID(t.AutomationRunID); err != nil || existing != nil {
+		return existing, err
+	}
+	return s.createTicket(t, author, strings.TrimSpace(ownerRole), now)
+}
+
 func (s *Store) createTicket(t Ticket, author, ownerRole string, now time.Time) (*Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -261,11 +273,11 @@ func (s *Store) createTicket(t Ticket, author, ownerRole string, now time.Time) 
 	if _, err := tx.Exec(`
 		INSERT INTO tickets (
 			id, title, description, status, assignee, cwd, last_agent_id,
-			project_id, created_at, updated_at, closed_at, archived_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			project_id, automation_run_id, created_at, updated_at, closed_at, archived_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		t.ID, t.Title, t.Description, string(t.Status), t.Assignee, t.Cwd, t.LastAgentID,
-		t.ProjectID, formatTicketTime(now), formatTicketTime(now),
+		t.ProjectID, nullIfEmpty(t.AutomationRunID), formatTicketTime(now), formatTicketTime(now),
 		formatTicketTimePtr(t.ClosedAt), formatTicketTimePtr(t.ArchivedAt),
 	); err != nil {
 		return nil, err
@@ -1039,8 +1051,15 @@ func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, erro
 
 const ticketSelect = `
 	SELECT id, title, description, status, assignee, cwd, last_agent_id,
-		project_id, created_at, updated_at, closed_at, archived_at, reconciled_at
+		project_id, automation_run_id, created_at, updated_at, closed_at, archived_at, reconciled_at
 	FROM tickets`
+
+func nullIfEmpty(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
 
 // updateTicketFieldWithEvent sets a single text column plus updated_at and emits
 // evt, atomically. column is a trusted internal literal, never caller input.
@@ -1158,21 +1177,23 @@ func (s *Store) ticketAttachments(ticketID string) ([]TicketAttachment, error) {
 
 func scanTicket(scanner ticketScanner) (*Ticket, error) {
 	var (
-		t            Ticket
-		status       string
-		createdAt    string
-		updatedAt    string
-		closedAt     string
-		archivedAt   string
-		reconciledAt string
+		t               Ticket
+		status          string
+		createdAt       string
+		updatedAt       string
+		closedAt        string
+		archivedAt      string
+		reconciledAt    string
+		automationRunID sql.NullString
 	)
 	if err := scanner.Scan(
 		&t.ID, &t.Title, &t.Description, &status, &t.Assignee, &t.Cwd, &t.LastAgentID,
-		&t.ProjectID, &createdAt, &updatedAt, &closedAt, &archivedAt, &reconciledAt,
+		&t.ProjectID, &automationRunID, &createdAt, &updatedAt, &closedAt, &archivedAt, &reconciledAt,
 	); err != nil {
 		return nil, err
 	}
 	t.Status = TicketStatus(status)
+	t.AutomationRunID = automationRunID.String
 	t.CreatedAt = parseTicketTime(createdAt)
 	t.UpdatedAt = parseTicketTime(updatedAt)
 	if closedAt != "" {
@@ -1188,6 +1209,19 @@ func scanTicket(scanner ticketScanner) (*Ticket, error) {
 		t.ReconciledAt = &ts
 	}
 	return &t, nil
+}
+
+func (s *Store) GetTicketByAutomationRunID(runID string) (*Ticket, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	t, err := scanTicket(s.db.QueryRow(ticketSelect+` WHERE automation_run_id = ?`, runID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return t, err
 }
 
 // formatTicketTime renders a timestamp as a fixed-width RFC3339 UTC string, so

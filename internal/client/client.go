@@ -25,6 +25,68 @@ type Client struct {
 	socketPath string
 }
 
+type AutomationResult struct {
+	Event   string          `json:"event"`
+	Action  string          `json:"action"`
+	Success bool            `json:"success"`
+	Error   *string         `json:"error,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+func (c *Client) sendAutomation(msg any) (*AutomationResult, error) {
+	conn, err := net.Dial("unix", c.socketPath)
+	if err != nil {
+		return nil, explainConnectError(c.socketPath, err)
+	}
+	defer conn.Close()
+	if err := json.NewEncoder(conn).Encode(msg); err != nil {
+		return nil, err
+	}
+	var result AutomationResult
+	if err := json.NewDecoder(conn).Decode(&result); err != nil {
+		return nil, err
+	}
+	if !result.Success {
+		return nil, fmt.Errorf("daemon error: %s", protocol.Deref(result.Error))
+	}
+	return &result, nil
+}
+func (c *Client) AutomationApply(raw string) (json.RawMessage, error) {
+	r, e := c.sendAutomation(protocol.AutomationApplyMessage{Cmd: protocol.CmdAutomationApply, DefinitionYaml: raw})
+	if e != nil {
+		return nil, e
+	}
+	return r.Data, nil
+}
+func (c *Client) AutomationList() (json.RawMessage, error) {
+	r, e := c.sendAutomation(protocol.AutomationListMessage{Cmd: protocol.CmdAutomationList})
+	if e != nil {
+		return nil, e
+	}
+	return r.Data, nil
+}
+func (c *Client) AutomationShow(id string) (json.RawMessage, error) {
+	r, e := c.sendAutomation(protocol.AutomationShowMessage{Cmd: protocol.CmdAutomationShow, DefinitionID: id})
+	if e != nil {
+		return nil, e
+	}
+	return r.Data, nil
+}
+func (c *Client) AutomationRun(id, requestID, input string) (json.RawMessage, error) {
+	r, e := c.sendAutomation(protocol.AutomationRunMessage{Cmd: protocol.CmdAutomationRun, DefinitionID: id, RequestID: requestID, InputJson: protocol.Ptr(input)})
+	if e != nil {
+		return nil, e
+	}
+	return r.Data, nil
+}
+func (c *Client) AutomationRuns(id string) (json.RawMessage, error) {
+	r, e := c.sendAutomation(protocol.AutomationRunListMessage{Cmd: protocol.CmdAutomationRunList, DefinitionID: id})
+	if e != nil {
+		return nil, e
+	}
+	return r.Data, nil
+}
+
 type ListResult struct {
 	Sessions   []protocol.Session   `json:"sessions"`
 	Workspaces []protocol.Workspace `json:"workspaces"`

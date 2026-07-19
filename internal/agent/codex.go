@@ -442,7 +442,7 @@ func codexToolFreeHeadlessArgs(request HeadlessTaskRequest, window int) []string
 // --- ConfigOverrideProvider ---
 
 func (c *Codex) GenerateConfigOverrides(opts SpawnOpts) []string {
-	return hooks.GenerateCodexConfigOverrides(
+	overrides := hooks.GenerateCodexConfigOverrides(
 		opts.SessionID,
 		opts.SocketPath,
 		opts.WrapperPath,
@@ -450,6 +450,10 @@ func (c *Codex) GenerateConfigOverrides(opts SpawnOpts) []string {
 		opts.NotebookRoot,
 		opts.InjectWorkflowGuidance,
 	)
+	if opts.TrustWorkingDirectory {
+		overrides = append(overrides, fmt.Sprintf(`projects.%s.trust_level="trusted"`, strconv.Quote(opts.CWD)))
+	}
+	return overrides
 }
 
 // --- TranscriptFinder ---

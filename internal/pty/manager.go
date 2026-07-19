@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -70,6 +71,16 @@ type SpawnOptions struct {
 	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
 	// that replaces the ReadLoginShellEnv call.
 	LoginShellEnv []string
+
+	// Launch policy and model pins are one-shot wrapper inputs. Worker-backed
+	// sessions receive them through the worker process environment; embedded
+	// sessions carry the same contract directly in SpawnOptions.
+	WorkflowGuidanceEnabled bool
+	AutoApprove             bool
+	TrustWorkingDirectory   bool
+	Model                   string
+	Effort                  string
+	ChiefContextWindowCap   int
 
 	// Theme seeds the colors the session answers OSC 10/11/12 queries with,
 	// before the child's first query — set explicitly so a spawn under a
@@ -545,6 +556,40 @@ func readCachedShellEnvFromProcess() []string {
 
 func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath string, logf LogFunc) []string {
 	env := os.Environ()
+	launchEnv := []string(nil)
+	launchKeys := []string{
+		"ATTN_WORKFLOW_GUIDANCE_ENABLED",
+		"ATTN_AUTO_APPROVE",
+		"ATTN_TRUST_WORKING_DIRECTORY",
+		"ATTN_MODEL",
+		"ATTN_EFFORT",
+		"ATTN_CHIEF_AUTO_COMPACT_WINDOW",
+	}
+	if os.Getenv("ATTN_PTY_WORKER") == "1" {
+		for _, key := range launchKeys {
+			if value, ok := os.LookupEnv(key); ok {
+				launchEnv = append(launchEnv, key+"="+value)
+			}
+		}
+	}
+	if opts.WorkflowGuidanceEnabled {
+		launchEnv = append(launchEnv, "ATTN_WORKFLOW_GUIDANCE_ENABLED=1")
+	}
+	if opts.AutoApprove {
+		launchEnv = append(launchEnv, "ATTN_AUTO_APPROVE=1")
+	}
+	if opts.TrustWorkingDirectory {
+		launchEnv = append(launchEnv, "ATTN_TRUST_WORKING_DIRECTORY=1")
+	}
+	if model := strings.TrimSpace(opts.Model); model != "" {
+		launchEnv = append(launchEnv, "ATTN_MODEL="+model)
+	}
+	if effort := strings.TrimSpace(opts.Effort); effort != "" {
+		launchEnv = append(launchEnv, "ATTN_EFFORT="+effort)
+	}
+	if opts.ChiefContextWindowCap > 0 {
+		launchEnv = append(launchEnv, "ATTN_CHIEF_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.ChiefContextWindowCap))
+	}
 
 	shellEnv := opts.LoginShellEnv
 	if len(shellEnv) == 0 {
@@ -559,8 +604,12 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 			logf("pty spawn: failed to capture login shell env from %s: %v", loginShell, err)
 		}
 	}
+	// Cached login-shell data can contain a parent agent's one-shot launch pins.
+	// Strip them first, then overlay only this session's explicit contract.
+	env = filterEnvKeys(env, launchKeys...)
+	env = mergeEnvironment(env, launchEnv)
 	// Don't leak worker-only configuration transport vars into spawned shells.
-	env = filterEnvKeys(env, "ATTN_CACHED_SHELL_ENV", "ATTN_PTY_EXTERNAL_ENV")
+	env = filterEnvKeys(env, "ATTN_PTY_WORKER", "ATTN_CACHED_SHELL_ENV", "ATTN_PTY_EXTERNAL_ENV")
 
 	// Strip CLAUDECODE after all merges so spawned sessions don't think
 	// they're nested.  This var leaks into the daemon env when started

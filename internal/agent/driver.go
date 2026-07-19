@@ -309,6 +309,10 @@ type SpawnOpts struct {
 
 	// ConfigOverrides are agent CLI config overrides generated for this launch.
 	ConfigOverrides []string
+
+	// TrustWorkingDirectory allows an unattended, daemon-owned launch to pass
+	// the driver's repository trust gate. Interactive launches leave this false.
+	TrustWorkingDirectory bool
 }
 
 // --- Optional capability interfaces ---

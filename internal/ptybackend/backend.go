@@ -55,6 +55,8 @@ type SpawnOptions struct {
 	// worker exports ATTN_AUTO_APPROVE so the launched agent starts in its native
 	// auto-approve mode (Claude --permission-mode auto). Yolo overrides it.
 	AutoApprove bool
+	// TrustWorkingDirectory is set only for unattended daemon-owned launches.
+	TrustWorkingDirectory bool
 
 	// Model, when set, pins the launched agent's model via --model. Sourced from
 	// the chief_model_<agent> setting for chief launches or a delegation's
