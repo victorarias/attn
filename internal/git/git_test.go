@@ -9,6 +9,7 @@ import (
 )
 
 func TestGetBranchInfo_MainRepo(t *testing.T) {
+	t.Parallel()
 	// Create temp git repo
 	dir := t.TempDir()
 	runGit(t, dir, "init")
@@ -30,6 +31,7 @@ func TestGetBranchInfo_MainRepo(t *testing.T) {
 }
 
 func TestGetBranchInfo_Worktree(t *testing.T) {
+	t.Parallel()
 	// Create temp git repo with worktree - use single tmpDir with subdirs
 	// to avoid flakiness when running tests in parallel
 	tmpDir := t.TempDir()
@@ -59,6 +61,7 @@ func TestGetBranchInfo_Worktree(t *testing.T) {
 }
 
 func TestGetBranchInfo_NotGitRepo(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	info, err := GetBranchInfo(dir)
 	if err != nil {
@@ -70,6 +73,7 @@ func TestGetBranchInfo_NotGitRepo(t *testing.T) {
 }
 
 func TestGetBranchInfo_DetachedHead(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	runGit(t, dir, "commit", "--allow-empty", "-m", "init")

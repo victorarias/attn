@@ -32,10 +32,12 @@ func TestRunGitOutputTimesOut(t *testing.T) {
 func TestRunGitOutputLogsSlowCommand(t *testing.T) {
 	fakeBin := t.TempDir()
 	fakeGit := filepath.Join(fakeBin, "git")
-	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nsleep 3\nprintf ok\n"), 0755); err != nil {
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nprintf ok\n"), 0755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cleanupThreshold := setSlowLogThresholdForTesting(0)
+	defer cleanupThreshold()
 
 	var logs []string
 	SetLogFunc(func(format string, args ...interface{}) {

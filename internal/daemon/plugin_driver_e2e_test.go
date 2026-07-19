@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -33,13 +32,7 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 	}
 
 	tmpDir := shortTempDir(t)
-	repoRoot := findRepoRootForTest(t)
-	attnBin := filepath.Join(tmpDir, "attn")
-	build := exec.Command("go", "build", "-o", attnBin, "./cmd/attn")
-	build.Dir = repoRoot
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build attn test binary: %v\n%s", err, string(output))
-	}
+	attnBin := attnBinaryForE2ETest(t, tmpDir)
 
 	port, err := freeTCPPort()
 	if err != nil {

@@ -3,6 +3,7 @@ package git
 import "testing"
 
 func TestOriginHostOwnerRepo(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		remote   string
@@ -37,6 +38,7 @@ func TestOriginHostOwnerRepo(t *testing.T) {
 }
 
 func TestOriginHostOwnerRepo_NotGitRepo(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if host, slug := OriginHostOwnerRepo(dir); host != "" || slug != "" {
 		t.Errorf("OriginHostOwnerRepo(non-repo) = (%q, %q), want empty", host, slug)
@@ -44,6 +46,7 @@ func TestOriginHostOwnerRepo_NotGitRepo(t *testing.T) {
 }
 
 func TestOriginHostOwnerRepo_NoOrigin(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	if host, slug := OriginHostOwnerRepo(dir); host != "" || slug != "" {
@@ -52,6 +55,7 @@ func TestOriginHostOwnerRepo_NoOrigin(t *testing.T) {
 }
 
 func TestHostOwnerRepoFromRemoteUnparseable(t *testing.T) {
+	t.Parallel()
 	cases := []string{"", "just-a-name", "https://github.com/", "relative/path/only"}
 	for _, remote := range cases {
 		if host, slug := hostOwnerRepoFromRemote(remote); host != "" || slug != "" {

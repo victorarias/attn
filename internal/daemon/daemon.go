@@ -231,6 +231,7 @@ type Daemon struct {
 	plugins             *pluginRegistry
 	pluginSupervisorMu  sync.Mutex
 	pluginSupervisor    *pluginSupervisor
+	pluginHealthEnabled bool
 	pluginDriverMu      sync.Mutex
 	pluginLaunching     map[string]pluginSessionLaunch
 	pluginReports       map[string][]pendingPluginReport
@@ -574,35 +575,36 @@ func New(socketPath string) *Daemon {
 	manager := pty.NewManager(pty.DefaultScrollbackSize, logger.Infof)
 
 	d := &Daemon{
-		socketPath:         socketPath,
-		pidPath:            pidPath,
-		dataRoot:           dataRoot,
-		store:              sessionStore,
-		wsHub:              newWSHub(),
-		done:               make(chan struct{}),
-		logger:             logger,
-		debugLogging:       logger != nil && logger.DebugEnabled(),
-		ghRegistry:         github.NewClientRegistry(),
-		hubManager:         nil,
-		repoCaches:         make(map[string]*repoCache),
-		gitCoord:           newGitCoordinator(),
-		warnings:           startupWarnings,
-		workflowDirty:      make(map[string]bool),
-		workflowEngineConn: make(map[string]workflowEngineSink),
-		ptyBackend:         ptybackend.NewEmbedded(manager),
-		transcriptWatch:    make(map[string]*transcriptWatcher),
-		pendingInitialWS:   make(map[*wsClient]struct{}),
-		startedCh:          make(chan struct{}),
-		classifiedTurn:     make(map[string]string),
-		classifyingTurn:    make(map[string]string),
-		longRun:            make(map[string]longRunSession),
-		forcedStop:         make(map[string]time.Time),
-		pendingResumeID:    make(map[string]string),
-		tailscale:          newTailscaleRuntime(),
-		plugins:            newPluginRegistry(),
-		pluginDir:          pluginDirForSocket(socketPath),
-		bundledPluginDir:   bundledPluginDirForExecutable(),
-		workspaces:         newWorkspaceRegistry(),
+		socketPath:          socketPath,
+		pidPath:             pidPath,
+		dataRoot:            dataRoot,
+		store:               sessionStore,
+		wsHub:               newWSHub(),
+		done:                make(chan struct{}),
+		logger:              logger,
+		debugLogging:        logger != nil && logger.DebugEnabled(),
+		ghRegistry:          github.NewClientRegistry(),
+		hubManager:          nil,
+		repoCaches:          make(map[string]*repoCache),
+		gitCoord:            newGitCoordinator(),
+		warnings:            startupWarnings,
+		workflowDirty:       make(map[string]bool),
+		workflowEngineConn:  make(map[string]workflowEngineSink),
+		ptyBackend:          ptybackend.NewEmbedded(manager),
+		transcriptWatch:     make(map[string]*transcriptWatcher),
+		pendingInitialWS:    make(map[*wsClient]struct{}),
+		startedCh:           make(chan struct{}),
+		classifiedTurn:      make(map[string]string),
+		classifyingTurn:     make(map[string]string),
+		longRun:             make(map[string]longRunSession),
+		forcedStop:          make(map[string]time.Time),
+		pendingResumeID:     make(map[string]string),
+		tailscale:           newTailscaleRuntime(),
+		plugins:             newPluginRegistry(),
+		pluginHealthEnabled: true,
+		pluginDir:           pluginDirForSocket(socketPath),
+		bundledPluginDir:    bundledPluginDirForExecutable(),
+		workspaces:          newWorkspaceRegistry(),
 	}
 	// Production wiring for the orphaned-ticket reconciliation classifier. Test
 	// constructors leave this nil so unit tests never shell out to a real CLI.

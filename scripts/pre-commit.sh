@@ -142,15 +142,15 @@ if [ "$run_daemon_checks" = true ]; then
   header "Go format"
   format_go_files
 
-  header "Go tests"
-  (cd "$root" && go test ./...)
-
   header "Go build"
   tmp_bin="$(mktemp -t attn-precommit.XXXXXX)"
   make -C "$root" build OUTPUT="$tmp_bin"
   if [ -z "${ATTN_E2E_BIN:-}" ]; then
     export ATTN_E2E_BIN="$tmp_bin"
   fi
+
+  header "Go tests"
+  (cd "$root" && ./scripts/test-go.sh)
 
   header "Tauri daemon binary"
   target_triple="$(rustc -vV | awk '/host:/ {print $2}')"

@@ -24,13 +24,7 @@ func TestCodexResumeMappingEndToEnd(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	repoRoot := findRepoRootForTest(t)
-	attnBin := filepath.Join(tmpDir, "attn")
-	build := exec.Command("go", "build", "-o", attnBin, "./cmd/attn")
-	build.Dir = repoRoot
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build attn test binary: %v\n%s", err, string(output))
-	}
+	attnBin := attnBinaryForE2ETest(t, tmpDir)
 
 	fakeCodexLog := filepath.Join(tmpDir, "fake-codex.log")
 	fakeCodex := filepath.Join(tmpDir, "fake-codex")
@@ -201,4 +195,25 @@ func findRepoRootForTest(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+func attnBinaryForE2ETest(t *testing.T, tmpDir string) string {
+	t.Helper()
+	if binary := os.Getenv("ATTN_E2E_BIN"); binary != "" {
+		if info, err := os.Stat(binary); err != nil {
+			t.Fatalf("stat ATTN_E2E_BIN: %v", err)
+		} else if info.Mode()&0o111 == 0 {
+			t.Fatalf("ATTN_E2E_BIN is not executable: %s", binary)
+		}
+		return binary
+	}
+
+	repoRoot := findRepoRootForTest(t)
+	binary := filepath.Join(tmpDir, "attn")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/attn")
+	build.Dir = repoRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build attn test binary: %v\n%s", err, string(output))
+	}
+	return binary
 }

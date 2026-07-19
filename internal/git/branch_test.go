@@ -16,6 +16,7 @@ func writeFile(t *testing.T, dir, name, content string) {
 }
 
 func TestListRemoteBranches(t *testing.T) {
+	t.Parallel()
 	// This test requires a repo with remotes, skip in CI
 	if os.Getenv("CI") != "" {
 		t.Skip("Skipping remote branch test in CI")
@@ -32,6 +33,7 @@ func TestListRemoteBranches(t *testing.T) {
 }
 
 func TestCheckoutRemoteBranch(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init")
 	runGit(t, dir, "config", "user.email", "test@test.com")
@@ -59,6 +61,7 @@ func TestCheckoutRemoteBranch(t *testing.T) {
 }
 
 func TestRefExists(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
 	runGit(t, dir, "commit", "--allow-empty", "-m", "init")
@@ -80,6 +83,7 @@ func TestRefExists(t *testing.T) {
 }
 
 func TestGetCurrentBranchEmptyRepo(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
 
@@ -93,6 +97,7 @@ func TestGetCurrentBranchEmptyRepo(t *testing.T) {
 }
 
 func TestListBranchesWithCommitsEmptyRepo(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-b", "main")
 
@@ -106,6 +111,7 @@ func TestListBranchesWithCommitsEmptyRepo(t *testing.T) {
 }
 
 func TestListBranchesWithCommits(t *testing.T) {
+	t.Parallel()
 	// Create temp directory with subdirectories for main repo and worktree
 	tmpDir := t.TempDir()
 	mainDir := filepath.Join(tmpDir, "main")

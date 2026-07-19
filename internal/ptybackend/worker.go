@@ -354,54 +354,11 @@ func (b *WorkerBackend) Probe(ctx context.Context) error {
 	return nil
 }
 
-func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
-	if err := validateSessionID(opts.ID); err != nil {
-		return err
-	}
-
-	token, err := randomToken(32)
-	if err != nil {
-		return err
-	}
-	sessionID := opts.ID
-	socketPath, err := b.expectedSocketPath(sessionID)
-	if err != nil {
-		return err
-	}
-	session := &workerSession{
-		SessionID:    sessionID,
-		SocketPath:   socketPath,
-		RegistryPath: filepath.Join(b.registryDir(), sessionID+".json"),
-		ControlToken: token,
-		LifecycleID:  opts.LifecycleID,
-	}
-
-	b.mu.Lock()
-	if _, exists := b.sessions[sessionID]; exists {
-		b.mu.Unlock()
-		return fmt.Errorf("session %s already exists", sessionID)
-	}
-	// Reserve the session ID early to avoid duplicate concurrent spawns.
-	b.sessions[sessionID] = session
-	b.mu.Unlock()
-	spawnReady := false
-	var workerProc *os.Process
-	defer func() {
-		if spawnReady {
-			return
-		}
-		if workerProc != nil {
-			b.stopSpawnedWorkerProcess(workerProc, sessionID)
-		}
-		b.mu.Lock()
-		delete(b.sessions, sessionID)
-		b.mu.Unlock()
-	}()
-
+func (b *WorkerBackend) spawnArgs(opts SpawnOptions, session *workerSession) ([]string, error) {
 	args := []string{
 		"pty-worker",
 		"--daemon-instance-id", b.cfg.DaemonInstanceID,
-		"--session-id", sessionID,
+		"--session-id", session.SessionID,
 		"--agent", opts.Agent,
 		"--cwd", opts.CWD,
 		"--cols", strconv.Itoa(int(opts.Cols)),
@@ -452,12 +409,63 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if len(opts.ExternalCommand) > 0 {
 		encoded, err := json.Marshal(opts.ExternalCommand)
 		if err != nil {
-			return fmt.Errorf("encode external command: %w", err)
+			return nil, fmt.Errorf("encode external command: %w", err)
 		}
 		args = append(args, "--external-command-json", string(encoded))
 	}
 	if opts.ExternalCWD != "" {
 		args = append(args, "--external-cwd", opts.ExternalCWD)
+	}
+	return args, nil
+}
+
+func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
+	if err := validateSessionID(opts.ID); err != nil {
+		return err
+	}
+
+	token, err := randomToken(32)
+	if err != nil {
+		return err
+	}
+	sessionID := opts.ID
+	socketPath, err := b.expectedSocketPath(sessionID)
+	if err != nil {
+		return err
+	}
+	session := &workerSession{
+		SessionID:    sessionID,
+		SocketPath:   socketPath,
+		RegistryPath: filepath.Join(b.registryDir(), sessionID+".json"),
+		ControlToken: token,
+		LifecycleID:  opts.LifecycleID,
+	}
+
+	b.mu.Lock()
+	if _, exists := b.sessions[sessionID]; exists {
+		b.mu.Unlock()
+		return fmt.Errorf("session %s already exists", sessionID)
+	}
+	// Reserve the session ID early to avoid duplicate concurrent spawns.
+	b.sessions[sessionID] = session
+	b.mu.Unlock()
+	spawnReady := false
+	var workerProc *os.Process
+	defer func() {
+		if spawnReady {
+			return
+		}
+		if workerProc != nil {
+			b.stopSpawnedWorkerProcess(workerProc, sessionID)
+		}
+		b.mu.Lock()
+		delete(b.sessions, sessionID)
+		b.mu.Unlock()
+	}()
+
+	args, err := b.spawnArgs(opts, session)
+	if err != nil {
+		return err
 	}
 
 	binaryPath := b.resolveBinaryPath()

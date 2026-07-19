@@ -178,7 +178,7 @@ func shortTempDir(t *testing.T) string {
 }
 
 func TestDaemon_RegisterAndQuery(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19900")
+	useFreeWSPort(t)
 
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
@@ -218,7 +218,7 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 }
 
 func TestDaemon_StateUpdate(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19901")
+	useFreeWSPort(t)
 
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
@@ -262,7 +262,7 @@ func TestDaemon_StateUpdate(t *testing.T) {
 // "scheduled") over the real socket. It must land as scheduled (not idle, not
 // dropped) so the parked session reads correctly end to end.
 func TestDaemon_ScheduledStateUpdate(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19952")
+	useFreeWSPort(t)
 
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
@@ -309,7 +309,7 @@ func TestDaemon_ScheduledStateUpdate(t *testing.T) {
 }
 
 func TestDaemon_Unregister(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19902")
+	useFreeWSPort(t)
 
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
@@ -332,7 +332,7 @@ func TestDaemon_Unregister(t *testing.T) {
 }
 
 func TestDaemon_MultipleSessions(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19903")
+	useFreeWSPort(t)
 
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
@@ -389,7 +389,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 }
 
 func TestDaemon_SocketCleanup(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19904")
+	useFreeWSPort(t)
 
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
@@ -413,9 +413,9 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 }
 
 func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19924")
+	useFreeWSPort(t)
 	t.Setenv("ATTN_PTY_BACKEND", "embedded")
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-prune-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 
 	d := NewForTesting(sockPath)
 
@@ -520,7 +520,7 @@ func TestDaemon_ReseedWorkspaceStatusesAfterRecovery(t *testing.T) {
 func TestDaemon_Start_SelectsWorkerBackendWhenRequested(t *testing.T) {
 	t.Setenv("ATTN_PTY_BACKEND", "worker")
 	t.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "1")
-	t.Setenv("ATTN_WS_PORT", "19926")
+	useFreeWSPort(t)
 
 	sockPath := filepath.Join(shortTempDir(t), "worker-select.sock")
 	d := NewForTesting(sockPath)
@@ -556,7 +556,7 @@ func TestDaemon_Start_WorkerProbeFailureFallsBackToEmbedded(t *testing.T) {
 	t.Setenv("ATTN_PTY_BACKEND", "worker")
 	t.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "0")
 	t.Setenv("ATTN_PTY_WORKER_BINARY", filepath.Join(t.TempDir(), "missing-attn-binary"))
-	t.Setenv("ATTN_WS_PORT", "19936")
+	useFreeWSPort(t)
 
 	sockPath := filepath.Join(shortTempDir(t), "worker-probe-fallback.sock")
 	d := NewForTesting(sockPath)
@@ -595,7 +595,7 @@ func TestDaemon_Start_WorkerProbeFailureFallsBackToEmbedded(t *testing.T) {
 
 func TestDaemon_Start_SelectsEmbeddedBackendWhenRequested(t *testing.T) {
 	t.Setenv("ATTN_PTY_BACKEND", "embedded")
-	t.Setenv("ATTN_WS_PORT", "19927")
+	useFreeWSPort(t)
 
 	sockPath := filepath.Join(shortTempDir(t), "embedded-select.sock")
 	d := NewForTesting(sockPath)
@@ -3553,10 +3553,7 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
-	// Use unique port
-	wsPort := "19851"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
 	d := NewForTesting(sockPath)
 	go d.Start()
@@ -3642,9 +3639,7 @@ func TestDaemon_WebRootServesEmbeddedClient(t *testing.T) {
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
-	wsPort := "19852"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
 	d := NewForTesting(sockPath)
 	go d.Start()
@@ -3813,9 +3808,7 @@ func TestDaemon_WebFaviconDoesNot404(t *testing.T) {
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
-	wsPort := "19853"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
 	d := NewForTesting(sockPath)
 	go d.Start()
@@ -3864,8 +3857,7 @@ func TestDaemon_WebInstrumentationLogsPayload(t *testing.T) {
 		t.Fatalf("freeTCPPort: %v", err)
 	}
 	wsPort := strconv.Itoa(port)
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	t.Setenv("ATTN_WS_PORT", wsPort)
 
 	logger, err := logging.New(logPath)
 	if err != nil {
@@ -4629,10 +4621,7 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 		Role:   "reviewer",
 	})
 
-	// Use unique port to avoid conflicts
-	wsPort := "19849"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
 	// Create GitHub client pointing to mock server
 	ghClient, err := github.NewClient(mockGH.URL, "test-token")
@@ -4645,7 +4634,7 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 
 	// Create daemon with GitHub client
 	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-ws-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 	os.Remove(sockPath) // Clean up any existing socket
 	d := NewWithGitHubClient(sockPath, ghClient)
 
@@ -4744,7 +4733,7 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 }
 
 func TestDaemon_InjectTestPR(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19905")
+	useFreeWSPort(t)
 
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
@@ -4823,13 +4812,10 @@ func TestDaemon_InjectTestPR(t *testing.T) {
 }
 
 func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
-	// Use unique port to avoid conflicts
-	wsPort := "19850"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
 	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-mute-pr-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)
@@ -4944,13 +4930,10 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 }
 
 func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
-	// Use unique port to avoid conflicts
-	wsPort := "19851"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
 	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-mute-repo-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)
@@ -5026,13 +5009,10 @@ func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
 }
 
 func TestDaemon_InitialState_IncludesRepoStates(t *testing.T) {
-	// Use unique port to avoid conflicts
-	wsPort := "19852"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
 	// Use /tmp directly to avoid long socket paths, with unique suffix to prevent parallel test conflicts
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-initial-repos-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)
@@ -5099,12 +5079,9 @@ func TestDaemon_InitialState_IncludesRepoStates(t *testing.T) {
 // ============================================================================
 
 func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
-	// Use unique port to avoid conflicts
-	wsPort := "19853"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-state-broadcast-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 	os.Remove(sockPath)
 
 	d := NewForTesting(sockPath)
@@ -5168,12 +5145,9 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 }
 
 func TestDaemon_StateTransitions_AllStates(t *testing.T) {
-	// Use unique port to avoid conflicts
-	wsPort := "19854"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-state-transitions-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 	os.Remove(sockPath)
 
 	d := NewForTesting(sockPath)
@@ -5253,12 +5227,9 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 }
 
 func TestDaemon_InjectTestSession_BroadcastsToWebSocket(t *testing.T) {
-	// Use unique port to avoid conflicts
-	wsPort := "19855"
-	os.Setenv("ATTN_WS_PORT", wsPort)
-	defer os.Unsetenv("ATTN_WS_PORT")
+	wsPort := useFreeWSPort(t)
 
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-inject-session-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 	os.Remove(sockPath)
 
 	d := NewForTesting(sockPath)
@@ -5345,10 +5316,10 @@ func TestDaemon_InjectTestSession_BroadcastsToWebSocket(t *testing.T) {
 }
 
 func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19906")
+	useFreeWSPort(t)
 
 	// Use /tmp directly to avoid long socket paths
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-stop-pending-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)
@@ -5422,7 +5393,7 @@ func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
 }
 
 func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T) {
-	t.Setenv("ATTN_WS_PORT", "19907")
+	useFreeWSPort(t)
 
 	// This test verifies that when all todos are completed, the daemon
 	// does NOT short-circuit to waiting_input based on todos alone.
@@ -5432,7 +5403,7 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	// but that's different from the todos short-circuit path.
 
 	// Use /tmp directly to avoid long socket paths
-	sockPath := filepath.Join("/tmp", fmt.Sprintf("attn-test-stop-completed-%d.sock", time.Now().UnixNano()))
+	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 	os.Remove(sockPath) // Clean up any existing socket
 
 	d := NewForTesting(sockPath)

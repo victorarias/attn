@@ -1,0 +1,93 @@
+# Plan: Faster Go tests
+
+## Goal
+
+Keep the ordinary Go verification contract intact while making a cache-controlled
+`go test` run fast and predictable enough for pre-commit use. Tests must remain
+isolated from production `~/.attn`.
+
+## Starting Measurements
+
+Measured on an Apple M5 Max with macOS 26.5.2 and Go 1.26.2. Full-test timings
+use a warm compiler cache and `-count=1` so Go's test-result cache cannot hide
+execution. These numbers describe this machine and cache state, not a universal
+budget.
+
+| Candidate | Starting result |
+| --- | ---: |
+| Full `go test -count=1 ./...`, inherited Spotify Git wrapper | 131.07s, pass |
+| `internal/daemon` within that run | 129.882s, pass |
+| `internal/git`, inherited Spotify Git wrapper | 14.97s, pass |
+| `internal/git`, direct Git | 5.93s, pass |
+| Full suite, direct Git diagnostic | 70.41s, one load-sensitive Codex-resume failure |
+| Four direct-Git daemon shards | 18.81s, one shared `/tmp/attn.pid` collision |
+| Compile only, fresh `GOCACHE` | 29.68s |
+| Compile only, warm `GOCACHE` | 0.29s |
+
+## Test Path
+
+```text
+Current:
+make / pre-commit
+  -> one `go test ./...`
+    -> packages run concurrently
+      -> 778 daemon tests run almost entirely serially
+      -> every `git` lookup inherits the developer PATH
+
+Target:
+make / pre-commit
+  -> one repository test runner
+    -> temp-scoped ATTN_DATA_DIR with inherited path overrides cleared
+    -> direct, uninstrumented Git for test subprocesses
+    -> bounded package and per-process Go parallelism
+    -> five deterministic daemon test shards
+      -> temp-scoped sockets, PID files, ports, and data
+    -> one reusable attn test binary for process E2E tests
+    -> 90-second per-job fail-fast budget
+```
+
+## Implementation Tasks
+
+- [x] Run tests with a direct Git executable rather than an inherited wrapper.
+- [x] Isolate daemon socket, PID-file, port, and other shared test resources.
+- [x] Shard `internal/daemon` deterministically across five test processes.
+- [x] Replace deliberate wall-clock sleeps with test-controlled thresholds.
+- [x] Reuse a prebuilt `attn` binary across process E2E tests.
+- [x] Add `t.Parallel()` only to audited tests without process-global state.
+- [x] Repeat cold and warm measurements and compare them with this baseline.
+
+## Results
+
+Ten consecutive five-shard `-count=1` runs passed. Their wall times were
+24.71–27.45s, with a 25.64s median and 27.45s observed p95. A fresh-`GOCACHE`
+run passed in 48.43s. The cache-controlled median is 80% lower than the 131.07s
+starting measurement; the observed p95 and cold run meet their budgets. The
+median missed the aspirational sub-25s target by 0.64s.
+
+The focused `internal/git` package improved from 14.97s through the inherited
+wrapper to 1.99s using direct Git plus audited parallel tests. The worker theme
+argument test improved from 6.3s and load-sensitive failure to 0.42s by testing
+argument construction without launching a process.
+
+## Success Criteria
+
+- [x] The same default Go test coverage passes ten consecutive cache-controlled runs.
+- [ ] Warm compiler cache with test-result caching disabled: p50 under 25s on
+  the baseline machine (observed 25.64s).
+- [x] Warm compiler cache with test-result caching disabled: p95 under 30s on
+  the baseline machine (observed 27.45s).
+- [x] Fresh `GOCACHE`: p95 under 60s on the baseline machine.
+- [x] No failures from fixed ports, shared PID files, sockets, inherited test paths,
+  or production attn state.
+
+## Decisions
+
+- Preserve the complete default suite before considering a separate integration
+  tier.
+- Prefer process sharding over broad in-process parallelism because daemon tests
+  mutate environment variables and package globals.
+- Keep Git selection test-scoped; do not change interactive Git or global Spotify
+  configuration.
+- Five daemon shards with `GOMAXPROCS=3` replaced the initial four-shard shape
+  after the measured concurrency sweep: 25.32s versus 30.75s for four/four and
+  41.85s for six/four.
