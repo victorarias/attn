@@ -3710,6 +3710,7 @@ func (d *Daemon) broadcastEndpointsUpdated() {
 func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 	sessions := d.store.List("")
 	prs := d.store.ListPRs("")
+	dataDir, socketPath, routingPathError := healthRoutingPaths()
 
 	health := map[string]interface{}{
 		"status":             "ok",
@@ -3727,12 +3728,32 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 		// they're connected to the daemon they expect and refuse to
 		// operate on a mismatch.
 		"profile":     config.ProfileLabel(),
-		"data_dir":    config.DataDir(),
-		"socket_path": config.SocketPath(),
+		"data_dir":    dataDir,
+		"socket_path": socketPath,
 		"port":        config.WSPort(),
+	}
+	if routingPathError != "" {
+		health["routing_path_error"] = routingPathError
 	}
 
 	setNoStoreHeaders(w.Header())
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(health)
+}
+
+func healthRoutingPaths() (dataDir, socketPath, routingPathError string) {
+	rawDataDir := config.DataDir()
+	rawSocketPath := config.SocketPath()
+	dataDir, dataErr := config.CanonicalRuntimePath(rawDataDir)
+	if dataErr != nil {
+		dataDir = rawDataDir
+	}
+	socketPath, socketErr := config.CanonicalRuntimePath(rawSocketPath)
+	if socketErr != nil {
+		socketPath = rawSocketPath
+	}
+	if dataErr != nil || socketErr != nil {
+		routingPathError = fmt.Sprintf("data_dir: %v; socket_path: %v", dataErr, socketErr)
+	}
+	return dataDir, socketPath, routingPathError
 }

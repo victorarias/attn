@@ -78,6 +78,15 @@ A large automated suite — even a race-clean concurrency suite — is not by it
 
 Use a **non-prod** profile for this (the `dev` sibling or a throwaway `ATTN_PROFILE`) — that is pre-authorized; never smoke on prod. See [Iterating On Attn Itself](#iterating-on-attn-itself-attn-on-attn-testing) and [docs/profiles.md](docs/profiles.md).
 
+After installing and selecting the non-production profile, run that profile's newly bundled CLI preflight before starting live verification:
+
+```bash
+profile_app="$(./attn profile resolve --field appPath)"
+"$profile_app/Contents/MacOS/attn" preflight
+```
+
+When the scenario launches an agent with pinned settings, pass the same values to preflight, for example `--agent codex --model <model> --effort high`. Use `--json` when a script or agent needs a stable result. A failing preflight is an environment/setup failure: fix its reported tool, writable-path, routing, daemon, or protocol cause before treating later behavior as product evidence. Preflight is diagnostic only and never repairs or restarts the environment. Use the installed profile's bundled CLI as shown above, not an unrelated `attn` earlier on `PATH`.
+
 If a PR needs live-app verification and you **cannot** run it (no ability to build/install/run a non-prod profile in this environment), **stop and ask the user for guidance** — do not merge on automated tests alone. State plainly in the PR and to the user what was and was not verified live.
 
 ## Packaged-App Harness

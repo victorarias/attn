@@ -242,6 +242,9 @@ func main() {
 	case "automation":
 		maybePrintProfileBanner()
 		runAutomationCommand()
+	case "preflight":
+		maybePrintProfileBanner()
+		runPreflight()
 	case "plugin":
 		maybePrintProfileBanner()
 		runPluginCommand()
@@ -615,6 +618,7 @@ commands:
   browser <command>                 open and control the in-app browser
   workflow <command>                run, inspect, and resume durable workflows
   automation <command>              manage and run durable automations
+  preflight                         diagnose tools, paths, routing, and launch settings
   list                              list sessions and workspaces
   present <command>                 open a review presentation and read feedback
   debug <command>                   probe debug artifacts (incidents, logs)
