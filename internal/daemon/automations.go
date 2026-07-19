@@ -517,6 +517,9 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 	if originPR.HeadSHA != currentPR.HeadSHA {
 		return errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
 	}
+	if d.canStartWithdrawnUndeliveredReviewer(origin, req.IDs.SessionID) {
+		return nil
+	}
 	if d.ptyBackend == nil {
 		return errors.New("reviewer continuity cannot verify the existing session")
 	}
@@ -781,7 +784,9 @@ func (d *Daemon) EnsureSession(_ context.Context, req automation.WorkRequest, di
 		}
 	}
 	if continuationRun != nil {
-		return errors.New("reviewer continuity requires the existing session to still be live")
+		if !d.canStartWithdrawnUndeliveredReviewer(continuationRun, req.IDs.SessionID) {
+			return errors.New("reviewer continuity requires the existing session to still be live")
+		}
 	}
 	prompt := automationSessionPrompt(req.Prompt, inputPath)
 	client := newInternalWSClient()
@@ -791,6 +796,10 @@ func (d *Daemon) EnsureSession(_ context.Context, req automation.WorkRequest, di
 		return err
 	}
 	return d.verifyUnattendedLaunch(req)
+}
+
+func (d *Daemon) canStartWithdrawnUndeliveredReviewer(origin *store.AutomationRun, sessionID string) bool {
+	return origin != nil && origin.State == "failed" && origin.LastError == store.AutomationReviewWithdrawnError && d.store.Get(sessionID) == nil
 }
 
 func (d *Daemon) automationContinuationOrigin(req automation.WorkRequest) (*store.AutomationRun, error) {

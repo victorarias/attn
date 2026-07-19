@@ -47,6 +47,8 @@ type AutomationReviewRequestCandidate struct {
 	Cycle      int
 }
 
+const AutomationReviewWithdrawnError = "GitHub review request withdrawn before delivery"
+
 func (s *Store) AutomationReviewRequestNeedsClaim(definitionID, subjectKey string, cycle int) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -306,14 +308,14 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		}
 		if _, err := tx.Exec(`
 			UPDATE automation_runs
-			SET state='failed',last_error='GitHub review request withdrawn before delivery',updated_at=?
+			SET state='failed',last_error=?,updated_at=?
 			WHERE state='pending' AND id IN (
 				SELECT r.id
 				FROM automation_runs r
 				JOIN automation_occurrences o ON o.id=r.occurrence_id
 				WHERE r.definition_id=? AND o.provider='github' AND o.subject_key=?
 			)
-		`, updatedRaw, definitionID, subjectKey); err != nil {
+		`, AutomationReviewWithdrawnError, updatedRaw, definitionID, subjectKey); err != nil {
 			return nil, err
 		}
 		if _, err := tx.Exec(`

@@ -773,3 +773,46 @@ func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T
 		t.Fatalf("unsafe continuation published ticket activity before validation: %#v", ticket.Activity)
 	}
 }
+
+func TestReRequestCanStartReviewerWhenWithdrawnOriginNeverLaunched(t *testing.T) {
+	s := store.New()
+	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	const payload = `{"provider":"github","host":"github.com","owner":"owner","repository":"repo","number":42,"url":"https://github.com/owner/repo/pull/42","state":"open","head_sha":"0123456789abcdef0123456789abcdef01234567"}`
+	const snapshot = `{"prompt":"Review","launch":{},"location":{}}`
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	first, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, payload, snapshot, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: first.TicketID, Title: "Review", Status: store.TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("re-request candidates=%#v err=%v", candidates, err)
+	}
+	second, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, payload, snapshot, now.Add(2*time.Minute), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{store: s, ptyBackend: &fakeSpawnBackend{}}
+	req := automation.WorkRequest{
+		RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Prompt: "Review", Context: json.RawMessage(payload),
+		IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID},
+	}
+	if err := d.validateAutomationContinuation(req); err != nil {
+		t.Fatalf("withdrawn-before-launch re-request rejected: %v", err)
+	}
+}
