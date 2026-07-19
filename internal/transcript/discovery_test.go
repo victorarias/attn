@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/victorarias/attn/internal/toolhome"
 )
 
 func writeCopilotSessionState(
@@ -91,13 +93,7 @@ func writeCodexTranscript(
 func TestFindCodexTranscript_MatchesSymlinkEquivalentCWD(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("CODEX_HOME", "")
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
+	t.Setenv(toolhome.EnvVar, homeDir)
 
 	root := t.TempDir()
 	realCWD := filepath.Join(root, "real", "project")
@@ -129,11 +125,7 @@ func TestFindCodexTranscript_MatchesSymlinkEquivalentCWD(t *testing.T) {
 func TestFindCodexTranscriptForResume_SelectsExactNativeID(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("CODEX_HOME", "")
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Setenv("HOME", oldHome) })
+	t.Setenv(toolhome.EnvVar, homeDir)
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	wrong := writeCodexTranscript(t, homeDir, "native-wrong", "/repo", now, now)
 	want := writeCodexTranscript(t, homeDir, "native-target", "/other", now.Add(time.Second), now.Add(time.Second))
@@ -145,7 +137,9 @@ func TestFindCodexTranscriptForResume_SelectsExactNativeID(t *testing.T) {
 func TestFindCodexTranscriptForResume_HonorsCodexHome(t *testing.T) {
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
-	t.Setenv("HOME", t.TempDir())
+	// CODEX_HOME is set, so codexSessionsDir never reaches toolhome.Dir(); set
+	// it anyway (defensive, and consistent with every other test in this file).
+	t.Setenv(toolhome.EnvVar, t.TempDir())
 	start := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	sessionDir := filepath.Join(codexHome, "sessions", "2026", "07", "18")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -166,13 +160,7 @@ func TestFindCodexTranscriptForResume_HonorsCodexHome(t *testing.T) {
 
 func TestFindCopilotTranscript_PrefersClosestStartTime(t *testing.T) {
 	homeDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
+	t.Setenv(toolhome.EnvVar, homeDir)
 
 	cwd := "/repo/project"
 	startedAt := time.Date(2026, 2, 8, 15, 30, 0, 0, time.UTC)
@@ -206,13 +194,7 @@ func TestFindCopilotTranscript_PrefersClosestStartTime(t *testing.T) {
 
 func TestFindCopilotTranscript_FallsBackToNewestModTime(t *testing.T) {
 	homeDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
+	t.Setenv(toolhome.EnvVar, homeDir)
 
 	cwd := "/repo/project"
 	startedAt := time.Date(2026, 2, 8, 15, 30, 0, 0, time.UTC)
@@ -246,13 +228,7 @@ func TestFindCopilotTranscript_FallsBackToNewestModTime(t *testing.T) {
 
 func TestFindClaudeTranscript_FindsSessionFile(t *testing.T) {
 	homeDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
+	t.Setenv(toolhome.EnvVar, homeDir)
 
 	sessionID := "claude-session-123"
 	projectDir := filepath.Join(homeDir, ".claude", "projects", "-Users-test-repo")
@@ -273,13 +249,7 @@ func TestFindClaudeTranscript_FindsSessionFile(t *testing.T) {
 
 func TestFindClaudeTranscript_ReturnsEmptyWhenMissing(t *testing.T) {
 	homeDir := t.TempDir()
-	oldHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("set HOME: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", oldHome)
-	})
+	t.Setenv(toolhome.EnvVar, homeDir)
 
 	projectDir := filepath.Join(homeDir, ".claude", "projects", "-Users-test-repo")
 	if err := os.MkdirAll(projectDir, 0o755); err != nil {

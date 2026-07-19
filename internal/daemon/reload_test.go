@@ -17,16 +17,18 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/toolhome"
 )
 
-// writeClaudeTranscriptFixture points HOME at a temp dir and writes a Claude
-// transcript for sessionID so FindClaudeTranscript (which walks ~/.claude/projects)
-// treats the session as resumable. Without it a reload-resume id with no transcript
-// on disk is correctly downgraded to a fresh spawn.
+// writeClaudeTranscriptFixture points ATTN_TOOL_HOME at a temp dir and writes
+// a Claude transcript for sessionID so FindClaudeTranscript (which walks
+// ~/.claude/projects) treats the session as resumable. Without it a
+// reload-resume id with no transcript on disk is correctly downgraded to a
+// fresh spawn.
 func writeClaudeTranscriptFixture(t *testing.T, sessionID string) {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 	projDir := filepath.Join(home, ".claude", "projects", "proj")
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatalf("mkdir transcript dir: %v", err)
@@ -288,10 +290,10 @@ func TestReloadSessionAgentFreshSpawnsWhenNotResumable(t *testing.T) {
 	}
 	d := newReloadTestDaemon(t, backend)
 	addReloadSession(d, "chief", protocol.SessionAgentClaude, protocol.SessionStateWorking)
-	// A resume id with NO transcript on disk: point HOME at an empty temp home so
-	// FindClaudeTranscript finds nothing for this id.
+	// A resume id with NO transcript on disk: point ATTN_TOOL_HOME at an empty
+	// temp home so FindClaudeTranscript finds nothing for this id.
 	d.persistResumeSessionID("chief", "chief")
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv(toolhome.EnvVar, t.TempDir())
 
 	d.reloadSessionAgent("chief")
 
@@ -337,7 +339,7 @@ func TestReloadSessionAgentAbortsWhenLaunchParamsNotRecorded(t *testing.T) {
 func TestBuildReloadSpawnOptionsCarriesChiefContextWindowCap(t *testing.T) {
 	// No transcript on disk → deterministic resume resolution (fresh-spawn), which
 	// keeps buildReloadSpawnOptions from depending on a resumable transcript.
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv(toolhome.EnvVar, t.TempDir())
 
 	newDaemonWithSession := func(t *testing.T, sessionID string) *Daemon {
 		t.Helper()

@@ -43,6 +43,7 @@ const (
 	CmdClientHello                           = "client_hello"
 	CmdRegister                              = "register"
 	CmdDelegate                              = "delegate"
+	CmdDelegateStatus                        = "delegate_status"
 	CmdSetTicketStatus                       = "set_ticket_status"
 	CmdTicketInbox                           = "ticket_inbox"
 	CmdTicketList                            = "ticket_list"
@@ -226,6 +227,7 @@ const (
 	EventPresentationAdded               = "presentation_added"
 	EventPresentationUpdated             = "presentation_updated"
 	EventDelegateResult                  = "delegate_result"
+	EventDelegationOperation             = "delegation_operation"
 	EventWorkspaceContextResult          = "workspace_context_result"
 	EventWorkspaceContextListResult      = "workspace_context_list_result"
 	EventNotebookListResult              = "notebook_list_result"
@@ -428,6 +430,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		return peek.Cmd, &msg, nil
 	case CmdAutomationRunList:
 		var msg AutomationRunListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDelegateStatus:
+		var msg DelegateStatusMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

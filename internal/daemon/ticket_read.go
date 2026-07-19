@@ -126,7 +126,7 @@ func (d *Daemon) ticketWatchEligible(sessionID string, now time.Time) (bool, err
 			return false, err
 		}
 		for _, event := range events {
-			deadline, immediate, err := d.ticketDeadline(sessionID, event.TicketID, event.CreatedAt, now)
+			deadline, immediate, err := d.ticketDeadline(sessionID, event, now)
 			if err != nil {
 				return false, err
 			}

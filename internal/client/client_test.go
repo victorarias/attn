@@ -348,17 +348,20 @@ func TestClient_Delegate(t *testing.T) {
 
 		json.NewEncoder(conn).Encode(protocol.Response{
 			Ok: true,
-			DelegateResult: &protocol.DelegateResult{
-				SessionID:   "delegated-session",
-				WorkspaceID: "workspace-1",
-				Directory:   "/tmp/project",
-				Placement:   "new_workspace",
+			DelegationOperation: &protocol.DelegationOperation{
+				OperationID: "operation-1", RequestID: "request-1", SessionID: "delegated-session",
+				State: protocol.DelegationOperationStateCompleted,
+				Result: &protocol.DelegateResult{
+					SessionID: "delegated-session", WorkspaceID: "workspace-1",
+					Directory: "/tmp/project", Placement: "new_workspace",
+				},
 			},
 		})
 	}()
 
 	c := New(sockPath)
 	result, err := c.Delegate("source-session", "Investigate the parser", DelegateOptions{
+		RequestID:    "request-1",
 		Agent:        "codex",
 		Model:        "gpt-5.2-codex",
 		Effort:       "high",
@@ -494,6 +497,10 @@ func TestClient_ConnectError_HintsOtherProfileWhenLive(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
 
+	// Intentionally exempt from the toolhome seam: DataDirForProfile is
+	// deliberately HOME-based for cross-profile probing (read-only path
+	// construction, no writes through the tool-dotfile paths toolhome guards),
+	// so HOME is its only lever. See config.go's DataDirForProfile comments.
 	t.Setenv("HOME", tmp)            // so SocketPathForProfile("") → $tmp/.attn/attn.sock
 	t.Setenv("ATTN_PROFILE", "dev")  // current profile is dev
 	t.Setenv("ATTN_SOCKET_PATH", "") // don't let an env override mask the default resolution

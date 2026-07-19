@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/victorarias/attn/internal/toolhome"
 )
 
 // FindCodexTranscript searches Codex session logs for the most recent session
@@ -157,7 +159,7 @@ func codexSessionsDir() string {
 	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
 		return filepath.Join(codexHome, "sessions")
 	}
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := toolhome.Dir()
 	if err != nil {
 		return ""
 	}
@@ -256,7 +258,7 @@ func absDuration(d time.Duration) time.Duration {
 // FindCopilotTranscript searches Copilot session-state for the most recently
 // active events stream matching cwd and launch timing.
 func FindCopilotTranscript(cwd string, startedAt time.Time) string {
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := toolhome.Dir()
 	if err != nil {
 		return ""
 	}
@@ -362,7 +364,7 @@ func FindCopilotTranscriptForResume(resumeID string) string {
 		return ""
 	}
 
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := toolhome.Dir()
 	if err != nil {
 		return ""
 	}
@@ -380,7 +382,7 @@ func FindClaudeTranscript(sessionID string) string {
 		return ""
 	}
 
-	homeDir, err := os.UserHomeDir()
+	homeDir, err := toolhome.Dir()
 	if err != nil {
 		return ""
 	}

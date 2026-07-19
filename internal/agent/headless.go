@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/victorarias/attn/internal/launchenv"
+	"github.com/victorarias/attn/internal/toolhome"
 )
 
 // DefaultContextWindowCap is the auto-compaction token threshold attn applies to
@@ -210,7 +211,7 @@ func headlessEnvironment(provider string) []string {
 		}
 	}
 	if provider == "codex" && strings.TrimSpace(os.Getenv("CODEX_HOME")) == "" {
-		if homeDir, err := os.UserHomeDir(); err == nil && strings.TrimSpace(homeDir) != "" {
+		if homeDir, err := toolhome.Dir(); err == nil && strings.TrimSpace(homeDir) != "" {
 			env = append(env, "CODEX_HOME="+filepath.Join(homeDir, ".codex"))
 		}
 	}

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/victorarias/attn/internal/toolhome"
 )
 
 func readSkillFile(t *testing.T, skillDir, relative string) string {
@@ -188,7 +190,7 @@ func assertAttnSkillTree(t *testing.T, skillDir string) {
 
 func TestEnsureAttnClaudeSkillInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 
 	if err := ensureAttnClaudeSkillInstalled(); err != nil {
 		t.Fatalf("ensureAttnClaudeSkillInstalled() error = %v", err)
@@ -205,7 +207,7 @@ func TestEnsureAttnClaudeSkillInstalled(t *testing.T) {
 // directly contradict the current skill's guidance, so install must prune.
 func TestEnsureAttnClaudeSkillInstalledPrunesOrphanedFiles(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 
 	skillDir := filepath.Join(home, ".claude", "skills", "attn")
 	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
@@ -235,7 +237,7 @@ func TestEnsureAttnClaudeSkillInstalledPrunesOrphanedFiles(t *testing.T) {
 
 func TestEnsureAttnCodexSkillInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 
 	if err := ensureAttnCodexSkillInstalled(); err != nil {
 		t.Fatalf("ensureAttnCodexSkillInstalled() error = %v", err)
@@ -246,7 +248,7 @@ func TestEnsureAttnCodexSkillInstalled(t *testing.T) {
 
 func TestEnsureAttnCopilotSkillInstalled(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 
 	if err := ensureAttnCopilotSkillInstalled(); err != nil {
 		t.Fatalf("ensureAttnCopilotSkillInstalled() error = %v", err)
@@ -261,7 +263,7 @@ func TestEnsureAttnCopilotSkillInstalled(t *testing.T) {
 // chief-of-staff.md telling a delegated leaf it can re-delegate).
 func TestEnsureAttnCopilotSkillInstalledPrunesOrphanedFiles(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 
 	skillDir := filepath.Join(home, ".copilot", "skills", "attn")
 	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
@@ -284,7 +286,7 @@ func TestEnsureAttnCopilotSkillInstalledPrunesOrphanedFiles(t *testing.T) {
 
 func TestAttnSkillInstallsAreIdentical(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv(toolhome.EnvVar, home)
 
 	if err := ensureAttnClaudeSkillInstalled(); err != nil {
 		t.Fatalf("ensureAttnClaudeSkillInstalled() error = %v", err)

@@ -155,7 +155,11 @@ type Daemon struct {
 	ticketReconcilePRFetch prStateFetcher
 	// ticketArtifactMu serializes attach installation with its durable ticket
 	// receipt so concurrent submissions cannot race on destination names.
-	ticketArtifactMu sync.Mutex
+	ticketArtifactMu  sync.Mutex
+	delegationMu      sync.Mutex
+	delegationRunning map[string]bool
+	// deterministic slow-preparation seam used by delegation idempotency tests.
+	delegationWorktreePrepareHook func(path string)
 	// reloadingSessions marks sessions whose agent is being re-spawned in place
 	// (chief-of-staff assign/demote reload). handlePTYExit consumes the flag to
 	// suppress the killed worker's session_exited so the reload reads as a runtime
@@ -862,6 +866,11 @@ func (d *Daemon) Start() error {
 		d.performStartupPTYRecovery(recoveryStartedAt)
 		d.recoverAutomations()
 		d.setRecovering(false)
+		// A pending delegation may have spawned its stable runtime ID just
+		// before the daemon stopped. Resume only after worker reconciliation has
+		// adopted any surviving runtime into the session store; absence is then
+		// authoritative enough to launch the reserved ID once.
+		d.resumePendingDelegations()
 	}()
 
 	// Note: No background persistence needed - SQLite persists immediately
@@ -2028,6 +2037,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleDelegate(conn, msg.(*protocol.DelegateMessage))
 	case protocol.CmdAutomationApply, protocol.CmdAutomationList, protocol.CmdAutomationShow, protocol.CmdAutomationRun, protocol.CmdAutomationRunList:
 		d.handleAutomationCommand(conn, cmd, msg)
+	case protocol.CmdDelegateStatus:
+		d.handleDelegateStatus(conn, msg.(*protocol.DelegateStatusMessage))
 	case protocol.CmdSetTicketStatus:
 		d.handleSetTicketStatus(conn, msg.(*protocol.SetTicketStatusMessage))
 	case protocol.CmdTicketInbox:

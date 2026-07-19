@@ -470,6 +470,9 @@ type DelegateMessage struct {
 	// Agent corresponds to the JSON schema field "agent".
 	Agent *string `json:"agent,omitempty,omitzero"`
 
+	// AllowWorktreeReuse corresponds to the JSON schema field "allow_worktree_reuse".
+	AllowWorktreeReuse *bool `json:"allow_worktree_reuse,omitempty,omitzero"`
+
 	// Brief corresponds to the JSON schema field "brief".
 	Brief string `json:"brief"`
 
@@ -490,6 +493,9 @@ type DelegateMessage struct {
 
 	// Placement corresponds to the JSON schema field "placement".
 	Placement *string `json:"placement,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
 
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID string `json:"source_session_id"`
@@ -538,6 +544,14 @@ type DelegateResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type DelegateStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
 type DelegateWorktreeRequest struct {
 	// Branch corresponds to the JSON schema field "branch".
 	Branch string `json:"branch"`
@@ -551,6 +565,65 @@ type DelegateWorktreeRequest struct {
 	// StartingFrom corresponds to the JSON schema field "starting_from".
 	StartingFrom *string `json:"starting_from,omitempty,omitzero"`
 }
+
+type DelegationOperation struct {
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// OperationID corresponds to the JSON schema field "operation_id".
+	OperationID string `json:"operation_id"`
+
+	// Progress corresponds to the JSON schema field "progress".
+	Progress string `json:"progress"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Result corresponds to the JSON schema field "result".
+	Result *DelegateResult `json:"result,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// State corresponds to the JSON schema field "state".
+	State DelegationOperationState `json:"state"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID *string `json:"ticket_id,omitempty,omitzero"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+
+	// WorktreePath corresponds to the JSON schema field "worktree_path".
+	WorktreePath *string `json:"worktree_path,omitempty,omitzero"`
+}
+
+type DelegationOperationMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Operation corresponds to the JSON schema field "operation".
+	Operation *DelegationOperation `json:"operation,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type DelegationOperationState string
+
+const DelegationOperationStateAccepted DelegationOperationState = "accepted"
+const DelegationOperationStateCompleted DelegationOperationState = "completed"
+const DelegationOperationStateFailed DelegationOperationState = "failed"
+const DelegationOperationStatePreparing DelegationOperationState = "preparing"
 
 type DeleteWorktreeMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
@@ -3250,6 +3323,10 @@ type Response struct {
 
 	// DelegateResult corresponds to the JSON schema field "delegate_result".
 	DelegateResult *DelegateResult `json:"delegate_result,omitempty,omitzero"`
+
+	// DelegationOperation corresponds to the JSON schema field
+	// "delegation_operation".
+	DelegationOperation *DelegationOperation `json:"delegation_operation,omitempty,omitzero"`
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`

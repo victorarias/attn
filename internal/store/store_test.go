@@ -715,6 +715,34 @@ func TestStore_ListAuthorStates(t *testing.T) {
 	}
 }
 
+func TestHasSessionInDirectoryIgnoresIdleSessions(t *testing.T) {
+	for _, persistent := range []bool{false, true} {
+		name := "memory"
+		var s *Store
+		if persistent {
+			name = "sqlite"
+			var err error
+			s, err = NewWithDB(t.TempDir() + "/test.db")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+		} else {
+			s = New()
+		}
+		t.Run(name, func(t *testing.T) {
+			s.Add(&protocol.Session{ID: "idle", Directory: "/tmp/worktree", State: protocol.SessionStateIdle})
+			if s.HasSessionInDirectory("/tmp/worktree") {
+				t.Fatal("idle session should not reserve the worktree")
+			}
+			s.Add(&protocol.Session{ID: "working", Directory: "/tmp/worktree", State: protocol.SessionStateWorking})
+			if !s.HasSessionInDirectory("/tmp/worktree") {
+				t.Fatal("working session should reserve the worktree")
+			}
+		})
+	}
+}
+
 // The intentional-close mark is the durable half of the close-vs-crash signal:
 // it must survive a store reopen (daemon restart) so the startup reap's ticket
 // seam can still tell a user close from a spontaneous death, and clearing it
