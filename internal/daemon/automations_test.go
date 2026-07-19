@@ -662,6 +662,17 @@ func TestSuccessfulContinuationReopensOriginTicketAfterDelivery(t *testing.T) {
 	}
 }
 
+func TestContinuationActivationFailsIfTicketDisappeared(t *testing.T) {
+	d := &Daemon{store: store.New()}
+	err := d.activateAutomationContinuationTicket(automation.WorkRequest{
+		RunID: "run-2", DefinitionID: "review", ContinuityKey: "github.com/owner/repo#42",
+		IDs: automation.DeliveryIDs{TicketID: "missing-ticket"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "disappeared during delivery") {
+		t.Fatalf("missing ticket activation err=%v", err)
+	}
+}
+
 func TestMissingContinuityTicketFailsBeforeReusingBoundArtifacts(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
@@ -740,6 +751,13 @@ func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T
 	}
 	d := &Daemon{store: s, ptyBackend: &fakeSpawnBackend{sessionIDs: []string{first.SessionID}}}
 	req := automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Context: json.RawMessage(secondPayload), IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}
+	changedContract := req
+	changedContract.Context = json.RawMessage(firstPayload)
+	changedContract.Prompt = "Updated review instructions"
+	err = d.validateAutomationContinuation(changedContract)
+	if err == nil || !strings.Contains(err.Error(), "contract changed") {
+		t.Fatalf("changed-contract preflight err=%v", err)
+	}
 	err = d.validateAutomationContinuation(req)
 	if err == nil || !strings.Contains(err.Error(), "changed pull-request revision") {
 		t.Fatalf("changed-head preflight err=%v", err)

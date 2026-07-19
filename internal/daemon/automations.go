@@ -484,6 +484,13 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 	if origin == nil {
 		return errors.New("continuity origin run missing")
 	}
+	var originSnapshot automation.Snapshot
+	if err := json.Unmarshal([]byte(origin.SnapshotJSON), &originSnapshot); err != nil {
+		return fmt.Errorf("continuity origin snapshot: %w", err)
+	}
+	if originSnapshot.Prompt != req.Prompt || originSnapshot.Launch != req.Launch || !sameAutomationLocation(originSnapshot.Location, req.Location) {
+		return errors.New("automation reviewer contract changed; refusing to reuse a session with stale instructions")
+	}
 	originOccurrence, err := d.store.GetAutomationOccurrence(origin.OccurrenceID)
 	if err != nil || originOccurrence == nil {
 		return errors.Join(errors.New("continuity origin occurrence missing"), err)
@@ -561,8 +568,14 @@ func (d *Daemon) activateAutomationContinuationTicket(req automation.WorkRequest
 		return nil
 	}
 	ticket, err := d.store.GetTicket(req.IDs.TicketID)
-	if err != nil || ticket == nil || ticket.AutomationRunID == req.RunID || !ticket.Status.IsTerminal() {
+	if err != nil {
 		return err
+	}
+	if ticket == nil {
+		return errors.New("automation continuity ticket disappeared during delivery")
+	}
+	if ticket.AutomationRunID == req.RunID || !ticket.Status.IsTerminal() {
+		return nil
 	}
 	comment := "Reopened for automation occurrence " + req.RunID + "."
 	if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusWorking, "automation:"+req.DefinitionID, comment, time.Now()); err != nil {
@@ -571,6 +584,12 @@ func (d *Daemon) activateAutomationContinuationTicket(req automation.WorkRequest
 	d.broadcastTicketsUpdated()
 	d.notifyTicketObservers(ticket.ID)
 	return nil
+}
+
+func sameAutomationLocation(left, right automation.LocationSpec) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
 }
 
 func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) (automation.PreparedLocation, error) {
