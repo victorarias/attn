@@ -4,6 +4,16 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 stage_root="${1:-${repo_root}/app/src-tauri/bundled-plugins}"
 
+# bun < 1.3.14 emits --compile binaries whose embedded JS payload can overflow
+# the __BUN segment past the code-signature extent; codesign then refuses to
+# sign them ("main executable failed strict validation").
+minimum_bun_version="1.3.14"
+bun_version="$(bun --version)"
+if [[ "$(printf '%s\n' "${minimum_bun_version}" "${bun_version}" | sort -V | head -1)" != "${minimum_bun_version}" ]]; then
+  echo "bun ${bun_version} is too old to produce signable --compile binaries; need >= ${minimum_bun_version}" >&2
+  exit 1
+fi
+
 stage_plugin() {
   local name="$1" description="$2"
   local source_dir="${repo_root}/plugins/${name}"
@@ -25,11 +35,18 @@ stage_plugin() {
   if [[ "${name}" == "attn-opencode" ]]; then
     bun build "${source_dir}/src/guidance-plugin.ts" --target=bun --format=esm --minify --outfile "${stage_dir}/guidance-plugin.js"
   fi
+  if [[ "${name}" == "attn-pi" ]]; then
+    # The suite runs inside pi's node runtime; pi resolves
+    # @earendil-works/pi-coding-agent as a virtual module at load time, so it
+    # must stay an external import.
+    bun build "${source_dir}/suite/index.ts" --target=node --format=esm --minify \
+      --external "@earendil-works/pi-coding-agent" --outfile "${stage_dir}/suite.js"
+  fi
   cp "${source_dir}/README.md" "${stage_dir}/README.md"
   cat >"${stage_dir}/attn-plugin.toml" <<EOF
 name = "${name}"
 version = "${package_version}"
-attn_api_version = 4
+attn_api_version = 5
 description = "${description}"
 
 [plugin]

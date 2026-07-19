@@ -1,5 +1,15 @@
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { AttnRPCClient } from "./attn-rpc";
+import type { RelayConnection, RelayServer } from "./relay";
+import type {
+  RelayDeliverMessageParams,
+  RelayDeliverMessageResult,
+  RelayHelloParams,
+  RelayHelloResult,
+  RelayReportStateParams,
+  RelayReportStopParams,
+} from "./relay-protocol";
 import {
   compareVersion,
   evaluatePiVersion,
@@ -19,6 +29,20 @@ type Availability =
   | { ok: true; executable: string; version: string }
   | { ok: false; message: string };
 
+// One run = one live pi process launched by this driver. `token` is the
+// bearer credential handed to the pi-side suite via env; `seq` is the
+// per-run monotonic cursor for session.report_* calls, owned entirely here.
+type RunState = {
+  token: string;
+  sessionID: string;
+  runID: string;
+  seq: number;
+  metadata: PiMetadata;
+  connection?: RelayConnection;
+};
+
+const deliverMessageTimeoutMs = 10_000;
+
 const defaultRunCommand: RunCommand = async (argv) => {
   const child = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -33,10 +57,22 @@ export class PiDriver {
   private readonly rpc: AttnRPCClient;
   private readonly runCommand: RunCommand;
   private readonly executable: string;
+  private readonly relay: RelayServer;
+  private readonly suitePath: string;
   private availability: Availability = { ok: false, message: "pi availability has not been checked" };
+  private readonly runsByToken = new Map<string, RunState>();
+  private readonly runsBySessionID = new Map<string, RunState>();
 
-  constructor(options: { rpc: AttnRPCClient; runCommand?: RunCommand; executable?: string }) {
+  constructor(options: {
+    rpc: AttnRPCClient;
+    relay: RelayServer;
+    suitePath: string;
+    runCommand?: RunCommand;
+    executable?: string;
+  }) {
     this.rpc = options.rpc;
+    this.relay = options.relay;
+    this.suitePath = options.suitePath;
     this.runCommand = options.runCommand ?? defaultRunCommand;
     this.executable = options.executable?.trim() || process.env.ATTN_PI_EXECUTABLE?.trim() || "pi";
   }
@@ -44,6 +80,7 @@ export class PiDriver {
   async initialize(): Promise<void> {
     await this.refreshAvailability();
     if (!this.availability.ok) return;
+    await this.relay.listen();
     const result = await this.rpc.request<DriverRegisterResult>("driver.register", {
       agent: "pi",
       capabilities: {
@@ -51,11 +88,14 @@ export class PiDriver {
         initial_prompt: true,
         model_pin: true,
         effort_pin: true,
+        state_reporting: true,
+        message_delivery: true,
       },
     });
     if (!result.ok) throw new Error("attn rejected pi driver registration");
-    // No recovery work: this driver keeps no per-run state. Active runs keep
-    // living in their daemon-owned PTYs; resume metadata is persisted daemon-side.
+    // No recovery work: this driver keeps no cross-restart run state. Active
+    // runs keep living in their daemon-owned PTYs; resume metadata is
+    // persisted daemon-side.
   }
 
   health(): { ok: boolean; message: string } {
@@ -66,6 +106,7 @@ export class PiDriver {
 
   async spawn(params: DriverSpawnParams): Promise<DriverSpawnResult> {
     const availability = await this.requireAvailability();
+    const suitePath = this.requireSuitePath();
     const metadata: PiMetadata = {
       schema: 1,
       pi_session_id: randomUUID(),
@@ -73,12 +114,18 @@ export class PiDriver {
       model: cleanOptional(params.model),
       thinking: thinkingFor(params.effort),
     };
-    await this.reportMetadata(params, metadata);
-    return { argv: this.argvFor(availability.executable, metadata, params.initial_prompt), cwd: params.cwd };
+    const run = this.createRun(requireText(params.session_id, "session_id"), requireText(params.run_id, "run_id"), metadata);
+    await this.reportMetadata(run);
+    return {
+      argv: this.argvFor(availability.executable, metadata, params.initial_prompt, suitePath),
+      cwd: params.cwd,
+      env: this.envFor(run.token),
+    };
   }
 
   async resume(params: DriverSpawnParams): Promise<DriverSpawnResult> {
     const availability = await this.requireAvailability();
+    const suitePath = this.requireSuitePath();
     const previous = parsePiMetadata(params.metadata);
     const installed = parseStableVersion(availability.version);
     const recorded = parseStableVersion(previous.pi_version);
@@ -94,28 +141,140 @@ export class PiDriver {
       model: cleanOptional(params.model) ?? previous.model,
       thinking: thinkingFor(params.effort) ?? previous.thinking,
     };
-    await this.reportMetadata(params, metadata);
-    return { argv: this.argvFor(availability.executable, metadata, undefined), cwd: params.cwd };
+    const run = this.createRun(requireText(params.session_id, "session_id"), requireText(params.run_id, "run_id"), metadata);
+    await this.reportMetadata(run);
+    return {
+      argv: this.argvFor(availability.executable, metadata, undefined, suitePath),
+      cwd: params.cwd,
+      env: this.envFor(run.token),
+    };
   }
 
-  async sessionClosed(_params: SessionClosedParams): Promise<{ ok: true }> {
+  async sessionClosed(params: SessionClosedParams): Promise<{ ok: true }> {
+    const run = this.runsBySessionID.get(params.session_id);
+    if (run) {
+      this.runsBySessionID.delete(params.session_id);
+      this.runsByToken.delete(run.token);
+    }
     return { ok: true };
   }
 
-  private argvFor(executable: string, metadata: PiMetadata, initialPrompt: string | undefined): string[] {
+  // Delegate methods invoked by RelayServer when the pi-side suite calls in.
+
+  async suiteHello(connection: RelayConnection, rawParams: unknown): Promise<RelayHelloResult> {
+    const params = parseRelayHello(rawParams);
+    const run = this.requireRunByToken(params.token);
+    run.connection = connection;
+    // Keep model/thinking pins; the suite is only authoritative for pi's own
+    // native session id and version, which change across resume/fork/new.
+    run.metadata = { ...run.metadata, pi_session_id: params.pi_session_id, pi_version: params.pi_version };
+    await this.reportMetadata(run);
+    return { ok: true };
+  }
+
+  async suiteReportState(rawParams: unknown): Promise<void> {
+    const params = parseRelayReportState(rawParams);
+    const run = this.requireRunByToken(params.token);
+    await this.rpc.request("session.report_state", {
+      session_id: run.sessionID,
+      run_id: run.runID,
+      seq: this.nextSeq(run),
+      state: "working",
+    });
+  }
+
+  async suiteReportStop(rawParams: unknown): Promise<void> {
+    const params = parseRelayReportStop(rawParams);
+    const run = this.requireRunByToken(params.token);
+    const text = params.assistant_text.trim();
+    // Empty text means the agent settled without saying anything: there is
+    // nothing to await a response to, so skip the (up to ~30s) classifier call.
+    const verdict = text === "" ? "idle" : await this.classifyStop(run, text);
+    await this.rpc.request("session.report_stop", {
+      session_id: run.sessionID,
+      run_id: run.runID,
+      seq: this.nextSeq(run),
+      verdict,
+    });
+  }
+
+  // Called for the daemon's driver.deliver_message request.
+  async deliverMessage(rawParams: unknown): Promise<{ ok: boolean }> {
+    const params = parseDeliverMessageParams(rawParams);
+    const run = this.runsBySessionID.get(params.session_id);
+    if (!run) throw new Error(`no active pi run for session ${params.session_id}`);
+    if (run.runID !== params.run_id) {
+      throw new Error(`run_id mismatch for session ${params.session_id}: expected ${run.runID}, got ${params.run_id}`);
+    }
+    if (!run.connection) throw new Error(`no live pi suite connection for session ${params.session_id}`);
+    const result = await this.relay.deliverMessage<RelayDeliverMessageParams, RelayDeliverMessageResult>(
+      run.connection,
+      { text: params.text },
+      deliverMessageTimeoutMs,
+    );
+    return { ok: result.delivered };
+  }
+
+  private async classifyStop(run: RunState, assistantText: string): Promise<string> {
+    const result = await this.rpc.request<{ verdict: string }>("attn.classify_stop", {
+      session_id: run.sessionID,
+      run_id: run.runID,
+      assistant_text: assistantText,
+    });
+    return result.verdict;
+  }
+
+  private createRun(sessionID: string, runID: string, metadata: PiMetadata): RunState {
+    const previous = this.runsBySessionID.get(sessionID);
+    if (previous) this.runsByToken.delete(previous.token);
+    const run: RunState = { token: randomUUID(), sessionID, runID, seq: 0, metadata };
+    this.runsByToken.set(run.token, run);
+    this.runsBySessionID.set(sessionID, run);
+    return run;
+  }
+
+  private requireRunByToken(token: string): RunState {
+    const run = this.runsByToken.get(token);
+    if (!run) throw new Error("unknown pi suite token");
+    return run;
+  }
+
+  private nextSeq(run: RunState): number {
+    run.seq += 1;
+    return run.seq;
+  }
+
+  private requireSuitePath(): string {
+    if (!existsSync(this.suitePath)) {
+      throw new Error(`pi suite entrypoint not found at ${this.suitePath}; this is a build/packaging bug`);
+    }
+    return this.suitePath;
+  }
+
+  private envFor(token: string): Record<string, string> {
+    return { ATTN_PI_SUITE_SOCKET: this.relay.socketPath, ATTN_PI_TOKEN: token };
+  }
+
+  private argvFor(
+    executable: string,
+    metadata: PiMetadata,
+    initialPrompt: string | undefined,
+    suitePath: string,
+  ): string[] {
     const argv = [executable, "--session-id", metadata.pi_session_id];
     if (metadata.model) argv.push("--model", metadata.model);
     if (metadata.thinking) argv.push("--thinking", metadata.thinking);
+    argv.push("-e", suitePath);
     if (initialPrompt !== undefined && initialPrompt.trim() !== "") argv.push(initialPrompt);
     return argv;
   }
 
-  private async reportMetadata(params: DriverSpawnParams, metadata: PiMetadata): Promise<void> {
+  private async reportMetadata(run: RunState): Promise<void> {
     await this.rpc.request("session.report_metadata", {
-      session_id: requireText(params.session_id, "session_id"),
-      run_id: requireText(params.run_id, "run_id"),
-      seq: 1,
-      metadata,
+      session_id: run.sessionID,
+      run_id: run.runID,
+      seq: this.nextSeq(run),
+      metadata: run.metadata,
     });
   }
 
@@ -158,6 +317,53 @@ export function parsePiMetadata(value: unknown): PiMetadata {
     model: cleanOptional(typeof record.model === "string" ? record.model : undefined),
     thinking: cleanOptional(typeof record.thinking === "string" ? record.thinking : undefined),
   };
+}
+
+function parseRelayHello(value: unknown): RelayHelloParams {
+  if (typeof value !== "object" || value === null) throw new Error("suite.hello params must be an object");
+  const record = value as Record<string, unknown>;
+  const token = record.token;
+  const piSessionID = record.pi_session_id;
+  const piVersion = record.pi_version;
+  const reason = record.reason;
+  if (typeof token !== "string" || token.trim() === "") throw new Error("suite.hello is missing token");
+  if (typeof piSessionID !== "string" || piSessionID.trim() === "") throw new Error("suite.hello is missing pi_session_id");
+  if (typeof piVersion !== "string" || piVersion.trim() === "") throw new Error("suite.hello is missing pi_version");
+  if (typeof reason !== "string") throw new Error("suite.hello is missing reason");
+  return { token: token.trim(), pi_session_id: piSessionID.trim(), pi_version: piVersion.trim(), reason };
+}
+
+function parseRelayReportState(value: unknown): RelayReportStateParams {
+  if (typeof value !== "object" || value === null) throw new Error("suite.report_state params must be an object");
+  const record = value as Record<string, unknown>;
+  const token = record.token;
+  if (typeof token !== "string" || token.trim() === "") throw new Error("suite.report_state is missing token");
+  if (record.state !== "working") {
+    throw new Error(`suite.report_state state must be "working", got ${JSON.stringify(record.state)}`);
+  }
+  return { token: token.trim(), state: "working" };
+}
+
+function parseRelayReportStop(value: unknown): RelayReportStopParams {
+  if (typeof value !== "object" || value === null) throw new Error("suite.report_stop params must be an object");
+  const record = value as Record<string, unknown>;
+  const token = record.token;
+  const assistantText = record.assistant_text;
+  if (typeof token !== "string" || token.trim() === "") throw new Error("suite.report_stop is missing token");
+  if (typeof assistantText !== "string") throw new Error("suite.report_stop is missing assistant_text");
+  return { token: token.trim(), assistant_text: assistantText };
+}
+
+function parseDeliverMessageParams(value: unknown): { session_id: string; run_id: string; text: string } {
+  if (typeof value !== "object" || value === null) throw new Error("driver.deliver_message params must be an object");
+  const record = value as Record<string, unknown>;
+  const sessionID = record.session_id;
+  const runID = record.run_id;
+  const text = record.text;
+  if (typeof sessionID !== "string" || sessionID.trim() === "") throw new Error("driver.deliver_message is missing session_id");
+  if (typeof runID !== "string" || runID.trim() === "") throw new Error("driver.deliver_message is missing run_id");
+  if (typeof text !== "string") throw new Error("driver.deliver_message is missing text");
+  return { session_id: sessionID.trim(), run_id: runID.trim(), text };
 }
 
 function thinkingFor(effort: string | undefined): string | undefined {

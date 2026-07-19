@@ -59,8 +59,30 @@ vision: `docs/vision/pi-attn-plugins.md`. Full grounding evidence with citations
   returning argv+env+cwd that the daemon runs in the attn-owned PTY,
   `session.report_metadata` as the resume token, `driver.session_closed`
   cleanup.
-- Rock 1 is a pure driver with dumb state (no `state_reporting`); declared
-  state arrives with the pi-side attn suite (rock 2). Do not add
-  screen-scraping state detectors for pi.
-- Staging the pi-side suite uses `pi install <local-dir> -a` (non-interactive;
-  stores the absolute path, no copy).
+- The driver also owns pi citizenship (rock 2): it listens on a relay unix
+  socket, injects `-e <bundled suite.js>` plus `ATTN_PI_SUITE_SOCKET` /
+  `ATTN_PI_TOKEN` env at spawn/resume, registers `state_reporting` +
+  `message_delivery`, relays suite reports to the daemon (the per-run seq
+  cursor lives driver-side), and forwards `driver.deliver_message` to the
+  suite. Stop verdicts come from daemon-side classification
+  (`attn.classify_stop`); an empty settle (nothing said) reports `idle`
+  without classifying. Never add screen-scraping state detectors for pi, and
+  never fall back to PTY typing for message delivery.
+
+## Suite invariants
+
+- The suite (`plugins/attn-pi/suite/`, staged as a single `suite.js` next to
+  the driver executable) runs inside pi's runtime. It must never crash or
+  block pi: relay sends are fire-and-forget, failures are swallowed, and
+  missing `ATTN_PI_SUITE_SOCKET`/`ATTN_PI_TOKEN` env turns the whole suite
+  into a no-op (bare pi outside attn).
+- The relay client lives at module scope and survives session transitions;
+  every factory re-run re-binds the current pi/ctx (stale ones throw on any
+  use — `driver.deliver_message` answers `delivered: false` then).
+- `agent_end` caches the last assistant message's text; `agent_settled` has
+  no payload and ships the cache as `suite.report_stop`.
+- `suite/index.ts` imports pi's `VERSION` from
+  `@earendil-works/pi-coding-agent`; pi resolves it as a virtual module at
+  load time, so the bundle step must keep that import `--external`.
+- PTY child exit stays the authoritative liveness signal; suite silence is
+  never meaningful.

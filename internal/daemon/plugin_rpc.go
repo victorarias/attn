@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const pluginAPIVersion = 4
+const pluginAPIVersion = 5
 const pluginHealthMethod = "attn.health"
 const pluginHealthInterval = 15 * time.Second
 const pluginHealthTimeout = 2 * time.Second
@@ -600,6 +600,15 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 func (d *Daemon) handlePluginMethod(plugin *pluginConnection, msg jsonRPCMessage) {
 	if jsonRPCIDKey(msg.ID) == "" {
 		_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "plugin method calls require an id"))
+		return
+	}
+
+	// attn.classify_stop replies asynchronously (the classifier LLM call must
+	// not run on this synchronous read-loop goroutine — see
+	// handlePluginClassifyStop), so it is intercepted here instead of going
+	// through the handled/err auto-reply contract below.
+	if msg.Method == "attn.classify_stop" {
+		d.handlePluginClassifyStop(plugin, msg)
 		return
 	}
 

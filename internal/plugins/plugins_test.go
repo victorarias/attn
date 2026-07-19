@@ -87,7 +87,7 @@ mkdir -p "$5/src"
 cat > "$5/attn-plugin.toml" <<'EOF'
 name = "attn-snipe"
 version = "0.1.0"
-attn_api_version = 4
+attn_api_version = 5
 
 [plugin]
 entrypoint = "src/index.ts"
@@ -235,7 +235,7 @@ func TestLoadManifestRejectsEntrypointTraversal(t *testing.T) {
 	manifest := []byte(`
 name = "worktree-provider"
 version = "0.1.0"
-attn_api_version = 4
+attn_api_version = 5
 
 [plugin]
 entrypoint = "../outside.ts"
@@ -268,7 +268,7 @@ func TestLoadManifestAcceptsExecutableEntrypoint(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "bin", "provider"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write executable: %v", err)
 	}
-	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 4\n\n[plugin]\nkind = \"executable\"\npath = \"bin/provider\"\n")
+	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 5\n\n[plugin]\nkind = \"executable\"\npath = \"bin/provider\"\n")
 	if err := os.WriteFile(filepath.Join(root, ManifestName), manifestData, 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestLoadManifestRejectsNonExecutableEntrypoint(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "bin", "provider"), []byte("binary"), 0o644); err != nil {
 		t.Fatalf("write executable: %v", err)
 	}
-	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 4\n\n[plugin]\nkind = \"executable\"\npath = \"bin/provider\"\n")
+	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 5\n\n[plugin]\nkind = \"executable\"\npath = \"bin/provider\"\n")
 	if err := os.WriteFile(filepath.Join(root, ManifestName), manifestData, 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
@@ -323,7 +323,7 @@ func writeTestPlugin(t *testing.T, root, name string) {
 	manifest := []byte(`
 name = "` + name + `"
 version = "0.1.0"
-attn_api_version = 4
+attn_api_version = 5
 
 [plugin]
 entrypoint = "src/index.ts"
