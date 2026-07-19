@@ -315,4 +315,43 @@ describe("PiDriver", () => {
       driver.suiteHello({} as any, { token, pi_session_id: "native-1", pi_version: "0.80.10", reason: "session_start" }),
     ).rejects.toThrow(/unknown pi suite token/);
   });
+
+  test("reserves the stop seq before awaiting classification so a newer working report outranks it", async () => {
+    let resolveClassify: (result: { verdict: string }) => void = () => {};
+    const classifyDeferred = new Promise<{ verdict: string }>((resolve) => {
+      resolveClassify = resolve;
+    });
+    const requests: Array<{ method: string; params: any }> = [];
+    const rpc = {
+      async request(method: string, params: any): Promise<any> {
+        requests.push({ method, params });
+        if (method === "driver.register") return { ok: true, active_runs: [] };
+        if (method === "attn.classify_stop") return classifyDeferred;
+        return { ok: true };
+      },
+      handle(_method: string, _handler: unknown): void {
+        // no-op: this driver never dispatches through its own RPC handle table
+      },
+    };
+    const driver = newDriver({ rpc, runCommand: fakeRunCommand(), executable: "pi" });
+
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    // Do not await yet: this is the classification in flight while a new
+    // message starts a new turn below.
+    const stopPromise = driver.suiteReportStop({ token, assistant_text: "done with the task" });
+
+    await driver.suiteReportState({ token, state: "working" });
+
+    resolveClassify({ verdict: "idle" });
+    await stopPromise;
+
+    const stopReport = requests.find((call) => call.method === "session.report_stop");
+    const stateReport = requests.find((call) => call.method === "session.report_state");
+    expect(stopReport).toBeDefined();
+    expect(stateReport).toBeDefined();
+    expect(stopReport?.params.seq).toBeLessThan(stateReport?.params.seq);
+    expect(stopReport?.params.verdict).toBe("idle");
+  });
 });

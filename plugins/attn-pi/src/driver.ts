@@ -187,13 +187,19 @@ export class PiDriver {
     const params = parseRelayReportStop(rawParams);
     const run = this.requireRunByToken(params.token);
     const text = params.assistant_text.trim();
+    // Reserve this report's slot in the per-run cursor BEFORE awaiting
+    // classification: a message delivered mid-classification can start a new
+    // turn whose "working" report must outrank this stop. With the seq taken
+    // up front, the daemon's strictly-increasing cursor discards the stale
+    // verdict instead of letting it overwrite live activity.
+    const seq = this.nextSeq(run);
     // Empty text means the agent settled without saying anything: there is
     // nothing to await a response to, so skip the (up to ~30s) classifier call.
     const verdict = text === "" ? "idle" : await this.classifyStop(run, text);
     await this.rpc.request("session.report_stop", {
       session_id: run.sessionID,
       run_id: run.runID,
-      seq: this.nextSeq(run),
+      seq,
       verdict,
     });
   }
