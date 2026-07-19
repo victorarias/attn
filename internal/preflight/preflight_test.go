@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,6 +15,14 @@ import (
 
 func passingProber(t *testing.T) prober {
 	t.Helper()
+	dataDir, err := config.CanonicalRuntimePath(config.DataDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketPath, err := config.CanonicalRuntimePath(config.SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
 	return prober{
 		lookPath:     func(tool string) (string, error) { return "/tools/" + filepath.Base(tool), nil },
 		writable:     func(string) error { return nil },
@@ -23,7 +32,7 @@ func passingProber(t *testing.T) prober {
 		daemonHealth: func(context.Context, string) (daemonHealth, error) {
 			return daemonHealth{
 				Protocol: protocol.ProtocolVersion, Profile: config.ProfileLabel(),
-				DataDir: config.DataDir(), SocketPath: config.SocketPath(), Port: config.WSPort(),
+				DataDir: dataDir, SocketPath: socketPath, Port: config.WSPort(),
 			}, nil
 		},
 		requiredTools: []string{"git", "go"},
@@ -83,10 +92,21 @@ func TestRunReportsRootCausesAndActions(t *testing.T) {
 			checkName: "routing.daemon", contains: "routing mismatch",
 		},
 		{
+			name: "unreadable app protocol with healthy daemon",
+			mutate: func(p *prober) {
+				p.appProtocol = func(context.Context, string) (string, error) {
+					return "", errors.New("app missing")
+				}
+			},
+			checkName: "protocol.app_daemon", contains: "app protocol is unavailable",
+		},
+		{
 			name: "app daemon protocol mismatch",
 			mutate: func(p *prober) {
+				dataDir, _ := config.CanonicalRuntimePath(config.DataDir())
+				socketPath, _ := config.CanonicalRuntimePath(config.SocketPath())
 				p.daemonHealth = func(context.Context, string) (daemonHealth, error) {
-					return daemonHealth{Protocol: "older", Profile: config.ProfileLabel(), DataDir: config.DataDir(), SocketPath: config.SocketPath(), Port: config.WSPort()}, nil
+					return daemonHealth{Protocol: "older", Profile: config.ProfileLabel(), DataDir: dataDir, SocketPath: socketPath, Port: config.WSPort()}, nil
 				}
 			},
 			checkName: "protocol.app_daemon", contains: "does not match",
@@ -102,6 +122,74 @@ func TestRunReportsRootCausesAndActions(t *testing.T) {
 			}
 			assertCheck(t, report, tt.checkName, StatusFail, tt.contains)
 		})
+	}
+}
+
+func TestRunRejectsSameRelativeRoutingOverridesFromDifferentWorkingDirectories(t *testing.T) {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDir) })
+
+	cliDir := t.TempDir()
+	daemonDir := t.TempDir()
+	for _, root := range []string{cliDir, daemonDir} {
+		if err := os.Mkdir(filepath.Join(root, ".attn-qa"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("ATTN_DATA_DIR", ".attn-qa")
+	t.Setenv("ATTN_SOCKET_PATH", filepath.Join(".attn-qa", "attn.sock"))
+
+	if err := os.Chdir(daemonDir); err != nil {
+		t.Fatal(err)
+	}
+	daemonDataDir, err := config.CanonicalRuntimePath(config.DataDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	daemonSocket, err := config.CanonicalRuntimePath(config.SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chdir(cliDir); err != nil {
+		t.Fatal(err)
+	}
+	p := passingProber(t)
+	p.daemonHealth = func(context.Context, string) (daemonHealth, error) {
+		return daemonHealth{
+			Protocol: protocol.ProtocolVersion, Profile: config.ProfileLabel(),
+			DataDir: daemonDataDir, SocketPath: daemonSocket, Port: config.WSPort(),
+		}, nil
+	}
+	report := run(context.Background(), Options{Agent: "codex", WorkingDir: cliDir}, p)
+	assertCheck(t, report, "routing.daemon", StatusFail, "routing mismatch")
+	if report.Routing.DataDir == daemonDataDir || report.Routing.Socket == daemonSocket {
+		t.Fatalf("relative overrides unexpectedly converged: cli=%+v daemon=%s/%s", report.Routing, daemonDataDir, daemonSocket)
+	}
+}
+
+func TestRunKeepsProtocolCheckNamesWhenAppProtocolIsUnavailable(t *testing.T) {
+	passing := run(context.Background(), Options{Agent: "codex", WorkingDir: t.TempDir()}, passingProber(t))
+	p := passingProber(t)
+	p.appProtocol = func(context.Context, string) (string, error) {
+		return "", errors.New("app missing")
+	}
+	failing := run(context.Background(), Options{Agent: "codex", WorkingDir: t.TempDir()}, p)
+
+	want := []string{"protocol.cli_app", "protocol.app_daemon"}
+	for _, report := range []Report{passing, failing} {
+		var got []string
+		for _, check := range report.Checks {
+			if strings.HasPrefix(check.Name, "protocol.") {
+				got = append(got, check.Name)
+			}
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("protocol check names = %v, want %v", got, want)
+		}
 	}
 }
 

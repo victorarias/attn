@@ -72,11 +72,12 @@ type Report struct {
 func (r Report) OK() bool { return r.Status != StatusFail }
 
 type daemonHealth struct {
-	Protocol   string `json:"protocol"`
-	Profile    string `json:"profile"`
-	DataDir    string `json:"data_dir"`
-	SocketPath string `json:"socket_path"`
-	Port       any    `json:"port"`
+	Protocol         string `json:"protocol"`
+	Profile          string `json:"profile"`
+	DataDir          string `json:"data_dir"`
+	SocketPath       string `json:"socket_path"`
+	RoutingPathError string `json:"routing_path_error"`
+	Port             any    `json:"port"`
 }
 
 type prober struct {
@@ -106,7 +107,7 @@ func Run(ctx context.Context, opts Options) Report {
 }
 
 func run(ctx context.Context, opts Options, p prober) Report {
-	routing := resolveRouting()
+	routing, routingErr := resolveRouting()
 	launch := resolveLaunch(opts)
 	report := Report{Status: StatusPass, Routing: routing, Launch: launch}
 	add := func(check Check) { report.Checks = append(report.Checks, check) }
@@ -177,7 +178,9 @@ func run(ctx context.Context, opts Options, p prober) Report {
 		}
 	}
 
-	if err := p.pathIsSocket(routing.Socket); err != nil {
+	if routingErr != nil {
+		add(fail("routing.socket", "could not canonicalize active routing paths: "+routingErr.Error(), "Use absolute paths for ATTN_DATA_DIR and ATTN_SOCKET_PATH, or fix inaccessible symlink ancestors."))
+	} else if err := p.pathIsSocket(routing.Socket); err != nil {
 		add(fail("routing.socket", fmt.Sprintf("expected daemon socket %s is unavailable: %v", routing.Socket, err), "Start the daemon for the active profile and verify ATTN_PROFILE/ATTN_SOCKET_PATH routing."))
 	} else {
 		add(pass("routing.socket", routing.Socket))
@@ -185,7 +188,7 @@ func run(ctx context.Context, opts Options, p prober) Report {
 
 	appProtocol, appErr := p.appProtocol(ctx, routing.AppPath)
 	if appErr != nil {
-		add(fail("protocol.app", fmt.Sprintf("could not read the installed app protocol: %v", appErr), "Build and install this profile's app, then rerun preflight."))
+		add(fail("protocol.cli_app", fmt.Sprintf("could not read the installed app protocol: %v", appErr), "Build and install this profile's app, then rerun preflight."))
 	} else if appProtocol != protocol.ProtocolVersion {
 		add(fail("protocol.cli_app", fmt.Sprintf("CLI protocol %s does not match installed app protocol %s", protocol.ProtocolVersion, appProtocol), "Rebuild and install the selected profile from this checkout."))
 	} else {
@@ -198,14 +201,18 @@ func run(ctx context.Context, opts Options, p prober) Report {
 		add(fail("protocol.app_daemon", "app/daemon protocol compatibility could not be verified", "Start the selected profile's daemon and rerun preflight."))
 	} else {
 		actualPort := fmt.Sprint(health.Port)
-		if health.Profile != routing.Label || health.DataDir != routing.DataDir || health.SocketPath != routing.Socket || actualPort != routing.WSPort {
+		if health.RoutingPathError != "" {
+			add(fail("routing.daemon", "daemon could not canonicalize its routing paths: "+health.RoutingPathError, "Use absolute daemon routing paths or fix inaccessible symlink ancestors, then restart this profile's daemon."))
+		} else if health.Profile != routing.Label || health.DataDir != routing.DataDir || health.SocketPath != routing.Socket || actualPort != routing.WSPort {
 			add(fail("routing.daemon", fmt.Sprintf("daemon routing mismatch: profile=%s data_dir=%s socket=%s port=%s", health.Profile, health.DataDir, health.SocketPath, actualPort), "Select the intended profile with `attn profile-env`, clear inherited routing overrides, and restart only that profile's daemon."))
 		} else {
 			add(pass("routing.daemon", fmt.Sprintf("profile=%s socket=%s port=%s", health.Profile, health.SocketPath, actualPort)))
 		}
-		if appErr == nil && appProtocol == health.Protocol {
+		if appErr != nil {
+			add(fail("protocol.app_daemon", "app/daemon protocol compatibility could not be verified because the app protocol is unavailable", "Build and install this profile's app, then rerun preflight."))
+		} else if appProtocol == health.Protocol {
 			add(pass("protocol.app_daemon", "installed app and daemon use protocol "+health.Protocol))
-		} else if appErr == nil {
+		} else {
 			add(fail("protocol.app_daemon", fmt.Sprintf("installed app protocol %s does not match daemon protocol %s", appProtocol, health.Protocol), "Restart the daemon from the selected profile's installed app."))
 		}
 	}
@@ -249,18 +256,40 @@ func resolvedLaunchValue(value, source string) ResolvedValue {
 	return ResolvedValue{Value: value, Source: source}
 }
 
-func resolveRouting() Routing {
+func resolveRouting() (Routing, error) {
 	profile := config.Profile()
 	label := profile
 	if label == "" {
 		label = "default"
 	}
-	return Routing{
+	rawDataDir := config.DataDir()
+	rawSocket := config.SocketPath()
+	dataDir, dataErr := config.CanonicalRuntimePath(rawDataDir)
+	if dataErr != nil {
+		dataDir = absoluteRoutingFallback(rawDataDir)
+	}
+	socket, socketErr := config.CanonicalRuntimePath(rawSocket)
+	if socketErr != nil {
+		socket = absoluteRoutingFallback(rawSocket)
+	}
+	routing := Routing{
 		Profile: profile, Label: label,
-		DataDir: config.DataDir(), Socket: config.SocketPath(),
+		DataDir: dataDir, Socket: socket,
 		WSPort: config.WSPort(), BundleID: config.BundleIdentifierForProfile(profile),
 		AppPath: config.AppPathForProfile(profile),
 	}
+	if dataErr != nil || socketErr != nil {
+		return routing, fmt.Errorf("data_dir: %v; socket: %v", dataErr, socketErr)
+	}
+	return routing, nil
+}
+
+func absoluteRoutingFallback(path string) string {
+	absolute, err := filepath.Abs(strings.TrimSpace(path))
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(absolute)
 }
 
 func probeWritableDirectory(path string) error {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -476,6 +477,15 @@ func ValidateDaemonIsolation(socketPath string) error {
 }
 
 func comparableDaemonIsolationPath(path string) (string, error) {
+	return CanonicalRuntimePath(path)
+}
+
+// CanonicalRuntimePath returns one absolute representation of a runtime path.
+// It resolves symlinks through the deepest existing ancestor, so a not-yet-
+// created socket or database below a symlinked data directory still compares by
+// its real location. CLI/daemon routing checks must use this instead of comparing
+// raw environment or config strings, which may be relative to different CWDs.
+func CanonicalRuntimePath(path string) (string, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return "", nil
@@ -484,7 +494,28 @@ func comparableDaemonIsolationPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Clean(absolute), nil
+	absolute = filepath.Clean(absolute)
+
+	existing := absolute
+	var missing []string
+	for {
+		resolved, err := filepath.EvalSymlinks(existing)
+		if err == nil {
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return absolute, nil
+		}
+		missing = append(missing, filepath.Base(existing))
+		existing = parent
+	}
 }
 
 // StatePath returns the legacy state file path (for migration/cleanup).
