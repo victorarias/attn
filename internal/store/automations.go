@@ -204,11 +204,18 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		return nil, err
 	}
 	defer tx.Rollback()
-	now := formatTicketTime(observedAt)
+	observedRaw := observedAt.UTC().Format(time.RFC3339Nano)
+	updatedRaw := formatTicketTime(observedAt)
 	var cursorRaw string
 	err = tx.QueryRow(`SELECT observed_at FROM automation_provider_cursors WHERE definition_id=? AND provider='github_review_requested' AND scope=?`, definitionID, host).Scan(&cursorRaw)
-	if err == nil && observedAt.Before(parseTicketTime(cursorRaw)) {
-		return nil, nil
+	if err == nil {
+		cursorAt, parseErr := time.Parse(time.RFC3339Nano, cursorRaw)
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse automation provider cursor: %w", parseErr)
+		}
+		if observedAt.Before(cursorAt) {
+			return nil, nil
+		}
 	}
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
@@ -223,12 +230,12 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		err := tx.QueryRow(`SELECT active,cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &cycle)
 		switch err {
 		case sql.ErrNoRows:
-			_, err = tx.Exec(`INSERT INTO automation_review_request_edges(definition_id,subject_key,host,active,cycle,accepted_cycle,last_observed_at,updated_at) VALUES(?,?,?,1,1,0,?,?)`, definitionID, subjectKey, host, now, now)
+			_, err = tx.Exec(`INSERT INTO automation_review_request_edges(definition_id,subject_key,host,active,cycle,accepted_cycle,last_observed_at,updated_at) VALUES(?,?,?,1,1,0,?,?)`, definitionID, subjectKey, host, observedRaw, updatedRaw)
 		case nil:
 			if active == 0 {
 				cycle++
 			}
-			_, err = tx.Exec(`UPDATE automation_review_request_edges SET host=?,active=1,cycle=?,last_observed_at=?,updated_at=? WHERE definition_id=? AND subject_key=?`, host, cycle, now, now, definitionID, subjectKey)
+			_, err = tx.Exec(`UPDATE automation_review_request_edges SET host=?,active=1,cycle=?,last_observed_at=?,updated_at=? WHERE definition_id=? AND subject_key=?`, host, cycle, observedRaw, updatedRaw, definitionID, subjectKey)
 		}
 		if err != nil {
 			return nil, err
@@ -253,7 +260,7 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		return nil, err
 	}
 	for _, subjectKey := range deactivate {
-		if _, err := tx.Exec(`UPDATE automation_review_request_edges SET active=0,updated_at=? WHERE definition_id=? AND subject_key=?`, now, definitionID, subjectKey); err != nil {
+		if _, err := tx.Exec(`UPDATE automation_review_request_edges SET active=0,updated_at=? WHERE definition_id=? AND subject_key=?`, updatedRaw, definitionID, subjectKey); err != nil {
 			return nil, err
 		}
 	}
@@ -273,7 +280,7 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'github_review_requested',?,?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at WHERE excluded.observed_at >= automation_provider_cursors.observed_at`, definitionID, host, now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'github_review_requested',?,?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at WHERE excluded.observed_at >= automation_provider_cursors.observed_at`, definitionID, host, observedRaw); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -366,8 +373,8 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, a
 		return err
 	}
 	defer tx.Rollback()
-	var assignee, originRunID, statusRaw string
-	if err := tx.QueryRow(`SELECT assignee,COALESCE(automation_run_id,''),status FROM tickets WHERE id=?`, ticketID).Scan(&assignee, &originRunID, &statusRaw); err != nil {
+	var assignee, originRunID string
+	if err := tx.QueryRow(`SELECT assignee,COALESCE(automation_run_id,'') FROM tickets WHERE id=?`, ticketID).Scan(&assignee, &originRunID); err != nil {
 		return err
 	}
 	if assignee != sessionID || originRunID == "" {
@@ -382,16 +389,32 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, a
 		return err
 	}
 	if inserted == 1 {
-		if status := TicketStatus(statusRaw); status.IsTerminal() {
-			if _, err := setTicketStatusTx(tx, ticketID, TicketStatusWorking, author, "Reopened for automation occurrence "+runID+".", now); err != nil {
-				return err
-			}
-		}
 		if _, err := addTicketCommentTx(tx, ticketID, author, "Accepted automation occurrence "+runID+" for the existing reviewer.", now); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+// HasPriorAutomationContinuityRun reports whether this subject binding predates
+// the current run. It lets delivery distinguish first-run crash recovery (where
+// the ticket may not exist yet) from a later cycle whose bound ticket was removed.
+func (s *Store) HasPriorAutomationContinuityRun(definitionID, continuityKey, currentRunID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return false, errors.New("automation persistence unavailable")
+	}
+	var exists int
+	err := s.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM automation_runs r
+			JOIN automation_occurrences o ON o.id=r.occurrence_id
+			WHERE r.definition_id=? AND o.subject_key=? AND r.id<>?
+		)
+	`, definitionID, continuityKey, currentRunID).Scan(&exists)
+	return exists != 0, err
 }
 
 func scanAutomationRun(scanner interface{ Scan(...any) error }) (*AutomationRun, error) {

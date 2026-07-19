@@ -381,6 +381,9 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 	if err != nil {
 		return err
 	}
+	if err := d.activateAutomationContinuationTicket(req); err != nil {
+		return err
+	}
 	if err := d.store.MarkAutomationRunDelivered(run.ID, string(result.Resolved), time.Now()); err != nil {
 		return err
 	}
@@ -417,9 +420,36 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 		d.notifyTicketObservers(req.IDs.TicketID)
 		return nil
 	}
+	if req.ContinuityKey != "" {
+		hasPrior, err := d.store.HasPriorAutomationContinuityRun(req.DefinitionID, req.ContinuityKey, req.RunID)
+		if err != nil {
+			return err
+		}
+		if hasPrior {
+			return errors.New("automation continuity ticket is missing; refusing to reuse its session or worktree")
+		}
+	}
 	_, err = d.store.EnsureAutomationTicket(store.Ticket{ID: req.IDs.TicketID, Title: def.Name, Description: req.Prompt, Status: store.TicketStatusWorking, Assignee: req.IDs.SessionID, Cwd: req.Location.Path, LastAgentID: req.Launch.Agent, AutomationRunID: req.RunID}, author, store.TicketRoleChiefOfStaff, time.Now())
 	return err
 }
+
+func (d *Daemon) activateAutomationContinuationTicket(req automation.WorkRequest) error {
+	if req.ContinuityKey == "" {
+		return nil
+	}
+	ticket, err := d.store.GetTicket(req.IDs.TicketID)
+	if err != nil || ticket == nil || ticket.AutomationRunID == req.RunID || !ticket.Status.IsTerminal() {
+		return err
+	}
+	comment := "Reopened for automation occurrence " + req.RunID + "."
+	if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusWorking, "automation:"+req.DefinitionID, comment, time.Now()); err != nil {
+		return err
+	}
+	d.broadcastTicketsUpdated()
+	d.notifyTicketObservers(ticket.ID)
+	return nil
+}
+
 func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) (automation.PreparedLocation, error) {
 	if req.Location.Type == "directory" {
 		directory, err := validateDelegationDirectory(req.Location.Path)
