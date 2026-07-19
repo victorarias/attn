@@ -94,6 +94,8 @@ tmp_bin=""
 # This binary is a test artifact, not a release. Stable metadata lets Go reuse
 # daemon E2E results when the staged source and all other inputs are unchanged.
 test_build_time="1970-01-01T00:00:00Z"
+test_source_fingerprint="pre-commit"
+test_git_commit="pre-commit"
 cleanup_tmp_bin() {
   if [ -n "$tmp_bin" ]; then
     rm -f "$tmp_bin"
@@ -108,7 +110,10 @@ ensure_e2e_binary() {
 
   header "Go build for E2E"
   tmp_bin="$(mktemp -t attn-precommit.XXXXXX)"
-  make -C "$root" build OUTPUT="$tmp_bin" BUILD_TIME="$test_build_time"
+  make -C "$root" build OUTPUT="$tmp_bin" \
+    BUILD_TIME="$test_build_time" \
+    SOURCE_FINGERPRINT="$test_source_fingerprint" \
+    GIT_COMMIT="$test_git_commit"
   export ATTN_E2E_BIN="$tmp_bin"
 }
 
@@ -152,7 +157,10 @@ if [ "$run_daemon_checks" = true ]; then
 
   header "Go build"
   tmp_bin="$(mktemp -t attn-precommit.XXXXXX)"
-  make -C "$root" build OUTPUT="$tmp_bin" BUILD_TIME="$test_build_time"
+  make -C "$root" build OUTPUT="$tmp_bin" \
+    BUILD_TIME="$test_build_time" \
+    SOURCE_FINGERPRINT="$test_source_fingerprint" \
+    GIT_COMMIT="$test_git_commit"
   if [ -z "${ATTN_E2E_BIN:-}" ]; then
     export ATTN_E2E_BIN="$tmp_bin"
   fi
