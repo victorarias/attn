@@ -726,6 +726,49 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		CREATE INDEX IF NOT EXISTS idx_automation_runs_definition_created
 			ON automation_runs(definition_id, created_at DESC);
 	`},
+	{74, "add GitHub automation observation and continuity", `
+		CREATE TABLE IF NOT EXISTS automation_provider_cursors (
+			definition_id TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			scope TEXT NOT NULL,
+			observed_at TEXT NOT NULL,
+			PRIMARY KEY(definition_id, provider, scope),
+			FOREIGN KEY(definition_id) REFERENCES automation_definitions(id)
+		);
+		CREATE TABLE IF NOT EXISTS automation_review_request_edges (
+			definition_id TEXT NOT NULL,
+			subject_key TEXT NOT NULL,
+			host TEXT NOT NULL,
+			active INTEGER NOT NULL DEFAULT 0,
+			cycle INTEGER NOT NULL DEFAULT 0,
+			accepted_cycle INTEGER NOT NULL DEFAULT 0,
+			last_observed_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(definition_id, subject_key),
+			FOREIGN KEY(definition_id) REFERENCES automation_definitions(id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_automation_review_edges_host
+			ON automation_review_request_edges(definition_id, host, active);
+		CREATE TABLE IF NOT EXISTS automation_continuity_bindings (
+			definition_id TEXT NOT NULL,
+			continuity_key TEXT NOT NULL,
+			ticket_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			pane_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(definition_id, continuity_key),
+			FOREIGN KEY(definition_id) REFERENCES automation_definitions(id)
+		);
+		CREATE TABLE IF NOT EXISTS automation_ticket_occurrence_events (
+			run_id TEXT PRIMARY KEY,
+			ticket_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			FOREIGN KEY(run_id) REFERENCES automation_runs(id),
+			FOREIGN KEY(ticket_id) REFERENCES tickets(id)
+		);
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

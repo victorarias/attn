@@ -21,6 +21,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   new comment from a person, or approval on a green exact head. Each outcome has
   its own exit code, with `--json` for the full detail. Comments from bots are
   ignored, as are comments already on the pull request when the wait begins.
+- **Requested GitHub reviews can prepare a local reviewer automatically.** An
+  enabled `github_review_requested` automation consumes attn's existing PR
+  refresh, pins the requested PR's exact head, and creates one durable
+  chief-owned ticket and steerable reviewer session. Repository filters,
+  restart-safe latest catch-up, review-request cycle deduplication, and
+  per-PR coalescing prevent polling or concurrent refreshes from launching a
+  duplicate reviewer; the automation never posts or changes anything on GitHub.
 - **Live agent transcripts are inspectable from the CLI.** `attn session
   transcript <session-id>` prints timestamped conversation, tool, and error
   events across supported agents, with `--follow` for live updates and opaque

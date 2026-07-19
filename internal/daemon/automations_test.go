@@ -4,15 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/automation"
 	attngit "github.com/victorarias/attn/internal/git"
+	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/launchcontract"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -321,5 +326,137 @@ func TestAutomationRecoveryWaitsForInitialGitHubDiscovery(t *testing.T) {
 	case <-recovered:
 	case <-time.After(time.Second):
 		t.Fatal("automation recovery did not resume after GitHub host discovery completed")
+	}
+}
+
+func TestGitHubReviewObservationDedupesPollsAndReusesReviewer(t *testing.T) {
+	var snapshotGETs atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/repo/pulls/42" {
+			http.NotFound(w, r)
+			return
+		}
+		snapshotGETs.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.com/owner/repo/pull/42","title":"Change","body":"untrusted","state":"open","draft":false,"user":{"login":"author"},"head":{"sha":"0123456789abcdef0123456789abcdef01234567","ref":"feature","repo":{"full_name":"owner/repo"}},"base":{"sha":"89abcdef0123456789abcdef0123456789abcdef","ref":"main","repo":{"full_name":"owner/repo"}}}`))
+	}))
+	defer server.Close()
+	client, err := github.NewClientForHost("github.com", server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := github.NewClientRegistry()
+	registry.Register("github.com", client)
+	s := store.New()
+	yaml := `api_version: attn.dev/automations/v1alpha1
+id: requested-review
+name: Requested review
+enabled: true
+trigger:
+  type: github_review_requested
+  repositories: {mode: all_accessible, include: [github.com/owner/repo], exclude: []}
+prompt: Review locally. Do not modify GitHub.
+launch: {driver: codex, effort: high}
+location:
+  type: repository_worktree
+  repository_sources: {default: {type: managed_cache}}
+policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
+`
+	_, canonical, err := automation.ParseDefinitionYAML([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertAutomationDefinition("requested-review", "Requested review", string(canonical), true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var delivered atomic.Int32
+	d := &Daemon{store: s, ghRegistry: registry}
+	d.automationDeliveryHook = func(run *store.AutomationRun) error {
+		delivered.Add(1)
+		return s.MarkAutomationRunDelivered(run.ID, `{"type":"test"}`, time.Now())
+	}
+	demand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
+	observedAt := time.Now()
+	d.observeGitHubReviewRequests("github.com", demand, observedAt)
+	d.observeGitHubReviewRequests("github.com", demand, observedAt)
+	if snapshotGETs.Load() != 1 || delivered.Load() != 1 {
+		t.Fatalf("duplicate poll snapshot GETs=%d deliveries=%d", snapshotGETs.Load(), delivered.Load())
+	}
+	firstRuns, err := s.ListAutomationRuns("requested-review")
+	if err != nil || len(firstRuns) != 1 {
+		t.Fatalf("first runs=%#v err=%v", firstRuns, err)
+	}
+	// Removal closes the durable edge; a later request is a new occurrence but
+	// adopts the original per-subject ticket/session/workspace/pane binding.
+	d.observeGitHubReviewRequests("github.com", nil, observedAt.Add(time.Minute))
+	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(2*time.Minute))
+	if snapshotGETs.Load() != 2 || delivered.Load() != 2 {
+		t.Fatalf("re-request snapshot GETs=%d deliveries=%d", snapshotGETs.Load(), delivered.Load())
+	}
+	runs, err := s.ListAutomationRuns("requested-review")
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("runs=%#v err=%v", runs, err)
+	}
+	if runs[0].ID == runs[1].ID || runs[0].TicketID != runs[1].TicketID || runs[0].SessionID != runs[1].SessionID || runs[0].WorkspaceID != runs[1].WorkspaceID || runs[0].PaneID != runs[1].PaneID {
+		t.Fatalf("re-request did not preserve reviewer binding: %#v", runs)
+	}
+}
+
+func TestManualPRRefreshFeedsGitHubAutomationObserver(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/search/issues":
+			items := `[]`
+			if strings.Contains(r.URL.Query().Get("q"), "review-requested:@me") {
+				items = `[{"number":42,"title":"Change","html_url":"https://github.com/owner/repo/pull/42","draft":false,"state":"open","repository_url":"https://api.github.com/repos/owner/repo","user":{"login":"author"},"comments":0}]`
+			}
+			_, _ = w.Write([]byte(`{"total_count":1,"items":` + items + `}`))
+		case r.URL.Path == "/repos/owner/repo/pulls/42":
+			_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.com/owner/repo/pull/42","title":"Change","body":"untrusted","state":"open","draft":false,"user":{"login":"author"},"head":{"sha":"0123456789abcdef0123456789abcdef01234567","ref":"feature","repo":{"full_name":"owner/repo"}},"base":{"sha":"89abcdef0123456789abcdef0123456789abcdef","ref":"main","repo":{"full_name":"owner/repo"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := github.NewClientForHost("github.com", server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := github.NewClientRegistry()
+	registry.Register("github.com", client)
+	s := store.New()
+	spec, canonical, err := automation.ParseDefinitionYAML([]byte(`api_version: attn.dev/automations/v1alpha1
+id: refresh-review
+name: Refresh review
+enabled: true
+trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
+prompt: Review locally.
+launch: {driver: codex}
+location: {type: repository_worktree, repository_sources: {default: {type: managed_cache}}}
+policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	delivered := make(chan struct{}, 1)
+	d := &Daemon{store: s, ghRegistry: registry, wsHub: newWSHub()}
+	d.automationDeliveryHook = func(run *store.AutomationRun) error {
+		if err := s.MarkAutomationRunDelivered(run.ID, `{}`, time.Now()); err != nil {
+			return err
+		}
+		delivered <- struct{}{}
+		return nil
+	}
+	if err := d.doRefreshPRsWithResult(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-delivered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual PR refresh did not feed the automation observer")
 	}
 }

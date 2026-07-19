@@ -158,6 +158,67 @@ policy: {continuity: fresh}
 	}
 }
 
+func TestGitHubReviewDefinitionCanonicalizesAndAppliesRepositoryFilter(t *testing.T) {
+	raw := `api_version: attn.dev/automations/v1alpha1
+id: requested-review
+name: Requested review
+enabled: true
+trigger:
+  type: github_review_requested
+  repositories:
+    mode: all_accessible
+    include: [GitHub.COM/Owner/Repo, github.com/owner/second]
+    exclude: [github.com/owner/second]
+prompt: Review locally without modifying GitHub.
+launch: {driver: codex, effort: high}
+location:
+  type: repository_worktree
+  repository_sources: {default: {type: managed_cache}}
+policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
+`
+	if _, _, err := ParseDefinitionYAML([]byte(raw)); err == nil || !strings.Contains(err.Error(), "both included and excluded") {
+		t.Fatalf("conflicting filter err = %v", err)
+	}
+	raw = strings.Replace(raw, "    exclude: [github.com/owner/second]", "    exclude: [github.com/owner/blocked]", 1)
+	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter := spec.Trigger.Repositories
+	if !filter.Matches("github.com/owner/repo") || !filter.Matches("github.com/owner/second") || filter.Matches("github.com/owner/other") || filter.Matches("github.com/owner/blocked") {
+		t.Fatalf("unexpected filter behavior: %#v", filter)
+	}
+	if strings.Contains(string(canonical), "GitHub.COM") {
+		t.Fatalf("canonical definition retained display identity: %s", canonical)
+	}
+}
+
+func TestGitHubReviewDefinitionRequiresAcceptedPolicyAndLocation(t *testing.T) {
+	base := `api_version: attn.dev/automations/v1alpha1
+id: requested-review
+name: Requested review
+enabled: true
+trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
+prompt: Review locally.
+launch: {driver: codex}
+location:
+  type: repository_worktree
+  repository_sources: {default: {type: managed_cache}}
+policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
+`
+	for name, raw := range map[string]string{
+		"fresh continuity": strings.Replace(base, "continuity: per_subject", "continuity: fresh", 1),
+		"skip catch up":    strings.Replace(base, "catch_up: latest", "catch_up: skip", 1),
+		"directory":        strings.Replace(base, "type: repository_worktree\n  repository_sources: {default: {type: managed_cache}}", "type: directory\n  path: /tmp", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := ParseDefinitionYAML([]byte(raw)); err == nil {
+				t.Fatal("accepted invalid GitHub review definition")
+			}
+		})
+	}
+}
+
 func TestPullRequestInputIsStrictAndCanonical(t *testing.T) {
 	raw := json.RawMessage(`{"provider":"github","host":"GitHub.COM","owner":"Owner","repository":"Repo","number":42,"url":"https://github.com/owner/repo/pull/42/","state":"open","draft":false,"head_sha":"0123456789ABCDEF0123456789ABCDEF01234567"}`)
 	input, err := ParsePullRequestInput(raw)

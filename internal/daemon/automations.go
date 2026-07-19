@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/victorarias/attn/internal/automation"
 	attngit "github.com/victorarias/attn/internal/git"
+	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
@@ -77,6 +78,9 @@ func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, inp
 	if err := json.Unmarshal([]byte(def.SpecJSON), &spec); err != nil {
 		return nil, err
 	}
+	if spec.Trigger.Type != "manual" {
+		return nil, fmt.Errorf("automation %q is provider-driven and cannot be run manually yet", definitionID)
+	}
 	snapshot, err := automation.Effective(spec, def.Revision)
 	if err != nil {
 		return nil, err
@@ -96,8 +100,7 @@ func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, inp
 		subjectKey = pr.SubjectKey()
 	}
 	snapshotJSON, _ := json.Marshal(snapshot)
-	runID := uuid.NewString()
-	ids := store.AutomationRunReservation{RunID: runID, OccurrenceID: uuid.NewString(), TicketID: "auto-" + strings.ReplaceAll(runID[:18], "-", ""), SessionID: uuid.NewString(), WorkspaceID: "workspace-" + uuid.NewString(), PaneID: "pane-" + uuid.NewString()}
+	ids := newAutomationRunReservation()
 	run, _, err := d.store.ClaimManualAutomationRun(definitionID, requestID, subjectKey, canonicalInput, def.Revision, string(snapshotJSON), time.Now(), ids)
 	if err != nil {
 		return nil, err
@@ -115,6 +118,11 @@ func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, inp
 		return d.handleAutomationDeliveryError(run, err)
 	}
 	return d.store.GetAutomationRun(run.ID)
+}
+
+func newAutomationRunReservation() store.AutomationRunReservation {
+	runID := uuid.NewString()
+	return store.AutomationRunReservation{RunID: runID, OccurrenceID: uuid.NewString(), TicketID: "auto-" + strings.ReplaceAll(runID[:18], "-", ""), SessionID: uuid.NewString(), WorkspaceID: "workspace-" + uuid.NewString(), PaneID: "pane-" + uuid.NewString()}
 }
 
 func (d *Daemon) automationRunPullRequest(ctx context.Context, definitionID, requestID, rawURL string) (*store.AutomationRun, error) {
@@ -141,6 +149,9 @@ func (d *Daemon) automationRunPullRequest(ctx context.Context, definitionID, req
 	if err := json.Unmarshal([]byte(def.SpecJSON), &spec); err != nil {
 		return nil, err
 	}
+	if spec.Trigger.Type != "manual" {
+		return nil, fmt.Errorf("automation %q is provider-driven and cannot be run manually yet", definitionID)
+	}
 	if spec.Location.Type != "repository_worktree" {
 		return nil, errors.New("--pr-url requires a repository_worktree automation")
 	}
@@ -165,13 +176,7 @@ func (d *Daemon) automationRunPullRequest(ctx context.Context, definitionID, req
 	if snapshot.State != "open" {
 		return nil, fmt.Errorf("pull request is %s; only open pull requests can be reviewed", snapshot.State)
 	}
-	input := automation.PullRequestInput{
-		Provider: "github", Host: host, Owner: owner, Repository: repository, Number: number,
-		URL: strings.TrimSuffix(rawURL, "/"), Title: snapshot.Title, Body: snapshot.Body,
-		Author: snapshot.Author, Draft: snapshot.Draft, State: snapshot.State,
-		HeadSHA: snapshot.HeadSHA, HeadRef: snapshot.HeadRef, HeadRepository: snapshot.HeadRepository,
-		BaseSHA: snapshot.BaseSHA, BaseRef: snapshot.BaseRef,
-	}
+	input := pullRequestAutomationInput(host, owner, repository, snapshot)
 	canonical, err := json.Marshal(input)
 	if err != nil {
 		return nil, err
@@ -180,6 +185,128 @@ func (d *Daemon) automationRunPullRequest(ctx context.Context, definitionID, req
 		return nil, err
 	}
 	return d.automationRun(ctx, definitionID, requestID, string(canonical))
+}
+
+func pullRequestAutomationInput(host, owner, repository string, snapshot *github.PullRequestSnapshot) automation.PullRequestInput {
+	return automation.PullRequestInput{
+		Provider: "github", Host: host, Owner: owner, Repository: repository, Number: snapshot.Number,
+		URL: strings.TrimSuffix(snapshot.URL, "/"), Title: snapshot.Title, Body: snapshot.Body,
+		Author: snapshot.Author, Draft: snapshot.Draft, State: snapshot.State,
+		HeadSHA: snapshot.HeadSHA, HeadRef: snapshot.HeadRef, HeadRepository: snapshot.HeadRepository,
+		BaseSHA: snapshot.BaseSHA, BaseRef: snapshot.BaseRef,
+	}
+}
+
+// observeGitHubReviewRequests consumes one host's already-refreshed PR snapshot.
+// It does not poll GitHub itself: only a newly active durable edge performs the
+// focused PR GET needed to pin the immutable review input.
+func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, observedAt time.Time) {
+	definitions, err := d.store.ListAutomationDefinitions()
+	if err != nil {
+		d.logf("automation GitHub observation list definitions: %v", err)
+		return
+	}
+	client, ok := d.ghRegistry.Get(host)
+	if !ok {
+		return
+	}
+	for i := range definitions {
+		definition := definitions[i]
+		if !definition.Enabled {
+			continue
+		}
+		var spec automation.DefinitionSpec
+		if err := json.Unmarshal([]byte(definition.SpecJSON), &spec); err != nil {
+			d.logf("automation GitHub observation parse %s: %v", definition.ID, err)
+			continue
+		}
+		if spec.Trigger.Type != "github_review_requested" {
+			continue
+		}
+		bySubject := make(map[string]*protocol.PR)
+		var subjects []string
+		for _, pr := range prs {
+			if pr == nil || pr.Role != protocol.PRRoleReviewer || pr.Reason != protocol.PRReasonReviewNeeded || pr.State != protocol.PRStateWaiting {
+				continue
+			}
+			identity, err := automation.CanonicalRepositoryIdentity(host + "/" + pr.Repo)
+			if err != nil || !spec.Trigger.Repositories.Matches(identity) {
+				continue
+			}
+			subject := identity + "#" + fmt.Sprint(pr.Number)
+			if _, exists := bySubject[subject]; exists {
+				continue
+			}
+			bySubject[subject] = pr
+			subjects = append(subjects, subject)
+		}
+		candidates, err := d.store.ReconcileAutomationReviewRequests(definition.ID, host, subjects, observedAt)
+		if err != nil {
+			d.logf("automation GitHub observation reconcile %s: %v", definition.ID, err)
+			continue
+		}
+		for _, candidate := range candidates {
+			pr := bySubject[candidate.SubjectKey]
+			if pr == nil {
+				continue
+			}
+			repositoryParts := strings.Split(pr.Repo, "/")
+			if len(repositoryParts) != 2 {
+				d.logf("automation GitHub observation invalid repository %q", pr.Repo)
+				continue
+			}
+			providerSnapshot, err := client.FetchPullRequestSnapshot(pr.Repo, pr.Number)
+			if err != nil {
+				d.logf("automation GitHub observation fetch %s: %v", candidate.SubjectKey, err)
+				continue
+			}
+			if providerSnapshot.Number != pr.Number || !strings.EqualFold(providerSnapshot.BaseRepository, pr.Repo) || providerSnapshot.State != "open" {
+				d.logf("automation GitHub observation ignored mismatched snapshot for %s", candidate.SubjectKey)
+				continue
+			}
+			input := pullRequestAutomationInput(host, repositoryParts[0], repositoryParts[1], providerSnapshot)
+			payload, err := json.Marshal(input)
+			if err != nil {
+				continue
+			}
+			if _, err := automation.ParsePullRequestInput(payload); err != nil {
+				d.logf("automation GitHub observation invalid snapshot %s: %v", candidate.SubjectKey, err)
+				continue
+			}
+			effective, err := automation.Effective(spec, definition.Revision)
+			if err != nil {
+				continue
+			}
+			snapshotJSON, err := json.Marshal(effective)
+			if err != nil {
+				continue
+			}
+			run, _, err := d.store.ClaimGitHubReviewAutomationRun(definition.ID, candidate.SubjectKey, candidate.Cycle, definition.Revision, string(payload), string(snapshotJSON), observedAt, newAutomationRunReservation())
+			if err != nil {
+				d.logf("automation GitHub observation claim %s: %v", candidate.SubjectKey, err)
+				continue
+			}
+			d.automationMu.Lock()
+			current, loadErr := d.store.GetAutomationRun(run.ID)
+			if loadErr == nil && current != nil && current.State == "pending" {
+				if deliverErr := d.deliverObservedAutomationRun(current); deliverErr != nil {
+					_, deliverErr = d.handleAutomationDeliveryError(current, deliverErr)
+					loadErr = deliverErr
+				}
+			}
+			d.automationMu.Unlock()
+			if loadErr != nil {
+				d.logf("automation GitHub observation deliver %s: %v", candidate.SubjectKey, loadErr)
+			}
+		}
+	}
+}
+
+func (d *Daemon) deliverObservedAutomationRun(run *store.AutomationRun) error {
+	if d.automationDeliveryHook != nil {
+		return d.automationDeliveryHook(run)
+	}
+	return d.deliverAutomationRun(context.Background(), run)
 }
 
 func (d *Daemon) handleAutomationDeliveryError(run *store.AutomationRun, deliveryErr error) (*store.AutomationRun, error) {
@@ -204,7 +331,7 @@ func (d *Daemon) failAutomationRun(run *store.AutomationRun, deliveryErr error) 
 	if err := d.store.MarkAutomationRunFailed(run.ID, deliveryErr.Error(), now); err != nil {
 		persistErr = errors.Join(persistErr, fmt.Errorf("mark run failed: %w", err))
 	}
-	if ticket, err := d.store.GetTicketByAutomationRunID(run.ID); err != nil {
+	if ticket, err := d.store.GetTicket(run.TicketID); err != nil {
 		persistErr = errors.Join(persistErr, fmt.Errorf("find automation ticket: %w", err))
 	} else if ticket != nil && ticket.Status != store.TicketStatusFailed {
 		comment := "Automation delivery failed: " + deliveryErr.Error()
@@ -236,7 +363,11 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 	if occurrence == nil {
 		return errors.New("automation occurrence missing")
 	}
-	req := automation.WorkRequest{RunID: run.ID, DefinitionID: run.DefinitionID, SubjectKey: occurrence.SubjectKey, Prompt: snapshot.Prompt, Context: json.RawMessage(occurrence.PayloadJSON), Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID}}
+	continuityKey := ""
+	if snapshot.Policy.Continuity == "per_subject" {
+		continuityKey = occurrence.SubjectKey
+	}
+	req := automation.WorkRequest{RunID: run.ID, DefinitionID: run.DefinitionID, SubjectKey: occurrence.SubjectKey, ContinuityKey: continuityKey, Prompt: snapshot.Prompt, Context: json.RawMessage(occurrence.PayloadJSON), Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID}}
 	result, err := (workdelivery.Service{Ports: d}).Deliver(ctx, req)
 	if err != nil {
 		return err
@@ -256,7 +387,22 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 	if def == nil {
 		return fmt.Errorf("definition missing")
 	}
-	_, err = d.store.EnsureAutomationTicket(store.Ticket{ID: req.IDs.TicketID, Title: def.Name, Description: req.Prompt, Status: store.TicketStatusWorking, Assignee: req.IDs.SessionID, Cwd: req.Location.Path, LastAgentID: req.Launch.Agent, AutomationRunID: req.RunID}, "automation:"+req.DefinitionID, store.TicketRoleChiefOfStaff, time.Now())
+	author := "automation:" + req.DefinitionID
+	if existing, getErr := d.store.GetTicket(req.IDs.TicketID); getErr != nil {
+		return getErr
+	} else if existing != nil {
+		if existing.AutomationRunID == req.RunID {
+			if existing.Assignee != req.IDs.SessionID {
+				return errors.New("automation ticket does not match its reserved session")
+			}
+			return nil
+		}
+		if req.ContinuityKey == "" {
+			return errors.New("automation ticket already exists without a continuity binding")
+		}
+		return d.store.EnsureAutomationContinuationTicket(req.IDs.TicketID, req.IDs.SessionID, req.RunID, author, time.Now())
+	}
+	_, err = d.store.EnsureAutomationTicket(store.Ticket{ID: req.IDs.TicketID, Title: def.Name, Description: req.Prompt, Status: store.TicketStatusWorking, Assignee: req.IDs.SessionID, Cwd: req.Location.Path, LastAgentID: req.Launch.Agent, AutomationRunID: req.RunID}, author, store.TicketRoleChiefOfStaff, time.Now())
 	return err
 }
 func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) (automation.PreparedLocation, error) {
@@ -277,6 +423,21 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 	pr, err := automation.ParsePullRequestInput(req.Context)
 	if err != nil {
 		return automation.PreparedLocation{}, err
+	}
+	if originRun, err := d.automationContinuationOrigin(req); err != nil {
+		return automation.PreparedLocation{}, err
+	} else if originRun != nil {
+		originOccurrence, err := d.store.GetAutomationOccurrence(originRun.OccurrenceID)
+		if err != nil || originOccurrence == nil {
+			return automation.PreparedLocation{}, errors.Join(errors.New("continuity origin occurrence missing"), err)
+		}
+		originPR, err := automation.ParsePullRequestInput(json.RawMessage(originOccurrence.PayloadJSON))
+		if err != nil {
+			return automation.PreparedLocation{}, fmt.Errorf("continuity origin payload: %w", err)
+		}
+		if originPR.HeadSHA != pr.HeadSHA {
+			return automation.PreparedLocation{}, errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+		}
 	}
 	identity := pr.RepositoryIdentity()
 	authorization := ""
@@ -393,6 +554,10 @@ func (d *Daemon) EnsureSession(_ context.Context, req automation.WorkRequest, di
 	if err := req.Launch.Validate(); err != nil {
 		return fmt.Errorf("invalid unattended launch contract: %w", err)
 	}
+	continuationRun, err := d.automationContinuationOrigin(req)
+	if err != nil {
+		return err
+	}
 	if existing := d.store.Get(req.IDs.SessionID); existing != nil {
 		if filepath.Clean(existing.Directory) != filepath.Clean(directory) || existing.WorkspaceID != req.IDs.WorkspaceID || string(existing.Agent) != req.Launch.Agent {
 			return fmt.Errorf("persisted session does not match automation snapshot")
@@ -413,6 +578,9 @@ func (d *Daemon) EnsureSession(_ context.Context, req automation.WorkRequest, di
 			return d.verifyUnattendedLaunch(req)
 		}
 	}
+	if continuationRun != nil {
+		return errors.New("reviewer continuity requires the existing session to still be live")
+	}
 	prompt := automationSessionPrompt(req.Prompt, inputPath)
 	client := newInternalWSClient()
 	d.handleSpawnSessionWithPolicy(client, &protocol.SpawnSessionMessage{Cmd: protocol.CmdSpawnSession, ID: req.IDs.SessionID, Cwd: directory, WorkspaceID: req.IDs.WorkspaceID, Agent: req.Launch.Agent, Cols: 80, Rows: 24, Label: protocol.Ptr(filepath.Base(directory)), InitialPrompt: protocol.Ptr(prompt), Model: protocol.Ptr(req.Launch.Model), Effort: protocol.Ptr(req.Launch.Effort), Executable: protocol.Ptr(req.Launch.Executable)}, internalSpawnPolicy{unattendedLaunch: req.Launch})
@@ -421,6 +589,24 @@ func (d *Daemon) EnsureSession(_ context.Context, req automation.WorkRequest, di
 		return err
 	}
 	return d.verifyUnattendedLaunch(req)
+}
+
+func (d *Daemon) automationContinuationOrigin(req automation.WorkRequest) (*store.AutomationRun, error) {
+	if req.ContinuityKey == "" {
+		return nil, nil
+	}
+	ticket, err := d.store.GetTicket(req.IDs.TicketID)
+	if err != nil || ticket == nil || ticket.AutomationRunID == "" || ticket.AutomationRunID == req.RunID {
+		return nil, err
+	}
+	origin, err := d.store.GetAutomationRun(ticket.AutomationRunID)
+	if err != nil {
+		return nil, err
+	}
+	if origin == nil {
+		return nil, errors.New("continuity origin run missing")
+	}
+	return origin, nil
 }
 
 func (d *Daemon) verifyUnattendedLaunch(req automation.WorkRequest) error {
@@ -528,12 +714,15 @@ func (d *Daemon) passUnattendedLaunchGate(req automation.WorkRequest) error {
 	return errors.New("Codex launch did not produce a verifiable screen")
 }
 func (d *Daemon) VerifyDelivery(_ context.Context, req automation.WorkRequest, directory string) error {
-	ticket, err := d.store.GetTicketByAutomationRunID(req.RunID)
+	ticket, err := d.store.GetTicket(req.IDs.TicketID)
 	if err != nil {
 		return err
 	}
 	if ticket == nil {
 		return fmt.Errorf("ticket link missing")
+	}
+	if req.ContinuityKey == "" && ticket.AutomationRunID != req.RunID {
+		return fmt.Errorf("ticket provenance disagrees")
 	}
 	if ticket.ID != req.IDs.TicketID || ticket.Assignee != req.IDs.SessionID {
 		return fmt.Errorf("ticket links disagree")

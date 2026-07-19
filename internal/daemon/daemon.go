@@ -106,29 +106,32 @@ type Daemon struct {
 	automationMu     sync.Mutex // serializes idempotent ensure/adopt delivery per profile
 	automationRepoMu sync.Mutex
 	automationRepos  map[string]*sync.Mutex
-	listener         net.Listener
-	httpServer       *http.Server
-	httpHandler      http.Handler
-	diagServer       *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
-	wsHub            *wsHub
-	done             chan struct{}
-	logger           *logging.Logger
-	debugLogging     bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
-	ghRegistry       *github.ClientRegistry
-	hubManager       *hub.Manager
-	classifier       Classifier // Optional, uses package-level classifier.Classify if nil
-	repoCaches       map[string]*repoCache
-	repoCacheMu      sync.RWMutex
-	gitCoordMu       sync.Mutex
-	gitCoord         *gitCoordinator
-	warnings         []protocol.DaemonWarning
-	warningsMu       sync.RWMutex
-	ptyBackend       ptybackend.Backend
-	watchersMu       sync.Mutex
-	transcriptWatch  map[string]*transcriptWatcher
-	classifiedMu     sync.Mutex
-	classifiedTurn   map[string]string
-	classifyingTurn  map[string]string
+	// automationDeliveryHook replaces only the final delivery call in focused
+	// provider-observation tests; production always leaves it nil.
+	automationDeliveryHook func(*store.AutomationRun) error
+	listener               net.Listener
+	httpServer             *http.Server
+	httpHandler            http.Handler
+	diagServer             *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
+	wsHub                  *wsHub
+	done                   chan struct{}
+	logger                 *logging.Logger
+	debugLogging           bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
+	ghRegistry             *github.ClientRegistry
+	hubManager             *hub.Manager
+	classifier             Classifier // Optional, uses package-level classifier.Classify if nil
+	repoCaches             map[string]*repoCache
+	repoCacheMu            sync.RWMutex
+	gitCoordMu             sync.Mutex
+	gitCoord               *gitCoordinator
+	warnings               []protocol.DaemonWarning
+	warningsMu             sync.RWMutex
+	ptyBackend             ptybackend.Backend
+	watchersMu             sync.Mutex
+	transcriptWatch        map[string]*transcriptWatcher
+	classifiedMu           sync.Mutex
+	classifiedTurn         map[string]string
+	classifyingTurn        map[string]string
 	// classificationTranscriptExtractor is a private test seam for exercising
 	// classification outcomes without waiting on an agent driver's retry policy.
 	// Production leaves it nil and uses extractLastAssistantMessage below.
@@ -3091,6 +3094,11 @@ func (d *Daemon) sendError(conn net.Conn, errMsg string) {
 	json.NewEncoder(conn).Encode(resp)
 }
 
+type successfulPRObservation struct {
+	prs        []*protocol.PR
+	observedAt time.Time
+}
+
 func (d *Daemon) pollPRs() {
 	if !d.githubAvailable() {
 		d.log("GitHub client not available, PR polling disabled")
@@ -3121,6 +3129,7 @@ func (d *Daemon) doPRPoll() {
 	}
 
 	var allPRs []*protocol.PR
+	observedByHost := make(map[string]successfulPRObservation)
 	skippedHosts := make(map[string]bool)
 	var earliestReset time.Time
 
@@ -3168,6 +3177,7 @@ func (d *Daemon) doPRPoll() {
 		}
 
 		allPRs = append(allPRs, prs...)
+		observedByHost[host] = successfulPRObservation{prs: prs, observedAt: time.Now()}
 	}
 
 	if !earliestReset.IsZero() {
@@ -3206,6 +3216,14 @@ func (d *Daemon) doPRPoll() {
 		}
 	}
 	d.logf("PR poll: %d PRs (%d waiting)", len(currentPRs), waiting)
+
+	// Automations consume the same successful provider refresh. Run delivery off
+	// the polling goroutine so an unattended agent startup cannot delay the next
+	// PR refresh or websocket update.
+	for host, observation := range observedByHost {
+		host, observation := host, observation
+		go d.observeGitHubReviewRequests(host, observation.prs, observation.observedAt)
+	}
 
 	// Run detail refresh after list poll
 	d.doDetailRefresh()
@@ -3512,6 +3530,7 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 	}
 
 	var allPRs []*protocol.PR
+	observedByHost := make(map[string]successfulPRObservation)
 	skippedHosts := make(map[string]bool)
 	var firstErr error
 	successCount := 0
@@ -3532,6 +3551,7 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 		}
 		successCount++
 		allPRs = append(allPRs, prs...)
+		observedByHost[host] = successfulPRObservation{prs: prs, observedAt: time.Now()}
 	}
 
 	if len(skippedHosts) > 0 {
@@ -3559,6 +3579,10 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 	})
 
 	d.logf("PR refresh: %d PRs fetched", len(currentPRs))
+	for host, observation := range observedByHost {
+		host, observation := host, observation
+		go d.observeGitHubReviewRequests(host, observation.prs, observation.observedAt)
+	}
 	if successCount == 0 && firstErr != nil {
 		return fmt.Errorf("failed to fetch PRs: %w", firstErr)
 	}
