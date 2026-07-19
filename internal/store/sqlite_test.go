@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -9,6 +10,58 @@ import (
 
 	"github.com/victorarias/attn/internal/protocol"
 )
+
+func migrationOrderError(registry []migration) error {
+	for i := 1; i < len(registry); i++ {
+		previous := registry[i-1].version
+		current := registry[i].version
+		switch {
+		case current == previous:
+			return fmt.Errorf("duplicate migration version %d at indexes %d and %d", current, i-1, i)
+		case current < previous:
+			return fmt.Errorf("migration version %d at index %d is out of order after version %d at index %d", current, i, previous, i-1)
+		}
+	}
+	return nil
+}
+
+func TestMigrationVersionsStrictlyIncrease(t *testing.T) {
+	if err := migrationOrderError(migrations); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrationOrderError(t *testing.T) {
+	tests := []struct {
+		name     string
+		versions []int
+		wantErr  string
+	}{
+		{name: "strictly increasing", versions: []int{68, 69, 70, 71}},
+		{name: "duplicate", versions: []int{68, 69, 70, 70}, wantErr: "duplicate migration version 70 at indexes 2 and 3"},
+		{name: "out of order", versions: []int{68, 70, 69, 71}, wantErr: "migration version 69 at index 2 is out of order after version 70 at index 1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := make([]migration, len(tt.versions))
+			for i, version := range tt.versions {
+				registry[i].version = version
+			}
+
+			err := migrationOrderError(registry)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("migrationOrderError() error = %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.wantErr {
+				t.Fatalf("migrationOrderError() error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
 
 // latestSchemaVersion is the highest version in the migrations slice. It is NOT
 // the same as len(migrations): versions 49 and 50 are burned (see sqlite.go), so
