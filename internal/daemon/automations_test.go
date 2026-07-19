@@ -422,6 +422,31 @@ func TestAutomationRecoveryWaitsForInitialGitHubDiscovery(t *testing.T) {
 	}
 }
 
+func TestAutomationRecoveryLeavesGitHubRunsForFreshProviderObservation(t *testing.T) {
+	s := store.New()
+	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	d.recoverAutomations()
+	got, err := s.GetAutomationRun(run.ID)
+	if err != nil || got == nil || got.State != "pending" {
+		t.Fatalf("startup recovery decided GitHub demand before a fresh observation: run=%#v err=%v", got, err)
+	}
+}
+
 func TestGitHubReviewObservationDedupesPollsAndReusesReviewer(t *testing.T) {
 	var snapshotGETs atomic.Int32
 	var snapshotDraft atomic.Bool
@@ -860,10 +885,11 @@ func TestReRequestCanStartReviewerWhenWithdrawnOriginNeverLaunched(t *testing.T)
 	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: first.TicketID, Title: "Review", Status: store.TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
+	d := &Daemon{store: s, ptyBackend: &fakeSpawnBackend{}, wsHub: newWSHub()}
+	if _, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
+	candidates, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("re-request candidates=%#v err=%v", candidates, err)
 	}
@@ -871,12 +897,258 @@ func TestReRequestCanStartReviewerWhenWithdrawnOriginNeverLaunched(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := &Daemon{store: s, ptyBackend: &fakeSpawnBackend{}}
 	req := automation.WorkRequest{
 		RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Prompt: "Review", Context: json.RawMessage(payload),
 		IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID},
 	}
 	if err := d.validateAutomationContinuation(req); err != nil {
 		t.Fatalf("withdrawn-before-launch re-request rejected: %v", err)
+	}
+}
+
+func TestReviewRequestWithdrawalStopsLaunchedPendingReviewer(t *testing.T) {
+	d := newDaemonForTest(t)
+	s := d.store
+	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: run.TicketID, Title: "Review", Status: store.TicketStatusWorking, Assignee: run.SessionID, AutomationRunID: run.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	s.Add(&protocol.Session{
+		ID: run.SessionID, Label: "reviewer", Agent: string(protocol.SessionAgentCodex), Directory: t.TempDir(), State: protocol.SessionStateWorking,
+		StateSince: now.Format(time.RFC3339), StateUpdatedAt: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), WorkspaceID: run.WorkspaceID,
+	})
+	backend := &fakeSpawnBackend{sessionIDs: []string{run.SessionID}, killErr: errors.New("kill unavailable")}
+	d.ptyBackend = backend
+
+	candidates, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute))
+	if err == nil || !strings.Contains(err.Error(), "kill unavailable") || len(candidates) != 0 {
+		t.Fatalf("failed kill reconcile candidates=%#v err=%v", candidates, err)
+	}
+	stillPending, err := s.GetAutomationRun(run.ID)
+	if err != nil || stillPending == nil || stillPending.State != "pending" || s.Get(run.SessionID) == nil || backend.WasKilledAndRemoved(run.SessionID) {
+		t.Fatalf("failed kill discarded cancellation evidence: run=%#v session=%#v removed=%v err=%v", stillPending, s.Get(run.SessionID), backend.WasKilledAndRemoved(run.SessionID), err)
+	}
+	if s.SessionCloseIntentional(run.SessionID) || d.hasForcedStopMark(run.SessionID) {
+		t.Fatal("failed kill left intentional-close suppression on the live reviewer")
+	}
+	backend.killErr = nil
+	if err := d.handleAutomationRecoveryError(stillPending, errAutomationReviewWithdrawn); err != nil {
+		t.Fatalf("startup recovery did not finish withdrawn reviewer cancellation: %v", err)
+	}
+	failed, err := s.GetAutomationRun(run.ID)
+	if err != nil || failed == nil || failed.State != "failed" || failed.LastError != store.AutomationReviewWithdrawnError {
+		t.Fatalf("withdrawn run=%#v err=%v", failed, err)
+	}
+	if session := s.Get(run.SessionID); session != nil {
+		t.Fatalf("withdrawn reviewer session remains registered: %#v", session)
+	}
+	if !backend.WasKilledAndRemoved(run.SessionID) {
+		t.Fatalf("withdrawn reviewer was not killed and removed")
+	}
+	ticket, err := s.GetTicket(run.TicketID)
+	if err != nil || ticket == nil || ticket.Status != store.TicketStatusFailed || len(ticket.Activity) == 0 || !strings.Contains(ticket.Activity[len(ticket.Activity)-1].Comment, "withdrawn") {
+		t.Fatalf("withdrawn ticket=%#v err=%v", ticket, err)
+	}
+}
+
+func TestReviewRequestWithdrawalLeavesDeliveredReviewerToTicketLifecycle(t *testing.T) {
+	d := newDaemonForTest(t)
+	s := d.store
+	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: run.TicketID, Title: "Review", Status: store.TicketStatusWorking, Assignee: run.SessionID, AutomationRunID: run.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run.ID, `{}`, now); err != nil {
+		t.Fatal(err)
+	}
+	s.Add(&protocol.Session{
+		ID: run.SessionID, Label: "reviewer", Agent: string(protocol.SessionAgentCodex), Directory: t.TempDir(), State: protocol.SessionStateWorking,
+		StateSince: now.Format(time.RFC3339), StateUpdatedAt: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), WorkspaceID: run.WorkspaceID,
+	})
+	backend := &fakeSpawnBackend{sessionIDs: []string{run.SessionID}}
+	d.ptyBackend = backend
+
+	if _, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	delivered, err := s.GetAutomationRun(run.ID)
+	if err != nil || delivered == nil || delivered.State != "delivered" {
+		t.Fatalf("delivered run changed after provider withdrawal: run=%#v err=%v", delivered, err)
+	}
+	if session := s.Get(run.SessionID); session == nil {
+		t.Fatal("delivered reviewer was removed instead of remaining under ticket/session lifecycle")
+	}
+	if backend.WasKilledAndRemoved(run.SessionID) {
+		t.Fatal("delivered reviewer was cancelled after automation handoff")
+	}
+}
+
+func TestReviewRequestCancellationRecoversBeforeReactivation(t *testing.T) {
+	d := newDaemonForTest(t)
+	s := d.store
+	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: run.TicketID, Title: "Review", Status: store.TicketStatusWorking, Assignee: run.SessionID, AutomationRunID: run.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	s.Add(&protocol.Session{
+		ID: run.SessionID, Label: "reviewer", Agent: string(protocol.SessionAgentCodex), Directory: t.TempDir(), State: protocol.SessionStateWorking,
+		StateSince: now.Format(time.RFC3339), StateUpdatedAt: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), WorkspaceID: run.WorkspaceID,
+	})
+	backend := &fakeSpawnBackend{sessionIDs: []string{run.SessionID}}
+	d.ptyBackend = backend
+
+	// Simulate a daemon exit after the provider edge committed inactive but before
+	// runtime cancellation. Generic pending-run recovery notices the inactive edge
+	// and persists the shared withdrawal failure before the next observation sees
+	// that the request is active again.
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunFailed(run.ID, store.AutomationReviewWithdrawnError, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
+	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 2 {
+		t.Fatalf("reactivation candidates=%#v err=%v", candidates, err)
+	}
+	failed, err := s.GetAutomationRun(run.ID)
+	if err != nil || failed == nil || failed.State != "failed" || failed.LastError != store.AutomationReviewWithdrawnError {
+		t.Fatalf("recovered withdrawal run=%#v err=%v", failed, err)
+	}
+	if s.Get(run.SessionID) != nil || !backend.WasKilledAndRemoved(run.SessionID) {
+		t.Fatal("reactivation advanced before the durable withdrawal cancellation completed")
+	}
+}
+
+func TestContinuationWithdrawalDoesNotCancelDeliveredOriginReviewer(t *testing.T) {
+	d := newDaemonForTest(t)
+	s := d.store
+	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	first, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: first.TicketID, Title: "Review", Status: store.TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(first.ID, `{}`, now); err != nil {
+		t.Fatal(err)
+	}
+	s.Add(&protocol.Session{
+		ID: first.SessionID, Label: "reviewer", Agent: string(protocol.SessionAgentCodex), Directory: t.TempDir(), State: protocol.SessionStateWorking,
+		StateSince: now.Format(time.RFC3339), StateUpdatedAt: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), WorkspaceID: first.WorkspaceID,
+	})
+	backend := &fakeSpawnBackend{sessionIDs: []string{first.SessionID}}
+	d.ptyBackend = backend
+
+	if _, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("continuation candidates=%#v err=%v", candidates, err)
+	}
+	second, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(2*time.Minute), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.SessionID != first.SessionID || second.TicketID != first.TicketID {
+		t.Fatalf("continuation did not reuse origin binding: first=%#v second=%#v", first, second)
+	}
+	if _, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	failed, err := s.GetAutomationRun(second.ID)
+	if err != nil || failed == nil || failed.State != "failed" || failed.LastError != store.AutomationReviewWithdrawnError {
+		t.Fatalf("withdrawn continuation=%#v err=%v", failed, err)
+	}
+	if s.Get(first.SessionID) == nil || backend.WasKilledAndRemoved(first.SessionID) {
+		t.Fatal("withdrawn continuation cancelled the delivered origin reviewer")
+	}
+	ticket, err := s.GetTicket(first.TicketID)
+	if err != nil || ticket == nil {
+		t.Fatalf("origin ticket=%#v err=%v", ticket, err)
+	}
+	if len(ticket.Activity) == 0 || !strings.Contains(ticket.Activity[len(ticket.Activity)-1].Comment, second.ID) {
+		t.Fatalf("withdrawn continuation activity lacks run provenance: %#v", ticket.Activity)
+	}
+	activityCount := len(ticket.Activity)
+	if _, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(4*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err = s.GetTicket(first.TicketID)
+	if err != nil || ticket == nil || len(ticket.Activity) != activityCount {
+		t.Fatalf("replayed withdrawal duplicated ticket activity: before=%d ticket=%#v err=%v", activityCount, ticket, err)
+	}
+	candidates, err = d.reconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(5*time.Minute))
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("later continuation candidates=%#v err=%v", candidates, err)
+	}
+	third, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(5*time.Minute), store.AutomationRunReservation{RunID: "run-3", OccurrenceID: "occ-3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(6*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err = s.GetTicket(first.TicketID)
+	if err != nil || ticket == nil || len(ticket.Activity) != activityCount+1 || !strings.Contains(ticket.Activity[len(ticket.Activity)-1].Comment, third.ID) {
+		t.Fatalf("distinct withdrawal was deduped by shared text: before=%d ticket=%#v err=%v", activityCount, ticket, err)
+	}
+	origin, err := s.GetAutomationRun(first.ID)
+	if err != nil || origin == nil || origin.State != "delivered" {
+		t.Fatalf("origin run changed after continuation withdrawal: run=%#v err=%v", origin, err)
 	}
 }

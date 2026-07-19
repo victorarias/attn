@@ -323,18 +323,6 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 			return nil, err
 		}
 		if _, err := tx.Exec(`
-			UPDATE automation_runs
-			SET state='failed',last_error=?,updated_at=?
-			WHERE state='pending' AND id IN (
-				SELECT r.id
-				FROM automation_runs r
-				JOIN automation_occurrences o ON o.id=r.occurrence_id
-				WHERE r.definition_id=? AND o.provider='github' AND o.subject_key=?
-			)
-		`, AutomationReviewWithdrawnError, updatedRaw, definitionID, subjectKey); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(`
 			DELETE FROM automation_continuity_bindings
 			WHERE definition_id=? AND continuity_key=?
 			  AND NOT EXISTS (
@@ -421,6 +409,51 @@ func (s *Store) GitHubReviewAutomationRunStillRequested(runID string) (bool, err
 	}
 	wantKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)
 	return active == 1 && acceptedCycle == cycle && occurrenceKey == wantKey, nil
+}
+
+// ListWithdrawnGitHubReviewUndeliveredRuns returns the pending or already-failed
+// undelivered run for the currently withdrawn cycle. Keeping pending runs visible
+// here makes runtime cancellation recoverable if the daemon exits after recording
+// the inactive edge but before it stops a partially launched reviewer. Once
+// delivery durably links the ticket and visible session, the automation engine no
+// longer owns that session's lifecycle; later work state is controlled through
+// the ordinary ticket/session surfaces. Ticket/session row presence alone is not
+// that handoff signal: stable-ID ensures intentionally persist those rows before
+// unattended launch verification. The delivered run transition is the commit
+// record that verification and every durable link agreed.
+// Older withdrawn cycles may also share continuity IDs with later work and must
+// not be used to cancel that later reviewer.
+func (s *Store) ListWithdrawnGitHubReviewUndeliveredRuns(definitionID, host string) ([]AutomationRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, errors.New("automation persistence unavailable")
+	}
+	rows, err := s.db.Query(`
+		SELECT r.id,r.definition_id,r.occurrence_id,r.definition_revision,r.snapshot_json,r.state,r.last_error,r.ticket_id,r.session_id,r.workspace_id,r.pane_id,r.resolved_location_json,r.created_at,r.updated_at,r.delivered_at
+		FROM automation_runs r
+		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		JOIN automation_review_request_edges e
+		  ON e.definition_id=r.definition_id AND e.subject_key=o.subject_key
+		WHERE r.definition_id=? AND e.host=? AND e.active=0
+		  AND (r.state='pending' OR (r.state='failed' AND r.last_error=?))
+		  AND o.provider='github'
+		  AND o.occurrence_key=('review_requested:' || e.subject_key || ':' || CAST(e.cycle AS TEXT))
+		ORDER BY r.created_at
+	`, definitionID, host, AutomationReviewWithdrawnError)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AutomationRun
+	for rows.Next() {
+		run, err := scanAutomationRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *run)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ClaimGitHubReviewAutomationRun(definitionID, subjectKey string, cycle, expectedRevision int, payloadJSON, snapshotJSON string, observedAt time.Time, reserved AutomationRunReservation) (*AutomationRun, bool, error) {

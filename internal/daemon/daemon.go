@@ -1625,7 +1625,28 @@ func (d *Daemon) removePTYSession(sessionID string) error {
 }
 
 func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
-	d.stopTranscriptWatcher(sessionID)
+	if err := d.terminateSessionChecked(sessionID, sig); err != nil {
+		d.logf("terminate session failed for %s: %v", sessionID, err)
+		// Legacy callers forget the session even when termination cannot be
+		// confirmed. Restore their intentional-close evidence before the ticket
+		// reconciliation seam sees the discarded row; checked ownership-sensitive
+		// callers bypass this wrapper and keep the cleared marks on a surviving PTY.
+		d.markForcedStopClassification(sessionID)
+		if d.store != nil {
+			d.store.MarkSessionIntentionalClose(sessionID, time.Now())
+		}
+		// The watcher must not outlive the legacy caller's discarded record.
+		d.stopTranscriptWatcher(sessionID)
+		if d.ptyBackend != nil {
+			_ = d.ptyBackend.Remove(context.Background(), sessionID)
+		}
+	}
+}
+
+// terminateSessionChecked stops a runtime without discarding its durable
+// session record when termination cannot be confirmed. Ownership-sensitive
+// callers can then retry instead of spawning a second process with the same ID.
+func (d *Daemon) terminateSessionChecked(sessionID string, sig syscall.Signal) error {
 	d.markForcedStopClassification(sessionID)
 	// Also record the intentional close durably, BEFORE the kill: the in-memory
 	// forced-stop mark above expires after 30s and dies with the daemon, but the
@@ -1638,8 +1659,9 @@ func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 	}
 
 	if d.ptyBackend == nil {
+		d.stopTranscriptWatcher(sessionID)
 		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
-		return
+		return nil
 	}
 	err := d.ptyBackend.Kill(context.Background(), sessionID, sig)
 	if err == nil || errors.Is(err, pty.ErrSessionNotFound) {
@@ -1648,9 +1670,20 @@ func (d *Daemon) terminateSession(sessionID string, sig syscall.Signal) {
 		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
 	}
 	if err != nil && !errors.Is(err, pty.ErrSessionNotFound) {
-		d.logf("terminate session failed for %s: %v", sessionID, err)
+		d.clearForcedStopClassification(sessionID)
+		if d.store != nil {
+			d.store.ClearSessionIntentionalClose(sessionID)
+		}
+		return err
 	}
-	_ = d.ptyBackend.Remove(context.Background(), sessionID)
+	// Kill is now confirmed (or the runtime was already absent). Until this point
+	// a checked caller may need to retain a surviving session after a hard error,
+	// including its transcript-driven state/classification watcher.
+	d.stopTranscriptWatcher(sessionID)
+	if err := d.ptyBackend.Remove(context.Background(), sessionID); err != nil && !errors.Is(err, pty.ErrSessionNotFound) && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protocol.Session {
@@ -1659,6 +1692,11 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 		session = d.hubManager.RemoteSession(sessionID)
 	}
 	d.terminateSession(sessionID, sig)
+	d.forgetSession(sessionID)
+	return session
+}
+
+func (d *Daemon) forgetSession(sessionID string) {
 	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
 	if d.hubManager != nil {
@@ -1667,7 +1705,6 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 	d.clearLongRunTracking(sessionID)
 	d.clearClassifiedTurn(sessionID)
 	d.clearClassifyingTurn(sessionID)
-	return session
 }
 
 func (d *Daemon) removeReapedSession(sessionID string) {
@@ -2848,6 +2885,12 @@ func (d *Daemon) consumeForcedStopClassification(sessionID string) bool {
 	}
 	delete(d.forcedStop, sessionID)
 	return now.Sub(markedAt) <= forcedStopSuppressTTL
+}
+
+func (d *Daemon) clearForcedStopClassification(sessionID string) {
+	d.forcedStopMu.Lock()
+	defer d.forcedStopMu.Unlock()
+	delete(d.forcedStop, sessionID)
 }
 
 func (d *Daemon) sessionNeedsReviewAfterLongRun(sessionID string) bool {

@@ -182,6 +182,9 @@ func TestGitHubReviewReRequestDoesNotReuseWithdrawnUndeliveredBinding(t *testing
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.MarkAutomationRunFailed(first.ID, AutomationReviewWithdrawnError, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("second candidates=%#v err=%v", candidates, err)
@@ -196,7 +199,7 @@ func TestGitHubReviewReRequestDoesNotReuseWithdrawnUndeliveredBinding(t *testing
 	}
 }
 
-func TestGitHubReviewWithdrawalCancelsPendingRunAndReleasesEmptyBinding(t *testing.T) {
+func TestGitHubReviewWithdrawalExposesPendingRunAndReleasesEmptyBinding(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
@@ -220,11 +223,18 @@ func TestGitHubReviewWithdrawalCancelsPendingRunAndReleasesEmptyBinding(t *testi
 		t.Fatal(err)
 	}
 	first, err = s.GetAutomationRun(first.ID)
-	if err != nil || first == nil || first.State != "failed" || !strings.Contains(first.LastError, "withdrawn") {
+	if err != nil || first == nil || first.State != "pending" || first.LastError != "" {
 		t.Fatalf("withdrawn run=%#v err=%v", first, err)
+	}
+	withdrawn, err := s.ListWithdrawnGitHubReviewUndeliveredRuns(def.ID, "github.com")
+	if err != nil || len(withdrawn) != 1 || withdrawn[0].ID != first.ID {
+		t.Fatalf("current withdrawn runs=%#v err=%v", withdrawn, err)
 	}
 	if current, err := s.GitHubReviewAutomationRunStillRequested(first.ID); err != nil || current {
 		t.Fatalf("withdrawn run current=%v err=%v", current, err)
+	}
+	if err := s.MarkAutomationRunFailed(first.ID, AutomationReviewWithdrawnError, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
 	}
 	var bindings int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?`, def.ID, subject).Scan(&bindings); err != nil || bindings != 0 {
@@ -233,6 +243,10 @@ func TestGitHubReviewWithdrawalCancelsPendingRunAndReleasesEmptyBinding(t *testi
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("re-request candidates=%#v err=%v", candidates, err)
+	}
+	withdrawn, err = s.ListWithdrawnGitHubReviewUndeliveredRuns(def.ID, "github.com")
+	if err != nil || len(withdrawn) != 0 {
+		t.Fatalf("old cycle remained cancellable after re-request: runs=%#v err=%v", withdrawn, err)
 	}
 	second, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(2*time.Minute), AutomationRunReservation{
 		RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2",

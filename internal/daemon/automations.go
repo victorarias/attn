@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,8 @@ type retryableAutomationDeliveryError struct{ cause error }
 
 func (e *retryableAutomationDeliveryError) Error() string { return e.cause.Error() }
 func (e *retryableAutomationDeliveryError) Unwrap() error { return e.cause }
+
+var errAutomationReviewWithdrawn = errors.New(store.AutomationReviewWithdrawnError)
 
 func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error) {
 	spec, canonical, err := automation.ParseDefinitionYAML([]byte(raw))
@@ -274,9 +277,7 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 			bySubject[subject] = pr
 			subjects = append(subjects, subject)
 		}
-		d.automationMu.Lock()
-		candidates, err := d.store.ReconcileAutomationReviewRequests(definition.ID, host, subjects, observedAt)
-		d.automationMu.Unlock()
+		candidates, err := d.reconcileAutomationReviewRequests(definition.ID, host, subjects, observedAt)
 		if err != nil {
 			d.logf("automation GitHub observation reconcile %s: %v", definition.ID, err)
 			continue
@@ -356,6 +357,88 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 	}
 }
 
+func (d *Daemon) reconcileAutomationReviewRequests(definitionID, host string, subjects []string, observedAt time.Time) ([]store.AutomationReviewRequestCandidate, error) {
+	d.automationMu.Lock()
+	defer d.automationMu.Unlock()
+	// Finish any cancellation made durable by an earlier observation before a
+	// fresh provider snapshot can reactivate the edge. This closes the daemon-exit
+	// window between recording withdrawal and stopping a partially launched PTY.
+	if err := d.cancelWithdrawnAutomationRuns(definitionID, host); err != nil {
+		return nil, err
+	}
+	candidates, err := d.store.ReconcileAutomationReviewRequests(definitionID, host, subjects, observedAt)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.cancelWithdrawnAutomationRuns(definitionID, host); err != nil {
+		return nil, err
+	}
+	return candidates, nil
+}
+
+func (d *Daemon) cancelWithdrawnAutomationRuns(definitionID, host string) error {
+	withdrawn, err := d.store.ListWithdrawnGitHubReviewUndeliveredRuns(definitionID, host)
+	if err != nil {
+		return err
+	}
+	var cancelErr error
+	for i := range withdrawn {
+		if err := d.cancelWithdrawnAutomationRun(&withdrawn[i]); err != nil {
+			cancelErr = errors.Join(cancelErr, err)
+		}
+	}
+	return cancelErr
+}
+
+func (d *Daemon) cancelWithdrawnAutomationRun(run *store.AutomationRun) error {
+	if run == nil {
+		return nil
+	}
+	ticket, ticketErr := d.store.GetTicket(run.TicketID)
+	if ticketErr != nil {
+		return ticketErr
+	}
+	// Continuation cycles reuse the delivered origin's session. Withdrawal fails
+	// that occurrence, but must not tear down a reviewer already handed off to the
+	// ordinary ticket/session lifecycle.
+	if ticket != nil && ticket.AutomationRunID == run.ID {
+		shouldStop := d.store.Get(run.SessionID) != nil
+		if d.ptyBackend != nil {
+			for _, sessionID := range d.ptyBackend.SessionIDs(context.Background()) {
+				if sessionID == run.SessionID {
+					shouldStop = true
+					break
+				}
+			}
+		}
+		if shouldStop {
+			// Keep the durable run, ticket, workspace, pane, and worktree as evidence,
+			// but stop and forget the unrequested runtime. A later initial-cycle
+			// re-request may safely recreate the same reserved session ID.
+			if err := d.terminateSessionChecked(run.SessionID, syscall.SIGTERM); err != nil {
+				return fmt.Errorf("stop withdrawn automation reviewer: %w", err)
+			}
+			d.forgetSession(run.SessionID)
+		}
+	}
+	failureComment := automationFailureComment(run, ticket, store.AutomationReviewWithdrawnError)
+	if run.State == "failed" {
+		if ticket == nil || (ticket.AutomationRunID == run.ID && ticket.Status == store.TicketStatusFailed) {
+			return nil
+		}
+		if ticket.AutomationRunID != run.ID {
+			author := "automation:" + run.DefinitionID
+			for _, activity := range ticket.Activity {
+				if activity.Author == author && activity.Comment == failureComment {
+					return nil
+				}
+			}
+		}
+	}
+	_, failErr := d.failAutomationRun(run, errAutomationReviewWithdrawn)
+	return failErr
+}
+
 func (d *Daemon) deliverObservedAutomationRun(run *store.AutomationRun) error {
 	if d.automationDeliveryHook != nil {
 		return d.automationDeliveryHook(run)
@@ -387,7 +470,7 @@ func (d *Daemon) failAutomationRun(run *store.AutomationRun, deliveryErr error) 
 	if ticket, err := d.store.GetTicket(run.TicketID); err != nil {
 		persistErr = errors.Join(persistErr, fmt.Errorf("find automation ticket: %w", err))
 	} else if ticket != nil {
-		comment := "Automation delivery failed: " + deliveryErr.Error()
+		comment := automationFailureComment(run, ticket, deliveryErr.Error())
 		if ticket.AutomationRunID != "" && ticket.AutomationRunID != run.ID {
 			// A later per-subject occurrence must not rewrite the outcome of the
 			// successful run that created the shared reviewer ticket. The failed run
@@ -408,6 +491,14 @@ func (d *Daemon) failAutomationRun(run *store.AutomationRun, deliveryErr error) 
 		persistErr = errors.Join(persistErr, fmt.Errorf("reload failed run: %w", err))
 	}
 	return failed, persistErr
+}
+
+func automationFailureComment(run *store.AutomationRun, ticket *store.Ticket, message string) string {
+	comment := "Automation delivery failed: " + message
+	if run != nil && ticket != nil && ticket.AutomationRunID != "" && ticket.AutomationRunID != run.ID {
+		comment += " (automation run " + run.ID + ")"
+	}
+	return comment
 }
 
 func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.AutomationRun) error {
@@ -439,7 +530,7 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 			return err
 		}
 		if !stillRequested {
-			return errors.New("GitHub review request was withdrawn before delivery")
+			return errAutomationReviewWithdrawn
 		}
 	}
 	continuityKey := ""
@@ -960,12 +1051,24 @@ func (d *Daemon) recoverAutomations() {
 		return
 	}
 	for i := range runs {
+		occurrence, occurrenceErr := d.store.GetAutomationOccurrence(runs[i].OccurrenceID)
+		if occurrenceErr != nil {
+			d.logf("automation recovery occurrence %s: %v", runs[i].OccurrenceID, occurrenceErr)
+			continue
+		}
+		if occurrence != nil && occurrence.Provider == "github" {
+			// Review-request demand must be refreshed before recovery decides whether
+			// to deliver or cancel. The next successful provider observation retries
+			// an accepted pending run or settles an inactive edge; generic startup
+			// recovery must not race that snapshot using yesterday's active edge.
+			continue
+		}
 		d.automationMu.Lock()
 		run, err := d.store.GetAutomationRun(runs[i].ID)
 		if err == nil && run.State == "pending" {
 			err = d.deliverAutomationRun(context.Background(), run)
 			if err != nil {
-				_, err = d.handleAutomationDeliveryError(run, err)
+				err = d.handleAutomationRecoveryError(run, err)
 			}
 		}
 		d.automationMu.Unlock()
@@ -973,6 +1076,14 @@ func (d *Daemon) recoverAutomations() {
 			d.logf("automation recovery run %s: %v", runs[i].ID, err)
 		}
 	}
+}
+
+func (d *Daemon) handleAutomationRecoveryError(run *store.AutomationRun, deliveryErr error) error {
+	if errors.Is(deliveryErr, errAutomationReviewWithdrawn) {
+		return d.cancelWithdrawnAutomationRun(run)
+	}
+	_, err := d.handleAutomationDeliveryError(run, deliveryErr)
+	return err
 }
 
 func recoverAutomationsAfterGitHubReady(ready <-chan struct{}, recover func()) {
