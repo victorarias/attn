@@ -129,12 +129,16 @@ type Daemon struct {
 	classifiedMu     sync.Mutex
 	classifiedTurn   map[string]string
 	classifyingTurn  map[string]string
-	longRunMu        sync.Mutex
-	longRun          map[string]longRunSession
-	forcedStopMu     sync.Mutex
-	forcedStop       map[string]time.Time
-	pendingResumeMu  sync.Mutex
-	pendingResumeID  map[string]string
+	// classificationTranscriptExtractor is a private test seam for exercising
+	// classification outcomes without waiting on an agent driver's retry policy.
+	// Production leaves it nil and uses extractLastAssistantMessage below.
+	classificationTranscriptExtractor func(*protocol.Session, string, int, time.Time) (string, string, error)
+	longRunMu                         sync.Mutex
+	longRun                           map[string]longRunSession
+	forcedStopMu                      sync.Mutex
+	forcedStop                        map[string]time.Time
+	pendingResumeMu                   sync.Mutex
+	pendingResumeID                   map[string]string
 	// Orphaned-ticket reconciliation (docs/plans/2026-07-01-orphaned-ticket-
 	// reconciliation.md): when an owning session dies with a non-terminal ticket,
 	// a capped headless classifier judges the dead transcript against the brief.
@@ -2520,7 +2524,11 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 
 	// Parse transcript for last assistant message
 	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
-	lastMessage, assistantTurnID, err := d.extractLastAssistantMessage(session, resolvedTranscriptPath, 500, classificationStartTime)
+	extract := d.extractLastAssistantMessage
+	if d.classificationTranscriptExtractor != nil {
+		extract = d.classificationTranscriptExtractor
+	}
+	lastMessage, assistantTurnID, err := extract(session, resolvedTranscriptPath, 500, classificationStartTime)
 	if err != nil {
 		if errors.Is(err, agentdriver.ErrNoNewAssistantTurn) {
 			d.logf("classifySessionState: no new assistant turn for session %s, skipping classification", sessionID)

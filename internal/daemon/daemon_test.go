@@ -5572,10 +5572,13 @@ func TestClassifySessionState_TranscriptDisabledWithPendingTodos_SetsWaitingInpu
 	}
 }
 
-func TestClassifySessionState_ClaudeSkipsDuplicateAssistantTurn(t *testing.T) {
+func TestClassifySessionState_SkipsNoNewAssistantTurn(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
 	d.classifier = mockClassifier
+	d.classificationTranscriptExtractor = func(*protocol.Session, string, int, time.Time) (string, string, error) {
+		return "", "", agentdriver.ErrNoNewAssistantTurn
+	}
 
 	now := time.Now()
 	nowStr := string(protocol.NewTimestamp(now))
@@ -5590,40 +5593,17 @@ func TestClassifySessionState_ClaudeSkipsDuplicateAssistantTurn(t *testing.T) {
 		LastSeen:       nowStr,
 	})
 
-	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
-	content := fmt.Sprintf(
-		`{"type":"user","uuid":"u1","timestamp":"%s","message":{"role":"user","content":"hello"}}
-{"type":"assistant","uuid":"a1","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"Hello! What can I help you with today?"}]}}
-`,
-		now.Add(-1*time.Second).UTC().Format(time.RFC3339Nano),
-		now.UTC().Format(time.RFC3339Nano),
-	)
-	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
-		t.Fatalf("write transcript: %v", err)
-	}
-
-	d.classifySessionState("sess-1", transcriptPath)
-	if got := mockClassifier.CallCount(); got != 1 {
-		t.Fatalf("first classify calls=%d, want 1", got)
+	d.classifySessionState("sess-1", filepath.Join(t.TempDir(), "transcript.jsonl"))
+	if got := mockClassifier.CallCount(); got != 0 {
+		t.Fatalf("classifier calls=%d, want 0", got)
 	}
 
 	sess := d.store.Get("sess-1")
 	if sess == nil {
-		t.Fatal("session missing after first classify")
+		t.Fatal("session missing after classification")
 	}
-	firstState := sess.State
-
-	d.classifySessionState("sess-1", transcriptPath)
-	if got := mockClassifier.CallCount(); got != 1 {
-		t.Fatalf("second classify calls=%d, want still 1", got)
-	}
-
-	sess = d.store.Get("sess-1")
-	if sess == nil {
-		t.Fatal("session missing after second classify")
-	}
-	if sess.State != firstState {
-		t.Fatalf("state changed on duplicate turn: got %q want %q", sess.State, firstState)
+	if sess.State != protocol.StateWorking {
+		t.Fatalf("state changed on no-new-turn result: got %q want %q", sess.State, protocol.StateWorking)
 	}
 }
 

@@ -55,6 +55,11 @@ make / pre-commit
 - [x] Reuse a prebuilt `attn` binary across process E2E tests.
 - [x] Add `t.Parallel()` only to audited tests without process-global state.
 - [x] Repeat cold and warm measurements and compare them with this baseline.
+- [x] Replace the eight real SSH dial timeouts with one deterministic protocol failure while preserving the OS-level child-reaping assertion.
+- [x] Add a private Claude transcript-retry seam so duplicate-turn behavior is tested without the production two-second window.
+- [x] Test the daemon's no-new-turn handling through a fake extraction adapter instead of the real Claude retry loop.
+- [x] Move remote URL variants to the pure parser and retain one Git-backed origin integration test.
+- [x] Remeasure the focused tests and ten complete cache-controlled runs.
 
 ## Results
 
@@ -68,6 +73,28 @@ The focused `internal/git` package improved from 14.97s through the inherited
 wrapper to 1.99s using direct Git plus audited parallel tests. The worker theme
 argument test improved from 6.3s and load-sensitive failure to 0.42s by testing
 argument construction without launching a process.
+
+A second pass removed the remaining deliberate waits without deleting their
+regression contracts. Isolated `-count=1 -json` timings changed as follows:
+
+| Test contract | Before | After |
+| --- | ---: | ---: |
+| SSH child reaping after dial failure | 4.30s | 0.16s |
+| Claude duplicate-turn extraction | 2.02s | <0.01s |
+| Daemon no-new-turn handling | 2.03s | 0.01s |
+| Git-backed origin resolution | 0.50s | 0.10s |
+
+The faster SSH harness still failed in 0.21s and found one zombie when
+`cmd.Wait()` was temporarily mutation-removed, proving that it preserves the
+historical regression signal.
+
+Ten additional complete runs passed at 27.95–40.36s with a 29.45s median.
+This sample is not directly comparable to the earlier low-contention median:
+other attn worktrees ran `go test ./...` concurrently, and observed system CPU
+included `mediaanalysisd` above 75% and `JamfDaemon` above 50%. Eight of ten
+runs clustered at 27.95–32.81s; the 40.36s outlier coincided with that external
+load. The focused timings establish the code-path savings; the full-run sample
+shows no correctness regression but cannot establish a new low-contention p50.
 
 ## Success Criteria
 
