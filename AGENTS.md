@@ -73,6 +73,9 @@ Use the bundled CLI, not an unrelated `attn` on `PATH`. Preflight is diagnostic;
 fix reported tool/path/routing/daemon/protocol failures before treating scenario
 output as product evidence.
 
+For a GitHub merge gate, run `attn pr wait-ready <pr> --repo <owner/repo>
+--reviewer <login>` once; do not poll checks and reviews separately.
+
 ### Packaged-app harness
 
 - Single-tenant: never run packaged-app scenarios in parallel.

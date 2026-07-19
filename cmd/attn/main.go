@@ -245,6 +245,8 @@ func main() {
 	case "preflight":
 		maybePrintProfileBanner()
 		runPreflight()
+	case "pr":
+		runPRCommand()
 	case "plugin":
 		maybePrintProfileBanner()
 		runPluginCommand()
@@ -619,6 +621,7 @@ commands:
   workflow <command>                run, inspect, and resume durable workflows
   automation <command>              manage and run durable automations
   preflight                         diagnose tools, paths, routing, and launch settings
+  pr wait-ready <pr>                wait for exact-head checks and approval
   list                              list sessions and workspaces
   present <command>                 open a review presentation and read feedback
   debug <command>                   probe debug artifacts (incidents, logs)
