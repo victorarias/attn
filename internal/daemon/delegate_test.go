@@ -1837,8 +1837,12 @@ func TestDelegateWorktreeExplicitRepoOverridesWorkspaceSessions(t *testing.T) {
 // starting point, and picking a representative session would make the starting
 // ref depend on session-id ordering.
 //
-// The new branch must therefore start from the repository's default, matching
-// neither member branch, regardless of which session sorts first.
+// The new branch must therefore start from the repository's default branch,
+// matching neither member branch, regardless of which session sorts first.
+//
+// The main checkout is deliberately parked on a divergent topic branch: an
+// implementation that leaves StartingFrom empty gets `git worktree add -b`'s
+// current-HEAD behaviour, so its ambient checkout would steer the delegation.
 func TestDelegateWorktreeSameRepoDifferentBranchesUsesRepoDefault(t *testing.T) {
 	root := t.TempDir()
 	repo := initDelegationRepo(t, root, "repo")
@@ -1855,6 +1859,15 @@ func TestDelegateWorktreeSameRepoDifferentBranchesUsesRepoDefault(t *testing.T) 
 	runGitDaemon(t, worktreeB, "commit", "--allow-empty", "-m", "b")
 	headA := gitRevParseDaemon(t, worktreeA, "HEAD")
 	headB := gitRevParseDaemon(t, worktreeB, "HEAD")
+
+	// Park the main checkout somewhere other than the default branch. Nothing
+	// about the delegation may depend on this.
+	runGitDaemon(t, repo, "checkout", "-q", "-b", "topic/ambient")
+	runGitDaemon(t, repo, "commit", "--allow-empty", "-m", "ambient")
+	ambientHead := gitRevParseDaemon(t, repo, "HEAD")
+	if ambientHead == mainHead {
+		t.Fatal("precondition: main checkout HEAD must diverge from the default branch")
+	}
 
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
@@ -1897,8 +1910,12 @@ func TestDelegateWorktreeSameRepoDifferentBranchesUsesRepoDefault(t *testing.T) 
 		t.Fatalf("new branch started from a member session's branch (head %s; feat/a %s, feat/b %s); "+
 			"the starting ref must not depend on which session sorts first", head, headA, headB)
 	}
+	if head == ambientHead {
+		t.Fatalf("new branch started from the main checkout's current HEAD (%s); "+
+			"the starting ref must not depend on what the main checkout happens to have checked out", head)
+	}
 	if head != mainHead {
-		t.Fatalf("new branch head = %s, want the repository default %s", head, mainHead)
+		t.Fatalf("new branch head = %s, want the repository default branch %s", head, mainHead)
 	}
 }
 
@@ -1944,5 +1961,69 @@ func TestDelegateWorktreeExplicitFromStillWins(t *testing.T) {
 	}
 	if head := gitRevParseDaemon(t, result.Directory, "HEAD"); head != headA {
 		t.Fatalf("new branch head = %s, want feat/a head %s", head, headA)
+	}
+}
+
+// TestDelegateWorktreePrefersRemoteDefaultBranch pins the documented preference
+// for the remote-tracking default branch: a delegated worktree should start from
+// what upstream has, not from a stale local default. The local default branch is
+// deliberately left behind origin's.
+func TestDelegateWorktreePrefersRemoteDefaultBranch(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	runGitDaemon(t, root, "init", "--bare", "-b", "main", origin)
+
+	repo := initDelegationRepo(t, root, "repo")
+	runGitDaemon(t, repo, "branch", "-M", "main")
+	runGitDaemon(t, repo, "remote", "add", "origin", origin)
+	runGitDaemon(t, repo, "push", "-q", "-u", "origin", "main")
+	staleLocalHead := gitRevParseDaemon(t, repo, "main")
+
+	// Advance origin/main beyond the local default branch, then leave the local
+	// checkout behind. A clone elsewhere is the least contrived way to push a
+	// commit the local repo does not have.
+	other := filepath.Join(root, "other")
+	runGitDaemon(t, root, "clone", "-q", origin, other)
+	runGitDaemon(t, other, "commit", "--allow-empty", "-m", "upstream advance")
+	runGitDaemon(t, other, "push", "-q", "origin", "main")
+	upstreamHead := gitRevParseDaemon(t, other, "HEAD")
+	if upstreamHead == staleLocalHead {
+		t.Fatal("precondition: origin/main must be ahead of the local default branch")
+	}
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	targetWorkspaceID := "workspace-target"
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Target",
+		Directory: repo,
+	})
+	addWorkspaceSessionAt(t, d, targetWorkspaceID, "session-a", repo)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Start from upstream.",
+		Placement:       protocol.Ptr(delegationPlacementExisting),
+		WorkspaceID:     protocol.Ptr(targetWorkspaceID),
+		Label:           protocol.Ptr("delegated"),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Branch: "feat/from-upstream",
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	head := gitRevParseDaemon(t, result.Directory, "HEAD")
+	if head == staleLocalHead {
+		t.Fatalf("new branch started from the stale local default branch (%s), want origin/main %s", head, upstreamHead)
+	}
+	if head != upstreamHead {
+		t.Fatalf("new branch head = %s, want origin/main %s", head, upstreamHead)
 	}
 }
