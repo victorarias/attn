@@ -105,25 +105,32 @@ Flag mapping (verified against pi v0.80.10 `args.ts`):
 
 ## Implementation Steps
 
-- [ ] Smoke spike (phase-2 opener): launch pi manually inside a
+- [x] Smoke spike (phase-2 opener): launch pi manually inside a
       throwaway-profile attn session; verify TUI render, OSC 11/kitty
       negotiation against the worker responder, resize behavior,
       `--session-id` create + resume round-trip, and the project-trust prompt
       flow. Capture evidence for the PR.
-- [ ] Plugin skeleton: `attn-plugin.toml`, `package.json`, `src/index.ts`
+      Done 2026-07-19 (headless, throwaway profile pismoke, shell session over daemon WS): TUI renders under the worker PTY; resize 90x24/140x40 re-flows; --session-id create + resume restores history; --model/--thinking pins apply; ctrl+d exits to shell.
+- [x] Plugin skeleton: `attn-plugin.toml`, `package.json`, `src/index.ts`
       rpc wiring (mirror attn-opencode).
-- [ ] `src/driver.ts`: availability + version floor, `driver.register`
+- [x] `src/driver.ts`: availability + version floor, `driver.register`
       (capabilities above), spawn/resume argv mapping, metadata report,
       `driver.session_closed` cleanup.
-- [ ] Unit tests: argv mapping (pins/prompt/resume), version gate incl.
+- [x] Unit tests: argv mapping (pins/prompt/resume), version gate incl.
       downgrade-on-resume refusal, malformed metadata rejection.
-- [ ] Bundling: add attn-pi to `scripts/build-bundled-plugins.sh` (bun
+      13 tests green (`bun test` in plugins/attn-pi).
+- [x] Bundling: add attn-pi to `scripts/build-bundled-plugins.sh` (bun
       compile + generated executable manifest) so
-      `attn plugin install-bundled attn-pi` works.
-- [ ] Live verification on a throwaway profile per AGENTS.md (preflight
-      first): spawn from the app UI, type a turn, quit, resume, confirm
-      session lifecycle + working/idle states.
-- [ ] CHANGELOG entry; PR includes plugins/attn-pi guidance docs and
+      `attn plugin install-bundled attn-pi` works. Also added attn-pi
+      sources to the `scripts/source-fingerprint.sh` includes.
+- [x] Live verification on a throwaway profile (pismoke, daemon built from
+      this branch): `attn plugin install-bundled attn-pi` -> driver
+      registered (agent=pi) -> spawn with effort pin -> state=working +
+      PiMetadata persisted -> real turn -> ctrl+d -> idle -> re-spawn same
+      session id -> driver.resume restored history with pins re-applied.
+      Headless over the daemon WS, not the app UI: the PR touches no
+      frontend code, and the picker is dynamic (see Open Questions).
+- [x] CHANGELOG entry; PR includes plugins/attn-pi guidance docs and
       docs/grounding/pi-plugins.md.
 
 ## Decisions
@@ -137,15 +144,18 @@ Flag mapping (verified against pi v0.80.10 `args.ts`):
   one-line change gated on reading pi's CHANGELOG.
 - Initial prompt travels as a positional argv (visible in `ps`) — same
   exposure class as existing agent launches; not worth staging machinery.
+- pi's --model flag is a fuzzy pattern, not an exact id: in the smoke run, "--model gpt-5.5" matched an azure-openai-responses provider rather than the default openai one. The driver passes the pin through verbatim; provider-qualified patterns are the user's tool if it matters.
 
 ## Open Questions
 
-- pi's project-trust prompt: does trust persist across launches per cwd, or
-  will every attn spawn re-prompt? Smoke spike answers; if it re-prompts,
-  consider `--approve` implications instead of accepting the friction.
-- Frontend: pi should appear in the agent picker automatically via
-  `broadcastSettings` on driver registration — verify in smoke; if not, a
-  small frontend follow-up is needed.
+- ~~pi's project-trust prompt~~ Resolved 2026-07-19: first launch in a fresh cwd with a fresh ~/.pi showed no trust prompt — pi went straight to the input UI.
+- ~~Frontend picker~~ Resolved 2026-07-19 in code: `driver.register`
+  broadcasts settings (`internal/daemon/plugin_driver.go:199`), the settings
+  payload publishes `pi_available=true` plus capability keys for registered
+  plugin drivers (`internal/daemon/ws_settings.go:238-243`), and the
+  frontend parses any `<agent>_available` key
+  (`app/src/utils/agentAvailability.ts`) — pi appears in the picker with no
+  frontend change.
 - `pi install local:` on-disk layout expectations (matters for rock 2's suite
   staging, not for this PR).
 
