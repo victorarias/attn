@@ -402,16 +402,7 @@ func (d *Daemon) cancelWithdrawnAutomationRun(run *store.AutomationRun) error {
 	// that occurrence, but must not tear down a reviewer already handed off to the
 	// ordinary ticket/session lifecycle.
 	if ticket != nil && ticket.AutomationRunID == run.ID {
-		shouldStop := d.store.Get(run.SessionID) != nil
-		if d.ptyBackend != nil {
-			for _, sessionID := range d.ptyBackend.SessionIDs(context.Background()) {
-				if sessionID == run.SessionID {
-					shouldStop = true
-					break
-				}
-			}
-		}
-		if shouldStop {
+		if d.hasAutomationSession(run.SessionID) {
 			// Keep the durable run, ticket, workspace, pane, and worktree as evidence,
 			// but stop and forget the unrequested runtime. A later initial-cycle
 			// re-request may safely recreate the same reserved session ID.
@@ -437,6 +428,21 @@ func (d *Daemon) cancelWithdrawnAutomationRun(run *store.AutomationRun) error {
 	}
 	_, failErr := d.failAutomationRun(run, errAutomationReviewWithdrawn)
 	return failErr
+}
+
+func (d *Daemon) hasAutomationSession(sessionID string) bool {
+	if d.store.Get(sessionID) != nil {
+		return true
+	}
+	if d.ptyBackend == nil {
+		return false
+	}
+	for _, liveSessionID := range d.ptyBackend.SessionIDs(context.Background()) {
+		if liveSessionID == sessionID {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Daemon) deliverObservedAutomationRun(run *store.AutomationRun) error {

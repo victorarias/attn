@@ -411,18 +411,10 @@ func (s *Store) GitHubReviewAutomationRunStillRequested(runID string) (bool, err
 	return active == 1 && acceptedCycle == cycle && occurrenceKey == wantKey, nil
 }
 
-// ListWithdrawnGitHubReviewUndeliveredRuns returns the pending or already-failed
-// undelivered run for the currently withdrawn cycle. Keeping pending runs visible
-// here makes runtime cancellation recoverable if the daemon exits after recording
-// the inactive edge but before it stops a partially launched reviewer. Once
-// delivery durably links the ticket and visible session, the automation engine no
-// longer owns that session's lifecycle; later work state is controlled through
-// the ordinary ticket/session surfaces. Ticket/session row presence alone is not
-// that handoff signal: stable-ID ensures intentionally persist those rows before
-// unattended launch verification. The delivered run transition is the commit
-// record that verification and every durable link agreed.
-// Older withdrawn cycles may also share continuity IDs with later work and must
-// not be used to cancel that later reviewer.
+// ListWithdrawnGitHubReviewUndeliveredRuns returns the current withdrawn cycle's
+// pending run, or its failed run when cancellation still needs to be reconciled.
+// Delivery is the handoff to ordinary ticket/session ownership; persisted stable
+// IDs alone are not, because they may precede successful launch verification.
 func (s *Store) ListWithdrawnGitHubReviewUndeliveredRuns(definitionID, host string) ([]AutomationRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
