@@ -460,3 +460,50 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 		t.Fatal("manual PR refresh did not feed the automation observer")
 	}
 }
+
+func TestContinuationFailurePreservesOriginTicketOutcome(t *testing.T) {
+	s := store.New()
+	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	firstIDs := store.AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	first, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, firstIDs)
+	if err != nil || !created {
+		t.Fatalf("first claim created=%v err=%v", created, err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: first.TicketID, Title: "Review", Status: store.TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetTicketStatus(first.TicketID, store.TicketStatusDone, first.SessionID, "review complete", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(3*time.Minute))
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("second candidates=%#v err=%v", candidates, err)
+	}
+	second, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(3*time.Minute), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "unused-ticket", SessionID: "unused-session", WorkspaceID: "unused-workspace", PaneID: "unused-pane"})
+	if err != nil || !created {
+		t.Fatalf("second claim created=%v err=%v", created, err)
+	}
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	failed, err := d.failAutomationRun(second, errors.New("changed revision requires an explicit continuity rule"))
+	if err != nil || failed == nil || failed.State != "failed" {
+		t.Fatalf("failed run=%#v err=%v", failed, err)
+	}
+	ticket, err := s.GetTicket(first.TicketID)
+	if err != nil || ticket == nil || ticket.Status != store.TicketStatusDone {
+		t.Fatalf("origin ticket=%#v err=%v", ticket, err)
+	}
+	if len(ticket.Activity) == 0 || !strings.Contains(ticket.Activity[len(ticket.Activity)-1].Comment, "changed revision") {
+		t.Fatalf("continuation failure activity=%#v", ticket.Activity)
+	}
+}

@@ -326,17 +326,26 @@ func (d *Daemon) failAutomationRun(run *store.AutomationRun, deliveryErr error) 
 	now := time.Now()
 	var persistErr error
 	// Keep any stable-ID workspace, pane, or session artifacts for diagnosis and
-	// steering. The failed ticket makes the partial delivery visible without
-	// presenting it as active work; recovery never creates a second artifact set.
+	// steering. Recovery never creates a second artifact set.
 	if err := d.store.MarkAutomationRunFailed(run.ID, deliveryErr.Error(), now); err != nil {
 		persistErr = errors.Join(persistErr, fmt.Errorf("mark run failed: %w", err))
 	}
 	if ticket, err := d.store.GetTicket(run.TicketID); err != nil {
 		persistErr = errors.Join(persistErr, fmt.Errorf("find automation ticket: %w", err))
-	} else if ticket != nil && ticket.Status != store.TicketStatusFailed {
+	} else if ticket != nil {
 		comment := "Automation delivery failed: " + deliveryErr.Error()
-		if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusFailed, store.TicketAuthorAttn, comment, now); err != nil {
-			persistErr = errors.Join(persistErr, fmt.Errorf("mark automation ticket failed: %w", err))
+		if ticket.AutomationRunID != "" && ticket.AutomationRunID != run.ID {
+			// A later per-subject occurrence must not rewrite the outcome of the
+			// successful run that created the shared reviewer ticket. The failed run
+			// remains visible in run history and the ticket receives durable activity.
+			if _, err := d.store.AddTicketComment(ticket.ID, "automation:"+run.DefinitionID, comment, now); err != nil {
+				persistErr = errors.Join(persistErr, fmt.Errorf("record continuation failure: %w", err))
+			}
+			d.notifyTicketObservers(ticket.ID)
+		} else if ticket.Status != store.TicketStatusFailed {
+			if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusFailed, store.TicketAuthorAttn, comment, now); err != nil {
+				persistErr = errors.Join(persistErr, fmt.Errorf("mark automation ticket failed: %w", err))
+			}
 		}
 	}
 	d.broadcastTicketsUpdated()
@@ -400,7 +409,13 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 		if req.ContinuityKey == "" {
 			return errors.New("automation ticket already exists without a continuity binding")
 		}
-		return d.store.EnsureAutomationContinuationTicket(req.IDs.TicketID, req.IDs.SessionID, req.RunID, author, time.Now())
+		if err := d.store.EnsureAutomationContinuationTicket(req.IDs.TicketID, req.IDs.SessionID, req.RunID, author, time.Now()); err != nil {
+			return err
+		}
+		// The ticket event is the durable payload. Use the ordinary content-free
+		// doorbell so an idle live reviewer learns that a new cycle is waiting.
+		d.notifyTicketObservers(req.IDs.TicketID)
+		return nil
 	}
 	_, err = d.store.EnsureAutomationTicket(store.Ticket{ID: req.IDs.TicketID, Title: def.Name, Description: req.Prompt, Status: store.TicketStatusWorking, Assignee: req.IDs.SessionID, Cwd: req.Location.Path, LastAgentID: req.Launch.Agent, AutomationRunID: req.RunID}, author, store.TicketRoleChiefOfStaff, time.Now())
 	return err
