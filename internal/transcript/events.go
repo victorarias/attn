@@ -134,16 +134,11 @@ func ReadEventPage(path, agent, cursor string, maxEvents int) (EventPage, error)
 		line := bytes.TrimSpace(record)
 		parsed := parseEventLine(agent, line)
 		allEvents := parsed.events
-		if parsed.dedupeAssistantEcho && hasPreviousEvent &&
-			previousEvent.Kind == EventKindAssistant && previousEvent.Text == allEvents[0].Text {
+		if isDuplicateAssistantEcho(parsed, previousEvent, hasPreviousEvent) {
 			allEvents = nil
 		}
 		if skipEvents > len(allEvents) {
 			return EventPage{}, ErrInvalidCursor
-		}
-		if skipEvents > 0 {
-			previousEvent = allEvents[skipEvents-1]
-			hasPreviousEvent = true
 		}
 		events := allEvents[skipEvents:]
 
@@ -307,8 +302,8 @@ type eventContentBlock struct {
 }
 
 type parsedEventLine struct {
-	events              []Event
-	dedupeAssistantEcho bool
+	events                 []Event
+	assistantEchoCandidate bool
 }
 
 func parseEventLine(agent string, line []byte) parsedEventLine {
@@ -328,12 +323,21 @@ func parseEventLine(agent string, line []byte) parsedEventLine {
 	case "codex":
 		events := parseCodexEvent(envelope)
 		return parsedEventLine{
-			events:              events,
-			dedupeAssistantEcho: envelope.Type == "response_item" && len(events) == 1 && events[0].Kind == EventKindAssistant,
+			events:                 events,
+			assistantEchoCandidate: envelope.Type == "response_item",
 		}
 	default:
 		return parsedEventLine{}
 	}
+}
+
+func isDuplicateAssistantEcho(parsed parsedEventLine, previous Event, hasPrevious bool) bool {
+	return parsed.assistantEchoCandidate &&
+		len(parsed.events) == 1 &&
+		parsed.events[0].Kind == EventKindAssistant &&
+		hasPrevious &&
+		previous.Kind == EventKindAssistant &&
+		previous.Text == parsed.events[0].Text
 }
 
 func parseCodexEvent(envelope eventEnvelope) []Event {

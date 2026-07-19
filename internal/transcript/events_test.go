@@ -17,6 +17,21 @@ func writeEventTranscript(t *testing.T, lines ...string) string {
 	return path
 }
 
+func appendEventTranscript(t *testing.T, path, line string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReadEventPageCodexNormalizesAndRedacts(t *testing.T) {
 	path := writeEventTranscript(t,
 		`{"timestamp":"2026-07-19T10:00:00Z","type":"session_meta","payload":{"id":"native-id"}}`,
@@ -96,18 +111,9 @@ func TestReadEventPageCodexDeduplicatesPairedAssistantAcrossFollowPoll(t *testin
 		t.Fatalf("first poll = %#v", first)
 	}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, writeErr := f.WriteString(`{"timestamp":"2026-07-19T10:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"checking now"}]}}` + "\n")
-	closeErr := f.Close()
-	if writeErr != nil {
-		t.Fatal(writeErr)
-	}
-	if closeErr != nil {
-		t.Fatal(closeErr)
-	}
+	appendEventTranscript(t, path,
+		`{"timestamp":"2026-07-19T10:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"checking now"}]}}`,
+	)
 
 	second, err := ReadEventPage(path, "codex", first.NextCursor, 10)
 	if err != nil {
