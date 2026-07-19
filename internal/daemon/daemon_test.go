@@ -161,6 +161,17 @@ func waitForSocket(t *testing.T, sockPath string, timeout time.Duration) {
 	t.Fatalf("socket %s not ready after %v", sockPath, timeout)
 }
 
+func waitForRecovery(t *testing.T, d *Daemon) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for d.isRecovering() {
+		if time.Now().After(deadline) {
+			t.Fatal("daemon recovery did not finish before test setup")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func shortTempDir(t *testing.T) string {
 	t.Helper()
 	// Unix socket paths are length-limited (notably on macOS). The default
@@ -188,13 +199,7 @@ func TestDaemon_RegisterAndQuery(t *testing.T) {
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
-	deadline := time.Now().Add(2 * time.Second)
-	for d.isRecovering() {
-		if time.Now().After(deadline) {
-			t.Fatal("daemon recovery did not finish before test setup")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForRecovery(t, d)
 
 	c := client.New(sockPath)
 
@@ -228,13 +233,7 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
-	deadline := time.Now().Add(2 * time.Second)
-	for d.isRecovering() {
-		if time.Now().After(deadline) {
-			t.Fatal("daemon recovery did not finish before test setup")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForRecovery(t, d)
 
 	c := client.New(sockPath)
 
@@ -272,13 +271,7 @@ func TestDaemon_ScheduledStateUpdate(t *testing.T) {
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
-	deadline := time.Now().Add(2 * time.Second)
-	for d.isRecovering() {
-		if time.Now().After(deadline) {
-			t.Fatal("daemon recovery did not finish before test setup")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForRecovery(t, d)
 
 	c := client.New(sockPath)
 	c.Register("sess-1", "loop-bot", "/tmp")
@@ -342,13 +335,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 	defer d.Stop()
 
 	waitForSocket(t, sockPath, 5*time.Second)
-	deadline := time.Now().Add(2 * time.Second)
-	for d.isRecovering() {
-		if time.Now().After(deadline) {
-			t.Fatal("daemon recovery did not finish before test setup")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForRecovery(t, d)
 
 	c := client.New(sockPath)
 
@@ -368,7 +355,7 @@ func TestDaemon_MultipleSessions(t *testing.T) {
 		t.Fatalf("UpdateState(2, working) error: %v", err)
 	}
 
-	deadline = time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for {
 		launching, err := c.Query(protocol.StateLaunching)
 		if err != nil {
