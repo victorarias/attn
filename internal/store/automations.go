@@ -63,7 +63,23 @@ func (s *Store) AutomationReviewRequestNeedsClaim(definitionID, subjectKey strin
 	if err != nil {
 		return false, err
 	}
-	return active == 1 && currentCycle == cycle && acceptedCycle < cycle, nil
+	if active != 1 || currentCycle != cycle {
+		return false, nil
+	}
+	if acceptedCycle < cycle {
+		return true, nil
+	}
+	occurrenceKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)
+	var pending int
+	err = s.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1
+			FROM automation_occurrences o
+			JOIN automation_runs r ON r.occurrence_id=o.id
+			WHERE o.definition_id=? AND o.provider='github' AND o.occurrence_key=? AND r.state='pending'
+		)
+	`, definitionID, occurrenceKey).Scan(&pending)
+	return pending != 0, err
 }
 
 func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bool, now time.Time) (*AutomationDefinition, error) {
@@ -219,9 +235,9 @@ func (s *Store) ClaimManualAutomationRun(definitionID, requestID, subjectKey, pa
 }
 
 // ReconcileAutomationReviewRequests records the provider's complete current
-// review-request demand for one host and returns only active edges whose current
-// cycle has not yet been accepted into a durable run. A failed detail fetch can
-// therefore retry on the next poll without inventing another cycle.
+// review-request demand for one host. It returns active edges whose current cycle
+// either has not been accepted or still owns a pending run, so both detail-fetch
+// and delivery failures retry on a later observation without inventing a cycle.
 func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, subjectKeys []string, observedAt time.Time) ([]AutomationReviewRequestCandidate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -329,21 +345,48 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 			return nil, err
 		}
 	}
-	rows, err = tx.Query(`SELECT subject_key,cycle FROM automation_review_request_edges WHERE definition_id=? AND host=? AND active=1 AND accepted_cycle < cycle ORDER BY subject_key`, definitionID, host)
+	rows, err = tx.Query(`SELECT subject_key,cycle,accepted_cycle FROM automation_review_request_edges WHERE definition_id=? AND host=? AND active=1 ORDER BY subject_key`, definitionID, host)
 	if err != nil {
 		return nil, err
 	}
-	var candidates []AutomationReviewRequestCandidate
+	type activeReviewEdge struct {
+		subjectKey    string
+		cycle         int
+		acceptedCycle int
+	}
+	var activeEdges []activeReviewEdge
 	for rows.Next() {
-		var candidate AutomationReviewRequestCandidate
-		if err := rows.Scan(&candidate.SubjectKey, &candidate.Cycle); err != nil {
+		var edge activeReviewEdge
+		if err := rows.Scan(&edge.subjectKey, &edge.cycle, &edge.acceptedCycle); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		candidates = append(candidates, candidate)
+		activeEdges = append(activeEdges, edge)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
+	}
+	var candidates []AutomationReviewRequestCandidate
+	for _, edge := range activeEdges {
+		if edge.acceptedCycle < edge.cycle {
+			candidates = append(candidates, AutomationReviewRequestCandidate{SubjectKey: edge.subjectKey, Cycle: edge.cycle})
+			continue
+		}
+		occurrenceKey := fmt.Sprintf("review_requested:%s:%d", edge.subjectKey, edge.cycle)
+		var pending int
+		if err := tx.QueryRow(`
+			SELECT EXISTS(
+				SELECT 1
+				FROM automation_occurrences o
+				JOIN automation_runs r ON r.occurrence_id=o.id
+				WHERE o.definition_id=? AND o.provider='github' AND o.occurrence_key=? AND r.state='pending'
+			)
+		`, definitionID, occurrenceKey).Scan(&pending); err != nil {
+			return nil, err
+		}
+		if pending != 0 {
+			candidates = append(candidates, AutomationReviewRequestCandidate{SubjectKey: edge.subjectKey, Cycle: edge.cycle})
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'github_review_requested',?,?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at WHERE excluded.observed_at >= automation_provider_cursors.observed_at`, definitionID, host, observedRaw); err != nil {
 		return nil, err

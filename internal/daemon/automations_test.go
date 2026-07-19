@@ -573,6 +573,66 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	}
 }
 
+func TestGitHubReviewObservationRetriesAcceptedPendingRunOnSameDemand(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/repo/pulls/42" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.com/owner/repo/pull/42","title":"Change","body":"untrusted","state":"open","draft":false,"user":{"login":"author"},"head":{"sha":"0123456789abcdef0123456789abcdef01234567","ref":"feature","repo":{"full_name":"owner/repo"}},"base":{"sha":"89abcdef0123456789abcdef0123456789abcdef","ref":"main","repo":{"full_name":"owner/repo"}}}`))
+	}))
+	defer server.Close()
+	client, err := github.NewClientForHost("github.com", server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := github.NewClientRegistry()
+	registry.Register("github.com", client)
+	s := store.New()
+	_, canonical, err := automation.ParseDefinitionYAML([]byte(`api_version: attn.dev/automations/v1alpha1
+id: retry-review
+name: Retry review
+enabled: true
+trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
+prompt: Review locally.
+launch: {driver: codex}
+location: {type: repository_worktree, repository_sources: {default: {type: managed_cache}}}
+policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertAutomationDefinition("retry-review", "Retry review", string(canonical), true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var attempts atomic.Int32
+	d := &Daemon{store: s, ghRegistry: registry}
+	d.automationDeliveryHook = func(run *store.AutomationRun) error {
+		if attempts.Add(1) == 1 {
+			return &retryableAutomationDeliveryError{cause: errors.New("transient launch failure")}
+		}
+		return s.MarkAutomationRunDelivered(run.ID, `{}`, time.Now())
+	}
+	demand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
+	observedAt := time.Now()
+	d.observeGitHubReviewRequests("github.com", demand, observedAt)
+	runs, err := s.ListAutomationRuns("retry-review")
+	if err != nil || len(runs) != 1 || runs[0].State != "pending" || attempts.Load() != 1 {
+		t.Fatalf("first observation runs=%#v attempts=%d err=%v", runs, attempts.Load(), err)
+	}
+
+	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(time.Second))
+	runs, err = s.ListAutomationRuns("retry-review")
+	if err != nil || len(runs) != 1 || runs[0].State != "delivered" || attempts.Load() != 2 {
+		t.Fatalf("retry observation runs=%#v attempts=%d err=%v", runs, attempts.Load(), err)
+	}
+	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(2*time.Second))
+	if attempts.Load() != 2 {
+		t.Fatalf("delivered run retried again: attempts=%d", attempts.Load())
+	}
+}
+
 func TestContinuationFailurePreservesOriginTicketOutcome(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)

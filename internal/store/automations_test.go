@@ -90,6 +90,9 @@ func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Review", Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", TicketRoleChiefOfStaff, now); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.MarkAutomationRunDelivered(first.ID, `{}`, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	candidates, err = s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
 	if err != nil || len(candidates) != 0 {
 		t.Fatalf("duplicate poll candidates = %#v err=%v", candidates, err)
@@ -116,6 +119,46 @@ func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 	occurrence, err := s.GetAutomationOccurrence(second.OccurrenceID)
 	if err != nil || occurrence == nil || occurrence.OccurrenceKey != "review_requested:github.com/owner/repo#42:2" {
 		t.Fatalf("second occurrence = %#v err=%v", occurrence, err)
+	}
+}
+
+func TestGitHubReviewAcceptedPendingRunRemainsRetryableWhileDemandIsActive(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := "github.com/owner/repo#42"
+	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("first reconcile = %#v err=%v", candidates, err)
+	}
+	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	run, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("claim created=%v err=%v", created, err)
+	}
+
+	candidates, err = s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(time.Minute))
+	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 1 {
+		t.Fatalf("pending retry candidates = %#v err=%v", candidates, err)
+	}
+	needsClaim, err := s.AutomationReviewRequestNeedsClaim(def.ID, subject, 1)
+	if err != nil || !needsClaim {
+		t.Fatalf("pending run needs claim=%v err=%v", needsClaim, err)
+	}
+	retried, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now.Add(time.Minute), AutomationRunReservation{RunID: "unused"})
+	if err != nil || created || retried.ID != run.ID {
+		t.Fatalf("retry run=%#v created=%v err=%v", retried, created, err)
+	}
+
+	if err := s.MarkAutomationRunDelivered(run.ID, `{}`, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err = s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(3*time.Minute))
+	if err != nil || len(candidates) != 0 {
+		t.Fatalf("delivered duplicate candidates = %#v err=%v", candidates, err)
 	}
 }
 
