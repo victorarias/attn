@@ -3148,6 +3148,10 @@ func (d *Daemon) doPRPoll() {
 			continue
 		}
 
+		// Order observations by when their provider fetch began. A slower, older
+		// response must not supersede a newer explicit refresh that already recorded
+		// withdrawn demand.
+		observedAt := time.Now()
 		prs, err := client.FetchAll()
 		if err != nil {
 			if errors.Is(err, github.ErrRateLimited) {
@@ -3177,7 +3181,7 @@ func (d *Daemon) doPRPoll() {
 		}
 
 		allPRs = append(allPRs, prs...)
-		observedByHost[host] = successfulPRObservation{prs: prs, observedAt: time.Now()}
+		observedByHost[host] = successfulPRObservation{prs: prs, observedAt: observedAt}
 	}
 
 	if !earliestReset.IsZero() {
@@ -3540,6 +3544,7 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 		if !ok {
 			continue
 		}
+		observedAt := time.Now()
 		prs, err := client.FetchAll()
 		if err != nil {
 			d.logf("PR refresh error for %s: %v", host, err)
@@ -3551,7 +3556,7 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 		}
 		successCount++
 		allPRs = append(allPRs, prs...)
-		observedByHost[host] = successfulPRObservation{prs: prs, observedAt: time.Now()}
+		observedByHost[host] = successfulPRObservation{prs: prs, observedAt: observedAt}
 	}
 
 	if len(skippedHosts) > 0 {

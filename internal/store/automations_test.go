@@ -214,3 +214,50 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 		t.Fatalf("re-enabled latest catch-up candidates=%#v err=%v", candidates, err)
 	}
 }
+
+func TestContinuationOccurrenceReopensTerminalTicketExactlyOnce(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	first, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if err != nil || !created {
+		t.Fatalf("first claim created=%v err=%v", created, err)
+	}
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Review", Status: TicketStatusDone, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:review", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("second candidates=%#v err=%v", candidates, err)
+	}
+	second, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(2*time.Minute), AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "unused-ticket", SessionID: "unused-session", WorkspaceID: "unused-workspace", PaneID: "unused-pane"})
+	if err != nil || !created {
+		t.Fatalf("second claim created=%v err=%v", created, err)
+	}
+	if second.TicketID != first.TicketID || second.SessionID != first.SessionID {
+		t.Fatalf("second run did not reuse binding: first=%#v second=%#v", first, second)
+	}
+	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, second.ID, "automation:review", now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EnsureAutomationContinuationTicket(first.TicketID, first.SessionID, second.ID, "automation:review", now.Add(4*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := s.GetTicket(first.TicketID)
+	if err != nil || ticket == nil || ticket.Status != TicketStatusWorking || ticket.ClosedAt != nil {
+		t.Fatalf("reopened ticket=%#v err=%v", ticket, err)
+	}
+	if len(ticket.Activity) != 2 {
+		t.Fatalf("activity=%#v, want one reopen and one occurrence comment", ticket.Activity)
+	}
+}

@@ -366,8 +366,8 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, a
 		return err
 	}
 	defer tx.Rollback()
-	var assignee, originRunID string
-	if err := tx.QueryRow(`SELECT assignee,COALESCE(automation_run_id,'') FROM tickets WHERE id=?`, ticketID).Scan(&assignee, &originRunID); err != nil {
+	var assignee, originRunID, statusRaw string
+	if err := tx.QueryRow(`SELECT assignee,COALESCE(automation_run_id,''),status FROM tickets WHERE id=?`, ticketID).Scan(&assignee, &originRunID, &statusRaw); err != nil {
 		return err
 	}
 	if assignee != sessionID || originRunID == "" {
@@ -382,6 +382,11 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, a
 		return err
 	}
 	if inserted == 1 {
+		if status := TicketStatus(statusRaw); status.IsTerminal() {
+			if _, err := setTicketStatusTx(tx, ticketID, TicketStatusWorking, author, "Reopened for automation occurrence "+runID+".", now); err != nil {
+				return err
+			}
+		}
 		if _, err := addTicketCommentTx(tx, ticketID, author, "Accepted automation occurrence "+runID+" for the existing reviewer.", now); err != nil {
 			return err
 		}

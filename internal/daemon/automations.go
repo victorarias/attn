@@ -451,6 +451,9 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 			return automation.PreparedLocation{}, fmt.Errorf("continuity origin payload: %w", err)
 		}
 		if originPR.HeadSHA != pr.HeadSHA {
+			// The stable session's CWD is the origin run's exact detached worktree.
+			// Until the next continuity slice defines resume/fallback rules for a new
+			// revision, failing is safer than silently reviewing the wrong checkout.
 			return automation.PreparedLocation{}, errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
 		}
 	}
