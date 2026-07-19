@@ -717,17 +717,17 @@ func delegatedTicketPrompt(brief string) string {
 This task is tracked as a ticket in attn. Report your work state so the ticket
 moves across the board and the chief of staff can see your progress:
 
-    "$ATTN_WRAPPER_PATH" ticket status in_progress --comment "<progress and next action>"
+    attn ticket status in_progress --comment "<progress and next action>"
 
 Use the state that matches the outcome when work needs input, is ready, or ends:
 
-    "$ATTN_WRAPPER_PATH" ticket status needs_input --comment "<needed decision>"
-    "$ATTN_WRAPPER_PATH" ticket status ready_for_review --comment "<what is ready>"
-    "$ATTN_WRAPPER_PATH" ticket status completed --comment "<completed outcome>"
-    "$ATTN_WRAPPER_PATH" ticket status failed --comment "<terminal failure>"
+    attn ticket status needs_input --comment "<needed decision>"
+    attn ticket status ready_for_review --comment "<what is ready>"
+    attn ticket status completed --comment "<completed outcome>"
+    attn ticket status failed --comment "<terminal failure>"
 
 When the deliverable is a durable Markdown plan or design, hand it over with
-` + "`" + `"$ATTN_WRAPPER_PATH" ticket attach-plan --file <path>` + "`" + `. In a monorepo, add
+` + "`" + `attn ticket attach-plan --file <path>` + "`" + `. In a monorepo, add
 ` + "`" + `--scope <affected-component>` + "`" + `. The command follows the applicable repository
 convention: a committed repository plan stays canonical in Git and the ticket gets
 a Notebook reference; otherwise the plan is promoted to the Notebook and its

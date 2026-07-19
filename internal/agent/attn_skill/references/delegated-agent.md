@@ -25,22 +25,22 @@ the working column. Report when you:
 - need input or are blocked
 - finish the requested work
 
-    "$ATTN_WRAPPER_PATH" ticket status in_progress --comment \
+    attn ticket status in_progress --comment \
       "Implemented the parser and tests pass. Next: review the error wording."
 
 When work needs input, is ready for review, clearly completes, or fails, report
 the matching state:
 
-    "$ATTN_WRAPPER_PATH" ticket status needs_input \
+    attn ticket status needs_input \
       --comment "Core implementation is ready locally; which event contract should be used?"
 
-    "$ATTN_WRAPPER_PATH" ticket status ready_for_review \
+    attn ticket status ready_for_review \
       --comment "Parser implementation is ready for review"
 
-    "$ATTN_WRAPPER_PATH" ticket status completed \
+    attn ticket status completed \
       --comment "The requested PR merged and no follow-up remains"
 
-    "$ATTN_WRAPPER_PATH" ticket status failed \
+    attn ticket status failed \
       --comment "Implementation cannot continue because the required API was removed"
 
 Reporting moves your bound ticket to the matching column so the chief sees your
@@ -72,7 +72,7 @@ delegation.
 When tracked work produces a Markdown plan or design that must outlive this
 session, let attn choose its one canonical home:
 
-    "$ATTN_WRAPPER_PATH" ticket attach-plan \
+    attn ticket attach-plan \
       --file docs/plans/design.md \
       --state ready_for_review \
       --comment "The design is ready."
