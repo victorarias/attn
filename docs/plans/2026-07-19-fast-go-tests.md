@@ -60,6 +60,8 @@ make / pre-commit
 - [x] Test the daemon's no-new-turn handling through a fake extraction adapter instead of the real Claude retry loop.
 - [x] Move remote URL variants to the pure parser and retain one Git-backed origin integration test.
 - [x] Remeasure the focused tests and ten complete cache-controlled runs.
+- [x] Prototype compiling the daemon test binary once for all shards; reject it
+  if the measured gain does not justify duplicating Go's flag rewriting.
 
 ## Results
 
@@ -96,6 +98,14 @@ runs clustered at 27.95–32.81s; the 40.36s outlier coincided with that externa
 load. The focused timings establish the code-path savings; the full-run sample
 shows no correctness regression but cannot establish a new low-contention p50.
 
+A compiled-daemon-binary prototype also passed default, verbose, short, JSON
+fallback, and focused race-instrumented verification. Ten cache-controlled runs
+passed at 24.85–36.16s with a 29.60s median, compared with 29.87s immediately
+before the prototype. The roughly 0.27s median difference is within ordinary
+run-to-run variance and does not justify maintaining a partial reimplementation
+of Go's build/test flag rewriting, changing daemon test-cache behavior, or
+degrading package-aware output. The runner change was therefore removed.
+
 ## Success Criteria
 
 - [x] The same default Go test coverage passes ten consecutive cache-controlled runs.
@@ -118,3 +128,5 @@ shows no correctness regression but cannot establish a new low-contention p50.
 - Five daemon shards with `GOMAXPROCS=3` replaced the initial four-shard shape
   after the measured concurrency sweep: 25.32s versus 30.75s for four/four and
   41.85s for six/four.
+- Keep the Go driver responsible for compiling and invoking every test binary;
+  compiling the daemon binary once did not produce a material wall-time gain.
