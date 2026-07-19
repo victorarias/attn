@@ -4,8 +4,71 @@ package git
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestEnsureDetachedWorktreeAtRevisionCreateAdoptAndProtectEvidence(t *testing.T) {
+	mainDir := filepath.Join(t.TempDir(), "main")
+	if err := os.MkdirAll(mainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
+	revision, err := GetHeadCommit(mainDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(filepath.Dir(mainDir), "detached")
+	created, err := EnsureDetachedWorktreeAtRevision(mainDir, worktree, revision)
+	if err != nil || !created {
+		t.Fatalf("create = %v, %v", created, err)
+	}
+	created, err = EnsureDetachedWorktreeAtRevision(mainDir, worktree, revision)
+	if err != nil || created {
+		t.Fatalf("adopt = %v, %v", created, err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "evidence.txt"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureDetachedWorktreeAtRevision(mainDir, worktree, revision); err == nil || !strings.Contains(err.Error(), "local changes") {
+		t.Fatalf("dirty adoption err = %v", err)
+	}
+	if created, err := EnsureAutomationSessionWorktree(mainDir, worktree, revision, "", true); err != nil || created {
+		t.Fatalf("persisted session dirty adoption = %v, %v", created, err)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, "evidence.txt")); err != nil {
+		t.Fatalf("dirty evidence was changed: %v", err)
+	}
+
+	attached := filepath.Join(filepath.Dir(mainDir), "attached")
+	runGit(t, mainDir, "worktree", "add", "-b", "review-attached", attached, revision)
+	if _, err := EnsureDetachedWorktreeAtRevision(mainDir, attached, revision); err == nil || !strings.Contains(err.Error(), "attached to branch") {
+		t.Fatalf("attached adoption err = %v", err)
+	}
+}
+
+func TestEnsureDetachedWorktreeAtRevisionRecoversFreshStaleMetadata(t *testing.T) {
+	mainDir := filepath.Join(t.TempDir(), "main")
+	if err := os.MkdirAll(mainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, mainDir, "init")
+	runGit(t, mainDir, "commit", "--allow-empty", "-m", "init")
+	revision, err := GetHeadCommit(mainDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(filepath.Dir(mainDir), "interrupted")
+	runGit(t, mainDir, "worktree", "add", "--detach", worktree, revision)
+	if err := os.RemoveAll(worktree); err != nil {
+		t.Fatal(err)
+	}
+	created, err := EnsureDetachedWorktreeAtRevision(mainDir, worktree, revision)
+	if err != nil || !created {
+		t.Fatalf("fresh stale metadata recovery created=%v err=%v", created, err)
+	}
+}
 
 func TestListWorktrees(t *testing.T) {
 	tmpDir := t.TempDir()

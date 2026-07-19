@@ -13,17 +13,21 @@ func TestAutomationClaimIsIdempotentAndSnapshotsRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "auto-run-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
-	first, created, err := s.ClaimManualAutomationRun("cleanup", "request-1", `{"scope":"tmp"}`, def.Revision, `{"prompt":"first"}`, now, ids)
+	first, created, err := s.ClaimManualAutomationRun("cleanup", "request-1", "github.com/owner/repo#42", `{"scope":"tmp"}`, def.Revision, `{"prompt":"first"}`, now, ids)
 	if err != nil || !created {
 		t.Fatalf("first claim created=%v err=%v", created, err)
 	}
 	other := AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "auto-run-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"}
-	second, created, err := s.ClaimManualAutomationRun("cleanup", "request-1", `{"scope":"changed"}`, def.Revision, `{"prompt":"changed"}`, now.Add(time.Minute), other)
+	second, created, err := s.ClaimManualAutomationRun("cleanup", "request-1", "", `{"scope":"changed"}`, def.Revision, `{"prompt":"changed"}`, now.Add(time.Minute), other)
 	if err != nil || created {
 		t.Fatalf("duplicate claim created=%v err=%v", created, err)
 	}
 	if second.ID != first.ID || second.TicketID != first.TicketID || second.SnapshotJSON != `{"prompt":"first"}` {
 		t.Fatalf("duplicate returned different run: %#v", second)
+	}
+	occurrence, err := s.GetAutomationOccurrence(first.OccurrenceID)
+	if err != nil || occurrence == nil || occurrence.SubjectKey != "github.com/owner/repo#42" || occurrence.PayloadJSON != `{"scope":"tmp"}` {
+		t.Fatalf("occurrence = %#v err=%v", occurrence, err)
 	}
 }
 

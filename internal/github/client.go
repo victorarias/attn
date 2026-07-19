@@ -2,6 +2,7 @@ package github
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,20 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"golang.org/x/time/rate"
 )
+
+func GitHTTPSAuthorizationHeader(token string) string {
+	if token == "" {
+		return ""
+	}
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token))
+}
+
+func (c *Client) GitHTTPSAuthorizationHeader() string {
+	if c == nil {
+		return ""
+	}
+	return GitHTTPSAuthorizationHeader(c.token)
+}
 
 // ErrRateLimited is returned when GitHub rate limit is exceeded
 var ErrRateLimited = errors.New("GitHub rate limit exceeded")
@@ -477,6 +492,67 @@ type PRDetails struct {
 	ReviewStatus   string
 	HeadSHA        string // Current commit SHA for change detection
 	HeadBranch     string // Branch name (for worktree creation)
+}
+
+// PullRequestSnapshot is the single-read provider payload used to pin a manual
+// automation review before any durable run is claimed.
+type PullRequestSnapshot struct {
+	Number         int
+	URL            string
+	Title          string
+	Body           string
+	Author         string
+	Draft          bool
+	State          string
+	HeadSHA        string
+	HeadRef        string
+	HeadRepository string
+	BaseSHA        string
+	BaseRef        string
+	BaseRepository string
+}
+
+// FetchPullRequestSnapshot performs exactly one read-only PR GET. It does not
+// fetch reviews, checks, comments, or any other mutable collaboration surface.
+func (c *Client) FetchPullRequestSnapshot(repo string, number int) (*PullRequestSnapshot, error) {
+	body, err := c.doRequest("GET", fmt.Sprintf("/repos/%s/pulls/%d", repo, number), nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetch pull request snapshot: %w", err)
+	}
+	var response struct {
+		Number  int    `json:"number"`
+		HTMLURL string `json:"html_url"`
+		Title   string `json:"title"`
+		Body    string `json:"body"`
+		Draft   bool   `json:"draft"`
+		State   string `json:"state"`
+		User    struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		Head struct {
+			SHA  string `json:"sha"`
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+		Base struct {
+			SHA  string `json:"sha"`
+			Ref  string `json:"ref"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"base"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("parse pull request snapshot: %w", err)
+	}
+	return &PullRequestSnapshot{
+		Number: response.Number, URL: response.HTMLURL, Title: response.Title, Body: response.Body,
+		Author: response.User.Login, Draft: response.Draft, State: response.State,
+		HeadSHA: response.Head.SHA, HeadRef: response.Head.Ref, HeadRepository: response.Head.Repo.FullName,
+		BaseSHA: response.Base.SHA, BaseRef: response.Base.Ref, BaseRepository: response.Base.Repo.FullName,
+	}, nil
 }
 
 // FetchPRState fetches a PR's definitive lifecycle state in a single GET to

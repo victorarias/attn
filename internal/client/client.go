@@ -79,6 +79,14 @@ func (c *Client) AutomationRun(id, requestID, input string) (json.RawMessage, er
 	}
 	return r.Data, nil
 }
+
+func (c *Client) AutomationRunPullRequest(id, requestID, prURL string) (json.RawMessage, error) {
+	r, e := c.sendAutomation(protocol.AutomationRunMessage{Cmd: protocol.CmdAutomationRun, DefinitionID: id, RequestID: requestID, PRURL: protocol.Ptr(prURL)})
+	if e != nil {
+		return nil, e
+	}
+	return r.Data, nil
+}
 func (c *Client) AutomationRuns(id string) (json.RawMessage, error) {
 	r, e := c.sendAutomation(protocol.AutomationRunListMessage{Cmd: protocol.CmdAutomationRunList, DefinitionID: id})
 	if e != nil {

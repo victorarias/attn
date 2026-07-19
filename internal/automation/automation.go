@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +40,15 @@ type LaunchSpec struct {
 	Executable string `yaml:"executable,omitempty" json:"executable,omitempty"`
 }
 type LocationSpec struct {
+	Type              string            `yaml:"type" json:"type"`
+	Path              string            `yaml:"path,omitempty" json:"path,omitempty"`
+	RepositorySources RepositorySources `yaml:"repository_sources,omitempty" json:"repository_sources,omitempty"`
+}
+type RepositorySources struct {
+	Default   RepositorySource            `yaml:"default" json:"default"`
+	Overrides map[string]RepositorySource `yaml:"overrides,omitempty" json:"overrides,omitempty"`
+}
+type RepositorySource struct {
 	Type string `yaml:"type" json:"type"`
 	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 }
@@ -97,24 +109,45 @@ func ValidateDefinition(s *DefinitionSpec) error {
 	if strings.TrimSpace(s.Launch.Driver) == "" {
 		return errors.New("launch.driver is required")
 	}
-	if s.Location.Type != "directory" {
-		return errors.New("Slice 1 supports only location.type directory")
+	switch s.Location.Type {
+	case "directory":
+		if err := canonicalizeDirectory(&s.Location.Path, "location.path"); err != nil {
+			return err
+		}
+		if s.Location.RepositorySources.Default.Type != "" || len(s.Location.RepositorySources.Overrides) > 0 {
+			return errors.New("directory location cannot configure repository_sources")
+		}
+	case "repository_worktree":
+		if strings.TrimSpace(s.Location.Path) != "" {
+			return errors.New("repository_worktree location cannot configure path")
+		}
+		if s.Location.RepositorySources.Default.Type != "managed_cache" {
+			return errors.New("repository_sources.default.type must be managed_cache")
+		}
+		if strings.TrimSpace(s.Location.RepositorySources.Default.Path) != "" {
+			return errors.New("managed_cache source cannot configure path")
+		}
+		canonicalOverrides := make(map[string]RepositorySource, len(s.Location.RepositorySources.Overrides))
+		for identity, source := range s.Location.RepositorySources.Overrides {
+			canonicalIdentity, err := CanonicalRepositoryIdentity(identity)
+			if err != nil {
+				return fmt.Errorf("repository_sources.overrides[%q]: %w", identity, err)
+			}
+			if source.Type != "local_clone" {
+				return fmt.Errorf("repository_sources.overrides[%q].type must be local_clone", identity)
+			}
+			if err := canonicalizeDirectory(&source.Path, fmt.Sprintf("repository_sources.overrides[%q].path", identity)); err != nil {
+				return err
+			}
+			if _, exists := canonicalOverrides[canonicalIdentity]; exists {
+				return fmt.Errorf("duplicate repository override %q", canonicalIdentity)
+			}
+			canonicalOverrides[canonicalIdentity] = source
+		}
+		s.Location.RepositorySources.Overrides = canonicalOverrides
+	default:
+		return errors.New("location.type must be directory or repository_worktree")
 	}
-	if !strings.HasPrefix(s.Location.Path, "/") {
-		return errors.New("location.path must be absolute")
-	}
-	info, err := os.Stat(s.Location.Path)
-	if err != nil {
-		return fmt.Errorf("location.path: %w", err)
-	}
-	if !info.IsDir() {
-		return errors.New("location.path must be a directory")
-	}
-	canonicalPath, err := filepath.EvalSymlinks(s.Location.Path)
-	if err != nil {
-		return fmt.Errorf("canonicalize location.path: %w", err)
-	}
-	s.Location.Path = filepath.Clean(canonicalPath)
 	if s.Policy.Continuity == "" {
 		s.Policy.Continuity = "fresh"
 	}
@@ -125,6 +158,136 @@ func ValidateDefinition(s *DefinitionSpec) error {
 		return errors.New("policy.overlap must be coalesce")
 	}
 	return nil
+}
+
+func canonicalizeDirectory(path *string, field string) error {
+	if path == nil || !filepath.IsAbs(*path) {
+		return fmt.Errorf("%s must be absolute", field)
+	}
+	info, err := os.Stat(*path)
+	if err != nil {
+		return fmt.Errorf("%s: %w", field, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s must be a directory", field)
+	}
+	canonicalPath, err := filepath.EvalSymlinks(*path)
+	if err != nil {
+		return fmt.Errorf("canonicalize %s: %w", field, err)
+	}
+	*path = filepath.Clean(canonicalPath)
+	return nil
+}
+
+var repositoryHostPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
+var repositoryComponentPattern = regexp.MustCompile(`^[a-z0-9_.-]+$`)
+
+func CanonicalRepositoryIdentity(identity string) (string, error) {
+	identity = strings.ToLower(strings.TrimSpace(identity))
+	parts := strings.Split(identity, "/")
+	unsafeComponent := func(value string) bool {
+		return value == "." || value == ".." || !repositoryComponentPattern.MatchString(value)
+	}
+	if len(parts) != 3 || !repositoryHostPattern.MatchString(parts[0]) || unsafeComponent(parts[1]) || unsafeComponent(parts[2]) {
+		return "", errors.New("repository identity must be host/owner/repository")
+	}
+	return identity, nil
+}
+
+type PullRequestInput struct {
+	Provider       string `json:"provider"`
+	Host           string `json:"host"`
+	Owner          string `json:"owner"`
+	Repository     string `json:"repository"`
+	Number         int    `json:"number"`
+	URL            string `json:"url"`
+	Title          string `json:"title,omitempty"`
+	Body           string `json:"body,omitempty"`
+	Author         string `json:"author,omitempty"`
+	Draft          bool   `json:"draft"`
+	State          string `json:"state"`
+	HeadSHA        string `json:"head_sha"`
+	HeadRef        string `json:"head_ref,omitempty"`
+	HeadRepository string `json:"head_repository,omitempty"`
+	BaseSHA        string `json:"base_sha,omitempty"`
+	BaseRef        string `json:"base_ref,omitempty"`
+}
+
+func ParsePullRequestInput(raw json.RawMessage) (PullRequestInput, error) {
+	var input PullRequestInput
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&input); err != nil {
+		return input, fmt.Errorf("parse pull request input: %w", err)
+	}
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		return input, errors.New("parse pull request input: expected one JSON object")
+	}
+	if input.Provider != "github" {
+		return input, errors.New("pull request input provider must be github")
+	}
+	identity, err := CanonicalRepositoryIdentity(input.Host + "/" + input.Owner + "/" + input.Repository)
+	if err != nil {
+		return input, fmt.Errorf("pull request repository: %w", err)
+	}
+	parts := strings.Split(identity, "/")
+	input.Host, input.Owner, input.Repository = parts[0], parts[1], parts[2]
+	if input.Number <= 0 {
+		return input, errors.New("pull request number must be positive")
+	}
+	if strings.TrimSpace(input.URL) == "" {
+		return input, errors.New("pull request url is required")
+	}
+	urlHost, urlOwner, urlRepository, urlNumber, err := ParsePullRequestURL(input.URL)
+	if err != nil {
+		return input, err
+	}
+	if urlHost != input.Host || urlOwner != input.Owner || urlRepository != input.Repository || urlNumber != input.Number {
+		return input, errors.New("pull request url does not match repository identity and number")
+	}
+	if matched, _ := regexp.MatchString(`^[0-9a-fA-F]{40}$`, input.HeadSHA); !matched {
+		return input, errors.New("pull request head_sha must be a full commit SHA")
+	}
+	input.HeadSHA = strings.ToLower(input.HeadSHA)
+	return input, nil
+}
+
+func (input PullRequestInput) RepositoryIdentity() string {
+	return input.Host + "/" + input.Owner + "/" + input.Repository
+}
+
+func (input PullRequestInput) SubjectKey() string {
+	return input.RepositoryIdentity() + "#" + strconv.Itoa(input.Number)
+}
+
+func ParsePullRequestURL(raw string) (host, owner, repository string, number int, err error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", "", "", 0, fmt.Errorf("parse pull request url: %w", err)
+	}
+	if parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Hostname() == "" || parsed.Port() != "" {
+		return "", "", "", 0, errors.New("pull request url must be an https repository pull URL")
+	}
+	parts := strings.Split(strings.Trim(strings.TrimSpace(parsed.EscapedPath()), "/"), "/")
+	if len(parts) != 4 || parts[2] != "pull" {
+		return "", "", "", 0, errors.New("pull request url path must be /owner/repository/pull/number")
+	}
+	for i := range parts {
+		decoded, decodeErr := url.PathUnescape(parts[i])
+		if decodeErr != nil || decoded != parts[i] || strings.TrimSpace(decoded) == "" {
+			return "", "", "", 0, errors.New("pull request url contains an invalid path component")
+		}
+	}
+	number, err = strconv.Atoi(parts[3])
+	if err != nil || number <= 0 {
+		return "", "", "", 0, errors.New("pull request url number must be positive")
+	}
+	identity, err := CanonicalRepositoryIdentity(parsed.Hostname() + "/" + parts[0] + "/" + parts[1])
+	if err != nil {
+		return "", "", "", 0, err
+	}
+	identityParts := strings.Split(identity, "/")
+	return identityParts[0], identityParts[1], identityParts[2], number, nil
 }
 
 func Effective(spec DefinitionSpec, revision int) (Snapshot, error) {
@@ -149,7 +312,25 @@ type WorkRequest struct {
 	Location                                       LocationSpec
 	IDs                                            DeliveryIDs
 }
-type DeliveryResult struct{ TicketID, SessionID, WorkspaceID, Directory, Revision, Mode string }
+type PreparedLocation struct {
+	Directory string          `json:"directory"`
+	Revision  string          `json:"revision,omitempty"`
+	Resolved  json.RawMessage `json:"resolved"`
+}
+type ResolvedLocation struct {
+	Type             string           `json:"type"`
+	Path             string           `json:"path,omitempty"`
+	Repository       string           `json:"repository,omitempty"`
+	ConfiguredSource RepositorySource `json:"configured_source,omitempty"`
+	MainRepository   string           `json:"main_repository,omitempty"`
+	Worktree         string           `json:"worktree,omitempty"`
+	Revision         string           `json:"revision,omitempty"`
+	ProviderRef      string           `json:"provider_ref,omitempty"`
+}
+type DeliveryResult struct {
+	TicketID, SessionID, WorkspaceID, Directory, Revision, Mode string
+	Resolved                                                    json.RawMessage
+}
 type Deliverer interface {
 	Deliver(context.Context, WorkRequest) (DeliveryResult, error)
 }

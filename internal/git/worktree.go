@@ -66,6 +66,81 @@ func CreateWorktreeFromPoint(repoDir, branch, path, startingFrom string) error {
 	return nil
 }
 
+// EnsureDetachedWorktreeAtRevision creates or adopts a clean detached worktree
+// at one exact commit. Existing worktrees are evidence: a different repository,
+// revision, or dirty state is reported and never reset or removed.
+func EnsureDetachedWorktreeAtRevision(repoDir, path, revision string) (bool, error) {
+	return EnsureDetachedWorktreeAtRevisionWithHTTPAuthorization(repoDir, path, revision, "")
+}
+
+func EnsureDetachedWorktreeAtRevisionWithHTTPAuthorization(repoDir, path, revision, authorization string) (bool, error) {
+	return ensureDetachedWorktreeAtRevision(repoDir, path, revision, authorization, false)
+}
+
+// EnsureAutomationSessionWorktree creates a new exact detached worktree, or
+// adopts an existing worktree owned by a previously persisted stable session.
+// Once a session has started, its agent is allowed to modify, commit, or switch
+// the checkout; recovery still validates that it belongs to the expected main
+// repository but must not mistake that ordinary work for corrupt provisioning.
+func EnsureAutomationSessionWorktree(repoDir, path, revision, authorization string, sessionPersisted bool) (bool, error) {
+	return ensureDetachedWorktreeAtRevision(repoDir, path, revision, authorization, sessionPersisted)
+}
+
+func ensureDetachedWorktreeAtRevision(repoDir, path, revision, authorization string, sessionPersisted bool) (bool, error) {
+	repoDir = ResolveMainRepoPath(repoDir)
+	path = CanonicalizePath(path)
+	if info, err := os.Stat(path); err == nil {
+		if !info.IsDir() {
+			return false, fmt.Errorf("automation worktree path is not a directory: %s", path)
+		}
+		mainRepo := ResolveMainRepoPath(path)
+		if !sameDirectory(mainRepo, repoDir) {
+			return false, fmt.Errorf("automation worktree repository mismatch: got %s want %s", mainRepo, repoDir)
+		}
+		if sessionPersisted {
+			return false, nil
+		}
+		head, err := GetHeadCommit(path)
+		if err != nil {
+			return false, fmt.Errorf("read automation worktree HEAD: %w", err)
+		}
+		if !strings.EqualFold(head, revision) {
+			return false, fmt.Errorf("automation worktree revision mismatch: got %s want %s", head, revision)
+		}
+		if branch, err := runGitOutput(OpMetadata, path, "symbolic-ref", "--quiet", "HEAD"); err == nil {
+			return false, fmt.Errorf("automation worktree is attached to branch %s; expected detached HEAD", strings.TrimSpace(string(branch)))
+		}
+		clean, err := IsWorktreeClean(path)
+		if err != nil {
+			return false, fmt.Errorf("inspect automation worktree: %w", err)
+		}
+		if !clean {
+			return false, fmt.Errorf("automation worktree has local changes: %s", path)
+		}
+		return false, nil
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Errorf("inspect automation worktree path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return false, fmt.Errorf("create automation worktree parent: %w", err)
+	}
+	// A daemon death after Git wrote worktree metadata but before the directory
+	// became durable can leave this exact absent path registered as prunable.
+	// Prune only after proving the target is absent, under the caller's repository
+	// lock, so retry can converge on the reserved path.
+	_ = runGitNoOutput(OpWorktree, repoDir, "worktree", "prune", "--expire", "now")
+	remoteURL := ""
+	if authorization != "" {
+		if out, err := runGitOutput(OpMetadata, repoDir, "remote", "get-url", "origin"); err == nil {
+			remoteURL = strings.TrimSpace(string(out))
+		}
+	}
+	if out, err := runGitCombinedWithHTTPAuthorization(OpWorktree, repoDir, remoteURL, authorization, "worktree", "add", "--detach", path, revision); err != nil {
+		return false, fmt.Errorf("git worktree add --detach failed: %s", strings.TrimSpace(string(out)))
+	}
+	return true, nil
+}
+
 // CreateWorktreeFromBranch creates a worktree from an existing branch
 func CreateWorktreeFromBranch(repoDir, branch, path string) error {
 	resolvedDir, err := ResolveRepoDir(repoDir)

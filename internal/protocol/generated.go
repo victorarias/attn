@@ -150,6 +150,9 @@ type AutomationRunMessage struct {
 	// InputJson corresponds to the JSON schema field "input_json".
 	InputJson *string `json:"input_json,omitempty,omitzero"`
 
+	// PRURL corresponds to the JSON schema field "pr_url".
+	PRURL *string `json:"pr_url,omitempty,omitzero"`
+
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
 }

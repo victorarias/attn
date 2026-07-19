@@ -224,6 +224,40 @@ func FetchRemoteBranch(repoDir, remote, branch string) error {
 	return nil
 }
 
+// EnsurePullRequestRevision fetches GitHub's read-only pull-request head ref so
+// the provider-snapshotted commit is available locally. Recovery may run after
+// the PR ref has advanced; an already-present old snapshot remains valid and is
+// never replaced with the moving FETCH_HEAD.
+func EnsurePullRequestRevision(repoDir, remote string, number int, expectedSHA, authorization string) error {
+	resolvedDir, err := ResolveRepoDir(repoDir)
+	if err != nil {
+		return err
+	}
+	ref := fmt.Sprintf("refs/pull/%d/head", number)
+	if RefExists(resolvedDir, expectedSHA) {
+		return nil
+	}
+	remoteURL, err := runGitOutput(OpMetadata, resolvedDir, "remote", "get-url", remote)
+	if err != nil {
+		return fmt.Errorf("read pull request remote: %w", err)
+	}
+	authorization, err = authorizationForGitURL(strings.TrimSpace(string(remoteURL)), authorization)
+	if err != nil {
+		return err
+	}
+	if out, err := runGitCombinedWithHTTPAuthorization(OpNetwork, resolvedDir, strings.TrimSpace(string(remoteURL)), authorization, "fetch", "--no-tags", remote, ref); err != nil {
+		message := strings.TrimSpace(string(out))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("fetch pull request head: %s", message)
+	}
+	if !RefExists(resolvedDir, expectedSHA) {
+		return fmt.Errorf("snapshotted pull request revision %s is unavailable after fetching %s", expectedSHA, ref)
+	}
+	return nil
+}
+
 // FetchRemotes fetches all remotes with prune.
 func FetchRemotes(repoDir string) error {
 	resolvedDir, err := ResolveRepoDir(repoDir)
