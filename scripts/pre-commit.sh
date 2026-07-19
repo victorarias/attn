@@ -96,6 +96,7 @@ tmp_bin=""
 test_build_time="1970-01-01T00:00:00Z"
 test_source_fingerprint="pre-commit"
 test_git_commit="pre-commit"
+test_goflags="${GOFLAGS:+$GOFLAGS }-buildvcs=false"
 cleanup_tmp_bin() {
   if [ -n "$tmp_bin" ]; then
     rm -f "$tmp_bin"
@@ -113,7 +114,8 @@ ensure_e2e_binary() {
   make -C "$root" build OUTPUT="$tmp_bin" \
     BUILD_TIME="$test_build_time" \
     SOURCE_FINGERPRINT="$test_source_fingerprint" \
-    GIT_COMMIT="$test_git_commit"
+    GIT_COMMIT="$test_git_commit" \
+    GOFLAGS="$test_goflags"
   export ATTN_E2E_BIN="$tmp_bin"
 }
 
@@ -160,7 +162,8 @@ if [ "$run_daemon_checks" = true ]; then
   make -C "$root" build OUTPUT="$tmp_bin" \
     BUILD_TIME="$test_build_time" \
     SOURCE_FINGERPRINT="$test_source_fingerprint" \
-    GIT_COMMIT="$test_git_commit"
+    GIT_COMMIT="$test_git_commit" \
+    GOFLAGS="$test_goflags"
   if [ -z "${ATTN_E2E_BIN:-}" ]; then
     export ATTN_E2E_BIN="$tmp_bin"
   fi
