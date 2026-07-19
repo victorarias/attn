@@ -14,6 +14,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   events across supported agents, with `--follow` for live updates and opaque
   cursors for safe resumption. Provider-specific records stay behind the daemon
   boundary, and secrets are redacted before output.
+- **Environment failures can be diagnosed before a run starts.** `attn
+  preflight` checks required tools and writable paths, verifies the active
+  profile's app, daemon, socket, routing, and protocol versions, and reports the
+  selected agent model and effort without changing the environment.
 
 ### Fixed
 - **Retried delegations no longer create duplicate agents or tickets.** `attn
