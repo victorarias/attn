@@ -169,7 +169,7 @@ if [ "$run_daemon_checks" = true ]; then
   fi
 
   header "Go tests"
-  (cd "$root" && GOFLAGS="$test_goflags" ./scripts/test-go.sh)
+  (cd "$root" && ./scripts/test-go.sh)
 
   header "Tauri daemon binary"
   target_triple="$(rustc -vV | awk '/host:/ {print $2}')"
