@@ -26,10 +26,12 @@ func TestWithoutEnvironmentKeysRemovesInheritedLaunchPins(t *testing.T) {
 
 	got := withoutEnvironmentKeys([]string{
 		"PATH=/bin",
+		"ATTN_AUTO_APPROVE=inherited",
+		"ATTN_TRUST_WORKING_DIRECTORY=inherited",
 		"ATTN_MODEL=inherited",
 		"ATTN_EFFORT=medium",
 		"ATTN_MODEL=duplicate",
-	}, "ATTN_MODEL", "ATTN_EFFORT")
+	}, "ATTN_AUTO_APPROVE", "ATTN_TRUST_WORKING_DIRECTORY", "ATTN_MODEL", "ATTN_EFFORT")
 	want := []string{"PATH=/bin"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("withoutEnvironmentKeys() = %#v, want %#v", got, want)

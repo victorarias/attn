@@ -225,6 +225,10 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 	if err := json.Unmarshal([]byte(run.SnapshotJSON), &snapshot); err != nil {
 		return err
 	}
+	snapshot.Launch = snapshot.Launch.WithLegacyDefaults()
+	if err := snapshot.Launch.Validate(); err != nil {
+		return fmt.Errorf("invalid unattended launch contract: %w", err)
+	}
 	occurrence, err := d.store.GetAutomationOccurrence(run.OccurrenceID)
 	if err != nil {
 		return err
@@ -252,7 +256,7 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 	if def == nil {
 		return fmt.Errorf("definition missing")
 	}
-	_, err = d.store.EnsureAutomationTicket(store.Ticket{ID: req.IDs.TicketID, Title: def.Name, Description: req.Prompt, Status: store.TicketStatusWorking, Assignee: req.IDs.SessionID, Cwd: req.Location.Path, LastAgentID: req.Launch.Driver, AutomationRunID: req.RunID}, "automation:"+req.DefinitionID, store.TicketRoleChiefOfStaff, time.Now())
+	_, err = d.store.EnsureAutomationTicket(store.Ticket{ID: req.IDs.TicketID, Title: def.Name, Description: req.Prompt, Status: store.TicketStatusWorking, Assignee: req.IDs.SessionID, Cwd: req.Location.Path, LastAgentID: req.Launch.Agent, AutomationRunID: req.RunID}, "automation:"+req.DefinitionID, store.TicketRoleChiefOfStaff, time.Now())
 	return err
 }
 func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) (automation.PreparedLocation, error) {
@@ -335,7 +339,7 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 	sessionPersisted := false
 	if d.store != nil {
 		if existing := d.store.Get(req.IDs.SessionID); existing != nil {
-			if filepath.Clean(existing.Directory) != filepath.Clean(worktree) || existing.WorkspaceID != req.IDs.WorkspaceID || string(existing.Agent) != req.Launch.Driver {
+			if filepath.Clean(existing.Directory) != filepath.Clean(worktree) || existing.WorkspaceID != req.IDs.WorkspaceID || string(existing.Agent) != req.Launch.Agent {
 				return automation.PreparedLocation{}, fmt.Errorf("persisted session does not match automation snapshot")
 			}
 			sessionPersisted = true
@@ -353,7 +357,7 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 }
 
 func (d *Daemon) BindTicketLocation(_ context.Context, req automation.WorkRequest, location automation.PreparedLocation) error {
-	return d.store.SetTicketSession(req.IDs.TicketID, location.Directory, req.Launch.Driver, time.Now())
+	return d.store.SetTicketSession(req.IDs.TicketID, location.Directory, req.Launch.Agent, time.Now())
 }
 func (d *Daemon) EnsureWorkspace(_ context.Context, req automation.WorkRequest, directory string) error {
 	if existing := d.store.GetWorkspace(req.IDs.WorkspaceID); existing != nil {
@@ -386,8 +390,11 @@ func (d *Daemon) EnsurePane(_ context.Context, req automation.WorkRequest) error
 	return nil
 }
 func (d *Daemon) EnsureSession(_ context.Context, req automation.WorkRequest, directory string) error {
+	if err := req.Launch.Validate(); err != nil {
+		return fmt.Errorf("invalid unattended launch contract: %w", err)
+	}
 	if existing := d.store.Get(req.IDs.SessionID); existing != nil {
-		if filepath.Clean(existing.Directory) != filepath.Clean(directory) || existing.WorkspaceID != req.IDs.WorkspaceID || string(existing.Agent) != req.Launch.Driver {
+		if filepath.Clean(existing.Directory) != filepath.Clean(directory) || existing.WorkspaceID != req.IDs.WorkspaceID || string(existing.Agent) != req.Launch.Agent {
 			return fmt.Errorf("persisted session does not match automation snapshot")
 		}
 		// Startup PTY recovery only adopts a still-live worker; it never respawns
@@ -408,7 +415,7 @@ func (d *Daemon) EnsureSession(_ context.Context, req automation.WorkRequest, di
 	}
 	prompt := automationSessionPrompt(req.Prompt, inputPath)
 	client := newInternalWSClient()
-	d.handleSpawnSessionWithPolicy(client, &protocol.SpawnSessionMessage{Cmd: protocol.CmdSpawnSession, ID: req.IDs.SessionID, Cwd: directory, WorkspaceID: req.IDs.WorkspaceID, Agent: req.Launch.Driver, Cols: 80, Rows: 24, Label: protocol.Ptr(filepath.Base(directory)), InitialPrompt: protocol.Ptr(prompt), Model: protocol.Ptr(req.Launch.Model), Effort: protocol.Ptr(req.Launch.Effort), Executable: protocol.Ptr(req.Launch.Executable)}, internalSpawnPolicy{autoApprove: true, trustWorkingDirectory: true})
+	d.handleSpawnSessionWithPolicy(client, &protocol.SpawnSessionMessage{Cmd: protocol.CmdSpawnSession, ID: req.IDs.SessionID, Cwd: directory, WorkspaceID: req.IDs.WorkspaceID, Agent: req.Launch.Agent, Cols: 80, Rows: 24, Label: protocol.Ptr(filepath.Base(directory)), InitialPrompt: protocol.Ptr(prompt), Model: protocol.Ptr(req.Launch.Model), Effort: protocol.Ptr(req.Launch.Effort), Executable: protocol.Ptr(req.Launch.Executable)}, internalSpawnPolicy{unattendedLaunch: req.Launch})
 	_, err = readInternalActionResult(client)
 	if err != nil {
 		return err
@@ -483,7 +490,7 @@ const codexDirectoryTrustPrompt = "Do you trust the contents of this directory?"
 // this choice. Exact screen matching keeps ordinary prompts and agent input out
 // of this path.
 func (d *Daemon) passUnattendedLaunchGate(req automation.WorkRequest) error {
-	if req.Launch.Driver != string(protocol.SessionAgentCodex) {
+	if req.Launch.Agent != string(protocol.SessionAgentCodex) {
 		return nil
 	}
 	snapshots, ok := d.ptyBackend.(interface {

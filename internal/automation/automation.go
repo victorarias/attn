@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/launchcontract"
 	"gopkg.in/yaml.v3"
 )
 
@@ -57,11 +58,7 @@ type PolicySpec struct {
 	CatchUp    string `yaml:"catch_up,omitempty" json:"catch_up,omitempty"`
 	Overlap    string `yaml:"overlap,omitempty" json:"overlap,omitempty"`
 }
-type EffectiveLaunch struct {
-	LaunchSpec
-	ApprovalProductMode string `json:"approval_product_mode"`
-	ApprovalDriverMode  string `json:"approval_driver_mode"`
-}
+type EffectiveLaunch = launchcontract.UnattendedLaunchSpec
 type Snapshot struct {
 	APIVersion         string          `json:"api_version"`
 	DefinitionRevision int             `json:"definition_revision,omitempty"`
@@ -106,7 +103,8 @@ func ValidateDefinition(s *DefinitionSpec) error {
 	if strings.TrimSpace(s.Prompt) == "" {
 		return errors.New("prompt is required")
 	}
-	if strings.TrimSpace(s.Launch.Driver) == "" {
+	s.Launch.Driver = strings.TrimSpace(strings.ToLower(s.Launch.Driver))
+	if s.Launch.Driver == "" {
 		return errors.New("launch.driver is required")
 	}
 	switch s.Location.Type {
@@ -291,16 +289,25 @@ func ParsePullRequestURL(raw string) (host, owner, repository string, number int
 }
 
 func Effective(spec DefinitionSpec, revision int) (Snapshot, error) {
-	mode := ""
+	mode := launchcontract.ApprovalAuto
 	switch strings.ToLower(spec.Launch.Driver) {
 	case "codex":
-		mode = "auto_review"
-	case "claude":
-		mode = "auto"
-	default:
-		mode = "auto"
+		mode = launchcontract.ApprovalAutoReview
 	}
-	return Snapshot{APIVersion: APIVersion, DefinitionRevision: revision, Prompt: spec.Prompt, Launch: EffectiveLaunch{LaunchSpec: spec.Launch, ApprovalProductMode: "auto", ApprovalDriverMode: mode}, Location: spec.Location, Policy: spec.Policy}, nil
+	launch := EffectiveLaunch{
+		Agent:               spec.Launch.Driver,
+		Model:               spec.Launch.Model,
+		Effort:              spec.Launch.Effort,
+		Executable:          spec.Launch.Executable,
+		ApprovalProductMode: launchcontract.ApprovalAuto,
+		ApprovalDriverMode:  mode,
+		DirectoryTrust:      launchcontract.TrustConfiguredDirectory,
+		Recovery:            launchcontract.RecoveryAdoptOrRestartFresh,
+	}
+	if err := launch.Validate(); err != nil {
+		return Snapshot{}, err
+	}
+	return Snapshot{APIVersion: APIVersion, DefinitionRevision: revision, Prompt: spec.Prompt, Launch: launch, Location: spec.Location, Policy: spec.Policy}, nil
 }
 
 type DeliveryIDs struct{ TicketID, SessionID, WorkspaceID, PaneID string }

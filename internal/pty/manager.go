@@ -18,6 +18,7 @@ import (
 
 	creackpty "github.com/creack/pty"
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/launchenv"
 )
 
@@ -81,6 +82,7 @@ type SpawnOptions struct {
 	Model                   string
 	Effort                  string
 	ChiefContextWindowCap   int
+	UnattendedLaunch        launchcontract.UnattendedLaunchSpec
 
 	// Theme seeds the colors the session answers OSC 10/11/12 queries with,
 	// before the child's first query — set explicitly so a spawn under a
@@ -174,6 +176,18 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	}
 	if opts.CWD == "" {
 		return errors.New("missing cwd")
+	}
+	if !opts.UnattendedLaunch.IsZero() {
+		if err := opts.UnattendedLaunch.Validate(); err != nil {
+			return err
+		}
+		if strings.TrimSpace(strings.ToLower(opts.Agent)) != strings.TrimSpace(strings.ToLower(opts.UnattendedLaunch.Agent)) {
+			return fmt.Errorf("unattended launch agent %q does not match spawn agent %q", opts.UnattendedLaunch.Agent, opts.Agent)
+		}
+		if opts.AutoApprove || opts.TrustWorkingDirectory || strings.TrimSpace(opts.Model) != "" ||
+			strings.TrimSpace(opts.Effort) != "" || strings.TrimSpace(opts.Executable) != "" {
+			return errors.New("unattended launch policy must not be duplicated in spawn options")
+		}
 	}
 	if opts.Cols == 0 {
 		opts.Cols = 80
@@ -566,7 +580,11 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 		"ATTN_CHIEF_AUTO_COMPACT_WINDOW",
 	}
 	if os.Getenv("ATTN_PTY_WORKER") == "1" {
-		for _, key := range launchKeys {
+		inheritedKeys := launchKeys
+		if !opts.UnattendedLaunch.IsZero() {
+			inheritedKeys = []string{"ATTN_WORKFLOW_GUIDANCE_ENABLED", "ATTN_CHIEF_AUTO_COMPACT_WINDOW"}
+		}
+		for _, key := range inheritedKeys {
 			if value, ok := os.LookupEnv(key); ok {
 				launchEnv = append(launchEnv, key+"="+value)
 			}
@@ -589,6 +607,18 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 	}
 	if opts.ChiefContextWindowCap > 0 {
 		launchEnv = append(launchEnv, "ATTN_CHIEF_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.ChiefContextWindowCap))
+	}
+	if launch := opts.UnattendedLaunch; !launch.IsZero() {
+		launchEnv = append(launchEnv,
+			"ATTN_AUTO_APPROVE=1",
+			"ATTN_TRUST_WORKING_DIRECTORY=1",
+		)
+		if model := strings.TrimSpace(launch.Model); model != "" {
+			launchEnv = append(launchEnv, "ATTN_MODEL="+model)
+		}
+		if effort := strings.TrimSpace(launch.Effort); effort != "" {
+			launchEnv = append(launchEnv, "ATTN_EFFORT="+effort)
+		}
 	}
 
 	shellEnv := opts.LoginShellEnv
@@ -670,6 +700,9 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 }
 
 func configuredExecutableForAgent(opts SpawnOptions, agent string) string {
+	if !opts.UnattendedLaunch.IsZero() {
+		return strings.TrimSpace(opts.UnattendedLaunch.Executable)
+	}
 	if strings.TrimSpace(opts.Executable) != "" {
 		return strings.TrimSpace(opts.Executable)
 	}

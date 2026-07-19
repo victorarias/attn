@@ -12,6 +12,7 @@ import (
 
 	"github.com/victorarias/attn/internal/automation"
 	attngit "github.com/victorarias/attn/internal/git"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -188,6 +189,39 @@ func TestAutomationOccurrenceInputIsStructurallySeparateFromPrompt(t *testing.T)
 	}
 	if !strings.Contains(prompt, path) || !strings.Contains(prompt, "untrusted data") {
 		t.Fatalf("prompt does not carry the constrained data reference: %q", prompt)
+	}
+}
+
+func TestEnsureAutomationSessionPassesOneUnattendedContract(t *testing.T) {
+	directory := t.TempDir()
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	d.ptyBackend = backend
+	addTestWorkspace(d, "workspace-1", directory)
+	spec := launchcontract.UnattendedLaunchSpec{
+		Agent: "claude", Model: "sonnet", Effort: "high", Executable: "/opt/claude",
+		ApprovalProductMode: launchcontract.ApprovalAuto, ApprovalDriverMode: launchcontract.ApprovalAuto,
+		DirectoryTrust: launchcontract.TrustConfiguredDirectory, Recovery: launchcontract.RecoveryAdoptOrRestartFresh,
+	}
+	err := d.EnsureSession(context.Background(), automation.WorkRequest{
+		RunID: "run-1", Prompt: "Inspect the input.", Context: json.RawMessage(`{}`), Launch: spec,
+		IDs: automation.DeliveryIDs{SessionID: "session-1", WorkspaceID: "workspace-1"},
+	}, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spawn, ok := backend.LastSpawn()
+	if !ok {
+		t.Fatal("automation did not spawn a session")
+	}
+	if spawn.UnattendedLaunch != spec {
+		t.Fatalf("spawn contract = %#v, want %#v", spawn.UnattendedLaunch, spec)
+	}
+	if spawn.AutoApprove || spawn.TrustWorkingDirectory || spawn.Model != "" || spawn.Effort != "" || spawn.Executable != "" {
+		t.Fatalf("parallel launch fields were populated: %#v", spawn)
+	}
+	if spawn.Agent != spec.Agent {
+		t.Fatalf("spawn agent = %q, want %q", spawn.Agent, spec.Agent)
 	}
 }
 

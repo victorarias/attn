@@ -67,7 +67,31 @@ policy: {continuity: fresh}
 	if snapshot.Launch.ApprovalProductMode != "auto" || snapshot.Launch.ApprovalDriverMode != "auto_review" {
 		t.Fatalf("effective launch=%#v", snapshot.Launch)
 	}
+	if snapshot.Launch.Agent != "codex" || snapshot.Launch.DirectoryTrust != "configured_directory" || snapshot.Launch.Recovery != "adopt_or_restart_fresh" {
+		t.Fatalf("effective unattended contract=%#v", snapshot.Launch)
+	}
 	_ = os.RemoveAll(dir)
+}
+
+func TestDefinitionCanonicalizesLaunchDriver(t *testing.T) {
+	dir := t.TempDir()
+	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
+id: canonical-driver
+name: Canonical driver
+enabled: true
+trigger: {type: manual}
+prompt: Inspect.
+launch: {driver: " CoDeX "}
+location: {type: directory, path: PATH}
+policy: {continuity: fresh}
+`, `PATH`, dir)
+	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Launch.Driver != "codex" || strings.Contains(string(canonical), " CoDeX ") {
+		t.Fatalf("driver=%q canonical=%s", spec.Launch.Driver, canonical)
+	}
 }
 
 func TestDefinitionRejectsUnknownFields(t *testing.T) {

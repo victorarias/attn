@@ -2,8 +2,12 @@ package ptybackend
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"syscall"
 
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/pty"
 )
 
@@ -77,6 +81,29 @@ type SpawnOptions struct {
 	// Sourced from the chief_context_window_cap setting and set only for chief
 	// launches, so non-chief sessions stay uncapped.
 	ChiefContextWindowCap int
+
+	// UnattendedLaunch is the daemon-owned launch contract. When set, it is the
+	// sole source for agent, executable, approval, trust, model, effort, and
+	// recovery policy across embedded, worker, and reload paths.
+	UnattendedLaunch launchcontract.UnattendedLaunchSpec
+}
+
+func validateUnattendedSpawnOptions(opts SpawnOptions) error {
+	launch := opts.UnattendedLaunch
+	if launch.IsZero() {
+		return nil
+	}
+	if err := launch.Validate(); err != nil {
+		return err
+	}
+	if !strings.EqualFold(strings.TrimSpace(opts.Agent), strings.TrimSpace(launch.Agent)) {
+		return fmt.Errorf("unattended launch agent %q does not match spawn agent %q", launch.Agent, opts.Agent)
+	}
+	if opts.AutoApprove || opts.TrustWorkingDirectory || strings.TrimSpace(opts.Model) != "" ||
+		strings.TrimSpace(opts.Effort) != "" || strings.TrimSpace(opts.Executable) != "" {
+		return errors.New("unattended launch policy must not be duplicated in spawn options")
+	}
+	return nil
 }
 
 type AttachInfo struct {
@@ -191,6 +218,7 @@ type SessionLaunchParams struct {
 	CopilotExecutable string
 	Model             string
 	Effort            string
+	UnattendedLaunch  launchcontract.UnattendedLaunchSpec
 }
 
 // SessionLaunchParamsProvider is implemented by backends that can return the

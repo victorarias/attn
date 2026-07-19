@@ -34,7 +34,14 @@ func (b *EmbeddedBackend) SetStateHandler(handler func(sessionID, state string))
 }
 
 func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
-	return b.manager.Spawn(pty.SpawnOptions{
+	if err := validateUnattendedSpawnOptions(opts); err != nil {
+		return err
+	}
+	return b.manager.Spawn(embeddedSpawnOptions(opts))
+}
+
+func embeddedSpawnOptions(opts SpawnOptions) pty.SpawnOptions {
+	return pty.SpawnOptions{
 		ID:                opts.ID,
 		CWD:               opts.CWD,
 		Agent:             opts.Agent,
@@ -62,7 +69,8 @@ func (b *EmbeddedBackend) Spawn(_ context.Context, opts SpawnOptions) error {
 		Model:                   opts.Model,
 		Effort:                  opts.Effort,
 		ChiefContextWindowCap:   opts.ChiefContextWindowCap,
-	})
+		UnattendedLaunch:        opts.UnattendedLaunch,
+	}
 }
 
 func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID string) (AttachInfo, Stream, error) {

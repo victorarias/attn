@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/launchenv"
 )
 
@@ -144,6 +145,35 @@ func TestBuildSpawnEnv_EmbeddedLaunchPinsOverrideInheritedEnvironment(t *testing
 	for key, want := range map[string]string{
 		"ATTN_AUTO_APPROVE": "1", "ATTN_TRUST_WORKING_DIRECTORY": "1",
 		"ATTN_MODEL": "automation-model", "ATTN_EFFORT": "low",
+	} {
+		if got, _ := lookupEnv(env, key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestBuildSpawnEnv_UnattendedContractOverridesInheritedWorkerAndLoginValues(t *testing.T) {
+	t.Setenv("ATTN_PTY_WORKER", "1")
+	for key, value := range map[string]string{
+		"ATTN_AUTO_APPROVE": "parent", "ATTN_TRUST_WORKING_DIRECTORY": "parent",
+		"ATTN_MODEL": "parent-model", "ATTN_EFFORT": "medium",
+		"ATTN_WORKFLOW_GUIDANCE_ENABLED": "1", "ATTN_CHIEF_AUTO_COMPACT_WINDOW": "12345",
+	} {
+		t.Setenv(key, value)
+	}
+	spec := launchcontract.UnattendedLaunchSpec{
+		Agent: "codex", Model: "exact-model", Effort: "high",
+		ApprovalProductMode: launchcontract.ApprovalAuto, ApprovalDriverMode: launchcontract.ApprovalAutoReview,
+		DirectoryTrust: launchcontract.TrustConfiguredDirectory, Recovery: launchcontract.RecoveryAdoptOrRestartFresh,
+	}
+	env := buildSpawnEnv("", SpawnOptions{
+		ID: "session-1", UnattendedLaunch: spec,
+		LoginShellEnv: []string{"ATTN_MODEL=login-model", "ATTN_EFFORT=low", "ATTN_AUTO_APPROVE=login"},
+	}, "codex", "/tmp/attn", nil)
+	for key, want := range map[string]string{
+		"ATTN_AUTO_APPROVE": "1", "ATTN_TRUST_WORKING_DIRECTORY": "1",
+		"ATTN_MODEL": "exact-model", "ATTN_EFFORT": "high",
+		"ATTN_WORKFLOW_GUIDANCE_ENABLED": "1", "ATTN_CHIEF_AUTO_COMPACT_WINDOW": "12345",
 	} {
 		if got, _ := lookupEnv(env, key); got != want {
 			t.Fatalf("%s = %q, want %q", key, got, want)

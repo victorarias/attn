@@ -429,7 +429,9 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.CodexExecutable, "codex-executable", "", "codex executable override")
 	fs.StringVar(&cfg.CopilotExecutable, "copilot-executable", "", "copilot executable override")
 	var externalCommandJSON string
+	var unattendedLaunchJSON string
 	fs.StringVar(&externalCommandJSON, "external-command-json", "", "external plugin driver argv as JSON")
+	fs.StringVar(&unattendedLaunchJSON, "unattended-launch-json", "", "immutable unattended launch contract as JSON")
 	fs.StringVar(&cfg.ExternalCWD, "external-cwd", "", "external plugin driver working directory")
 	fs.StringVar(&cfg.RegistryPath, "registry-path", "", "registry path")
 	fs.StringVar(&cfg.SocketPath, "socket-path", "", "socket path")
@@ -442,6 +444,16 @@ func runPTYWorker() {
 	if externalCommandJSON != "" {
 		if err := json.Unmarshal([]byte(externalCommandJSON), &cfg.ExternalCommand); err != nil {
 			fmt.Fprintf(os.Stderr, "pty-worker error: invalid --external-command-json: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if unattendedLaunchJSON != "" {
+		if err := json.Unmarshal([]byte(unattendedLaunchJSON), &cfg.UnattendedLaunch); err != nil {
+			fmt.Fprintf(os.Stderr, "pty-worker error: invalid --unattended-launch-json: %v\n", err)
+			os.Exit(1)
+		}
+		if err := cfg.UnattendedLaunch.Validate(); err != nil {
+			fmt.Fprintf(os.Stderr, "pty-worker error: invalid --unattended-launch-json: %v\n", err)
 			os.Exit(1)
 		}
 	}
