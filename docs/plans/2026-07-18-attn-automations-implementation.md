@@ -1016,7 +1016,30 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       inline daemon rejection on a disabled definition, daemon restart
       preserving definitions and runs) against the app built from `91f899b5`
       (2026-07-20).
-- [ ] Add the self-service editor and remaining policy depth.
+- [x] Complete the lifecycle half of Slice 7: contract-keyed continuity rotation
+      on edit, provenance-retaining delete with resurrect, bounded retention,
+      explicit dirty-safe cleanup reporting a three-way
+      `cleaned`/`kept_dirty`/`kept_active` partition (protocol 179), and a
+      bounded thread *lifetime* — the ticket TTL sweep is now actually wired up
+      and releases a thread's continuity binding along with its ticket, so a
+      reviewer automation's worktrees stop being pinned forever. Proven by the
+      packaged serial scenario `real-app:scenario-automation-lifecycle` — run
+      `automation-lifecycle-2026-07-20T21-53-29-423Z`, all three legs green
+      (edit-rebind including the revert case, delete-resurrect, and a single
+      cleanup call partitioning a clean, a dirty, and a still-bound worktree)
+      against the app built from `458455f8` (2026-07-20). The TTL sweep itself
+      is out of that scenario's reach (30-day TTL, hourly tick), so it was
+      verified separately against a live daemon on the same build with
+      `ATTN_TICKET_RETENTION_SWEEP_INTERVAL=5s`: a 40-day-old closed ticket and
+      the continuity binding pointing at it both disappeared on the first tick,
+      with `ticket retention sweep: removed 1 expired ticket(s)` in the profile
+      daemon log.
+      Two adversarial passes found three permanent-brick bugs and one unbounded
+      worktree leak, all from treating a run as privately owning its resources
+      or a thread as living forever; each is fixed with regression tests, and
+      the shared-identity and thread-lifetime invariants are recorded above as
+      domain context.
+- [ ] Add the self-service YAML editor and validate-without-apply (Slice 7 PR B).
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
 
