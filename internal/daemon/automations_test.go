@@ -27,6 +27,20 @@ type automationResumeBackend struct {
 	snapshotCalls int
 }
 
+func writeCodexRolloutFixture(t *testing.T, resumeID string) {
+	t.Helper()
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	sessionsDir := filepath.Join(codexHome, "sessions", "2026", "07", "20")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir Codex sessions dir: %v", err)
+	}
+	rollout := []byte(`{"type":"session_meta","payload":{"id":"` + resumeID + `","cwd":"/tmp"}}` + "\n")
+	if err := os.WriteFile(filepath.Join(sessionsDir, "rollout-fixture.jsonl"), rollout, 0o644); err != nil {
+		t.Fatalf("write Codex rollout fixture: %v", err)
+	}
+}
+
 func (b *automationResumeBackend) Snapshot(context.Context, string) (ptybackend.AttachInfo, error) {
 	b.snapshotCalls++
 	if b.snapshotCalls == 1 {
@@ -916,6 +930,7 @@ func TestStoppedContinuationResumesRecordedReviewerWithPinnedContract(t *testing
 	}
 	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{Cmd: protocol.CmdRegisterWorkspace, ID: origin.WorkspaceID, Title: "review", Directory: directory})
 	d.store.Add(&protocol.Session{ID: origin.SessionID, Agent: protocol.SessionAgentCodex, Directory: directory, WorkspaceID: origin.WorkspaceID})
+	writeCodexRolloutFixture(t, "codex-rollout-1")
 	d.store.SetResumeSessionID(origin.SessionID, "codex-rollout-1")
 
 	req := automation.WorkRequest{
@@ -943,6 +958,14 @@ func TestStoppedContinuationRequiresAvailableTranscript(t *testing.T) {
 	d.store.SetResumeSessionID(req.IDs.SessionID, "")
 	if _, err := d.automationResumeSessionID(req); err == nil || !strings.Contains(err.Error(), "without a recorded transcript") {
 		t.Fatalf("missing transcript id err=%v", err)
+	}
+
+	t.Setenv("CODEX_HOME", t.TempDir())
+	codexReq := automation.WorkRequest{Launch: testAutomationLaunch("codex"), IDs: automation.DeliveryIDs{SessionID: "session-2"}}
+	d.store.Add(&protocol.Session{ID: codexReq.IDs.SessionID, Agent: protocol.SessionAgentCodex})
+	d.store.SetResumeSessionID(codexReq.IDs.SessionID, "missing-codex-rollout")
+	if _, err := d.automationResumeSessionID(codexReq); err == nil || !strings.Contains(err.Error(), "transcript is unavailable") {
+		t.Fatalf("unavailable Codex rollout err=%v", err)
 	}
 }
 

@@ -466,6 +466,13 @@ func (c *Codex) FindTranscriptForResume(resumeID string) string {
 	return transcript.FindCodexTranscriptForResume(resumeID)
 }
 
+// ResumeAvailable reports whether Codex still has the exact rollout recorded
+// for a stopped session. Unattended continuation must fail closed when Codex
+// has pruned or moved that rollout.
+func (c *Codex) ResumeAvailable(resumeID string) bool {
+	return transcript.FindCodexTranscriptForResume(resumeID) != ""
+}
+
 func (c *Codex) BootstrapBytes() int64 {
 	return 256 * 1024
 }
