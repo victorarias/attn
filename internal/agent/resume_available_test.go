@@ -47,15 +47,22 @@ func TestResumeAvailableEmptyID(t *testing.T) {
 	}
 }
 
-// Drivers that don't implement ResumeAvailabilityProvider are assumed
-// always-resumable, so their resume behavior is unchanged. Codex resumes by
-// rollout id (not a transcript lookup) and a zero-turn codex never stores a
-// rollout id, so it never reaches the reload path with a doomed resume id.
-func TestResumeAvailableDefaultsTrueForCodex(t *testing.T) {
-	if _, ok := any(&Codex{}).(ResumeAvailabilityProvider); ok {
-		t.Skip("Codex now implements ResumeAvailabilityProvider; update this test to assert its real behavior")
+func TestCodexResumeAvailable(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	if ResumeAvailable(&Codex{}, "missing-rollout-id") {
+		t.Fatal("ResumeAvailable should be false when no Codex rollout exists")
 	}
-	if !ResumeAvailable(&Codex{}, "any-rollout-id") {
-		t.Fatal("ResumeAvailable should default to true for a driver without the capability")
+
+	sessionsDir := filepath.Join(codexHome, "sessions", "2026", "07", "20")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir Codex sessions dir: %v", err)
+	}
+	rollout := []byte(`{"type":"session_meta","payload":{"id":"has-rollout-id","cwd":"/tmp"}}` + "\n")
+	if err := os.WriteFile(filepath.Join(sessionsDir, "rollout-fixture.jsonl"), rollout, 0o644); err != nil {
+		t.Fatalf("write Codex rollout fixture: %v", err)
+	}
+	if !ResumeAvailable(&Codex{}, "has-rollout-id") {
+		t.Fatal("ResumeAvailable should be true when the exact Codex rollout exists")
 	}
 }

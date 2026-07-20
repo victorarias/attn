@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/automation"
 	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
@@ -617,15 +618,38 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 	if d.canStartWithdrawnUndeliveredReviewer(origin, req.IDs.SessionID) {
 		return nil
 	}
+	if d.automationSessionIsLive(req.IDs.SessionID) {
+		return nil
+	}
+	_, err = d.automationResumeSessionID(req)
+	return err
+}
+
+func (d *Daemon) automationSessionIsLive(sessionID string) bool {
 	if d.ptyBackend == nil {
-		return errors.New("reviewer continuity cannot verify the existing session")
+		return false
 	}
 	for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
-		if liveID == req.IDs.SessionID {
-			return nil
+		if liveID == sessionID {
+			return true
 		}
 	}
-	return errors.New("reviewer continuity requires the existing session to still be live")
+	return false
+}
+
+func (d *Daemon) automationResumeSessionID(req automation.WorkRequest) (string, error) {
+	resumeID := strings.TrimSpace(d.store.GetResumeSessionID(req.IDs.SessionID))
+	if resumeID == "" {
+		resumeID = strings.TrimSpace(d.store.GetTicketResumeSessionID(req.IDs.SessionID))
+	}
+	if resumeID == "" {
+		return "", errors.New("reviewer continuity cannot resume the stopped session without a recorded transcript")
+	}
+	driver := agentdriver.Get(req.Launch.Agent)
+	if !agentdriver.ResumeAvailable(driver, resumeID) {
+		return "", errors.New("reviewer continuity transcript is unavailable; refusing an unattended fresh session")
+	}
+	return resumeID, nil
 }
 
 func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) error {
@@ -723,9 +747,11 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 	if err != nil {
 		return automation.PreparedLocation{}, err
 	}
-	if originRun, err := d.automationContinuationOrigin(req); err != nil {
+	originRun, err := d.automationContinuationOrigin(req)
+	if err != nil {
 		return automation.PreparedLocation{}, err
-	} else if originRun != nil {
+	}
+	if originRun != nil {
 		originOccurrence, err := d.store.GetAutomationOccurrence(originRun.OccurrenceID)
 		if err != nil || originOccurrence == nil {
 			return automation.PreparedLocation{}, errors.Join(errors.New("continuity origin occurrence missing"), err)
@@ -735,9 +761,6 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 			return automation.PreparedLocation{}, fmt.Errorf("continuity origin payload: %w", err)
 		}
 		if originPR.HeadSHA != pr.HeadSHA {
-			// The stable session's CWD is the origin run's exact detached worktree.
-			// Until the next continuity slice defines resume/fallback rules for a new
-			// revision, failing is safer than silently reviewing the wrong checkout.
 			return automation.PreparedLocation{}, errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
 		}
 	}
@@ -808,6 +831,24 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 			sessionPersisted = true
 		}
 	}
+	if originRun != nil && originRun.State == "delivered" {
+		ticket, err := d.store.GetTicket(req.IDs.TicketID)
+		if err != nil {
+			return automation.PreparedLocation{}, err
+		}
+		if ticket == nil || filepath.Clean(ticket.Cwd) != filepath.Clean(worktree) {
+			return automation.PreparedLocation{}, errors.New("reviewer continuity ticket does not own the expected worktree")
+		}
+		if _, err := os.Stat(worktree); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return automation.PreparedLocation{}, errors.New("reviewer continuity worktree is missing; refusing to recreate it silently")
+			}
+			return automation.PreparedLocation{}, fmt.Errorf("inspect reviewer continuity worktree: %w", err)
+		}
+		// A delivered origin proves that this stable session owned the worktree.
+		// Preserve its commits, branch switch, and local changes when resuming.
+		sessionPersisted = true
+	}
 	if _, err := attngit.EnsureAutomationSessionWorktree(mainRepo, worktree, pr.HeadSHA, authorization, sessionPersisted); err != nil {
 		return automation.PreparedLocation{}, &retryableAutomationDeliveryError{cause: err}
 	}
@@ -873,23 +914,34 @@ func (d *Daemon) EnsureSession(_ context.Context, req automation.WorkRequest, di
 	if err != nil {
 		return err
 	}
-	for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
-		if liveID == req.IDs.SessionID {
-			// Worker recovery adopted the already-correct original launch. Do not
-			// ask the backend to spawn the stable session ID a second time.
-			return d.verifyUnattendedLaunch(req)
-		}
+	if d.automationSessionIsLive(req.IDs.SessionID) {
+		// Worker recovery adopted the already-correct original launch. Do not ask
+		// the backend to spawn the stable session ID a second time.
+		return d.verifyUnattendedLaunch(req)
 	}
 	if continuationRun != nil {
-		if !d.canStartWithdrawnUndeliveredReviewer(continuationRun, req.IDs.SessionID) {
-			return errors.New("reviewer continuity requires the existing session to still be live")
+		if d.canStartWithdrawnUndeliveredReviewer(continuationRun, req.IDs.SessionID) {
+			return d.startAutomationSession(req, directory, inputPath, "")
 		}
+		resumeID, err := d.automationResumeSessionID(req)
+		if err != nil {
+			return err
+		}
+		return d.startAutomationSession(req, directory, inputPath, resumeID)
 	}
+	return d.startAutomationSession(req, directory, inputPath, "")
+}
+
+func (d *Daemon) startAutomationSession(req automation.WorkRequest, directory, inputPath, resumeID string) error {
 	_, pullRequestErr := automation.ParsePullRequestInput(req.Context)
 	prompt := automationSessionPrompt(req.Prompt, inputPath, pullRequestErr == nil)
 	client := newInternalWSClient()
-	d.handleSpawnSessionWithPolicy(client, &protocol.SpawnSessionMessage{Cmd: protocol.CmdSpawnSession, ID: req.IDs.SessionID, Cwd: directory, WorkspaceID: req.IDs.WorkspaceID, Agent: req.Launch.Agent, Cols: 80, Rows: 24, Label: protocol.Ptr(filepath.Base(directory)), InitialPrompt: protocol.Ptr(prompt), Model: protocol.Ptr(req.Launch.Model), Effort: protocol.Ptr(req.Launch.Effort), Executable: protocol.Ptr(req.Launch.Executable)}, internalSpawnPolicy{unattendedLaunch: req.Launch})
-	_, err = readInternalActionResult(client)
+	message := &protocol.SpawnSessionMessage{Cmd: protocol.CmdSpawnSession, ID: req.IDs.SessionID, Cwd: directory, WorkspaceID: req.IDs.WorkspaceID, Agent: req.Launch.Agent, Cols: 80, Rows: 24, Label: protocol.Ptr(filepath.Base(directory)), InitialPrompt: protocol.Ptr(prompt), Model: protocol.Ptr(req.Launch.Model), Effort: protocol.Ptr(req.Launch.Effort), Executable: protocol.Ptr(req.Launch.Executable)}
+	if resumeID != "" {
+		message.ResumeSessionID = protocol.Ptr(resumeID)
+	}
+	d.handleSpawnSessionWithPolicy(client, message, internalSpawnPolicy{unattendedLaunch: req.Launch})
+	_, err := readInternalActionResult(client)
 	if err != nil {
 		return err
 	}

@@ -14,6 +14,29 @@ if [[ "$(printf '%s\n' "${minimum_bun_version}" "${bun_version}" | sort -V | hea
   exit 1
 fi
 
+remove_bun_linker_signature() {
+  local executable="$1"
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return
+  fi
+
+  local signature_end file_size
+  signature_end="$(otool -l "${executable}" | awk '
+    $1 == "cmd" && $2 == "LC_CODE_SIGNATURE" { in_signature = 1; next }
+    in_signature && $1 == "dataoff" { dataoff = $2; next }
+    in_signature && $1 == "datasize" { print dataoff + $2; exit }
+  ')"
+  if [[ -z "${signature_end}" ]]; then
+    return
+  fi
+
+  file_size="$(stat -f '%z' "${executable}")"
+  if (( file_size > signature_end )); then
+    truncate -s "${signature_end}" "${executable}"
+  fi
+  codesign --remove-signature "${executable}"
+}
+
 stage_plugin() {
   local name="$1" description="$2"
   local source_dir="${repo_root}/plugins/${name}"
@@ -31,6 +54,10 @@ stage_plugin() {
   rm -rf "${stage_dir}"
   mkdir -p "${stage_dir}/bin"
   bun build "${source_dir}/src/index.ts" --compile --minify --outfile "${stage_dir}/bin/${name}"
+  # Bun emits a linker-signed Mach-O. Some dependency graphs leave bytes after
+  # the declared signature, which prevents macOS codesign from replacing it.
+  # Normalize the generated executable before Tauri copies and signs the bundle.
+  remove_bun_linker_signature "${stage_dir}/bin/${name}"
   chmod 0755 "${stage_dir}/bin/${name}"
   if [[ "${name}" == "attn-opencode" ]]; then
     bun build "${source_dir}/src/guidance-plugin.ts" --target=bun --format=esm --minify --outfile "${stage_dir}/guidance-plugin.js"

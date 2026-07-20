@@ -67,12 +67,12 @@ func TestTicketResumeRespawnsClosedBoundSession(t *testing.T) {
 	leafID, ticket := delegateBoundTicket(t, d, backend, "codex")
 
 	// Close the leaf (its session row — and its own resume_session_id — are gone),
-	// then seed the durable resume mirror on the ticket. codex is resumable by
-	// default (no transcript probe), so Resume should adopt the mirrored id.
+	// then seed the durable resume mirror on the ticket and its native rollout.
 	d.unregisterSession(leafID, syscall.SIGTERM)
 	if d.store.Get(leafID) != nil {
 		t.Fatalf("session %s still registered after close", leafID)
 	}
+	writeCodexRolloutFixture(t, "codex-conv-xyz")
 	d.persistResumeSessionID(leafID, "codex-conv-xyz")
 
 	before, err := d.store.GetTicket(ticket.ID)

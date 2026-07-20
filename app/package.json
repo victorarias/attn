@@ -32,6 +32,7 @@
     "real-app:scenario-tr204": "node scripts/real-app-harness/scenario-tr204-local-relaunch-formatting.mjs",
     "real-app:scenario-tr301": "node scripts/real-app-harness/scenario-tr301-local-utility-session-switch.mjs",
     "real-app:scenario-codex-resume": "node scripts/real-app-harness/scenario-codex-resume-mapping.mjs",
+    "real-app:scenario-automation-pr-continuity": "node scripts/real-app-harness/scenario-automation-pr-continuity.mjs",
     "real-app:scenario-tr401": "node scripts/real-app-harness/scenario-tr401-local-window-resize.mjs",
     "real-app:scenario-tr401-local-codex": "node scripts/real-app-harness/scenario-tr401-local-window-resize.mjs --agent codex",
     "real-app:scenario-tr401-codex-main": "node scripts/real-app-harness/scenario-tr401-local-codex-main-window-resize.mjs",
