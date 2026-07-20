@@ -152,3 +152,69 @@ func TestAutomationDeleteThenReapplyResurrects(t *testing.T) {
 		t.Fatalf("expected a fresh binding after resurrection, got ticket=%q session=%q", run2.TicketID, run2.SessionID)
 	}
 }
+
+// TestAutomationDeleteClearsReviewEdgesBindingsAndFencesProviderCursors pins
+// three of automationDelete's five store mutations that no other test
+// exercises: DeleteAutomationReviewRequestEdges, DeleteAutomationContinuityBindings,
+// and FenceAutomationProviderCursors. None of the three has a direct getter,
+// so each is asserted through its own observable effect.
+func TestAutomationDeleteClearsReviewEdgesBindingsAndFencesProviderCursors(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	dir := t.TempDir()
+	raw := scheduledDefinitionYAML(dir, "*/5 * * * *", "singleton", "latest", "Sweep.")
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Establish an active, unaccepted GitHub review-request edge — the state
+	// DeleteAutomationReviewRequestEdges exists to clear. observedAt must be
+	// after automationApply's own enable fence (set from the real wall clock),
+	// or this observation would be rejected before ever creating the edge.
+	const subject = "github.com/owner/repo#42"
+	observedAt := time.Now()
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, observedAt); err != nil {
+		t.Fatal(err)
+	}
+	if needsClaim, err := s.AutomationReviewRequestNeedsClaim(def.ID, subject, 1); err != nil || !needsClaim {
+		t.Fatalf("fixture setup: review request needs claim = %v err=%v, want true", needsClaim, err)
+	}
+
+	// Establish a continuity binding — the state DeleteAutomationContinuityBindings
+	// exists to clear.
+	origin, _, err := s.ClaimScheduledAutomationRun(def.ID, "schedule:1", "singleton", def.Revision, `{}`, `{}`, observedAt, store.AutomationRunReservation{
+		RunID: "run-origin", OccurrenceID: "occ-origin", TicketID: "ticket-origin", SessionID: "session-origin", WorkspaceID: "workspace-origin", PaneID: "pane-origin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound, err := s.AutomationSessionHasContinuityBinding(origin.SessionID); err != nil || !bound {
+		t.Fatalf("fixture setup: session bound = %v err=%v, want true", bound, err)
+	}
+
+	if err := d.automationDelete(context.Background(), def.ID); err != nil {
+		t.Fatalf("automationDelete: %v", err)
+	}
+
+	if needsClaim, err := s.AutomationReviewRequestNeedsClaim(def.ID, subject, 1); err != nil || needsClaim {
+		t.Fatalf("expected delete to clear the review-request edge, needsClaim=%v err=%v", needsClaim, err)
+	}
+	if bound, err := s.AutomationSessionHasContinuityBinding(origin.SessionID); err != nil || bound {
+		t.Fatalf("expected delete to clear the continuity binding, bound=%v err=%v", bound, err)
+	}
+
+	// FenceAutomationProviderCursors: a stale observation from before the
+	// delete must not resurrect the edge delete just cleared — mirrors the
+	// re-enable fence idiom in TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand.
+	// Reusing observedAt (rather than a fresh, later timestamp) proves the
+	// block is the delete's own fence and not merely the earlier host cursor.
+	stale, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, observedAt)
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("pre-delete observation crossed the delete's fence: candidates=%#v err=%v", stale, err)
+	}
+	fresh, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, time.Now().Add(time.Hour))
+	if err != nil || len(fresh) != 1 || fresh[0].SubjectKey != subject {
+		t.Fatalf("expected a post-fence observation to see the review request again, candidates=%#v err=%v", fresh, err)
+	}
+}

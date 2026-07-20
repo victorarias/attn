@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -166,5 +167,92 @@ func TestAutomationCleanupSecondRunIsNoOp(t *testing.T) {
 	}
 	if got, err := s.GetAutomationRun(run.ID); err != nil || got == nil {
 		t.Fatalf("run row must still survive after the second pass, got %#v err=%v", got, err)
+	}
+}
+
+// TestAutomationCleanupLiveSessionSkipped pins that a terminal run whose
+// session still exists in the store keeps its worktree. Unlike A3's
+// retention sweep, cleanup has no age/count gate at all, so without this
+// check it would remove a live thread's worktree out from under it on the
+// very next on-demand cleanup.
+func TestAutomationCleanupLiveSessionSkipped(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+	worktree := filepath.Join(root, "repo--live")
+	runGitDaemon(t, mainRepo, "worktree", "add", "-b", "automation/cleanup-live", worktree)
+
+	s := store.New()
+	d := &Daemon{store: s, dataRoot: root, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	run := claimTerminalAutomationRun(t, s, def, "cleanup-live-1", now, automationResolvedLocationJSON(t, mainRepo, worktree))
+	s.Add(&protocol.Session{
+		ID: run.SessionID, Label: "reviewer", Agent: string(protocol.SessionAgentCodex), Directory: t.TempDir(), State: protocol.SessionStateIdle,
+		StateSince: now.Format(time.RFC3339), StateUpdatedAt: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), WorkspaceID: run.WorkspaceID,
+	})
+
+	cleaned, keptDirty, err := d.automationCleanup(context.Background(), def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleaned) != 0 || len(keptDirty) != 0 {
+		t.Fatalf("expected a live-session run to be skipped entirely, cleaned=%v keptDirty=%v", cleaned, keptDirty)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("expected the live-session worktree to survive cleanup, stat err=%v", err)
+	}
+}
+
+// TestAutomationCleanupReclaimsSoftDeletedDefinition pins that cleanup still
+// works after its definition is soft-deleted: automationCleanup deliberately
+// uses GetAutomationDefinitionIncludingDeleted rather than
+// GetAutomationDefinition, precisely so a user can reclaim a retired
+// automation's worktrees on demand instead of waiting for the retention
+// sweep to eventually reach it.
+func TestAutomationCleanupReclaimsSoftDeletedDefinition(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+	worktree := filepath.Join(root, "repo--deleted-def")
+	runGitDaemon(t, mainRepo, "worktree", "add", "-b", "automation/cleanup-deleted-def", worktree)
+
+	s := store.New()
+	d := &Daemon{store: s, dataRoot: root, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := claimTerminalAutomationRun(t, s, def, "cleanup-deleted-def-1", time.Now(), automationResolvedLocationJSON(t, mainRepo, worktree))
+
+	if err := d.automationDelete(context.Background(), def.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	cleaned, keptDirty, err := d.automationCleanup(context.Background(), def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleaned) != 1 || cleaned[0] != run.ID {
+		t.Fatalf("cleaned = %v, want [%s]", cleaned, run.ID)
+	}
+	if len(keptDirty) != 0 {
+		t.Fatalf("keptDirty = %v, want none", keptDirty)
+	}
+	if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+		t.Fatalf("expected the deleted definition's worktree to be reclaimed, stat err=%v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -253,5 +254,34 @@ func TestAutomationRetentionSweepLiveSessionSkipped(t *testing.T) {
 
 	if got, err := s.GetAutomationRun(run.ID); err != nil || got == nil {
 		t.Fatalf("a run whose session is still live must not be pruned, got %#v err=%v", got, err)
+	}
+}
+
+// TestAutomationRetentionSweepReachesSoftDeletedDefinitions pins that the
+// sweep still prunes a soft-deleted definition's old runs.
+// ListAutomationDefinitionIDsIncludingDeleted exists solely for this: a
+// retired automation must not accumulate worktrees forever just because it
+// was deleted rather than left enabled.
+func TestAutomationRetentionSweepReachesSoftDeletedDefinitions(t *testing.T) {
+	t.Setenv("ATTN_AUTOMATION_RETENTION_KEEP", "0")
+	t.Setenv("ATTN_AUTOMATION_RETENTION_MIN_AGE", "1h")
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	run := claimTerminalAutomationRun(t, s, def, "deleted-def-1", old, "{}")
+
+	if err := d.automationDelete(context.Background(), def.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	d.automationRetentionSweepPass(time.Now())
+
+	if got, err := s.GetAutomationRun(run.ID); err != nil || got != nil {
+		t.Fatalf("expected a soft-deleted definition's old run to still be reached and pruned, got %#v err=%v", got, err)
 	}
 }

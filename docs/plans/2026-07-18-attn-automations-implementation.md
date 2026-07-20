@@ -635,6 +635,21 @@ ticket/session is inspectable; agent idle is not a deletion signal. The initial
 implementation provides explicit cleanup only. Automatic cleanup belongs in a
 later lifecycle slice and must refuse to discard dirty worktrees.
 
+**A continuity thread's runs share identity, so no lifecycle operation may treat a
+run as privately owning its resources.** Within one thread every occurrence reuses
+the binding's session id, and the worktree path is keyed on session id alone, so a
+thread's oldest terminal run and its live current run resolve to the *same*
+directory. Its ticket is likewise shared, and `tickets.automation_run_id` is written
+once at thread creation and never updated, so it points permanently at the thread's
+oldest run. Both facts are load-bearing: deleting an old run's worktree or its row
+destroys the live thread, and both failures are permanent — the next occurrence
+fails closed with "reviewer continuity worktree is missing" or "continuity origin
+run missing" and never recovers on its own. Any per-run cleanup, retention, or
+migration must therefore ask whether the run's thread is still bound before touching
+disk or rows. A run's session row being absent does **not** mean its thread is dead;
+a thread routinely outlives its session row, and the continuity binding is the
+authoritative liveness signal.
+
 For large Bazel repositories, the local-clone override reuses the repository's Git
 objects and existing machine configuration. Per-session paths still produce
 distinct Bazel output bases, while repository/disk/remote caches configured outside
