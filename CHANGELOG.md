@@ -9,14 +9,27 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-20]
 
 ### Added
+- **You can now write and edit automations in the app.** The Automations panel
+  has New and Edit buttons that open the definition's YAML in an editor, so
+  creating an automation no longer means dropping to a terminal. Validate
+  checks a definition without storing anything and reports the first problem
+  it finds; Save stores it. Two mistakes are refused rather than silently
+  accepted: changing the `id` of a definition you are editing (which would
+  leave the original running and quietly create a second one), and saving over
+  a definition that changed elsewhere since you opened it — the latter offers a
+  reload. Your YAML is now stored as you wrote it, so comments and formatting
+  survive an edit round-trip; definitions applied before this release are
+  rendered from their stored form the first time and keep their new text
+  afterwards.
 - **Automations now have a panel in the app.** A new toolbar button opens an
   Automations panel that lists every definition with its trigger and
   enabled state, lets you enable/disable or run a manual automation now,
   shows each definition's run history with failures called out inline, and
-  jumps straight to the ticket or session a run produced. Definitions are
-  still created from the CLI (`attn automation apply`); changes made there
-  appear in the panel immediately, and daemon rejections are shown in the
-  panel rather than silently swallowed.
+  jumps straight to the ticket or session a run produced. Changes made from
+  the CLI (`attn automation apply`) appear in the panel immediately, and
+  daemon rejections are shown in the panel rather than silently swallowed.
+- **`attn automation validate --file <path>`** checks a definition without
+  applying it, using the exact same checks `apply` runs.
 - **Automations can now run on a schedule.** A definition can declare a cron
   schedule with a required time zone and fire an ordinary visible agent
   session at each intended instant — for example, a recurring merged-worktree
