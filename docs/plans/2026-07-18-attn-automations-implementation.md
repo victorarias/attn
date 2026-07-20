@@ -650,6 +650,16 @@ disk or rows. A run's session row being absent does **not** mean its thread is d
 a thread routinely outlives its session row, and the continuity binding is the
 authoritative liveness signal.
 
+That binding is also what gives a thread a *lifetime*, not just a liveness check at
+a point in time. A binding survives indefinitely on its own — nothing ages it out by
+elapsed time or occurrence count — so what actually bounds how long a bound thread's
+worktree sticks around is its ticket's TTL: `SweepExpiredTickets` hard-deletes a
+terminal (done/failed/crashed) ticket once `closed_at` is old enough, and cascades
+that deletion to the ticket's continuity binding in the same transaction, releasing
+the thread. An open ticket is never swept regardless of age, so a thread stays bound
+for as long as its ticket stays open, however long that is; retention pruning
+(A3/A4) only ever runs after that release, never instead of it.
+
 For large Bazel repositories, the local-clone override reuses the repository's Git
 objects and existing machine configuration. Per-session paths still produce
 distinct Bazel output bases, while repository/disk/remote caches configured outside

@@ -41,10 +41,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   continuity thread, are both reported as kept, not silently dropped from the
   result. A background sweep now does the same automatically for old
   finished runs — keeping the newest 200 per definition, or anything younger
-  than two weeks — so a long-running automation doesn't accumulate worktrees
-  forever; a run whose session is still open, or whose continuity thread is
-  still bound to it via a shared worktree, is never touched, so a recurring
-  automation is never bricked by its own retention.
+  than two weeks. A run whose session is still open, or whose continuity
+  thread is still bound to it via a shared worktree, is never touched, so a
+  recurring automation is never bricked by its own retention; a bound
+  thread's worktree is released once its documenting ticket ages out (see
+  the ticket retention entry below), which is what actually bounds worktree
+  growth for a long-running per-subject automation like a PR reviewer.
+- **Closed tickets are now hard-deleted after 30 days.** A ticket closed as
+  done, failed, or crashed is kept for 30 days in case you need to refer back
+  to it, then permanently removed along with its activity, attachments, and
+  events. Open tickets are never touched, however old.
 
 ### Changed
 - **`catch_up` is now schedule-only.** Applying an automation whose manual or
@@ -63,9 +69,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   permanently blocks new runs.** A→B→A edits used to refuse every future run
   once any earlier revision shared the same prompt/launch/location, even
   after that revision's own ticket was long gone. Continuity is now checked
-  per prior run's own ticket, so a genuine revert is allowed again as long as
-  that ticket is still alive, and still refused once it's actually been
-  swept away.
+  per prior run's own thread: a revert is refused only when it would reuse a
+  thread whose own ticket vanished out from under it, not merely because some
+  unrelated earlier thread's ticket is gone — including once that ticket has
+  aged out via the ticket retention sweep above.
 
 ## [2026-07-19]
 

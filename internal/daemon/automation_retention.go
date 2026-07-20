@@ -325,7 +325,16 @@ func (d *Daemon) automationCleanup(ctx context.Context, id string) (cleaned, kep
 			continue
 		}
 		switch block {
-		case automationRunCleanupLiveSession, automationRunCleanupBoundThread:
+		case automationRunCleanupLiveSession:
+			// Both cases below merge into the keptActive bucket the caller
+			// sees (main.tsp's kept_active) — a user asking "why is this
+			// still here" only cares that it's protected, not which reason.
+			// The daemon log is where the two reasons are told apart.
+			d.logf("automation cleanup %s: run %s: kept active (live session)", id, run.ID)
+			keptActive = append(keptActive, run.ID)
+			continue
+		case automationRunCleanupBoundThread:
+			d.logf("automation cleanup %s: run %s: kept active (bound continuity thread)", id, run.ID)
 			keptActive = append(keptActive, run.ID)
 			continue
 		case automationRunCleanupDirtyWorktree:

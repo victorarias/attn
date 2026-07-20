@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -395,5 +397,91 @@ func TestAutomationCleanupThreeWayPartition(t *testing.T) {
 	}
 	if len(keptActive) != 1 || keptActive[0] != boundRun.ID {
 		t.Fatalf("keptActive = %v, want [%s]", keptActive, boundRun.ID)
+	}
+}
+
+// TestAutomationCleanupLogsDistinguishLiveSessionFromBoundThread pins the
+// kept_active schema comment's claim (main.tsp, ~:2702) that "only the
+// daemon log distinguishes them": a live-session run and a bound-thread run
+// both land in the same keptActive bucket the caller sees, so the only place
+// a user (or an on-call reading daemon.log) can tell which is which is the
+// log line cleanup emits per run. Assert against the captured log content
+// itself, not just the buckets already covered above.
+func TestAutomationCleanupLogsDistinguishLiveSessionFromBoundThread(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+
+	liveWorktree := filepath.Join(root, "repo--live")
+	runGitDaemon(t, mainRepo, "worktree", "add", "-b", "automation/log-live", liveWorktree)
+	boundWorktree := filepath.Join(root, "repo--bound")
+	runGitDaemon(t, mainRepo, "worktree", "add", "-b", "automation/log-bound", boundWorktree)
+
+	logPath := filepath.Join(t.TempDir(), "daemon.log")
+	logger, err := logging.New(logPath)
+	if err != nil {
+		t.Fatalf("new test logger: %v", err)
+	}
+	defer logger.Close()
+
+	s := store.New()
+	d := &Daemon{store: s, dataRoot: root, wsHub: newWSHub(), logger: logger}
+	dir := t.TempDir()
+	def, err := d.automationApply(scheduledDefinitionYAML(dir, "*/5 * * * *", "singleton", "latest", "Log."))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	// Live session: an unbound (empty continuityKey) run whose session row
+	// still exists.
+	liveRun, _, err := s.ClaimScheduledAutomationRun(def.ID, "schedule:live", "", def.Revision, `{}`, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-log-live", OccurrenceID: "occ-log-live", TicketID: "ticket-log-live", SessionID: "session-log-live", WorkspaceID: "workspace-log-live", PaneID: "pane-log-live",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(liveRun.ID, automationResolvedLocationJSON(t, mainRepo, liveWorktree), now); err != nil {
+		t.Fatal(err)
+	}
+	s.Add(&protocol.Session{
+		ID: liveRun.SessionID, Label: "reviewer", Agent: string(protocol.SessionAgentCodex), Directory: t.TempDir(), State: protocol.SessionStateIdle,
+		StateSince: now.Format(time.RFC3339), StateUpdatedAt: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), WorkspaceID: liveRun.WorkspaceID,
+	})
+
+	// Bound thread: a "singleton"-continuity run whose session row is gone
+	// but whose binding survives.
+	boundRun, _, err := s.ClaimScheduledAutomationRun(def.ID, "schedule:bound", "singleton", def.Revision, `{}`, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-log-bound", OccurrenceID: "occ-log-bound", TicketID: "ticket-log-bound", SessionID: "session-log-bound", WorkspaceID: "workspace-log-bound", PaneID: "pane-log-bound",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(boundRun.ID, automationResolvedLocationJSON(t, mainRepo, boundWorktree), now); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, keptActive, err := d.automationCleanup(context.Background(), def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keptActive) != 2 {
+		t.Fatalf("keptActive = %v, want both %s and %s", keptActive, liveRun.ID, boundRun.ID)
+	}
+
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	body := string(logged)
+	if !strings.Contains(body, liveRun.ID) || !strings.Contains(body, "live session") {
+		t.Fatalf("expected a live-session log line naming %s, got:\n%s", liveRun.ID, body)
+	}
+	if !strings.Contains(body, boundRun.ID) || !strings.Contains(body, "bound continuity thread") {
+		t.Fatalf("expected a bound-thread log line naming %s, got:\n%s", boundRun.ID, body)
 	}
 }
