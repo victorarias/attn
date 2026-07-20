@@ -434,12 +434,12 @@ func Effective(spec DefinitionSpec, revision int) (Snapshot, error) {
 
 type DeliveryIDs struct{ TicketID, SessionID, WorkspaceID, PaneID string }
 type WorkRequest struct {
-	RunID, DefinitionID, SubjectKey, ContinuityKey string
-	Prompt                                         string
-	Context                                        json.RawMessage
-	Launch                                         EffectiveLaunch
-	Location                                       LocationSpec
-	IDs                                            DeliveryIDs
+	RunID, DefinitionID, SubjectKey, ContinuityKey, Provider string
+	Prompt                                                   string
+	Context                                                  json.RawMessage
+	Launch                                                   EffectiveLaunch
+	Location                                                 LocationSpec
+	IDs                                                      DeliveryIDs
 }
 type PreparedLocation struct {
 	Directory string          `json:"directory"`

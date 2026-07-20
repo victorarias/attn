@@ -541,10 +541,13 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 		}
 	}
 	continuityKey := ""
-	if snapshot.Policy.Continuity == "per_subject" {
+	switch snapshot.Policy.Continuity {
+	case "per_subject":
 		continuityKey = occurrence.SubjectKey
+	case "singleton":
+		continuityKey = "singleton"
 	}
-	req := automation.WorkRequest{RunID: run.ID, DefinitionID: run.DefinitionID, SubjectKey: occurrence.SubjectKey, ContinuityKey: continuityKey, Prompt: snapshot.Prompt, Context: json.RawMessage(occurrence.PayloadJSON), Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID}}
+	req := automation.WorkRequest{RunID: run.ID, DefinitionID: run.DefinitionID, SubjectKey: occurrence.SubjectKey, ContinuityKey: continuityKey, Provider: occurrence.Provider, Prompt: snapshot.Prompt, Context: json.RawMessage(occurrence.PayloadJSON), Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID}}
 	if err := d.validateAutomationContinuation(req); err != nil {
 		return err
 	}
@@ -600,20 +603,25 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 	if originSnapshot.Prompt != req.Prompt || originSnapshot.Launch != req.Launch || !sameAutomationLocation(originSnapshot.Location, req.Location) {
 		return errors.New("automation reviewer contract changed; refusing to reuse a session with stale instructions")
 	}
-	originOccurrence, err := d.store.GetAutomationOccurrence(origin.OccurrenceID)
-	if err != nil || originOccurrence == nil {
-		return errors.Join(errors.New("continuity origin occurrence missing"), err)
-	}
-	originPR, err := automation.ParsePullRequestInput(json.RawMessage(originOccurrence.PayloadJSON))
-	if err != nil {
-		return fmt.Errorf("continuity origin payload: %w", err)
-	}
-	currentPR, err := automation.ParsePullRequestInput(req.Context)
-	if err != nil {
-		return err
-	}
-	if originPR.HeadSHA != currentPR.HeadSHA {
-		return errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+	// The origin/current pull-request revision comparison only applies to
+	// GitHub-provider occurrences. A scheduled occurrence's payload is
+	// ScheduledInput, not a pull request; parsing it here would always fail.
+	if req.Provider == "github" {
+		originOccurrence, err := d.store.GetAutomationOccurrence(origin.OccurrenceID)
+		if err != nil || originOccurrence == nil {
+			return errors.Join(errors.New("continuity origin occurrence missing"), err)
+		}
+		originPR, err := automation.ParsePullRequestInput(json.RawMessage(originOccurrence.PayloadJSON))
+		if err != nil {
+			return fmt.Errorf("continuity origin payload: %w", err)
+		}
+		currentPR, err := automation.ParsePullRequestInput(req.Context)
+		if err != nil {
+			return err
+		}
+		if originPR.HeadSHA != currentPR.HeadSHA {
+			return errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+		}
 	}
 	if d.canStartWithdrawnUndeliveredReviewer(origin, req.IDs.SessionID) {
 		return nil
@@ -1121,6 +1129,10 @@ func (d *Daemon) recoverAutomations() {
 			// recovery must not race that snapshot using yesterday's active edge.
 			continue
 		}
+		// Scheduled runs (occurrence.Provider == "schedule") fall through to
+		// generic recovery: their payload is self-contained (the intended
+		// instant, immutably snapshotted at claim time), so a pending run can
+		// be delivered directly without refreshing any external demand first.
 		d.automationMu.Lock()
 		run, err := d.store.GetAutomationRun(runs[i].ID)
 		if err == nil && run.State == "pending" {

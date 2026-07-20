@@ -934,6 +934,10 @@ func (d *Daemon) Start() error {
 	// narrate executor is registered before the first tick fires.
 	go d.startNotebookCronEnqueuer(d.done)
 
+	// Start the scheduled-automation observation loop (claims and delivers due
+	// scheduled-trigger occurrences).
+	go d.startAutomationScheduleLoop(d.done)
+
 	d.signalStarted()
 	startSucceeded = true
 
