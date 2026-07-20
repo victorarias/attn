@@ -247,7 +247,7 @@ async function main() {
       try { run(binary, ['daemon', 'stop'], daemonEnv); } catch {}
       run(binary, ['daemon', 'ensure'], daemonEnv);
       await poll(() => {
-        try { return runJSON(binary, ['automation', 'list'], daemonEnv); } catch { return null; }
+        try { runJSON(binary, ['automation', 'list'], daemonEnv); return { ready: true }; } catch { return null; }
       }, 'profile daemon');
     });
     await runner.step('launch_packaged_app', () => launchFreshAppAndConnect(client, observer));
