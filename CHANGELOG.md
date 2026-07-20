@@ -32,6 +32,26 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   messages steered into the conversation instead of keystrokes typed into
   the terminal. Forking or starting a new session inside pi keeps attn's
   resume token current.
+- **Automations can now be retired and their worktrees reclaimed.** `attn
+  automation delete <id>` retires a definition; its finished runs keep their
+  tickets and history. `attn automation cleanup <id>` reclaims worktree disk
+  space for a definition's finished runs on demand, reporting each one it
+  skips rather than leaving it unmentioned: a worktree with uncommitted
+  changes, and a worktree still in use by a live session or a live
+  continuity thread, are both reported as kept, not silently dropped from the
+  result. A background sweep now does the same automatically for old
+  finished runs — keeping the newest 200 per definition, or anything younger
+  than two weeks. A run whose session is still open, or whose continuity
+  thread is still bound to it via a shared worktree, is never touched, so a
+  recurring automation is never bricked by its own retention. Both of those
+  hold the disk independently, and both have to lift before it comes back:
+  the session has to end, and the thread's documenting ticket has to age out
+  (see the ticket retention entry below). This release fixes the second one,
+  which previously never lifted at all.
+- **Closed tickets are now hard-deleted after 30 days.** A ticket closed as
+  done, failed, or crashed is kept for 30 days in case you need to refer back
+  to it, then permanently removed along with its activity, attachments, and
+  events. Open tickets are never touched, however old.
 
 ### Changed
 - **`catch_up` is now schedule-only.** Applying an automation whose manual or
@@ -44,6 +64,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   and preserve reviewer changes in the owned worktree. Missing worktrees,
   unavailable transcripts, and changed pull-request heads fail visibly instead
   of silently starting in the wrong context.
+
+### Fixed
+- **Reverting an automation's prompt to an earlier version no longer
+  permanently blocks new runs.** A→B→A edits used to refuse every future run
+  once any earlier revision shared the same prompt/launch/location, even
+  after that revision's own ticket was long gone. Continuity is now checked
+  per prior run's own thread: a revert is refused only when it would reuse a
+  thread whose own ticket vanished out from under it, not merely because some
+  unrelated earlier thread's ticket is gone — including once that ticket has
+  aged out via the ticket retention sweep above.
 
 ## [2026-07-19]
 

@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, AutomationActionResultMessage, AutomationApplyMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationListMessage, AutomationRunListMessage, AutomationRunMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationSetEnabledMessage, AutomationShowMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, AutomationActionResultMessage, AutomationApplyMessage, AutomationCleanupMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDeleteMessage, AutomationListMessage, AutomationRunListMessage, AutomationRunMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationSetEnabledMessage, AutomationShowMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionVisualizedMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
@@ -11,8 +11,10 @@
 //   const authorsUpdatedMessage = Convert.toAuthorsUpdatedMessage(json);
 //   const automationActionResultMessage = Convert.toAutomationActionResultMessage(json);
 //   const automationApplyMessage = Convert.toAutomationApplyMessage(json);
+//   const automationCleanupMessage = Convert.toAutomationCleanupMessage(json);
 //   const automationDefinitionSummary = Convert.toAutomationDefinitionSummary(json);
 //   const automationDefinitionsGetMessage = Convert.toAutomationDefinitionsGetMessage(json);
+//   const automationDeleteMessage = Convert.toAutomationDeleteMessage(json);
 //   const automationListMessage = Convert.toAutomationListMessage(json);
 //   const automationRunListMessage = Convert.toAutomationRunListMessage(json);
 //   const automationRunMessage = Convert.toAutomationRunMessage(json);
@@ -471,9 +473,12 @@ export enum AuthorsUpdatedMessageEvent {
 
 export interface AutomationActionResultMessage {
     action:       string;
+    cleaned?:     string[];
     definitions?: Items[];
     error?:       string;
     event:        AutomationActionResultMessageEvent;
+    kept_active?: string[];
+    kept_dirty?:  string[];
     request_id?:  string;
     run_id?:      string;
     runs?:        RunElement[];
@@ -529,6 +534,17 @@ export enum AutomationApplyMessageCmd {
     AutomationApply = "automation_apply",
 }
 
+export interface AutomationCleanupMessage {
+    cmd:           AutomationCleanupMessageCmd;
+    definition_id: string;
+    request_id?:   string;
+    [property: string]: any;
+}
+
+export enum AutomationCleanupMessageCmd {
+    AutomationCleanup = "automation_cleanup",
+}
+
 export interface AutomationDefinitionSummary {
     catch_up?:           string;
     continuity?:         string;
@@ -551,6 +567,17 @@ export interface AutomationDefinitionsGetMessage {
 
 export enum AutomationDefinitionsGetMessageCmd {
     AutomationDefinitionsGet = "automation_definitions_get",
+}
+
+export interface AutomationDeleteMessage {
+    cmd:           AutomationDeleteMessageCmd;
+    definition_id: string;
+    request_id?:   string;
+    [property: string]: any;
+}
+
+export enum AutomationDeleteMessageCmd {
+    AutomationDelete = "automation_delete",
 }
 
 export interface AutomationListMessage {
@@ -2072,7 +2099,7 @@ export interface InitialStateMessage {
     prs?:                PRElement[];
     repos?:              RepoElement[];
     sessions?:           SessionElement[];
-    settings?:           { [key: string]: any };
+    settings?:           { [key: string]: string };
     source_fingerprint?: string;
     tickets?:            TicketElement[];
     warnings?:           WarningElement[];
@@ -4076,7 +4103,7 @@ export interface SettingsUpdatedMessage {
     changed_key?: string;
     error?:       string;
     event:        SettingsUpdatedMessageEvent;
-    settings?:    { [key: string]: any };
+    settings?:    { [key: string]: string };
     success?:     boolean;
     [property: string]: any;
 }
@@ -4730,7 +4757,7 @@ export interface WebSocketEvent {
     session?:                  SessionElement;
     session_id?:               string;
     sessions?:                 SessionElement[];
-    settings?:                 { [key: string]: any };
+    settings?:                 { [key: string]: string };
     signal?:                   string;
     split_id?:                 string;
     staged?:                   StagedElement[];
@@ -5478,6 +5505,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("AutomationApplyMessage")), null, 2);
     }
 
+    public static toAutomationCleanupMessage(json: string): AutomationCleanupMessage {
+        return cast(JSON.parse(json), r("AutomationCleanupMessage"));
+    }
+
+    public static automationCleanupMessageToJson(value: AutomationCleanupMessage): string {
+        return JSON.stringify(uncast(value, r("AutomationCleanupMessage")), null, 2);
+    }
+
     public static toAutomationDefinitionSummary(json: string): AutomationDefinitionSummary {
         return cast(JSON.parse(json), r("AutomationDefinitionSummary"));
     }
@@ -5492,6 +5527,14 @@ export class Convert {
 
     public static automationDefinitionsGetMessageToJson(value: AutomationDefinitionsGetMessage): string {
         return JSON.stringify(uncast(value, r("AutomationDefinitionsGetMessage")), null, 2);
+    }
+
+    public static toAutomationDeleteMessage(json: string): AutomationDeleteMessage {
+        return cast(JSON.parse(json), r("AutomationDeleteMessage"));
+    }
+
+    public static automationDeleteMessageToJson(value: AutomationDeleteMessage): string {
+        return JSON.stringify(uncast(value, r("AutomationDeleteMessage")), null, 2);
     }
 
     public static toAutomationListMessage(json: string): AutomationListMessage {
@@ -8559,9 +8602,12 @@ const typeMap: any = {
     ], "any"),
     "AutomationActionResultMessage": o([
         { json: "action", js: "action", typ: "" },
+        { json: "cleaned", js: "cleaned", typ: u(undefined, a("")) },
         { json: "definitions", js: "definitions", typ: u(undefined, a(r("Items"))) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("AutomationActionResultMessageEvent") },
+        { json: "kept_active", js: "kept_active", typ: u(undefined, a("")) },
+        { json: "kept_dirty", js: "kept_dirty", typ: u(undefined, a("")) },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "run_id", js: "run_id", typ: u(undefined, "") },
         { json: "runs", js: "runs", typ: u(undefined, a(r("RunElement"))) },
@@ -8601,6 +8647,11 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("AutomationApplyMessageCmd") },
         { json: "definition_yaml", js: "definition_yaml", typ: "" },
     ], "any"),
+    "AutomationCleanupMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AutomationCleanupMessageCmd") },
+        { json: "definition_id", js: "definition_id", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
     "AutomationDefinitionSummary": o([
         { json: "catch_up", js: "catch_up", typ: u(undefined, "") },
         { json: "continuity", js: "continuity", typ: u(undefined, "") },
@@ -8615,6 +8666,11 @@ const typeMap: any = {
     ], "any"),
     "AutomationDefinitionsGetMessage": o([
         { json: "cmd", js: "cmd", typ: r("AutomationDefinitionsGetMessageCmd") },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "AutomationDeleteMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AutomationDeleteMessageCmd") },
+        { json: "definition_id", js: "definition_id", typ: "" },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
     ], "any"),
     "AutomationListMessage": o([
@@ -9513,7 +9569,7 @@ const typeMap: any = {
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
-        { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "settings", js: "settings", typ: u(undefined, m("")) },
         { json: "source_fingerprint", js: "source_fingerprint", typ: u(undefined, "") },
         { json: "tickets", js: "tickets", typ: u(undefined, a(r("TicketElement"))) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
@@ -10707,7 +10763,7 @@ const typeMap: any = {
         { json: "changed_key", js: "changed_key", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("SettingsUpdatedMessageEvent") },
-        { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "settings", js: "settings", typ: u(undefined, m("")) },
         { json: "success", js: "success", typ: u(undefined, true) },
     ], "any"),
     "SpawnResultMessage": o([
@@ -11102,7 +11158,7 @@ const typeMap: any = {
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
         { json: "session_id", js: "session_id", typ: u(undefined, "") },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
-        { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "settings", js: "settings", typ: u(undefined, m("")) },
         { json: "signal", js: "signal", typ: u(undefined, "") },
         { json: "split_id", js: "split_id", typ: u(undefined, "") },
         { json: "staged", js: "staged", typ: u(undefined, a(r("StagedElement"))) },
@@ -11511,8 +11567,14 @@ const typeMap: any = {
     "AutomationApplyMessageCmd": [
         "automation_apply",
     ],
+    "AutomationCleanupMessageCmd": [
+        "automation_cleanup",
+    ],
     "AutomationDefinitionsGetMessageCmd": [
         "automation_definitions_get",
+    ],
+    "AutomationDeleteMessageCmd": [
+        "automation_delete",
     ],
     "AutomationListMessageCmd": [
         "automation_list",

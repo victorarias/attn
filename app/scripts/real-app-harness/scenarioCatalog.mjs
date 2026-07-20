@@ -82,6 +82,16 @@ export const scenarioCatalog = [
     timeoutMs: 360_000,
   },
   {
+    id: 'automation-lifecycle',
+    label: 'Automation lifecycle: edit-rebind, delete-resurrect, cleanup-dirty-safe',
+    command: ['pnpm', 'run', 'real-app:scenario-automation-lifecycle'],
+    // Three independent legs: a scheduled definition edited/reverted across
+    // three live ~60s ticker waits, a delete/resurrect round-trip through
+    // the panel, and a two-delivery mock-GitHub cleanup proof; needs more
+    // than the default budget.
+    timeoutMs: 600_000,
+  },
+  {
     id: 'terminal-block-copy',
     label: 'OSC 133 block copy via real fish + native Cmd+C',
     command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],

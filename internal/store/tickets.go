@@ -995,9 +995,10 @@ func (s *Store) ArchiveTicket(id string, now time.Time) error {
 }
 
 // SweepExpiredTickets hard-deletes terminal tickets whose closed_at is older than
-// now-ttl, cascading to their activity, attachments, events, and event cursors.
-// Open tickets (a durable backlog) are never swept. Returns the number of tickets
-// removed. The caller
+// now-ttl, cascading to their activity, attachments, events, event cursors, and
+// (see the automation_continuity_bindings delete below) any automation continuity
+// binding the ticket documents. Open tickets (a durable backlog) are never swept.
+// Returns the number of tickets removed. The caller
 // passes now and the TTL (production: time.Now() and 30 days); tests inject both.
 func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, error) {
 	s.mu.Lock()
@@ -1034,6 +1035,19 @@ func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, erro
 		return 0, err
 	}
 	if _, err := tx.Exec(`DELETE FROM automation_ticket_occurrence_events WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
+		return 0, err
+	}
+	// A continuity binding's ticket_id pins it to one thread's documenting
+	// ticket; once that ticket is swept there is nothing left to resume, so
+	// release the binding atomically with it. This is what actually bounds a
+	// bound thread's worktree lifetime (see AutomationSessionHasContinuityBinding
+	// and ListPrunableAutomationRuns): the per-subject reap in
+	// ReconcileAutomationReviewRequests only fires once, at the moment a review
+	// request's edge goes inactive, and no-ops if the ticket is still open at
+	// that instant — it does not revisit an edge that stays inactive while its
+	// ticket later ages out. Leave that reap alone; it still covers the case
+	// where the ticket was already gone at withdraw time.
+	if _, err := tx.Exec(`DELETE FROM automation_continuity_bindings WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
 		return 0, err
 	}
 	res, err := tx.Exec(`DELETE FROM tickets WHERE `+expired, cutoff)

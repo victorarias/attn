@@ -635,6 +635,44 @@ ticket/session is inspectable; agent idle is not a deletion signal. The initial
 implementation provides explicit cleanup only. Automatic cleanup belongs in a
 later lifecycle slice and must refuse to discard dirty worktrees.
 
+**A continuity thread's runs share identity, so no lifecycle operation may treat a
+run as privately owning its resources.** Within one thread every occurrence reuses
+the binding's session id, and the worktree path is keyed on session id alone, so a
+thread's oldest terminal run and its live current run resolve to the *same*
+directory. Its ticket is likewise shared, and `tickets.automation_run_id` is written
+once at thread creation and never updated, so it points permanently at the thread's
+oldest run. Both facts are load-bearing: deleting an old run's worktree or its row
+destroys the live thread, and both failures are permanent — the next occurrence
+fails closed with "reviewer continuity worktree is missing" or "continuity origin
+run missing" and never recovers on its own. Any per-run cleanup, retention, or
+migration must therefore ask whether the run's thread is still bound before touching
+disk or rows. A run's session row being absent does **not** mean its thread is dead;
+a thread routinely outlives its session row, and the continuity binding is the
+authoritative liveness signal.
+
+That binding is also what gives a thread a *lifetime*, not just a liveness check at
+a point in time. A binding survives indefinitely on its own — nothing ages it out by
+elapsed time or occurrence count — so what actually bounds how long a bound thread's
+worktree sticks around is its ticket's TTL: `SweepExpiredTickets` hard-deletes a
+terminal (done/failed/crashed) ticket once `closed_at` is old enough, and cascades
+that deletion to the ticket's continuity binding in the same transaction, releasing
+the thread. An open ticket is never swept regardless of age, so a thread stays bound
+for as long as its ticket stays open, however long that is; retention pruning
+(A3/A4) only ever runs after that release, never instead of it.
+
+The binding is not the only thing pinning that disk, though, and this is the easiest
+mistake to make when reasoning about reclamation. `automationRunCleanupSafety` checks
+a *live session row* before it checks the binding, and that check is bare row
+existence (`store.Get(sessionID) != nil`), not PTY liveness. So a run's worktree is
+reclaimable only once **both** pins lift: the session row is gone *and* the thread is
+unbound. The two are independent — ageing out the ticket does nothing while the
+session row survives. That matters in practice because automation-delivered agent
+sessions do not reliably end: a codex-driven delivery is observed sitting in
+`launching` indefinitely with its pty-worker and agent process still alive, and a
+worker that reattaches to a restarted daemon never reaches the 12-hour idle
+self-stop. Until session lifetime is bounded too, the ticket TTL bounds only one of
+the two pins.
+
 For large Bazel repositories, the local-clone override reuses the repository's Git
 objects and existing machine configuration. Per-session paths still produce
 distinct Bazel output bases, while repository/disk/remote caches configured outside
@@ -991,7 +1029,35 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       inline daemon rejection on a disabled definition, daemon restart
       preserving definitions and runs) against the app built from `91f899b5`
       (2026-07-20).
-- [ ] Add the self-service editor and remaining policy depth.
+- [x] Complete the lifecycle half of Slice 7: contract-keyed continuity rotation
+      on edit, provenance-retaining delete with resurrect, bounded retention,
+      explicit dirty-safe cleanup reporting a three-way
+      `cleaned`/`kept_dirty`/`kept_active` partition (protocol 179), and a
+      bounded thread *lifetime* — the ticket TTL sweep is now actually wired up
+      and releases a thread's continuity binding along with its ticket, so the
+      binding stops pinning a reviewer automation's worktrees forever. Note the
+      binding is only one of two independent pins: `automationRunCleanupSafety`
+      blocks on a live session row first, so a worktree is reclaimable only once
+      the session has also ended. Automation-delivered agent sessions do not
+      reliably end today (see the thread-lifetime note above), so this slice
+      bounds one pin, not both. Proven by the
+      packaged serial scenario `real-app:scenario-automation-lifecycle` — run
+      `automation-lifecycle-2026-07-20T21-53-29-423Z`, all three legs green
+      (edit-rebind including the revert case, delete-resurrect, and a single
+      cleanup call partitioning a clean, a dirty, and a still-bound worktree)
+      against the app built from `458455f8` (2026-07-20). The TTL sweep itself
+      is out of that scenario's reach (30-day TTL, hourly tick), so it was
+      verified separately against a live daemon on the same build with
+      `ATTN_TICKET_RETENTION_SWEEP_INTERVAL=5s`: a 40-day-old closed ticket and
+      the continuity binding pointing at it both disappeared on the first tick,
+      with `ticket retention sweep: removed 1 expired ticket(s)` in the profile
+      daemon log.
+      Two adversarial passes found three permanent-brick bugs and one unbounded
+      worktree leak, all from treating a run as privately owning its resources
+      or a thread as living forever; each is fixed with regression tests, and
+      the shared-identity and thread-lifetime invariants are recorded above as
+      domain context.
+- [ ] Add the self-service YAML editor and validate-without-apply (Slice 7 PR B).
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
 

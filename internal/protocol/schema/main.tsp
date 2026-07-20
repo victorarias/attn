@@ -1577,6 +1577,25 @@ model AutomationShowMessage { cmd: "automation_show"; definition_id: string; }
 model AutomationRunMessage { cmd: "automation_run"; definition_id: string; request_id: string; input_json?: string; pr_url?: string; }
 model AutomationRunListMessage { cmd: "automation_run_list"; definition_id: string; }
 
+// Dual-surface (unix-socket/CLI + WS), unlike automation_set_enabled below:
+// mirrors automation_apply/automation_run's shape. request_id is optional
+// because the WS path uses it for correlation but the socket/CLI path
+// doesn't need one.
+model AutomationDeleteMessage {
+  cmd: "automation_delete";
+  definition_id: string;
+  request_id?: string;
+}
+
+// Same dual-surface shape as automation_delete above. Unlike delete, cleanup
+// is disk-only (worktrees only; never rows or artifacts) and repeatable —
+// see AutomationActionResultMessage's cleaned/kept_dirty/kept_active fields.
+model AutomationCleanupMessage {
+  cmd: "automation_cleanup";
+  definition_id: string;
+  request_id?: string;
+}
+
 // WS-only automations surface: list definitions, list one definition's runs, and
 // toggle enabled. automation_run (above) is reused for WS run-now; it already
 // carries request_id for correlation.
@@ -2670,6 +2689,21 @@ model AutomationActionResultMessage {
   run_id?: string;
   ticket_id?: string;
   session_id?: string;
+  // cleaned/kept_dirty/kept_active: automation_cleanup's three-way per-run-id
+  // partition of the terminal runs it examined — cleaned had their worktree
+  // removed; kept_dirty were skipped because the worktree had uncommitted
+  // changes; kept_active were skipped because the run's thread is still in
+  // use (its session is live, or its session id is still referenced by a
+  // continuity binding even though the session row is gone) — a bound
+  // continuity thread shares its worktree with its whole thread, so an old
+  // terminal run's worktree may still be the thread's live working
+  // directory. One bucket for both live-session and bound-thread cases,
+  // deliberately: the user-facing story is identical, "still in use, not
+  // reclaimable" — only the daemon log distinguishes them. All three omitted
+  // (not just empty) when the action isn't automation_cleanup.
+  cleaned?: string[];
+  kept_dirty?: string[];
+  kept_active?: string[];
 }
 
 // Compact change signal: canonical state lives in SQLite, so clients re-read

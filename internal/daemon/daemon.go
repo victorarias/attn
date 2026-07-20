@@ -928,6 +928,20 @@ func (d *Daemon) Start() error {
 	// a daemon death mid-seam) and repairs claims whose verdict never landed.
 	go d.runTicketReconcileSweep()
 
+	// Automation run retention sweep (A3): bounds unbounded automation run
+	// history, pruning terminal runs/artifacts/worktrees outside the keep
+	// window once they're old and safe to touch. Dedicated ticker rather than
+	// piggybacking the schedule-observation tick — that tick's cadence is
+	// driven by cron granularity, not retention policy.
+	go d.runAutomationRetentionSweep()
+
+	// Ticket TTL sweep: hard-deletes terminal tickets past their retention
+	// window. This is also what actually bounds a bound continuity thread's
+	// worktree lifetime (see SweepExpiredTickets' automation_continuity_bindings
+	// cascade) — without this loop running, AutomationSessionHasContinuityBinding
+	// never stops protecting a thread's worktree from A3/A4 pruning.
+	go d.runTicketRetentionSweep()
+
 	// Construct + start the durable compaction runner (kinds compact_context,
 	// summarize_session, narrate_workspace).
 	d.startCompactRunner()
@@ -2110,7 +2124,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleRegister(conn, msg.(*protocol.RegisterMessage))
 	case protocol.CmdDelegate:
 		d.handleDelegate(conn, msg.(*protocol.DelegateMessage))
-	case protocol.CmdAutomationApply, protocol.CmdAutomationList, protocol.CmdAutomationShow, protocol.CmdAutomationRun, protocol.CmdAutomationRunList:
+	case protocol.CmdAutomationApply, protocol.CmdAutomationList, protocol.CmdAutomationShow, protocol.CmdAutomationRun, protocol.CmdAutomationRunList, protocol.CmdAutomationDelete, protocol.CmdAutomationCleanup:
 		d.handleAutomationCommand(conn, cmd, msg)
 	case protocol.CmdDelegateStatus:
 		d.handleDelegateStatus(conn, msg.(*protocol.DelegateStatusMessage))

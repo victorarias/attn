@@ -159,76 +159,58 @@ func TestScheduledAutomationSingletonContinuityReusesBinding(t *testing.T) {
 	}
 }
 
-// TestScheduledAutomationSingletonRecordsContinuityKeyAsSubjectKey is the
-// regression check for Fix 2: HasPriorAutomationContinuityRun matches on
-// automation_occurrences.subject_key, so a scheduled singleton's occurrence
-// must record subject_key="singleton" (not "") or the deleted-ticket safety
-// guard can never fire for scheduled singletons.
-func TestScheduledAutomationSingletonRecordsContinuityKeyAsSubjectKey(t *testing.T) {
+// TestAutomationContinuityRunHistoryReturnsPriorRuns covers
+// AutomationContinuityRunHistory directly: no history for a continuity key
+// returns nothing; a prior run under the same key returns that run's own
+// pinned snapshot_json paired with its own ticket_id, excluding the current
+// run itself. The daemon (see hasPriorAutomationContinuityRun in
+// internal/daemon/automations.go) is responsible for deciding what a
+// returned entry *means* (by comparing its ContinuationContract to the
+// current request and checking its own ticket's existence) — this test only
+// pins what the store hands back.
+func TestAutomationContinuityRunHistoryReturnsPriorRuns(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	firstIDs := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
-	first, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "singleton", def.Revision, `{}`, `{}`, now, firstIDs)
+	first, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "singleton", def.Revision, `{}`, `{"prompt":"v1"}`, now, firstIDs)
 	if err != nil || !created {
 		t.Fatalf("first claim created=%v err=%v", created, err)
 	}
+
+	// No history yet for a run's own continuity key excludes itself; nothing prior.
+	history, err := s.AutomationContinuityRunHistory(def.ID, "singleton", first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("expected no prior history for the first run, got %#v", history)
+	}
+
 	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Nightly", Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:nightly", TicketRoleChiefOfStaff, now); err != nil {
 		t.Fatal(err)
 	}
 	secondIDs := AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"}
-	second, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-21T03:00:00Z", "singleton", def.Revision, `{}`, `{}`, now.Add(24*time.Hour), secondIDs)
+	second, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-21T03:00:00Z", "singleton", def.Revision, `{}`, `{"prompt":"v1"}`, now.Add(24*time.Hour), secondIDs)
 	if err != nil || !created {
 		t.Fatalf("second claim created=%v err=%v", created, err)
 	}
 
-	firstOccurrence, err := s.GetAutomationOccurrence(first.OccurrenceID)
-	if err != nil || firstOccurrence == nil || firstOccurrence.SubjectKey != "singleton" {
-		t.Fatalf("first occurrence = %#v err=%v, want subject_key=singleton", firstOccurrence, err)
-	}
-	hasPrior, err := s.HasPriorAutomationContinuityRun(def.ID, "singleton", second.ID)
+	history, err = s.AutomationContinuityRunHistory(def.ID, "singleton", second.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasPrior {
-		t.Fatal("HasPriorAutomationContinuityRun=false, want true once the singleton's occurrence records subject_key")
+	if len(history) != 1 || history[0].SnapshotJSON != `{"prompt":"v1"}` || history[0].TicketID != "ticket-1" {
+		t.Fatalf("expected the first run's own pinned snapshot+ticket as second's prior history, got %#v", history)
 	}
-}
 
-// TestScheduledAutomationFreshContinuityRecordsEmptySubjectKey guards the
-// other half of Fix 2: fresh continuity (policy.continuity=fresh) still
-// records subject_key="" per occurrence, so HasPriorAutomationContinuityRun
-// never spuriously matches unrelated fresh occurrences against each other.
-func TestScheduledAutomationFreshContinuityRecordsEmptySubjectKey(t *testing.T) {
-	s := New()
-	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
-	run, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "", def.Revision, `{}`, `{}`, now, ids)
-	if err != nil || !created {
-		t.Fatalf("claim created=%v err=%v", created, err)
-	}
-	occurrence, err := s.GetAutomationOccurrence(run.OccurrenceID)
-	if err != nil || occurrence == nil || occurrence.SubjectKey != "" {
-		t.Fatalf("occurrence = %#v err=%v, want subject_key empty for fresh continuity", occurrence, err)
-	}
-	// Callers never invoke HasPriorAutomationContinuityRun with an empty
-	// continuity key (both validateAutomationContinuation and EnsureTicket
-	// early-return when req.ContinuityKey == ""), so this only pins that
-	// fresh continuity keeps recording an empty subject_key rather than
-	// accidentally adopting Fix 2's "singleton" literal.
-	hasPrior, err := s.HasPriorAutomationContinuityRun(def.ID, "", run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hasPrior {
-		t.Fatal("HasPriorAutomationContinuityRun=true against an empty continuity key, want false")
+	// Empty continuity key never has history to report.
+	if history, err := s.AutomationContinuityRunHistory(def.ID, "", second.ID); err != nil || len(history) != 0 {
+		t.Fatalf("expected no history for an empty continuity key, got %#v err=%v", history, err)
 	}
 }
 
@@ -843,5 +825,224 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(3*time.Minute))
 	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 2 {
 		t.Fatalf("re-enabled latest catch-up candidates=%#v err=%v", candidates, err)
+	}
+}
+
+// TestListPrunableAutomationRunsProtectsBoundThreadOrigin pins the fix for
+// Slice 7 PR A's continuity-bricking blocker: a thread's ticket.automation_run_id
+// is written once at ticket creation and never updated, so it permanently
+// points at the thread's oldest (origin) run — exactly the run retention
+// would otherwise prune first. As long as the thread's continuity binding
+// still exists (the thread can still deliver again), the origin run must
+// never be a prunable candidate, however far outside the keep window or age
+// floor it is; pruning it would make automationContinuationOrigin
+// (internal/daemon/automations.go) fail forever on the next occurrence.
+func TestListPrunableAutomationRunsProtectsBoundThreadOrigin(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-origin", OccurrenceID: "occ-origin", TicketID: "ticket-origin", SessionID: "session-origin", WorkspaceID: "workspace-origin", PaneID: "pane-origin"}
+	origin, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:1", "singleton", def.Revision, `{}`, `{}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("claim origin created=%v err=%v", created, err)
+	}
+	if err := s.MarkAutomationRunDelivered(origin.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+	// The thread's ticket permanently points at the origin run: the real
+	// shape validateAutomationContinuation/automationContinuationOrigin rely on.
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: origin.TicketID, Title: "Nightly", Status: TicketStatusWorking, Assignee: origin.SessionID, AutomationRunID: origin.ID}, "automation:nightly", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+
+	far := now.Add(365 * 24 * time.Hour)
+	prunable, err := s.ListPrunableAutomationRuns(def.ID, 0, far)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range prunable {
+		if r.ID == origin.ID {
+			t.Fatalf("expected the bound thread's origin run to be protected, got it in the prunable set: %#v", prunable)
+		}
+	}
+}
+
+// TestListPrunableAutomationRunsStillPrunesNonContinuityRuns guards against
+// over-broadening the fix above: every automation run (continuity or not)
+// gets a ticket whose own automation_run_id is that run's own id, so an
+// unjoined "any run referenced by any ticket" exclusion would protect
+// essentially every run and silently turn retention into a no-op. Only the
+// join through automation_continuity_bindings should narrow protection to
+// threads that can still deliver again — an ordinary non-continuity run's
+// own ticket never has a continuity binding, so it must remain prunable.
+func TestListPrunableAutomationRunsStillPrunesNonContinuityRuns(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-manual", OccurrenceID: "occ-manual", TicketID: "ticket-manual", SessionID: "session-manual", WorkspaceID: "workspace-manual", PaneID: "pane-manual"}
+	run, created, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("claim created=%v err=%v", created, err)
+	}
+	if err := s.MarkAutomationRunDelivered(run.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+	// This run's own ticket points back at itself, exactly like every
+	// automation run's ticket does, with no continuity binding involved.
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: run.TicketID, Title: "Cleanup", Status: TicketStatusWorking, Assignee: run.SessionID, AutomationRunID: run.ID}, "automation:cleanup", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+
+	far := now.Add(365 * 24 * time.Hour)
+	prunable, err := s.ListPrunableAutomationRuns(def.ID, 0, far)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prunable) != 1 || prunable[0].ID != run.ID {
+		t.Fatalf("expected the non-continuity run to remain prunable, got %#v", prunable)
+	}
+}
+
+// TestSweepExpiredTicketsCascadesToContinuityBindings pins the other half of
+// the fix ListPrunableAutomationRunsProtectsBoundThreadOrigin (above) relies
+// on: a binding is only a temporary hold, not a permanent one. Once the
+// ticket it documents ages past the TTL, SweepExpiredTickets must release
+// the binding in the same transaction — a within-TTL or still-open thread's
+// binding must be left alone.
+func TestSweepExpiredTicketsCascadesToContinuityBindings(t *testing.T) {
+	s := New()
+	base := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	const ttl = 30 * 24 * time.Hour
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bind := func(continuityKey string, closedAt time.Time, terminal bool) *AutomationRun {
+		t.Helper()
+		ids := AutomationRunReservation{RunID: "run-" + continuityKey, OccurrenceID: "occ-" + continuityKey, TicketID: "ticket-" + continuityKey, SessionID: "session-" + continuityKey, WorkspaceID: "workspace-" + continuityKey, PaneID: "pane-" + continuityKey}
+		run, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:"+continuityKey, continuityKey, def.Revision, `{}`, `{}`, base, ids)
+		if err != nil || !created {
+			t.Fatalf("claim %s created=%v err=%v", continuityKey, created, err)
+		}
+		if err := s.MarkAutomationRunDelivered(run.ID, "{}", base); err != nil {
+			t.Fatal(err)
+		}
+		status := TicketStatusWorking
+		if terminal {
+			status = TicketStatusDone
+		}
+		// EnsureAutomationTicket sets closed_at from the timestamp passed in
+		// when the ticket is created directly in a terminal status (mirrors
+		// TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne's use of
+		// the same mechanism), so a distinct closedAt per thread is enough to
+		// place each on either side of the TTL without a separate SetTicketStatus
+		// call.
+		if _, err := s.EnsureAutomationTicket(Ticket{ID: run.TicketID, Title: "Nightly", Status: status, Assignee: run.SessionID, AutomationRunID: run.ID}, "automation:nightly", TicketRoleChiefOfStaff, closedAt); err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+
+	bind("swept", base.Add(-40*24*time.Hour), true) // terminal, 40d old: past the 30d TTL.
+	bind("recent", base.Add(-5*24*time.Hour), true) // terminal, 5d old: within the TTL.
+	bind("open", base.Add(-90*24*time.Hour), false) // never closed: not a sweep candidate regardless of age.
+
+	removed, err := s.SweepExpiredTickets(base, ttl)
+	if err != nil {
+		t.Fatalf("SweepExpiredTickets: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1 (only swept)", removed)
+	}
+
+	bindingExists := func(continuityKey string) bool {
+		t.Helper()
+		var exists int
+		if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?)`, def.ID, continuityKey).Scan(&exists); err != nil {
+			t.Fatalf("query binding %s: %v", continuityKey, err)
+		}
+		return exists != 0
+	}
+	if bindingExists("swept") {
+		t.Fatal("swept thread's binding survived its ticket's sweep")
+	}
+	if !bindingExists("recent") {
+		t.Fatal("within-TTL thread's binding was released early")
+	}
+	if !bindingExists("open") {
+		t.Fatal("open thread's binding was released even though its ticket was never closed")
+	}
+}
+
+// TestSweepExpiredTicketsUnblocksPruningOfBoundThreadOrigin is the chain
+// TestListPrunableAutomationRunsProtectsBoundThreadOrigin's protection exists
+// to eventually let go of: once the ticket that keeps a binding alive ages
+// out, both AutomationSessionHasContinuityBinding and ListPrunableAutomationRuns
+// must reflect the release, or the fix this PR makes is unproven — the guard
+// would be permanent instead of TTL-bounded, which is the exact bug this
+// branch exists to fix (see the "Fix brief" this test was written from).
+func TestSweepExpiredTicketsUnblocksPruningOfBoundThreadOrigin(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-origin", OccurrenceID: "occ-origin", TicketID: "ticket-origin", SessionID: "session-origin", WorkspaceID: "workspace-origin", PaneID: "pane-origin"}
+	origin, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:1", "singleton", def.Revision, `{}`, `{}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("claim origin created=%v err=%v", created, err)
+	}
+	if err := s.MarkAutomationRunDelivered(origin.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: origin.TicketID, Title: "Nightly", Status: TicketStatusDone, Assignee: origin.SessionID, AutomationRunID: origin.ID}, "automation:nightly", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+
+	far := now.Add(365 * 24 * time.Hour)
+
+	// Before the TTL sweep: still protected, exactly like
+	// TestListPrunableAutomationRunsProtectsBoundThreadOrigin pins.
+	if bound, err := s.AutomationSessionHasContinuityBinding(origin.SessionID); err != nil || !bound {
+		t.Fatalf("bound=%v err=%v, want bound before the sweep", bound, err)
+	}
+	prunable, err := s.ListPrunableAutomationRuns(def.ID, 0, far)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range prunable {
+		if r.ID == origin.ID {
+			t.Fatalf("origin run already prunable before its ticket aged out: %#v", prunable)
+		}
+	}
+
+	if removed, err := s.SweepExpiredTickets(now.Add(31*24*time.Hour), 30*24*time.Hour); err != nil || removed != 1 {
+		t.Fatalf("sweep removed=%d err=%v", removed, err)
+	}
+
+	// After the sweep: the chain must actually close.
+	if bound, err := s.AutomationSessionHasContinuityBinding(origin.SessionID); err != nil || bound {
+		t.Fatalf("bound=%v err=%v, want released after the sweep", bound, err)
+	}
+	prunable, err = s.ListPrunableAutomationRuns(def.ID, 0, far)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range prunable {
+		if r.ID == origin.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the origin run to become prunable once its ticket aged out, got %#v", prunable)
 	}
 }

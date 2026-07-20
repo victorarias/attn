@@ -441,6 +441,45 @@ func Effective(spec DefinitionSpec, revision int) (Snapshot, error) {
 	return Snapshot{APIVersion: APIVersion, DefinitionRevision: revision, Prompt: spec.Prompt, Launch: launch, Location: spec.Location, Policy: spec.Policy}, nil
 }
 
+// ContinuationContract is the subset of a Snapshot that governs whether a
+// continuity binding (ticket/session/worktree) is safe to reuse across
+// occurrences: the reviewer-facing prompt, launch configuration, and
+// location. It deliberately excludes Policy (continuity/catch_up policy
+// changes don't invalidate an in-flight thread) and any per-occurrence
+// freshness signal (e.g. GitHub HeadSHA, checked separately by
+// validateAutomationContinuation as per-PR freshness, not contract
+// identity).
+type ContinuationContract struct {
+	Prompt   string
+	Launch   EffectiveLaunch
+	Location LocationSpec
+}
+
+// NewContinuationContract builds a ContinuationContract from its comparison
+// fields directly, for callers (e.g. a WorkRequest) that don't hold a full
+// Snapshot.
+func NewContinuationContract(prompt string, launch EffectiveLaunch, location LocationSpec) ContinuationContract {
+	return ContinuationContract{Prompt: prompt, Launch: launch, Location: location}
+}
+
+// ContinuationContract extracts the Snapshot's continuation contract.
+func (s Snapshot) ContinuationContract() ContinuationContract {
+	return NewContinuationContract(s.Prompt, s.Launch, s.Location)
+}
+
+// Equal reports whether two contracts would be treated as identical by
+// validateAutomationContinuation. Location has a non-comparable map field
+// (RepositorySources.Overrides), so it is compared via JSON marshal rather
+// than struct equality.
+func (c ContinuationContract) Equal(other ContinuationContract) bool {
+	if c.Prompt != other.Prompt || c.Launch != other.Launch {
+		return false
+	}
+	leftJSON, leftErr := json.Marshal(c.Location)
+	rightJSON, rightErr := json.Marshal(other.Location)
+	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
+}
+
 type DeliveryIDs struct{ TicketID, SessionID, WorkspaceID, PaneID string }
 type WorkRequest struct {
 	RunID, DefinitionID, SubjectKey, ContinuityKey, Provider string
