@@ -935,6 +935,13 @@ func (d *Daemon) Start() error {
 	// driven by cron granularity, not retention policy.
 	go d.runAutomationRetentionSweep()
 
+	// Ticket TTL sweep: hard-deletes terminal tickets past their retention
+	// window. This is also what actually bounds a bound continuity thread's
+	// worktree lifetime (see SweepExpiredTickets' automation_continuity_bindings
+	// cascade) — without this loop running, AutomationSessionHasContinuityBinding
+	// never stops protecting a thread's worktree from A3/A4 pruning.
+	go d.runTicketRetentionSweep()
+
 	// Construct + start the durable compaction runner (kinds compact_context,
 	// summarize_session, narrate_workspace).
 	d.startCompactRunner()
