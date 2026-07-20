@@ -13,14 +13,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   has New and Edit buttons that open the definition's YAML in an editor, so
   creating an automation no longer means dropping to a terminal. Validate
   checks a definition without storing anything and reports the first problem
-  it finds; Save stores it. Two mistakes are refused rather than silently
+  it finds; Save stores it. Three mistakes are refused rather than silently
   accepted: changing the `id` of a definition you are editing (which would
-  leave the original running and quietly create a second one), and saving over
-  a definition that changed elsewhere since you opened it — the latter offers a
-  reload. Your YAML is now stored as you wrote it, so comments and formatting
-  survive an edit round-trip; definitions applied before this release are
-  rendered from their stored form the first time and keep their new text
-  afterwards.
+  leave the original running and quietly create a second one), creating a new
+  automation whose `id` already belongs to one you have (which would replace
+  it wholesale), and saving over a definition that changed elsewhere since you
+  opened it — the last offers a reload. Your YAML is now stored as you wrote
+  it, so comments and formatting survive an edit round-trip; definitions
+  applied before this release are rendered from their stored form the first
+  time and keep their new text afterwards.
 - **Automations now have a panel in the app.** A new toolbar button opens an
   Automations panel that lists every definition with its trigger and
   enabled state, lets you enable/disable or run a manual automation now,
