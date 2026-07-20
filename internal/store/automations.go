@@ -1150,18 +1150,16 @@ func (s *Store) MarkAutomationRunFailed(id, message string, now time.Time) error
 }
 
 // ListPrunableAutomationRuns returns definitionID's terminal (delivered or
-// failed) runs that are all three of: outside the newest keep runs (by
-// created_at, across all states — a pending run still consumes a keep slot,
-// so it DOES bump an older terminal run out of protection, same as any other
-// run would); older than olderThan, measured by updated_at (when the run
-// became terminal, not when it was created — a run claimed long ago that
-// only just delivered is not yet prunable); and not the origin run of a
-// still-bound continuity thread (tickets.automation_run_id is set once at
-// thread creation and never updated, so it always points at the thread's
-// oldest run — pruning it would permanently break every later occurrence,
-// see automationContinuationOrigin). Session liveness and worktree
-// cleanliness are daemon-side concerns this package cannot check; this only
-// narrows by count/state/age/origin, per A3's fixed retention policy.
+// failed) runs older than olderThan that fall outside the newest keep runs
+// (by created_at, across all states — a pending run still counts toward
+// keep, so it DOES bump an older terminal run out of protection, same as any
+// other run would), and are not the origin run of a still-bound continuity
+// thread (tickets.automation_run_id is set once at thread creation and never
+// updated, so it always points at the thread's oldest run — pruning it would
+// permanently break every later occurrence, see
+// automationContinuationOrigin). Session liveness and worktree cleanliness
+// are daemon-side concerns this package cannot check; this only narrows by
+// count/state/age/origin, per A3's fixed retention policy.
 func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderThan time.Time) ([]AutomationRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1171,9 +1169,9 @@ func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderT
 	rows, err := s.db.Query(`
 		SELECT `+automationRunColumns+`
 		FROM automation_runs
-		WHERE definition_id=? AND state IN ('delivered','failed') AND updated_at<?
+		WHERE definition_id=? AND state IN ('delivered','failed') AND created_at<?
 		  AND id NOT IN (
-			SELECT id FROM automation_runs WHERE definition_id=? ORDER BY created_at DESC, id DESC LIMIT ?
+			SELECT id FROM automation_runs WHERE definition_id=? ORDER BY created_at DESC LIMIT ?
 		  )
 		  -- A still-bound continuity thread's origin run is never prunable: see
 		  -- this function's doc comment.
@@ -1182,7 +1180,7 @@ func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderT
 			JOIN automation_continuity_bindings b ON b.ticket_id = t.id
 			WHERE t.automation_run_id IS NOT NULL AND t.automation_run_id <> ''
 		  )
-		ORDER BY created_at, id
+		ORDER BY created_at
 	`, definitionID, formatTicketTime(olderThan), definitionID, keep)
 	if err != nil {
 		return nil, err
