@@ -27,6 +27,8 @@ import type {
   PresentCommentInput,
   PRRole,
   HeatState,
+  AutomationDefinitionSummary,
+  AutomationRunSummary,
 } from '../types/generated';
 import {
   emitPtyEvent,
@@ -61,6 +63,7 @@ import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
+import { useAutomationsStore } from '../store/automations';
 
 // Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
@@ -2838,6 +2841,34 @@ export function useDaemonSocket({
             break;
           }
 
+          // Single generic result event for the automations WS surface
+          // (definitions_get / runs_get / set_enabled / run) — see
+          // AutomationActionResultMessage's doc comment. Correlated by
+          // request_id, not action, so concurrent calls (e.g. listing runs for
+          // two different definitions) never cross-resolve; each caller wraps
+          // its own extraction of the raw payload at registration time.
+          case 'automation_action_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') break;
+            const key = `automation:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) break;
+            pendingActionsRef.current.delete(key);
+            if ((data as any).success) {
+              pending.resolve(data);
+            } else {
+              pending.reject(new Error((data as any).error || 'Automation action failed'));
+            }
+            break;
+          }
+
+          // Canonical state stays daemon-side: this broadcast carries no
+          // payload views need. Bump the tick and let open views re-fetch.
+          case 'automations_changed': {
+            useAutomationsStore.getState().bumpChanged();
+            break;
+          }
+
           case 'command_error':
             if (data.error === 'daemon_recovering') {
               console.debug('[Daemon] Command deferred while daemon recovers:', data.cmd);
@@ -5229,6 +5260,110 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const listAutomationDefinitions = useCallback((): Promise<AutomationDefinitionSummary[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('automation_definitions_get');
+      const key = `automation:${requestId}`;
+      pendingActionsRef.current.set(key, {
+        resolve: (result: any) => resolve((result.definitions ?? []) as AutomationDefinitionSummary[]),
+        reject,
+      });
+      ws.send(JSON.stringify({ cmd: 'automation_definitions_get', request_id: requestId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('List automation definitions timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  const listAutomationRuns = useCallback((definitionId: string): Promise<AutomationRunSummary[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('automation_runs_get');
+      const key = `automation:${requestId}`;
+      pendingActionsRef.current.set(key, {
+        resolve: (result: any) => resolve((result.runs ?? []) as AutomationRunSummary[]),
+        reject,
+      });
+      ws.send(JSON.stringify({ cmd: 'automation_runs_get', definition_id: definitionId, request_id: requestId }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('List automation runs timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  const setAutomationEnabled = useCallback((definitionId: string, enabled: boolean): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('automation_set_enabled');
+      const key = `automation:${requestId}`;
+      // Success carries the daemon's updated definition, but canonical state
+      // flows back through the automations_changed broadcast + refetch, not
+      // this promise — resolve void and let the caller's store stay
+      // untouched here.
+      pendingActionsRef.current.set(key, { resolve: () => resolve(undefined), reject });
+      ws.send(
+        JSON.stringify({ cmd: 'automation_set_enabled', definition_id: definitionId, enabled, request_id: requestId }),
+      );
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Set automation enabled timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  const runAutomationNow = useCallback(
+    (definitionId: string): Promise<{ runId?: string; ticketId?: string; sessionId?: string }> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        // crypto.randomUUID(), not nextRequestID's counter scheme: the daemon
+        // persists this as ClaimManualAutomationRun's idempotency key
+        // (internal/daemon/automations.go automationRun), so a caller-side
+        // retry of the same click that reuses this id claims the same run
+        // instead of creating a duplicate.
+        const requestId = crypto.randomUUID();
+        const key = `automation:${requestId}`;
+        pendingActionsRef.current.set(key, {
+          resolve: (result: any) =>
+            resolve({ runId: result.run_id, ticketId: result.ticket_id, sessionId: result.session_id }),
+          reject,
+        });
+        ws.send(JSON.stringify({ cmd: 'automation_run', definition_id: definitionId, request_id: requestId }));
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new Error('Run automation timed out'));
+          }
+        }, 10000);
+      });
+    },
+    [],
+  );
+
   // Fetch the current open/closed presentations (for the main-window banner).
   const getPresentations = useCallback((): Promise<Presentation[]> => {
     return new Promise((resolve, reject) => {
@@ -5463,6 +5598,10 @@ export function useDaemonSocket({
     getRepoInfo,
     getWorkflowRun,
     listWorkflowRuns,
+    listAutomationDefinitions,
+    listAutomationRuns,
+    setAutomationEnabled,
+    runAutomationNow,
     getPresentations,
     getPresentationRound,
     submitPresentationRound,
