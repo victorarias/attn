@@ -26,7 +26,21 @@ import (
 // Mutations here (set_enabled, run) can block behind d.automationMu while it
 // is held for an in-flight automation delivery (clone/fetch, agent spawn),
 // which can take tens of seconds — the frontend's wrappers use a 30s timeout
-// to match.
+// to match. The two mutations resolve that race differently:
+//
+//   - set_enabled aborts, rather than mutating, once
+//     wsAutomationMutationTimeoutDuration's daemon-side deadline (25s, strictly
+//     inside the client's 30s) passes while still waiting on automationMu — see
+//     automationSetEnabled. So the client's timer can never fire before a
+//     set_enabled either lands or is provably abandoned; a late store flip
+//     after a reported timeout is not possible.
+//   - run-now cannot use the same trick: automationRun durably claims the run
+//     via ClaimManualAutomationRun before waiting on automationMu, so an
+//     abandoned wait still leaves a pending run that will eventually deliver.
+//     Instead the client is expected to reuse the same request_id across a
+//     retry of the same click (ClaimManualAutomationRun is idempotent per
+//     request_id), so a retry after a client-side timeout dedups onto the
+//     original claim rather than creating a second one.
 
 // automationRunSummaryListCap bounds automation_runs_get: a defensive cap
 // against an unbounded WS payload for a long-lived definition, not a
@@ -77,7 +91,9 @@ func (d *Daemon) handleAutomationRunsGetWS(client *wsClient, msg *protocol.Autom
 
 func (d *Daemon) handleAutomationSetEnabledWS(client *wsClient, msg *protocol.AutomationSetEnabledMessage) {
 	go func() {
-		definition, err := d.automationSetEnabled(msg.DefinitionID, msg.Enabled)
+		ctx, cancel := context.WithTimeout(context.Background(), d.wsAutomationMutationTimeoutDuration())
+		defer cancel()
+		definition, err := d.automationSetEnabled(ctx, msg.DefinitionID, msg.Enabled)
 		result := protocol.AutomationActionResultMessage{
 			Event:     protocol.EventAutomationActionResult,
 			Action:    "set_enabled",

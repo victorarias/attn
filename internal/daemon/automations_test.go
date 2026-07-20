@@ -1528,7 +1528,7 @@ func TestAutomationSetEnabledDisableFailsPendingRunsAndBroadcasts(t *testing.T) 
 	}
 
 	broadcasts := automationBroadcastRecorder(d)
-	got, err := d.automationSetEnabled(def.ID, false)
+	got, err := d.automationSetEnabled(context.Background(), def.ID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1543,7 +1543,7 @@ func TestAutomationSetEnabledDisableFailsPendingRunsAndBroadcasts(t *testing.T) 
 		t.Fatal("automationSetEnabled disable did not broadcast")
 	}
 
-	if _, err := d.automationSetEnabled("does-not-exist", false); err == nil {
+	if _, err := d.automationSetEnabled(context.Background(), "does-not-exist", false); err == nil {
 		t.Fatal("expected error for unknown definition")
 	}
 }
@@ -1559,7 +1559,7 @@ func TestAutomationSetEnabledNoOpDoesNotBroadcast(t *testing.T) {
 	}
 
 	broadcasts := automationBroadcastRecorder(d)
-	got, err := d.automationSetEnabled(def.ID, true)
+	got, err := d.automationSetEnabled(context.Background(), def.ID, true)
 	if err != nil {
 		t.Fatal(err)
 	}

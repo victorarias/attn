@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyAttach, ptyDetach, ptyKill, ptySpawn } from '../pty/bridge';
-import { PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
+import { AutomationActionTimeoutError, PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
 import { useAutomationsStore } from '../store/automations';
 import { TicketStatus } from '../types/generated';
@@ -777,11 +777,11 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     );
 
     const ws = await waitForOpenSocket();
-    const request = result.current.runAutomationNow('d1');
+    const request = result.current.runAutomationNow('d1', 'req-1');
     const command = ws.sent
       .map((entry) => JSON.parse(entry))
       .find((entry) => entry.cmd === 'automation_run');
-    expect(command).toMatchObject({ definition_id: 'd1' });
+    expect(command).toMatchObject({ definition_id: 'd1', request_id: 'req-1' });
 
     act(() => {
       ws.emit({
@@ -796,6 +796,34 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
 
     await expect(request).resolves.toEqual({ runId: 'run-1', ticketId: 'ticket-1', sessionId: 'session-1' });
+    unmount();
+  });
+
+  it('rejects runAutomationNow with AutomationActionTimeoutError when no result arrives within 30s', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    await waitForOpenSocket();
+
+    vi.useFakeTimers();
+    let caught: unknown;
+    const request = result.current.runAutomationNow('d1', 'req-timeout').catch((err) => {
+      caught = err;
+    });
+
+    await vi.advanceTimersByTimeAsync(30000);
+    await request;
+    vi.useRealTimers();
+
+    expect(caught).toBeInstanceOf(AutomationActionTimeoutError);
     unmount();
   });
 

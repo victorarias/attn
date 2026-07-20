@@ -93,6 +93,41 @@ describe('useAutomationsStore', () => {
     expect(state.runsByDefinition).toEqual({});
     expect(state.changedTick).toBe(0);
   });
+
+  it('ensureRunRequest returns a stable id for a definition until cleared', () => {
+    const store = useAutomationsStore.getState();
+    const first = store.ensureRunRequest('d1');
+    const second = store.ensureRunRequest('d1');
+    expect(second).toBe(first);
+    expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBe(first);
+
+    store.clearRunRequest('d1');
+    expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBeUndefined();
+
+    const third = store.ensureRunRequest('d1');
+    expect(third).not.toBe(first);
+  });
+
+  it('ensureRunRequest tracks separate ids per definition', () => {
+    const store = useAutomationsStore.getState();
+    const d1 = store.ensureRunRequest('d1');
+    const d2 = store.ensureRunRequest('d2');
+    expect(d1).not.toBe(d2);
+    expect(useAutomationsStore.getState().pendingRunRequests).toEqual({ d1, d2 });
+  });
+
+  it('clearRunRequest is a no-op when there is no pending request', () => {
+    const store = useAutomationsStore.getState();
+    store.clearRunRequest('does-not-exist');
+    expect(useAutomationsStore.getState().pendingRunRequests).toEqual({});
+  });
+
+  it('reset clears pendingRunRequests', () => {
+    const store = useAutomationsStore.getState();
+    store.ensureRunRequest('d1');
+    store.reset();
+    expect(useAutomationsStore.getState().pendingRunRequests).toEqual({});
+  });
 });
 
 describe('selectDefinitionById', () => {

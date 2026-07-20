@@ -39,6 +39,25 @@ func (e *retryableAutomationDeliveryError) Unwrap() error { return e.cause }
 
 var errAutomationReviewWithdrawn = errors.New(store.AutomationReviewWithdrawnError)
 
+// defaultWSAutomationMutationTimeout is the fallback for
+// Daemon.wsAutomationMutationTimeout (see wsAutomationMutationTimeoutDuration).
+// 25s is deliberately strictly inside the frontend's 30s client timeout
+// (useDaemonSocket.ts) so a WS set_enabled mutation either completes or
+// aborts with a definitive error before the client gives up waiting — the
+// client's timer can never observe a flip that happens after it already
+// reported failure.
+const defaultWSAutomationMutationTimeout = 25 * time.Second
+
+// wsAutomationMutationTimeoutDuration resolves the effective deadline for a
+// WS-originated automation mutation: the configured override if set, else
+// defaultWSAutomationMutationTimeout.
+func (d *Daemon) wsAutomationMutationTimeoutDuration() time.Duration {
+	if d.wsAutomationMutationTimeout > 0 {
+		return d.wsAutomationMutationTimeout
+	}
+	return defaultWSAutomationMutationTimeout
+}
+
 func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error) {
 	spec, canonical, err := automation.ParseDefinitionYAML([]byte(raw))
 	if err != nil {
@@ -99,9 +118,19 @@ func (d *Daemon) failPendingAutomationRuns(definitionID string) error {
 // failing any pending runs through the same path automationApply uses. It is
 // a no-op (success, no broadcast) when the definition already has the
 // requested state, and errors for an unknown or soft-deleted definition.
-func (d *Daemon) automationSetEnabled(definitionID string, enabled bool) (*store.AutomationDefinition, error) {
+//
+// ctx bounds how long the caller is willing to wait to acquire automationMu:
+// once locked, ctx.Err() is checked before any store mutation, so a caller
+// whose deadline already passed aborts without flipping the flag (see
+// wsAutomationMutationTimeoutDuration for the WS caller's deadline). The
+// unix-socket caller passes context.Background() — the CLI/agent path waits
+// synchronously with no deadline of its own, so behavior there is unchanged.
+func (d *Daemon) automationSetEnabled(ctx context.Context, definitionID string, enabled bool) (*store.AutomationDefinition, error) {
 	d.automationMu.Lock()
 	defer d.automationMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("deadline exceeded waiting for an in-flight automation delivery: %w", err)
+	}
 	definition, changed, err := d.store.SetAutomationEnabled(definitionID, enabled, time.Now())
 	if err != nil {
 		return nil, err

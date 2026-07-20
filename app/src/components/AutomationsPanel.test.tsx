@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, userEvent } from '../test/utils';
 import { AutomationsPanel } from './AutomationsPanel';
 import { useAutomationsStore } from '../store/automations';
+import { AutomationActionTimeoutError } from '../hooks/useDaemonSocket';
 import { AutomationDefinitionSummary, AutomationRunSummary } from '../types/generated';
 
 function makeDefinition(
@@ -131,8 +132,74 @@ describe('AutomationsPanel', () => {
     await user.click(button);
 
     await waitFor(() => expect(screen.getByTestId('automation-run-error-d1')).toHaveTextContent('busy'));
-    expect(props.runNow).toHaveBeenCalledWith('d1');
+    expect(props.runNow).toHaveBeenCalledWith('d1', expect.any(String));
     expect(button).not.toBeDisabled();
+  });
+
+  it('a definitive Run now rejection clears the pending request id', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
+    props.runNow.mockRejectedValue(new Error('automation is disabled'));
+    render(<AutomationsPanel {...props} />);
+
+    const button = await screen.findByTestId('automation-run-now-d1');
+    await user.click(button);
+
+    await waitFor(() => expect(screen.getByTestId('automation-run-error-d1')).toHaveTextContent('automation is disabled'));
+    expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBeUndefined();
+
+    await user.click(button);
+    const [firstCall, secondCall] = props.runNow.mock.calls;
+    expect(secondCall[1]).not.toBe(firstCall[1]);
+  });
+
+  it('a Run now timeout keeps the pending request id so a retry reuses it', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
+    props.runNow.mockRejectedValue(new AutomationActionTimeoutError('Run automation timed out'));
+    render(<AutomationsPanel {...props} />);
+
+    const button = await screen.findByTestId('automation-run-now-d1');
+    await user.click(button);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('automation-run-error-d1')).toHaveTextContent(/still in flight/i),
+    );
+    const pendingId = useAutomationsStore.getState().pendingRunRequests['d1'];
+    expect(pendingId).toBeTruthy();
+
+    await user.click(button);
+    const [firstCall, secondCall] = props.runNow.mock.calls;
+    expect(firstCall[1]).toBe(pendingId);
+    expect(secondCall[1]).toBe(pendingId);
+  });
+
+  it('reconciles a pending run request once a fetched run for its request id reaches delivered', async () => {
+    const props = baseProps();
+    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
+    props.fetchRuns.mockResolvedValue([]);
+    useAutomationsStore.getState().reset();
+    render(<AutomationsPanel {...props} />);
+    await screen.findByTestId('automation-run-now-d1');
+
+    const pendingId = useAutomationsStore.getState().ensureRunRequest('d1');
+
+    // Still pending: the key survives.
+    props.fetchRuns.mockResolvedValue([
+      makeRun({ id: 'r1', occurrence_key: `manual:${pendingId}`, state: 'pending' }),
+    ]);
+    useAutomationsStore.getState().bumpChanged();
+    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalled());
+    await waitFor(() => expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBe(pendingId));
+
+    // Delivered: the key clears, so the next click mints a fresh id.
+    props.fetchRuns.mockResolvedValue([
+      makeRun({ id: 'r1', occurrence_key: `manual:${pendingId}`, state: 'delivered' }),
+    ]);
+    useAutomationsStore.getState().bumpChanged();
+    await waitFor(() => expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBeUndefined());
   });
 
   it('refetches definitions when changedTick bumps', async () => {

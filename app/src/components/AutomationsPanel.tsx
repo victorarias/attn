@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AutomationDefinitionSummary, AutomationRunSummary } from '../types/generated';
 import { useAutomationsStore, selectDefinitionById, selectLatestRunForDefinition } from '../store/automations';
+import { AutomationActionTimeoutError } from '../hooks/useDaemonSocket';
 import './AutomationsPanel.css';
 
 export interface AutomationsPanelProps {
@@ -9,7 +10,10 @@ export interface AutomationsPanelProps {
   fetchDefinitions: () => Promise<AutomationDefinitionSummary[]>;
   fetchRuns: (definitionId: string) => Promise<AutomationRunSummary[]>;
   setEnabled: (definitionId: string, enabled: boolean) => Promise<void>;
-  runNow: (definitionId: string) => Promise<{ runId?: string; ticketId?: string; sessionId?: string }>;
+  runNow: (
+    definitionId: string,
+    requestId: string,
+  ) => Promise<{ runId?: string; ticketId?: string; sessionId?: string }>;
   onOpenTicket: (ticketId: string) => void;
   onSelectSession: (sessionId: string) => void;
   onFocusPane: (sessionId: string, paneId: string) => void;
@@ -28,6 +32,22 @@ export function runNavigationTarget(run: AutomationRunSummary): RunNavigationTar
   if (run.ticket_id) return { kind: 'ticket', ticketId: run.ticket_id };
   if (run.session_id) return { kind: 'session', sessionId: run.session_id, paneId: run.pane_id || null };
   return null;
+}
+
+// reconcilePendingRunRequest clears a definition's in-flight run-now request
+// key once a freshly-fetched run proves it reached a terminal state
+// (delivered or failed). The key's occurrence_key is always "manual:<key>"
+// (see internal/daemon/automations.go's automationRun); a run still pending
+// keeps the key so an impatient re-click reuses the same request_id instead
+// of minting a new one and claiming a duplicate run.
+function reconcilePendingRunRequest(definitionId: string, runs: AutomationRunSummary[]) {
+  const key = useAutomationsStore.getState().pendingRunRequests[definitionId];
+  if (!key) return;
+  const occurrenceKey = `manual:${key}`;
+  const match = runs.find((run) => run.occurrence_key === occurrenceKey);
+  if (match && (match.state === 'delivered' || match.state === 'failed')) {
+    useAutomationsStore.getState().clearRunRequest(definitionId);
+  }
 }
 
 function triggerLabel(definition: AutomationDefinitionSummary): string {
@@ -87,7 +107,9 @@ export function AutomationsPanel({
         fetched.forEach((definition) => {
           fetchRuns(definition.id)
             .then((runs) => {
-              if (!cancelled) useAutomationsStore.getState().setRuns(definition.id, runs);
+              if (cancelled) return;
+              useAutomationsStore.getState().setRuns(definition.id, runs);
+              reconcilePendingRunRequest(definition.id, runs);
             })
             .catch(() => {
               // Best-effort enrichment for the list badge; the definition row
@@ -114,6 +136,7 @@ export function AutomationsPanel({
       .then((runs) => {
         if (cancelled) return;
         useAutomationsStore.getState().setRuns(selectedDefinitionId, runs);
+        reconcilePendingRunRequest(selectedDefinitionId, runs);
         setRunsError(null);
       })
       .catch((error) => {
@@ -149,6 +172,7 @@ export function AutomationsPanel({
   }
 
   function handleRunNow(definitionId: string) {
+    const requestId = useAutomationsStore.getState().ensureRunRequest(definitionId);
     setRunInFlight((prev) => ({ ...prev, [definitionId]: true }));
     setRunErrors((prev) => {
       if (!(definitionId in prev)) return prev;
@@ -156,10 +180,26 @@ export function AutomationsPanel({
       delete next[definitionId];
       return next;
     });
-    runNow(definitionId)
+    runNow(definitionId, requestId)
       // Success: the daemon's automations_changed broadcast drives the
       // refetch above. No synthetic run row is injected here.
+      .then(() => {
+        useAutomationsStore.getState().clearRunRequest(definitionId);
+      })
       .catch((error) => {
+        if (error instanceof AutomationActionTimeoutError) {
+          // No definitive outcome yet: the daemon may still deliver this run
+          // after our wait window closed. Keep the request_id so a re-click
+          // reuses it (dedups onto the same run) instead of claiming a
+          // duplicate.
+          setRunErrors((prev) => ({
+            ...prev,
+            [definitionId]:
+              'Run request is still in flight — it will appear in run history; clicking again retries the same run.',
+          }));
+          return;
+        }
+        useAutomationsStore.getState().clearRunRequest(definitionId);
         setRunErrors((prev) => ({
           ...prev,
           [definitionId]: error instanceof Error ? error.message : 'Run failed',

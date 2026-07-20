@@ -296,3 +296,156 @@ func TestAutomationRunWSRoutesPRURL(t *testing.T) {
 		t.Fatalf("run result error = %q, want automationRunPullRequest's own validation error, not a manual-path error", *res.Error)
 	}
 }
+
+// TestAutomationSetEnabledWSDeadlineAbortsWithoutMutating pins the
+// timeout-vs-mutation trap from PR #619's review: automationSetEnabled must
+// abort once its daemon-side deadline (wsAutomationMutationTimeout) elapses
+// while still waiting on automationMu, and must NOT mutate the definition
+// afterward. Without this guard, a slow in-flight delivery holding
+// automationMu for longer than the frontend's 30s client timeout lets the
+// toggle flip after the UI has already reported "timed out" — invisible to
+// the user who believes their click had no effect.
+func TestAutomationSetEnabledWSDeadlineAbortsWithoutMutating(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub(), wsAutomationMutationTimeout: 50 * time.Millisecond}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !def.Enabled {
+		t.Fatalf("fixture definition = %#v, want enabled", def)
+	}
+
+	// Simulate an in-flight automation delivery holding automationMu well past
+	// the 50ms deadline; released after 200ms.
+	d.automationMu.Lock()
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		d.automationMu.Unlock()
+		close(released)
+	}()
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationSetEnabledWS(client, &protocol.AutomationSetEnabledMessage{
+		Cmd:          protocol.CmdAutomationSetEnabled,
+		DefinitionID: def.ID,
+		Enabled:      false,
+		RequestID:    protocol.Ptr("set-deadline"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "deadline exceeded") {
+		t.Fatalf("set_enabled result = %+v, want success=false with a deadline error", res)
+	}
+
+	<-released
+
+	stored, err := s.GetAutomationDefinition(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Enabled {
+		t.Fatalf("definition after deadline abort = %#v, want still enabled (no late flip)", stored)
+	}
+
+	// Sanity: an uncontended set_enabled once the lock has freed still succeeds.
+	client2 := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationSetEnabledWS(client2, &protocol.AutomationSetEnabledMessage{
+		Cmd:          protocol.CmdAutomationSetEnabled,
+		DefinitionID: def.ID,
+		Enabled:      false,
+		RequestID:    protocol.Ptr("set-after"),
+	})
+	var res2 protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client2.send, &res2)
+	if !res2.Success {
+		t.Fatalf("set_enabled after lock freed = %+v, want success", res2)
+	}
+	stored2, err := s.GetAutomationDefinition(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored2.Enabled {
+		t.Fatalf("definition after uncontended set_enabled = %#v, want disabled", stored2)
+	}
+}
+
+// TestAutomationRunWSRetryWithSameRequestIDDoesNotDuplicate pins the run-now
+// half of the timeout-vs-mutation trap: a client that times out waiting for
+// automation_run and retries with the SAME request_id (the fix in
+// AutomationsPanel/useDaemonSocket) must dedup onto the original claim rather
+// than creating a second run, even when both calls contend on automationMu.
+//
+// The run is pre-claimed and pre-marked delivered directly through the store
+// (matching TestAutomationRunBroadcastsAfterClaim's technique) so neither
+// call re-enters deliverAutomationRun/real backend machinery: automationRun's
+// own ClaimManualAutomationRun call idempotently dedups on request_id before
+// either goroutine even reaches automationMu, and both then read back the
+// same already-delivered run once the held lock frees. automationDeliveryHook
+// does not apply here — it only affects deliverObservedAutomationRun's
+// provider-observation path, not automationRun's manual-run path.
+func TestAutomationRunWSRetryWithSameRequestIDDoesNotDuplicate(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	run, _, err := s.ClaimManualAutomationRun(def.ID, "retry-request", "", `{}`, def.Revision, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate an in-flight delivery holding automationMu while both retry
+	// attempts arrive and queue behind it.
+	d.automationMu.Lock()
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		d.automationMu.Unlock()
+		close(released)
+	}()
+
+	client1 := &wsClient{send: make(chan outboundMessage, 4)}
+	client2 := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationRunWS(client1, &protocol.AutomationRunMessage{
+		Cmd:          protocol.CmdAutomationRun,
+		DefinitionID: def.ID,
+		RequestID:    "retry-request",
+	})
+	d.handleAutomationRunWS(client2, &protocol.AutomationRunMessage{
+		Cmd:          protocol.CmdAutomationRun,
+		DefinitionID: def.ID,
+		RequestID:    "retry-request",
+	})
+
+	var res1, res2 protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client1.send, &res1)
+	readNotebookWSEvent(t, client2.send, &res2)
+	<-released
+
+	if !res1.Success || !res2.Success {
+		t.Fatalf("run results = %+v / %+v, want both success", res1, res2)
+	}
+	if res1.RunID == nil || res2.RunID == nil || *res1.RunID != run.ID || *res2.RunID != run.ID {
+		t.Fatalf("run ids = %v / %v, want both %s", res1.RunID, res2.RunID, run.ID)
+	}
+
+	runs, err := s.ListAutomationRuns(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs for definition = %d, want exactly 1 (no duplicate claim from the retried request_id)", len(runs))
+	}
+}

@@ -176,6 +176,16 @@ export interface RateLimitState {
 export const PROTOCOL_VERSION = '176';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
+// AutomationActionTimeoutError distinguishes "the daemon never sent a
+// definitive result within the client's wait window" from an ordinary
+// rejection carrying a daemon-reported error string (e.g. "automation is
+// disabled"). The four automation wrappers below (listAutomationDefinitions,
+// listAutomationRuns, setAutomationEnabled, runAutomationNow) all reject with
+// this on their timeout path so callers — notably AutomationsPanel's run-now
+// handler — can tell "no outcome yet, retry is safe" apart from "the daemon
+// definitively said no, don't retry blindly".
+export class AutomationActionTimeoutError extends Error {}
+
 interface PRActionResult {
   success: boolean;
   error?: string;
@@ -5286,7 +5296,7 @@ export function useDaemonSocket({
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
-          reject(new Error('List automation definitions timed out'));
+          reject(new AutomationActionTimeoutError('List automation definitions timed out'));
         }
       }, 30000);
     });
@@ -5312,7 +5322,7 @@ export function useDaemonSocket({
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
-          reject(new Error('List automation runs timed out'));
+          reject(new AutomationActionTimeoutError('List automation runs timed out'));
         }
       }, 30000);
     });
@@ -5341,26 +5351,27 @@ export function useDaemonSocket({
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
-          reject(new Error('Set automation enabled timed out'));
+          reject(new AutomationActionTimeoutError('Set automation enabled timed out'));
         }
       }, 30000);
     });
   }, [nextRequestID]);
 
   const runAutomationNow = useCallback(
-    (definitionId: string): Promise<{ runId?: string; ticketId?: string; sessionId?: string }> => {
+    (definitionId: string, requestId: string): Promise<{ runId?: string; ticketId?: string; sessionId?: string }> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           reject(new Error('WebSocket not connected'));
           return;
         }
-        // crypto.randomUUID(), not nextRequestID's counter scheme: the daemon
-        // persists this as ClaimManualAutomationRun's idempotency key
-        // (internal/daemon/automations.go automationRun), so a caller-side
-        // retry of the same click that reuses this id claims the same run
-        // instead of creating a duplicate.
-        const requestId = crypto.randomUUID();
+        // requestId is caller-owned (useAutomationsStore's
+        // ensureRunRequest), not nextRequestID's counter scheme: the daemon
+        // persists it as ClaimManualAutomationRun's idempotency key
+        // (internal/daemon/automations.go automationRun), so callers reuse
+        // the same id across a retry of the same click (e.g. after this
+        // promise rejects with AutomationActionTimeoutError) to claim the
+        // same run instead of creating a duplicate.
         const key = `automation:${requestId}`;
         pendingActionsRef.current.set(key, {
           resolve: (result: any) =>
@@ -5374,7 +5385,7 @@ export function useDaemonSocket({
         setTimeout(() => {
           if (pendingActionsRef.current.has(key)) {
             pendingActionsRef.current.delete(key);
-            reject(new Error('Run automation timed out'));
+            reject(new AutomationActionTimeoutError('Run automation timed out'));
           }
         }, 30000);
       });
