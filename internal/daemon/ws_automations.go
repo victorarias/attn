@@ -3,6 +3,8 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 
 	"github.com/victorarias/attn/internal/automation"
 	"github.com/victorarias/attn/internal/protocol"
@@ -20,6 +22,11 @@ import (
 // internal/client's AutomationResult, which carry a generic `data` payload) —
 // see the AutomationActionResultMessage doc comment in main.tsp for why the
 // two are not merged.
+//
+// Mutations here (set_enabled, run) can block behind d.automationMu while it
+// is held for an in-flight automation delivery (clone/fetch, agent spawn),
+// which can take tens of seconds — the frontend's wrappers use a 30s timeout
+// to match.
 
 // automationRunSummaryListCap bounds automation_runs_get: a defensive cap
 // against an unbounded WS payload for a long-lived definition, not a
@@ -93,7 +100,18 @@ func (d *Daemon) handleAutomationSetEnabledWS(client *wsClient, msg *protocol.Au
 // socket path's existing behavior — it is not a transport-level failure.
 func (d *Daemon) handleAutomationRunWS(client *wsClient, msg *protocol.AutomationRunMessage) {
 	go func() {
-		run, err := d.automationRun(context.Background(), msg.DefinitionID, msg.RequestID, protocol.Deref(msg.InputJson))
+		var run *store.AutomationRun
+		var err error
+		prURL := strings.TrimSpace(protocol.Deref(msg.PRURL))
+		inputJSON := strings.TrimSpace(protocol.Deref(msg.InputJson))
+		switch {
+		case prURL != "" && inputJSON != "":
+			err = errors.New("pr_url and input_json are mutually exclusive")
+		case prURL != "":
+			run, err = d.automationRunPullRequest(context.Background(), msg.DefinitionID, msg.RequestID, prURL)
+		default:
+			run, err = d.automationRun(context.Background(), msg.DefinitionID, msg.RequestID, protocol.Deref(msg.InputJson))
+		}
 		result := protocol.AutomationActionResultMessage{
 			Event:     protocol.EventAutomationActionResult,
 			Action:    "run",

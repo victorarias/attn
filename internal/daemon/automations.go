@@ -386,6 +386,12 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 				d.logf("automation GitHub observation claim %s: %v", candidate.SubjectKey, err)
 				continue
 			}
+			// A run now exists for this definition (freshly claimed, or the
+			// idempotent dedup of an already-claimed one) whether or not
+			// delivery below succeeds; broadcast so a WS client watching this
+			// definition's runs sees it appear without waiting on the
+			// delivery outcome.
+			d.broadcastAutomationsChanged(definition.ID)
 			d.automationMu.Lock()
 			current, loadErr := d.store.GetAutomationRun(run.ID)
 			if loadErr == nil && current != nil && current.State == "pending" {
@@ -607,6 +613,16 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 		return err
 	}
 	d.broadcastTicketsUpdated()
+	// This pending->delivered transition broadcast has no unit-test coverage:
+	// every unit test that reaches deliverAutomationRun's success path does so
+	// through automationDeliveryHook (bypassing this real delivery return) or
+	// forces a deterministic pre-broadcast failure (e.g.
+	// TestDisabledAutomationRefusesRecoveredPendingDelivery,
+	// TestScheduledPendingRunRecoversOnRestart's failed-transition variant).
+	// Reaching this line for real requires a full workdelivery spawn, which is
+	// out of reach for a unit test; the invariant is pinned live instead by
+	// scenario-automation-surface.mjs leg2_run_now_and_navigable, which drives
+	// a real run-now to `delivered` and asserts the panel reflects it.
 	d.broadcastAutomationsChanged(run.DefinitionID)
 	return nil
 }

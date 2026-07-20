@@ -34,7 +34,7 @@ function triggerLabel(definition: AutomationDefinitionSummary): string {
   switch (definition.trigger_type) {
     case 'manual':
       return 'Manual';
-    case 'github':
+    case 'github_review_requested':
       return 'GitHub';
     case 'scheduled': {
       if (!definition.schedule_cron) return 'Scheduled';

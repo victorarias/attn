@@ -73,13 +73,16 @@ describe('AutomationsPanel', () => {
         schedule_cron: '0 9 * * *',
         schedule_time_zone: 'UTC',
       }),
+      makeDefinition({ id: 'd3', name: 'Recurring reviewer', trigger_type: 'github_review_requested' }),
     ]);
     render(<AutomationsPanel {...props} />);
 
-    await waitFor(() => expect(screen.getAllByTestId('automation-definition-row')).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByTestId('automation-definition-row')).toHaveLength(3));
     expect(screen.getByText('PR reviewer')).toBeInTheDocument();
     expect(screen.getByText('Nightly digest')).toBeInTheDocument();
     expect(screen.getByText('Scheduled — 0 9 * * * (UTC)')).toBeInTheDocument();
+    expect(screen.getByText('Recurring reviewer')).toBeInTheDocument();
+    expect(screen.getByText('GitHub')).toBeInTheDocument();
 
     expect(screen.getByTestId('automation-run-now-d1')).toBeInTheDocument();
     expect(screen.queryByTestId('automation-run-now-d2')).not.toBeInTheDocument();

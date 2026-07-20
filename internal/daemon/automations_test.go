@@ -683,12 +683,21 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 		}
 		return s.MarkAutomationRunDelivered(run.ID, `{}`, time.Now())
 	}
+	var broadcasts []string
+	d.automationsBroadcastHook = func(msg *protocol.AutomationsChangedMessage) {
+		broadcasts = append(broadcasts, msg.DefinitionIds...)
+	}
 	demand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
 	observedAt := time.Now()
 	d.observeGitHubReviewRequests("github.com", demand, observedAt)
 	runs, err := s.ListAutomationRuns("retry-review")
 	if err != nil || len(runs) != 1 || runs[0].State != "pending" || attempts.Load() != 1 {
 		t.Fatalf("first observation runs=%#v attempts=%d err=%v", runs, attempts.Load(), err)
+	}
+	// Fix F1: the claim broadcasts before delivery is attempted, so an open WS
+	// panel sees the pending run even though delivery below fails retryably.
+	if len(broadcasts) == 0 || broadcasts[0] != "retry-review" {
+		t.Fatalf("broadcasts at claim time=%#v, want [\"retry-review\", ...]", broadcasts)
 	}
 
 	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(time.Second))
@@ -1478,6 +1487,27 @@ func TestAutomationRunBroadcastsAfterClaim(t *testing.T) {
 	}
 	if ids := broadcasts(); len(ids) != 1 || ids[0] != def.ID {
 		t.Fatalf("broadcasts after automationRun claim = %v, want [%s]", ids, def.ID)
+	}
+}
+
+// TestAutomationRunRejectsNonManualTrigger pins Fix F8: driving
+// d.automationRun against a provider-driven (scheduled) definition must be
+// rejected before any occurrence/run row is created — schedule/GitHub
+// observation are the only paths allowed to produce a run for it.
+func TestAutomationRunRejectsNonManualTrigger(t *testing.T) {
+	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
+
+	_, err := d.automationRun(context.Background(), def.ID, "request-1", `{}`)
+	if err == nil || !strings.Contains(err.Error(), "cannot be run manually") {
+		t.Fatalf("automationRun err=%v, want a manual-trigger rejection", err)
+	}
+	// automationRun's non-manual check runs before any store write, so runs
+	// being empty is sufficient proof no occurrence was created either — the
+	// two are always inserted together in one transaction (see
+	// ClaimManualAutomationRun).
+	runs, err := s.ListAutomationRuns(def.ID)
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("runs=%#v err=%v, want no run created", runs, err)
 	}
 }
 

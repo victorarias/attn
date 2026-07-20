@@ -1304,6 +1304,12 @@ export function useDaemonSocket({
             }
             hasReceivedInitialStateRef.current = true;
             setHasReceivedInitialState(true);
+            // Automations aren't part of initial_state (they're pulled on
+            // demand via automation_definitions_list), so a panel open across
+            // a daemon restart/reconnect never sees a fresh event to refetch
+            // on. Bump changedTick on every (re)connect so an open panel
+            // re-reads instead of staying on a stale error.
+            useAutomationsStore.getState().bumpChanged();
             flushQueuedCommands(ws);
             requestTileContentsForWorkspaces(ws, nextWorkspaces);
             // The daemon's terminal theme is in-memory only, so a restarted
@@ -5274,12 +5280,15 @@ export function useDaemonSocket({
         reject,
       });
       ws.send(JSON.stringify({ cmd: 'automation_definitions_get', request_id: requestId }));
+      // Mutations can serialize behind an in-flight automation delivery
+      // (daemon holds automationMu across full run delivery); 30s matches the
+      // repo's async-action convention.
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           reject(new Error('List automation definitions timed out'));
         }
-      }, 10000);
+      }, 30000);
     });
   }, [nextRequestID]);
 
@@ -5297,12 +5306,15 @@ export function useDaemonSocket({
         reject,
       });
       ws.send(JSON.stringify({ cmd: 'automation_runs_get', definition_id: definitionId, request_id: requestId }));
+      // Mutations can serialize behind an in-flight automation delivery
+      // (daemon holds automationMu across full run delivery); 30s matches the
+      // repo's async-action convention.
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           reject(new Error('List automation runs timed out'));
         }
-      }, 10000);
+      }, 30000);
     });
   }, [nextRequestID]);
 
@@ -5323,12 +5335,15 @@ export function useDaemonSocket({
       ws.send(
         JSON.stringify({ cmd: 'automation_set_enabled', definition_id: definitionId, enabled, request_id: requestId }),
       );
+      // Mutations can serialize behind an in-flight automation delivery
+      // (daemon holds automationMu across full run delivery); 30s matches the
+      // repo's async-action convention.
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
           reject(new Error('Set automation enabled timed out'));
         }
-      }, 10000);
+      }, 30000);
     });
   }, [nextRequestID]);
 
@@ -5353,12 +5368,15 @@ export function useDaemonSocket({
           reject,
         });
         ws.send(JSON.stringify({ cmd: 'automation_run', definition_id: definitionId, request_id: requestId }));
+        // Mutations can serialize behind an in-flight automation delivery
+        // (daemon holds automationMu across full run delivery); 30s matches
+        // the repo's async-action convention.
         setTimeout(() => {
           if (pendingActionsRef.current.has(key)) {
             pendingActionsRef.current.delete(key);
             reject(new Error('Run automation timed out'));
           }
-        }, 10000);
+        }, 30000);
       });
     },
     [],

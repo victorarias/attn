@@ -685,3 +685,37 @@ func TestScheduledSingletonMissingContinuityTicketFailsBeforeReusingBoundArtifac
 		t.Fatalf("swept ticket was recreated: ticket=%#v err=%v", ticket, err)
 	}
 }
+
+// TestObserveDueScheduleBroadcastsAtClaimTimeEvenWhenDeliveryFailsRetryably
+// pins Fix F1: a claimed scheduled run must be visible to an open WS panel
+// immediately, not only after delivery settles. A retryable delivery error
+// leaves the run pending (recovery/next-tick retries it), so without a
+// claim-time broadcast the panel would have no signal the run exists at all
+// until some later transition.
+func TestObserveDueScheduleBroadcastsAtClaimTimeEvenWhenDeliveryFailsRetryably(t *testing.T) {
+	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
+	var broadcasts []string
+	d.automationsBroadcastHook = func(msg *protocol.AutomationsChangedMessage) {
+		broadcasts = append(broadcasts, msg.DefinitionIds...)
+	}
+	d.automationDeliveryHook = func(run *store.AutomationRun) error {
+		return &retryableAutomationDeliveryError{cause: fmt.Errorf("session not ready yet")}
+	}
+
+	now0 := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	d.observeDueSchedules(now0) // anchor
+	d.observeDueSchedules(now0.Add(70 * time.Second))
+
+	if len(broadcasts) == 0 {
+		t.Fatal("no automations_changed broadcast fired at claim time")
+	}
+	for _, id := range broadcasts {
+		if id != def.ID {
+			t.Fatalf("broadcast for unexpected definition %q, want %q", id, def.ID)
+		}
+	}
+	runs, err := s.ListAutomationRuns(def.ID)
+	if err != nil || len(runs) != 1 || runs[0].State != "pending" {
+		t.Fatalf("runs=%#v err=%v, want exactly one pending run despite the retryable delivery failure", runs, err)
+	}
+}

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +211,88 @@ func TestAutomationRunWSResultCorrelatesRequest(t *testing.T) {
 	}
 	if res.TicketID == nil || *res.TicketID != run.TicketID || res.SessionID == nil || *res.SessionID != run.SessionID {
 		t.Fatalf("run result ticket/session = %+v, want %s/%s", res, run.TicketID, run.SessionID)
+	}
+}
+
+// TestAutomationRunWSRejectsNonManualTrigger is the WS-level half of Fix F8:
+// handleAutomationRunWS must surface a provider-driven definition's
+// manual-trigger rejection as success=false with the same error text as the
+// daemon-level automationRun path, not a transport-level failure.
+func TestAutomationRunWSRejectsNonManualTrigger(t *testing.T) {
+	d, _, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationRunWS(client, &protocol.AutomationRunMessage{
+		Cmd:          protocol.CmdAutomationRun,
+		DefinitionID: def.ID,
+		RequestID:    "request-1",
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "cannot be run manually") {
+		t.Fatalf("run result = %+v, want success=false with a manual-trigger rejection", res)
+	}
+}
+
+// TestAutomationRunWSMutualExclusion mirrors the unix-socket arm's pr_url /
+// input_json mutual-exclusion guard (Fix F3): the WS arm must reject both
+// being set with the same error text rather than silently ignoring pr_url.
+func TestAutomationRunWSMutualExclusion(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationRunWS(client, &protocol.AutomationRunMessage{
+		Cmd:          protocol.CmdAutomationRun,
+		DefinitionID: def.ID,
+		RequestID:    "request-1",
+		PRURL:        protocol.Ptr("https://github.com/owner/repo/pull/1"),
+		InputJson:    protocol.Ptr(`{}`),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "mutually exclusive") {
+		t.Fatalf("run result = %+v, want success=false mutual-exclusion error", res)
+	}
+}
+
+// TestAutomationRunWSRoutesPRURL mirrors the unix-socket arm's pr_url
+// routing (Fix F3): a WS automation_run with only pr_url set must reach
+// automationRunPullRequest, not the manual automationRun path. A manual
+// definition's location isn't repository_worktree, so
+// automationRunPullRequest's own validation rejects it — proving routing
+// without building GitHub fixtures, and with an error text distinct from the
+// manual-path's own errors.
+func TestAutomationRunWSRoutesPRURL(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationRunWS(client, &protocol.AutomationRunMessage{
+		Cmd:          protocol.CmdAutomationRun,
+		DefinitionID: def.ID,
+		RequestID:    "request-1",
+		PRURL:        protocol.Ptr("https://github.com/owner/repo/pull/1"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil {
+		t.Fatalf("run result = %+v, want success=false (pr_url routed to the pull-request path)", res)
+	}
+	if strings.Contains(*res.Error, "mutually exclusive") || strings.Contains(*res.Error, "cannot be run manually") {
+		t.Fatalf("run result error = %q, want automationRunPullRequest's own validation error, not a manual-path error", *res.Error)
 	}
 }

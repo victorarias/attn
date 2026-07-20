@@ -282,6 +282,52 @@ func TestAutomationScheduleCursorGetSetRoundtrip(t *testing.T) {
 	}
 }
 
+func TestListAutomationRunsWithOccurrenceKeysOrdersNewestFirstWithLimit(t *testing.T) {
+	s := New()
+	base := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := func(requestID string, at time.Time) *AutomationRun {
+		ids := AutomationRunReservation{
+			RunID:        "run-" + requestID,
+			OccurrenceID: "occ-" + requestID,
+			TicketID:     "ticket-" + requestID,
+			SessionID:    "session-" + requestID,
+			WorkspaceID:  "workspace-" + requestID,
+			PaneID:       "pane-" + requestID,
+		}
+		run, created, err := s.ClaimManualAutomationRun(def.ID, requestID, "", `{}`, def.Revision, `{}`, at, ids)
+		if err != nil || !created {
+			t.Fatalf("claim %s created=%v err=%v", requestID, created, err)
+		}
+		return run
+	}
+	// Distinct clock-injected timestamps, not wall-clock spacing, so ordering
+	// is deterministic regardless of test execution speed.
+	seed("req-1", base)
+	second := seed("req-2", base.Add(time.Minute))
+	third := seed("req-3", base.Add(2*time.Minute))
+
+	runs, err := s.ListAutomationRunsWithOccurrenceKeys(def.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("len(runs)=%d, want 2: %#v", len(runs), runs)
+	}
+	if runs[0].ID != third.ID || runs[0].OccurrenceKey != "manual:req-3" {
+		t.Fatalf("newest run = %#v, want run %s with occurrence_key manual:req-3", runs[0], third.ID)
+	}
+	if runs[1].ID != second.ID || runs[1].OccurrenceKey != "manual:req-2" {
+		t.Fatalf("second-newest run = %#v, want run %s with occurrence_key manual:req-2", runs[1], second.ID)
+	}
+	if !runs[0].CreatedAt.After(runs[1].CreatedAt) {
+		t.Fatalf("runs not newest-first by created_at: %v then %v", runs[0].CreatedAt, runs[1].CreatedAt)
+	}
+}
+
 func TestListPendingAutomationRunsIncludesScheduledProvider(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)

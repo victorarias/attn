@@ -4,6 +4,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyAttach, ptyDetach, ptyKill, ptySpawn } from '../pty/bridge';
 import { PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
+import { useAutomationsStore } from '../store/automations';
 import { TicketStatus } from '../types/generated';
 
 class FakeWebSocket {
@@ -669,6 +670,156 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       updated_by_session_id: 'session-1',
       updated_at: '2026-06-09T10:00:00Z',
     }]);
+    unmount();
+  });
+
+  it('resolves automation definitions from a correlated automation_action_result, ignoring a mismatched request_id', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const request = result.current.listAutomationDefinitions();
+    const command = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.cmd === 'automation_definitions_get');
+    expect(command.request_id).toMatch(/^automation_definitions_get:/);
+
+    let resolved = false;
+    request.then(() => {
+      resolved = true;
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'automation_action_result',
+        action: 'definitions_get',
+        request_id: 'mismatched-request-id',
+        success: true,
+        definitions: [{ id: 'wrong' }],
+      });
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    const definition = {
+      id: 'd1',
+      name: 'PR reviewer',
+      enabled: true,
+      revision: 1,
+      trigger_type: 'manual',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+    act(() => {
+      ws.emit({
+        event: 'automation_action_result',
+        action: 'definitions_get',
+        request_id: command.request_id,
+        success: true,
+        definitions: [definition],
+      });
+    });
+
+    await expect(request).resolves.toEqual([definition]);
+    unmount();
+  });
+
+  it('rejects setAutomationEnabled with the daemon error string on failure', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const request = result.current.setAutomationEnabled('d1', false);
+    const command = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.cmd === 'automation_set_enabled');
+    expect(command).toMatchObject({ definition_id: 'd1', enabled: false });
+
+    act(() => {
+      ws.emit({
+        event: 'automation_action_result',
+        action: 'set_enabled',
+        request_id: command.request_id,
+        success: false,
+        error: 'automation definition is disabled elsewhere',
+      });
+    });
+
+    await expect(request).rejects.toThrow('automation definition is disabled elsewhere');
+    unmount();
+  });
+
+  it('resolves runAutomationNow with run/ticket/session ids', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const request = result.current.runAutomationNow('d1');
+    const command = ws.sent
+      .map((entry) => JSON.parse(entry))
+      .find((entry) => entry.cmd === 'automation_run');
+    expect(command).toMatchObject({ definition_id: 'd1' });
+
+    act(() => {
+      ws.emit({
+        event: 'automation_action_result',
+        action: 'run',
+        request_id: command.request_id,
+        success: true,
+        run_id: 'run-1',
+        ticket_id: 'ticket-1',
+        session_id: 'session-1',
+      });
+    });
+
+    await expect(request).resolves.toEqual({ runId: 'run-1', ticketId: 'ticket-1', sessionId: 'session-1' });
+    unmount();
+  });
+
+  it('bumps useAutomationsStore changedTick on automations_changed', async () => {
+    useAutomationsStore.getState().reset();
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const before = useAutomationsStore.getState().changedTick;
+
+    act(() => {
+      ws.emit({ event: 'automations_changed', definition_ids: ['d1'] });
+    });
+
+    expect(useAutomationsStore.getState().changedTick).toBe(before + 1);
     unmount();
   });
 
