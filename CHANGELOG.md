@@ -35,13 +35,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Automations can now be retired and their worktrees reclaimed.** `attn
   automation delete <id>` retires a definition; its finished runs keep their
   tickets and history. `attn automation cleanup <id>` reclaims worktree disk
-  space for a definition's finished runs on demand, skipping any worktree
-  that still has uncommitted changes. A background sweep now does the same
-  automatically for old finished runs — keeping the newest 200 per
-  definition, or anything younger than two weeks — so a long-running
-  automation doesn't accumulate worktrees forever; a run whose session is
-  still open is never touched either way, and neither is a still-bound
-  continuity thread's origin run or its shared worktree, so a recurring
+  space for a definition's finished runs on demand, reporting each one it
+  skips rather than leaving it unmentioned: a worktree with uncommitted
+  changes, and a worktree still in use by a live session or a live
+  continuity thread, are both reported as kept, not silently dropped from the
+  result. A background sweep now does the same automatically for old
+  finished runs — keeping the newest 200 per definition, or anything younger
+  than two weeks — so a long-running automation doesn't accumulate worktrees
+  forever; a run whose session is still open, or whose continuity thread is
+  still bound to it via a shared worktree, is never touched, so a recurring
   automation is never bricked by its own retention.
 
 ### Changed

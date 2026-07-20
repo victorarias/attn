@@ -135,6 +135,9 @@ type AutomationActionResultMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
+	// KeptActive corresponds to the JSON schema field "kept_active".
+	KeptActive []string `json:"kept_active,omitempty,omitzero"`
+
 	// KeptDirty corresponds to the JSON schema field "kept_dirty".
 	KeptDirty []string `json:"kept_dirty,omitempty,omitzero"`
 

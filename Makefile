@@ -208,9 +208,20 @@ generate-types:
 		--capitalization ID --capitalization URL --capitalization SHA --capitalization PR --capitalization CI \
 		-o internal/protocol/generated.go \
 		internal/protocol/schema/tsp-output/json-schema/*.json
-	npx quicktype \
+	# The @26.0.0 pin is the guarantee: npx otherwise resolves whatever's
+	# latest on npm on every run, so an unpinned quicktype release can change
+	# generated.ts out from under everyone with no signal beyond a
+	# check-types diff (or, if flag defaults shift again, no diff at all).
+	# --no-prefer-unions/--no-prefer-unknown are a style choice pinned
+	# alongside it, and are what the rest of the app is written against: real
+	# enums (usable as values, not just string literals) and `any` index
+	# signatures. Those were quicktype's defaults until 26, which flipped both
+	# preferences on — so the flags are only redundant with the version pin
+	# for as long as both stay put. Keep them explicit.
+	npx quicktype@26.0.0 \
 		--src internal/protocol/schema/tsp-output/json-schema/*.json \
 		--src-lang schema --lang typescript \
+		--no-prefer-unions --no-prefer-unknown \
 		-o app/src/types/generated.ts
 
 # CI check: verify generated files are up-to-date

@@ -33,10 +33,12 @@ type automationActionResult struct {
 }
 
 // automationCleanupResult is automation_cleanup's socket/CLI data payload —
-// mirrors AutomationActionResultMessage's cleaned/kept_dirty WS fields.
+// mirrors AutomationActionResultMessage's cleaned/kept_dirty/kept_active WS
+// fields.
 type automationCleanupResult struct {
-	Cleaned   []string `json:"cleaned"`
-	KeptDirty []string `json:"kept_dirty"`
+	Cleaned    []string `json:"cleaned"`
+	KeptDirty  []string `json:"kept_dirty"`
+	KeptActive []string `json:"kept_active"`
 }
 
 type retryableAutomationDeliveryError struct{ cause error }
@@ -1438,10 +1440,10 @@ func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 		err = d.automationDelete(context.Background(), m.DefinitionID)
 	case protocol.CmdAutomationCleanup:
 		m := msg.(*protocol.AutomationCleanupMessage)
-		var cleaned, keptDirty []string
-		cleaned, keptDirty, err = d.automationCleanup(context.Background(), m.DefinitionID)
+		var cleaned, keptDirty, keptActive []string
+		cleaned, keptDirty, keptActive, err = d.automationCleanup(context.Background(), m.DefinitionID)
 		if err == nil {
-			data = automationCleanupResult{Cleaned: cleaned, KeptDirty: keptDirty}
+			data = automationCleanupResult{Cleaned: cleaned, KeptDirty: keptDirty, KeptActive: keptActive}
 		}
 	}
 	result := automationActionResult{Event: protocol.EventAutomationActionResult, Action: cmd, Success: err == nil}

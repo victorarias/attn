@@ -91,7 +91,12 @@ func (d *Daemon) automationRetentionSweepPass(now time.Time) {
 	}
 	keep := automationRetentionKeep()
 	cutoff := now.Add(-automationRetentionMinAge())
-	pruned, keptDirty := 0, 0
+	// boundThread is counted separately from the (deliberately unlogged)
+	// live-session skip: a bound thread outliving one of its own runs is
+	// still routine, but without this counter a sweep that examined
+	// candidates and skipped every one of them for that reason logs nothing
+	// at all, which reads identically to "nothing to do".
+	pruned, keptDirty, boundThread := 0, 0, 0
 	for _, defID := range ids {
 		candidates, err := d.store.ListPrunableAutomationRuns(defID, keep, cutoff)
 		if err != nil {
@@ -105,7 +110,10 @@ func (d *Daemon) automationRetentionSweepPass(now time.Time) {
 				continue
 			}
 			switch block {
-			case automationRunCleanupLiveSession, automationRunCleanupBoundThread:
+			case automationRunCleanupLiveSession:
+				continue
+			case automationRunCleanupBoundThread:
+				boundThread++
 				continue
 			case automationRunCleanupDirtyWorktree:
 				keptDirty++
@@ -127,8 +135,8 @@ func (d *Daemon) automationRetentionSweepPass(now time.Time) {
 			pruned++
 		}
 	}
-	if pruned > 0 || keptDirty > 0 {
-		d.logf("automation retention sweep: pruned %d run(s), kept %d dirty", pruned, keptDirty)
+	if pruned > 0 || keptDirty > 0 || boundThread > 0 {
+		d.logf("automation retention sweep: pruned %d run(s), kept %d dirty, %d bound to a live thread", pruned, keptDirty, boundThread)
 	}
 }
 
@@ -152,6 +160,11 @@ const (
 	// time it's asked to continue. Not logged per-run, same reasoning as
 	// automationRunCleanupLiveSession: a bound thread outliving one of its
 	// own runs is the routine case this exists to protect, not an anomaly.
+	// The sweep still counts it in aggregate (see automationRetentionSweepPass's
+	// boundThread counter) and A4's cleanup reports it per-run-id in
+	// kept_active — both callers must surface it as "examined and kept", not
+	// silently skip it, which is what made this block invisible in the first
+	// place.
 	automationRunCleanupBoundThread
 	// automationRunCleanupDirtyWorktree: the worktree has uncommitted
 	// changes. Dirty evidence is never deleted — logged so it's visible.
@@ -267,20 +280,31 @@ func (d *Daemon) removeAutomationOccurrenceArtifact(runID string) error {
 // GetAutomationDefinitionIncludingDeleted (not GetAutomationDefinition) so a
 // user can reclaim a deleted automation's leftover worktrees without waiting
 // for the retention sweep to eventually reach it.
-func (d *Daemon) automationCleanup(ctx context.Context, id string) (cleaned, keptDirty []string, err error) {
+//
+// The result is a three-way partition of every terminal run examined:
+// cleaned (worktree removed), keptDirty (uncommitted changes), and
+// keptActive (the run's thread is still in use — live session or bound
+// continuity thread — so its worktree is off limits). keptActive merges two
+// distinct safety-predicate blocks on purpose: from the caller's side, "a
+// live session" and "a session row that's gone but still bound to a
+// continuity thread" both mean the same thing, a worktree the user asked to
+// reclaim that isn't reclaimable yet. Runs skipped for any other reason (an
+// already-gone worktree, an empty resolved location, a stat/parse error) stay
+// out of all three buckets — those aren't things the user asked about.
+func (d *Daemon) automationCleanup(ctx context.Context, id string) (cleaned, keptDirty, keptActive []string, err error) {
 	if err := ctx.Err(); err != nil {
-		return nil, nil, fmt.Errorf("deadline exceeded waiting to run automation cleanup: %w", err)
+		return nil, nil, nil, fmt.Errorf("deadline exceeded waiting to run automation cleanup: %w", err)
 	}
 	definition, err := d.store.GetAutomationDefinitionIncludingDeleted(id)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if definition == nil {
-		return nil, nil, fmt.Errorf("automation %q not found", id)
+		return nil, nil, nil, fmt.Errorf("automation %q not found", id)
 	}
 	runs, err := d.store.ListTerminalAutomationRuns(id)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	for _, run := range runs {
 		worktree, werr := automationRunWorktreePath(run)
@@ -302,6 +326,7 @@ func (d *Daemon) automationCleanup(ctx context.Context, id string) (cleaned, kep
 		}
 		switch block {
 		case automationRunCleanupLiveSession, automationRunCleanupBoundThread:
+			keptActive = append(keptActive, run.ID)
 			continue
 		case automationRunCleanupDirtyWorktree:
 			keptDirty = append(keptDirty, run.ID)
@@ -313,8 +338,8 @@ func (d *Daemon) automationCleanup(ctx context.Context, id string) (cleaned, kep
 		}
 		cleaned = append(cleaned, run.ID)
 	}
-	if len(cleaned) > 0 || len(keptDirty) > 0 {
-		d.logf("automation cleanup %s: cleaned %d worktree(s), kept %d dirty", id, len(cleaned), len(keptDirty))
+	if len(cleaned) > 0 || len(keptDirty) > 0 || len(keptActive) > 0 {
+		d.logf("automation cleanup %s: cleaned %d worktree(s), kept %d dirty, %d active", id, len(cleaned), len(keptDirty), len(keptActive))
 	}
-	return cleaned, keptDirty, nil
+	return cleaned, keptDirty, keptActive, nil
 }

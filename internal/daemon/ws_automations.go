@@ -148,7 +148,7 @@ func (d *Daemon) handleAutomationCleanupWS(client *wsClient, msg *protocol.Autom
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), d.wsAutomationMutationTimeoutDuration())
 		defer cancel()
-		cleaned, keptDirty, err := d.automationCleanup(ctx, msg.DefinitionID)
+		cleaned, keptDirty, keptActive, err := d.automationCleanup(ctx, msg.DefinitionID)
 		result := protocol.AutomationActionResultMessage{
 			Event:     protocol.EventAutomationActionResult,
 			Action:    "cleanup",
@@ -160,6 +160,7 @@ func (d *Daemon) handleAutomationCleanupWS(client *wsClient, msg *protocol.Autom
 		} else {
 			result.Cleaned = cleaned
 			result.KeptDirty = keptDirty
+			result.KeptActive = keptActive
 		}
 		d.sendToClient(client, result)
 	}()

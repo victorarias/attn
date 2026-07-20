@@ -220,9 +220,9 @@ func TestAutomationDeleteWSResultCorrelatesRequest(t *testing.T) {
 
 // TestAutomationCleanupWSResultCorrelatesRequest exercises
 // handleAutomationCleanupWS: a definition with one clean-worktree terminal
-// run reports it in the result's Cleaned field, correlated by request_id;
-// an unknown definition surfaces as success=false, matching delete's
-// business-failure shape.
+// run reports it in the result's Cleaned field (KeptDirty/KeptActive empty),
+// correlated by request_id; an unknown definition surfaces as success=false,
+// matching delete's business-failure shape.
 func TestAutomationCleanupWSResultCorrelatesRequest(t *testing.T) {
 	root := t.TempDir()
 	mainRepo := filepath.Join(root, "repo")
@@ -260,6 +260,9 @@ func TestAutomationCleanupWSResultCorrelatesRequest(t *testing.T) {
 	}
 	if len(res.KeptDirty) != 0 {
 		t.Fatalf("cleanup result KeptDirty = %v, want none", res.KeptDirty)
+	}
+	if len(res.KeptActive) != 0 {
+		t.Fatalf("cleanup result KeptActive = %v, want none", res.KeptActive)
 	}
 
 	// Unknown definition surfaces as success=false with an error, not a

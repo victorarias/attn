@@ -477,6 +477,7 @@ export interface AutomationActionResultMessage {
     definitions?: Items[];
     error?:       string;
     event:        AutomationActionResultMessageEvent;
+    kept_active?: string[];
     kept_dirty?:  string[];
     request_id?:  string;
     run_id?:      string;
@@ -2098,7 +2099,7 @@ export interface InitialStateMessage {
     prs?:                PRElement[];
     repos?:              RepoElement[];
     sessions?:           SessionElement[];
-    settings?:           { [key: string]: any };
+    settings?:           { [key: string]: string };
     source_fingerprint?: string;
     tickets?:            TicketElement[];
     warnings?:           WarningElement[];
@@ -4102,7 +4103,7 @@ export interface SettingsUpdatedMessage {
     changed_key?: string;
     error?:       string;
     event:        SettingsUpdatedMessageEvent;
-    settings?:    { [key: string]: any };
+    settings?:    { [key: string]: string };
     success?:     boolean;
     [property: string]: any;
 }
@@ -4756,7 +4757,7 @@ export interface WebSocketEvent {
     session?:                  SessionElement;
     session_id?:               string;
     sessions?:                 SessionElement[];
-    settings?:                 { [key: string]: any };
+    settings?:                 { [key: string]: string };
     signal?:                   string;
     split_id?:                 string;
     staged?:                   StagedElement[];
@@ -8605,6 +8606,7 @@ const typeMap: any = {
         { json: "definitions", js: "definitions", typ: u(undefined, a(r("Items"))) },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("AutomationActionResultMessageEvent") },
+        { json: "kept_active", js: "kept_active", typ: u(undefined, a("")) },
         { json: "kept_dirty", js: "kept_dirty", typ: u(undefined, a("")) },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "run_id", js: "run_id", typ: u(undefined, "") },
@@ -9567,7 +9569,7 @@ const typeMap: any = {
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
-        { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "settings", js: "settings", typ: u(undefined, m("")) },
         { json: "source_fingerprint", js: "source_fingerprint", typ: u(undefined, "") },
         { json: "tickets", js: "tickets", typ: u(undefined, a(r("TicketElement"))) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
@@ -10761,7 +10763,7 @@ const typeMap: any = {
         { json: "changed_key", js: "changed_key", typ: u(undefined, "") },
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("SettingsUpdatedMessageEvent") },
-        { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "settings", js: "settings", typ: u(undefined, m("")) },
         { json: "success", js: "success", typ: u(undefined, true) },
     ], "any"),
     "SpawnResultMessage": o([
@@ -11156,7 +11158,7 @@ const typeMap: any = {
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
         { json: "session_id", js: "session_id", typ: u(undefined, "") },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionElement"))) },
-        { json: "settings", js: "settings", typ: u(undefined, m("any")) },
+        { json: "settings", js: "settings", typ: u(undefined, m("")) },
         { json: "signal", js: "signal", typ: u(undefined, "") },
         { json: "split_id", js: "split_id", typ: u(undefined, "") },
         { json: "staged", js: "staged", typ: u(undefined, a(r("StagedElement"))) },

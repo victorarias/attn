@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -171,12 +172,18 @@ func TestAutomationRetentionAndCleanupPreserveBoundThreadSharedWorktree(t *testi
 		t.Fatalf("expected the shared worktree to survive the sweep, stat err=%v", err)
 	}
 
-	cleaned, _, err := d.automationCleanup(context.Background(), def.ID)
+	cleaned, _, keptActive, err := d.automationCleanup(context.Background(), def.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cleaned) != 0 {
 		t.Fatalf("expected cleanup to leave the bound thread's shared worktree alone, cleaned=%v", cleaned)
+	}
+	// Both origin and second share session-shared, so cleanup — which walks
+	// every terminal run for the definition, not just second — reports both
+	// as kept_active, not only the non-origin run this test is titled after.
+	if len(keptActive) != 2 || !slices.Contains(keptActive, origin.ID) || !slices.Contains(keptActive, second.ID) {
+		t.Fatalf("expected both bound-thread runs to be reported kept_active, got %v", keptActive)
 	}
 	if _, err := os.Stat(worktree); err != nil {
 		t.Fatalf("expected the shared worktree to survive cleanup, stat err=%v", err)
@@ -187,7 +194,7 @@ func TestAutomationRetentionAndCleanupPreserveBoundThreadSharedWorktree(t *testi
 	if err := d.automationDelete(context.Background(), def.ID); err != nil {
 		t.Fatal(err)
 	}
-	cleaned, _, err = d.automationCleanup(context.Background(), def.ID)
+	cleaned, _, _, err = d.automationCleanup(context.Background(), def.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
