@@ -9,6 +9,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-20]
 
 ### Added
+- **Automations can now run on a schedule.** A definition can declare a cron
+  schedule with a required time zone and fire an ordinary visible agent
+  session at each intended instant — for example, a recurring merged-worktree
+  cleanup. After daemon downtime, `catch_up: latest` runs the newest missed
+  instant once, while `catch_up: skip` quietly drops instants older than a few
+  minutes; a backlog never replays as a storm of runs. `continuity: singleton`
+  keeps every occurrence on the same ticket and session instead of opening a
+  new one each time.
 - **pi sessions now report their own state and take steering in-band.** A pi
   session launched by attn loads a bundled companion extension that declares
   when the agent is working, tells attn how a turn ended — done, or waiting

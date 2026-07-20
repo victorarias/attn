@@ -12,31 +12,20 @@
   (`67dca139`). Packaged live verification completed before the
   behavior-preserving rebase at `aac6b7f2`; the rebased head was green and
   Figgyster-approved before merge.
-- Slice 4 is in [attn PR #614](https://github.com/victorarias/attn/pull/614).
-  The continuity path was live-verified at `b2a43445`. Figgyster then found that
-  Codex resume availability accepted any non-empty rollout ID. Fix `3402100f`
-  resolves the exact rollout before unattended continuation; unit and daemon
-  regressions cover present and missing rollouts. The branch was then rebased
-  onto `main` (post pi PRs #613/#615; conflict-resolution-only, verified by the
-  Go suites), and the packaged continuity scenario was rerun green on the fixed
-  code from a fresh `automations` profile (2026-07-20, 15s): same ticket,
-  session, and worktree; copied rollout passed to `codex resume`; pinned
-  `gpt-5.6-terra` high with automatic review approval preserved; dirty review
-  notes preserved; archived ticket reopened; missing delivered worktree failed
-  visibly without recreation. The rerun surfaced one harness bug — a fresh
-  profile's empty `automation list` (JSON `null`) was misread as
-  daemon-not-ready — fixed in the scenario's readiness poll. A separate
-  autoreview rerun was not repeated for the rebase: the only delta since the
-  approved head is mechanical conflict resolution (both sides independently
-  reviewed) plus documentation, and review happens on the exact head anyway.
+- Slice 4 merged through [attn PR #614](https://github.com/victorarias/attn/pull/614)
+  (`25a1c2ec`, 2026-07-20). The continuity path was live-verified at `b2a43445`;
+  Figgyster found Codex resume availability accepted any non-empty rollout ID,
+  fixed in `3402100f` with unit and daemon regressions for present and missing
+  rollouts; the packaged continuity scenario was rerun green on the fixed code
+  from a fresh `automations` profile before merge.
 - Later slices remain pending.
 
 ## Next steps
 
-1. Merge PR #614 through the ordinary review flow: green checks plus Figgyster
-   approval on the exact head. Victor directed merge-on-approval (2026-07-20),
-   superseding the earlier stop-unmerged instruction.
-2. Start Slice 5 (scheduled prompt with one real maintenance case) from `main`.
+1. Slice 5 (scheduled prompt with one real maintenance case) is in progress on
+   `slice/automations-scheduled` off `main`.
+2. Then Slice 6 (profile-level Automations surface) and Slice 7 (self-service
+   editing and lifecycle completion), followed by the final verification matrix.
 
 This guide implements the [attn Automations vision](attn-automations.md)
 as functional walking-skeleton slices. Each slice must leave a real capability
@@ -369,6 +358,58 @@ policy:
   overlap: coalesce
 ```
 
+The scheduled form nests the schedule under the trigger. `time_zone` is a
+required IANA name so a definition means the same instants on any machine;
+`TZ=`/`CRON_TZ=` prefixes inside the cron expression are rejected:
+
+```yaml
+api_version: attn.dev/automations/v1alpha1
+id: worktree-cleanup
+name: Merged-worktree cleanup
+enabled: true
+
+trigger:
+  type: scheduled
+  schedule:
+    cron: "0 9 * * 1-5"
+    time_zone: America/New_York
+
+prompt: |
+  Review the git worktrees under this directory. Remove each linked worktree
+  whose branch is fully merged and whose tree is completely clean using
+  `git worktree remove` (never --force). Never remove a worktree with staged,
+  unstaged, or untracked changes; list preserved worktrees with reasons.
+
+launch:
+  driver: codex
+  model: gpt-5.5
+  effort: high
+
+location:
+  type: directory
+  path: /Users/example/src/repository
+
+policy:
+  continuity: singleton
+  catch_up: latest
+  overlap: coalesce
+```
+
+Scheduled semantics decided at implementation time (Slice 5): occurrence keys
+are the intended instant in UTC (`scheduled:<RFC3339>`), so identity is
+machine-independent. Each observation tick fires at most the newest due
+instant per definition — older missed instants never fire, which is the
+replay-storm guard. `catch_up: latest` always fires the newest missed instant
+after downtime; `catch_up: skip` fires only within a 5-minute grace of the
+intended instant and otherwise discards it. The first observation of a new
+definition anchors its cursor without firing retroactively. Cron follows
+robfig/cron standard parsing, so DST is wall-clock literal: a slot inside the
+spring-forward gap does not fire that day, and the fall-back repeated hour
+fires twice with two distinct UTC occurrence keys. Slice 5 accepts
+`continuity: singleton` (one continuity stream keyed `"singleton"` reusing the
+same ticket/session across occurrences); scheduled definitions require
+`catch_up` and a `directory` location.
+
 The example paths illustrate configuration shape only. No user's path belongs in
 source, fixtures intended for shipping, or built-in defaults.
 
@@ -400,6 +441,7 @@ type LocationSpec struct {
 
 type WorkRequest struct {
     RunID, DefinitionID, SubjectKey, ContinuityKey string
+    Provider                                       string // occurrence provider; gates provider-specific continuation checks
     Prompt                                         string
     Context                                        json.RawMessage
     Launch                                         EffectiveLaunch
