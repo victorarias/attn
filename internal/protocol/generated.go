@@ -144,6 +144,9 @@ type AutomationActionResultMessage struct {
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 
+	// Revision corresponds to the JSON schema field "revision".
+	Revision *int `json:"revision,omitempty,omitzero"`
+
 	// RunID corresponds to the JSON schema field "run_id".
 	RunID *string `json:"run_id,omitempty,omitzero"`
 
@@ -152,6 +155,9 @@ type AutomationActionResultMessage struct {
 
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// SpecYaml corresponds to the JSON schema field "spec_yaml".
+	SpecYaml *string `json:"spec_yaml,omitempty,omitzero"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -169,9 +175,29 @@ type AutomationApplyMessage struct {
 
 	// DefinitionYaml corresponds to the JSON schema field "definition_yaml".
 	DefinitionYaml string `json:"definition_yaml"`
+
+	// ExpectedID corresponds to the JSON schema field "expected_id".
+	ExpectedID *string `json:"expected_id,omitempty,omitzero"`
+
+	// ExpectedRevision corresponds to the JSON schema field "expected_revision".
+	ExpectedRevision *int `json:"expected_revision,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
 }
 
 type AutomationCleanupMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type AutomationDefinitionGetMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
@@ -335,6 +361,17 @@ type AutomationShowMessage struct {
 
 	// DefinitionID corresponds to the JSON schema field "definition_id".
 	DefinitionID string `json:"definition_id"`
+}
+
+type AutomationValidateMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DefinitionYaml corresponds to the JSON schema field "definition_yaml".
+	DefinitionYaml string `json:"definition_yaml"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
 }
 
 type AutomationsChangedMessage struct {

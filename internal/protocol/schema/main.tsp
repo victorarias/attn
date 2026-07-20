@@ -1571,11 +1571,38 @@ model WorkflowRunCancelMessage {
   run_id: string;
 }
 
-model AutomationApplyMessage { cmd: "automation_apply"; definition_yaml: string; }
+// Dual-surface (unix-socket/CLI `attn automation apply` + WS, the app
+// editor's Save): the socket/CLI path applies unconditionally — "last writer
+// wins," unchanged by this field addition. The WS path additionally supplies
+// expected_id and expected_revision so the daemon can refuse a save that
+// would silently fork the definition (an edited id — apply is keyed on the
+// id *inside* the YAML) or silently clobber a concurrent apply (a stale
+// revision) instead of persisting it; see Daemon.automationApplyWithGuards.
+// Both are absent/zero when creating. request_id is optional, used only by
+// WS for correlation, like automation_delete's below.
+model AutomationApplyMessage {
+  cmd: "automation_apply";
+  definition_yaml: string;
+  request_id?: string;
+  expected_id?: string;
+  expected_revision?: int32;
+}
 model AutomationListMessage { cmd: "automation_list"; }
 model AutomationShowMessage { cmd: "automation_show"; definition_id: string; }
 model AutomationRunMessage { cmd: "automation_run"; definition_id: string; request_id: string; input_json?: string; pr_url?: string; }
 model AutomationRunListMessage { cmd: "automation_run_list"; definition_id: string; }
+
+// Dual-surface (unix-socket `attn automation validate` + WS "Validate"
+// button): runs exactly the checks automation_apply runs before persisting
+// (Daemon.validateAutomationSpec) without writing anything. Deliberately not
+// just a thinner call to ParseDefinitionYAML — see the
+// AutomationActionResultMessage doc comment below for why a validate that
+// skipped one of apply's checks would actively lie to the user.
+model AutomationValidateMessage {
+  cmd: "automation_validate";
+  definition_yaml: string;
+  request_id?: string;
+}
 
 // Dual-surface (unix-socket/CLI + WS), unlike automation_set_enabled below:
 // mirrors automation_apply/automation_run's shape. request_id is optional
@@ -1601,6 +1628,18 @@ model AutomationCleanupMessage {
 // carries request_id for correlation.
 model AutomationDefinitionsGetMessage {
   cmd: "automation_definitions_get";
+  request_id?: string;
+}
+
+// WS-only: the editor's load-for-edit and load-for-create-template call, in
+// one request. definition_id "" returns the starter template
+// (automation.StarterTemplateYAML) at revision 0, so create and edit share
+// one frontend code path and the template can never structurally drift from
+// what ParseDefinitionYAML accepts. A non-empty, unknown definition_id
+// surfaces as success=false with an error, like the other WS lookups above.
+model AutomationDefinitionGetMessage {
+  cmd: "automation_definition_get";
+  definition_id: string;
   request_id?: string;
 }
 model AutomationRunsGetMessage {
@@ -2704,6 +2743,12 @@ model AutomationActionResultMessage {
   cleaned?: string[];
   kept_dirty?: string[];
   kept_active?: string[];
+  // spec_yaml/revision: automation_definition_get's payload — the definition
+  // YAML to show in the editor and the revision it was loaded at (echoed
+  // back as automation_apply's expected_revision). revision 0 with
+  // definition_id "" means the starter template for a brand-new definition.
+  spec_yaml?: string;
+  revision?: int32;
 }
 
 // Compact change signal: canonical state lives in SQLite, so clients re-read

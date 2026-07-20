@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "179"
+const ProtocolVersion = "180"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -164,10 +164,12 @@ const (
 	CmdAutomationRun                         = "automation_run"
 	CmdAutomationRunList                     = "automation_run_list"
 	CmdAutomationDefinitionsGet              = "automation_definitions_get"
+	CmdAutomationDefinitionGet               = "automation_definition_get"
 	CmdAutomationRunsGet                     = "automation_runs_get"
 	CmdAutomationSetEnabled                  = "automation_set_enabled"
 	CmdAutomationDelete                      = "automation_delete"
 	CmdAutomationCleanup                     = "automation_cleanup"
+	CmdAutomationValidate                    = "automation_validate"
 	CmdSpawnSession                          = "spawn_session"
 	CmdAttachSession                         = "attach_session"
 	CmdDetachSession                         = "detach_session"
@@ -448,6 +450,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdAutomationDefinitionsGet:
 		var msg AutomationDefinitionsGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutomationDefinitionGet:
+		var msg AutomationDefinitionGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutomationValidate:
+		var msg AutomationValidateMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
