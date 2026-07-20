@@ -99,17 +99,25 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bo
 	}
 	defer tx.Rollback()
 	var revision, oldEnabled int
-	var oldSpec string
-	err = tx.QueryRow(`SELECT revision, spec_json, enabled FROM automation_definitions WHERE id=? AND deleted_at=''`, id).Scan(&revision, &oldSpec, &oldEnabled)
+	var oldSpec, deletedAt string
+	// Deliberately not filtered by deleted_at='': a soft-deleted row must be
+	// found here too, so applying the same id resurrects it (clears
+	// deleted_at) instead of colliding with the PRIMARY KEY on an INSERT.
+	err = tx.QueryRow(`SELECT revision, spec_json, enabled, deleted_at FROM automation_definitions WHERE id=?`, id).Scan(&revision, &oldSpec, &oldEnabled, &deletedAt)
 	switch err {
 	case sql.ErrNoRows:
 		revision = 1
 		_, err = tx.Exec(`INSERT INTO automation_definitions(id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,?,'')`, id, name, enabled, revision, specJSON, formatTicketTime(now), formatTicketTime(now))
 	case nil:
-		if oldSpec != specJSON {
+		wasDeleted := deletedAt != ""
+		if oldSpec != specJSON || wasDeleted {
+			// A resurrection always bumps revision, even with an unchanged spec,
+			// so the daemon's contract comparison (old revision vs new) can tell
+			// resurrection apart from a no-op reapply and always rotate continuity
+			// bindings for it.
 			revision++
 		}
-		_, err = tx.Exec(`UPDATE automation_definitions SET name=?, enabled=?, revision=?, spec_json=?, updated_at=? WHERE id=?`, name, enabled, revision, specJSON, formatTicketTime(now), id)
+		_, err = tx.Exec(`UPDATE automation_definitions SET name=?, enabled=?, revision=?, spec_json=?, updated_at=?, deleted_at='' WHERE id=?`, name, enabled, revision, specJSON, formatTicketTime(now), id)
 		if err == nil && oldEnabled == 0 && enabled {
 			// Re-enabling begins from the provider's current truth. A request that
 			// arrived while disabled must be eligible for latest catch-up even if an
@@ -242,6 +250,103 @@ func (s *Store) GetAutomationDefinition(id string) (*AutomationDefinition, error
 		return nil, nil
 	}
 	return d, err
+}
+
+// GetAutomationDefinitionIncludingDeleted reads a definition regardless of
+// soft-delete state, for automationApply's pre-upsert load (to detect
+// resurrection and compare the old ContinuationContract, see
+// internal/automation) and for callers that need to confirm a definition
+// once existed.
+func (s *Store) GetAutomationDefinitionIncludingDeleted(id string) (*AutomationDefinition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	d, err := scanAutomationDefinition(s.db.QueryRow(`SELECT id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at FROM automation_definitions WHERE id=?`, id))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return d, err
+}
+
+// DeleteAutomationContinuityBindings removes every continuity binding for a
+// definition, so the next claim under a matching continuity key starts a
+// fresh ticket/session thread instead of reusing one pinned to a stale
+// contract. Called when an apply changes a definition's ContinuationContract
+// or resurrects a soft-deleted definition (both in automationApply), and by
+// automationDelete before soft-deleting.
+func (s *Store) DeleteAutomationContinuityBindings(definitionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("automation persistence unavailable")
+	}
+	_, err := s.db.Exec(`DELETE FROM automation_continuity_bindings WHERE definition_id=?`, definitionID)
+	return err
+}
+
+// DeleteAutomationReviewRequestEdges removes every review-request edge for a
+// definition. Used only by automationDelete: a soft-deleted definition's
+// provider-side review-request tracking is fully retired, unlike a
+// re-enable (clearAutomationReviewRequestEdgesTx) which only deactivates
+// edges so the next observation starts a fresh cycle.
+func (s *Store) DeleteAutomationReviewRequestEdges(definitionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("automation persistence unavailable")
+	}
+	_, err := s.db.Exec(`DELETE FROM automation_review_request_edges WHERE definition_id=?`, definitionID)
+	return err
+}
+
+// FenceAutomationProviderCursors records now as a definition's
+// github_review_requested provider fence, so an in-flight stale observation
+// started before this call cannot act on the definition afterward. Mirrors
+// the fencing UpsertAutomationDefinition performs inline on every enabled
+// apply (fenceAutomationProviderCursorsTx); automationDelete calls this
+// directly since a delete isn't part of an apply's own transaction.
+func (s *Store) FenceAutomationProviderCursors(definitionID string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("automation persistence unavailable")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := fenceAutomationProviderCursorsTx(tx, definitionID, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DeleteAutomationDefinition soft-deletes a definition by setting
+// deleted_at. Runs, occurrences, tickets, sessions, and on-disk artifacts are
+// untouched here — automationDelete fails pending runs and clears
+// continuity/review-request state before calling this. Returns an error for
+// an unknown or already-deleted id.
+func (s *Store) DeleteAutomationDefinition(id string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("automation persistence unavailable")
+	}
+	res, err := s.db.Exec(`UPDATE automation_definitions SET deleted_at=?, updated_at=? WHERE id=? AND deleted_at=''`, formatTicketTime(now), formatTicketTime(now), id)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return fmt.Errorf("automation %q not found or already deleted", id)
+	}
+	return nil
 }
 
 func (s *Store) ListAutomationDefinitions() ([]AutomationDefinition, error) {
@@ -391,7 +496,7 @@ func (s *Store) ClaimScheduledAutomationRun(definitionID, occurrenceKey, continu
 		}
 	}
 	now := formatTicketTime(observedAt)
-	// subject_key is recorded as continuityKey (not always ""): HasPriorAutomationContinuityRun
+	// subject_key is recorded as continuityKey (not always ""): AutomationContinuityRunSnapshots
 	// keys its lookup on subject_key, so the continuity key must be recorded there for the
 	// deleted-ticket safety guard to ever match a scheduled singleton's prior run.
 	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'schedule',?,?,?,?,?)`, ids.OccurrenceID, definitionID, occurrenceKey, continuityKey, now, payloadJSON, now); err != nil {
@@ -784,31 +889,47 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, o
 	return tx.Commit()
 }
 
-// HasPriorAutomationContinuityRun reports whether this subject binding predates
-// the current run. It lets delivery distinguish first-run crash recovery (where
-// the ticket may not exist yet) from a later cycle whose bound ticket was removed.
-func (s *Store) HasPriorAutomationContinuityRun(definitionID, continuityKey, currentRunID string) (bool, error) {
-	// An empty continuity key means "no continuity": without this guard the
-	// subject_key match below would pair any two fresh-continuity occurrences
-	// (both stored with subject_key='').
+// AutomationContinuityRunSnapshots returns the pinned snapshot_json of every
+// other run recorded under this continuity key, most recent first. Delivery
+// uses this to decide whether the current cycle continues an earlier one
+// (and so must find that earlier cycle's ticket still present) or starts a
+// fresh episode: A1's continuity-binding rotation (automationApply, on a
+// contract-changing edit) mints a brand-new ticket for the same continuity
+// key while older runs remain in history under the old ticket, so a plain
+// "does history exist for this continuity key" check would wrongly treat
+// that stale history as binding on the new episode too. Comparing pinned
+// snapshots by ContinuationContract (done by the caller, which has the
+// domain type) tells the two cases apart: a rotation changes the contract,
+// so old snapshots stop matching; an ordinary crash/sweep does not.
+func (s *Store) AutomationContinuityRunSnapshots(definitionID, continuityKey, currentRunID string) ([]string, error) {
 	if continuityKey == "" {
-		return false, nil
+		return nil, nil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.db == nil {
-		return false, errors.New("automation persistence unavailable")
+		return nil, errors.New("automation persistence unavailable")
 	}
-	var exists int
-	err := s.db.QueryRow(`
-		SELECT EXISTS(
-			SELECT 1
-			FROM automation_runs r
-			JOIN automation_occurrences o ON o.id=r.occurrence_id
-			WHERE r.definition_id=? AND o.subject_key=? AND r.id<>?
-		)
-	`, definitionID, continuityKey, currentRunID).Scan(&exists)
-	return exists != 0, err
+	rows, err := s.db.Query(`
+		SELECT r.snapshot_json
+		FROM automation_runs r
+		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		WHERE r.definition_id=? AND o.subject_key=? AND r.id<>?
+		ORDER BY r.created_at DESC
+	`, definitionID, continuityKey, currentRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var snapshots []string
+	for rows.Next() {
+		var snapshotJSON string
+		if err := rows.Scan(&snapshotJSON); err != nil {
+			return nil, err
+		}
+		snapshots = append(snapshots, snapshotJSON)
+	}
+	return snapshots, rows.Err()
 }
 
 func scanAutomationRun(scanner interface{ Scan(...any) error }) (*AutomationRun, error) {
@@ -955,6 +1076,76 @@ func (s *Store) MarkAutomationRunFailed(id, message string, now time.Time) error
 	defer s.mu.Unlock()
 	_, e := s.db.Exec(`UPDATE automation_runs SET state='failed',last_error=?,updated_at=? WHERE id=?`, message, formatTicketTime(now), id)
 	return e
+}
+
+// ListPrunableAutomationRuns returns definitionID's terminal (delivered or
+// failed) runs older than olderThan that fall outside the newest keep runs
+// (by created_at, across all states — a pending run still counts toward
+// keep, so it never bumps an older terminal run out of protection). Session
+// liveness and worktree cleanliness are daemon-side concerns this package
+// cannot check; this only narrows by count/state/age, per A3's fixed
+// retention policy.
+func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderThan time.Time) ([]AutomationRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT `+automationRunColumns+`
+		FROM automation_runs
+		WHERE definition_id=? AND state IN ('delivered','failed') AND created_at<?
+		  AND id NOT IN (
+			SELECT id FROM automation_runs WHERE definition_id=? ORDER BY created_at DESC LIMIT ?
+		  )
+		ORDER BY created_at
+	`, definitionID, formatTicketTime(olderThan), definitionID, keep)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AutomationRun
+	for rows.Next() {
+		r, err := scanAutomationRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
+// DeleteAutomationRun removes a run and its occurrence row in one
+// transaction. It does not touch on-disk artifacts (worktrees, occurrence
+// JSON) — callers (the A3 retention sweep, A4 cleanup does not call this)
+// remove those first. Deleting an already-gone run is a no-op, not an error,
+// since sweep candidates are gathered once and acted on afterward.
+func (s *Store) DeleteAutomationRun(runID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("automation persistence unavailable")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var occurrenceID string
+	err = tx.QueryRow(`SELECT occurrence_id FROM automation_runs WHERE id=?`, runID).Scan(&occurrenceID)
+	if err == sql.ErrNoRows {
+		return tx.Commit()
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM automation_runs WHERE id=?`, runID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM automation_occurrences WHERE id=?`, occurrenceID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) AutomationOccurrencePayload(id string, out *string) error {

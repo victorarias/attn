@@ -637,7 +637,7 @@ func TestScheduledSingletonContinuationSkipsPullRequestParsing(t *testing.T) {
 // TestMissingContinuityTicketFailsBeforeReusingBoundArtifacts in
 // automations_test.go. Fix 2 makes ClaimScheduledAutomationRun record
 // subject_key=continuityKey instead of always "": this is what lets
-// HasPriorAutomationContinuityRun ever match a scheduled singleton's prior
+// hasPriorAutomationContinuityRun ever match a scheduled singleton's prior
 // run, so EnsureTicket's deleted-ticket safety guard actually fires instead
 // of silently recreating the ticket.
 func TestScheduledSingletonMissingContinuityTicketFailsBeforeReusingBoundArtifacts(t *testing.T) {
