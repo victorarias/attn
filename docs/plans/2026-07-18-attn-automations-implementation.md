@@ -986,10 +986,10 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       ticket/session navigation, fed by `automations_changed` broadcasts and
       typed WS get commands (protocol 176), proven by the packaged serial
       scenario `real-app:scenario-automation-surface` — run
-      `automation-surface-2026-07-20T15-35-53-343Z`, all four legs green
+      `automation-surface-2026-07-20T15-48-06-271Z`, all four legs green
       (broadcast-driven listing, delivered navigable run with no duplicates,
       inline daemon rejection on a disabled definition, daemon restart
-      preserving definitions and runs) against the app built from `383da961`
+      preserving definitions and runs) against the app built from `91f899b5`
       (2026-07-20).
 - [ ] Add the self-service editor and remaining policy depth.
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
