@@ -22,8 +22,9 @@
 
 ## Next steps
 
-1. Slice 5 (scheduled prompt with one real maintenance case) is in progress on
-   `slice/automations-scheduled` off `main`.
+1. Slice 5 (scheduled prompt with one real maintenance case) is implemented on
+   `slice/automations-scheduled` with the packaged scenario green (see the
+   checklist entry below); it merges through the ordinary review flow.
 2. Then Slice 6 (profile-level Automations surface) and Slice 7 (self-service
    editing and lifecycle completion), followed by the final verification matrix.
 
@@ -964,7 +965,13 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
 - [x] Finish PR #614: exact-rollout regressions in place and packaged continuity
       verification rerun green on the fixed code (2026-07-20). Merge follows the
       ordinary review flow (green checks plus Figgyster approval on the head).
-- [ ] Add schedule and its real maintenance case through the same engine.
+- [x] Add schedule and its real maintenance case through the same engine:
+      scheduled trigger with catch-up, storm guard, and singleton continuity,
+      proven by the packaged serial scenario
+      `real-app:scenario-automation-scheduled-cleanup` (a real codex agent
+      removing a merged-clean worktree while preserving a dirty one) — run
+      `automation-scheduled-cleanup-2026-07-20T12-22-03-841Z`, all legs green
+      against the app built from `45c7684c` (2026-07-20).
 - [ ] Add operational UI, then the editor and remaining policy depth.
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
