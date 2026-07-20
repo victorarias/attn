@@ -133,6 +133,24 @@ func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw, expectedID 
 	}
 	guard := func(existing *store.AutomationDefinition) error {
 		if expectedRevision == 0 {
+			// Create. Revisions start at 1 (see UpsertAutomationDefinition), so
+			// this is unambiguous — it is never an edit of a revision-0 row.
+			//
+			// Apply is keyed on the id inside the YAML, so a create whose id
+			// happens to match a live definition would UPDATE that definition
+			// in place: the user typing an id that already exists would replace
+			// someone else's automation wholesale, from a form that said
+			// "New automation" and never mentioned it. Refuse instead. The
+			// socket/CLI path keeps its unconditional last-writer-wins
+			// semantics — it passes no guard at all.
+			//
+			// A soft-deleted row is deliberately NOT a collision: re-applying a
+			// deleted definition's id is how resurrect works, and the editor's
+			// list only shows live definitions, so the user cannot be
+			// overwriting anything they can see.
+			if existing != nil && existing.DeletedAt == nil {
+				return fmt.Errorf("an automation with id %q already exists — edit it instead of creating a second one", spec.ID)
+			}
 			return nil
 		}
 		if existing == nil || existing.Revision != expectedRevision {

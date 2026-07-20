@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -560,6 +561,67 @@ func TestAutomationApplyWSRefusesIDMismatch(t *testing.T) {
 	}
 	if got, err := s.GetAutomationDefinition("manual-check-renamed"); err != nil || got != nil {
 		t.Fatalf("renamed id after refused apply = %#v err=%v, want no definition created", got, err)
+	}
+}
+
+// TestAutomationApplyWSRefusesCreateOverLiveDefinition pins the create half
+// of the identity guard. Apply is keyed on the id inside the YAML, so a
+// create whose id collides with a live definition would UPDATE that
+// definition in place — the user typing an existing id into a form labelled
+// "New automation" would replace an automation they never opened. A
+// soft-deleted row is not a collision: re-applying its id is how resurrect
+// works, and the editor's list never showed it.
+func TestAutomationApplyWSRefusesCreateOverLiveDefinition(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	original, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create (no expected_id, no expected_revision) carrying the same id but
+	// entirely different content.
+	colliding := strings.Replace(raw, "Check locally.", "Something else entirely.", 1)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(client, &protocol.AutomationApplyMessage{
+		Cmd:            protocol.CmdAutomationApply,
+		DefinitionYaml: colliding,
+		RequestID:      protocol.Ptr("apply-create-collision"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "already exists") {
+		t.Fatalf("apply result = %+v, want success=false with an already-exists error", res)
+	}
+	survivor, err := s.GetAutomationDefinition(original.ID)
+	if err != nil || survivor == nil {
+		t.Fatalf("definition after refused create = %#v err=%v, want it to survive", survivor, err)
+	}
+	if survivor.Revision != original.Revision || !strings.Contains(survivor.SpecYAML, "Check locally.") {
+		t.Fatalf("definition after refused create = revision %d yaml %q, want the original untouched",
+			survivor.Revision, survivor.SpecYAML)
+	}
+
+	// Soft-deleted is not a collision: the same create now resurrects.
+	if err := d.automationDelete(context.Background(), original.ID); err != nil {
+		t.Fatal(err)
+	}
+	resurrectClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(resurrectClient, &protocol.AutomationApplyMessage{
+		Cmd:            protocol.CmdAutomationApply,
+		DefinitionYaml: colliding,
+		RequestID:      protocol.Ptr("apply-create-resurrect"),
+	})
+	var resurrectRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, resurrectClient.send, &resurrectRes)
+	if !resurrectRes.Success {
+		t.Fatalf("resurrect apply result = %+v, want success", resurrectRes)
+	}
+	resurrected, err := s.GetAutomationDefinition(original.ID)
+	if err != nil || resurrected == nil || !strings.Contains(resurrected.SpecYAML, "Something else entirely.") {
+		t.Fatalf("definition after resurrect = %#v err=%v, want the new content live", resurrected, err)
 	}
 }
 
