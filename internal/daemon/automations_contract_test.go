@@ -204,3 +204,184 @@ func TestAutomationApplyPreservesPinnedSnapshotOfAlreadyClaimedRun(t *testing.T)
 		t.Fatalf("apply mutated an already-claimed run's pinned snapshot: prompt=%q, want %q", pinned.Prompt, "Original prompt.")
 	}
 }
+
+// TestAutomationApplyRevertAllowsFreshThreadWhenOldTicketSurvives pins
+// scenario 3 of the A1-fix matrix: edit A→B→A (revert). The reverted
+// contract now equals the original A thread's (run1/ticket T1) contract
+// again, but T1's own ticket is still alive — it was merely rotated away
+// from, not swept. A fresh post-revert thread (run3/ticket T3) must be
+// allowed to deliver: hasPriorAutomationContinuityRun must not treat "some
+// same-contract history exists" as disqualifying on its own.
+func TestAutomationApplyRevertAllowsFreshThreadWhenOldTicketSurvives(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+
+	v1 := scheduledDefinitionYAML(dir, "*/5 * * * *", "singleton", "latest", "Prompt A.")
+	def1, err := d.automationApply(v1)
+	if err != nil {
+		t.Fatalf("apply v1: %v", err)
+	}
+	spec1, _, err := automation.ParseDefinitionYAML([]byte(v1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot1, err := automation.Effective(spec1, def1.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotJSON1, err := json.Marshal(snapshot1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run1, _, err := s.ClaimScheduledAutomationRun(def1.ID, "schedule:1", "singleton", def1.Revision, `{}`, string(snapshotJSON1), now, store.AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run1.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+	// T1 stays alive throughout — it was rotated away from, never swept.
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: run1.TicketID, Title: "Nightly", Status: store.TicketStatusDone, Assignee: run1.SessionID, AutomationRunID: run1.ID}, "automation:nightly", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// Edit to B: rotates the binding.
+	v2 := scheduledDefinitionYAML(dir, "*/5 * * * *", "singleton", "latest", "Prompt B.")
+	def2, err := d.automationApply(v2)
+	if err != nil {
+		t.Fatalf("apply v2: %v", err)
+	}
+	spec2, _, err := automation.ParseDefinitionYAML([]byte(v2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot2, err := automation.Effective(spec2, def2.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotJSON2, err := json.Marshal(snapshot2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run2, _, err := s.ClaimScheduledAutomationRun(def2.ID, "schedule:2", "singleton", def2.Revision, `{}`, string(snapshotJSON2), now.Add(5*time.Minute), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run2.ID, "{}", now.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: run2.TicketID, Title: "Nightly", Status: store.TicketStatusDone, Assignee: run2.SessionID, AutomationRunID: run2.ID}, "automation:nightly", store.TicketRoleChiefOfStaff, now.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Revert back to A: rotates the binding again. The reverted contract
+	// now equals run1's (T1's) contract.
+	v3 := scheduledDefinitionYAML(dir, "*/5 * * * *", "singleton", "latest", "Prompt A.")
+	def3, err := d.automationApply(v3)
+	if err != nil {
+		t.Fatalf("apply v3 (revert): %v", err)
+	}
+	run3, fresh, err := s.ClaimScheduledAutomationRun(def3.ID, "schedule:3", "singleton", def3.Revision, `{}`, string(snapshotJSON1), now.Add(10*time.Minute), store.AutomationRunReservation{RunID: "run-3", OccurrenceID: "occ-3", TicketID: "ticket-3", SessionID: "session-3", WorkspaceID: "workspace-3", PaneID: "pane-3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fresh {
+		t.Fatal("expected a fresh claim after the revert rotation")
+	}
+
+	req := automation.WorkRequest{RunID: run3.ID, DefinitionID: def3.ID, ContinuityKey: "singleton", Provider: "schedule", Prompt: snapshot1.Prompt, Launch: snapshot1.Launch, Location: snapshot1.Location, IDs: automation.DeliveryIDs{TicketID: run3.TicketID, SessionID: run3.SessionID}}
+	if err := d.validateAutomationContinuation(req); err != nil {
+		t.Fatalf("revert with the old same-contract thread's ticket (T1) still alive must be allowed, got: %v", err)
+	}
+}
+
+// TestAutomationApplyRevertRefusesWhenOldTicketWasSwept pins scenario 4 of
+// the A1-fix matrix: edit A→B→A (revert), but the original A thread's
+// ticket (T1) was itself later swept (removed) rather than merely rotated
+// away from. hasPriorAutomationContinuityRun must still refuse in this case
+// — "refuse if ANY prior same-contract thread's own ticket is missing", not
+// "allow if any prior same-contract thread's ticket happens to be alive".
+func TestAutomationApplyRevertRefusesWhenOldTicketWasSwept(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+
+	v1 := scheduledDefinitionYAML(dir, "*/5 * * * *", "singleton", "latest", "Prompt A.")
+	def1, err := d.automationApply(v1)
+	if err != nil {
+		t.Fatalf("apply v1: %v", err)
+	}
+	spec1, _, err := automation.ParseDefinitionYAML([]byte(v1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot1, err := automation.Effective(spec1, def1.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotJSON1, err := json.Marshal(snapshot1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run1, _, err := s.ClaimScheduledAutomationRun(def1.ID, "schedule:1", "singleton", def1.Revision, `{}`, string(snapshotJSON1), now, store.AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run1.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+	// T1 is deliberately never created here (or was created and later
+	// removed by a sweep) — simulate the "genuinely gone" case.
+
+	// Edit to B: rotates the binding.
+	v2 := scheduledDefinitionYAML(dir, "*/5 * * * *", "singleton", "latest", "Prompt B.")
+	def2, err := d.automationApply(v2)
+	if err != nil {
+		t.Fatalf("apply v2: %v", err)
+	}
+	spec2, _, err := automation.ParseDefinitionYAML([]byte(v2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot2, err := automation.Effective(spec2, def2.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotJSON2, err := json.Marshal(snapshot2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run2, _, err := s.ClaimScheduledAutomationRun(def2.ID, "schedule:2", "singleton", def2.Revision, `{}`, string(snapshotJSON2), now.Add(5*time.Minute), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run2.ID, "{}", now.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: run2.TicketID, Title: "Nightly", Status: store.TicketStatusDone, Assignee: run2.SessionID, AutomationRunID: run2.ID}, "automation:nightly", store.TicketRoleChiefOfStaff, now.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Revert back to A: rotates the binding again. The reverted contract
+	// now equals run1's (T1's) contract, but T1 was swept.
+	v3 := scheduledDefinitionYAML(dir, "*/5 * * * *", "singleton", "latest", "Prompt A.")
+	def3, err := d.automationApply(v3)
+	if err != nil {
+		t.Fatalf("apply v3 (revert): %v", err)
+	}
+	run3, fresh, err := s.ClaimScheduledAutomationRun(def3.ID, "schedule:3", "singleton", def3.Revision, `{}`, string(snapshotJSON1), now.Add(10*time.Minute), store.AutomationRunReservation{RunID: "run-3", OccurrenceID: "occ-3", TicketID: "ticket-3", SessionID: "session-3", WorkspaceID: "workspace-3", PaneID: "pane-3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fresh {
+		t.Fatal("expected a fresh claim after the revert rotation")
+	}
+
+	req := automation.WorkRequest{RunID: run3.ID, DefinitionID: def3.ID, ContinuityKey: "singleton", Provider: "schedule", Prompt: snapshot1.Prompt, Launch: snapshot1.Launch, Location: snapshot1.Location, IDs: automation.DeliveryIDs{TicketID: run3.TicketID, SessionID: run3.SessionID}}
+	if err := d.validateAutomationContinuation(req); err == nil {
+		t.Fatal("expected refusal: the reverted contract's original thread (T1) had its own ticket swept")
+	}
+}

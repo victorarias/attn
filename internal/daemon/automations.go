@@ -888,39 +888,64 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 	return err
 }
 
-// hasPriorAutomationContinuityRun reports whether an earlier run under this
-// continuity key was delivered under the same reviewer-facing contract as
-// req. It lets delivery distinguish first-run crash recovery (no earlier run
-// shares this contract, so the ticket may legitimately not exist yet) from a
-// later cycle whose bound ticket was removed out from under it (an earlier
-// run does share this contract, so its ticket must still be there).
+// hasPriorAutomationContinuityRun reports whether some earlier same-contract
+// thread under this continuity key has genuinely lost its ticket. It lets
+// delivery distinguish first-run crash recovery (no earlier thread shares
+// req's contract, so this ticket may legitimately not exist yet) from a
+// thread whose bound ticket was removed out from under it (an earlier
+// same-contract thread's own ticket is gone).
 //
-// Comparing by ContinuationContract, not just "does any history exist for
-// this continuity key", matters because of A1's continuity-binding rotation:
-// a contract-changing edit (automationApply) deletes the old binding and the
-// next occurrence mints a brand-new ticket for the same continuity key while
-// the old run remains in history. That old run's contract differs from the
-// new one's by construction, so it is correctly excluded here — a plain
-// existence check would wrongly treat it as binding on the new episode and
-// spuriously refuse every post-rotation delivery with "ticket is missing".
+// Two things matter here, both found the hard way:
+//
+//  1. Comparing by ContinuationContract, not just "does any history exist
+//     for this continuity key": a contract-changing edit (automationApply)
+//     deletes the old binding and the next occurrence mints a brand-new
+//     ticket for the same continuity key while the old run remains in
+//     history. That old run's contract differs from the new one's by
+//     construction, so it must be excluded — a plain existence check would
+//     wrongly treat it as binding on the new thread and spuriously refuse
+//     every post-rotation delivery with "ticket is missing".
+//
+//  2. Checking each same-contract entry's OWN ticket, not just "does any
+//     same-contract entry exist": edit A→B then revert B→A rotates the
+//     binding twice, minting a fresh ticket T3 whose thread's contract
+//     equals the original A thread's (T1). If T1's ticket is still alive,
+//     that's not a lost thread — a fresh T3 is a legitimate new thread under
+//     a since-reused contract, and must be allowed. Checking existence
+//     against T1's own ticket_id (not T3's, and not "any history exists")
+//     is what tells that apart from a real sweep: if T1's own ticket were
+//     later removed too, this must go back to refusing, since a same-
+//     contract thread's ticket really did disappear.
 func (d *Daemon) hasPriorAutomationContinuityRun(req automation.WorkRequest) (bool, error) {
 	if req.ContinuityKey == "" {
 		return false, nil
 	}
-	snapshots, err := d.store.AutomationContinuityRunSnapshots(req.DefinitionID, req.ContinuityKey, req.RunID)
+	history, err := d.store.AutomationContinuityRunHistory(req.DefinitionID, req.ContinuityKey, req.RunID)
 	if err != nil {
 		return false, err
 	}
-	if len(snapshots) == 0 {
+	if len(history) == 0 {
 		return false, nil
 	}
 	reqContract := automation.NewContinuationContract(req.Prompt, req.Launch, req.Location)
-	for _, snapshotJSON := range snapshots {
+	checkedTicketIDs := make(map[string]bool, len(history))
+	for _, entry := range history {
 		var snapshot automation.Snapshot
-		if err := json.Unmarshal([]byte(snapshotJSON), &snapshot); err != nil {
+		if err := json.Unmarshal([]byte(entry.SnapshotJSON), &snapshot); err != nil {
 			continue
 		}
-		if snapshot.ContinuationContract().Equal(reqContract) {
+		if !snapshot.ContinuationContract().Equal(reqContract) {
+			continue
+		}
+		if checkedTicketIDs[entry.TicketID] {
+			continue
+		}
+		checkedTicketIDs[entry.TicketID] = true
+		ticket, err := d.store.GetTicket(entry.TicketID)
+		if err != nil {
+			return false, err
+		}
+		if ticket == nil {
 			return true, nil
 		}
 	}

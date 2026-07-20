@@ -159,15 +159,16 @@ func TestScheduledAutomationSingletonContinuityReusesBinding(t *testing.T) {
 	}
 }
 
-// TestAutomationContinuityRunSnapshotsReturnsPriorRuns covers
-// AutomationContinuityRunSnapshots directly: no history for a continuity key
+// TestAutomationContinuityRunHistoryReturnsPriorRuns covers
+// AutomationContinuityRunHistory directly: no history for a continuity key
 // returns nothing; a prior run under the same key returns that run's own
-// pinned snapshot_json, excluding the current run itself. The daemon (see
-// hasPriorAutomationContinuityRun in internal/daemon/automations.go) is
-// responsible for deciding what a returned snapshot *means* (by comparing
-// its ContinuationContract to the current request) — this test only pins
-// what the store hands back.
-func TestAutomationContinuityRunSnapshotsReturnsPriorRuns(t *testing.T) {
+// pinned snapshot_json paired with its own ticket_id, excluding the current
+// run itself. The daemon (see hasPriorAutomationContinuityRun in
+// internal/daemon/automations.go) is responsible for deciding what a
+// returned entry *means* (by comparing its ContinuationContract to the
+// current request and checking its own ticket's existence) — this test only
+// pins what the store hands back.
+func TestAutomationContinuityRunHistoryReturnsPriorRuns(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
@@ -182,12 +183,12 @@ func TestAutomationContinuityRunSnapshotsReturnsPriorRuns(t *testing.T) {
 	}
 
 	// No history yet for a run's own continuity key excludes itself; nothing prior.
-	snapshots, err := s.AutomationContinuityRunSnapshots(def.ID, "singleton", first.ID)
+	history, err := s.AutomationContinuityRunHistory(def.ID, "singleton", first.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshots) != 0 {
-		t.Fatalf("expected no prior snapshots for the first run, got %#v", snapshots)
+	if len(history) != 0 {
+		t.Fatalf("expected no prior history for the first run, got %#v", history)
 	}
 
 	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Nightly", Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:nightly", TicketRoleChiefOfStaff, now); err != nil {
@@ -199,17 +200,17 @@ func TestAutomationContinuityRunSnapshotsReturnsPriorRuns(t *testing.T) {
 		t.Fatalf("second claim created=%v err=%v", created, err)
 	}
 
-	snapshots, err = s.AutomationContinuityRunSnapshots(def.ID, "singleton", second.ID)
+	history, err = s.AutomationContinuityRunHistory(def.ID, "singleton", second.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshots) != 1 || snapshots[0] != `{"prompt":"v1"}` {
-		t.Fatalf("expected the first run's own pinned snapshot as second's prior history, got %#v", snapshots)
+	if len(history) != 1 || history[0].SnapshotJSON != `{"prompt":"v1"}` || history[0].TicketID != "ticket-1" {
+		t.Fatalf("expected the first run's own pinned snapshot+ticket as second's prior history, got %#v", history)
 	}
 
 	// Empty continuity key never has history to report.
-	if snapshots, err := s.AutomationContinuityRunSnapshots(def.ID, "", second.ID); err != nil || len(snapshots) != 0 {
-		t.Fatalf("expected no snapshots for an empty continuity key, got %#v err=%v", snapshots, err)
+	if history, err := s.AutomationContinuityRunHistory(def.ID, "", second.ID); err != nil || len(history) != 0 {
+		t.Fatalf("expected no history for an empty continuity key, got %#v err=%v", history, err)
 	}
 }
 

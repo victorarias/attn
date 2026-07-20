@@ -496,7 +496,7 @@ func (s *Store) ClaimScheduledAutomationRun(definitionID, occurrenceKey, continu
 		}
 	}
 	now := formatTicketTime(observedAt)
-	// subject_key is recorded as continuityKey (not always ""): AutomationContinuityRunSnapshots
+	// subject_key is recorded as continuityKey (not always ""): AutomationContinuityRunHistory
 	// keys its lookup on subject_key, so the continuity key must be recorded there for the
 	// deleted-ticket safety guard to ever match a scheduled singleton's prior run.
 	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'schedule',?,?,?,?,?)`, ids.OccurrenceID, definitionID, occurrenceKey, continuityKey, now, payloadJSON, now); err != nil {
@@ -889,19 +889,35 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, o
 	return tx.Commit()
 }
 
-// AutomationContinuityRunSnapshots returns the pinned snapshot_json of every
-// other run recorded under this continuity key, most recent first. Delivery
-// uses this to decide whether the current cycle continues an earlier one
-// (and so must find that earlier cycle's ticket still present) or starts a
-// fresh episode: A1's continuity-binding rotation (automationApply, on a
-// contract-changing edit) mints a brand-new ticket for the same continuity
-// key while older runs remain in history under the old ticket, so a plain
-// "does history exist for this continuity key" check would wrongly treat
-// that stale history as binding on the new episode too. Comparing pinned
-// snapshots by ContinuationContract (done by the caller, which has the
-// domain type) tells the two cases apart: a rotation changes the contract,
-// so old snapshots stop matching; an ordinary crash/sweep does not.
-func (s *Store) AutomationContinuityRunSnapshots(definitionID, continuityKey, currentRunID string) ([]string, error) {
+// AutomationContinuityRunHistoryEntry is one other run recorded under a
+// continuity key: its own pinned snapshot_json (to test contract equality)
+// paired with its own delivery ticket_id (to test whether that specific
+// thread's ticket still exists). Continuation runs of the same thread carry
+// the same ticket_id as their origin (they reuse the thread's continuity
+// binding), so per-entry ticket resolution is exact — it never needs to fall
+// back to grouping by tickets.automation_run_id origin linkage.
+type AutomationContinuityRunHistoryEntry struct {
+	SnapshotJSON string
+	TicketID     string
+}
+
+// AutomationContinuityRunHistory returns every other run recorded under this
+// continuity key, most recent first. Delivery uses this to decide whether
+// the current cycle continues an earlier thread (and so must find that
+// thread's own ticket still present) or starts a fresh one: A1's
+// continuity-binding rotation (automationApply, on a contract-changing edit)
+// mints a brand-new ticket for the same continuity key while older runs
+// remain in history under their own old ticket, so a plain "does history
+// exist for this continuity key" check would wrongly treat that stale
+// history as binding on the new thread too. The caller (which holds the
+// domain type) compares each entry's ContinuationContract against the
+// current request and, only for a same-contract entry, checks whether that
+// entry's own ticket_id still exists — a rotation changes the contract, so
+// unrelated old threads are skipped entirely regardless of their ticket
+// state; a same-contract thread (e.g. after a revert back to an earlier
+// contract) is only treated as lost if its own ticket is actually gone, not
+// merely because some other thread's fresh ticket hasn't been created yet.
+func (s *Store) AutomationContinuityRunHistory(definitionID, continuityKey, currentRunID string) ([]AutomationContinuityRunHistoryEntry, error) {
 	if continuityKey == "" {
 		return nil, nil
 	}
@@ -911,7 +927,7 @@ func (s *Store) AutomationContinuityRunSnapshots(definitionID, continuityKey, cu
 		return nil, errors.New("automation persistence unavailable")
 	}
 	rows, err := s.db.Query(`
-		SELECT r.snapshot_json
+		SELECT r.snapshot_json, r.ticket_id
 		FROM automation_runs r
 		JOIN automation_occurrences o ON o.id=r.occurrence_id
 		WHERE r.definition_id=? AND o.subject_key=? AND r.id<>?
@@ -921,15 +937,15 @@ func (s *Store) AutomationContinuityRunSnapshots(definitionID, continuityKey, cu
 		return nil, err
 	}
 	defer rows.Close()
-	var snapshots []string
+	var history []AutomationContinuityRunHistoryEntry
 	for rows.Next() {
-		var snapshotJSON string
-		if err := rows.Scan(&snapshotJSON); err != nil {
+		var entry AutomationContinuityRunHistoryEntry
+		if err := rows.Scan(&entry.SnapshotJSON, &entry.TicketID); err != nil {
 			return nil, err
 		}
-		snapshots = append(snapshots, snapshotJSON)
+		history = append(history, entry)
 	}
-	return snapshots, rows.Err()
+	return history, rows.Err()
 }
 
 func scanAutomationRun(scanner interface{ Scan(...any) error }) (*AutomationRun, error) {
