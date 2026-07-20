@@ -534,8 +534,10 @@ async function main() {
         'runs remain queryable via the CLI after delete',
         runsAfterDelete,
       );
-      const deletedRow = sqliteRow(dbPath, `SELECT deleted_at FROM automation_definitions WHERE id='${sqlEscape(deleteID)}';`);
-      runner.assert(deletedRow && deletedRow[0] !== '', 'the definition row is soft-deleted (deleted_at set) in the DB', { deletedRow });
+      // Select id alongside deleted_at: sqlite3 prints a lone empty string as
+      // an empty line, which sqliteRow can't tell apart from "no row".
+      const deletedRow = sqliteRow(dbPath, `SELECT id, deleted_at FROM automation_definitions WHERE id='${sqlEscape(deleteID)}';`);
+      runner.assert(deletedRow && deletedRow[1] !== '' && deletedRow[1] !== undefined, 'the definition row is soft-deleted (deleted_at set) in the DB', { deletedRow });
 
       fs.writeFileSync(deleteDefinitionFile, deleteResurrectDefinitionYAML({ id: deleteID, locationPath: deleteFixture, enabled: true, executable: probe.executable }));
       runJSON(binary, ['automation', 'apply', '--file', deleteDefinitionFile], daemonEnv);
@@ -551,8 +553,8 @@ async function main() {
         'old run history survives resurrection',
         runsAfterResurrect,
       );
-      const resurrectedRow = sqliteRow(dbPath, `SELECT deleted_at FROM automation_definitions WHERE id='${sqlEscape(deleteID)}';`);
-      runner.assert(resurrectedRow && resurrectedRow[0] === '', 'the definition row is live again (deleted_at cleared) in the DB', { resurrectedRow });
+      const resurrectedRow = sqliteRow(dbPath, `SELECT id, deleted_at FROM automation_definitions WHERE id='${sqlEscape(deleteID)}';`);
+      runner.assert(resurrectedRow && (resurrectedRow[1] ?? '') === '', 'the definition row is live again (deleted_at cleared) in the DB', { resurrectedRow });
 
       fs.writeFileSync(deleteDefinitionFile, deleteResurrectDefinitionYAML({ id: deleteID, locationPath: deleteFixture, enabled: false, executable: probe.executable }));
       runJSON(binary, ['automation', 'apply', '--file', deleteDefinitionFile], daemonEnv);
