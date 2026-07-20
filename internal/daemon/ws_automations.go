@@ -236,22 +236,31 @@ func (d *Daemon) handleAutomationApplyWS(client *wsClient, msg *protocol.Automat
 
 // handleAutomationValidateWS is the WS counterpart of the unix-socket
 // CmdAutomationValidate path: validate-without-apply, so the editor can show
-// an error before Save. It runs synchronously (no goroutine, no
-// automationMu): validateAutomationSpec never mutates the store, so it
-// cannot contend with an in-flight apply/delete/set_enabled the way the
-// mutation handlers above can.
+// an error before Save.
+//
+// It takes no automationMu: validateAutomationSpec never mutates the store,
+// so it cannot contend with an in-flight apply/delete/set_enabled the way the
+// mutation handlers above can. It does still run on its own goroutine,
+// because "does not touch the store" is not the same as "is fast": each
+// location override is checked with git.ValidateLocalClone, which stats the
+// path and shells out to git twice. The dispatcher calls handlers inline on
+// the client's read loop, so validating synchronously would stall every other
+// message from that client behind those subprocesses — and a path on an
+// unresponsive mount would stall them indefinitely.
 func (d *Daemon) handleAutomationValidateWS(client *wsClient, msg *protocol.AutomationValidateMessage) {
-	_, _, err := d.validateAutomationSpec(msg.DefinitionYaml)
-	result := protocol.AutomationActionResultMessage{
-		Event:     protocol.EventAutomationActionResult,
-		Action:    "validate",
-		RequestID: msg.RequestID,
-		Success:   err == nil,
-	}
-	if err != nil {
-		result.Error = protocol.Ptr(err.Error())
-	}
-	d.sendToClient(client, result)
+	go func() {
+		_, _, err := d.validateAutomationSpec(msg.DefinitionYaml)
+		result := protocol.AutomationActionResultMessage{
+			Event:     protocol.EventAutomationActionResult,
+			Action:    "validate",
+			RequestID: msg.RequestID,
+			Success:   err == nil,
+		}
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+		}
+		d.sendToClient(client, result)
+	}()
 }
 
 // handleAutomationDefinitionGetWS backs the editor's load path: definition_id
