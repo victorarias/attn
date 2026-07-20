@@ -234,6 +234,135 @@ func (s *Store) ClaimManualAutomationRun(definitionID, requestID, subjectKey, pa
 	return run, true, e
 }
 
+// ClaimScheduledAutomationRun claims one scheduled occurrence, keyed by the
+// intended instant's occurrence key. Idempotent on (definition_id, provider,
+// occurrence_key): a second claim for the same key returns the existing run
+// without consuming the reservation. expectedRevision guards against the
+// observation race where the snapshot was built from a definition revision
+// read before this transaction: a mismatch rejects the claim and lets the
+// next tick re-read and re-decide, mirroring ClaimGitHubReviewAutomationRun.
+// continuityKey is "" for policy.continuity fresh (every occurrence gets its
+// own reservation IDs) or "singleton" for policy.continuity singleton, in
+// which case the reservation's ticket/session/workspace/pane IDs are bound
+// once per definition and reused by every later occurrence, mirroring
+// ClaimGitHubReviewAutomationRun's per-subject binding reuse.
+func (s *Store) ClaimScheduledAutomationRun(definitionID, occurrenceKey, continuityKey string, expectedRevision int, payloadJSON, snapshotJSON string, observedAt time.Time, reservation AutomationRunReservation) (*AutomationRun, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil, false, errors.New("automation persistence unavailable")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+	var existingID string
+	err = tx.QueryRow(`SELECT r.id FROM automation_occurrences o JOIN automation_runs r ON r.occurrence_id=o.id WHERE o.definition_id=? AND o.provider='schedule' AND o.occurrence_key=?`, definitionID, occurrenceKey).Scan(&existingID)
+	if err == nil {
+		tx.Rollback()
+		run, e := s.getAutomationRunUnlocked(existingID)
+		return run, false, e
+	}
+	if err != sql.ErrNoRows {
+		return nil, false, err
+	}
+	var revision, enabled int
+	if err := tx.QueryRow(`SELECT revision,enabled FROM automation_definitions WHERE id=? AND deleted_at=''`, definitionID).Scan(&revision, &enabled); err != nil {
+		return nil, false, err
+	}
+	if revision != expectedRevision {
+		return nil, false, errors.New("automation definition changed while accepting observation")
+	}
+	if enabled == 0 {
+		return nil, false, fmt.Errorf("automation %q is disabled", definitionID)
+	}
+	ids := reservation
+	if continuityKey != "" {
+		// A later occurrence must not overtake an earlier one whose ticket has
+		// not been created yet: delivery would otherwise mistake the
+		// not-yet-created ticket for one already swept, the same hazard
+		// ClaimGitHubReviewAutomationRun guards against per subject.
+		var undeliveredPredecessor int
+		if err := tx.QueryRow(`
+			SELECT EXISTS(
+				SELECT 1
+				FROM automation_runs r
+				JOIN automation_occurrences o ON o.id=r.occurrence_id
+				WHERE r.definition_id=? AND o.provider='schedule' AND r.state='pending'
+				  AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.id=r.ticket_id)
+			)
+		`, definitionID).Scan(&undeliveredPredecessor); err != nil {
+			return nil, false, err
+		}
+		if undeliveredPredecessor != 0 {
+			return nil, false, errors.New("an earlier scheduled automation run for this definition has not created its ticket yet")
+		}
+		var createdAt, updatedAt string
+		err = tx.QueryRow(`SELECT ticket_id,session_id,workspace_id,pane_id,created_at,updated_at FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?`, definitionID, continuityKey).Scan(&ids.TicketID, &ids.SessionID, &ids.WorkspaceID, &ids.PaneID, &createdAt, &updatedAt)
+		switch err {
+		case sql.ErrNoRows:
+			now := formatTicketTime(observedAt)
+			if _, err = tx.Exec(`INSERT INTO automation_continuity_bindings(definition_id,continuity_key,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, definitionID, continuityKey, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
+				return nil, false, err
+			}
+		case nil:
+		default:
+			return nil, false, err
+		}
+	}
+	now := formatTicketTime(observedAt)
+	// subject_key is recorded as continuityKey (not always ""): HasPriorAutomationContinuityRun
+	// keys its lookup on subject_key, so the continuity key must be recorded there for the
+	// deleted-ticket safety guard to ever match a scheduled singleton's prior run.
+	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'schedule',?,?,?,?,?)`, ids.OccurrenceID, definitionID, occurrenceKey, continuityKey, now, payloadJSON, now); err != nil {
+		return nil, false, err
+	}
+	if _, err = tx.Exec(`INSERT INTO automation_runs(id,definition_id,occurrence_id,definition_revision,snapshot_json,state,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?,?,?,?)`, ids.RunID, definitionID, ids.OccurrenceID, revision, snapshotJSON, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
+		return nil, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	run, e := s.getAutomationRunUnlocked(ids.RunID)
+	return run, true, e
+}
+
+// GetAutomationScheduleCursor returns the last observed instant recorded by
+// SetAutomationScheduleCursor for this definition, ok=false when unset.
+func (s *Store) GetAutomationScheduleCursor(definitionID string) (time.Time, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return time.Time{}, false, errors.New("automation persistence unavailable")
+	}
+	var raw string
+	err := s.db.QueryRow(`SELECT observed_at FROM automation_provider_cursors WHERE definition_id=? AND provider='schedule' AND scope='*'`, definitionID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	at, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse automation schedule cursor: %w", err)
+	}
+	return at, true, nil
+}
+
+// SetAutomationScheduleCursor records the schedule's cursor instant, on the
+// shared automation_provider_cursors table (provider "schedule", scope "*").
+func (s *Store) SetAutomationScheduleCursor(definitionID string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("automation persistence unavailable")
+	}
+	_, err := s.db.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'schedule','*',?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at`, definitionID, at.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
 // ReconcileAutomationReviewRequests records the provider's complete current
 // review-request demand for one host. It returns active edges whose current cycle
 // either has not been accepted or still owns a pending run, so both detail-fetch
@@ -580,6 +709,12 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, o
 // the current run. It lets delivery distinguish first-run crash recovery (where
 // the ticket may not exist yet) from a later cycle whose bound ticket was removed.
 func (s *Store) HasPriorAutomationContinuityRun(definitionID, continuityKey, currentRunID string) (bool, error) {
+	// An empty continuity key means "no continuity": without this guard the
+	// subject_key match below would pair any two fresh-continuity occurrences
+	// (both stored with subject_key='').
+	if continuityKey == "" {
+		return false, nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.db == nil {

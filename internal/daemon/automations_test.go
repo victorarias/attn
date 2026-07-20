@@ -424,7 +424,7 @@ trigger: {type: manual}
 prompt: Check locally.
 launch: {driver: codex}
 location: {type: directory, path: "` + t.TempDir() + `"}
-policy: {continuity: fresh, catch_up: none, overlap: coalesce}
+policy: {continuity: fresh, overlap: coalesce}
 `
 	def, err := d.automationApply(raw)
 	if err != nil {
@@ -884,7 +884,7 @@ func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T
 		t.Fatal(err)
 	}
 	d := &Daemon{store: s, ptyBackend: &fakeSpawnBackend{sessionIDs: []string{first.SessionID}}}
-	req := automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Context: json.RawMessage(secondPayload), IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}
+	req := automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Provider: "github", Context: json.RawMessage(secondPayload), IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}
 	changedContract := req
 	changedContract.Context = json.RawMessage(firstPayload)
 	changedContract.Prompt = "Updated review instructions"
@@ -1133,7 +1133,7 @@ func TestReRequestCanStartReviewerWhenWithdrawnOriginNeverLaunched(t *testing.T)
 		t.Fatal(err)
 	}
 	req := automation.WorkRequest{
-		RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Prompt: "Review", Context: json.RawMessage(payload),
+		RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Provider: "github", Prompt: "Review", Context: json.RawMessage(payload),
 		IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID},
 	}
 	if err := d.validateAutomationContinuation(req); err != nil {

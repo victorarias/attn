@@ -33,6 +33,281 @@ func TestAutomationClaimIsIdempotentAndSnapshotsRevision(t *testing.T) {
 	}
 }
 
+func TestScheduledAutomationClaimIsIdempotent(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "scheduled:2026-07-20T03:00:00Z"
+	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "auto-run-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	first, created, err := s.ClaimScheduledAutomationRun(def.ID, key, "", def.Revision, `{"provider":"schedule"}`, `{"prompt":"sweep"}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("first claim created=%v err=%v", created, err)
+	}
+	other := AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "auto-run-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"}
+	second, created, err := s.ClaimScheduledAutomationRun(def.ID, key, "", def.Revision, `{"provider":"schedule","changed":true}`, `{"prompt":"changed"}`, now.Add(time.Minute), other)
+	if err != nil || created {
+		t.Fatalf("duplicate claim created=%v err=%v", created, err)
+	}
+	if second.ID != first.ID || second.TicketID != first.TicketID || second.SnapshotJSON != `{"prompt":"sweep"}` {
+		t.Fatalf("duplicate returned different run: %#v", second)
+	}
+	var occurrenceCount int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM automation_occurrences WHERE definition_id=? AND provider='schedule'`, def.ID).Scan(&occurrenceCount); err != nil {
+		t.Fatal(err)
+	}
+	if occurrenceCount != 1 {
+		t.Fatalf("occurrence count=%d, want 1", occurrenceCount)
+	}
+}
+
+func TestScheduledAutomationClaimRejectsStaleRevision(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A second apply bumps the revision, simulating the definition changing
+	// between the caller's revision read and this claim's transaction.
+	if _, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly","edited":true}`, true, now); err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	if _, _, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "", def.Revision, `{}`, `{}`, now, ids); err == nil {
+		t.Fatal("expected stale revision claim to be rejected")
+	}
+	if occurrence, err := s.GetAutomationOccurrence("occ-1"); err != nil || occurrence != nil {
+		t.Fatalf("rejected claim left an occurrence: %#v err=%v", occurrence, err)
+	}
+	if run, err := s.GetAutomationRun("run-1"); err != nil || run != nil {
+		t.Fatalf("rejected claim persisted a run: %#v err=%v", run, err)
+	}
+}
+
+// TestScheduledAutomationClaimRejectsDisabledDefinition pins the store-level
+// guard itself (Fix 4b): there is already a daemon-level test that a disabled
+// definition never reaches the claim at all, but this proves
+// ClaimScheduledAutomationRun refuses on its own and leaves no occurrence or
+// run rows, matching the enabled-check every other claim path relies on.
+func TestScheduledAutomationClaimRejectsDisabledDefinition(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	if _, _, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "", def.Revision, `{}`, `{}`, now, ids); err == nil {
+		t.Fatal("expected a disabled definition's claim to be rejected")
+	}
+	if occurrence, err := s.GetAutomationOccurrence("occ-1"); err != nil || occurrence != nil {
+		t.Fatalf("rejected claim left an occurrence: %#v err=%v", occurrence, err)
+	}
+	if run, err := s.GetAutomationRun("run-1"); err != nil || run != nil {
+		t.Fatalf("rejected claim persisted a run: %#v err=%v", run, err)
+	}
+}
+
+func TestScheduledAutomationDifferentInstantsClaimDifferentRuns(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "", def.Revision, `{}`, `{}`, now, AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if err != nil || !created {
+		t.Fatalf("first claim created=%v err=%v", created, err)
+	}
+	second, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-21T03:00:00Z", "", def.Revision, `{}`, `{}`, now.Add(24*time.Hour), AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"})
+	if err != nil || !created {
+		t.Fatalf("second claim created=%v err=%v", created, err)
+	}
+	if second.ID == first.ID {
+		t.Fatalf("different instants claimed the same run: %#v", second)
+	}
+}
+
+func TestScheduledAutomationSingletonContinuityReusesBinding(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstIDs := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	first, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "singleton", def.Revision, `{}`, `{}`, now, firstIDs)
+	if err != nil || !created {
+		t.Fatalf("first claim created=%v err=%v", created, err)
+	}
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Nightly", Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:nightly", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	secondIDs := AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"}
+	second, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-21T03:00:00Z", "singleton", def.Revision, `{}`, `{}`, now.Add(24*time.Hour), secondIDs)
+	if err != nil || !created {
+		t.Fatalf("second claim created=%v err=%v", created, err)
+	}
+	if second.ID == first.ID {
+		t.Fatal("second occurrence should claim a distinct run")
+	}
+	if second.TicketID != first.TicketID || second.SessionID != first.SessionID || second.WorkspaceID != first.WorkspaceID || second.PaneID != first.PaneID {
+		t.Fatalf("singleton continuity did not reuse binding IDs: first=%#v second=%#v", first, second)
+	}
+}
+
+// TestScheduledAutomationSingletonRecordsContinuityKeyAsSubjectKey is the
+// regression check for Fix 2: HasPriorAutomationContinuityRun matches on
+// automation_occurrences.subject_key, so a scheduled singleton's occurrence
+// must record subject_key="singleton" (not "") or the deleted-ticket safety
+// guard can never fire for scheduled singletons.
+func TestScheduledAutomationSingletonRecordsContinuityKeyAsSubjectKey(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstIDs := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	first, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "singleton", def.Revision, `{}`, `{}`, now, firstIDs)
+	if err != nil || !created {
+		t.Fatalf("first claim created=%v err=%v", created, err)
+	}
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Nightly", Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:nightly", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	secondIDs := AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"}
+	second, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-21T03:00:00Z", "singleton", def.Revision, `{}`, `{}`, now.Add(24*time.Hour), secondIDs)
+	if err != nil || !created {
+		t.Fatalf("second claim created=%v err=%v", created, err)
+	}
+
+	firstOccurrence, err := s.GetAutomationOccurrence(first.OccurrenceID)
+	if err != nil || firstOccurrence == nil || firstOccurrence.SubjectKey != "singleton" {
+		t.Fatalf("first occurrence = %#v err=%v, want subject_key=singleton", firstOccurrence, err)
+	}
+	hasPrior, err := s.HasPriorAutomationContinuityRun(def.ID, "singleton", second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasPrior {
+		t.Fatal("HasPriorAutomationContinuityRun=false, want true once the singleton's occurrence records subject_key")
+	}
+}
+
+// TestScheduledAutomationFreshContinuityRecordsEmptySubjectKey guards the
+// other half of Fix 2: fresh continuity (policy.continuity=fresh) still
+// records subject_key="" per occurrence, so HasPriorAutomationContinuityRun
+// never spuriously matches unrelated fresh occurrences against each other.
+func TestScheduledAutomationFreshContinuityRecordsEmptySubjectKey(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	run, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "", def.Revision, `{}`, `{}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("claim created=%v err=%v", created, err)
+	}
+	occurrence, err := s.GetAutomationOccurrence(run.OccurrenceID)
+	if err != nil || occurrence == nil || occurrence.SubjectKey != "" {
+		t.Fatalf("occurrence = %#v err=%v, want subject_key empty for fresh continuity", occurrence, err)
+	}
+	// Callers never invoke HasPriorAutomationContinuityRun with an empty
+	// continuity key (both validateAutomationContinuation and EnsureTicket
+	// early-return when req.ContinuityKey == ""), so this only pins that
+	// fresh continuity keeps recording an empty subject_key rather than
+	// accidentally adopting Fix 2's "singleton" literal.
+	hasPrior, err := s.HasPriorAutomationContinuityRun(def.ID, "", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasPrior {
+		t.Fatal("HasPriorAutomationContinuityRun=true against an empty continuity key, want false")
+	}
+}
+
+func TestScheduledAutomationSingletonContinuityBlocksUndeliveredPredecessor(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstIDs := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	if _, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "singleton", def.Revision, `{}`, `{}`, now, firstIDs); err != nil || !created {
+		t.Fatalf("first claim created=%v err=%v", created, err)
+	}
+	// No ticket was ever created for the first run, so the second occurrence's
+	// claim must refuse rather than reuse a binding whose ticket is missing.
+	secondIDs := AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"}
+	if _, _, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-21T03:00:00Z", "singleton", def.Revision, `{}`, `{}`, now.Add(24*time.Hour), secondIDs); err == nil {
+		t.Fatal("expected second claim to be rejected while the first run has no ticket yet")
+	}
+}
+
+func TestAutomationScheduleCursorGetSetRoundtrip(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.GetAutomationScheduleCursor(def.ID); err != nil || ok {
+		t.Fatalf("missing cursor ok=%v err=%v", ok, err)
+	}
+	instant := time.Date(2026, 7, 20, 3, 0, 0, 123000000, time.UTC)
+	if err := s.SetAutomationScheduleCursor(def.ID, instant); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := s.GetAutomationScheduleCursor(def.ID)
+	if err != nil || !ok {
+		t.Fatalf("roundtrip cursor ok=%v err=%v", ok, err)
+	}
+	if !got.Equal(instant) {
+		t.Fatalf("cursor=%v, want %v", got, instant)
+	}
+	later := instant.Add(time.Hour)
+	if err := s.SetAutomationScheduleCursor(def.ID, later); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err = s.GetAutomationScheduleCursor(def.ID)
+	if err != nil || !ok || !got.Equal(later) {
+		t.Fatalf("advanced cursor=%v ok=%v err=%v", got, ok, err)
+	}
+}
+
+func TestListPendingAutomationRunsIncludesScheduledProvider(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "", def.Revision, `{}`, `{}`, now, AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if err != nil || !created {
+		t.Fatalf("claim created=%v err=%v", created, err)
+	}
+	pending, err := s.ListPendingAutomationRuns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range pending {
+		if r.ID == run.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("pending runs=%#v, missing claimed schedule run %s", pending, run.ID)
+	}
+}
+
 func TestEnsureAutomationTicketAdoptsByRun(t *testing.T) {
 	s := New()
 	now := time.Now()

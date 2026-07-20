@@ -219,6 +219,175 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	}
 }
 
+func TestScheduledDefinitionValidation(t *testing.T) {
+	dir := t.TempDir()
+	base := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
+id: nightly
+name: Nightly
+enabled: true
+trigger:
+  type: scheduled
+  schedule: {cron: "0 3 * * *", time_zone: America/New_York}
+prompt: Sweep.
+launch: {driver: codex}
+location: {type: directory, path: PATH}
+policy: {continuity: fresh, catch_up: skip}
+`, "PATH", dir)
+	if _, _, err := ParseDefinitionYAML([]byte(base)); err != nil {
+		t.Fatalf("valid scheduled definition rejected: %v", err)
+	}
+	for name, raw := range map[string]string{
+		"missing cron":                 strings.Replace(base, `cron: "0 3 * * *", `, "", 1),
+		"TZ prefix":                    strings.Replace(base, `cron: "0 3 * * *"`, `cron: "TZ=America/New_York 0 3 * * *"`, 1),
+		"CRON_TZ prefix":               strings.Replace(base, `cron: "0 3 * * *"`, `cron: "CRON_TZ=America/New_York 0 3 * * *"`, 1),
+		"invalid cron":                 strings.Replace(base, `cron: "0 3 * * *"`, `cron: "not a cron"`, 1),
+		"never-occurring cron":         strings.Replace(base, `cron: "0 3 * * *"`, `cron: "0 0 30 2 *"`, 1),
+		"missing time zone":            strings.Replace(base, ", time_zone: America/New_York", "", 1),
+		"invalid time zone":            strings.Replace(base, "time_zone: America/New_York", "time_zone: Not/AZone", 1),
+		"repository_worktree location": strings.Replace(base, "location: {type: directory, path: "+dir+"}", "location: {type: repository_worktree, repository_sources: {default: {type: managed_cache}}}", 1),
+		"per_subject continuity":       strings.Replace(base, "continuity: fresh, catch_up: skip", "continuity: per_subject, catch_up: skip", 1),
+		"missing catch_up":             strings.Replace(base, "continuity: fresh, catch_up: skip", "continuity: fresh", 1),
+		"catch_up queue":               strings.Replace(base, "catch_up: skip", "catch_up: queue", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw = strings.ReplaceAll(raw, "PATH", dir)
+			if _, _, err := ParseDefinitionYAML([]byte(raw)); err == nil {
+				t.Fatal("accepted invalid scheduled definition")
+			}
+		})
+	}
+	for name, catchUp := range map[string]string{"skip": "skip", "latest": "latest"} {
+		t.Run("catch_up "+name, func(t *testing.T) {
+			raw := strings.Replace(base, "catch_up: skip", "catch_up: "+catchUp, 1)
+			if _, _, err := ParseDefinitionYAML([]byte(raw)); err != nil {
+				t.Fatalf("catch_up=%s rejected: %v", catchUp, err)
+			}
+		})
+	}
+	for name, continuity := range map[string]string{"fresh": "fresh", "singleton": "singleton"} {
+		t.Run("continuity "+name, func(t *testing.T) {
+			raw := strings.Replace(base, "continuity: fresh", "continuity: "+continuity, 1)
+			if _, _, err := ParseDefinitionYAML([]byte(raw)); err != nil {
+				t.Fatalf("continuity=%s rejected: %v", continuity, err)
+			}
+		})
+	}
+}
+
+func TestManualAndGitHubTriggersRejectSchedule(t *testing.T) {
+	dir := t.TempDir()
+	manual := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
+id: manual-with-schedule
+name: Manual
+enabled: true
+trigger:
+  type: manual
+  schedule: {cron: "0 3 * * *", time_zone: UTC}
+prompt: Inspect.
+launch: {driver: codex}
+location: {type: directory, path: PATH}
+policy: {continuity: fresh}
+`, "PATH", dir)
+	if _, _, err := ParseDefinitionYAML([]byte(manual)); err == nil || !strings.Contains(err.Error(), "cannot configure schedule") {
+		t.Fatalf("err = %v", err)
+	}
+	github := `api_version: attn.dev/automations/v1alpha1
+id: requested-review
+name: Requested review
+enabled: true
+trigger:
+  type: github_review_requested
+  repositories: {mode: all_accessible}
+  schedule: {cron: "0 3 * * *", time_zone: UTC}
+prompt: Review locally.
+launch: {driver: codex}
+location:
+  type: repository_worktree
+  repository_sources: {default: {type: managed_cache}}
+policy: {continuity: per_subject, catch_up: latest}
+`
+	if _, _, err := ParseDefinitionYAML([]byte(github)); err == nil || !strings.Contains(err.Error(), "cannot configure schedule") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestCanonicalJSONOmitsScheduleForNonScheduledTriggers is the regression
+// check for Fix 3: encoding/json's omitempty does not omit a zero-value
+// struct, so TriggerSpec.Schedule must be a pointer or every manual/
+// github_review_requested definition's canonical JSON grows a spurious
+// "schedule":{} key, which would bump UpsertAutomationDefinition's revision
+// on every byte-identical re-apply.
+func TestCanonicalJSONOmitsScheduleForNonScheduledTriggers(t *testing.T) {
+	dir := t.TempDir()
+	manual := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
+id: manual-no-schedule
+name: Manual
+enabled: true
+trigger: {type: manual}
+prompt: Inspect.
+launch: {driver: codex}
+location: {type: directory, path: PATH}
+policy: {continuity: fresh}
+`, "PATH", dir)
+	_, canonical, err := ParseDefinitionYAML([]byte(manual))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(canonical), `"schedule"`) {
+		t.Fatalf("canonical JSON contains a schedule key for a manual trigger: %s", canonical)
+	}
+}
+
+// TestScheduledDefinitionRoundTripsCronAndTimeZone locks in that
+// TriggerSpec.Schedule's pointer conversion still carries cron/time_zone
+// through both the YAML parse and a canonical-JSON re-decode.
+func TestScheduledDefinitionRoundTripsCronAndTimeZone(t *testing.T) {
+	dir := t.TempDir()
+	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
+id: nightly
+name: Nightly
+enabled: true
+trigger:
+  type: scheduled
+  schedule: {cron: "0 3 * * *", time_zone: America/New_York}
+prompt: Sweep.
+launch: {driver: codex}
+location: {type: directory, path: PATH}
+policy: {continuity: fresh, catch_up: skip}
+`, "PATH", dir)
+	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Trigger.Schedule == nil || spec.Trigger.Schedule.Cron != "0 3 * * *" || spec.Trigger.Schedule.TimeZone != "America/New_York" {
+		t.Fatalf("parsed schedule = %#v, want cron/time_zone preserved", spec.Trigger.Schedule)
+	}
+	var reDecoded DefinitionSpec
+	if err := json.Unmarshal(canonical, &reDecoded); err != nil {
+		t.Fatal(err)
+	}
+	if reDecoded.Trigger.Schedule == nil || reDecoded.Trigger.Schedule.Cron != "0 3 * * *" || reDecoded.Trigger.Schedule.TimeZone != "America/New_York" {
+		t.Fatalf("canonical JSON round-trip schedule = %#v, want cron/time_zone preserved", reDecoded.Trigger.Schedule)
+	}
+}
+
+func TestManualTriggerRejectsCatchUp(t *testing.T) {
+	dir := t.TempDir()
+	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
+id: manual-with-catchup
+name: Manual
+enabled: true
+trigger: {type: manual}
+prompt: Inspect.
+launch: {driver: codex}
+location: {type: directory, path: PATH}
+policy: {continuity: fresh, catch_up: skip}
+`, "PATH", dir)
+	if _, _, err := ParseDefinitionYAML([]byte(raw)); err == nil || !strings.Contains(err.Error(), "cannot configure policy.catch_up") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestPullRequestInputIsStrictAndCanonical(t *testing.T) {
 	raw := json.RawMessage(`{"provider":"github","host":"GitHub.COM","owner":"Owner","repository":"Repo","number":42,"url":"https://github.com/owner/repo/pull/42/","state":"open","draft":false,"head_sha":"0123456789ABCDEF0123456789ABCDEF01234567"}`)
 	input, err := ParsePullRequestInput(raw)
