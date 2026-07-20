@@ -170,6 +170,52 @@ func TestAutomationSetEnabledWSResultCorrelatesRequest(t *testing.T) {
 	}
 }
 
+// TestAutomationDeleteWSResultCorrelatesRequest mirrors
+// TestAutomationSetEnabledWSResultCorrelatesRequest for handleAutomationDeleteWS:
+// a successful delete's result is still correlated by request_id once it
+// lands, and an unknown definition surfaces as success=false with an error
+// rather than a transport failure.
+func TestAutomationDeleteWSResultCorrelatesRequest(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDeleteWS(client, &protocol.AutomationDeleteMessage{
+		Cmd:          protocol.CmdAutomationDelete,
+		DefinitionID: def.ID,
+		RequestID:    protocol.Ptr("delete-1"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.RequestID == nil || *res.RequestID != "delete-1" {
+		t.Fatalf("delete result = %+v, want success for delete-1", res)
+	}
+
+	if got, err := s.GetAutomationDefinition(def.ID); err != nil || got != nil {
+		t.Fatalf("expected the definition to be soft-deleted, got %#v err=%v", got, err)
+	}
+
+	// Unknown definition surfaces as success=false with an error, not a
+	// transport failure.
+	client2 := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDeleteWS(client2, &protocol.AutomationDeleteMessage{
+		Cmd:          protocol.CmdAutomationDelete,
+		DefinitionID: "does-not-exist",
+		RequestID:    protocol.Ptr("delete-2"),
+	})
+	var errRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client2.send, &errRes)
+	if errRes.Success || errRes.Error == nil {
+		t.Fatalf("delete unknown definition result = %+v, want success=false with error", errRes)
+	}
+}
+
 // TestAutomationRunWSResultCorrelatesRequest exercises handleAutomationRunWS
 // (also goroutine-backed) via the same idempotent-dedup technique as
 // TestAutomationRunBroadcastsAfterClaim: pre-claiming and pre-delivering the

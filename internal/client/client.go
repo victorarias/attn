@@ -94,6 +94,10 @@ func (c *Client) AutomationRuns(id string) (json.RawMessage, error) {
 	}
 	return r.Data, nil
 }
+func (c *Client) AutomationDelete(id string) error {
+	_, e := c.sendAutomation(protocol.AutomationDeleteMessage{Cmd: protocol.CmdAutomationDelete, DefinitionID: id})
+	return e
+}
 
 type ListResult struct {
 	Sessions   []protocol.Session   `json:"sessions"`

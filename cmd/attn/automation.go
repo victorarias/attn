@@ -10,7 +10,9 @@ import (
 	"github.com/victorarias/attn/internal/client"
 )
 
-func automationUsage() { fmt.Fprint(os.Stderr, "usage: attn automation <apply|list|show|run|runs>\n") }
+func automationUsage() {
+	fmt.Fprint(os.Stderr, "usage: attn automation <apply|list|show|run|runs|delete>\n")
+}
 func runAutomationCommand() {
 	if len(os.Args) < 3 {
 		automationUsage()
@@ -88,6 +90,14 @@ func runAutomationCommand() {
 			break
 		}
 		data, err = c.AutomationRuns(os.Args[3])
+	case "delete":
+		if len(os.Args) != 4 {
+			err = fmt.Errorf("usage: attn automation delete <definition-id>")
+			break
+		}
+		if err = c.AutomationDelete(os.Args[3]); err == nil {
+			data, _ = json.Marshal(map[string]string{"deleted": os.Args[3]})
+		}
 	default:
 		err = fmt.Errorf("unknown automation command %q", os.Args[2])
 	}

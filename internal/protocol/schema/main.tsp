@@ -1577,6 +1577,16 @@ model AutomationShowMessage { cmd: "automation_show"; definition_id: string; }
 model AutomationRunMessage { cmd: "automation_run"; definition_id: string; request_id: string; input_json?: string; pr_url?: string; }
 model AutomationRunListMessage { cmd: "automation_run_list"; definition_id: string; }
 
+// Dual-surface (unix-socket/CLI + WS), unlike automation_set_enabled below:
+// mirrors automation_apply/automation_run's shape. request_id is optional
+// because the WS path uses it for correlation but the socket/CLI path
+// doesn't need one.
+model AutomationDeleteMessage {
+  cmd: "automation_delete";
+  definition_id: string;
+  request_id?: string;
+}
+
 // WS-only automations surface: list definitions, list one definition's runs, and
 // toggle enabled. automation_run (above) is reused for WS run-now; it already
 // carries request_id for correlation.

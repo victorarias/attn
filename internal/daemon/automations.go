@@ -1426,6 +1426,9 @@ func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 	case protocol.CmdAutomationRunList:
 		m := msg.(*protocol.AutomationRunListMessage)
 		data, err = d.store.ListAutomationRuns(m.DefinitionID)
+	case protocol.CmdAutomationDelete:
+		m := msg.(*protocol.AutomationDeleteMessage)
+		err = d.automationDelete(context.Background(), m.DefinitionID)
 	}
 	result := automationActionResult{Event: protocol.EventAutomationActionResult, Action: cmd, Success: err == nil}
 	if err != nil {
