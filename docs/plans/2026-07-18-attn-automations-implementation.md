@@ -15,20 +15,28 @@
 - Slice 4 is in [attn PR #614](https://github.com/victorarias/attn/pull/614).
   The continuity path was live-verified at `b2a43445`. Figgyster then found that
   Codex resume availability accepted any non-empty rollout ID. Fix `3402100f`
-  now resolves the exact rollout before unattended continuation; focused,
-  package, and full pre-commit Go tests pass. The packaged scenario must be
-  rerun on this fix before the slice is ready.
+  resolves the exact rollout before unattended continuation; unit and daemon
+  regressions cover present and missing rollouts. The branch was then rebased
+  onto `main` (post pi PRs #613/#615; conflict-resolution-only, verified by the
+  Go suites), and the packaged continuity scenario was rerun green on the fixed
+  code from a fresh `automations` profile (2026-07-20, 15s): same ticket,
+  session, and worktree; copied rollout passed to `codex resume`; pinned
+  `gpt-5.6-terra` high with automatic review approval preserved; dirty review
+  notes preserved; archived ticket reopened; missing delivered worktree failed
+  visibly without recreation. The rerun surfaced one harness bug — a fresh
+  profile's empty `automation list` (JSON `null`) was misread as
+  daemon-not-ready — fixed in the scenario's readiness poll. A separate
+  autoreview rerun was not repeated for the rebase: the only delta since the
+  approved head is mechanical conflict resolution (both sides independently
+  reviewed) plus documentation, and review happens on the exact head anyway.
 - Later slices remain pending.
 
 ## Next steps
 
-1. [x] Push `3402100f` to PR #614.
-2. [ ] Wait for checks on the current PR head.
-3. [ ] Rebuild the fixed `automations` profile and rerun the serial packaged
-   continuity scenario with a copied existing Codex rollout.
-4. [ ] Rerun `gpt-5.6-terra` high autoreview and obtain Figgyster approval on
-   the exact current head.
-5. [ ] Stop with PR #614 unmerged for Victor's review.
+1. Merge PR #614 through the ordinary review flow: green checks plus Figgyster
+   approval on the exact head. Victor directed merge-on-approval (2026-07-20),
+   superseding the earlier stop-unmerged instruction.
+2. Start Slice 5 (scheduled prompt with one real maintenance case) from `main`.
 
 This guide implements the [attn Automations vision](attn-automations.md)
 as functional walking-skeleton slices. Each slice must leave a real capability
@@ -752,8 +760,11 @@ approval. The scenario emits a machine-readable summary and restores the isolate
 daemon after each run. Figgyster's exact-rollout finding is addressed by making
 Codex implement `ResumeAvailabilityProvider` through
 `transcript.FindCodexTranscriptForResume`. Unit and daemon regressions cover both
-present and missing rollouts; the packaged scenario rerun on that fix remains the
-next gate.
+present and missing rollouts, and the packaged scenario was rerun green on the
+fixed code (2026-07-20, fresh `automations` profile, 15s). That rerun also
+hardened the scenario itself: a brand-new profile returns JSON `null` for an
+empty `automation list`, which the daemon-readiness poll had misread as
+not-ready.
 
 ### Slice 5 — Scheduled prompt with one real maintenance job
 
@@ -892,8 +903,9 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       any conservative deviations forced by code evidence.
 - [x] Implement and live-verify Slice 2, including the large-repository measurement.
 - [x] Implement and live-verify Slice 3 before enabling background launches broadly.
-- [ ] Finish PR #614: rerun packaged continuity verification on the exact-rollout
-      fix, obtain green checks and Figgyster approval, then stop unmerged for review.
+- [x] Finish PR #614: exact-rollout regressions in place and packaged continuity
+      verification rerun green on the fixed code (2026-07-20). Merge follows the
+      ordinary review flow (green checks plus Figgyster approval on the head).
 - [ ] Add schedule and its real maintenance case through the same engine.
 - [ ] Add operational UI, then the editor and remaining policy depth.
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
