@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -264,13 +265,113 @@ func verifyDelegationWorktreeOwner(worktreePath, token string) error {
 	return nil
 }
 
-func (d *Daemon) createDelegationWorktree(baseDirectory string, request *protocol.DelegateWorktreeRequest, operationID, ownedPath string, worktreeOwned bool, ownedToken string, allowReuse bool) (string, bool, error) {
+// delegationWorktreeRepo resolves the main repository a worktree delegated into
+// an existing workspace belongs to, or "" when the workspace offers nothing to
+// infer from.
+//
+// A workspace's stored Directory is the location it was last registered at, not
+// a claim about the repositories its sessions occupy. It is overwritten on every
+// re-registration (unlike title/rank/muted/pinned, which are deliberately
+// preserved), it is inherited wholesale when a pane is dragged out into a new
+// workspace, and it is never recomputed when a member session moves into a
+// worktree. It can therefore name a repository no member session has ever been
+// in, and trusting it here silently created worktrees in unrelated repositories.
+//
+// The member sessions are the authority instead: they carry a directory that is
+// re-derived from the real cwd on every register and spawn. When they disagree
+// on a main repository the choice is genuinely ambiguous, so fail and ask for
+// --repo rather than guess — a confusing error beats a silent misplacement.
+//
+// This deliberately answers only "which repository". Several member sessions can
+// sit in different worktrees of that one repository, each on its own branch, so
+// no member session's branch is a defensible starting point for the new one;
+// picking a representative session here would make the starting ref depend on
+// session ordering. Starting-ref selection is left to the caller (see the
+// worktreeStartRefBase comment in delegateOperation).
+func (d *Daemon) delegationWorktreeRepo(workspaceID string) (string, error) {
+	seen := map[string]struct{}{}
+	var repos []string
+	for _, sessionID := range d.store.SessionsInWorkspace(workspaceID) {
+		session := d.store.Get(sessionID)
+		if session == nil || strings.TrimSpace(session.Directory) == "" {
+			continue
+		}
+		root, err := git.GetRepoRoot(session.Directory)
+		if err != nil {
+			continue
+		}
+		// Distinct worktrees of one repository all resolve to the same main
+		// repository, so they are not an ambiguity.
+		repo := git.ResolveMainRepoPath(root)
+		if _, ok := seen[repo]; ok {
+			continue
+		}
+		seen[repo] = struct{}{}
+		repos = append(repos, repo)
+	}
+
+	switch len(repos) {
+	case 0:
+		// An empty or non-git workspace offers nothing to infer from; the caller
+		// falls back to the stored directory so its own repo check reports it.
+		return "", nil
+	case 1:
+		return repos[0], nil
+	default:
+		sort.Strings(repos)
+		return "", fmt.Errorf("workspace %s spans multiple repositories (%s); pass --repo to choose which one the worktree branches from",
+			workspaceID, strings.Join(repos, ", "))
+	}
+}
+
+// delegationDefaultStartRef names the ref a delegated worktree starts from when
+// no working directory supplies a defensible starting point. It returns "" when
+// the repository's default branch cannot be resolved at all, leaving the caller
+// with git's own current-HEAD behaviour as a last resort.
+//
+// Prefers the remote-tracking ref, matching how the app's own new-worktree flow
+// defaults (RepoOptions.tsx), so a delegated branch starts from what upstream
+// has rather than from however stale the local checkout is; doCreateWorktree
+// fetches it before creating. Falls back to the local default branch for
+// repositories with no matching remote branch.
+func delegationDefaultStartRef(repo string) string {
+	branch, err := git.GetDefaultBranch(repo)
+	if err != nil {
+		return ""
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return ""
+	}
+	if remoteRef := "origin/" + branch; git.RefExists(repo, remoteRef) {
+		return remoteRef
+	}
+	if git.RefExists(repo, branch) {
+		return branch
+	}
+	return ""
+}
+
+// createDelegationWorktree creates the worktree. inferredRepo, when non-empty,
+// names the main repository already resolved by the caller; baseDirectory, when
+// non-empty, is a working directory the repository and the starting ref may be
+// inferred from. A caller that knows the repository but has no defensible
+// starting point passes the repository alone and leaves baseDirectory empty.
+func (d *Daemon) createDelegationWorktree(baseDirectory, inferredRepo string, request *protocol.DelegateWorktreeRequest, operationID, ownedPath string, worktreeOwned bool, ownedToken string, allowReuse bool) (string, bool, error) {
 	branch := strings.TrimSpace(request.Branch)
 	if branch == "" {
 		return "", false, fmt.Errorf("worktree branch is required")
 	}
 	repo := strings.TrimSpace(protocol.Deref(request.Repo))
 	if repo == "" {
+		repo = strings.TrimSpace(inferredRepo)
+	}
+	if repo == "" {
+		// Never call git with an empty directory: it would run in the daemon's own
+		// working directory and could resolve to an unrelated repository.
+		if baseDirectory == "" {
+			return "", false, fmt.Errorf("cannot determine which repository the worktree belongs to; pass --repo")
+		}
 		repoRoot, err := git.GetRepoRoot(baseDirectory)
 		if err != nil {
 			return "", false, fmt.Errorf("workspace directory is not in a git repository; pass --repo")
@@ -318,7 +419,18 @@ func (d *Daemon) createDelegationWorktree(baseDirectory string, request *protoco
 		d.delegationWorktreePrepareHook(expectedPath)
 	}
 	startingFrom := request.StartingFrom
-	if strings.TrimSpace(protocol.Deref(startingFrom)) == "" {
+	if strings.TrimSpace(protocol.Deref(startingFrom)) == "" && baseDirectory == "" {
+		// No working directory whose branch could serve as a starting point, so
+		// name the repository's default branch explicitly. Leaving this empty
+		// would make `git worktree add -b` start from the main checkout's current
+		// HEAD (see starting_from in the protocol schema) — whatever that
+		// checkout happens to have checked out today, which is the same kind of
+		// ambient state this resolution exists to eliminate.
+		if ref := delegationDefaultStartRef(repo); ref != "" {
+			startingFrom = protocol.Ptr(ref)
+		}
+	}
+	if strings.TrimSpace(protocol.Deref(startingFrom)) == "" && baseDirectory != "" {
 		baseRoot, baseRootErr := git.GetRepoRoot(baseDirectory)
 		baseBranch, baseBranchErr := git.GetBranchInfo(baseDirectory)
 		if baseRootErr == nil &&
@@ -539,8 +651,46 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		}
 	}
 
+	// The workspace record's directory is a registration artifact, not a repo
+	// authority (see delegationWorktreeRepo). Only an existing-workspace
+	// placement would otherwise infer a repo from it; current/new placements
+	// already base off a real session directory or an explicit --cwd, where that
+	// directory legitimately supplies both the repository and the starting ref.
+	//
+	// worktreeStartRefBase is cleared once the repository is known from the
+	// member sessions, which decouples the two inferences. Those sessions may sit
+	// in different worktrees of the one repository, each on its own branch, so
+	// there is no member branch that deserves to become the implicit --from.
+	// Clearing it makes createDelegationWorktree resolve the repository's default
+	// branch explicitly (delegationDefaultStartRef) rather than a branch chosen
+	// by session ordering — and, just as importantly, rather than the main
+	// checkout's current HEAD. An explicit --from still wins.
+	worktreeStartRefBase := directory
+	inferredWorktreeRepo := ""
+	if msg.Worktree != nil && placement == delegationPlacementExisting {
+		// Unconditionally, including when --repo is given: the workspace record's
+		// directory never supplies a starting ref for this placement. --repo
+		// selects the repository; only --from selects a non-default starting ref.
+		worktreeStartRefBase = ""
+		if strings.TrimSpace(protocol.Deref(msg.Worktree.Repo)) == "" {
+			resolvedRepo, repoErr := d.delegationWorktreeRepo(workspaceID)
+			if repoErr != nil {
+				return nil, repoErr
+			}
+			if resolvedRepo == "" {
+				// A workspace with no member sessions to learn from leaves the
+				// stored directory as the only remaining signal for *which*
+				// repository — still never for which ref.
+				if root, rootErr := git.GetRepoRoot(directory); rootErr == nil {
+					resolvedRepo = git.ResolveMainRepoPath(root)
+				}
+			}
+			inferredWorktreeRepo = resolvedRepo
+		}
+	}
+
 	if msg.Worktree != nil {
-		worktreePath, created, createErr := d.createDelegationWorktree(directory, msg.Worktree, operationID, ownedWorktreePath, worktreeOwned, worktreeToken, protocol.Deref(msg.AllowWorktreeReuse))
+		worktreePath, created, createErr := d.createDelegationWorktree(worktreeStartRefBase, inferredWorktreeRepo, msg.Worktree, operationID, ownedWorktreePath, worktreeOwned, worktreeToken, protocol.Deref(msg.AllowWorktreeReuse))
 		if createErr != nil {
 			return nil, createErr
 		}
