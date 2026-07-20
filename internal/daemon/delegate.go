@@ -367,6 +367,11 @@ func (d *Daemon) createDelegationWorktree(baseDirectory, inferredRepo string, re
 		repo = strings.TrimSpace(inferredRepo)
 	}
 	if repo == "" {
+		// Never call git with an empty directory: it would run in the daemon's own
+		// working directory and could resolve to an unrelated repository.
+		if baseDirectory == "" {
+			return "", false, fmt.Errorf("cannot determine which repository the worktree belongs to; pass --repo")
+		}
 		repoRoot, err := git.GetRepoRoot(baseDirectory)
 		if err != nil {
 			return "", false, fmt.Errorf("workspace directory is not in a git repository; pass --repo")
@@ -662,15 +667,25 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	// checkout's current HEAD. An explicit --from still wins.
 	worktreeStartRefBase := directory
 	inferredWorktreeRepo := ""
-	if msg.Worktree != nil && placement == delegationPlacementExisting &&
-		strings.TrimSpace(protocol.Deref(msg.Worktree.Repo)) == "" {
-		resolvedRepo, repoErr := d.delegationWorktreeRepo(workspaceID)
-		if repoErr != nil {
-			return nil, repoErr
-		}
-		if resolvedRepo != "" {
+	if msg.Worktree != nil && placement == delegationPlacementExisting {
+		// Unconditionally, including when --repo is given: the workspace record's
+		// directory never supplies a starting ref for this placement. --repo
+		// selects the repository; only --from selects a non-default starting ref.
+		worktreeStartRefBase = ""
+		if strings.TrimSpace(protocol.Deref(msg.Worktree.Repo)) == "" {
+			resolvedRepo, repoErr := d.delegationWorktreeRepo(workspaceID)
+			if repoErr != nil {
+				return nil, repoErr
+			}
+			if resolvedRepo == "" {
+				// A workspace with no member sessions to learn from leaves the
+				// stored directory as the only remaining signal for *which*
+				// repository — still never for which ref.
+				if root, rootErr := git.GetRepoRoot(directory); rootErr == nil {
+					resolvedRepo = git.ResolveMainRepoPath(root)
+				}
+			}
 			inferredWorktreeRepo = resolvedRepo
-			worktreeStartRefBase = ""
 		}
 	}
 

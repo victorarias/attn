@@ -2027,3 +2027,81 @@ func TestDelegateWorktreePrefersRemoteDefaultBranch(t *testing.T) {
 		t.Fatalf("new branch head = %s, want origin/main %s", head, upstreamHead)
 	}
 }
+
+// TestDelegateWorktreeExplicitRepoStillUsesRepoDefault covers the same
+// contract as TestDelegateWorktreeSameRepoDifferentBranchesUsesRepoDefault,
+// but with an explicit --repo. --repo selects the repository; only --from may
+// select a non-default starting ref. The workspace's recorded directory is a
+// worktree of that same repository on a divergent branch, so an implementation
+// that keeps it as the start-ref base would inherit that branch instead.
+func TestDelegateWorktreeExplicitRepoStillUsesRepoDefault(t *testing.T) {
+	root := t.TempDir()
+	origin := filepath.Join(root, "origin.git")
+	runGitDaemon(t, root, "init", "--bare", "-b", "main", origin)
+
+	repo := initDelegationRepo(t, root, "repo")
+	runGitDaemon(t, repo, "branch", "-M", "main")
+	runGitDaemon(t, repo, "remote", "add", "origin", origin)
+	runGitDaemon(t, repo, "push", "-q", "-u", "origin", "main")
+
+	// The workspace's recorded directory: a worktree of the same repository,
+	// parked on its own branch.
+	legacy := filepath.Join(root, "repo--legacy")
+	runGitDaemon(t, repo, "worktree", "add", "-b", "topic/legacy", legacy)
+	runGitDaemon(t, legacy, "commit", "--allow-empty", "-m", "legacy")
+	legacyHead := gitRevParseDaemon(t, legacy, "HEAD")
+
+	// The main checkout is parked elsewhere too, so falling through to
+	// `git worktree add -b`'s current-HEAD behaviour is also detectable.
+	runGitDaemon(t, repo, "checkout", "-q", "-b", "topic/ambient")
+	runGitDaemon(t, repo, "commit", "--allow-empty", "-m", "ambient")
+	ambientHead := gitRevParseDaemon(t, repo, "HEAD")
+
+	// Advance origin/main past the local default branch.
+	other := filepath.Join(root, "other")
+	runGitDaemon(t, root, "clone", "-q", origin, other)
+	runGitDaemon(t, other, "commit", "--allow-empty", "-m", "upstream advance")
+	runGitDaemon(t, other, "push", "-q", "origin", "main")
+	upstreamHead := gitRevParseDaemon(t, other, "HEAD")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	consumeDelegatedPrompt(t, backend)
+
+	targetWorkspaceID := "workspace-target"
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd:       protocol.CmdRegisterWorkspace,
+		ID:        targetWorkspaceID,
+		Title:     "Target",
+		Directory: legacy,
+	})
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Explicit repo, default ref.",
+		Placement:       protocol.Ptr(delegationPlacementExisting),
+		WorkspaceID:     protocol.Ptr(targetWorkspaceID),
+		Label:           protocol.Ptr("delegated"),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Branch: "feat/explicit-repo-default",
+			Repo:   protocol.Ptr(repo),
+		},
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+
+	head := gitRevParseDaemon(t, result.Directory, "HEAD")
+	if head == legacyHead {
+		t.Fatalf("new branch started from the workspace directory's branch (%s); "+
+			"--repo selects the repository, not the starting ref", head)
+	}
+	if head == ambientHead {
+		t.Fatalf("new branch started from the main checkout's current HEAD (%s)", head)
+	}
+	if head != upstreamHead {
+		t.Fatalf("new branch head = %s, want origin/main %s", head, upstreamHead)
+	}
+}
