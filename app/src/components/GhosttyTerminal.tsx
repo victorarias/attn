@@ -597,15 +597,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // triggering a render.
     const recoveryAttemptRef = useRef(0);
     const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    // Set before an epoch rebuild caused by a recoverable WASM model fault.
-    // It survives the effect cleanup so the replacement model can record the
-    // successful containment and notify the app shell exactly once.
-    const modelFaultRef = useRef<{
+    // Dedupe failures from the same model while React applies the epoch bump.
+    // Do not use this to represent a pending recovery: a replacement can fault
+    // during its own initial fit and must trigger another rebuild.
+    const modelFaultDedupeRef = useRef<{
       operation: string;
       error: string;
       model: number;
       rendererEpoch: number;
     } | null>(null);
+    // Survives epoch rebuilds until a replacement has completed its initial
+    // fit and become ready. Only then may the app announce recovery.
+    const modelRecoveryPendingRef = useRef(false);
     const [error, setError] = useState<string | null>(null);
     const [linkCursorActive, setLinkCursorActive] = useState(false);
     const [findUi, setFindUi] = useState({ open: false, matchCount: 0, focusedIndex: -1, scanning: false, caseSensitive: false });
@@ -638,9 +641,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     const recoverFromModelFault = useCallback((operation: string, reason: unknown) => {
       // An invalid model can make several queued render/write operations fail
-      // before React applies the epoch bump. One rebuild is enough; recording
-      // all of them would obscure the first fault that made the model unusable.
-      if (modelFaultRef.current) return;
+      // before React applies the epoch bump. One rebuild per model is enough;
+      // a fault from a replacement model has a new epoch and must not be
+      // suppressed by the old model's dedupe record.
+      if (modelFaultDedupeRef.current?.rendererEpoch === rendererEpoch) return;
       const error = reason instanceof Error ? reason.message : String(reason);
       const stack = reason instanceof Error ? reason.stack : undefined;
       const terminal = terminalRef.current;
@@ -659,7 +663,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         model: modelInstanceRef.current,
         rendererEpoch,
       };
-      modelFaultRef.current = fault;
+      modelFaultDedupeRef.current = fault;
+      modelRecoveryPendingRef.current = true;
       const session = runtimeMetaRef.current?.sessionId ?? undefined;
       const paneKind = runtimeMetaRef.current?.paneKind ?? undefined;
       let snapshot: Record<string, unknown> | undefined;
@@ -1921,15 +1926,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
         terminalRef.current = terminal;
         rendererRef.current = renderer;
-        const recoveredModelFault = modelFaultRef.current;
-        if (recoveryAttemptRef.current > 0 || recoveredModelFault) {
-          noteRecovery(diagKeyRef.current, {
-            session: runtimeMetaRef.current?.sessionId ?? undefined,
-            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
-            attempt: recoveryAttemptRef.current || 1,
-            outcome: 'recovered',
-          });
-        }
+        const recoveryAttempt = recoveryAttemptRef.current;
+        const recoveredModelFault = modelRecoveryPendingRef.current;
         recoveryAttemptRef.current = 0;
         setError(null);
         // The bundled Nerd Font may not be loaded yet, so the first glyphs that
@@ -1982,6 +1980,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           (mode) => terminal.getMode(mode),
         );
         fit();
+        // `fit()` contains WASM traps and schedules a fresh epoch. Do not mark
+        // this model ready (or announce recovery) if its initial fit was the
+        // next fault in the chain.
+        if (modelFaultDedupeRef.current?.rendererEpoch === rendererEpoch) return;
+        if (recoveryAttempt > 0 || recoveredModelFault) {
+          noteRecovery(diagKeyRef.current, {
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+            attempt: recoveryAttempt || 1,
+            outcome: 'recovered',
+          });
+        }
         readyRef.current = true;
         startupRef.current.firstReadyAt = Date.now();
         startupRef.current.firstReadyCols = terminal.cols;
@@ -2021,7 +2031,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           drain: () => writeChainRef.current,
         });
         if (recoveredModelFault) {
-          modelFaultRef.current = null;
+          modelRecoveryPendingRef.current = false;
           onTerminalModelRecoveredRef.current?.();
         }
       }).catch((reason) => {
