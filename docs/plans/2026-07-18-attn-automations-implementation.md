@@ -660,6 +660,19 @@ the thread. An open ticket is never swept regardless of age, so a thread stays b
 for as long as its ticket stays open, however long that is; retention pruning
 (A3/A4) only ever runs after that release, never instead of it.
 
+The binding is not the only thing pinning that disk, though, and this is the easiest
+mistake to make when reasoning about reclamation. `automationRunCleanupSafety` checks
+a *live session row* before it checks the binding, and that check is bare row
+existence (`store.Get(sessionID) != nil`), not PTY liveness. So a run's worktree is
+reclaimable only once **both** pins lift: the session row is gone *and* the thread is
+unbound. The two are independent — ageing out the ticket does nothing while the
+session row survives. That matters in practice because automation-delivered agent
+sessions do not reliably end: a codex-driven delivery is observed sitting in
+`launching` indefinitely with its pty-worker and agent process still alive, and a
+worker that reattaches to a restarted daemon never reaches the 12-hour idle
+self-stop. Until session lifetime is bounded too, the ticket TTL bounds only one of
+the two pins.
+
 For large Bazel repositories, the local-clone override reuses the repository's Git
 objects and existing machine configuration. Per-session paths still produce
 distinct Bazel output bases, while repository/disk/remote caches configured outside
@@ -1021,8 +1034,13 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       explicit dirty-safe cleanup reporting a three-way
       `cleaned`/`kept_dirty`/`kept_active` partition (protocol 179), and a
       bounded thread *lifetime* — the ticket TTL sweep is now actually wired up
-      and releases a thread's continuity binding along with its ticket, so a
-      reviewer automation's worktrees stop being pinned forever. Proven by the
+      and releases a thread's continuity binding along with its ticket, so the
+      binding stops pinning a reviewer automation's worktrees forever. Note the
+      binding is only one of two independent pins: `automationRunCleanupSafety`
+      blocks on a live session row first, so a worktree is reclaimable only once
+      the session has also ended. Automation-delivered agent sessions do not
+      reliably end today (see the thread-lifetime note above), so this slice
+      bounds one pin, not both. Proven by the
       packaged serial scenario `real-app:scenario-automation-lifecycle` — run
       `automation-lifecycle-2026-07-20T21-53-29-423Z`, all three legs green
       (edit-rebind including the revert case, delete-resurrect, and a single

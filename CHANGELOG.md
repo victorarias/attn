@@ -43,10 +43,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   finished runs — keeping the newest 200 per definition, or anything younger
   than two weeks. A run whose session is still open, or whose continuity
   thread is still bound to it via a shared worktree, is never touched, so a
-  recurring automation is never bricked by its own retention; a bound
-  thread's worktree is released once its documenting ticket ages out (see
-  the ticket retention entry below), which is what actually bounds worktree
-  growth for a long-running per-subject automation like a PR reviewer.
+  recurring automation is never bricked by its own retention. Both of those
+  hold the disk independently, and both have to lift before it comes back:
+  the session has to end, and the thread's documenting ticket has to age out
+  (see the ticket retention entry below). This release fixes the second one,
+  which previously never lifted at all.
 - **Closed tickets are now hard-deleted after 30 days.** A ticket closed as
   done, failed, or crashed is kept for 30 days in case you need to refer back
   to it, then permanently removed along with its activity, attachments, and
