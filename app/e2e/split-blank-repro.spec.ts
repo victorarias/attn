@@ -79,10 +79,7 @@ test('agent pane stays painted after opening a shell split', async ({ page, daem
   const terminal = await setupAgent(page, daemon, agentId);
 
   // 1) Paint a full frame and confirm it actually rendered (high quad count).
-  await emit(page, agentId, fullFrame('OLD'));
-  await expect
-    .poll(async () => page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_TEXT?.(sid) ?? '', agentId), { timeout: 5000 })
-    .toContain('OLD line 0');
+  await emitUntilVisible(page, agentId, fullFrame('OLD'), 'OLD line 0');
   await expect
     .poll(async () => {
       const trace = await readTrace(page, agentId);
@@ -164,6 +161,46 @@ async function setupAgent(
   return terminal;
 }
 
+// Emit setup content and keep re-emitting until the model actually shows it.
+//
+// A single `__TEST_EMIT_PTY_DATA` can be lost: it traverses the router's binding
+// lookup (paneRuntimeEventRouter.handleEvent `if (!match) return`), the pane's
+// handle lookup (useGhosttyPaneRuntime.deliverEvent `if (!terminal) return`),
+// and a fire-and-forget `void terminal.write(...)` — each of which drops
+// silently when the pane is not fully wired. `expect.poll` on the pane text
+// re-READS but never re-SENDS, so one lost emit could only ever expire at the
+// deadline. That is the observed CI flake: these specs failed at 5.9s on
+// `toContain('OLD line 0')` against a 5s poll, i.e. ~0.9s of setup and then a
+// full 5s of fruitless re-reads — a dropped emit, not a slow machine.
+//
+// Re-emitting closes that hole and is timing-independent rather than tuned to a
+// machine's speed. `fullFrame` is idempotent (it opens with `2J`/`H` and
+// absolutely positions every row), so a repeat repaints identical content. A
+// non-idempotent payload (scrollback, which appends) is still safe here: a retry
+// only happens when the previous emit produced nothing at all, since any visible
+// marker ends the poll.
+//
+// Use this ONLY for scaffolding. The post-split redraw each test actually
+// exercises must stay a single emit: its timing against the resize IS the
+// behaviour under test, and retrying it would paper over the very bug these
+// specs exist to catch.
+async function emitUntilVisible(
+  page: import('@playwright/test').Page,
+  sessionId: string,
+  data: string,
+  marker: string,
+) {
+  await expect
+    .poll(async () => {
+      await emit(page, sessionId, data);
+      return page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_TEXT?.(sid) ?? '', sessionId);
+    }, {
+      timeout: 15000,
+      message: `setup frame never reached the model for ${sessionId} (emit dropped before the pane was wired)`,
+    })
+    .toContain(marker);
+}
+
 // The terminal CONTAINER becoming visible is not the same as the pane being
 // ready to receive PTY data. `__TEST_EMIT_PTY_DATA` delivers to the live
 // terminal handle and silently DROPS the event when no handle is registered yet
@@ -173,9 +210,15 @@ async function setupAgent(
 // visible. Emitting in that window loses the bytes and the model never updates,
 // so the downstream `toContain('… line 0')` poll times out — the flake. In prod
 // this race cannot happen: data only arrives in response to attach, which is
-// itself fired from handleTerminalReady (after the handle exists). `getPaneSize`
-// returns a size only once the handle is registered, so it is the precise
-// "emit will be delivered" signal to gate on.
+// itself fired from handleTerminalReady (after the handle exists).
+//
+// `getPaneSize` returning non-null proves that one handle exists, so this gate
+// is necessary — but it is NOT sufficient, and this comment used to claim it
+// was. It misses the router's own binding lookup, and it reads `getSize()`,
+// which GhosttyTerminalHandle documents as reporting the model's provisional
+// construction default until a real fit lands. `emitUntilVisible` covers the
+// remaining gap for setup frames; keep this cheap gate first so the common case
+// settles before any retry loop starts.
 async function waitForPaneReady(
   page: import('@playwright/test').Page,
   sessionId: string,
@@ -229,8 +272,7 @@ test('agent stays painted when split races a chunked redraw', async ({ page, dae
   const agentId = 's-agent-race';
   const terminal = await setupAgent(page, daemon, agentId);
 
-  await emit(page, agentId, fullFrame('OLD'));
-  await expect.poll(async () => page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_TEXT?.(sid) ?? '', agentId), { timeout: 5000 }).toContain('OLD line 0');
+  await emitUntilVisible(page, agentId, fullFrame('OLD'), 'OLD line 0');
   await page.evaluate(() => { (window as Window & { __ATTN_RENDER_TRACE?: unknown[] }).__ATTN_RENDER_TRACE = []; });
 
   // Open a synchronized frame (no close) — mid-frame, like the live log.
@@ -274,9 +316,11 @@ test('agent stays painted when split lands while scrolled up', async ({ page, da
 
   // Build scrollback so wheel-up produces a non-zero viewport offset.
   const scrollback = Array.from({ length: 200 }, (_, i) => `HIST line ${String(i).padStart(3, '0')}`).join('\r\n');
-  await emit(page, agentId, `${ESC}[2J${ESC}[H${scrollback}`);
-  await emit(page, agentId, fullFrame('OLD'));
-  await expect.poll(async () => page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_TEXT?.(sid) ?? '', agentId), { timeout: 5000 }).toContain('OLD line 0');
+  // Assert the scrollback landed rather than assuming it: if this emit were
+  // dropped the wheel-up below would produce a zero offset and the test would
+  // still pass, having silently stopped exercising the scrolled-up case.
+  await emitUntilVisible(page, agentId, `${ESC}[2J${ESC}[H${scrollback}`, 'HIST line 199');
+  await emitUntilVisible(page, agentId, fullFrame('OLD'), 'OLD line 0');
 
   // Scroll up.
   await terminal.hover({ position: { x: 80, y: 200 } });

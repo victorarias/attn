@@ -39,7 +39,15 @@ permissions.
 - Non-production builds, installs, launches, and restarts are pre-authorized.
 - Production `make`, `make install`, and `make install-daemon` require Victor's
   explicit approval.
-- Default to `make dev`; use `make install-daemon-dev` for daemon-only changes.
+- Install the cheapest tier that covers the change:
+  - Go-only change (`cmd/attn`, `internal/**`) → `make install-daemon-dev`, or
+    `make install-daemon PROFILE=<name>`. Replaces and re-signs the sidecar and
+    restarts the daemon; no Tauri/Rust/frontend build.
+  - Anything under `app/` (frontend, `src-tauri`, plugins), a protocol change
+    (`generated.ts` moves with `generated.go`), or bundle metadata → `make dev`,
+    or `make install PROFILE=<name>`.
+  Escalate to the full build when unsure, or when a daemon-only install does not
+  show the change.
 - Named profile: select it with `eval "$(./attn profile-env <name>)"`, then run
   `make install PROFILE=<name>`. The shell's `ATTN_PROFILE` must match.
 - `profile-env` clears inherited routing overrides. Verify the emitted
