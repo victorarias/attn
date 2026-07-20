@@ -928,6 +928,13 @@ func (d *Daemon) Start() error {
 	// a daemon death mid-seam) and repairs claims whose verdict never landed.
 	go d.runTicketReconcileSweep()
 
+	// Automation run retention sweep (A3): bounds unbounded automation run
+	// history, pruning terminal runs/artifacts/worktrees outside the keep
+	// window once they're old and safe to touch. Dedicated ticker rather than
+	// piggybacking the schedule-observation tick — that tick's cadence is
+	// driven by cron granularity, not retention policy.
+	go d.runAutomationRetentionSweep()
+
 	// Construct + start the durable compaction runner (kinds compact_context,
 	// summarize_session, narrate_workspace).
 	d.startCompactRunner()

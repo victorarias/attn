@@ -371,6 +371,34 @@ func (s *Store) ListAutomationDefinitions() ([]AutomationDefinition, error) {
 	return out, rows.Err()
 }
 
+// ListAutomationDefinitionIDsIncludingDeleted returns every definition id,
+// including soft-deleted ones. Unlike ListAutomationDefinitions (which the
+// UI/CLI use and which filters deleted_at=”), the A3 retention sweep and A4
+// cleanup both need to reach a deleted definition's runs too — deleting a
+// definition retires it but explicitly leaves its runs/artifacts for these
+// two mechanisms to eventually clean up (see automationDelete's doc comment).
+func (s *Store) ListAutomationDefinitionIDsIncludingDeleted() ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT id FROM automation_definitions ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ClaimManualAutomationRun(definitionID, requestID, subjectKey, payloadJSON string, expectedRevision int, snapshotJSON string, observedAt time.Time, ids AutomationRunReservation) (*AutomationRun, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
