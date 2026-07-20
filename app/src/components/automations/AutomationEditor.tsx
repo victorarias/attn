@@ -210,15 +210,25 @@ export function AutomationEditor({
           )}
 
           <div className="automation-editor__actions">
-            <button
-              type="button"
-              className="automation-editor__reload"
-              onClick={handleReload}
-              disabled={reloading}
-              data-testid="automation-editor-reload"
-            >
-              {reloading ? 'Reloading…' : 'Reload'}
-            </button>
+            {/* Reload exists only as the recovery path after a stale-revision
+                Save refusal (D5), which presupposes a persisted definition.
+                While creating, loadedId is null and Reload would re-fetch the
+                starter template — silently discarding the draft being typed
+                for no reachable benefit. So it is not offered until the buffer
+                is backed by a saved definition. */}
+            {loadedId !== null ? (
+              <button
+                type="button"
+                className="automation-editor__reload"
+                onClick={handleReload}
+                disabled={reloading}
+                data-testid="automation-editor-reload"
+              >
+                {reloading ? 'Reloading…' : 'Reload'}
+              </button>
+            ) : (
+              <span />
+            )}
             <div className="automation-editor__actions-primary">
               <button
                 type="button"

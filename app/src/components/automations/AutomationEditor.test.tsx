@@ -254,4 +254,32 @@ describe('AutomationEditor', () => {
     );
     expect(screen.getByDisplayValue('id: d1\n', EXACT_VALUE)).toBeInTheDocument();
   });
+
+  // While creating, Reload would re-fetch the starter template (getDefinition
+  // is called with '') and overwrite the draft being typed, with nothing to
+  // recover — the D5 stale-revision refusal it exists for cannot happen before
+  // the definition is persisted. So it must not be reachable in that state.
+  it('does not offer Reload while creating, so a draft cannot be discarded', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    render(<AutomationEditor {...props} />);
+
+    await screen.findByDisplayValue('id: new-automation\n', EXACT_VALUE);
+    expect(screen.queryByTestId('automation-editor-reload')).not.toBeInTheDocument();
+
+    // Editing an existing definition still gets it.
+    const editProps = baseProps();
+    editProps.definitionId = 'd1';
+    editProps.getDefinition.mockResolvedValueOnce({ specYaml: 'id: d1\n', revision: 1 });
+    render(<AutomationEditor {...editProps} />);
+
+    await screen.findByDisplayValue('id: d1\n', EXACT_VALUE);
+    expect(screen.getAllByTestId('automation-editor-reload')).toHaveLength(1);
+
+    // Guard against the assertion above passing vacuously if the create-mode
+    // editor stopped rendering entirely.
+    expect(screen.getAllByTestId('automation-editor')).toHaveLength(2);
+    await user.click(screen.getAllByTestId('automation-editor-close')[0]);
+    expect(props.onCancel).toHaveBeenCalledTimes(1);
+  });
 });
