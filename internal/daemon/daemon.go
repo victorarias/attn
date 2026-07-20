@@ -319,6 +319,12 @@ type Daemon struct {
 	workflowAttentionHook func(attention.Result)                    // optional, tests only
 	ticketsBroadcastHook  func([]protocol.Ticket)                   // optional, tests only
 
+	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
+	// WS surface (automations_broadcast.go): invoked before every
+	// automations_changed broadcast so tests can observe it deterministically
+	// without a live socket.
+	automationsBroadcastHook func(*protocol.AutomationsChangedMessage)
+
 	workspaceContextCheckoutMu sync.Mutex
 
 	// compactRunner is the durable task runner that owns the keeper's

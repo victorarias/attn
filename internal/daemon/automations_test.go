@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1385,5 +1387,156 @@ func TestContinuationWithdrawalDoesNotCancelDeliveredOriginReviewer(t *testing.T
 	origin, err := s.GetAutomationRun(first.ID)
 	if err != nil || origin == nil || origin.State != "delivered" {
 		t.Fatalf("origin run changed after continuation withdrawal: run=%#v err=%v", origin, err)
+	}
+}
+
+// automationBroadcastRecorder installs an automationsBroadcastHook on d and
+// returns a function that snapshots every definition ID broadcast so far,
+// safe for concurrent use since automationSetEnabledWS-style callers run the
+// mutation in a goroutine.
+func automationBroadcastRecorder(d *Daemon) func() []string {
+	var mu sync.Mutex
+	var ids []string
+	d.automationsBroadcastHook = func(msg *protocol.AutomationsChangedMessage) {
+		mu.Lock()
+		ids = append(ids, msg.DefinitionIds...)
+		mu.Unlock()
+	}
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), ids...)
+	}
+}
+
+const manualAutomationYAML = `api_version: attn.dev/automations/v1alpha1
+id: manual-check
+name: Manual check
+enabled: true
+trigger: {type: manual}
+prompt: Check locally.
+launch: {driver: codex}
+location: {type: directory, path: "%s"}
+policy: {continuity: fresh, overlap: coalesce}
+`
+
+func TestAutomationApplyBroadcastsOnUpsert(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	broadcasts := automationBroadcastRecorder(d)
+
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := broadcasts(); len(got) != 1 || got[0] != def.ID {
+		t.Fatalf("broadcasts after enabled apply = %v, want [%s]", got, def.ID)
+	}
+
+	if _, err := d.automationApply(strings.Replace(raw, "enabled: true", "enabled: false", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if got := broadcasts(); len(got) != 2 || got[1] != def.ID {
+		t.Fatalf("broadcasts after disable apply = %v, want two entries ending in %s", got, def.ID)
+	}
+}
+
+// TestAutomationRunBroadcastsAfterClaim exercises automationRun's post-claim
+// broadcast (automations.go's "after claim" call) without reaching real
+// delivery/backend machinery: the run is pre-claimed and pre-marked delivered
+// directly through the store, so automationRun's own ClaimManualAutomationRun
+// call hits the idempotent same-request-id dedup path and returns without
+// re-entering deliverAutomationRun (run.State != "pending").
+func TestAutomationRunBroadcastsAfterClaim(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	run, _, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+
+	broadcasts := automationBroadcastRecorder(d)
+	got, err := d.automationRun(context.Background(), def.ID, "request-1", `{}`)
+	if err != nil {
+		t.Fatalf("automationRun on already-delivered idempotent claim: %v", err)
+	}
+	if got.State != "delivered" {
+		t.Fatalf("automationRun state = %q, want delivered (idempotent dedup, no re-delivery)", got.State)
+	}
+	if ids := broadcasts(); len(ids) != 1 || ids[0] != def.ID {
+		t.Fatalf("broadcasts after automationRun claim = %v, want [%s]", ids, def.ID)
+	}
+}
+
+func TestAutomationSetEnabledDisableFailsPendingRunsAndBroadcasts(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, time.Now(), store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	broadcasts := automationBroadcastRecorder(d)
+	got, err := d.automationSetEnabled(def.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled {
+		t.Fatalf("definition = %#v, want disabled", got)
+	}
+	failed, err := s.GetAutomationRun(run.ID)
+	if err != nil || failed == nil || failed.State != "failed" || !strings.Contains(failed.LastError, "disabled before delivery") {
+		t.Fatalf("pending run after disable = %#v err=%v, want failed", failed, err)
+	}
+	if ids := broadcasts(); len(ids) == 0 {
+		t.Fatal("automationSetEnabled disable did not broadcast")
+	}
+
+	if _, err := d.automationSetEnabled("does-not-exist", false); err == nil {
+		t.Fatal("expected error for unknown definition")
+	}
+}
+
+func TestAutomationSetEnabledNoOpDoesNotBroadcast(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	broadcasts := automationBroadcastRecorder(d)
+	got, err := d.automationSetEnabled(def.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Enabled {
+		t.Fatalf("definition = %#v, want still enabled", got)
+	}
+	if ids := broadcasts(); len(ids) != 0 {
+		t.Fatalf("no-op automationSetEnabled broadcast = %v, want none", ids)
 	}
 }

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/automation"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -458,7 +460,11 @@ func claimPendingScheduledRun(t *testing.T, s *store.Store, def *store.Automatio
 // A real delivery attempt reaches deliverAutomationRun (which recoverAutomations
 // calls directly, not through automationDeliveryHook, so a full spawn is out of
 // reach for a unit test); disabling the definition after the claim gives a
-// deterministic, PTY-free failure that still proves the attempt was made.
+// deterministic, PTY-free failure that still proves the attempt was made. That
+// same real deliverAutomationRun -> failAutomationRun path is also where a
+// scheduled run's delivered/failed transition broadcasts automations_changed,
+// so this is extended to assert the broadcast fires for a scheduled run too
+// (not just the manual/WS paths covered in automations_test.go).
 func TestScheduledPendingRunRecoversOnRestart(t *testing.T) {
 	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
 	intended := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
@@ -467,11 +473,32 @@ func TestScheduledPendingRunRecoversOnRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var mu sync.Mutex
+	var broadcastIDs []string
+	d.automationsBroadcastHook = func(msg *protocol.AutomationsChangedMessage) {
+		mu.Lock()
+		broadcastIDs = append(broadcastIDs, msg.DefinitionIds...)
+		mu.Unlock()
+	}
+
 	d.recoverAutomations()
 
 	got, err := s.GetAutomationRun(run.ID)
 	if err != nil || got == nil || got.State != "failed" || !strings.Contains(got.LastError, "definition is disabled") {
 		t.Fatalf("recovery did not attempt scheduled run: run=%#v err=%v", got, err)
+	}
+	mu.Lock()
+	ids := append([]string(nil), broadcastIDs...)
+	mu.Unlock()
+	found := false
+	for _, id := range ids {
+		if id == def.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("scheduled run's failed transition did not broadcast automations_changed: broadcasts=%v", ids)
 	}
 }
 

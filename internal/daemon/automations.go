@@ -61,22 +61,61 @@ func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error
 	d.automationMu.Lock()
 	defer d.automationMu.Unlock()
 	definition, err := d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), spec.Enabled, time.Now())
-	if err != nil || spec.Enabled {
-		return definition, err
-	}
-	pending, err := d.store.ListPendingAutomationRuns()
 	if err != nil {
 		return definition, err
 	}
+	d.broadcastAutomationsChanged(spec.ID)
+	if spec.Enabled {
+		return definition, nil
+	}
+	return definition, d.failPendingAutomationRuns(spec.ID)
+}
+
+// failPendingAutomationRuns fails every pending run for definitionID via
+// failAutomationRun, e.g. when a definition is disabled before its pending
+// occurrences were delivered. One run's failure does not stop the rest;
+// errors are joined. Shared by automationApply's disable path and
+// automationSetEnabled's disable path so both fail pending runs identically.
+func (d *Daemon) failPendingAutomationRuns(definitionID string) error {
+	pending, err := d.store.ListPendingAutomationRuns()
+	if err != nil {
+		return err
+	}
 	for i := range pending {
 		run := pending[i]
-		if run.DefinitionID != spec.ID {
+		if run.DefinitionID != definitionID {
 			continue
 		}
 		if _, failErr := d.failAutomationRun(&run, errors.New("automation definition disabled before delivery")); failErr != nil {
 			err = errors.Join(err, failErr)
 		}
 	}
+	return err
+}
+
+// automationSetEnabled flips definitionID's enabled flag, reusing the store's
+// shared enable-transition side effects (review-edge clear + provider-cursor
+// fence — see store.SetAutomationEnabled) and, on a disable transition,
+// failing any pending runs through the same path automationApply uses. It is
+// a no-op (success, no broadcast) when the definition already has the
+// requested state, and errors for an unknown or soft-deleted definition.
+func (d *Daemon) automationSetEnabled(definitionID string, enabled bool) (*store.AutomationDefinition, error) {
+	d.automationMu.Lock()
+	defer d.automationMu.Unlock()
+	definition, changed, err := d.store.SetAutomationEnabled(definitionID, enabled, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if definition == nil {
+		return nil, fmt.Errorf("automation %q not found", definitionID)
+	}
+	if !changed {
+		return definition, nil
+	}
+	if !enabled {
+		err = d.failPendingAutomationRuns(definitionID)
+	}
+	d.broadcastAutomationsChanged(definitionID)
 	return definition, err
 }
 
@@ -134,6 +173,11 @@ func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, inp
 	if err != nil {
 		return nil, err
 	}
+	// A run now exists for this definition (freshly claimed, or the idempotent
+	// dedup of an already-claimed one) whether or not delivery below succeeds;
+	// broadcast so a WS client watching this definition's runs sees it appear
+	// without waiting on the delivery outcome.
+	d.broadcastAutomationsChanged(definitionID)
 	if run.State != "pending" {
 		return run, nil
 	}
@@ -493,6 +537,7 @@ func (d *Daemon) failAutomationRun(run *store.AutomationRun, deliveryErr error) 
 		}
 	}
 	d.broadcastTicketsUpdated()
+	d.broadcastAutomationsChanged(run.DefinitionID)
 	failed, err := d.store.GetAutomationRun(run.ID)
 	if err != nil {
 		persistErr = errors.Join(persistErr, fmt.Errorf("reload failed run: %w", err))
@@ -562,6 +607,7 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 		return err
 	}
 	d.broadcastTicketsUpdated()
+	d.broadcastAutomationsChanged(run.DefinitionID)
 	return nil
 }
 
