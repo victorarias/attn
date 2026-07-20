@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AutomationDefinitionSummary } from '../../types/generated';
 import { AutomationYamlEditor, type AutomationYamlEditorHandle } from './AutomationYamlEditor';
+import { setAutomationEditorAutomationHandle } from './automationEditorAutomation';
 import './AutomationEditor.css';
 
 export interface AutomationEditorProps {
@@ -144,6 +145,59 @@ export function AutomationEditor({
         setReloading(false);
       });
   }, [getDefinition, loadedId]);
+
+  // Publish a read/write handle for the UI automation bridge (testing only —
+  // see automationEditorAutomation.ts's doc comment). Re-registered whenever
+  // the state getState() closes over changes, rather than GridView's
+  // single-registration-reading-through-refs pattern: nothing here mutates
+  // outside React's render cycle, so a plain effect dependency array keeps it
+  // correct with far less machinery.
+  useEffect(() => {
+    setAutomationEditorAutomationHandle({
+      getState: () => ({
+        present: true,
+        mode: definitionId ? 'edit' : 'create',
+        definitionId: loadedId,
+        revision,
+        status,
+        loadError: loadError ?? '',
+        // The live CodeMirror doc, not the `value` state mirror — see
+        // getDocText's doc comment for why the mirror can lag mid-typing.
+        text: editorRef.current?.getDocText() ?? value,
+        validation: { state: validation.state, message: validation.message ?? '' },
+        saving,
+        saveError: saveError ?? '',
+        reloading,
+        reloadError: reloadError ?? '',
+        // Mirrors the JSX gate below: Reload presupposes a persisted definition.
+        reloadOffered: loadedId !== null,
+      }),
+      // Equivalent to the user replacing the buffer by typing: go through the
+      // same handleChange the real onChange path uses (so a stale validation
+      // result and stale saveError are cleared even if `next` happens to
+      // equal the current doc, when applyExternalContent's dispatch would be
+      // a no-op), then push the text into CodeMirror so a subsequent Save —
+      // and getDocText() — see exactly what was set.
+      setText: (next: string) => {
+        editorRef.current?.applyExternalContent(next);
+        handleChange(next);
+      },
+    });
+    return () => setAutomationEditorAutomationHandle(null);
+  }, [
+    definitionId,
+    loadedId,
+    revision,
+    status,
+    loadError,
+    value,
+    validation,
+    saving,
+    saveError,
+    reloading,
+    reloadError,
+    handleChange,
+  ]);
 
   return (
     <div className="automation-editor" data-testid="automation-editor">

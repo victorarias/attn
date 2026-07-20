@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, userEvent } from '../../test/utils';
+import { act, render, screen, waitFor, userEvent } from '../../test/utils';
 import { AutomationEditor } from './AutomationEditor';
 import { AutomationDefinitionSummary } from '../../types/generated';
+import { getAutomationEditorAutomationHandle } from './automationEditorAutomation';
 
 // getByDisplayValue/findByDisplayValue apply the default TL normalizer (trim
 // + collapse whitespace) to the DOM value being matched but NOT to the
@@ -23,16 +24,29 @@ vi.mock('./AutomationYamlEditor', async () => {
   return {
     AutomationYamlEditor: forwardRef(function MockAutomationYamlEditor(
       { value, onChange, ariaLabel }: { value: string; onChange: (value: string) => void; ariaLabel?: string },
-      ref: React.Ref<{ applyExternalContent: (next: string) => void; focus: () => void }>,
+      ref: React.Ref<{ applyExternalContent: (next: string) => void; focus: () => void; getDocText: () => string }>,
     ) {
       // Mirrors the real imperative handle: pushing external content reports
       // it through onChange, the way a CodeMirror dispatch would, so
       // AutomationEditor's controlled value tracks it — exactly what Reload
-      // relies on.
+      // relies on. getDocText mirrors the controlled `value` prop directly:
+      // unlike the real CodeMirror doc it can never lag behind it, since this
+      // mock has no buffer of its own independent of `value`.
+      //
+      // The `next === value` guard is load-bearing, not tidiness: the real
+      // applyExternalContent computes a MINIMAL edit and dispatches nothing
+      // when the text is unchanged, so no onChange fires. A mock that always
+      // called onChange would paper over exactly the case AutomationEditor's
+      // setText calls handleChange for, and any test of that case would pass
+      // against a component that had dropped the call.
       useImperativeHandle(ref, () => ({
-        applyExternalContent: (next: string) => onChange(next),
+        applyExternalContent: (next: string) => {
+          if (next === value) return;
+          onChange(next);
+        },
         focus: () => {},
-      }), [onChange]);
+        getDocText: () => value,
+      }), [onChange, value]);
       return (
         <textarea aria-label={ariaLabel ?? 'Automation definition'} value={value} onChange={(event) => onChange(event.target.value)} />
       );
@@ -281,5 +295,125 @@ describe('AutomationEditor', () => {
     expect(screen.getAllByTestId('automation-editor')).toHaveLength(2);
     await user.click(screen.getAllByTestId('automation-editor-close')[0]);
     expect(props.onCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The UI automation bridge's automation_editor_* verbs read this handle
+// instead of scraping the DOM — see automationEditorAutomation.ts's doc
+// comment for why (CodeMirror virtualizes long documents, and this seam is
+// the evidence source for a save/reload comment-preservation proof).
+describe('AutomationEditor automation bridge handle', () => {
+  it('registers the handle while mounted and clears it on unmount', async () => {
+    const props = baseProps();
+    const { unmount } = render(<AutomationEditor {...props} />);
+
+    await screen.findByDisplayValue('id: new-automation\n', EXACT_VALUE);
+    expect(getAutomationEditorAutomationHandle()).not.toBeNull();
+
+    unmount();
+    expect(getAutomationEditorAutomationHandle()).toBeNull();
+  });
+
+  it('getState reflects create vs edit mode, reloadOffered, and a validation error message', async () => {
+    const user = userEvent.setup();
+    const createProps = baseProps();
+    const { unmount: unmountCreate } = render(<AutomationEditor {...createProps} />);
+    await screen.findByDisplayValue('id: new-automation\n', EXACT_VALUE);
+
+    expect(getAutomationEditorAutomationHandle()?.getState()).toMatchObject({
+      present: true,
+      mode: 'create',
+      definitionId: null,
+      reloadOffered: false,
+    });
+    unmountCreate();
+
+    const editProps = baseProps();
+    editProps.definitionId = 'd1';
+    editProps.validateDefinition.mockRejectedValue(
+      new Error('trigger.schedule.cron: invalid cron expression'),
+    );
+    editProps.getDefinition.mockResolvedValueOnce({ specYaml: 'id: d1\n', revision: 7 });
+    render(<AutomationEditor {...editProps} />);
+    await screen.findByDisplayValue('id: d1\n', EXACT_VALUE);
+
+    expect(getAutomationEditorAutomationHandle()?.getState()).toMatchObject({
+      present: true,
+      mode: 'edit',
+      definitionId: 'd1',
+      revision: 7,
+      reloadOffered: true,
+    });
+
+    await user.click(screen.getByTestId('automation-editor-validate'));
+    await screen.findByTestId('automation-editor-validation-error');
+
+    expect(getAutomationEditorAutomationHandle()?.getState().validation).toEqual({
+      state: 'error',
+      message: 'trigger.schedule.cron: invalid cron expression',
+    });
+  });
+
+  // The invariant setText must uphold: it's equivalent to the user replacing
+  // the buffer by typing, so it goes through the same path as onChange — a
+  // stale "Looks good." result is gone, and a subsequent Save sends exactly
+  // what was set, not what was loaded or previously typed.
+  it('setText clears a stale validation result and Save carries the newly set text', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    render(<AutomationEditor {...props} />);
+    await screen.findByDisplayValue('id: new-automation\n', EXACT_VALUE);
+
+    await user.click(screen.getByTestId('automation-editor-validate'));
+    await screen.findByTestId('automation-editor-validation-ok');
+
+    const handle = getAutomationEditorAutomationHandle();
+    expect(handle).not.toBeNull();
+    act(() => {
+      handle?.setText('id: new-automation\nname: replaced via bridge\n');
+    });
+
+    expect(screen.queryByTestId('automation-editor-validation-ok')).not.toBeInTheDocument();
+    await screen.findByDisplayValue('id: new-automation\nname: replaced via bridge\n', EXACT_VALUE);
+    // Re-read through the module getter, not the captured handle: the
+    // registration effect re-runs (and re-registers) on this state change,
+    // same gotcha as SettingsModal's selectSection (see SettingsModal.test.tsx).
+    expect(getAutomationEditorAutomationHandle()?.getState().text).toBe(
+      'id: new-automation\nname: replaced via bridge\n',
+    );
+
+    await user.click(screen.getByTestId('automation-editor-save'));
+    await waitFor(() =>
+      expect(props.applyDefinition).toHaveBeenCalledWith(
+        'id: new-automation\nname: replaced via bridge\n',
+        '',
+        0,
+      ),
+    );
+  });
+
+  // The case the test above cannot reach, and the only reason setText calls
+  // handleChange in addition to pushing the text into CodeMirror: when the
+  // new text equals the current buffer, applyExternalContent computes an
+  // empty edit and dispatches nothing, so no onChange fires. Without the
+  // explicit handleChange, a "Looks good." from a previous Validate would
+  // survive a setText — telling the harness (and a user) that text was
+  // validated when the validation it is showing predates the write.
+  it('setText clears a stale validation result even when the text is unchanged', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    render(<AutomationEditor {...props} />);
+    await screen.findByDisplayValue('id: new-automation\n', EXACT_VALUE);
+
+    await user.click(screen.getByTestId('automation-editor-validate'));
+    await screen.findByTestId('automation-editor-validation-ok');
+
+    act(() => {
+      // Byte-identical to what is already in the buffer.
+      getAutomationEditorAutomationHandle()?.setText('id: new-automation\n');
+    });
+
+    expect(screen.queryByTestId('automation-editor-validation-ok')).not.toBeInTheDocument();
+    expect(getAutomationEditorAutomationHandle()?.getState().validation.state).toBe('idle');
   });
 });

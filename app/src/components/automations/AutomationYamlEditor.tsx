@@ -37,6 +37,11 @@ export interface AutomationYamlEditorHandle {
   // current.
   applyExternalContent: (next: string) => void;
   focus: () => void;
+  // Live buffer text straight from the CodeMirror doc, for the UI automation
+  // bridge's automation_editor_* verbs — see automationEditorAutomation.ts's
+  // doc comment for why this exists instead of scraping the DOM. '' before
+  // the view has mounted.
+  getDocText: () => string;
 }
 
 interface AutomationYamlEditorProps {
@@ -141,6 +146,7 @@ export const AutomationYamlEditor = forwardRef<AutomationYamlEditorHandle, Autom
         focus: () => {
           cmRef.current?.view?.focus();
         },
+        getDocText: () => cmRef.current?.view?.state.doc.toString() ?? '',
       }),
       [],
     );
