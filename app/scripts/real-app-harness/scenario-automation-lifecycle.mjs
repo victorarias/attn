@@ -5,8 +5,8 @@
  * editing a live definition safely rotates a stale continuity binding
  * (including the revert-edge fix, live), soft-delete/resurrect round-trips
  * through the profile-level Automations panel while preserving run history,
- * and the explicit dirty-safe cleanup command partitions clean vs. dirty
- * worktrees correctly without ever touching run rows.
+ * and the explicit dirty-safe cleanup command partitions terminal runs three
+ * ways — cleaned, kept_dirty, kept_active — without ever touching run rows.
  *
  * A3 (bounded retention) is deliberately NOT exercised here: its policy is
  * purely time-based (age floor + keep-window) and is fully covered by
@@ -30,13 +30,16 @@
  *   - `automation-lifecycle-cleanup-<suffix>`: trigger.type
  *     github_review_requested against a local mock GitHub server (mirrors
  *     scenario-automation-pr-continuity.mjs's fixture), policy.continuity
- *     per_subject, location.type repository_worktree. Two independent
+ *     per_subject, location.type repository_worktree. Three independent
  *     worktrees under ONE definition are produced by delivering once, then
- *     editing the prompt (which rotates the per_subject binding exactly
- *     like the edit-rebind leg) and re-triggering the same PR/SHA subject
- *     through a withdraw+re-request cycle — the second claim mints a fresh,
- *     non-persisted session and therefore a fresh worktree path, with no
- *     second mock host or PR needed.
+ *     editing the prompt twice more (each edit rotates the per_subject
+ *     binding exactly like the edit-rebind leg) and re-triggering the same
+ *     PR/SHA subject through a withdraw+re-request cycle each time — every
+ *     claim mints a fresh, non-persisted session and therefore a fresh
+ *     worktree path, with no second mock host or PR needed. Only the third
+ *     (current) binding is left live at cleanup time — the first two are
+ *     dropped by the edits that rotate past them — so the three runs land
+ *     one in each of cleanup's three result buckets.
  *
  * Run serially (packaged-app scenarios are single-tenant):
  *   ATTN_HARNESS_PROFILE=<name> node scripts/real-app-harness/scenario-automation-lifecycle.mjs
@@ -398,6 +401,7 @@ async function main() {
   const PROMPT_P2 = 'Edit-rebind proof P2: edited contract.';
   const CLEANUP_PROMPT_V1 = 'Cleanup-dirty-safe proof v1: initial contract.';
   const CLEANUP_PROMPT_V2 = 'Cleanup-dirty-safe proof v2: edited contract.';
+  const CLEANUP_PROMPT_V3 = 'Cleanup-dirty-safe proof v3: edited contract again.';
 
   let daemonEnv = null;
   let mock = null;
@@ -560,13 +564,16 @@ async function main() {
       runJSON(binary, ['automation', 'apply', '--file', deleteDefinitionFile], daemonEnv);
     });
 
-    // Leg 3: cleanup-dirty-safe. Two independent worktrees under ONE
-    // definition come from delivering once, then editing the prompt (which
-    // rotates the per_subject binding via the same rotateContinuity
-    // mechanism leg 1 already proved) and re-triggering the same PR/SHA
-    // subject through a withdraw+re-request cycle, which mints a fresh,
-    // non-persisted session and therefore a fresh worktree path — no second
-    // mock host or PR needed.
+    // Leg 3: cleanup-dirty-safe. Three independent worktrees under ONE
+    // definition come from delivering once, then editing the prompt twice
+    // more (each edit rotates the per_subject binding via the same
+    // rotateContinuity mechanism leg 1 already proved) and re-triggering the
+    // same PR/SHA subject through a withdraw+re-request cycle each time,
+    // which mints a fresh, non-persisted session and therefore a fresh
+    // worktree path — no second mock host or PR needed. Only the third
+    // (current) binding is still live when cleanup runs: the first two were
+    // dropped by the edits that rotated past them, so run1/run2 are
+    // genuinely unbound and run3 is not.
     await runner.step('leg3_cleanup_dirty_safe', async () => {
       fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: true, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V1 }));
       runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
@@ -605,15 +612,50 @@ async function main() {
 
       fs.writeFileSync(path.join(dirtyWorktree, 'uncommitted-scratch.txt'), 'dirty for leg3 cleanup-dirty-safe\n');
 
+      // A third edit rotates the binding again, dropping run2's binding (its
+      // worktree is now unbound too, just dirty) and minting run3 as the
+      // definition's new current thread.
+      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: true, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V3 }));
+      runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
+
+      await setRequested(mock.url, false);
+      await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
+      await setRequested(mock.url, true);
+      await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
+
+      const activeRun = await poll(() => {
+        const rows = (runJSON(binary, ['automation', 'runs', cleanupID], daemonEnv) || [])
+          .filter((row) => row.State === 'delivered' && row.TicketID !== cleanRun.TicketID && row.TicketID !== dirtyRun.TicketID);
+        return rows.length >= 1 ? rows[0] : null;
+      }, 'cleanup leg third delivery on the current thread', GH_DELIVERY_TIMEOUT_MS);
+      const activeWorktree = resolveWorktree(observer, profile, activeRun.SessionID);
+      runner.assert(activeWorktree !== cleanWorktree && activeWorktree !== dirtyWorktree, 'the third delivery gets an independent worktree', { cleanWorktree, dirtyWorktree, activeWorktree });
+      runner.assert(fs.existsSync(activeWorktree), 'third delivery worktree exists', { activeWorktree });
+
+      // Closing thread C's session before cleanup is the point of this leg,
+      // not an incidental step: a session row being absent does not mean the
+      // thread is dead. Unlike run1/run2, the definition is NOT edited again
+      // after this delivery, so run3's continuity binding is still live —
+      // that surviving binding, with no live session row backing it, is
+      // exactly the case that used to make cleanup silently skip the run and
+      // destroy a live thread's worktree.
+      await client.request('close_session', { sessionId: activeRun.SessionID });
+      await waitSessionGone(observer, activeRun.SessionID, 'third cleanup-leg session to unregister');
+
       const result = runJSON(binary, ['automation', 'cleanup', cleanupID], daemonEnv);
       runner.assert(
-        Array.isArray(result.cleaned) && result.cleaned.includes(cleanRun.ID) && !result.cleaned.includes(dirtyRun.ID),
-        'cleanup reports the clean run in cleaned, not the dirty one',
+        Array.isArray(result.cleaned) && result.cleaned.includes(cleanRun.ID) && !result.cleaned.includes(dirtyRun.ID) && !result.cleaned.includes(activeRun.ID),
+        'cleanup reports only the clean run in cleaned',
         result,
       );
       runner.assert(
-        Array.isArray(result.kept_dirty) && result.kept_dirty.includes(dirtyRun.ID) && !result.kept_dirty.includes(cleanRun.ID),
-        'cleanup reports the dirty run in kept_dirty, not the clean one',
+        Array.isArray(result.kept_dirty) && result.kept_dirty.includes(dirtyRun.ID) && !result.kept_dirty.includes(cleanRun.ID) && !result.kept_dirty.includes(activeRun.ID),
+        'cleanup reports only the dirty run in kept_dirty',
+        result,
+      );
+      runner.assert(
+        Array.isArray(result.kept_active) && result.kept_active.includes(activeRun.ID) && !result.kept_active.includes(cleanRun.ID) && !result.kept_active.includes(dirtyRun.ID),
+        'cleanup reports the still-bound current thread in kept_active rather than silently skipping it',
         result,
       );
       runner.assert(!fs.existsSync(cleanWorktree), 'the clean worktree is removed from disk', { cleanWorktree });
@@ -621,9 +663,11 @@ async function main() {
       runner.assert(fs.existsSync(dirtyWorktree), 'the dirty worktree directory is preserved', { dirtyWorktree });
       runner.assert(fs.existsSync(path.join(dirtyWorktree, 'uncommitted-scratch.txt')), 'the dirty worktree file is untouched', { dirtyWorktree });
       runner.assert(worktreeListShows(cleanupFixture.repo, dirtyWorktree), 'the dirty worktree is still tracked by git worktree list', { dirtyWorktree });
+      runner.assert(fs.existsSync(activeWorktree), 'the still-bound worktree is preserved', { activeWorktree });
+      runner.assert(worktreeListShows(cleanupFixture.repo, activeWorktree), 'the still-bound worktree is still tracked by git worktree list', { activeWorktree });
 
       const rowsAfterCleanup = runJSON(binary, ['automation', 'runs', cleanupID], daemonEnv) || [];
-      runner.assert(rowsAfterCleanup.length === 2, 'both run rows still exist after cleanup', rowsAfterCleanup);
+      runner.assert(rowsAfterCleanup.length === 3, 'all three run rows still exist after cleanup', rowsAfterCleanup);
       runner.assert(
         rowsAfterCleanup.every((row) => row.State === 'delivered'),
         'cleanup never mutates run state',
@@ -632,12 +676,12 @@ async function main() {
 
       const second = runJSON(binary, ['automation', 'cleanup', cleanupID], daemonEnv);
       runner.assert(
-        (second.cleaned || []).length === 0 && (second.kept_dirty || []).includes(dirtyRun.ID),
-        'a second cleanup invocation is a no-op for the already-clean run and still reports the dirty one',
+        (second.cleaned || []).length === 0 && (second.kept_dirty || []).includes(dirtyRun.ID) && (second.kept_active || []).includes(activeRun.ID),
+        'a second cleanup invocation is a no-op for the already-cleaned run and still reports the dirty and still-bound runs',
         second,
       );
 
-      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: false, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V2 }));
+      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: false, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V3 }));
       runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
     });
 
@@ -669,7 +713,7 @@ async function main() {
       }
       if (cleanupApplied && cleanupFixture) {
         try {
-          fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: false, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V2 }));
+          fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: false, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V3 }));
           run(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
         } catch {}
       }
