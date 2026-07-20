@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestDefinitionPersistsCanonicalDirectory(t *testing.T) {
@@ -38,6 +41,70 @@ policy: {continuity: fresh}
 	}
 	if spec.Location.Path != resolved || strings.Contains(string(canonical), link) {
 		t.Fatalf("path=%q canonical=%s, want resolved %q", spec.Location.Path, canonical, resolved)
+	}
+}
+
+// TestMarshalDefinitionYAMLRoundTripsThroughParse pins
+// MarshalDefinitionYAML's contract as automationDefinitionYAML's legacy-row
+// fallback: rendering a parsed spec back to YAML and parsing that YAML again
+// must produce an equal spec, byte-identical canonical JSON, and (critically)
+// still pass ParseDefinitionYAML's validation — a legacy row's
+// reconstructed definition_yaml must stay a legal input to
+// validateAutomationSpec / automationApply, not just a legal-looking one.
+func TestMarshalDefinitionYAMLRoundTripsThroughParse(t *testing.T) {
+	raw := `api_version: attn.dev/automations/v1alpha1
+id: roundtrip
+name: Roundtrip
+enabled: true
+trigger: {type: manual}
+prompt: Do the thing.
+launch: {driver: codex, model: gpt-5, effort: high}
+location: {type: directory, path: "` + t.TempDir() + `"}
+policy: {continuity: fresh, overlap: coalesce}
+`
+	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseDefinitionYAML() error = %v", err)
+	}
+
+	rendered, err := MarshalDefinitionYAML(spec)
+	if err != nil {
+		t.Fatalf("MarshalDefinitionYAML() error = %v", err)
+	}
+
+	roundTripped, roundTrippedCanonical, err := ParseDefinitionYAML(rendered)
+	if err != nil {
+		t.Fatalf("ParseDefinitionYAML(MarshalDefinitionYAML(spec)) error = %v, rendered:\n%s", err, rendered)
+	}
+	if !reflect.DeepEqual(roundTripped, spec) {
+		t.Fatalf("round-tripped spec = %#v, want %#v", roundTripped, spec)
+	}
+	if string(roundTrippedCanonical) != string(canonical) {
+		t.Fatalf("round-tripped canonical JSON = %s, want %s", roundTrippedCanonical, canonical)
+	}
+}
+
+// TestStarterTemplateYAMLIsWellFormedYAML pins automation_definition_get's
+// id: "" starter-template contract: the rendered document must at least be
+// syntactically parseable YAML matching StarterDefinition field-for-field
+// (via yaml.Unmarshal directly, not ParseDefinitionYAML/ValidateDefinition —
+// StarterDefinition's Location.Path is an intentional placeholder that does
+// not exist on disk, so it fails canonicalizeDirectory by design until the
+// user edits it).
+func TestStarterTemplateYAMLIsWellFormedYAML(t *testing.T) {
+	rendered, err := StarterTemplateYAML()
+	if err != nil {
+		t.Fatalf("StarterTemplateYAML() error = %v", err)
+	}
+	var got DefinitionSpec
+	if err := yaml.Unmarshal(rendered, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal(StarterTemplateYAML()) error = %v, rendered:\n%s", err, rendered)
+	}
+	if !reflect.DeepEqual(got, StarterDefinition) {
+		t.Fatalf("starter template round-trip = %#v, want %#v", got, StarterDefinition)
+	}
+	if _, _, err := ParseDefinitionYAML(rendered); err == nil {
+		t.Fatalf("ParseDefinitionYAML(StarterTemplateYAML()) unexpectedly succeeded; the placeholder path should fail canonicalizeDirectory")
 	}
 }
 

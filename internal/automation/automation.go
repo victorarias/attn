@@ -101,6 +101,45 @@ func ParseDefinitionYAML(data []byte) (DefinitionSpec, []byte, error) {
 	return spec, canonical, err
 }
 
+// MarshalDefinitionYAML renders spec back to valid, re-appliable YAML — every
+// field of DefinitionSpec and its nested structs already carries a `yaml:`
+// tag, so this is a direct yaml.v3 marshal. It is the fallback used to
+// reconstruct definition_yaml for rows written before migration 75 added
+// spec_yaml (empty spec_yaml column): the result loses whatever comments the
+// original author's YAML carried, but ParseDefinitionYAML(MarshalDefinitionYAML(spec))
+// round-trips to an equal spec, so it stays a legal input to
+// validateAutomationSpec / automationApply.
+func MarshalDefinitionYAML(spec DefinitionSpec) ([]byte, error) {
+	return yaml.Marshal(spec)
+}
+
+// StarterDefinition is the placeholder spec automation_definition_get returns
+// for id: "" (new-definition case). It is deliberately not a valid,
+// appliable definition as-is — Location.Path is a placeholder, not a real
+// directory, so it fails canonicalizeDirectory in ValidateDefinition until
+// the user edits it — but every field is filled in so the editor opens on a
+// complete, self-explanatory document rather than an empty buffer the user
+// has to build field-by-field from documentation.
+var StarterDefinition = DefinitionSpec{
+	APIVersion: APIVersion,
+	ID:         "my-automation",
+	Name:       "My automation",
+	Enabled:    true,
+	Trigger:    TriggerSpec{Type: "manual"},
+	Prompt:     "Describe what the agent should do when this automation runs.",
+	Launch:     LaunchSpec{Driver: "codex"},
+	Location:   LocationSpec{Type: "directory", Path: "/path/to/repository"},
+	Policy:     PolicySpec{Continuity: "fresh"},
+}
+
+// StarterTemplateYAML renders StarterDefinition through the same
+// MarshalDefinitionYAML path every legacy-row fallback uses, so the starter
+// template can never drift into a shape validateAutomationSpec would reject
+// for reasons other than the intentional placeholder path.
+func StarterTemplateYAML() ([]byte, error) {
+	return MarshalDefinitionYAML(StarterDefinition)
+}
+
 func ValidateDefinition(s *DefinitionSpec) error {
 	if s == nil {
 		return errors.New("definition is required")
