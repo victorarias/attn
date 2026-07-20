@@ -9,6 +9,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-20]
 
 ### Added
+- **Automations now have a panel in the app.** A new toolbar button opens an
+  Automations panel that lists every definition with its trigger and
+  enabled state, lets you enable/disable or run a manual automation now,
+  shows each definition's run history with failures called out inline, and
+  jumps straight to the ticket or session a run produced. Definitions are
+  still created from the CLI (`attn automation apply`); changes made there
+  appear in the panel immediately, and daemon rejections are shown in the
+  panel rather than silently swallowed.
 - **Automations can now run on a schedule.** A definition can declare a cron
   schedule with a required time zone and fire an ordinary visible agent
   session at each intended instant — for example, a recurring merged-worktree
