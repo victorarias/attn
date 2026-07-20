@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, waitForMockPtyBanner } from './fixtures';
 
 declare global {
   interface Window {
@@ -48,6 +48,9 @@ async function openTerminalSession(
       { timeout: 5000 },
     )
     .toBe(true);
+  // connect_terminal fires before ptyAttach, so the mock banner is still in
+  // flight here. Let it land before the caller clears the screen.
+  await waitForMockPtyBanner(page, sessionId);
   return terminal;
 }
 
