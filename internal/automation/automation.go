@@ -34,7 +34,13 @@ type DefinitionSpec struct {
 type TriggerSpec struct {
 	Type         string               `yaml:"type" json:"type"`
 	Repositories RepositoryFilterSpec `yaml:"repositories,omitempty" json:"repositories,omitempty"`
-	Schedule     ScheduleSpec         `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+	// Schedule is a pointer so that encoding/json's omitempty actually omits it
+	// for non-scheduled triggers: a zero-value ScheduleSpec struct is never
+	// "empty" to json.Marshal, so a value field would put a spurious
+	// "schedule":{...} key in every manual/github_review_requested
+	// definition's canonical JSON and bump UpsertAutomationDefinition's
+	// revision on every byte-identical re-apply.
+	Schedule *ScheduleSpec `yaml:"schedule,omitempty" json:"schedule,omitempty"`
 }
 type ScheduleSpec struct {
 	Cron     string `yaml:"cron,omitempty" json:"cron,omitempty"`
@@ -113,21 +119,24 @@ func ValidateDefinition(s *DefinitionSpec) error {
 		if s.Trigger.Repositories.Mode != "" || len(s.Trigger.Repositories.Include) > 0 || len(s.Trigger.Repositories.Exclude) > 0 {
 			return errors.New("manual trigger cannot configure repositories")
 		}
-		if s.Trigger.Schedule != (ScheduleSpec{}) {
+		if s.Trigger.Schedule != nil {
 			return errors.New("manual trigger cannot configure schedule")
 		}
 	case "github_review_requested":
 		if err := validateRepositoryFilter(&s.Trigger.Repositories); err != nil {
 			return err
 		}
-		if s.Trigger.Schedule != (ScheduleSpec{}) {
+		if s.Trigger.Schedule != nil {
 			return errors.New("github_review_requested trigger cannot configure schedule")
 		}
 	case "scheduled":
 		if s.Trigger.Repositories.Mode != "" || len(s.Trigger.Repositories.Include) > 0 || len(s.Trigger.Repositories.Exclude) > 0 {
 			return errors.New("scheduled trigger cannot configure repositories")
 		}
-		if _, err := CompileSchedule(s.Trigger.Schedule); err != nil {
+		if s.Trigger.Schedule == nil {
+			return errors.New("scheduled trigger requires schedule")
+		}
+		if _, err := CompileSchedule(*s.Trigger.Schedule); err != nil {
 			return err
 		}
 	default:

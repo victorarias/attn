@@ -410,6 +410,22 @@ fires twice with two distinct UTC occurrence keys. Slice 5 accepts
 same ticket/session across occurrences); scheduled definitions require
 `catch_up` and a `directory` location.
 
+Two deliberate Slice 5 boundaries, both to revisit in Slice 7 (lifecycle):
+
+- Editing a singleton scheduled definition's prompt, launch, or location makes
+  subsequent occurrences fail visibly at delivery: the continuation contract
+  check compares each run against the origin run's snapshot pinned to the
+  continuity binding, and that origin never advances. This is the same
+  fail-visible-on-changed-contract stance Slice 4 chose for per-PR
+  continuations, made total by the single `"singleton"` binding. Recovery today
+  is disabling the definition or recreating it under a new id; proper edit
+  semantics (rotating the continuity binding to a new ticket/session when the
+  contract changes) belong to Slice 7's edit/disable/delete work.
+- Validation now rejects `catch_up` on manual and github triggers (it only ever
+  had meaning for schedules). Stored definitions keep observing fine, but
+  re-applying an old YAML that carried a stray `catch_up` on a non-scheduled
+  trigger fails validation until the field is removed.
+
 The example paths illustrate configuration shape only. No user's path belongs in
 source, fixtures intended for shipping, or built-in defaults.
 

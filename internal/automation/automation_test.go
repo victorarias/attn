@@ -311,6 +311,66 @@ policy: {continuity: per_subject, catch_up: latest}
 	}
 }
 
+// TestCanonicalJSONOmitsScheduleForNonScheduledTriggers is the regression
+// check for Fix 3: encoding/json's omitempty does not omit a zero-value
+// struct, so TriggerSpec.Schedule must be a pointer or every manual/
+// github_review_requested definition's canonical JSON grows a spurious
+// "schedule":{} key, which would bump UpsertAutomationDefinition's revision
+// on every byte-identical re-apply.
+func TestCanonicalJSONOmitsScheduleForNonScheduledTriggers(t *testing.T) {
+	dir := t.TempDir()
+	manual := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
+id: manual-no-schedule
+name: Manual
+enabled: true
+trigger: {type: manual}
+prompt: Inspect.
+launch: {driver: codex}
+location: {type: directory, path: PATH}
+policy: {continuity: fresh}
+`, "PATH", dir)
+	_, canonical, err := ParseDefinitionYAML([]byte(manual))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(canonical), `"schedule"`) {
+		t.Fatalf("canonical JSON contains a schedule key for a manual trigger: %s", canonical)
+	}
+}
+
+// TestScheduledDefinitionRoundTripsCronAndTimeZone locks in that
+// TriggerSpec.Schedule's pointer conversion still carries cron/time_zone
+// through both the YAML parse and a canonical-JSON re-decode.
+func TestScheduledDefinitionRoundTripsCronAndTimeZone(t *testing.T) {
+	dir := t.TempDir()
+	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
+id: nightly
+name: Nightly
+enabled: true
+trigger:
+  type: scheduled
+  schedule: {cron: "0 3 * * *", time_zone: America/New_York}
+prompt: Sweep.
+launch: {driver: codex}
+location: {type: directory, path: PATH}
+policy: {continuity: fresh, catch_up: skip}
+`, "PATH", dir)
+	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Trigger.Schedule == nil || spec.Trigger.Schedule.Cron != "0 3 * * *" || spec.Trigger.Schedule.TimeZone != "America/New_York" {
+		t.Fatalf("parsed schedule = %#v, want cron/time_zone preserved", spec.Trigger.Schedule)
+	}
+	var reDecoded DefinitionSpec
+	if err := json.Unmarshal(canonical, &reDecoded); err != nil {
+		t.Fatal(err)
+	}
+	if reDecoded.Trigger.Schedule == nil || reDecoded.Trigger.Schedule.Cron != "0 3 * * *" || reDecoded.Trigger.Schedule.TimeZone != "America/New_York" {
+		t.Fatalf("canonical JSON round-trip schedule = %#v, want cron/time_zone preserved", reDecoded.Trigger.Schedule)
+	}
+}
+
 func TestManualTriggerRejectsCatchUp(t *testing.T) {
 	dir := t.TempDir()
 	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1

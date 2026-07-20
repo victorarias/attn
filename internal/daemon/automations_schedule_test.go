@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -102,6 +103,78 @@ func TestObserveDueSchedulesFiresWithinGraceForBothCatchUpPolicies(t *testing.T)
 	}
 }
 
+// TestObserveDueSchedulesSkipGraceBoundary is the regression check for Fix
+// 4a: catch_up=skip's grace window is inclusive of exactly scheduleSkipGrace
+// but excludes anything past it, matching observeDueSchedule's `<=` compare.
+// The cursor still advances in both cases either way.
+func TestObserveDueSchedulesSkipGraceBoundary(t *testing.T) {
+	for name, tc := range map[string]struct {
+		offset   time.Duration
+		delivers bool
+	}{
+		"exactly at grace fires":      {scheduleSkipGrace, true},
+		"one second past grace skips": {scheduleSkipGrace + time.Second, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d, s, def, _ := setupScheduledDaemon(t, "0 * * * *", "fresh", "skip")
+			var delivered []*store.AutomationRun
+			d.automationDeliveryHook = func(run *store.AutomationRun) error {
+				delivered = append(delivered, run)
+				return s.MarkAutomationRunDelivered(run.ID, "{}", time.Now())
+			}
+
+			anchor := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+			d.observeDueSchedules(anchor)
+			intended := time.Date(2026, 7, 20, 4, 0, 0, 0, time.UTC)
+			observedAt := intended.Add(tc.offset)
+			d.observeDueSchedules(observedAt)
+
+			if tc.delivers {
+				if len(delivered) != 1 {
+					t.Fatalf("delivered=%d, want 1", len(delivered))
+				}
+				occurrence, err := s.GetAutomationOccurrence(delivered[0].OccurrenceID)
+				if err != nil || occurrence == nil {
+					t.Fatalf("occurrence missing: %v", err)
+				}
+				if wantKey := automation.ScheduledOccurrenceKey(intended); occurrence.OccurrenceKey != wantKey {
+					t.Fatalf("occurrence key=%s want=%s", occurrence.OccurrenceKey, wantKey)
+				}
+			} else if len(delivered) != 0 {
+				t.Fatalf("delivered=%d, want 0", len(delivered))
+			}
+
+			cursor, ok, err := s.GetAutomationScheduleCursor(def.ID)
+			if err != nil || !ok || !cursor.Equal(observedAt) {
+				t.Fatalf("cursor=%v ok=%v err=%v, want advanced to %v regardless of fire/skip", cursor, ok, err, observedAt)
+			}
+		})
+	}
+}
+
+// TestObserveDueSchedulesSkipsObservationWhileRecovering is the regression
+// check for Fix 4c: a brand-new scheduled definition observed while startup
+// recovery hasn't settled prior state must not anchor a cursor; once
+// recovery clears, the next call anchors normally.
+func TestObserveDueSchedulesSkipsObservationWhileRecovering(t *testing.T) {
+	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
+	d.setRecovering(true)
+
+	now0 := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	d.observeDueSchedules(now0)
+
+	if _, ok, err := s.GetAutomationScheduleCursor(def.ID); err != nil || ok {
+		t.Fatalf("recovering observation anchored a cursor: ok=%v err=%v", ok, err)
+	}
+
+	d.setRecovering(false)
+	d.observeDueSchedules(now0)
+	cursor, ok, err := s.GetAutomationScheduleCursor(def.ID)
+	if err != nil || !ok || !cursor.Equal(now0) {
+		t.Fatalf("cursor=%v ok=%v err=%v, want anchored at %v once recovery clears", cursor, ok, err, now0)
+	}
+}
+
 func TestObserveDueSchedulesIdempotentAcrossRepeatedTicks(t *testing.T) {
 	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
 	delivered := 0
@@ -175,6 +248,89 @@ func TestObserveDueSchedulesDowntimeCatchUpPolicies(t *testing.T) {
 				t.Fatalf("cursor=%v ok=%v err=%v, want advanced to %v", cursor, ok, err, resumed)
 			}
 		})
+	}
+}
+
+// TestObserveDueScheduleClaimRejectionLeavesCursorForRetry is the regression
+// check for Fix 1: a claim rejected by ClaimScheduledAutomationRun's revision
+// guard must not advance the cursor past the intended instant, or the next
+// tick would never re-decide that occurrence and it would be dropped
+// permanently. Simulates the observation race directly (definition edited
+// between ListAutomationDefinitions' read and the claim) by calling
+// observeDueSchedule with a stale `definition` copy while the store already
+// holds a newer revision.
+func TestObserveDueScheduleClaimRejectionLeavesCursorForRetry(t *testing.T) {
+	d, s, def, dir := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
+	var spec automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(def.SpecJSON), &spec); err != nil {
+		t.Fatal(err)
+	}
+	staleDefinition := *def // Revision predates the edit below.
+
+	now0 := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	d.observeDueSchedules(now0) // anchor
+
+	// Edit the definition (bumping its revision), racing an in-flight tick
+	// that already read the pre-edit definition.
+	editedSpec, editedCanonical, err := automation.ParseDefinitionYAML([]byte(scheduledDefinitionYAML(dir, "* * * * *", "fresh", "latest", "Different sweep.")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertAutomationDefinition(editedSpec.ID, editedSpec.Name, string(editedCanonical), true, now0); err != nil {
+		t.Fatal(err)
+	}
+
+	delivered := 0
+	d.automationDeliveryHook = func(*store.AutomationRun) error { delivered++; return nil }
+	due := now0.Add(60 * time.Second)
+	d.observeDueSchedule(staleDefinition, spec, now0.Add(70*time.Second))
+
+	if delivered != 0 {
+		t.Fatalf("delivered=%d, want 0 on claim rejection", delivered)
+	}
+	cursor, ok, err := s.GetAutomationScheduleCursor(def.ID)
+	if err != nil || !ok || !cursor.Equal(now0) {
+		t.Fatalf("cursor=%v ok=%v err=%v, want unchanged at %v after rejected claim", cursor, ok, err, now0)
+	}
+	runs, err := s.ListAutomationRuns(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("runs=%d, want 0 after rejected claim", len(runs))
+	}
+
+	// A later tick re-reads the now-fresh definition and claims the same
+	// intended instant successfully.
+	freshDefinition, err := s.GetAutomationDefinition(def.ID)
+	if err != nil || freshDefinition == nil {
+		t.Fatalf("fresh definition: %v", err)
+	}
+	var freshSpec automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(freshDefinition.SpecJSON), &freshSpec); err != nil {
+		t.Fatal(err)
+	}
+	retryAt := now0.Add(75 * time.Second)
+	d.observeDueSchedule(*freshDefinition, freshSpec, retryAt)
+
+	if delivered != 1 {
+		t.Fatalf("delivered=%d, want 1 after retry with fresh definition", delivered)
+	}
+	runs, err = s.ListAutomationRuns(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs=%d, want 1", len(runs))
+	}
+	wantKey := automation.ScheduledOccurrenceKey(due)
+	occurrence, err := s.GetAutomationOccurrence(runs[0].OccurrenceID)
+	if err != nil || occurrence == nil || occurrence.OccurrenceKey != wantKey {
+		t.Fatalf("occurrence=%#v err=%v, want key %s for the same intended instant", occurrence, err, wantKey)
+	}
+	cursor, ok, err = s.GetAutomationScheduleCursor(def.ID)
+	if err != nil || !ok || !cursor.Equal(retryAt) {
+		t.Fatalf("cursor=%v ok=%v err=%v, want advanced to %v after the successful retry", cursor, ok, err, retryAt)
 	}
 }
 
@@ -379,5 +535,59 @@ func TestScheduledSingletonContinuationSkipsPullRequestParsing(t *testing.T) {
 	// live-session short circuit and succeeds.
 	if err := d.validateAutomationContinuation(req); err != nil {
 		t.Fatalf("singleton continuation with a live session rejected: %v", err)
+	}
+}
+
+// TestScheduledSingletonMissingContinuityTicketFailsBeforeReusingBoundArtifacts
+// is the scheduled-provider mirror of
+// TestMissingContinuityTicketFailsBeforeReusingBoundArtifacts in
+// automations_test.go. Fix 2 makes ClaimScheduledAutomationRun record
+// subject_key=continuityKey instead of always "": this is what lets
+// HasPriorAutomationContinuityRun ever match a scheduled singleton's prior
+// run, so EnsureTicket's deleted-ticket safety guard actually fires instead
+// of silently recreating the ticket.
+func TestScheduledSingletonMissingContinuityTicketFailsBeforeReusingBoundArtifacts(t *testing.T) {
+	s := store.New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intended1 := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	payload1, err := json.Marshal(automation.NewScheduledInput(intended1, now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, err := s.ClaimScheduledAutomationRun(def.ID, automation.ScheduledOccurrenceKey(intended1), "singleton", def.Revision, string(payload1), `{}`, now, store.AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: first.TicketID, Title: "Nightly", Status: store.TicketStatusDone, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:nightly", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(first.ID, `{}`, now); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := s.SweepExpiredTickets(now.Add(2*time.Hour), time.Hour); err != nil || removed != 1 {
+		t.Fatalf("sweep removed=%d err=%v", removed, err)
+	}
+
+	intended2 := intended1.Add(time.Minute)
+	payload2, err := json.Marshal(automation.NewScheduledInput(intended2, now.Add(4*time.Hour)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := s.ClaimScheduledAutomationRun(def.ID, automation.ScheduledOccurrenceKey(intended2), "singleton", def.Revision, string(payload2), `{}`, now.Add(4*time.Hour), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	err = d.EnsureTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: "singleton", IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}})
+	if err == nil || !strings.Contains(err.Error(), "continuity ticket is missing") {
+		t.Fatalf("missing continuity ticket err=%v", err)
+	}
+	if ticket, err := s.GetTicket(first.TicketID); err != nil || ticket != nil {
+		t.Fatalf("swept ticket was recreated: ticket=%#v err=%v", ticket, err)
 	}
 }

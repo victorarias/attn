@@ -312,7 +312,10 @@ func (s *Store) ClaimScheduledAutomationRun(definitionID, occurrenceKey, continu
 		}
 	}
 	now := formatTicketTime(observedAt)
-	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'schedule',?,?,?,?,?)`, ids.OccurrenceID, definitionID, occurrenceKey, "", now, payloadJSON, now); err != nil {
+	// subject_key is recorded as continuityKey (not always ""): HasPriorAutomationContinuityRun
+	// keys its lookup on subject_key, so the continuity key must be recorded there for the
+	// deleted-ticket safety guard to ever match a scheduled singleton's prior run.
+	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'schedule',?,?,?,?,?)`, ids.OccurrenceID, definitionID, occurrenceKey, continuityKey, now, payloadJSON, now); err != nil {
 		return nil, false, err
 	}
 	if _, err = tx.Exec(`INSERT INTO automation_runs(id,definition_id,occurrence_id,definition_revision,snapshot_json,state,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?,?,?,?)`, ids.RunID, definitionID, ids.OccurrenceID, revision, snapshotJSON, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
@@ -706,6 +709,12 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, o
 // the current run. It lets delivery distinguish first-run crash recovery (where
 // the ticket may not exist yet) from a later cycle whose bound ticket was removed.
 func (s *Store) HasPriorAutomationContinuityRun(definitionID, continuityKey, currentRunID string) (bool, error) {
+	// An empty continuity key means "no continuity": without this guard the
+	// subject_key match below would pair any two fresh-continuity occurrences
+	// (both stored with subject_key='').
+	if continuityKey == "" {
+		return false, nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.db == nil {

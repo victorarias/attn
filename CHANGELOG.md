@@ -26,6 +26,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   resume token current.
 
 ### Changed
+- **`catch_up` is now schedule-only.** Applying an automation whose manual or
+  GitHub trigger carries a `catch_up` policy fails validation with a clear
+  error; remove the field from the definition. Already-stored definitions are
+  unaffected.
 - **Later review requests return to a safe existing reviewer.** Per-PR
   automations now resume a stopped reviewer with its recorded transcript and
   pinned unattended policy, reopen archived tickets after successful delivery,

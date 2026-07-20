@@ -71,7 +71,12 @@ func (d *Daemon) observeDueSchedules(now time.Time) {
 // observeDueSchedule decides and, if due, claims and delivers the single
 // occurrence owed to one scheduled definition this tick.
 func (d *Daemon) observeDueSchedule(definition store.AutomationDefinition, spec automation.DefinitionSpec, now time.Time) {
-	compiled, err := automation.CompileSchedule(spec.Trigger.Schedule)
+	if spec.Trigger.Schedule == nil {
+		// Definition validation should have prevented this at apply time.
+		d.logf("automation schedule observation %s: scheduled trigger has no schedule", definition.ID)
+		return
+	}
+	compiled, err := automation.CompileSchedule(*spec.Trigger.Schedule)
 	if err != nil {
 		// Definition validation should have prevented this at apply time.
 		d.logf("automation schedule observation compile %s: %v", definition.ID, err)
@@ -114,11 +119,21 @@ func (d *Daemon) observeDueSchedule(definition store.AutomationDefinition, spec 
 		fire = now.Sub(intended) <= scheduleSkipGrace
 	}
 	if fire {
-		d.claimAndDeliverScheduledRun(definition, spec, intended, now)
+		if claimErr := d.claimAndDeliverScheduledRun(definition, spec, intended, now); claimErr != nil {
+			// The claim was rejected (revision mismatch, a singleton's
+			// undelivered-predecessor guard, or a transient store error): the
+			// cursor must stay behind intended so the next tick re-reads the
+			// definition and re-decides, per ClaimScheduledAutomationRun's
+			// documented contract. Advancing here would permanently drop
+			// this occurrence.
+			return
+		}
 	}
-	// Cursor advances after the claim decision regardless of fire/skip: a
-	// crash between claim and this write is safe because the next tick
-	// recomputes the same intended instant and the claim is idempotent.
+	// Cursor advances after a successful claim decision (fire or skip), not
+	// unconditionally: a crash between claim and this write is safe because
+	// the next tick recomputes the same intended instant and the claim is
+	// idempotent; a claim error must not advance past it (handled above) so
+	// the next tick retries the same intended instant instead of losing it.
 	if err := d.store.SetAutomationScheduleCursor(definition.ID, now); err != nil {
 		d.logf("automation schedule observation advance %s: %v", definition.ID, err)
 	}
@@ -126,37 +141,42 @@ func (d *Daemon) observeDueSchedule(definition store.AutomationDefinition, spec 
 
 // claimAndDeliverScheduledRun claims the occurrence for intended (idempotent
 // on definition + occurrence key) and, on a freshly pending run, delivers it
-// exactly like the GitHub review-request observation path.
-func (d *Daemon) claimAndDeliverScheduledRun(definition store.AutomationDefinition, spec automation.DefinitionSpec, intended, observedAt time.Time) {
+// exactly like the GitHub review-request observation path. It returns a
+// non-nil error when no run row was claimed — claim rejection/failure or any
+// pre-claim preparation failure; the caller uses that to withhold the cursor
+// advance. Delivery failures after a successful claim always return nil: the
+// run row already exists and is owned by delivery/recovery from here, not by
+// re-claiming.
+func (d *Daemon) claimAndDeliverScheduledRun(definition store.AutomationDefinition, spec automation.DefinitionSpec, intended, observedAt time.Time) error {
 	observationLock := d.automationObservationLock(definition.ID, "schedule", 0)
 	observationLock.Lock()
 	payload, err := json.Marshal(automation.NewScheduledInput(intended, observedAt))
 	if err != nil {
 		observationLock.Unlock()
 		d.logf("automation schedule observation payload %s: %v", definition.ID, err)
-		return
+		return err
 	}
 	effective, err := automation.Effective(spec, definition.Revision)
 	if err != nil {
 		observationLock.Unlock()
 		d.logf("automation schedule observation snapshot %s: %v", definition.ID, err)
-		return
+		return err
 	}
 	snapshotJSON, err := json.Marshal(effective)
 	if err != nil {
 		observationLock.Unlock()
 		d.logf("automation schedule observation snapshot marshal %s: %v", definition.ID, err)
-		return
+		return err
 	}
 	continuityKey := ""
 	if spec.Policy.Continuity == "singleton" {
 		continuityKey = "singleton"
 	}
-	run, _, err := d.store.ClaimScheduledAutomationRun(definition.ID, automation.ScheduledOccurrenceKey(intended), continuityKey, definition.Revision, string(payload), string(snapshotJSON), observedAt, newAutomationRunReservation())
+	run, _, claimErr := d.store.ClaimScheduledAutomationRun(definition.ID, automation.ScheduledOccurrenceKey(intended), continuityKey, definition.Revision, string(payload), string(snapshotJSON), observedAt, newAutomationRunReservation())
 	observationLock.Unlock()
-	if err != nil {
-		d.logf("automation schedule observation claim %s: %v", definition.ID, err)
-		return
+	if claimErr != nil {
+		d.logf("automation schedule observation claim %s: %v", definition.ID, claimErr)
+		return claimErr
 	}
 	d.automationMu.Lock()
 	current, loadErr := d.store.GetAutomationRun(run.ID)
@@ -170,4 +190,5 @@ func (d *Daemon) claimAndDeliverScheduledRun(definition store.AutomationDefiniti
 	if loadErr != nil {
 		d.logf("automation schedule observation deliver %s: %v", definition.ID, loadErr)
 	}
+	return nil
 }

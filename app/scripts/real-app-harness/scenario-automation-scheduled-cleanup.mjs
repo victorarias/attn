@@ -370,6 +370,13 @@ async function main() {
         { sessions: [...sessions] },
       );
 
+      // Later occurrences coalescing onto the same singleton agent must never
+      // touch the dirty worktree either, re-asserting leg 2's evidence after
+      // at least one more real tick has nudged the same live session.
+      runner.assert(fs.existsSync(fixture.dirtyWip), 'dirty-wip worktree directory is still preserved after coalescing');
+      runner.assert(fs.existsSync(path.join(fixture.dirtyWip, 'scratch.txt')), 'dirty-wip uncommitted file is still untouched after coalescing');
+      runner.assert(worktreeListShows(fixture.repo, fixture.dirtyWip), 'dirty-wip worktree is still tracked by git worktree list after coalescing');
+
       fs.writeFileSync(cleanupDefinitionFile, cleanupDefinitionYAML({ id: cleanupID, locationPath: fixtureRoot, enabled: false }));
       runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
     });
@@ -398,22 +405,31 @@ async function main() {
       await delay(DOWNTIME_MS);
       run(binary, ['daemon', 'ensure'], daemonEnv);
       await waitForDaemonReady(binary, daemonEnv);
+
+      // Poll until the run row exists AND has actually been delivered (its
+      // spawn already happened), not merely created: waiting on existence
+      // alone can race the NEXT real minute tick under fresh continuity (a
+      // second, distinct run+spawn) if delivery is slow. Disable the
+      // definition immediately once delivered — stopping further fires
+      // before polling for the probe invocation — so that race window can't
+      // widen while this step keeps running.
       const rows = await poll(() => {
         const list = runJSON(binary, ['automation', 'runs', stormGuardID], daemonEnv) || [];
-        return list.length >= 1 ? list : null;
-      }, 'storm-guard restart catch-up run', RESTART_RUN_TIMEOUT_MS);
+        const delivered = list.filter((row) => row.State === 'delivered');
+        return delivered.length >= 1 ? delivered : null;
+      }, 'storm-guard restart catch-up run delivered', RESTART_RUN_TIMEOUT_MS);
       runner.assert(rows.length === 1, 'storm-guard: exactly one catch-up run under fresh continuity too', { rows });
-
-      await poll(() => (invocations(probe.log).length >= 1 ? invocations(probe.log) : null), 'storm-guard probe launch');
-      runner.assert(invocations(probe.log).length === 1, 'exactly one process spawn backs the single catch-up run (no replay storm)', {
-        invocations: invocations(probe.log),
-      });
 
       fs.writeFileSync(
         stormGuardDefinitionFile,
         stormGuardDefinitionYAML({ id: stormGuardID, locationPath: fixtureRoot, enabled: false, executable: probe.executable }),
       );
       runJSON(binary, ['automation', 'apply', '--file', stormGuardDefinitionFile], daemonEnv);
+
+      await poll(() => (invocations(probe.log).length >= 1 ? invocations(probe.log) : null), 'storm-guard probe launch');
+      runner.assert(invocations(probe.log).length === 1, 'exactly one process spawn backs the single catch-up run (no replay storm)', {
+        invocations: invocations(probe.log),
+      });
     });
 
     runner.finishSuccess({ profile, cleanupID, stormGuardID, cleanupTicketID, cleanupSessionID, fixtureRoot });
