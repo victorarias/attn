@@ -34,6 +34,11 @@ type DefinitionSpec struct {
 type TriggerSpec struct {
 	Type         string               `yaml:"type" json:"type"`
 	Repositories RepositoryFilterSpec `yaml:"repositories,omitempty" json:"repositories,omitempty"`
+	Schedule     ScheduleSpec         `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+}
+type ScheduleSpec struct {
+	Cron     string `yaml:"cron,omitempty" json:"cron,omitempty"`
+	TimeZone string `yaml:"time_zone,omitempty" json:"time_zone,omitempty"`
 }
 type RepositoryFilterSpec struct {
 	Mode    string   `yaml:"mode,omitempty" json:"mode,omitempty"`
@@ -108,12 +113,25 @@ func ValidateDefinition(s *DefinitionSpec) error {
 		if s.Trigger.Repositories.Mode != "" || len(s.Trigger.Repositories.Include) > 0 || len(s.Trigger.Repositories.Exclude) > 0 {
 			return errors.New("manual trigger cannot configure repositories")
 		}
+		if s.Trigger.Schedule != (ScheduleSpec{}) {
+			return errors.New("manual trigger cannot configure schedule")
+		}
 	case "github_review_requested":
 		if err := validateRepositoryFilter(&s.Trigger.Repositories); err != nil {
 			return err
 		}
+		if s.Trigger.Schedule != (ScheduleSpec{}) {
+			return errors.New("github_review_requested trigger cannot configure schedule")
+		}
+	case "scheduled":
+		if s.Trigger.Repositories.Mode != "" || len(s.Trigger.Repositories.Include) > 0 || len(s.Trigger.Repositories.Exclude) > 0 {
+			return errors.New("scheduled trigger cannot configure repositories")
+		}
+		if _, err := CompileSchedule(s.Trigger.Schedule); err != nil {
+			return err
+		}
 	default:
-		return errors.New("trigger.type must be manual or github_review_requested")
+		return errors.New("trigger.type must be manual, github_review_requested, or scheduled")
 	}
 	if strings.TrimSpace(s.Prompt) == "" {
 		return errors.New("prompt is required")
@@ -167,7 +185,8 @@ func ValidateDefinition(s *DefinitionSpec) error {
 	if s.Policy.Overlap != "" && s.Policy.Overlap != "coalesce" {
 		return errors.New("policy.overlap must be coalesce")
 	}
-	if s.Trigger.Type == "github_review_requested" {
+	switch s.Trigger.Type {
+	case "github_review_requested":
 		if s.Location.Type != "repository_worktree" {
 			return errors.New("github_review_requested trigger requires repository_worktree location")
 		}
@@ -177,8 +196,23 @@ func ValidateDefinition(s *DefinitionSpec) error {
 		if s.Policy.CatchUp != "latest" {
 			return errors.New("github_review_requested trigger requires policy.catch_up latest")
 		}
-	} else if s.Policy.Continuity != "fresh" {
-		return errors.New("manual trigger supports only policy.continuity fresh")
+	case "scheduled":
+		if s.Location.Type != "directory" {
+			return errors.New("scheduled trigger requires directory location")
+		}
+		if s.Policy.Continuity != "fresh" && s.Policy.Continuity != "singleton" {
+			return errors.New("scheduled trigger requires policy.continuity fresh or singleton")
+		}
+		if s.Policy.CatchUp != "skip" && s.Policy.CatchUp != "latest" {
+			return errors.New("scheduled trigger requires policy.catch_up skip or latest")
+		}
+	default:
+		if s.Policy.Continuity != "fresh" {
+			return errors.New("manual trigger supports only policy.continuity fresh")
+		}
+		if s.Policy.CatchUp != "" {
+			return errors.New("manual trigger cannot configure policy.catch_up")
+		}
 	}
 	return nil
 }
