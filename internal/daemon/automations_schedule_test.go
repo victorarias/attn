@@ -632,15 +632,25 @@ func TestScheduledSingletonContinuationSkipsPullRequestParsing(t *testing.T) {
 	}
 }
 
-// TestScheduledSingletonMissingContinuityTicketFailsBeforeReusingBoundArtifacts
-// is the scheduled-provider mirror of
-// TestMissingContinuityTicketFailsBeforeReusingBoundArtifacts in
+// TestScheduledSingletonFreshRunAfterTicketSweepGetsItsOwnTicket is the
+// scheduled-provider mirror of
+// TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne in
 // automations_test.go. Fix 2 makes ClaimScheduledAutomationRun record
 // subject_key=continuityKey instead of always "": this is what lets
 // hasPriorAutomationContinuityRun ever match a scheduled singleton's prior
-// run, so EnsureTicket's deleted-ticket safety guard actually fires instead
-// of silently recreating the ticket.
-func TestScheduledSingletonMissingContinuityTicketFailsBeforeReusingBoundArtifacts(t *testing.T) {
+// run in the first place.
+//
+// This used to assert a refusal ("continuity ticket is missing"). Once the
+// ticket TTL sweep is wired up (this PR), first's ticket aging out is the
+// designed, routine end of its own thread — SweepExpiredTickets releases the
+// binding along with the ticket, so `second` claims with no binding to
+// inherit from, same as any other brand new singleton occurrence. Refusing
+// it would permanently brick every nightly run once the first delivered
+// occurrence's ticket ever aged past the TTL. `second`'s reservation now
+// carries realistic freshly-reserved ids (matching the sole production
+// reservation site, automations.go:319) instead of the empty ones an absent
+// binding used to leave it with.
+func TestScheduledSingletonFreshRunAfterTicketSweepGetsItsOwnTicket(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{}`, true, now)
@@ -671,18 +681,23 @@ func TestScheduledSingletonMissingContinuityTicketFailsBeforeReusingBoundArtifac
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, _, err := s.ClaimScheduledAutomationRun(def.ID, automation.ScheduledOccurrenceKey(intended2), "singleton", def.Revision, string(payload2), `{}`, now.Add(4*time.Hour), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2"})
+	second, _, err := s.ClaimScheduledAutomationRun(def.ID, automation.ScheduledOccurrenceKey(intended2), "singleton", def.Revision, string(payload2), `{}`, now.Add(4*time.Hour), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if second.SessionID != "session-2" || second.TicketID != "ticket-2" {
+		t.Fatalf("second ids=%s/%s, want its own freshly reserved ones (no binding survived to hand it session-1/ticket-1)", second.SessionID, second.TicketID)
+	}
 
 	d := &Daemon{store: s, wsHub: newWSHub()}
-	err = d.EnsureTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: "singleton", IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}})
-	if err == nil || !strings.Contains(err.Error(), "continuity ticket is missing") {
-		t.Fatalf("missing continuity ticket err=%v", err)
+	if err := d.EnsureTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: "singleton", IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}); err != nil {
+		t.Fatalf("a fresh thread with no artifacts to reuse must not be refused: %v", err)
 	}
 	if ticket, err := s.GetTicket(first.TicketID); err != nil || ticket != nil {
 		t.Fatalf("swept ticket was recreated: ticket=%#v err=%v", ticket, err)
+	}
+	if ticket, err := s.GetTicket(second.TicketID); err != nil || ticket == nil {
+		t.Fatalf("expected the fresh thread's own ticket to be created: ticket=%#v err=%v", ticket, err)
 	}
 }
 

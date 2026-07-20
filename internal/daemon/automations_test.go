@@ -818,7 +818,27 @@ func TestContinuationActivationFailsIfTicketDisappeared(t *testing.T) {
 	}
 }
 
-func TestMissingContinuityTicketFailsBeforeReusingBoundArtifacts(t *testing.T) {
+// TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne pins the
+// GitHub-review-provider side of the same fix
+// TestValidateAutomationContinuationRefusesOnlyForItsOwnVanishedTicket pins
+// for the scheduled provider (automations_contract_test.go): once the old
+// thread's ticket (and, via SweepExpiredTickets' cascade, its binding) is
+// gone, the withdraw+re-request cycle here already released the binding too
+// (the pre-existing per-subject reap at :693-702, since the ticket was
+// already gone by then), so `second` claims with no binding to inherit from
+// — exactly like a real second review-request cycle after the first one's
+// thread fully aged out. That must mint its own fresh ticket, not refuse.
+//
+// This test used to assert a refusal ("continuity ticket is missing"), with
+// `second`'s reservation deliberately omitting ticket/session ids to lean on
+// a binding that, in this exact scenario, no longer exists — so it resolved
+// to an empty ticket id, not a realistic fresh one. Real callers always
+// reserve full ids up front (see the sole production reservation site,
+// automations.go:319); giving `second` the same shape here is what exposed
+// that the old refusal was firing for the wrong reason (any same-contract
+// history missing its ticket, not specifically req's own thread) rather than
+// a real hazard — see hasPriorAutomationContinuityRun's point 3.
+func TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
 	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
@@ -849,17 +869,22 @@ func TestMissingContinuityTicketFailsBeforeReusingBoundArtifacts(t *testing.T) {
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("second candidates=%#v err=%v", candidates, err)
 	}
-	second, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(4*time.Hour), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2"})
+	second, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(4*time.Hour), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if second.SessionID != "session-2" || second.TicketID != "ticket-2" {
+		t.Fatalf("second ids=%s/%s, want its own freshly reserved ones (no binding survived to hand it session-1/ticket-1)", second.SessionID, second.TicketID)
+	}
 	d := &Daemon{store: s, wsHub: newWSHub()}
-	err = d.EnsureTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}})
-	if err == nil || !strings.Contains(err.Error(), "continuity ticket is missing") {
-		t.Fatalf("missing continuity ticket err=%v", err)
+	if err := d.EnsureTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}); err != nil {
+		t.Fatalf("a fresh thread with no artifacts to reuse must not be refused: %v", err)
 	}
 	if ticket, err := s.GetTicket(first.TicketID); err != nil || ticket != nil {
 		t.Fatalf("swept ticket was recreated: ticket=%#v err=%v", ticket, err)
+	}
+	if ticket, err := s.GetTicket(second.TicketID); err != nil || ticket == nil {
+		t.Fatalf("expected the fresh thread's own ticket to be created: ticket=%#v err=%v", ticket, err)
 	}
 }
 

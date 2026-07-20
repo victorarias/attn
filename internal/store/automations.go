@@ -947,13 +947,16 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, o
 // AutomationContinuityRunHistoryEntry is one other run recorded under a
 // continuity key: its own pinned snapshot_json (to test contract equality)
 // paired with its own delivery ticket_id (to test whether that specific
-// thread's ticket still exists). Continuation runs of the same thread carry
-// the same ticket_id as their origin (they reuse the thread's continuity
-// binding), so per-entry ticket resolution is exact — it never needs to fall
-// back to grouping by tickets.automation_run_id origin linkage.
+// thread's ticket still exists) and session_id (to test whether that thread
+// is the very one the current request would reuse — see
+// hasPriorAutomationContinuityRun's use of it). Continuation runs of the same
+// thread carry the same ticket_id/session_id as their origin (they reuse the
+// thread's continuity binding), so per-entry resolution is exact — it never
+// needs to fall back to grouping by tickets.automation_run_id origin linkage.
 type AutomationContinuityRunHistoryEntry struct {
 	SnapshotJSON string
 	TicketID     string
+	SessionID    string
 }
 
 // AutomationContinuityRunHistory returns every other run recorded under this
@@ -982,7 +985,7 @@ func (s *Store) AutomationContinuityRunHistory(definitionID, continuityKey, curr
 		return nil, errors.New("automation persistence unavailable")
 	}
 	rows, err := s.db.Query(`
-		SELECT r.snapshot_json, r.ticket_id
+		SELECT r.snapshot_json, r.ticket_id, r.session_id
 		FROM automation_runs r
 		JOIN automation_occurrences o ON o.id=r.occurrence_id
 		WHERE r.definition_id=? AND o.subject_key=? AND r.id<>?
@@ -995,7 +998,7 @@ func (s *Store) AutomationContinuityRunHistory(definitionID, continuityKey, curr
 	var history []AutomationContinuityRunHistoryEntry
 	for rows.Next() {
 		var entry AutomationContinuityRunHistoryEntry
-		if err := rows.Scan(&entry.SnapshotJSON, &entry.TicketID); err != nil {
+		if err := rows.Scan(&entry.SnapshotJSON, &entry.TicketID, &entry.SessionID); err != nil {
 			return nil, err
 		}
 		history = append(history, entry)

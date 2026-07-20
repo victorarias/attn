@@ -925,6 +925,18 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 //     is what tells that apart from a real sweep: if T1's own ticket were
 //     later removed too, this must go back to refusing, since a same-
 //     contract thread's ticket really did disappear.
+//
+//  3. Scoping the disqualification to the entry's OWN session, not any
+//     same-contract entry's: the ticket TTL sweep (store.SweepExpiredTickets)
+//     releases a thread's continuity binding along with its ticket, by
+//     design — so a same-contract entry's ticket being gone is the routine
+//     end of that entry's own thread, not evidence about req's thread. Only
+//     when entry.SessionID equals req.IDs.SessionID is the vanished ticket
+//     actually req's OWN documenting ticket — i.e. req would be reusing that
+//     exact thread's session/worktree with no record of what happened to it.
+//     A different session id means req already holds a freshly reserved
+//     identity (no binding survived to hand it an old one), so nothing is
+//     being reused and there's nothing to refuse.
 func (d *Daemon) hasPriorAutomationContinuityRun(req automation.WorkRequest) (bool, error) {
 	if req.ContinuityKey == "" {
 		return false, nil
@@ -950,6 +962,9 @@ func (d *Daemon) hasPriorAutomationContinuityRun(req automation.WorkRequest) (bo
 			continue
 		}
 		checkedTicketIDs[entry.TicketID] = true
+		if entry.SessionID != req.IDs.SessionID {
+			continue
+		}
 		ticket, err := d.store.GetTicket(entry.TicketID)
 		if err != nil {
 			return false, err

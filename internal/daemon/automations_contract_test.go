@@ -297,13 +297,24 @@ func TestAutomationApplyRevertAllowsFreshThreadWhenOldTicketSurvives(t *testing.
 	}
 }
 
-// TestAutomationApplyRevertRefusesWhenOldTicketWasSwept pins scenario 4 of
-// the A1-fix matrix: edit A→B→A (revert), but the original A thread's
-// ticket (T1) was itself later swept (removed) rather than merely rotated
-// away from. hasPriorAutomationContinuityRun must still refuse in this case
-// — "refuse if ANY prior same-contract thread's own ticket is missing", not
-// "allow if any prior same-contract thread's ticket happens to be alive".
-func TestAutomationApplyRevertRefusesWhenOldTicketWasSwept(t *testing.T) {
+// TestAutomationApplyRevertAllowsFreshThreadEvenWhenOldTicketWasSwept pins
+// scenario 4 of the A1-fix matrix: edit A→B→A (revert), but the original A
+// thread's ticket (T1) was itself later swept (removed) rather than merely
+// rotated away from.
+//
+// This used to assert a refusal ("refuse if ANY prior same-contract thread's
+// own ticket is missing"). That was the exact bug the ticket TTL sweep's
+// wiring-up exposed: T1 being swept is now the ROUTINE, designed outcome of
+// its own thread aging out (store.SweepExpiredTickets releases a thread's
+// continuity binding along with its ticket — see the comment there), not
+// evidence about T3. T3 (run3) got a demonstrably fresh session via the
+// revert rotation (asserted via `fresh` below) — nothing of T1's is being
+// reused — so refusing here would permanently brick every future revert to
+// contract A once T1's ticket aged out, for no safety reason. See
+// hasPriorAutomationContinuityRun's point 3 for the general argument, and
+// TestValidateAutomationContinuationRefusesOnlyForItsOwnVanishedTicket for
+// the hazard this must still catch (same session, not a different one).
+func TestAutomationApplyRevertAllowsFreshThreadEvenWhenOldTicketWasSwept(t *testing.T) {
 	s := store.New()
 	d := &Daemon{store: s, wsHub: newWSHub()}
 	dir := t.TempDir()
@@ -381,8 +392,79 @@ func TestAutomationApplyRevertRefusesWhenOldTicketWasSwept(t *testing.T) {
 	}
 
 	req := automation.WorkRequest{RunID: run3.ID, DefinitionID: def3.ID, ContinuityKey: "singleton", Provider: "schedule", Prompt: snapshot1.Prompt, Launch: snapshot1.Launch, Location: snapshot1.Location, IDs: automation.DeliveryIDs{TicketID: run3.TicketID, SessionID: run3.SessionID}}
+	if err := d.validateAutomationContinuation(req); err != nil {
+		t.Fatalf("T3 holds a fresh session (%s), distinct from T1's (session-1); T1's ticket being gone must not block it, got: %v", run3.SessionID, err)
+	}
+}
+
+// TestValidateAutomationContinuationRefusesOnlyForItsOwnVanishedTicket pins
+// the hazard hasPriorAutomationContinuityRun's session scoping must still
+// catch: req's own thread — not some unrelated rotated-away thread — losing
+// its ticket. Unlike the revert scenario above, there is no contract edit
+// here, so the continuity binding never rotates; run2 is a second occurrence
+// of the exact same thread as run1, inheriting its session and ticket id.
+// That models the real race this exists for: a claim reads the binding
+// (inheriting session-1/ticket-1) just before the TTL sweep deletes that
+// same ticket (and, atomically, the binding) out from under it — by the time
+// delivery validates, req's own identifiers point at artifacts that just
+// vanished.
+func TestValidateAutomationContinuationRefusesOnlyForItsOwnVanishedTicket(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	dir := t.TempDir()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+
+	v1 := scheduledDefinitionYAML(dir, "*/5 * * * *", "singleton", "latest", "Prompt A.")
+	def, err := d.automationApply(v1)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	spec, _, err := automation.ParseDefinitionYAML([]byte(v1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := automation.Effective(spec, def.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run1, _, err := s.ClaimScheduledAutomationRun(def.ID, "schedule:1", "singleton", def.Revision, `{}`, string(snapshotJSON), now, store.AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run1.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EnsureAutomationTicket(store.Ticket{ID: run1.TicketID, Title: "Nightly", Status: store.TicketStatusDone, Assignee: run1.SessionID, AutomationRunID: run1.ID}, "automation:nightly", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// No contract edit: run2 is the same thread's next occurrence. Its
+	// reservation deliberately omits ticket/session/workspace/pane — the
+	// still-live binding must supply run1's, exactly as it would for a real
+	// second occurrence with nothing to reuse itself.
+	run2, _, err := s.ClaimScheduledAutomationRun(def.ID, "schedule:2", "singleton", def.Revision, `{}`, string(snapshotJSON), now.Add(5*time.Minute), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run2.SessionID != run1.SessionID || run2.TicketID != run1.TicketID {
+		t.Fatalf("run2 ids=%s/%s, want inherited from run1 (%s/%s)", run2.SessionID, run2.TicketID, run1.SessionID, run1.TicketID)
+	}
+
+	// The TTL sweep races the claim above: it fires before delivery gets a
+	// chance to validate, removing run1/run2's shared ticket (and, via the
+	// cascade, the binding) out from under req.
+	if removed, err := s.SweepExpiredTickets(now.Add(6*time.Hour), time.Hour); err != nil || removed != 1 {
+		t.Fatalf("sweep removed=%d err=%v", removed, err)
+	}
+
+	req := automation.WorkRequest{RunID: run2.ID, DefinitionID: def.ID, ContinuityKey: "singleton", Provider: "schedule", Prompt: snapshot.Prompt, Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run2.TicketID, SessionID: run2.SessionID}}
 	if err := d.validateAutomationContinuation(req); err == nil {
-		t.Fatal("expected refusal: the reverted contract's original thread (T1) had its own ticket swept")
+		t.Fatal("expected refusal: req's own thread (same session as the vanished ticket) must not be resumed blind")
 	}
 }
 
