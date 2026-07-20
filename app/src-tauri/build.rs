@@ -17,9 +17,17 @@ fn main() {
 /// previously embedded assets.
 ///
 /// That staleness is why installing used to require
-/// `touch app/src-tauri/src/lib.rs` first. Emitting the dependency here is
-/// purely additive (it can only cause more rebuilds, never a wrong one) and
-/// lets incremental Rust builds work for Go-only and backend-only changes.
+/// `touch app/src-tauri/src/lib.rs` first. Emitting the dependency here can only
+/// cause more rebuilds, never a wrong one.
+///
+/// Note what it does NOT buy. `make dev` runs vite first, and vite's
+/// `emptyOutDir` default wipes and rewrites `dist` every time, so the directory
+/// mtime always advances and this crate recompiles on every `make dev` even with
+/// no frontend change (measured back to back with no edits: 27.7s then 29.1s of
+/// a ~50s build). That is exactly what the `touch lib.rs` workaround already
+/// cost, so it is not a regression against how this was actually built — it buys
+/// correctness, not speed. Go-only changes stay fast via
+/// `make install-daemon-dev`, which never builds Tauri at all.
 fn track_frontend_dist() {
     let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") else {
         return;
