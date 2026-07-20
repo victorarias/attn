@@ -105,7 +105,7 @@ func (d *Daemon) automationRetentionSweepPass(now time.Time) {
 				continue
 			}
 			switch block {
-			case automationRunCleanupLiveSession:
+			case automationRunCleanupLiveSession, automationRunCleanupBoundThread:
 				continue
 			case automationRunCleanupDirtyWorktree:
 				keptDirty++
@@ -143,6 +143,16 @@ const (
 	// permanently skip until that changes. Not logged per-run; a live
 	// session is the routine, expected state for most terminal runs.
 	automationRunCleanupLiveSession
+	// automationRunCleanupBoundThread: the run's session id is still
+	// referenced by a continuity binding, even though its own session row is
+	// gone. A continuity thread reuses one session id and one shared
+	// worktree (worktrees/<sessionID>/<repo>) across every occurrence, so an
+	// old terminal run and the thread's live current run resolve to the same
+	// on-disk directory — removing it here would brick the thread the next
+	// time it's asked to continue. Not logged per-run, same reasoning as
+	// automationRunCleanupLiveSession: a bound thread outliving one of its
+	// own runs is the routine case this exists to protect, not an anomaly.
+	automationRunCleanupBoundThread
 	// automationRunCleanupDirtyWorktree: the worktree has uncommitted
 	// changes. Dirty evidence is never deleted — logged so it's visible.
 	automationRunCleanupDirtyWorktree
@@ -154,6 +164,15 @@ const (
 func (d *Daemon) automationRunCleanupSafety(run store.AutomationRun) (automationRunCleanupBlock, error) {
 	if run.SessionID != "" && d.store.Get(run.SessionID) != nil {
 		return automationRunCleanupLiveSession, nil
+	}
+	if run.SessionID != "" {
+		bound, err := d.store.AutomationSessionHasContinuityBinding(run.SessionID)
+		if err != nil {
+			return automationRunCleanupOK, err
+		}
+		if bound {
+			return automationRunCleanupBoundThread, nil
+		}
 	}
 	worktree, err := automationRunWorktreePath(run)
 	if err != nil {
@@ -282,7 +301,7 @@ func (d *Daemon) automationCleanup(ctx context.Context, id string) (cleaned, kep
 			continue
 		}
 		switch block {
-		case automationRunCleanupLiveSession:
+		case automationRunCleanupLiveSession, automationRunCleanupBoundThread:
 			continue
 		case automationRunCleanupDirtyWorktree:
 			keptDirty = append(keptDirty, run.ID)

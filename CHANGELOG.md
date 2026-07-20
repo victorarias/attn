@@ -40,7 +40,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   automatically for old finished runs — keeping the newest 200 per
   definition, or anything younger than two weeks — so a long-running
   automation doesn't accumulate worktrees forever; a run whose session is
-  still open is never touched either way.
+  still open is never touched either way, and neither is a still-bound
+  continuity thread's origin run or its shared worktree, so a recurring
+  automation is never bricked by its own retention.
 
 ### Changed
 - **`catch_up` is now schedule-only.** Applying an automation whose manual or

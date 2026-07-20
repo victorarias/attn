@@ -286,6 +286,33 @@ func (s *Store) DeleteAutomationContinuityBindings(definitionID string) error {
 	return err
 }
 
+// AutomationSessionHasContinuityBinding reports whether sessionID is still
+// referenced by some continuity binding, checked globally across every
+// definition rather than scoped to one. That matches
+// automationRunWorktreePath's worktree layout (worktrees/<sessionID>/<repo>),
+// which is keyed on session id alone: a bound thread's shared worktree can
+// only be identified by session id, not by definition. The daemon's
+// automationRunCleanupSafety uses this to protect that shared worktree even
+// once the thread's own session row has been garbage collected — the
+// session-liveness check above it only catches the case where the row is
+// still there.
+func (s *Store) AutomationSessionHasContinuityBinding(sessionID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if sessionID == "" {
+		return false, nil
+	}
+	if s.db == nil {
+		return false, errors.New("automation persistence unavailable")
+	}
+	var exists int
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM automation_continuity_bindings WHERE session_id=?)`, sessionID).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists != 0, nil
+}
+
 // DeleteAutomationReviewRequestEdges removes every review-request edge for a
 // definition. Used only by automationDelete: a soft-deleted definition's
 // provider-side review-request tracking is fully retired, unlike a
@@ -1125,10 +1152,14 @@ func (s *Store) MarkAutomationRunFailed(id, message string, now time.Time) error
 // ListPrunableAutomationRuns returns definitionID's terminal (delivered or
 // failed) runs older than olderThan that fall outside the newest keep runs
 // (by created_at, across all states — a pending run still counts toward
-// keep, so it never bumps an older terminal run out of protection). Session
-// liveness and worktree cleanliness are daemon-side concerns this package
-// cannot check; this only narrows by count/state/age, per A3's fixed
-// retention policy.
+// keep, so it never bumps an older terminal run out of protection), and are
+// not the origin run of a still-bound continuity thread
+// (tickets.automation_run_id is set once at thread creation and never
+// updated, so it always points at the thread's oldest run — pruning it would
+// permanently break every later occurrence, see
+// automationContinuationOrigin). Session liveness and worktree cleanliness
+// are daemon-side concerns this package cannot check; this only narrows by
+// count/state/age/origin, per A3's fixed retention policy.
 func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderThan time.Time) ([]AutomationRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1141,6 +1172,13 @@ func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderT
 		WHERE definition_id=? AND state IN ('delivered','failed') AND created_at<?
 		  AND id NOT IN (
 			SELECT id FROM automation_runs WHERE definition_id=? ORDER BY created_at DESC LIMIT ?
+		  )
+		  -- A still-bound continuity thread's origin run is never prunable: see
+		  -- this function's doc comment.
+		  AND id NOT IN (
+			SELECT t.automation_run_id FROM tickets t
+			JOIN automation_continuity_bindings b ON b.ticket_id = t.id
+			WHERE t.automation_run_id IS NOT NULL AND t.automation_run_id <> ''
 		  )
 		ORDER BY created_at
 	`, definitionID, formatTicketTime(olderThan), definitionID, keep)

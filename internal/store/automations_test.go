@@ -827,3 +827,84 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 		t.Fatalf("re-enabled latest catch-up candidates=%#v err=%v", candidates, err)
 	}
 }
+
+// TestListPrunableAutomationRunsProtectsBoundThreadOrigin pins the fix for
+// Slice 7 PR A's continuity-bricking blocker: a thread's ticket.automation_run_id
+// is written once at ticket creation and never updated, so it permanently
+// points at the thread's oldest (origin) run — exactly the run retention
+// would otherwise prune first. As long as the thread's continuity binding
+// still exists (the thread can still deliver again), the origin run must
+// never be a prunable candidate, however far outside the keep window or age
+// floor it is; pruning it would make automationContinuationOrigin
+// (internal/daemon/automations.go) fail forever on the next occurrence.
+func TestListPrunableAutomationRunsProtectsBoundThreadOrigin(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-origin", OccurrenceID: "occ-origin", TicketID: "ticket-origin", SessionID: "session-origin", WorkspaceID: "workspace-origin", PaneID: "pane-origin"}
+	origin, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:1", "singleton", def.Revision, `{}`, `{}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("claim origin created=%v err=%v", created, err)
+	}
+	if err := s.MarkAutomationRunDelivered(origin.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+	// The thread's ticket permanently points at the origin run: the real
+	// shape validateAutomationContinuation/automationContinuationOrigin rely on.
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: origin.TicketID, Title: "Nightly", Status: TicketStatusWorking, Assignee: origin.SessionID, AutomationRunID: origin.ID}, "automation:nightly", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+
+	far := now.Add(365 * 24 * time.Hour)
+	prunable, err := s.ListPrunableAutomationRuns(def.ID, 0, far)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range prunable {
+		if r.ID == origin.ID {
+			t.Fatalf("expected the bound thread's origin run to be protected, got it in the prunable set: %#v", prunable)
+		}
+	}
+}
+
+// TestListPrunableAutomationRunsStillPrunesNonContinuityRuns guards against
+// over-broadening the fix above: every automation run (continuity or not)
+// gets a ticket whose own automation_run_id is that run's own id, so an
+// unjoined "any run referenced by any ticket" exclusion would protect
+// essentially every run and silently turn retention into a no-op. Only the
+// join through automation_continuity_bindings should narrow protection to
+// threads that can still deliver again — an ordinary non-continuity run's
+// own ticket never has a continuity binding, so it must remain prunable.
+func TestListPrunableAutomationRunsStillPrunesNonContinuityRuns(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-manual", OccurrenceID: "occ-manual", TicketID: "ticket-manual", SessionID: "session-manual", WorkspaceID: "workspace-manual", PaneID: "pane-manual"}
+	run, created, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("claim created=%v err=%v", created, err)
+	}
+	if err := s.MarkAutomationRunDelivered(run.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+	// This run's own ticket points back at itself, exactly like every
+	// automation run's ticket does, with no continuity binding involved.
+	if _, err := s.EnsureAutomationTicket(Ticket{ID: run.TicketID, Title: "Cleanup", Status: TicketStatusWorking, Assignee: run.SessionID, AutomationRunID: run.ID}, "automation:cleanup", TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+
+	far := now.Add(365 * 24 * time.Hour)
+	prunable, err := s.ListPrunableAutomationRuns(def.ID, 0, far)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prunable) != 1 || prunable[0].ID != run.ID {
+		t.Fatalf("expected the non-continuity run to remain prunable, got %#v", prunable)
+	}
+}
