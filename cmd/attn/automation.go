@@ -11,7 +11,7 @@ import (
 )
 
 func automationUsage() {
-	fmt.Fprint(os.Stderr, "usage: attn automation <apply|list|show|run|runs|delete|cleanup>\n")
+	fmt.Fprint(os.Stderr, "usage: attn automation <apply|validate|list|show|run|runs|delete|cleanup>\n")
 }
 func runAutomationCommand() {
 	if len(os.Args) < 3 {
@@ -38,6 +38,25 @@ func runAutomationCommand() {
 			break
 		}
 		data, err = c.AutomationApply(string(raw))
+	case "validate":
+		fs := flag.NewFlagSet("automation validate", flag.ContinueOnError)
+		file := fs.String("file", "", "definition YAML")
+		if e := fs.Parse(os.Args[3:]); e != nil {
+			os.Exit(2)
+		}
+		if *file == "" {
+			err = fmt.Errorf("--file is required")
+			break
+		}
+		raw, e := os.ReadFile(*file)
+		if e != nil {
+			err = e
+			break
+		}
+		data, err = c.AutomationValidate(string(raw))
+		if err == nil && data == nil {
+			data, _ = json.Marshal(map[string]bool{"valid": true})
+		}
 	case "list":
 		data, err = c.AutomationList()
 	case "show":
