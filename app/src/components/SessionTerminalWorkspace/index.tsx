@@ -159,6 +159,7 @@ interface SessionTerminalWorkspaceProps {
   // markdown tile bound to that pane's session (empty sessionId = let the
   // daemon use the selected session).
   onOpenMarkdown?: (path: string, sessionId: string) => void;
+  onTerminalModelRecovered?: () => void;
   onZoomModeChange?: (zoomed: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
   onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
@@ -208,6 +209,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onTriggerNudge,
     onOpenPresentation,
     onOpenMarkdown,
+    onTerminalModelRecovered,
     onZoomModeChange,
     onNavigateOutOfSession,
     onResizeSplit,
@@ -925,6 +927,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   onReady={handleGhosttyTerminalReady(agentPane.id)}
                   onResize={runtime.handleTerminalResize(agentPane.id)}
                   onReplayInterrupted={runtime.handleReplayInterrupted(agentPane.id)}
+                  onTerminalModelRecovered={onTerminalModelRecovered}
                 />
               )}
               {ticketOverlayOpen && paneTicket && ticketActions ? (

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   dumpTerminalGeometry,
+  noteModelFault,
   noteRecovery,
   noteResize,
   recordDiag,
@@ -84,6 +85,34 @@ describe('noteRecovery', () => {
     const events = ringEventsFor(pane).filter((event) => event.kind === 'recovery');
     expect(events.map((event) => event.outcome)).toEqual(['contextLost', 'scheduled', 'recovered']);
     expect(events[1]?.delayMs).toBe(250);
+  });
+});
+
+describe('noteModelFault', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('attn:terminal-diagnostics', '1');
+  });
+
+  it('persists the operation and model geometry needed after the pane rebuilds', () => {
+    const pane = 'pane-model-fault';
+    noteModelFault(pane, {
+      session: 'session-model-fault',
+      paneKind: 'agent',
+      operation: 'render',
+      error: 'Out of bounds memory access',
+      model: 4,
+      cols: 307,
+      rows: 77,
+      rendererEpoch: 2,
+    });
+
+    expect(ringEventsFor(pane)).toContainEqual(expect.objectContaining({
+      kind: 'model_fault',
+      operation: 'render',
+      model: 4,
+      cols: 307,
+      rows: 77,
+    }));
   });
 });
 

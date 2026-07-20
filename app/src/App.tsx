@@ -75,7 +75,7 @@ import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
 import { ptySpawn } from './pty/bridge';
 import { clearBrowserHostFocus, controlBrowserHost, isBrowserHostOwnedTarget } from './browser/host';
-import { probeUiAfterSwitch } from './utils/uiDiagnosticsLog';
+import { probeUiAfterSwitch, UI_DIAGNOSTICS_FILE_DISPLAY } from './utils/uiDiagnosticsLog';
 import {
   agentLabel,
   getAgentAvailability,
@@ -1770,13 +1770,20 @@ sendFetchPRDetails,
   const [locationPickerSessionDirection, setLocationPickerSessionDirection] = useState<TerminalSplitDirection>('vertical');
 
   const [zoomModeBySessionId, setZoomModeBySessionId] = useState<Record<string, boolean>>({});
-  const { message: errorMessage, showError, clearError } = useErrorToast();
+  const { message: errorMessage, durationMs: errorDurationMs, showError, clearError } = useErrorToast();
   const [chiefTransferTarget, setChiefTransferTarget] = useState<{
     sessionId: string;
     targetLabel: string;
     currentLabel: string;
   } | null>(null);
   const [chiefTransferSaving, setChiefTransferSaving] = useState(false);
+
+  const handleTerminalModelRecovered = useCallback(() => {
+    showError(
+      `Terminal issue recovered. We reloaded it for you. Diagnostics were saved to ${UI_DIAGNOSTICS_FILE_DISPLAY}; please send this file to Victor so he can troubleshoot it.`,
+      { durationMs: 12_000 },
+    );
+  }, [showError]);
 
   const handleRebootstrapEndpoint = useCallback(async (endpointId: string) => {
     try {
@@ -3669,6 +3676,7 @@ sendFetchPRDetails,
                         });
                       });
                     }}
+                    onTerminalModelRecovered={handleTerminalModelRecovered}
                     workspace={workspaceState}
                     activePaneId={activePaneId}
                     fontSize={terminalFontSize}
@@ -3880,7 +3888,7 @@ sendFetchPRDetails,
           }
         }}
       />
-      <ErrorToast message={errorMessage} onDone={clearError} />
+      <ErrorToast message={errorMessage} durationMs={errorDurationMs} onDone={clearError} />
       <ChordLeaderHud />
       <WorkspaceContextNavigator
         isOpen={workspaceContextsOpen}

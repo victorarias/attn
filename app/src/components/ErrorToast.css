@@ -12,6 +12,7 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
+  max-width: min(640px, calc(100vw - 32px));
   color: var(--color-text-primary);
   box-shadow: 0 8px 24px rgba(220, 38, 38, 0.2);
   z-index: 400;
@@ -28,4 +29,8 @@
 .error-toast svg {
   color: #dc2626;
   flex-shrink: 0;
+}
+
+.error-toast span {
+  overflow-wrap: anywhere;
 }

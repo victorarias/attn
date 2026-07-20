@@ -80,7 +80,8 @@ export type DiagKind =
   | 'desync'
   | 'watchdog'
   | 'incident'
-  | 'recovery';
+  | 'recovery'
+  | 'model_fault';
 
 export interface DiagEvent {
   at: number;
@@ -104,6 +105,7 @@ const LIFECYCLE_KINDS = new Set<DiagKind>([
   'watchdog',
   'incident',
   'recovery',
+  'model_fault',
 ]);
 
 export interface RenderProbe {
@@ -495,12 +497,32 @@ export function noteRecovery(
     session?: string;
     paneKind?: string;
     attempt: number;
-    outcome: 'contextLost' | 'constructFailed' | 'scheduled' | 'recovered' | 'giveUp';
+    outcome: 'contextLost' | 'constructFailed' | 'scheduled' | 'recovered' | 'giveUp' | 'modelFault';
     delayMs?: number;
     error?: string;
   },
 ): void {
   recordDiag({ kind: 'recovery', pane, ...info });
+}
+
+// A Ghostty WASM model can become unusable while the renderer is asking it for
+// dirty cells. Persist the fault before the pane rebuilds: after recovery, the
+// replacement model has no knowledge of the invalid instance that triggered it.
+export function noteModelFault(
+  pane: string,
+  info: {
+    session?: string;
+    paneKind?: string;
+    operation: string;
+    error: string;
+    stack?: string;
+    model: number;
+    cols?: number;
+    rows?: number;
+    rendererEpoch: number;
+  },
+): void {
+  recordDiag({ kind: 'model_fault', pane, ...info });
 }
 
 function armWatchdog(pane: string, session?: string) {

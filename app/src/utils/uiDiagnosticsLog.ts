@@ -6,6 +6,11 @@ import { isTauri } from '@tauri-apps/api/core';
 
 const DEBUG_DIR = 'debug';
 const FILE = `${DEBUG_DIR}/ui-diagnostics.jsonl`;
+// Kept as an app-local path so the UI can name the exact durable artifact
+// without guessing an installation-specific macOS container directory.
+export const UI_DIAGNOSTICS_FILE = `$APPLOCALDATA/${FILE}`;
+const appLocalDataBundleId = import.meta.env.VITE_ATTN_BUILD_BUNDLE_ID || 'com.attn.manager';
+export const UI_DIAGNOSTICS_FILE_DISPLAY = `~/Library/Application Support/${appLocalDataBundleId}/${FILE}`;
 const FILE_SIZE_CAP_BYTES = 4 * 1024 * 1024;
 const RING_LIMIT = 300;
 const SWITCH_PROBE_DELAYS_MS = [0, 250, 1500];
@@ -36,7 +41,7 @@ let switchGeneration = 0;
 function exposeGlobals(): void {
   window.__ATTN_UI_DIAG = ring;
   window.__ATTN_UI_DIAG_DUMP = () => [...ring];
-  window.__ATTN_UI_DIAG_FILE = `$APPLOCALDATA/${FILE}`;
+  window.__ATTN_UI_DIAG_FILE = UI_DIAGNOSTICS_FILE;
 }
 
 function byteLength(value: string): number {
