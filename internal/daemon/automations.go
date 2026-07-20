@@ -67,32 +67,107 @@ func (d *Daemon) wsAutomationMutationTimeoutDuration() time.Duration {
 	return defaultWSAutomationMutationTimeout
 }
 
-func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error) {
+// validateAutomationSpec is the single seam every surface that judges
+// automation definition YAML must call: automation_validate (validate-only,
+// nothing persisted) and automationApply (validate-then-persist) both run
+// through this, so a YAML document that validate accepts is guaranteed to be
+// one apply also accepts — the two cannot drift apart by one of them
+// forgetting a check. It runs ParseDefinitionYAML's schema validation plus
+// every check automationApply used to run inline: the delegation agent must
+// resolve, --model/--effort must be supported by it, the driver must be one
+// of the automations subset that supports unattended automatic approval
+// (codex|claude), and every repository_sources override must be a valid,
+// reachable local clone.
+func (d *Daemon) validateAutomationSpec(raw string) (automation.DefinitionSpec, []byte, error) {
 	spec, canonical, err := automation.ParseDefinitionYAML([]byte(raw))
 	if err != nil {
-		return nil, err
+		return spec, nil, err
 	}
 	if _, err := d.resolveDelegationAgent("", protocol.Ptr(spec.Launch.Driver)); err != nil {
-		return nil, err
+		return spec, nil, err
 	}
 	if err := d.validateDelegationModelEffort(spec.Launch.Driver, spec.Launch.Model, spec.Launch.Effort); err != nil {
-		return nil, err
+		return spec, nil, err
 	}
 	if spec.Launch.Driver != "codex" && spec.Launch.Driver != "claude" {
-		return nil, fmt.Errorf("agent %q does not support automation automatic approval", spec.Launch.Driver)
+		return spec, nil, fmt.Errorf("agent %q does not support automation automatic approval", spec.Launch.Driver)
 	}
 	for identity, source := range spec.Location.RepositorySources.Overrides {
 		if _, err := attngit.ValidateLocalClone(source.Path, identity); err != nil {
-			return nil, fmt.Errorf("repository override %s: %w", identity, err)
+			return spec, nil, fmt.Errorf("repository override %s: %w", identity, err)
 		}
 	}
+	return spec, canonical, nil
+}
+
+// automationApply applies definition YAML unconditionally: parse, validate,
+// upsert. This is the unix-socket/CLI/agent surface (attn automation apply)
+// — "last writer wins," unguarded, exactly as before this PR. The WS
+// editor's Save goes through automationApplyWithGuards instead.
+func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error) {
+	spec, canonical, err := d.validateAutomationSpec(raw)
+	if err != nil {
+		return nil, err
+	}
+	return d.automationApplyLocked(context.Background(), raw, spec, canonical, nil)
+}
+
+// automationApplyWithGuards is automationApply's WS counterpart, used by the
+// app editor's Save. expectedID and expectedRevision implement D4/D5 from
+// the design: apply is an upsert keyed on the id *inside* the YAML, so an
+// edited id would silently fork the definition and leave the original
+// enabled and running (D4) — expectedID ("" when creating) refuses a
+// mismatch. And a stale expectedRevision (0 when creating) would silently
+// clobber a concurrent apply from the CLI or another app window (D5) — the
+// caller sees "changed elsewhere — reload" instead. Both guards run inside
+// automationApplyLocked's automationMu, atomically with the pre-upsert
+// existing-row read they depend on, so there is no window between the check
+// and the write where a concurrent apply could slip through.
+func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw, expectedID string, expectedRevision int) (*store.AutomationDefinition, error) {
+	spec, canonical, err := d.validateAutomationSpec(raw)
+	if err != nil {
+		return nil, err
+	}
+	if expectedID != "" && spec.ID != expectedID {
+		return nil, fmt.Errorf("definition id %q in the YAML does not match the definition being edited (%q) — apply is keyed on the id inside the YAML, so an id change must be made as a separate create", spec.ID, expectedID)
+	}
+	guard := func(existing *store.AutomationDefinition) error {
+		if expectedRevision == 0 {
+			return nil
+		}
+		if existing == nil || existing.Revision != expectedRevision {
+			return errors.New("automation definition changed elsewhere — reload before saving")
+		}
+		return nil
+	}
+	return d.automationApplyLocked(ctx, raw, spec, canonical, guard)
+}
+
+// automationApplyLocked is the locked validate-then-persist step shared by
+// automationApply and automationApplyWithGuards. ctx bounds how long the
+// caller is willing to wait to acquire automationMu (mirroring
+// automationSetEnabled/automationDelete's contract): once locked, ctx.Err()
+// is checked before any store mutation, so a caller whose deadline already
+// passed aborts without writing anything. guard (nil for the unconditional
+// socket/CLI path) runs after the pre-upsert existing-row read but still
+// inside automationMu, so a WS caller's expected_id/expected_revision check
+// is atomic with the write it gates.
+func (d *Daemon) automationApplyLocked(ctx context.Context, raw string, spec automation.DefinitionSpec, canonical []byte, guard func(*store.AutomationDefinition) error) (*store.AutomationDefinition, error) {
 	d.automationMu.Lock()
 	defer d.automationMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("deadline exceeded waiting for an in-flight automation delivery: %w", err)
+	}
 	existing, err := d.store.GetAutomationDefinitionIncludingDeleted(spec.ID)
 	if err != nil {
 		return nil, err
 	}
-	definition, err := d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), spec.Enabled, time.Now())
+	if guard != nil {
+		if err := guard(existing); err != nil {
+			return nil, err
+		}
+	}
+	definition, err := d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), raw, spec.Enabled, time.Now())
 	if err != nil {
 		return definition, err
 	}
@@ -1431,6 +1506,9 @@ func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 	case protocol.CmdAutomationApply:
 		m := msg.(*protocol.AutomationApplyMessage)
 		data, err = d.automationApply(m.DefinitionYaml)
+	case protocol.CmdAutomationValidate:
+		m := msg.(*protocol.AutomationValidateMessage)
+		_, _, err = d.validateAutomationSpec(m.DefinitionYaml)
 	case protocol.CmdAutomationList:
 		data, err = d.store.ListAutomationDefinitions()
 	case protocol.CmdAutomationShow:

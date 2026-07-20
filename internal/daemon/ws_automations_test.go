@@ -407,6 +407,299 @@ func TestAutomationRunWSRoutesPRURL(t *testing.T) {
 	}
 }
 
+// TestAutomationValidateAndApplyAgreeOnCorpus is the regression test for D3
+// (internal/daemon/automations.go's validateAutomationSpec doc comment): a
+// validate command that only ran ParseDefinitionYAML would green-light YAML
+// automation_apply then rejects, because apply layers four more checks on
+// top of parse (resolveDelegationAgent, validateDelegationModelEffort, the
+// codex|claude automatic-approval allowlist, and per-override
+// ValidateLocalClone). Every case here must produce the SAME success/failure
+// verdict — and, on failure, the same error text — from both
+// handleAutomationValidateWS and handleAutomationApplyWS, whether the
+// rejection comes from yaml.v3/ValidateDefinition (parse-level) or from one
+// of validateAutomationSpec's extra checks (seam-level, the case this test
+// exists to pin).
+func TestAutomationValidateAndApplyAgreeOnCorpus(t *testing.T) {
+	const template = `api_version: attn.dev/automations/v1alpha1
+id: %s
+name: Corpus case
+enabled: true
+trigger: {type: manual}
+prompt: Do the thing.
+launch: {driver: %s}
+location: {type: directory, path: "%s"}
+policy: {continuity: fresh, overlap: coalesce}
+`
+	cases := []struct {
+		name      string
+		id        string
+		driver    string
+		mutate    func(raw string) string
+		wantValid bool
+		wantErr   string
+	}{
+		{name: "valid codex baseline", id: "corpus-valid-codex", driver: "codex", wantValid: true},
+		{name: "valid claude baseline", id: "corpus-valid-claude", driver: "claude", wantValid: true},
+		{
+			name:      "driver outside the automatic-approval allowlist is rejected beyond parse",
+			id:        "corpus-shell-driver",
+			driver:    "shell",
+			wantValid: false,
+			wantErr:   "does not support automation automatic approval",
+		},
+		{
+			name:      "unresolvable agent is rejected beyond parse",
+			id:        "corpus-fake-driver",
+			driver:    "totally-not-a-real-agent",
+			wantValid: false,
+			wantErr:   "not available",
+		},
+		{
+			name:   "missing prompt is rejected at parse",
+			id:     "corpus-missing-prompt",
+			driver: "codex",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "prompt: Do the thing.\n", "", 1)
+			},
+			wantValid: false,
+			wantErr:   "prompt is required",
+		},
+		{
+			name:   "bad api_version is rejected at parse",
+			id:     "corpus-bad-api-version",
+			driver: "codex",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "attn.dev/automations/v1alpha1", "attn.dev/automations/v0", 1)
+			},
+			wantValid: false,
+			wantErr:   "api_version must be",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := store.New()
+			d := &Daemon{store: s, wsHub: newWSHub()}
+			raw := fmt.Sprintf(template, tc.id, tc.driver, t.TempDir())
+			if tc.mutate != nil {
+				raw = tc.mutate(raw)
+			}
+
+			validateClient := &wsClient{send: make(chan outboundMessage, 4)}
+			d.handleAutomationValidateWS(validateClient, &protocol.AutomationValidateMessage{
+				Cmd:            protocol.CmdAutomationValidate,
+				DefinitionYaml: raw,
+				RequestID:      protocol.Ptr("validate"),
+			})
+			var validateRes protocol.AutomationActionResultMessage
+			readNotebookWSEvent(t, validateClient.send, &validateRes)
+
+			applyClient := &wsClient{send: make(chan outboundMessage, 4)}
+			d.handleAutomationApplyWS(applyClient, &protocol.AutomationApplyMessage{
+				Cmd:            protocol.CmdAutomationApply,
+				DefinitionYaml: raw,
+				RequestID:      protocol.Ptr("apply"),
+			})
+			var applyRes protocol.AutomationActionResultMessage
+			readNotebookWSEvent(t, applyClient.send, &applyRes)
+
+			if validateRes.Success != applyRes.Success {
+				t.Fatalf("validate/apply disagree on %q: validate success=%v (err=%v), apply success=%v (err=%v)",
+					tc.name, validateRes.Success, validateRes.Error, applyRes.Success, applyRes.Error)
+			}
+			if validateRes.Success != tc.wantValid {
+				t.Fatalf("success = %v, want %v (validate error=%v, apply error=%v)", validateRes.Success, tc.wantValid, validateRes.Error, applyRes.Error)
+			}
+			if !tc.wantValid {
+				if validateRes.Error == nil || !strings.Contains(*validateRes.Error, tc.wantErr) {
+					t.Fatalf("validate error = %v, want to contain %q", validateRes.Error, tc.wantErr)
+				}
+				if applyRes.Error == nil || !strings.Contains(*applyRes.Error, tc.wantErr) {
+					t.Fatalf("apply error = %v, want to contain %q", applyRes.Error, tc.wantErr)
+				}
+			}
+		})
+	}
+}
+
+// TestAutomationApplyWSRefusesIDMismatch pins D4: the WS editor's Save
+// carries expected_id (the id of the definition it loaded), and the daemon
+// must refuse an apply whose YAML id differs rather than silently upserting
+// a second definition and leaving the original (still enabled, still
+// running) untouched — see automationApplyWithGuards's doc comment.
+func TestAutomationApplyWSRefusesIDMismatch(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	original, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	renamed := strings.Replace(raw, "id: manual-check", "id: manual-check-renamed", 1)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(client, &protocol.AutomationApplyMessage{
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   renamed,
+		ExpectedID:       protocol.Ptr(original.ID),
+		ExpectedRevision: protocol.Ptr(original.Revision),
+		RequestID:        protocol.Ptr("apply-id-mismatch"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "does not match the definition being edited") {
+		t.Fatalf("apply result = %+v, want success=false with an id-mismatch error", res)
+	}
+
+	// The original definition must be untouched, and no second definition
+	// created under the renamed id.
+	stillOriginal, err := s.GetAutomationDefinition(original.ID)
+	if err != nil || stillOriginal == nil || stillOriginal.Revision != original.Revision {
+		t.Fatalf("original definition after refused apply = %#v err=%v, want unchanged", stillOriginal, err)
+	}
+	if got, err := s.GetAutomationDefinition("manual-check-renamed"); err != nil || got != nil {
+		t.Fatalf("renamed id after refused apply = %#v err=%v, want no definition created", got, err)
+	}
+}
+
+// TestAutomationApplyWSRefusesStaleRevision pins D5: the WS editor's Save
+// carries expected_revision (the revision it loaded), and the daemon must
+// refuse to clobber a definition that changed elsewhere (another app window,
+// or the CLI) since the editor loaded it — the app cannot silently overwrite
+// a concurrent apply. expected_revision 0 (the create case) never triggers
+// this guard.
+func TestAutomationApplyWSRefusesStaleRevision(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	original, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A concurrent CLI apply bumps the revision out from under the editor.
+	concurrentlyApplied := strings.Replace(raw, "Manual check", "Manual check (renamed elsewhere)", 1)
+	if _, err := d.automationApply(concurrentlyApplied); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(client, &protocol.AutomationApplyMessage{
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   strings.Replace(raw, "Manual check", "Manual check (from the stale editor)", 1),
+		ExpectedID:       protocol.Ptr(original.ID),
+		ExpectedRevision: protocol.Ptr(original.Revision),
+		RequestID:        protocol.Ptr("apply-stale-revision"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "changed elsewhere") {
+		t.Fatalf("apply result = %+v, want success=false with a changed-elsewhere error", res)
+	}
+
+	stored, err := s.GetAutomationDefinition(original.ID)
+	if err != nil || stored == nil || stored.Name != "Manual check (renamed elsewhere)" {
+		t.Fatalf("definition after refused stale apply = %#v err=%v, want the concurrent apply's name to survive", stored, err)
+	}
+}
+
+// TestAutomationDefinitionGetWSStarterTemplate pins D7: definition_id "" is
+// the new-definition case and must return the starter template at revision
+// 0, so create and edit share one frontend code path.
+func TestAutomationDefinitionGetWSStarterTemplate(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDefinitionGetWS(client, &protocol.AutomationDefinitionGetMessage{
+		Cmd:          protocol.CmdAutomationDefinitionGet,
+		DefinitionID: "",
+		RequestID:    protocol.Ptr("get-starter"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.SpecYaml == nil || res.Revision == nil {
+		t.Fatalf("definition_get(\"\") result = %+v, want success with spec_yaml and revision set", res)
+	}
+	if *res.Revision != 0 {
+		t.Fatalf("starter template revision = %d, want 0", *res.Revision)
+	}
+	if !strings.Contains(*res.SpecYaml, "id: my-automation") {
+		t.Fatalf("starter template spec_yaml = %q, want the StarterDefinition placeholder", *res.SpecYaml)
+	}
+}
+
+// TestAutomationDefinitionGetWSResolvesLegacyEmptySpecYAML pins D1's fallback
+// for a definition applied before migration 75 added spec_yaml: an existing
+// store row with SpecYAML == "" (what every UpsertAutomationDefinition call
+// wrote before this PR) must still come back from definition_get as valid,
+// re-appliable YAML — reconstructed from spec_json via
+// automation.MarshalDefinitionYAML — not as an empty string.
+func TestAutomationDefinitionGetWSResolvesLegacyEmptySpecYAML(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	applied, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a pre-migration-75 row: same spec_json, but spec_yaml wiped
+	// back to "" as every legacy UpsertAutomationDefinition call left it.
+	legacy, err := s.UpsertAutomationDefinition(applied.ID, applied.Name, applied.SpecJSON, "", applied.Enabled, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.SpecYAML != "" {
+		t.Fatalf("seeded legacy row spec_yaml = %q, want empty", legacy.SpecYAML)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDefinitionGetWS(client, &protocol.AutomationDefinitionGetMessage{
+		Cmd:          protocol.CmdAutomationDefinitionGet,
+		DefinitionID: applied.ID,
+		RequestID:    protocol.Ptr("get-legacy"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.SpecYaml == nil {
+		t.Fatalf("definition_get(%q) result = %+v, want success with spec_yaml set", applied.ID, res)
+	}
+	if *res.Revision != legacy.Revision {
+		t.Fatalf("definition_get revision = %v, want %d", res.Revision, legacy.Revision)
+	}
+	// The fallback-rendered YAML must itself be a legal input to
+	// validateAutomationSpec — proving the legacy row is still appliable,
+	// not just present.
+	if _, _, err := d.validateAutomationSpec(*res.SpecYaml); err != nil {
+		t.Fatalf("validateAutomationSpec(legacy fallback spec_yaml) error = %v, spec_yaml:\n%s", err, *res.SpecYaml)
+	}
+}
+
+// TestAutomationDefinitionGetWSUnknownID surfaces an unknown id as
+// success=false with an error, matching the rest of the automations WS
+// surface's business-failure shape (delete/cleanup/set_enabled), not a
+// transport-level failure.
+func TestAutomationDefinitionGetWSUnknownID(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDefinitionGetWS(client, &protocol.AutomationDefinitionGetMessage{
+		Cmd:          protocol.CmdAutomationDefinitionGet,
+		DefinitionID: "does-not-exist",
+		RequestID:    protocol.Ptr("get-missing"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil {
+		t.Fatalf("definition_get(unknown) result = %+v, want success=false with an error", res)
+	}
+}
+
 // TestAutomationSetEnabledWSDeadlineAbortsWithoutMutating pins the
 // timeout-vs-mutation trap from PR #619's review: automationSetEnabled must
 // abort once its daemon-side deadline (wsAutomationMutationTimeout) elapses
