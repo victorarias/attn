@@ -119,12 +119,87 @@ type AuthorsUpdatedMessage struct {
 	Event string `json:"event"`
 }
 
+type AutomationActionResultMessage struct {
+	// Action corresponds to the JSON schema field "action".
+	Action string `json:"action"`
+
+	// Definitions corresponds to the JSON schema field "definitions".
+	Definitions []AutomationDefinitionSummary `json:"definitions,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// RunID corresponds to the JSON schema field "run_id".
+	RunID *string `json:"run_id,omitempty,omitzero"`
+
+	// Runs corresponds to the JSON schema field "runs".
+	Runs []AutomationRunSummary `json:"runs,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID *string `json:"ticket_id,omitempty,omitzero"`
+
+	// Truncated corresponds to the JSON schema field "truncated".
+	Truncated *bool `json:"truncated,omitempty,omitzero"`
+}
+
 type AutomationApplyMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
 	// DefinitionYaml corresponds to the JSON schema field "definition_yaml".
 	DefinitionYaml string `json:"definition_yaml"`
+}
+
+type AutomationDefinitionSummary struct {
+	// CatchUp corresponds to the JSON schema field "catch_up".
+	CatchUp *string `json:"catch_up,omitempty,omitzero"`
+
+	// Continuity corresponds to the JSON schema field "continuity".
+	Continuity *string `json:"continuity,omitempty,omitzero"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Revision corresponds to the JSON schema field "revision".
+	Revision int `json:"revision"`
+
+	// ScheduleCron corresponds to the JSON schema field "schedule_cron".
+	ScheduleCron *string `json:"schedule_cron,omitempty,omitzero"`
+
+	// ScheduleTimeZone corresponds to the JSON schema field "schedule_time_zone".
+	ScheduleTimeZone *string `json:"schedule_time_zone,omitempty,omitzero"`
+
+	// TriggerType corresponds to the JSON schema field "trigger_type".
+	TriggerType string `json:"trigger_type"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+}
+
+type AutomationDefinitionsGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
 }
 
 type AutomationListMessage struct {
@@ -157,12 +232,86 @@ type AutomationRunMessage struct {
 	RequestID string `json:"request_id"`
 }
 
+type AutomationRunSummary struct {
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+
+	// DefinitionRevision corresponds to the JSON schema field "definition_revision".
+	DefinitionRevision int `json:"definition_revision"`
+
+	// DeliveredAt corresponds to the JSON schema field "delivered_at".
+	DeliveredAt *string `json:"delivered_at,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// LastError corresponds to the JSON schema field "last_error".
+	LastError *string `json:"last_error,omitempty,omitzero"`
+
+	// OccurrenceKey corresponds to the JSON schema field "occurrence_key".
+	OccurrenceKey *string `json:"occurrence_key,omitempty,omitzero"`
+
+	// PaneID corresponds to the JSON schema field "pane_id".
+	PaneID *string `json:"pane_id,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// State corresponds to the JSON schema field "state".
+	State string `json:"state"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID *string `json:"ticket_id,omitempty,omitzero"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type AutomationRunsGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type AutomationSetEnabledMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
 type AutomationShowMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
 	// DefinitionID corresponds to the JSON schema field "definition_id".
 	DefinitionID string `json:"definition_id"`
+}
+
+type AutomationsChangedMessage struct {
+	// DefinitionIds corresponds to the JSON schema field "definition_ids".
+	DefinitionIds []string `json:"definition_ids"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
 }
 
 type BootstrapEndpointMessage struct {

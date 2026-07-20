@@ -39,6 +39,25 @@ func (e *retryableAutomationDeliveryError) Unwrap() error { return e.cause }
 
 var errAutomationReviewWithdrawn = errors.New(store.AutomationReviewWithdrawnError)
 
+// defaultWSAutomationMutationTimeout is the fallback for
+// Daemon.wsAutomationMutationTimeout (see wsAutomationMutationTimeoutDuration).
+// 25s is deliberately strictly inside the frontend's 30s client timeout
+// (useDaemonSocket.ts) so a WS set_enabled mutation either completes or
+// aborts with a definitive error before the client gives up waiting — the
+// client's timer can never observe a flip that happens after it already
+// reported failure.
+const defaultWSAutomationMutationTimeout = 25 * time.Second
+
+// wsAutomationMutationTimeoutDuration resolves the effective deadline for a
+// WS-originated automation mutation: the configured override if set, else
+// defaultWSAutomationMutationTimeout.
+func (d *Daemon) wsAutomationMutationTimeoutDuration() time.Duration {
+	if d.wsAutomationMutationTimeout > 0 {
+		return d.wsAutomationMutationTimeout
+	}
+	return defaultWSAutomationMutationTimeout
+}
+
 func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error) {
 	spec, canonical, err := automation.ParseDefinitionYAML([]byte(raw))
 	if err != nil {
@@ -61,22 +80,71 @@ func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error
 	d.automationMu.Lock()
 	defer d.automationMu.Unlock()
 	definition, err := d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), spec.Enabled, time.Now())
-	if err != nil || spec.Enabled {
-		return definition, err
-	}
-	pending, err := d.store.ListPendingAutomationRuns()
 	if err != nil {
 		return definition, err
 	}
+	d.broadcastAutomationsChanged(spec.ID)
+	if spec.Enabled {
+		return definition, nil
+	}
+	return definition, d.failPendingAutomationRuns(spec.ID)
+}
+
+// failPendingAutomationRuns fails every pending run for definitionID via
+// failAutomationRun, e.g. when a definition is disabled before its pending
+// occurrences were delivered. One run's failure does not stop the rest;
+// errors are joined. Shared by automationApply's disable path and
+// automationSetEnabled's disable path so both fail pending runs identically.
+func (d *Daemon) failPendingAutomationRuns(definitionID string) error {
+	pending, err := d.store.ListPendingAutomationRuns()
+	if err != nil {
+		return err
+	}
 	for i := range pending {
 		run := pending[i]
-		if run.DefinitionID != spec.ID {
+		if run.DefinitionID != definitionID {
 			continue
 		}
 		if _, failErr := d.failAutomationRun(&run, errors.New("automation definition disabled before delivery")); failErr != nil {
 			err = errors.Join(err, failErr)
 		}
 	}
+	return err
+}
+
+// automationSetEnabled flips definitionID's enabled flag, reusing the store's
+// shared enable-transition side effects (review-edge clear + provider-cursor
+// fence — see store.SetAutomationEnabled) and, on a disable transition,
+// failing any pending runs through the same path automationApply uses. It is
+// a no-op (success, no broadcast) when the definition already has the
+// requested state, and errors for an unknown or soft-deleted definition.
+//
+// ctx bounds how long the caller is willing to wait to acquire automationMu:
+// once locked, ctx.Err() is checked before any store mutation, so a caller
+// whose deadline already passed aborts without flipping the flag (see
+// wsAutomationMutationTimeoutDuration for the WS caller's deadline). The
+// unix-socket caller passes context.Background() — the CLI/agent path waits
+// synchronously with no deadline of its own, so behavior there is unchanged.
+func (d *Daemon) automationSetEnabled(ctx context.Context, definitionID string, enabled bool) (*store.AutomationDefinition, error) {
+	d.automationMu.Lock()
+	defer d.automationMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("deadline exceeded waiting for an in-flight automation delivery: %w", err)
+	}
+	definition, changed, err := d.store.SetAutomationEnabled(definitionID, enabled, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if definition == nil {
+		return nil, fmt.Errorf("automation %q not found", definitionID)
+	}
+	if !changed {
+		return definition, nil
+	}
+	if !enabled {
+		err = d.failPendingAutomationRuns(definitionID)
+	}
+	d.broadcastAutomationsChanged(definitionID)
 	return definition, err
 }
 
@@ -134,6 +202,11 @@ func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, inp
 	if err != nil {
 		return nil, err
 	}
+	// A run now exists for this definition (freshly claimed, or the idempotent
+	// dedup of an already-claimed one) whether or not delivery below succeeds;
+	// broadcast so a WS client watching this definition's runs sees it appear
+	// without waiting on the delivery outcome.
+	d.broadcastAutomationsChanged(definitionID)
 	if run.State != "pending" {
 		return run, nil
 	}
@@ -342,6 +415,12 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 				d.logf("automation GitHub observation claim %s: %v", candidate.SubjectKey, err)
 				continue
 			}
+			// A run now exists for this definition (freshly claimed, or the
+			// idempotent dedup of an already-claimed one) whether or not
+			// delivery below succeeds; broadcast so a WS client watching this
+			// definition's runs sees it appear without waiting on the
+			// delivery outcome.
+			d.broadcastAutomationsChanged(definition.ID)
 			d.automationMu.Lock()
 			current, loadErr := d.store.GetAutomationRun(run.ID)
 			if loadErr == nil && current != nil && current.State == "pending" {
@@ -493,6 +572,7 @@ func (d *Daemon) failAutomationRun(run *store.AutomationRun, deliveryErr error) 
 		}
 	}
 	d.broadcastTicketsUpdated()
+	d.broadcastAutomationsChanged(run.DefinitionID)
 	failed, err := d.store.GetAutomationRun(run.ID)
 	if err != nil {
 		persistErr = errors.Join(persistErr, fmt.Errorf("reload failed run: %w", err))
@@ -562,6 +642,17 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 		return err
 	}
 	d.broadcastTicketsUpdated()
+	// This pending->delivered transition broadcast has no unit-test coverage:
+	// every unit test that reaches deliverAutomationRun's success path does so
+	// through automationDeliveryHook (bypassing this real delivery return) or
+	// forces a deterministic pre-broadcast failure (e.g.
+	// TestDisabledAutomationRefusesRecoveredPendingDelivery,
+	// TestScheduledPendingRunRecoversOnRestart's failed-transition variant).
+	// Reaching this line for real requires a full workdelivery spawn, which is
+	// out of reach for a unit test; the invariant is pinned live instead by
+	// scenario-automation-surface.mjs leg2_run_now_and_navigable, which drives
+	// a real run-now to `delivered` and asserts the panel reflects it.
+	d.broadcastAutomationsChanged(run.DefinitionID)
 	return nil
 }
 

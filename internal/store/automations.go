@@ -113,8 +113,9 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bo
 		if err == nil && oldEnabled == 0 && enabled {
 			// Re-enabling begins from the provider's current truth. A request that
 			// arrived while disabled must be eligible for latest catch-up even if an
-			// older cycle for the same subject had been active before disable.
-			_, err = tx.Exec(`UPDATE automation_review_request_edges SET active=0,updated_at=? WHERE definition_id=?`, formatTicketTime(now), id)
+			// older cycle for the same subject had been active before disable. Shared
+			// with SetAutomationEnabled's own enabled-state transition.
+			err = clearAutomationReviewRequestEdgesTx(tx, id, now)
 		}
 	}
 	if err != nil {
@@ -124,9 +125,9 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bo
 		// Fence provider snapshots that began before this definition became
 		// active (or was reapplied). Observation timestamps are captured before
 		// provider fetches, so an in-flight stale refresh cannot launch work under
-		// a newly enabled revision.
-		fence := now.UTC().Format(time.RFC3339Nano)
-		if _, err := tx.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'github_review_requested','*',?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at`, id, fence); err != nil {
+		// a newly enabled revision. Unlike the edge clear above, this runs on
+		// every apply that leaves the definition enabled, not just a transition.
+		if err := fenceAutomationProviderCursorsTx(tx, id, now); err != nil {
 			return nil, err
 		}
 	}
@@ -136,6 +137,84 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bo
 	s.mu.Unlock()
 	locked = false
 	return s.GetAutomationDefinition(id)
+}
+
+// clearAutomationReviewRequestEdgesTx deactivates every review-request edge for
+// a definition, so a fresh provider observation after re-enabling accepts
+// latest demand instead of an older, possibly-stale cycle.
+func clearAutomationReviewRequestEdgesTx(tx *sql.Tx, definitionID string, now time.Time) error {
+	_, err := tx.Exec(`UPDATE automation_review_request_edges SET active=0,updated_at=? WHERE definition_id=?`, formatTicketTime(now), definitionID)
+	return err
+}
+
+// fenceAutomationProviderCursorsTx records the instant a definition became (or
+// remained) enabled as its github_review_requested provider fence. Observation
+// timestamps are captured before provider fetches, so an in-flight stale
+// refresh started before this fence cannot launch work under the newly
+// enabled/reapplied revision.
+func fenceAutomationProviderCursorsTx(tx *sql.Tx, definitionID string, now time.Time) error {
+	fence := now.UTC().Format(time.RFC3339Nano)
+	_, err := tx.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'github_review_requested','*',?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at`, definitionID, fence)
+	return err
+}
+
+// SetAutomationEnabled flips a definition's enabled flag directly (unlike
+// UpsertAutomationDefinition, without touching its spec/revision) and, on an
+// actual disabled->enabled transition, performs the same store-side effects
+// Upsert does for that transition: clearing review-request edges and fencing
+// provider cursors. It is a no-op (changed=false, no side effects) when the
+// definition already has the requested state. Returns (nil, false, nil) for an
+// unknown or soft-deleted definition.
+func (s *Store) SetAutomationEnabled(id string, enabled bool, now time.Time) (*AutomationDefinition, bool, error) {
+	s.mu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			s.mu.Unlock()
+		}
+	}()
+	if s.db == nil {
+		return nil, false, errors.New("automation persistence unavailable")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+	var oldEnabled int
+	err = tx.QueryRow(`SELECT enabled FROM automation_definitions WHERE id=? AND deleted_at=''`, id).Scan(&oldEnabled)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	wasEnabled := oldEnabled != 0
+	if wasEnabled == enabled {
+		tx.Rollback()
+		s.mu.Unlock()
+		locked = false
+		def, getErr := s.GetAutomationDefinition(id)
+		return def, false, getErr
+	}
+	if _, err := tx.Exec(`UPDATE automation_definitions SET enabled=?, updated_at=? WHERE id=?`, enabled, formatTicketTime(now), id); err != nil {
+		return nil, false, err
+	}
+	if enabled {
+		if err := clearAutomationReviewRequestEdgesTx(tx, id, now); err != nil {
+			return nil, false, err
+		}
+		if err := fenceAutomationProviderCursorsTx(tx, id, now); err != nil {
+			return nil, false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	s.mu.Unlock()
+	locked = false
+	def, getErr := s.GetAutomationDefinition(id)
+	return def, true, getErr
 }
 
 func scanAutomationDefinition(scanner interface{ Scan(...any) error }) (*AutomationDefinition, error) {
@@ -799,6 +878,51 @@ func (s *Store) ListAutomationRuns(definitionID string) ([]AutomationRun, error)
 	}
 	return out, rows.Err()
 }
+
+// AutomationRunWithOccurrenceKey pairs a run with its occurrence's
+// occurrence_key, for surfaces (the WS runs list) that need to show which
+// provider occurrence produced the run without exposing its full payload.
+type AutomationRunWithOccurrenceKey struct {
+	AutomationRun
+	OccurrenceKey string
+}
+
+// ListAutomationRunsWithOccurrenceKeys returns up to limit runs for
+// definitionID, newest first, each carrying its occurrence's occurrence_key
+// via one join (mirrors ListAutomationRuns's columns/ordering).
+func (s *Store) ListAutomationRunsWithOccurrenceKeys(definitionID string, limit int) ([]AutomationRunWithOccurrenceKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT r.id,r.definition_id,r.occurrence_id,r.definition_revision,r.snapshot_json,r.state,r.last_error,r.ticket_id,r.session_id,r.workspace_id,r.pane_id,r.resolved_location_json,r.created_at,r.updated_at,r.delivered_at,o.occurrence_key
+		FROM automation_runs r
+		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		WHERE r.definition_id=?
+		ORDER BY r.created_at DESC
+		LIMIT ?
+	`, definitionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AutomationRunWithOccurrenceKey
+	for rows.Next() {
+		var r AutomationRun
+		var created, updated, delivered, occurrenceKey string
+		if err := rows.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered, &occurrenceKey); err != nil {
+			return nil, err
+		}
+		r.CreatedAt = parseTicketTime(created)
+		r.UpdatedAt = parseTicketTime(updated)
+		r.DeliveredAt = parseOptionalAutomationTime(delivered)
+		out = append(out, AutomationRunWithOccurrenceKey{AutomationRun: r, OccurrenceKey: occurrenceKey})
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListPendingAutomationRuns() ([]AutomationRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -97,17 +97,23 @@ const (
 
 // Daemon manages Claude sessions
 type Daemon struct {
-	socketPath                 string
-	pidPath                    string
-	pidFile                    *os.File // Held open with flock for exclusive access
-	dataRoot                   string
-	daemonInstanceID           string
-	store                      *store.Store
-	automationMu               sync.Mutex // serializes idempotent ensure/adopt delivery per profile
-	automationObservationMu    sync.Mutex
-	automationObservationLocks map[string]*sync.Mutex
-	automationRepoMu           sync.Mutex
-	automationRepos            map[string]*sync.Mutex
+	socketPath       string
+	pidPath          string
+	pidFile          *os.File // Held open with flock for exclusive access
+	dataRoot         string
+	daemonInstanceID string
+	store            *store.Store
+	automationMu     sync.Mutex // serializes idempotent ensure/adopt delivery per profile
+	// wsAutomationMutationTimeout bounds how long a WS-originated automation
+	// mutation (set_enabled) waits to acquire automationMu before aborting
+	// without mutating. 0 resolves to defaultWSAutomationMutationTimeout via
+	// wsAutomationMutationTimeoutDuration; tests shrink it to exercise the
+	// deadline without holding the lock for tens of seconds.
+	wsAutomationMutationTimeout time.Duration
+	automationObservationMu     sync.Mutex
+	automationObservationLocks  map[string]*sync.Mutex
+	automationRepoMu            sync.Mutex
+	automationRepos             map[string]*sync.Mutex
 	// automationDeliveryHook replaces only the final delivery call in focused
 	// provider-observation tests; production always leaves it nil.
 	automationDeliveryHook func(*store.AutomationRun) error
@@ -318,6 +324,12 @@ type Daemon struct {
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
 	workflowAttentionHook func(attention.Result)                    // optional, tests only
 	ticketsBroadcastHook  func([]protocol.Ticket)                   // optional, tests only
+
+	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
+	// WS surface (automations_broadcast.go): invoked before every
+	// automations_changed broadcast so tests can observe it deterministically
+	// without a live socket.
+	automationsBroadcastHook func(*protocol.AutomationsChangedMessage)
 
 	workspaceContextCheckoutMu sync.Mutex
 

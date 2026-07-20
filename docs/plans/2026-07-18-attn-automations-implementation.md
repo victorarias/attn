@@ -18,15 +18,19 @@
   fixed in `3402100f` with unit and daemon regressions for present and missing
   rollouts; the packaged continuity scenario was rerun green on the fixed code
   from a fresh `automations` profile before merge.
+- Slice 5 merged through [attn PR #617](https://github.com/victorarias/attn/pull/617)
+  (`69ba6978`, 2026-07-20): scheduled trigger with catch-up, storm guard, and
+  singleton continuity, proven by the packaged serial scenario (see the
+  checklist entry below).
 - Later slices remain pending.
 
 ## Next steps
 
-1. Slice 5 (scheduled prompt with one real maintenance case) is implemented on
-   `slice/automations-scheduled` with the packaged scenario green (see the
-   checklist entry below); it merges through the ordinary review flow.
-2. Then Slice 6 (profile-level Automations surface) and Slice 7 (self-service
-   editing and lifecycle completion), followed by the final verification matrix.
+1. Slice 6 (profile-level Automations surface) is implemented on
+   `slice/automations-surface` (see the checklist entry below); it merges
+   through the ordinary review flow.
+2. Then Slice 7 (self-service editing and lifecycle completion), followed by
+   the final verification matrix.
 
 This guide implements the [attn Automations vision](attn-automations.md)
 as functional walking-skeleton slices. Each slice must leave a real capability
@@ -977,7 +981,17 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       removing a merged-clean worktree while preserving a dirty one) — run
       `automation-scheduled-cleanup-2026-07-20T12-22-03-841Z`, all legs green
       against the app built from `45c7684c` (2026-07-20).
-- [ ] Add operational UI, then the editor and remaining policy depth.
+- [x] Add operational UI: a profile-level Automations panel listing definitions
+      with enable/disable, run-now for manual definitions, and run history with
+      ticket/session navigation, fed by `automations_changed` broadcasts and
+      typed WS get commands (protocol 176), proven by the packaged serial
+      scenario `real-app:scenario-automation-surface` — run
+      `automation-surface-2026-07-20T15-48-06-271Z`, all four legs green
+      (broadcast-driven listing, delivered navigable run with no duplicates,
+      inline daemon rejection on a disabled definition, daemon restart
+      preserving definitions and runs) against the app built from `91f899b5`
+      (2026-07-20).
+- [ ] Add the self-service editor and remaining policy depth.
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
 

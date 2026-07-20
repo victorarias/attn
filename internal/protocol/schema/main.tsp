@@ -1577,6 +1577,25 @@ model AutomationShowMessage { cmd: "automation_show"; definition_id: string; }
 model AutomationRunMessage { cmd: "automation_run"; definition_id: string; request_id: string; input_json?: string; pr_url?: string; }
 model AutomationRunListMessage { cmd: "automation_run_list"; definition_id: string; }
 
+// WS-only automations surface: list definitions, list one definition's runs, and
+// toggle enabled. automation_run (above) is reused for WS run-now; it already
+// carries request_id for correlation.
+model AutomationDefinitionsGetMessage {
+  cmd: "automation_definitions_get";
+  request_id?: string;
+}
+model AutomationRunsGetMessage {
+  cmd: "automation_runs_get";
+  definition_id: string;
+  request_id?: string;
+}
+model AutomationSetEnabledMessage {
+  cmd: "automation_set_enabled";
+  definition_id: string;
+  enabled: boolean;
+  request_id?: string;
+}
+
 model SpawnSessionMessage {
   cmd: "spawn_session";
   id: string;
@@ -2599,6 +2618,68 @@ model WorkflowActionResultMessage {
   error?: string;
 }
 
+// Compact automations summaries for the WS surface. Canonical state (full
+// SpecJSON, occurrence payloads, snapshots) stays server-side in SQLite; these
+// carry only what the UI renders. AutomationDefinitionSummary's schedule/policy
+// fields are extracted daemon-side from the definition's SpecJSON.
+model AutomationDefinitionSummary {
+  id: string;
+  name: string;
+  enabled: boolean;
+  revision: int32;
+  trigger_type: string;
+  schedule_cron?: string;
+  schedule_time_zone?: string;
+  continuity?: string;
+  catch_up?: string;
+  updated_at: string;
+}
+
+model AutomationRunSummary {
+  id: string;
+  definition_id: string;
+  definition_revision: int32;
+  state: string;
+  last_error?: string;
+  ticket_id?: string;
+  session_id?: string;
+  workspace_id?: string;
+  pane_id?: string;
+  created_at: string;
+  updated_at: string;
+  delivered_at?: string;
+  occurrence_key?: string;
+}
+
+// Result for the WS automations surface (automation_definitions_get,
+// automation_runs_get, automation_set_enabled, automation_run). Distinct from
+// the unix-socket automation_action_result shape used by the CLI/agent path
+// (see internal/daemon/automations.go's automationActionResult and
+// internal/client's AutomationResult, which carry a generic `data` payload
+// instead of these typed fields): the two are not wire-compatible, so the
+// socket path keeps its own struct.
+model AutomationActionResultMessage {
+  event: "automation_action_result";
+  action: string;
+  request_id?: string;
+  success: boolean;
+  error?: string;
+  definitions?: AutomationDefinitionSummary[];
+  runs?: AutomationRunSummary[];
+  truncated?: boolean;
+  run_id?: string;
+  ticket_id?: string;
+  session_id?: string;
+}
+
+// Compact change signal: canonical state lives in SQLite, so clients re-read
+// (automation_definitions_get / automation_runs_get) on receipt rather than
+// trusting a broadcast payload.
+model AutomationsChangedMessage {
+  event: "automations_changed";
+  definition_ids: string[];
+}
+
 // Reviewer agent streaming events
 model SpawnResultMessage {
   event: "spawn_result";
@@ -3347,6 +3428,8 @@ alias DaemonEvent =
   | GetRepoInfoResultMessage
   | WorkflowRunUpdatedMessage
   | WorkflowActionResultMessage
+  | AutomationActionResultMessage
+  | AutomationsChangedMessage
   | WorkspaceContextResultMessage
   | WorkspaceContextListResultMessage
   | NotebookListResultMessage

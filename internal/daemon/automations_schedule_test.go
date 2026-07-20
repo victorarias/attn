@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/automation"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -458,7 +460,11 @@ func claimPendingScheduledRun(t *testing.T, s *store.Store, def *store.Automatio
 // A real delivery attempt reaches deliverAutomationRun (which recoverAutomations
 // calls directly, not through automationDeliveryHook, so a full spawn is out of
 // reach for a unit test); disabling the definition after the claim gives a
-// deterministic, PTY-free failure that still proves the attempt was made.
+// deterministic, PTY-free failure that still proves the attempt was made. That
+// same real deliverAutomationRun -> failAutomationRun path is also where a
+// scheduled run's delivered/failed transition broadcasts automations_changed,
+// so this is extended to assert the broadcast fires for a scheduled run too
+// (not just the manual/WS paths covered in automations_test.go).
 func TestScheduledPendingRunRecoversOnRestart(t *testing.T) {
 	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
 	intended := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
@@ -467,11 +473,32 @@ func TestScheduledPendingRunRecoversOnRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var mu sync.Mutex
+	var broadcastIDs []string
+	d.automationsBroadcastHook = func(msg *protocol.AutomationsChangedMessage) {
+		mu.Lock()
+		broadcastIDs = append(broadcastIDs, msg.DefinitionIds...)
+		mu.Unlock()
+	}
+
 	d.recoverAutomations()
 
 	got, err := s.GetAutomationRun(run.ID)
 	if err != nil || got == nil || got.State != "failed" || !strings.Contains(got.LastError, "definition is disabled") {
 		t.Fatalf("recovery did not attempt scheduled run: run=%#v err=%v", got, err)
+	}
+	mu.Lock()
+	ids := append([]string(nil), broadcastIDs...)
+	mu.Unlock()
+	found := false
+	for _, id := range ids {
+		if id == def.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("scheduled run's failed transition did not broadcast automations_changed: broadcasts=%v", ids)
 	}
 }
 
@@ -656,5 +683,39 @@ func TestScheduledSingletonMissingContinuityTicketFailsBeforeReusingBoundArtifac
 	}
 	if ticket, err := s.GetTicket(first.TicketID); err != nil || ticket != nil {
 		t.Fatalf("swept ticket was recreated: ticket=%#v err=%v", ticket, err)
+	}
+}
+
+// TestObserveDueScheduleBroadcastsAtClaimTimeEvenWhenDeliveryFailsRetryably
+// pins Fix F1: a claimed scheduled run must be visible to an open WS panel
+// immediately, not only after delivery settles. A retryable delivery error
+// leaves the run pending (recovery/next-tick retries it), so without a
+// claim-time broadcast the panel would have no signal the run exists at all
+// until some later transition.
+func TestObserveDueScheduleBroadcastsAtClaimTimeEvenWhenDeliveryFailsRetryably(t *testing.T) {
+	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
+	var broadcasts []string
+	d.automationsBroadcastHook = func(msg *protocol.AutomationsChangedMessage) {
+		broadcasts = append(broadcasts, msg.DefinitionIds...)
+	}
+	d.automationDeliveryHook = func(run *store.AutomationRun) error {
+		return &retryableAutomationDeliveryError{cause: fmt.Errorf("session not ready yet")}
+	}
+
+	now0 := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	d.observeDueSchedules(now0) // anchor
+	d.observeDueSchedules(now0.Add(70 * time.Second))
+
+	if len(broadcasts) == 0 {
+		t.Fatal("no automations_changed broadcast fired at claim time")
+	}
+	for _, id := range broadcasts {
+		if id != def.ID {
+			t.Fatalf("broadcast for unexpected definition %q, want %q", id, def.ID)
+		}
+	}
+	runs, err := s.ListAutomationRuns(def.ID)
+	if err != nil || len(runs) != 1 || runs[0].State != "pending" {
+		t.Fatalf("runs=%#v err=%v, want exactly one pending run despite the retryable delivery failure", runs, err)
 	}
 }

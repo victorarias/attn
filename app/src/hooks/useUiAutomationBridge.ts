@@ -98,6 +98,10 @@ interface UseUiAutomationBridgeArgs {
   openTicketDetail?: (ticketId: string) => void;
   closeTicketDetail?: () => void;
   tickets?: Ticket[];
+  // Automations panel (profile-level). Mutation verbs drive the real panel
+  // controls (toggle/run-now/select), same rationale as the ticket panel
+  // above; the bridge only needs to open the dock and read the rendered DOM.
+  openAutomationsPanel?: () => void;
   // Presentation notices (pane-header review chips). Read-only for the
   // bridge: the chip DOM is the source of truth for what's actually rendered.
   presentationNotices?: Presentation[];
@@ -1252,6 +1256,52 @@ function collectTicketDetailUiState() {
   };
 }
 
+// Serialize what AutomationsPanel is actually rendering: definition rows
+// (with enabled/failure/inline-error state) and, when a definition is
+// selected, its run history. Mirrors collectTicketDetailUiState above.
+function collectAutomationsUiState() {
+  const panel = document.querySelector('[data-testid="automations-panel"]');
+  if (!(panel instanceof HTMLElement)) {
+    return { present: false };
+  }
+  const definitionRows = Array.from(
+    panel.querySelectorAll('[data-testid="automation-definition-row"]'),
+  );
+  const definitions = definitionRows.map((row) => {
+    const id = row.getAttribute('data-definition-id') ?? '';
+    const toggle = row.querySelector(`[data-testid="automation-toggle-${id}"]`);
+    return {
+      id,
+      name: row.querySelector('.automations-panel__name')?.textContent?.trim() ?? '',
+      trigger: row.querySelector('.automations-panel__trigger')?.textContent?.trim() ?? '',
+      enabled: toggle instanceof HTMLInputElement ? toggle.checked : false,
+      selected: row.classList.contains('is-selected'),
+      failed: Boolean(row.querySelector(`[data-testid="automation-failure-badge-${id}"]`)),
+      canRunNow: Boolean(row.querySelector(`[data-testid="automation-run-now-${id}"]`)),
+      toggleError:
+        row.querySelector(`[data-testid="automation-toggle-error-${id}"]`)?.textContent?.trim() ?? '',
+      runError:
+        row.querySelector(`[data-testid="automation-run-error-${id}"]`)?.textContent?.trim() ?? '',
+    };
+  });
+  const runsSection = panel.querySelector('[data-testid="automations-panel-runs"]');
+  const runs = runsSection
+    ? Array.from(runsSection.querySelectorAll('[data-testid="automation-run-row"]')).map((row) => ({
+        id: row.getAttribute('data-run-id') ?? '',
+        state: row.getAttribute('data-state') ?? '',
+        navigable: Boolean(row.querySelector('button.automations-panel__run-row-main')),
+        lastError: row.querySelector('.automations-panel__run-error')?.textContent?.trim() ?? '',
+      }))
+    : [];
+  return {
+    present: true,
+    empty: Boolean(panel.querySelector('[data-testid="automations-panel-empty"]')),
+    error: panel.querySelector('[data-testid="automations-panel-error"]')?.textContent?.trim() ?? '',
+    definitions,
+    runs,
+  };
+}
+
 function getLocationPickerRoot() {
   const root = document.querySelector('[data-testid="location-picker"]');
   return root instanceof HTMLElement ? root : null;
@@ -1556,6 +1606,7 @@ export function useUiAutomationBridge({
   openTicketDetail,
   closeTicketDetail,
   tickets,
+  openAutomationsPanel,
   presentationNotices,
   resetSessionPaneTerminal,
   injectSessionPaneBytes,
@@ -2604,6 +2655,46 @@ export function useUiAutomationBridge({
         clickTestId('ticket-resume');
         await settleUi(2);
         return { ok: true };
+      }
+      // Automations panel (profile-level). Mutations drive the real rendered
+      // controls (checkbox/button clicks), same convention as the ticket_*
+      // verbs above; automations_get_state is the read-only DOM snapshot.
+      case 'automations_open_panel': {
+        if (!openAutomationsPanel) {
+          throw new Error('automations_open_panel is not configured');
+        }
+        openAutomationsPanel();
+        await settleUi(3);
+        return collectAutomationsUiState();
+      }
+      case 'automations_get_state':
+        return collectAutomationsUiState();
+      case 'automations_toggle_enabled': {
+        const definitionId = typeof payload.definitionId === 'string' ? payload.definitionId : '';
+        if (!definitionId) {
+          throw new Error('automations_toggle_enabled requires definitionId');
+        }
+        clickTestId(`automation-toggle-${definitionId}`);
+        await settleUi(3);
+        return collectAutomationsUiState();
+      }
+      case 'automations_run_now': {
+        const definitionId = typeof payload.definitionId === 'string' ? payload.definitionId : '';
+        if (!definitionId) {
+          throw new Error('automations_run_now requires definitionId');
+        }
+        clickTestId(`automation-run-now-${definitionId}`);
+        await settleUi(3);
+        return collectAutomationsUiState();
+      }
+      case 'automations_select_definition': {
+        const definitionId = typeof payload.definitionId === 'string' ? payload.definitionId : '';
+        if (!definitionId) {
+          throw new Error('automations_select_definition requires definitionId');
+        }
+        clickTestId(`automation-definition-select-${definitionId}`);
+        await settleUi(3);
+        return collectAutomationsUiState();
       }
       case 'click_nudge_trigger': {
         // The "deliver now" trigger renders only in NudgeIndicator's paused mode

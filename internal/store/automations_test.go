@@ -282,6 +282,52 @@ func TestAutomationScheduleCursorGetSetRoundtrip(t *testing.T) {
 	}
 }
 
+func TestListAutomationRunsWithOccurrenceKeysOrdersNewestFirstWithLimit(t *testing.T) {
+	s := New()
+	base := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := func(requestID string, at time.Time) *AutomationRun {
+		ids := AutomationRunReservation{
+			RunID:        "run-" + requestID,
+			OccurrenceID: "occ-" + requestID,
+			TicketID:     "ticket-" + requestID,
+			SessionID:    "session-" + requestID,
+			WorkspaceID:  "workspace-" + requestID,
+			PaneID:       "pane-" + requestID,
+		}
+		run, created, err := s.ClaimManualAutomationRun(def.ID, requestID, "", `{}`, def.Revision, `{}`, at, ids)
+		if err != nil || !created {
+			t.Fatalf("claim %s created=%v err=%v", requestID, created, err)
+		}
+		return run
+	}
+	// Distinct clock-injected timestamps, not wall-clock spacing, so ordering
+	// is deterministic regardless of test execution speed.
+	seed("req-1", base)
+	second := seed("req-2", base.Add(time.Minute))
+	third := seed("req-3", base.Add(2*time.Minute))
+
+	runs, err := s.ListAutomationRunsWithOccurrenceKeys(def.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("len(runs)=%d, want 2: %#v", len(runs), runs)
+	}
+	if runs[0].ID != third.ID || runs[0].OccurrenceKey != "manual:req-3" {
+		t.Fatalf("newest run = %#v, want run %s with occurrence_key manual:req-3", runs[0], third.ID)
+	}
+	if runs[1].ID != second.ID || runs[1].OccurrenceKey != "manual:req-2" {
+		t.Fatalf("second-newest run = %#v, want run %s with occurrence_key manual:req-2", runs[1], second.ID)
+	}
+	if !runs[0].CreatedAt.After(runs[1].CreatedAt) {
+		t.Fatalf("runs not newest-first by created_at: %v then %v", runs[0].CreatedAt, runs[1].CreatedAt)
+	}
+}
+
 func TestListPendingAutomationRunsIncludesScheduledProvider(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
@@ -722,5 +768,80 @@ func TestGitHubReviewCursorOrdersObservationsWithinOneSecond(t *testing.T) {
 	}
 	if active != 0 {
 		t.Fatal("stale same-second observation reactivated withdrawn demand")
+	}
+}
+
+func TestSetAutomationEnabledFlipsStateAndIsIdempotent(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{}`, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-applying the current state is a no-op: changed=false, no update.
+	got, changed, err := s.SetAutomationEnabled(def.ID, true, now.Add(time.Minute))
+	if err != nil || changed || got == nil || !got.Enabled {
+		t.Fatalf("no-op enable: def=%#v changed=%v err=%v", got, changed, err)
+	}
+	if !got.UpdatedAt.Equal(def.UpdatedAt) {
+		t.Fatalf("no-op enable touched updated_at: got %v, want %v", got.UpdatedAt, def.UpdatedAt)
+	}
+
+	disabled, changed, err := s.SetAutomationEnabled(def.ID, false, now.Add(2*time.Minute))
+	if err != nil || !changed || disabled == nil || disabled.Enabled {
+		t.Fatalf("disable: def=%#v changed=%v err=%v", disabled, changed, err)
+	}
+
+	againNoOp, changed, err := s.SetAutomationEnabled(def.ID, false, now.Add(3*time.Minute))
+	if err != nil || changed || againNoOp == nil || againNoOp.Enabled {
+		t.Fatalf("no-op disable: def=%#v changed=%v err=%v", againNoOp, changed, err)
+	}
+
+	reenabled, changed, err := s.SetAutomationEnabled(def.ID, true, now.Add(4*time.Minute))
+	if err != nil || !changed || reenabled == nil || !reenabled.Enabled {
+		t.Fatalf("re-enable: def=%#v changed=%v err=%v", reenabled, changed, err)
+	}
+
+	missing, changed, err := s.SetAutomationEnabled("does-not-exist", true, now)
+	if err != nil || changed || missing != nil {
+		t.Fatalf("unknown id: def=%#v changed=%v err=%v", missing, changed, err)
+	}
+}
+
+// TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand is the
+// SetAutomationEnabled parity of TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand
+// above: the disable/re-enable cycle drives through SetAutomationEnabled
+// instead of UpsertAutomationDefinition, and must produce the identical
+// review-request-edge-clear + provider-cursor-fence side effects.
+func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	const spec = `{"id":"review"}`
+	def, err := s.UpsertAutomationDefinition("review", "Review", spec, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	if _, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, ids); err != nil || !created {
+		t.Fatalf("initial claim created=%v err=%v", created, err)
+	}
+	if _, changed, err := s.SetAutomationEnabled(def.ID, false, now.Add(time.Minute)); err != nil || !changed {
+		t.Fatalf("disable: changed=%v err=%v", changed, err)
+	}
+	if _, changed, err := s.SetAutomationEnabled(def.ID, true, now.Add(2*time.Minute)); err != nil || !changed {
+		t.Fatalf("re-enable: changed=%v err=%v", changed, err)
+	}
+	stale, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(90*time.Second))
+	if err != nil || len(stale) != 0 {
+		t.Fatalf("pre-enable observation crossed enable fence: candidates=%#v err=%v", stale, err)
+	}
+	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(3*time.Minute))
+	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 2 {
+		t.Fatalf("re-enabled latest catch-up candidates=%#v err=%v", candidates, err)
 	}
 }

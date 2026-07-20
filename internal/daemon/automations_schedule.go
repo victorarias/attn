@@ -183,6 +183,11 @@ func (d *Daemon) claimAndDeliverScheduledRun(definition store.AutomationDefiniti
 		d.logf("automation schedule observation claim %s: %v", definition.ID, claimErr)
 		return claimErr
 	}
+	// A run now exists for this definition (freshly claimed, or the
+	// idempotent dedup of an already-claimed one) whether or not delivery
+	// below succeeds; broadcast so a WS client watching this definition's
+	// runs sees it appear without waiting on the delivery outcome.
+	d.broadcastAutomationsChanged(definition.ID)
 	d.automationMu.Lock()
 	current, loadErr := d.store.GetAutomationRun(run.ID)
 	if loadErr == nil && current != nil && current.State == "pending" {
