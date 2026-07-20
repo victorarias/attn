@@ -1083,6 +1083,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleAutomationSetEnabledWS(client, msg.(*protocol.AutomationSetEnabledMessage))
 	case protocol.CmdAutomationDelete:
 		d.handleAutomationDeleteWS(client, msg.(*protocol.AutomationDeleteMessage))
+	case protocol.CmdAutomationCleanup:
+		d.handleAutomationCleanupWS(client, msg.(*protocol.AutomationCleanupMessage))
 	case protocol.CmdAutomationRun:
 		d.handleAutomationRunWS(client, msg.(*protocol.AutomationRunMessage))
 	case protocol.CmdSpawnSession:

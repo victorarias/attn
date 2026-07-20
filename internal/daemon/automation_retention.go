@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -236,4 +237,65 @@ func (d *Daemon) removeAutomationOccurrenceArtifact(runID string) error {
 		return err
 	}
 	return nil
+}
+
+// automationCleanup is A4's explicit, on-demand counterpart to A3's
+// automationRetentionSweepPass. Two differences from the sweep: it walks
+// every terminal run for id right now, with no keep-window or age-floor
+// filter, and it is disk-only — a cleaned run's worktree is removed, but its
+// occurrence artifact and run/occurrence rows are left alone, so run history
+// stays intact and only reclaims worktree disk space. Uses
+// GetAutomationDefinitionIncludingDeleted (not GetAutomationDefinition) so a
+// user can reclaim a deleted automation's leftover worktrees without waiting
+// for the retention sweep to eventually reach it.
+func (d *Daemon) automationCleanup(ctx context.Context, id string) (cleaned, keptDirty []string, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("deadline exceeded waiting to run automation cleanup: %w", err)
+	}
+	definition, err := d.store.GetAutomationDefinitionIncludingDeleted(id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if definition == nil {
+		return nil, nil, fmt.Errorf("automation %q not found", id)
+	}
+	runs, err := d.store.ListTerminalAutomationRuns(id)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, run := range runs {
+		worktree, werr := automationRunWorktreePath(run)
+		if werr != nil {
+			d.logf("automation cleanup %s: run %s: %v", id, run.ID, werr)
+			continue
+		}
+		if worktree == "" {
+			continue
+		}
+		if _, statErr := os.Stat(worktree); statErr != nil {
+			// Already gone (or inaccessible): nothing new to report either way.
+			continue
+		}
+		block, safetyErr := d.automationRunCleanupSafety(run)
+		if safetyErr != nil {
+			d.logf("automation cleanup %s: run %s: %v", id, run.ID, safetyErr)
+			continue
+		}
+		switch block {
+		case automationRunCleanupLiveSession:
+			continue
+		case automationRunCleanupDirtyWorktree:
+			keptDirty = append(keptDirty, run.ID)
+			continue
+		}
+		if removeErr := d.removeAutomationRunWorktree(run); removeErr != nil {
+			d.logf("automation cleanup %s: run %s: %v", id, run.ID, removeErr)
+			continue
+		}
+		cleaned = append(cleaned, run.ID)
+	}
+	if len(cleaned) > 0 || len(keptDirty) > 0 {
+		d.logf("automation cleanup %s: cleaned %d worktree(s), kept %d dirty", id, len(cleaned), len(keptDirty))
+	}
+	return cleaned, keptDirty, nil
 }

@@ -1159,6 +1159,39 @@ func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderT
 	return out, rows.Err()
 }
 
+// ListTerminalAutomationRuns returns every delivered/failed run for
+// definitionID, oldest first, with no count or age gate — unlike
+// ListPrunableAutomationRuns, which only surfaces runs outside the retention
+// window. A4's explicit "automation cleanup" command uses this: it reclaims
+// disk space for every terminal run right now, not just the ones retention
+// would eventually get to.
+func (s *Store) ListTerminalAutomationRuns(definitionID string) ([]AutomationRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT `+automationRunColumns+`
+		FROM automation_runs
+		WHERE definition_id=? AND state IN ('delivered','failed')
+		ORDER BY created_at
+	`, definitionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AutomationRun
+	for rows.Next() {
+		r, err := scanAutomationRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
 // DeleteAutomationRun removes a run and its occurrence row in one
 // transaction. It does not touch on-disk artifacts (worktrees, occurrence
 // JSON) — callers (the A3 retention sweep, A4 cleanup does not call this)

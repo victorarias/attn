@@ -1587,6 +1587,15 @@ model AutomationDeleteMessage {
   request_id?: string;
 }
 
+// Same dual-surface shape as automation_delete above. Unlike delete, cleanup
+// is disk-only (worktrees only; never rows or artifacts) and repeatable —
+// see AutomationActionResultMessage's cleaned/kept_dirty fields.
+model AutomationCleanupMessage {
+  cmd: "automation_cleanup";
+  definition_id: string;
+  request_id?: string;
+}
+
 // WS-only automations surface: list definitions, list one definition's runs, and
 // toggle enabled. automation_run (above) is reused for WS run-now; it already
 // carries request_id for correlation.
@@ -2680,6 +2689,12 @@ model AutomationActionResultMessage {
   run_id?: string;
   ticket_id?: string;
   session_id?: string;
+  // cleaned/kept_dirty: automation_cleanup's per-run-id partition of the
+  // terminal runs it examined — cleaned had their worktree removed,
+  // kept_dirty were skipped because the worktree had uncommitted changes.
+  // Both omitted (not just empty) when the action isn't automation_cleanup.
+  cleaned?: string[];
+  kept_dirty?: string[];
 }
 
 // Compact change signal: canonical state lives in SQLite, so clients re-read

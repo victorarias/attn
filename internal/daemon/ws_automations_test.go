@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -213,6 +215,65 @@ func TestAutomationDeleteWSResultCorrelatesRequest(t *testing.T) {
 	readNotebookWSEvent(t, client2.send, &errRes)
 	if errRes.Success || errRes.Error == nil {
 		t.Fatalf("delete unknown definition result = %+v, want success=false with error", errRes)
+	}
+}
+
+// TestAutomationCleanupWSResultCorrelatesRequest exercises
+// handleAutomationCleanupWS: a definition with one clean-worktree terminal
+// run reports it in the result's Cleaned field, correlated by request_id;
+// an unknown definition surfaces as success=false, matching delete's
+// business-failure shape.
+func TestAutomationCleanupWSResultCorrelatesRequest(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+	worktree := filepath.Join(root, "repo--clean")
+	runGitDaemon(t, mainRepo, "worktree", "add", "-b", "automation/cleanup-ws", worktree)
+
+	s := store.New()
+	d := &Daemon{store: s, dataRoot: root, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := claimTerminalAutomationRun(t, s, def, "cleanup-ws-1", time.Now(), automationResolvedLocationJSON(t, mainRepo, worktree))
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationCleanupWS(client, &protocol.AutomationCleanupMessage{
+		Cmd:          protocol.CmdAutomationCleanup,
+		DefinitionID: def.ID,
+		RequestID:    protocol.Ptr("cleanup-1"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.RequestID == nil || *res.RequestID != "cleanup-1" {
+		t.Fatalf("cleanup result = %+v, want success for cleanup-1", res)
+	}
+	if len(res.Cleaned) != 1 || res.Cleaned[0] != run.ID {
+		t.Fatalf("cleanup result Cleaned = %v, want [%s]", res.Cleaned, run.ID)
+	}
+	if len(res.KeptDirty) != 0 {
+		t.Fatalf("cleanup result KeptDirty = %v, want none", res.KeptDirty)
+	}
+
+	// Unknown definition surfaces as success=false with an error, not a
+	// transport failure.
+	client2 := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationCleanupWS(client2, &protocol.AutomationCleanupMessage{
+		Cmd:          protocol.CmdAutomationCleanup,
+		DefinitionID: "does-not-exist",
+		RequestID:    protocol.Ptr("cleanup-2"),
+	})
+	var errRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client2.send, &errRes)
+	if errRes.Success || errRes.Error == nil {
+		t.Fatalf("cleanup unknown definition result = %+v, want success=false with error", errRes)
 	}
 }
 

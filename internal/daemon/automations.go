@@ -32,6 +32,13 @@ type automationActionResult struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
+// automationCleanupResult is automation_cleanup's socket/CLI data payload —
+// mirrors AutomationActionResultMessage's cleaned/kept_dirty WS fields.
+type automationCleanupResult struct {
+	Cleaned   []string `json:"cleaned"`
+	KeptDirty []string `json:"kept_dirty"`
+}
+
 type retryableAutomationDeliveryError struct{ cause error }
 
 func (e *retryableAutomationDeliveryError) Error() string { return e.cause.Error() }
@@ -1429,6 +1436,13 @@ func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 	case protocol.CmdAutomationDelete:
 		m := msg.(*protocol.AutomationDeleteMessage)
 		err = d.automationDelete(context.Background(), m.DefinitionID)
+	case protocol.CmdAutomationCleanup:
+		m := msg.(*protocol.AutomationCleanupMessage)
+		var cleaned, keptDirty []string
+		cleaned, keptDirty, err = d.automationCleanup(context.Background(), m.DefinitionID)
+		if err == nil {
+			data = automationCleanupResult{Cleaned: cleaned, KeptDirty: keptDirty}
+		}
 	}
 	result := automationActionResult{Event: protocol.EventAutomationActionResult, Action: cmd, Success: err == nil}
 	if err != nil {

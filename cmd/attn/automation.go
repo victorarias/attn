@@ -11,7 +11,7 @@ import (
 )
 
 func automationUsage() {
-	fmt.Fprint(os.Stderr, "usage: attn automation <apply|list|show|run|runs|delete>\n")
+	fmt.Fprint(os.Stderr, "usage: attn automation <apply|list|show|run|runs|delete|cleanup>\n")
 }
 func runAutomationCommand() {
 	if len(os.Args) < 3 {
@@ -98,6 +98,12 @@ func runAutomationCommand() {
 		if err = c.AutomationDelete(os.Args[3]); err == nil {
 			data, _ = json.Marshal(map[string]string{"deleted": os.Args[3]})
 		}
+	case "cleanup":
+		if len(os.Args) != 4 {
+			err = fmt.Errorf("usage: attn automation cleanup <definition-id>")
+			break
+		}
+		data, err = c.AutomationCleanup(os.Args[3])
 	default:
 		err = fmt.Errorf("unknown automation command %q", os.Args[2])
 	}

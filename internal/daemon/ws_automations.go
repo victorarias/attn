@@ -12,7 +12,7 @@ import (
 )
 
 // WS wrappers for the automations surface: list definitions, list one
-// definition's runs, enable/disable, delete, and run-now. Canonical state
+// definition's runs, enable/disable, delete, cleanup, and run-now. Canonical state
 // stays in SQLite; every handler here replies with a compact
 // AutomationActionResultMessage and mutations also broadcast
 // automations_changed (automations_broadcast.go) so other clients re-read.
@@ -41,6 +41,9 @@ import (
 //     retry of the same click (ClaimManualAutomationRun is idempotent per
 //     request_id), so a retry after a client-side timeout dedups onto the
 //     original claim rather than creating a second one.
+//   - cleanup does not participate in this race at all: it never takes
+//     automationMu (see handleAutomationCleanupWS), so it has nothing to
+//     abort ahead of — the WS timeout there is only a defensive bound.
 
 // automationRunSummaryListCap bounds automation_runs_get: a defensive cap
 // against an unbounded WS payload for a long-lived definition, not a
@@ -129,6 +132,34 @@ func (d *Daemon) handleAutomationDeleteWS(client *wsClient, msg *protocol.Automa
 		}
 		if err != nil {
 			result.Error = protocol.Ptr(err.Error())
+		}
+		d.sendToClient(client, result)
+	}()
+}
+
+// handleAutomationCleanupWS is the WS counterpart of the unix-socket
+// CmdAutomationCleanup path: reclaim worktree disk space for every terminal
+// run of a definition right now. Unlike set_enabled/delete, cleanup never
+// blocks on automationMu (automationCleanup doesn't take it — it's disk-only
+// and doesn't race an in-flight delivery's row mutations), so there is no
+// abort-before-mutate deadline race to guard against; the timeout here is
+// just a defensive bound on how long a large worktree scan may run.
+func (d *Daemon) handleAutomationCleanupWS(client *wsClient, msg *protocol.AutomationCleanupMessage) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), d.wsAutomationMutationTimeoutDuration())
+		defer cancel()
+		cleaned, keptDirty, err := d.automationCleanup(ctx, msg.DefinitionID)
+		result := protocol.AutomationActionResultMessage{
+			Event:     protocol.EventAutomationActionResult,
+			Action:    "cleanup",
+			RequestID: msg.RequestID,
+			Success:   err == nil,
+		}
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+		} else {
+			result.Cleaned = cleaned
+			result.KeptDirty = keptDirty
 		}
 		d.sendToClient(client, result)
 	}()

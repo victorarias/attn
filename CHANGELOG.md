@@ -32,6 +32,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   messages steered into the conversation instead of keystrokes typed into
   the terminal. Forking or starting a new session inside pi keeps attn's
   resume token current.
+- **Automations can now be retired and their worktrees reclaimed.** `attn
+  automation delete <id>` retires a definition; its finished runs keep their
+  tickets and history. `attn automation cleanup <id>` reclaims worktree disk
+  space for a definition's finished runs on demand, skipping any worktree
+  that still has uncommitted changes. A background sweep now does the same
+  automatically for old finished runs — keeping the newest 200 per
+  definition, or anything younger than two weeks — so a long-running
+  automation doesn't accumulate worktrees forever; a run whose session is
+  still open is never touched either way.
 
 ### Changed
 - **`catch_up` is now schedule-only.** Applying an automation whose manual or
@@ -44,6 +53,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   and preserve reviewer changes in the owned worktree. Missing worktrees,
   unavailable transcripts, and changed pull-request heads fail visibly instead
   of silently starting in the wrong context.
+
+### Fixed
+- **Reverting an automation's prompt to an earlier version no longer
+  permanently blocks new runs.** A→B→A edits used to refuse every future run
+  once any earlier revision shared the same prompt/launch/location, even
+  after that revision's own ticket was long gone. Continuity is now checked
+  per prior run's own ticket, so a genuine revert is allowed again as long as
+  that ticket is still alive, and still refused once it's actually been
+  swept away.
 
 ## [2026-07-19]
 

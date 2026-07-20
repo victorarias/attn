@@ -123,6 +123,9 @@ type AutomationActionResultMessage struct {
 	// Action corresponds to the JSON schema field "action".
 	Action string `json:"action"`
 
+	// Cleaned corresponds to the JSON schema field "cleaned".
+	Cleaned []string `json:"cleaned,omitempty,omitzero"`
+
 	// Definitions corresponds to the JSON schema field "definitions".
 	Definitions []AutomationDefinitionSummary `json:"definitions,omitempty,omitzero"`
 
@@ -131,6 +134,9 @@ type AutomationActionResultMessage struct {
 
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
+
+	// KeptDirty corresponds to the JSON schema field "kept_dirty".
+	KeptDirty []string `json:"kept_dirty,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
@@ -160,6 +166,17 @@ type AutomationApplyMessage struct {
 
 	// DefinitionYaml corresponds to the JSON schema field "definition_yaml".
 	DefinitionYaml string `json:"definition_yaml"`
+}
+
+type AutomationCleanupMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
 }
 
 type AutomationDefinitionSummary struct {

@@ -98,6 +98,13 @@ func (c *Client) AutomationDelete(id string) error {
 	_, e := c.sendAutomation(protocol.AutomationDeleteMessage{Cmd: protocol.CmdAutomationDelete, DefinitionID: id})
 	return e
 }
+func (c *Client) AutomationCleanup(id string) (json.RawMessage, error) {
+	r, e := c.sendAutomation(protocol.AutomationCleanupMessage{Cmd: protocol.CmdAutomationCleanup, DefinitionID: id})
+	if e != nil {
+		return nil, e
+	}
+	return r.Data, nil
+}
 
 type ListResult struct {
 	Sessions   []protocol.Session   `json:"sessions"`
