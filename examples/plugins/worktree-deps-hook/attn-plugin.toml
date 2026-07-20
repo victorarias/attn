@@ -1,6 +1,6 @@
 name = "worktree-deps-hook"
 version = "0.1.0"
-attn_api_version = 4
+attn_api_version = 5
 description = "Example worktree after-create hook that installs JavaScript dependencies"
 
 [plugin]

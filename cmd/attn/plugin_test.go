@@ -132,7 +132,7 @@ func writeCLIPluginManifest(t *testing.T, pluginDir, name string) {
 	if err := os.WriteFile(filepath.Join(root, "src", "index.ts"), []byte("// fixture\n"), 0o644); err != nil {
 		t.Fatalf("write entrypoint: %v", err)
 	}
-	manifest := "name = \"" + name + "\"\nversion = \"0.1.0\"\nattn_api_version = 4\n\n[plugin]\nentrypoint = \"src/index.ts\"\n"
+	manifest := "name = \"" + name + "\"\nversion = \"0.1.0\"\nattn_api_version = 5\n\n[plugin]\nentrypoint = \"src/index.ts\"\n"
 	if err := os.WriteFile(filepath.Join(root, "attn-plugin.toml"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}

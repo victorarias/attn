@@ -6,6 +6,17 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-20]
+
+### Added
+- **pi sessions now report their own state and take steering in-band.** A pi
+  session launched by attn loads a bundled companion extension that declares
+  when the agent is working, tells attn how a turn ended — done, or waiting
+  on your reply — and receives ticket nudges and doorbell wakes as real user
+  messages steered into the conversation instead of keystrokes typed into
+  the terminal. Forking or starting a new session inside pi keeps attn's
+  resume token current.
+
 ## [2026-07-19]
 
 ### Added

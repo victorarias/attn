@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	APIVersion   = 4
+	APIVersion   = 5
 	ManifestName = "attn-plugin.toml"
 )
 

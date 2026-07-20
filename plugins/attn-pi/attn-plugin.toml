@@ -1,6 +1,6 @@
 name = "attn-pi"
 version = "0.1.0"
-attn_api_version = 4
+attn_api_version = 5
 description = "pi driver for attn"
 
 [plugin]

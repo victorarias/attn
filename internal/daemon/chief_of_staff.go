@@ -127,18 +127,26 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 	return true
 }
 
-// typeDoorbell types a bounded prompt as an explicit bracketed-paste event and
-// follows it with Enter in the same PTY write. The paste terminator gives Codex a
-// semantic boundary before Enter (so the prompt submits instead of remaining in
-// the composer), while the single write keeps the approval-state fence atomic.
-// It is the shared primitive behind the chief-of-staff doorbells (notebook
-// activation, inbox nudge) and the markdown-annotation submit payload: always
-// a bounded, user-initiated single write — never arbitrary streamed content.
+// typeDoorbell delivers a bounded prompt to sessionID — the shared primitive
+// behind the chief-of-staff doorbells (notebook activation, inbox nudge) and
+// the markdown-annotation submit payload. When the session's active plugin
+// driver run declares the message_delivery capability, the prompt is relayed
+// in-band via the plugin (no PTY fallback on failure — see
+// deliverDoorbellViaPluginDriver). Otherwise it types the prompt as an
+// explicit bracketed-paste event followed by Enter in the same PTY write: the
+// paste terminator gives Codex a semantic boundary before Enter (so the
+// prompt submits instead of remaining in the composer), while the single
+// write keeps the approval-state fence atomic. Always a bounded,
+// user-initiated single write — never arbitrary streamed content.
 func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 	d.doorbellMu.Lock()
 	defer d.doorbellMu.Unlock()
-	if session := d.store.Get(sessionID); session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
+	session := d.store.Get(sessionID)
+	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
 		return errDoorbellBlockedByApproval
+	}
+	if delivered, err := d.deliverDoorbellViaPluginDriver(session, prompt); delivered {
+		return err
 	}
 	input := make([]byte, 0, len(bracketedPasteStart)+len(prompt)+len(bracketedPasteEnd)+1)
 	input = append(input, bracketedPasteStart...)
