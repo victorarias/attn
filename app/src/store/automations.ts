@@ -24,6 +24,12 @@ interface AutomationsStore {
   // click. Populated by ensureRunRequest, cleared by clearRunRequest once the
   // run reaches a terminal state (delivered/failed) or a definitive daemon
   // rejection makes retrying pointless.
+  //
+  // This map is in-memory only and does not survive an app relaunch. The key
+  // still has to be recoverable afterward: an unsettled durable run persists
+  // in the daemon's SQLite state regardless of what this store remembers, so
+  // canonical run history (not a local persistence layer) is the recovery
+  // source — see adoptRunRequest.
   pendingRunRequests: Record<string, string>;
 
   setDefinitions: (definitions: AutomationDefinitionSummary[]) => void;
@@ -31,6 +37,12 @@ interface AutomationsStore {
   bumpChanged: () => void;
   ensureRunRequest: (definitionId: string) => string;
   clearRunRequest: (definitionId: string) => void;
+
+  // adoptRunRequest recovers a pending run's request id when this session's
+  // store has none for definitionId (e.g. right after an app relaunch). It
+  // never overwrites an already-stored key: a key already in flight for this
+  // session is more current than anything derived from a later fetch.
+  adoptRunRequest: (definitionId: string, requestId: string) => void;
 
   // Clears the store (test convenience).
   reset: () => void;
@@ -66,6 +78,12 @@ export const useAutomationsStore = create<AutomationsStore>((set, get) => ({
       const next = { ...state.pendingRunRequests };
       delete next[definitionId];
       return { pendingRunRequests: next };
+    }),
+
+  adoptRunRequest: (definitionId, requestId) =>
+    set((state) => {
+      if (state.pendingRunRequests[definitionId]) return state;
+      return { pendingRunRequests: { ...state.pendingRunRequests, [definitionId]: requestId } };
     }),
 
   reset: () => set({ definitions: [], runsByDefinition: {}, changedTick: 0, pendingRunRequests: {} }),

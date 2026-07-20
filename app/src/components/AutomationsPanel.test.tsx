@@ -202,6 +202,64 @@ describe('AutomationsPanel', () => {
     await waitFor(() => expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBeUndefined());
   });
 
+  it('adopts a pending manual run id from run history after a simulated relaunch, so Run now retries it instead of minting a fresh id', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
+    props.fetchRuns.mockResolvedValue([
+      makeRun({ id: 'r1', occurrence_key: 'manual:restart-key-1', state: 'pending' }),
+    ]);
+    // Simulate relaunch: the store starts empty regardless of what the
+    // daemon still has pending.
+    useAutomationsStore.getState().reset();
+    render(<AutomationsPanel {...props} />);
+
+    const button = await screen.findByTestId('automation-run-now-d1');
+    await waitFor(() => expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBe('restart-key-1'));
+
+    await user.click(button);
+    expect(props.runNow).toHaveBeenCalledWith('d1', 'restart-key-1');
+  });
+
+  it('does not adopt a pending run whose occurrence_key is not manual-prefixed', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
+    props.fetchRuns.mockResolvedValue([
+      makeRun({ id: 'r1', occurrence_key: 'sched:2026-01-01T00:00:00Z', state: 'pending' }),
+    ]);
+    useAutomationsStore.getState().reset();
+    render(<AutomationsPanel {...props} />);
+
+    const button = await screen.findByTestId('automation-run-now-d1');
+    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalled());
+    expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBeUndefined();
+
+    await user.click(button);
+    const [requestId] = props.runNow.mock.calls[0].slice(1);
+    expect(requestId).not.toBe('sched:2026-01-01T00:00:00Z');
+    expect(typeof requestId).toBe('string');
+  });
+
+  it('adoption never overwrites a key already stored for this session', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
+    useAutomationsStore.getState().reset();
+    const storedKey = useAutomationsStore.getState().ensureRunRequest('d1');
+    props.fetchRuns.mockResolvedValue([
+      makeRun({ id: 'r1', occurrence_key: 'manual:some-other-pending-run', state: 'pending' }),
+    ]);
+    render(<AutomationsPanel {...props} />);
+
+    const button = await screen.findByTestId('automation-run-now-d1');
+    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalled());
+    expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBe(storedKey);
+
+    await user.click(button);
+    expect(props.runNow).toHaveBeenCalledWith('d1', storedKey);
+  });
+
   it('refetches definitions when changedTick bumps', async () => {
     const props = baseProps();
     props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);

@@ -128,6 +128,26 @@ describe('useAutomationsStore', () => {
     store.reset();
     expect(useAutomationsStore.getState().pendingRunRequests).toEqual({});
   });
+
+  it('adoptRunRequest stores the key when none is present for the definition', () => {
+    const store = useAutomationsStore.getState();
+    store.adoptRunRequest('d1', 'restart-key-1');
+    expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBe('restart-key-1');
+  });
+
+  it('adoptRunRequest never overwrites an already-stored key', () => {
+    const store = useAutomationsStore.getState();
+    const existing = store.ensureRunRequest('d1');
+    store.adoptRunRequest('d1', 'some-other-key');
+    expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBe(existing);
+  });
+
+  it('adoptRunRequest is cleared by reset', () => {
+    const store = useAutomationsStore.getState();
+    store.adoptRunRequest('d1', 'restart-key-1');
+    store.reset();
+    expect(useAutomationsStore.getState().pendingRunRequests).toEqual({});
+  });
 });
 
 describe('selectDefinitionById', () => {

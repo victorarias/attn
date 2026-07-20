@@ -40,13 +40,29 @@ export function runNavigationTarget(run: AutomationRunSummary): RunNavigationTar
 // (see internal/daemon/automations.go's automationRun); a run still pending
 // keeps the key so an impatient re-click reuses the same request_id instead
 // of minting a new one and claiming a duplicate run.
+//
+// When this session's store has no key for definitionId — most notably right
+// after an app relaunch, since pendingRunRequests is in-memory only — a
+// still-pending durable run on the daemon IS the retry identity. Adopt the
+// newest pending manual occurrence from run history so the next click reuses
+// it instead of minting a fresh id and claiming a second run.
 function reconcilePendingRunRequest(definitionId: string, runs: AutomationRunSummary[]) {
   const key = useAutomationsStore.getState().pendingRunRequests[definitionId];
-  if (!key) return;
-  const occurrenceKey = `manual:${key}`;
-  const match = runs.find((run) => run.occurrence_key === occurrenceKey);
-  if (match && (match.state === 'delivered' || match.state === 'failed')) {
-    useAutomationsStore.getState().clearRunRequest(definitionId);
+  if (key) {
+    const occurrenceKey = `manual:${key}`;
+    const match = runs.find((run) => run.occurrence_key === occurrenceKey);
+    if (match && (match.state === 'delivered' || match.state === 'failed')) {
+      useAutomationsStore.getState().clearRunRequest(definitionId);
+    }
+    return;
+  }
+  // Runs arrive newest-first, so the first match is the newest pending
+  // manual run.
+  const adoptable = runs.find((run) => run.state === 'pending' && run.occurrence_key?.startsWith('manual:'));
+  if (adoptable?.occurrence_key) {
+    useAutomationsStore
+      .getState()
+      .adoptRunRequest(definitionId, adoptable.occurrence_key.slice('manual:'.length));
   }
 }
 
