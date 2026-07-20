@@ -334,6 +334,73 @@ func TestObserveDueScheduleClaimRejectionLeavesCursorForRetry(t *testing.T) {
 	}
 }
 
+// A claim rejected at 03:01:30 on a minutely schedule retried a full minute
+// later must fire exactly one run for the NEWEST due instant (03:02), not the
+// failed 03:01: the held-back cursor keeps the definition's appointment
+// eligible, and the normal newest-due-wins rule — not a stale-instant replay —
+// decides what fires on retry. This pins the production cadence where a new
+// cron instant becomes due before the retry.
+func TestObserveDueScheduleClaimRejectionRetryFiresNewestDueInstant(t *testing.T) {
+	d, s, def, dir := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
+	var spec automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(def.SpecJSON), &spec); err != nil {
+		t.Fatal(err)
+	}
+	staleDefinition := *def // Revision predates the edit below.
+
+	now0 := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	d.observeDueSchedules(now0) // anchor
+
+	editedSpec, editedCanonical, err := automation.ParseDefinitionYAML([]byte(scheduledDefinitionYAML(dir, "* * * * *", "fresh", "latest", "Different sweep.")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertAutomationDefinition(editedSpec.ID, editedSpec.Name, string(editedCanonical), true, now0); err != nil {
+		t.Fatal(err)
+	}
+
+	delivered := 0
+	d.automationDeliveryHook = func(*store.AutomationRun) error { delivered++; return nil }
+	// 03:01:30 tick with the stale definition: intended 03:01 claim rejected.
+	d.observeDueSchedule(staleDefinition, spec, now0.Add(90*time.Second))
+	if delivered != 0 {
+		t.Fatalf("delivered=%d, want 0 on claim rejection", delivered)
+	}
+
+	// 03:02:30 tick with the fresh definition: both 03:01 and 03:02 are due;
+	// newest-due-wins fires 03:02 exactly once.
+	freshDefinition, err := s.GetAutomationDefinition(def.ID)
+	if err != nil || freshDefinition == nil {
+		t.Fatalf("fresh definition: %v", err)
+	}
+	var freshSpec automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(freshDefinition.SpecJSON), &freshSpec); err != nil {
+		t.Fatal(err)
+	}
+	retryAt := now0.Add(150 * time.Second)
+	d.observeDueSchedule(*freshDefinition, freshSpec, retryAt)
+
+	if delivered != 1 {
+		t.Fatalf("delivered=%d, want exactly 1 after the one-minute-later retry", delivered)
+	}
+	runs, err := s.ListAutomationRuns(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("runs=%d, want 1: the failed instant must be superseded, not replayed alongside", len(runs))
+	}
+	wantKey := automation.ScheduledOccurrenceKey(now0.Add(120 * time.Second))
+	occurrence, err := s.GetAutomationOccurrence(runs[0].OccurrenceID)
+	if err != nil || occurrence == nil || occurrence.OccurrenceKey != wantKey {
+		t.Fatalf("occurrence=%#v err=%v, want key %s for the newest due instant", occurrence, err, wantKey)
+	}
+	cursor, ok, err := s.GetAutomationScheduleCursor(def.ID)
+	if err != nil || !ok || !cursor.Equal(retryAt) {
+		t.Fatalf("cursor=%v ok=%v err=%v, want advanced to %v after the successful retry", cursor, ok, err, retryAt)
+	}
+}
+
 func TestObserveDueSchedulesReplayStormGuardAdvancesCursorWithoutClaiming(t *testing.T) {
 	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
 	now0 := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)

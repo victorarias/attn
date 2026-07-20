@@ -121,19 +121,24 @@ func (d *Daemon) observeDueSchedule(definition store.AutomationDefinition, spec 
 	if fire {
 		if claimErr := d.claimAndDeliverScheduledRun(definition, spec, intended, now); claimErr != nil {
 			// The claim was rejected (revision mismatch, a singleton's
-			// undelivered-predecessor guard, or a transient store error): the
-			// cursor must stay behind intended so the next tick re-reads the
-			// definition and re-decides, per ClaimScheduledAutomationRun's
-			// documented contract. Advancing here would permanently drop
-			// this occurrence.
+			// undelivered-predecessor guard, or a transient store error): hold
+			// the cursor behind intended so the missed instant stays eligible
+			// and the next tick re-reads the definition and re-decides. The
+			// retry fires the newest instant due at that time under the normal
+			// newest-due-wins rule — the identical instant unless a newer one
+			// has become due meanwhile (minutely-grade schedules) — so a claim
+			// failure delays the definition's appointment; it never silently
+			// drops it, and it never prefers a stale instant over a fresher
+			// due one.
 			return
 		}
 	}
 	// Cursor advances after a successful claim decision (fire or skip), not
 	// unconditionally: a crash between claim and this write is safe because
 	// the next tick recomputes the same intended instant and the claim is
-	// idempotent; a claim error must not advance past it (handled above) so
-	// the next tick retries the same intended instant instead of losing it.
+	// idempotent; a claim error must not advance (handled above), keeping the
+	// missed instant eligible until a retry succeeds or a newer due instant
+	// supersedes it.
 	if err := d.store.SetAutomationScheduleCursor(definition.ID, now); err != nil {
 		d.logf("automation schedule observation advance %s: %v", definition.ID, err)
 	}

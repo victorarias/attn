@@ -409,7 +409,12 @@ spring-forward gap does not fire that day, and the fall-back repeated hour
 fires twice with two distinct UTC occurrence keys. Slice 5 accepts
 `continuity: singleton` (one continuity stream keyed `"singleton"` reusing the
 same ticket/session across occurrences); scheduled definitions require
-`catch_up` and a `directory` location.
+`catch_up` and a `directory` location. A rejected or failed claim holds the
+cursor back so the missed instant stays eligible; the retry fires whatever
+instant is newest-due at that time — identical for hourly-and-coarser
+schedules, possibly a fresher instant on minutely-grade ones — so a claim
+failure delays the appointment rather than dropping it, and never prefers a
+stale instant over a fresher due one.
 
 Two deliberate Slice 5 boundaries, both to revisit in Slice 7 (lifecycle):
 
