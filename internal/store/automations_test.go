@@ -10,7 +10,7 @@ import (
 func TestAutomationClaimIsIdempotentAndSnapshotsRevision(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestAutomationClaimIsIdempotentAndSnapshotsRevision(t *testing.T) {
 func TestScheduledAutomationClaimIsIdempotent(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,13 +66,13 @@ func TestScheduledAutomationClaimIsIdempotent(t *testing.T) {
 func TestScheduledAutomationClaimRejectsStaleRevision(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A second apply bumps the revision, simulating the definition changing
 	// between the caller's revision read and this claim's transaction.
-	if _, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly","edited":true}`, true, now); err != nil {
+	if _, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly","edited":true}`, "", true, now); err != nil {
 		t.Fatal(err)
 	}
 	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
@@ -95,7 +95,7 @@ func TestScheduledAutomationClaimRejectsStaleRevision(t *testing.T) {
 func TestScheduledAutomationClaimRejectsDisabledDefinition(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, false, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", false, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestScheduledAutomationClaimRejectsDisabledDefinition(t *testing.T) {
 func TestScheduledAutomationDifferentInstantsClaimDifferentRuns(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestScheduledAutomationDifferentInstantsClaimDifferentRuns(t *testing.T) {
 func TestScheduledAutomationSingletonContinuityReusesBinding(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestScheduledAutomationSingletonContinuityReusesBinding(t *testing.T) {
 func TestAutomationContinuityRunHistoryReturnsPriorRuns(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestAutomationContinuityRunHistoryReturnsPriorRuns(t *testing.T) {
 func TestScheduledAutomationSingletonContinuityBlocksUndeliveredPredecessor(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestScheduledAutomationSingletonContinuityBlocksUndeliveredPredecessor(t *t
 func TestAutomationScheduleCursorGetSetRoundtrip(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestAutomationScheduleCursorGetSetRoundtrip(t *testing.T) {
 func TestListAutomationRunsWithOccurrenceKeysOrdersNewestFirstWithLimit(t *testing.T) {
 	s := New()
 	base := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, base)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, "", true, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestListAutomationRunsWithOccurrenceKeysOrdersNewestFirstWithLimit(t *testi
 func TestListPendingAutomationRunsIncludesScheduledProvider(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestEnsureAutomationTicketAdoptsByRun(t *testing.T) {
 func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 func TestGitHubReviewAcceptedPendingRunRemainsRetryableWhileDemandIsActive(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func TestGitHubReviewAcceptedPendingRunRemainsRetryableWhileDemandIsActive(t *te
 func TestGitHubReviewReRequestDoesNotReuseWithdrawnUndeliveredBinding(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestGitHubReviewReRequestDoesNotReuseWithdrawnUndeliveredBinding(t *testing
 func TestGitHubReviewWithdrawalExposesPendingRunAndReleasesEmptyBinding(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +562,7 @@ func TestGitHubReviewWithdrawalExposesPendingRunAndReleasesEmptyBinding(t *testi
 func TestGitHubReviewClaimAndTicketEventAreIdempotent(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +638,7 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	const spec = `{"id":"review"}`
-	def, err := s.UpsertAutomationDefinition("review", "Review", spec, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", spec, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,10 +650,10 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 	if _, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, ids); err != nil || !created {
 		t.Fatalf("initial claim created=%v err=%v", created, err)
 	}
-	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, false, now.Add(time.Minute)); err != nil {
+	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, "", false, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, true, now.Add(2*time.Minute)); err != nil {
+	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, "", true, now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	stale, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(90*time.Second))
@@ -669,7 +669,7 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 func TestContinuationOccurrenceRecordsOnTerminalTicketExactlyOnce(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +729,7 @@ func TestContinuationOccurrenceRecordsOnTerminalTicketExactlyOnce(t *testing.T) 
 func TestGitHubReviewCursorOrdersObservationsWithinOneSecond(t *testing.T) {
 	s := New()
 	base := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, base)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -756,7 +756,7 @@ func TestGitHubReviewCursorOrdersObservationsWithinOneSecond(t *testing.T) {
 func TestSetAutomationEnabledFlipsStateAndIsIdempotent(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +800,7 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	const spec = `{"id":"review"}`
-	def, err := s.UpsertAutomationDefinition("review", "Review", spec, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", spec, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -840,7 +840,7 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 func TestListPrunableAutomationRunsProtectsBoundThreadOrigin(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -881,7 +881,7 @@ func TestListPrunableAutomationRunsProtectsBoundThreadOrigin(t *testing.T) {
 func TestListPrunableAutomationRunsStillPrunesNonContinuityRuns(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,7 +919,7 @@ func TestSweepExpiredTicketsCascadesToContinuityBindings(t *testing.T) {
 	s := New()
 	base := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	const ttl = 30 * 24 * time.Hour
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, base)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -991,7 +991,7 @@ func TestSweepExpiredTicketsCascadesToContinuityBindings(t *testing.T) {
 func TestSweepExpiredTicketsUnblocksPruningOfBoundThreadOrigin(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,12 @@ func parseOptionalAutomationTime(value string) *time.Time {
 }
 
 type AutomationDefinition struct {
-	ID, Name, SpecJSON   string
+	ID, Name, SpecJSON string
+	// SpecYAML is the raw YAML text the caller applied, preserved verbatim
+	// (comments and all) rather than re-derived from SpecJSON. Empty for rows
+	// written before migration 75 added the column; callers that need YAML
+	// back for such a row fall back to automation.MarshalDefinitionYAML.
+	SpecYAML             string
 	Enabled              bool
 	Revision             int
 	CreatedAt, UpdatedAt time.Time
@@ -82,7 +87,7 @@ func (s *Store) AutomationReviewRequestNeedsClaim(definitionID, subjectKey strin
 	return pending != 0, err
 }
 
-func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bool, now time.Time) (*AutomationDefinition, error) {
+func (s *Store) UpsertAutomationDefinition(id, name, specJSON, specYAML string, enabled bool, now time.Time) (*AutomationDefinition, error) {
 	s.mu.Lock()
 	locked := true
 	defer func() {
@@ -107,7 +112,7 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bo
 	switch err {
 	case sql.ErrNoRows:
 		revision = 1
-		_, err = tx.Exec(`INSERT INTO automation_definitions(id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,?,'')`, id, name, enabled, revision, specJSON, formatTicketTime(now), formatTicketTime(now))
+		_, err = tx.Exec(`INSERT INTO automation_definitions(id,name,enabled,revision,spec_json,spec_yaml,created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,'')`, id, name, enabled, revision, specJSON, specYAML, formatTicketTime(now), formatTicketTime(now))
 	case nil:
 		wasDeleted := deletedAt != ""
 		if oldSpec != specJSON || wasDeleted {
@@ -117,7 +122,7 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, enabled bo
 			// bindings for it.
 			revision++
 		}
-		_, err = tx.Exec(`UPDATE automation_definitions SET name=?, enabled=?, revision=?, spec_json=?, updated_at=?, deleted_at='' WHERE id=?`, name, enabled, revision, specJSON, formatTicketTime(now), id)
+		_, err = tx.Exec(`UPDATE automation_definitions SET name=?, enabled=?, revision=?, spec_json=?, spec_yaml=?, updated_at=?, deleted_at='' WHERE id=?`, name, enabled, revision, specJSON, specYAML, formatTicketTime(now), id)
 		if err == nil && oldEnabled == 0 && enabled {
 			// Re-enabling begins from the provider's current truth. A request that
 			// arrived while disabled must be eligible for latest catch-up even if an
@@ -229,7 +234,7 @@ func scanAutomationDefinition(scanner interface{ Scan(...any) error }) (*Automat
 	var d AutomationDefinition
 	var enabled int
 	var created, updated, deleted string
-	if err := scanner.Scan(&d.ID, &d.Name, &enabled, &d.Revision, &d.SpecJSON, &created, &updated, &deleted); err != nil {
+	if err := scanner.Scan(&d.ID, &d.Name, &enabled, &d.Revision, &d.SpecJSON, &d.SpecYAML, &created, &updated, &deleted); err != nil {
 		return nil, err
 	}
 	d.Enabled = enabled != 0
@@ -245,7 +250,7 @@ func (s *Store) GetAutomationDefinition(id string) (*AutomationDefinition, error
 	if s.db == nil {
 		return nil, nil
 	}
-	d, err := scanAutomationDefinition(s.db.QueryRow(`SELECT id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at FROM automation_definitions WHERE id=? AND deleted_at=''`, id))
+	d, err := scanAutomationDefinition(s.db.QueryRow(`SELECT id,name,enabled,revision,spec_json,spec_yaml,created_at,updated_at,deleted_at FROM automation_definitions WHERE id=? AND deleted_at=''`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -263,7 +268,7 @@ func (s *Store) GetAutomationDefinitionIncludingDeleted(id string) (*AutomationD
 	if s.db == nil {
 		return nil, nil
 	}
-	d, err := scanAutomationDefinition(s.db.QueryRow(`SELECT id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at FROM automation_definitions WHERE id=?`, id))
+	d, err := scanAutomationDefinition(s.db.QueryRow(`SELECT id,name,enabled,revision,spec_json,spec_yaml,created_at,updated_at,deleted_at FROM automation_definitions WHERE id=?`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -382,7 +387,7 @@ func (s *Store) ListAutomationDefinitions() ([]AutomationDefinition, error) {
 	if s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`SELECT id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at FROM automation_definitions WHERE deleted_at='' ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id,name,enabled,revision,spec_json,spec_yaml,created_at,updated_at,deleted_at FROM automation_definitions WHERE deleted_at='' ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}

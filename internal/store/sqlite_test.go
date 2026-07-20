@@ -235,6 +235,55 @@ func TestMigration73RepairsAutomationProfileMigration70Collision(t *testing.T) {
 	}
 }
 
+// TestMigration75DefaultsExistingRowsToEmptySpecYAML mirrors
+// TestMigration73RepairsAutomationProfileMigration70Collision's technique:
+// roll a real DB back to just before migration 75 (drop the column it adds,
+// delete its schema_migrations record), seed a row in that pre-75 shape, then
+// reopen so migration 75 runs for real. Every row that existed before the
+// migration must come back with spec_yaml = '' (the column's DEFAULT '') —
+// that empty value is exactly what internal/daemon's automationDefinitionYAML
+// fallback (via automation.MarshalDefinitionYAML) is keyed on to reconstruct
+// definition_yaml for a definition applied before this PR.
+func TestMigration75DefaultsExistingRowsToEmptySpecYAML(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-75.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() setup error = %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.Exec(
+		`INSERT INTO automation_definitions (id, name, enabled, revision, spec_json, created_at, updated_at, deleted_at) VALUES (?, ?, 1, 1, ?, ?, ?, '')`,
+		"legacy-def", "Legacy", `{"id":"legacy-def","name":"Legacy"}`, now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed legacy row: %v", err)
+	}
+	if _, err := db.Exec(`
+		ALTER TABLE automation_definitions DROP COLUMN spec_yaml;
+		DELETE FROM schema_migrations WHERE version >= 75;
+	`); err != nil {
+		db.Close()
+		t.Fatalf("roll back to pre-migration-75 schema: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close seeded db: %v", err)
+	}
+
+	migrated, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() migration 75 = %v", err)
+	}
+	defer migrated.Close()
+
+	var specYAML string
+	if err := migrated.QueryRow(`SELECT spec_yaml FROM automation_definitions WHERE id = ?`, "legacy-def").Scan(&specYAML); err != nil {
+		t.Fatalf("query legacy row spec_yaml: %v", err)
+	}
+	if specYAML != "" {
+		t.Fatalf("legacy row spec_yaml = %q, want empty (migration 75's column default)", specYAML)
+	}
+}
+
 func TestMigration67RenamesTicketArtifactRecords(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "migration-67.db")
 	db, err := OpenDB(dbPath)
@@ -367,6 +416,7 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		{"chief_of_staff_dispatches", "structured_report_json"},
 		{"tickets", "reconciled_at"},
 		{"sessions", "closed_intentionally_at"},
+		{"automation_definitions", "spec_yaml"},
 	}
 
 	for _, tc := range migratedColumns {
