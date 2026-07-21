@@ -240,7 +240,7 @@ func TestMigration73RepairsAutomationProfileMigration70Collision(t *testing.T) {
 // roll a real DB back to just before migration 75 (drop the column it adds,
 // delete its schema_migrations record), seed a row in that pre-75 shape, then
 // reopen so migration 75 runs for real. Every row that existed before the
-// migration must come back with spec_yaml = '' (the column's DEFAULT '') —
+// migration must come back with an empty spec_yaml (the column's DEFAULT) —
 // that empty value is exactly what internal/daemon's automationDefinitionYAML
 // fallback (via automation.MarshalDefinitionYAML) is keyed on to reconstruct
 // definition_yaml for a definition applied before this PR.
