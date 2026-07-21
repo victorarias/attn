@@ -33,7 +33,7 @@ func TestAutomationDefinitionsGetWSResultCorrelatesRequest(t *testing.T) {
 		RequestID: protocol.Ptr("defs-1"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationDefinitionsResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if !res.Success || res.RequestID == nil || *res.RequestID != "defs-1" {
 		t.Fatalf("definitions_get result = %+v, want success for defs-1", res)
@@ -72,7 +72,7 @@ func TestAutomationRunsGetWSResultCorrelatesRequest(t *testing.T) {
 		RequestID:    protocol.Ptr("runs-1"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationRunsResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if !res.Success || res.RequestID == nil || *res.RequestID != "runs-1" {
 		t.Fatalf("runs_get result = %+v, want success for runs-1", res)
@@ -117,7 +117,7 @@ func TestAutomationRunsGetWSResultTruncatesAtCap(t *testing.T) {
 		RequestID:    protocol.Ptr("runs-cap"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationRunsResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if !res.Success {
 		t.Fatalf("runs_get result = %+v, want success", res)
@@ -150,13 +150,13 @@ func TestAutomationSetEnabledWSResultCorrelatesRequest(t *testing.T) {
 		RequestID:    protocol.Ptr("set-1"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationSetEnabledResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if !res.Success || res.RequestID == nil || *res.RequestID != "set-1" {
 		t.Fatalf("set_enabled result = %+v, want success for set-1", res)
 	}
-	if len(res.Definitions) != 1 || res.Definitions[0].Enabled {
-		t.Fatalf("set_enabled definitions = %+v, want one disabled summary", res.Definitions)
+	if res.Definition == nil || res.Definition.Enabled {
+		t.Fatalf("set_enabled definition = %+v, want a disabled summary", res.Definition)
 	}
 
 	// Unknown definition surfaces as success=false with an error, not a
@@ -168,7 +168,7 @@ func TestAutomationSetEnabledWSResultCorrelatesRequest(t *testing.T) {
 		Enabled:      true,
 		RequestID:    protocol.Ptr("set-2"),
 	})
-	var errRes protocol.AutomationActionResultMessage
+	var errRes protocol.AutomationSetEnabledResultMessage
 	readNotebookWSEvent(t, client2.send, &errRes)
 	if errRes.Success || errRes.Error == nil {
 		t.Fatalf("set_enabled unknown definition result = %+v, want success=false with error", errRes)
@@ -196,7 +196,7 @@ func TestAutomationDeleteWSResultCorrelatesRequest(t *testing.T) {
 		RequestID:    protocol.Ptr("delete-1"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationDeleteResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if !res.Success || res.RequestID == nil || *res.RequestID != "delete-1" {
 		t.Fatalf("delete result = %+v, want success for delete-1", res)
@@ -214,7 +214,7 @@ func TestAutomationDeleteWSResultCorrelatesRequest(t *testing.T) {
 		DefinitionID: "does-not-exist",
 		RequestID:    protocol.Ptr("delete-2"),
 	})
-	var errRes protocol.AutomationActionResultMessage
+	var errRes protocol.AutomationDeleteResultMessage
 	readNotebookWSEvent(t, client2.send, &errRes)
 	if errRes.Success || errRes.Error == nil {
 		t.Fatalf("delete unknown definition result = %+v, want success=false with error", errRes)
@@ -253,7 +253,7 @@ func TestAutomationCleanupWSResultCorrelatesRequest(t *testing.T) {
 		RequestID:    protocol.Ptr("cleanup-1"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationCleanupResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if !res.Success || res.RequestID == nil || *res.RequestID != "cleanup-1" {
 		t.Fatalf("cleanup result = %+v, want success for cleanup-1", res)
@@ -276,7 +276,7 @@ func TestAutomationCleanupWSResultCorrelatesRequest(t *testing.T) {
 		DefinitionID: "does-not-exist",
 		RequestID:    protocol.Ptr("cleanup-2"),
 	})
-	var errRes protocol.AutomationActionResultMessage
+	var errRes protocol.AutomationCleanupResultMessage
 	readNotebookWSEvent(t, client2.send, &errRes)
 	if errRes.Success || errRes.Error == nil {
 		t.Fatalf("cleanup unknown definition result = %+v, want success=false with error", errRes)
@@ -314,16 +314,16 @@ func TestAutomationRunWSResultCorrelatesRequest(t *testing.T) {
 		RequestID:    "request-1",
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationRunResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if !res.Success || res.RequestID == nil || *res.RequestID != "request-1" {
 		t.Fatalf("run result = %+v, want success for request-1", res)
 	}
-	if res.RunID == nil || *res.RunID != run.ID {
-		t.Fatalf("run result run_id = %v, want %s", res.RunID, run.ID)
+	if res.Run == nil || res.Run.ID != run.ID {
+		t.Fatalf("run result run = %+v, want %s", res.Run, run.ID)
 	}
-	if res.TicketID == nil || *res.TicketID != run.TicketID || res.SessionID == nil || *res.SessionID != run.SessionID {
-		t.Fatalf("run result ticket/session = %+v, want %s/%s", res, run.TicketID, run.SessionID)
+	if res.Run.TicketID == nil || *res.Run.TicketID != run.TicketID || res.Run.SessionID == nil || *res.Run.SessionID != run.SessionID {
+		t.Fatalf("run result ticket/session = %+v, want %s/%s", res.Run, run.TicketID, run.SessionID)
 	}
 }
 
@@ -341,7 +341,7 @@ func TestAutomationRunWSRejectsNonManualTrigger(t *testing.T) {
 		RequestID:    "request-1",
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationRunResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "cannot be run manually") {
 		t.Fatalf("run result = %+v, want success=false with a manual-trigger rejection", res)
@@ -369,7 +369,7 @@ func TestAutomationRunWSMutualExclusion(t *testing.T) {
 		InputJson:    protocol.Ptr(`{}`),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationRunResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "mutually exclusive") {
 		t.Fatalf("run result = %+v, want success=false mutual-exclusion error", res)
@@ -400,7 +400,7 @@ func TestAutomationRunWSRoutesPRURL(t *testing.T) {
 		PRURL:        protocol.Ptr("https://github.com/owner/repo/pull/1"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationRunResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil {
 		t.Fatalf("run result = %+v, want success=false (pr_url routed to the pull-request path)", res)
@@ -492,7 +492,7 @@ location: {type: directory, path: "%s"}
 				DefinitionYaml: raw,
 				RequestID:      protocol.Ptr("validate"),
 			})
-			var validateRes protocol.AutomationActionResultMessage
+			var validateRes protocol.AutomationValidateResultMessage
 			readNotebookWSEvent(t, validateClient.send, &validateRes)
 
 			applyClient := &wsClient{send: make(chan outboundMessage, 4)}
@@ -501,7 +501,7 @@ location: {type: directory, path: "%s"}
 				DefinitionYaml: raw,
 				RequestID:      protocol.Ptr("apply"),
 			})
-			var applyRes protocol.AutomationActionResultMessage
+			var applyRes protocol.AutomationApplyResultMessage
 			readNotebookWSEvent(t, applyClient.send, &applyRes)
 
 			if validateRes.Success != applyRes.Success {
@@ -528,6 +528,42 @@ location: {type: directory, path: "%s"}
 // must refuse an apply whose YAML id differs rather than silently upserting
 // a second definition and leaving the original (still enabled, still
 // running) untouched — see automationApplyWithGuards's doc comment.
+// TestAutomationCommandApplyOverSocketIsUnguarded pins the other half of the
+// apply unification: the socket/CLI path (attn automation apply) never sets
+// expected_id/expected_revision, so automationApplyWithGuards must enforce
+// NEITHER check for it — an apply that would be refused as an
+// already-exists collision over WS (TestAutomationApplyWSRefusesCreateOverLiveDefinition,
+// which explicitly sends expected_revision: 0) must instead succeed and
+// overwrite in place when dispatched with no guard fields at all, exactly as
+// the old unconditional automationApply did before this unification.
+func TestAutomationCommandApplyOverSocketIsUnguarded(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	original, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	colliding := strings.Replace(raw, "Check locally.", "Something else entirely.", 1)
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	go d.handleAutomationCommand(serverConn, protocol.CmdAutomationApply,
+		&protocol.AutomationApplyMessage{Cmd: protocol.CmdAutomationApply, DefinitionYaml: colliding})
+
+	var res protocol.AutomationApplyResultMessage
+	if err := json.NewDecoder(clientConn).Decode(&res); err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("socket apply result = %+v, want success (unguarded last-writer-wins)", res)
+	}
+	overwritten, err := s.GetAutomationDefinition(original.ID)
+	if err != nil || overwritten == nil || !strings.Contains(overwritten.SpecJSON, "Something else entirely.") {
+		t.Fatalf("definition after unguarded socket apply = %#v err=%v, want the new content live", overwritten, err)
+	}
+}
+
 func TestAutomationApplyWSRefusesIDMismatch(t *testing.T) {
 	s := store.New()
 	d := &Daemon{store: s, wsHub: newWSHub()}
@@ -547,7 +583,7 @@ func TestAutomationApplyWSRefusesIDMismatch(t *testing.T) {
 		RequestID:        protocol.Ptr("apply-id-mismatch"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationApplyResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "does not match the definition being edited") {
 		t.Fatalf("apply result = %+v, want success=false with an id-mismatch error", res)
@@ -580,17 +616,19 @@ func TestAutomationApplyWSRefusesCreateOverLiveDefinition(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create (no expected_id, no expected_revision) carrying the same id but
-	// entirely different content.
+	// Create (no expected_id, expected_revision explicitly 0 — matching what
+	// the real editor always sends for a not-yet-saved definition) carrying
+	// the same id but entirely different content.
 	colliding := strings.Replace(raw, "Check locally.", "Something else entirely.", 1)
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleAutomationApplyWS(client, &protocol.AutomationApplyMessage{
-		Cmd:            protocol.CmdAutomationApply,
-		DefinitionYaml: colliding,
-		RequestID:      protocol.Ptr("apply-create-collision"),
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   colliding,
+		ExpectedRevision: protocol.Ptr(0),
+		RequestID:        protocol.Ptr("apply-create-collision"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationApplyResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "already exists") {
 		t.Fatalf("apply result = %+v, want success=false with an already-exists error", res)
@@ -610,11 +648,12 @@ func TestAutomationApplyWSRefusesCreateOverLiveDefinition(t *testing.T) {
 	}
 	resurrectClient := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleAutomationApplyWS(resurrectClient, &protocol.AutomationApplyMessage{
-		Cmd:            protocol.CmdAutomationApply,
-		DefinitionYaml: colliding,
-		RequestID:      protocol.Ptr("apply-create-resurrect"),
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   colliding,
+		ExpectedRevision: protocol.Ptr(0),
+		RequestID:        protocol.Ptr("apply-create-resurrect"),
 	})
-	var resurrectRes protocol.AutomationActionResultMessage
+	var resurrectRes protocol.AutomationApplyResultMessage
 	readNotebookWSEvent(t, resurrectClient.send, &resurrectRes)
 	if !resurrectRes.Success {
 		t.Fatalf("resurrect apply result = %+v, want success", resurrectRes)
@@ -654,7 +693,7 @@ func TestAutomationApplyWSRefusesStaleRevision(t *testing.T) {
 		RequestID:        protocol.Ptr("apply-stale-revision"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationApplyResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "changed elsewhere") {
 		t.Fatalf("apply result = %+v, want success=false with a changed-elsewhere error", res)
@@ -700,7 +739,7 @@ func TestAutomationApplyWSRefusesEditOfDeletedDefinition(t *testing.T) {
 		RequestID:        protocol.Ptr("apply-edit-deleted"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationApplyResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "deleted") || !strings.Contains(*res.Error, "New") {
 		t.Fatalf("apply result = %+v, want success=false with an error naming the deletion and pointing at New", res)
@@ -733,13 +772,15 @@ func TestAutomationDefinitionGetWSStarterTemplate(t *testing.T) {
 		RequestID:    protocol.Ptr("get-starter"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationDefinitionResultMessage
 	readNotebookWSEvent(t, client.send, &res)
-	if !res.Success || res.SpecYaml == nil || res.Revision == nil {
-		t.Fatalf("definition_get(\"\") result = %+v, want success with spec_yaml and revision set", res)
+	if !res.Success || res.SpecYaml == nil {
+		t.Fatalf("definition_get(\"\") result = %+v, want success with spec_yaml set", res)
 	}
-	if *res.Revision != 0 {
-		t.Fatalf("starter template revision = %d, want 0", *res.Revision)
+	// No definition means revision 0 / new — the client treats an absent
+	// definition as the create case (see the design's D7).
+	if res.Definition != nil {
+		t.Fatalf("starter template result definition = %+v, want absent (new-definition case)", res.Definition)
 	}
 	if !strings.Contains(*res.SpecYaml, "id: my-automation") {
 		t.Fatalf("starter template spec_yaml = %q, want the StarterDefinition placeholder", *res.SpecYaml)
@@ -761,7 +802,7 @@ func TestAutomationDefinitionGetWSUnknownID(t *testing.T) {
 		RequestID:    protocol.Ptr("get-missing"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationDefinitionResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil {
 		t.Fatalf("definition_get(unknown) result = %+v, want success=false with an error", res)
@@ -793,9 +834,9 @@ func TestAutomationDefinitionGetWSAfterToggleDerivesFromSpecJSON(t *testing.T) {
 		Enabled:      false,
 		RequestID:    protocol.Ptr("toggle-off"),
 	})
-	var setRes protocol.AutomationActionResultMessage
+	var setRes protocol.AutomationSetEnabledResultMessage
 	readNotebookWSEvent(t, setClient.send, &setRes)
-	if !setRes.Success || len(setRes.Definitions) != 1 || setRes.Definitions[0].Enabled {
+	if !setRes.Success || setRes.Definition == nil || setRes.Definition.Enabled {
 		t.Fatalf("set_enabled result = %+v, want a disabled summary", setRes)
 	}
 
@@ -805,10 +846,10 @@ func TestAutomationDefinitionGetWSAfterToggleDerivesFromSpecJSON(t *testing.T) {
 		DefinitionID: def.ID,
 		RequestID:    protocol.Ptr("get-after-toggle"),
 	})
-	var getRes protocol.AutomationActionResultMessage
+	var getRes protocol.AutomationDefinitionResultMessage
 	readNotebookWSEvent(t, getClient.send, &getRes)
-	if !getRes.Success || getRes.SpecYaml == nil {
-		t.Fatalf("definition_get after toggle = %+v, want success with spec_yaml", getRes)
+	if !getRes.Success || getRes.SpecYaml == nil || getRes.Definition == nil {
+		t.Fatalf("definition_get after toggle = %+v, want success with spec_yaml and definition set", getRes)
 	}
 	fetched := *getRes.SpecYaml
 	if strings.Contains(fetched, "enabled:") {
@@ -820,10 +861,10 @@ func TestAutomationDefinitionGetWSAfterToggleDerivesFromSpecJSON(t *testing.T) {
 		Cmd:              protocol.CmdAutomationApply,
 		DefinitionYaml:   fetched,
 		ExpectedID:       protocol.Ptr(def.ID),
-		ExpectedRevision: getRes.Revision,
+		ExpectedRevision: protocol.Ptr(getRes.Definition.Revision),
 		RequestID:        protocol.Ptr("save-after-get"),
 	})
-	var applyRes protocol.AutomationActionResultMessage
+	var applyRes protocol.AutomationApplyResultMessage
 	readNotebookWSEvent(t, applyClient.send, &applyRes)
 	if !applyRes.Success {
 		t.Fatalf("re-applying the fetched (disabled) yaml failed: %+v", applyRes)
@@ -873,7 +914,7 @@ func TestAutomationSetEnabledWSDeadlineAbortsWithoutMutating(t *testing.T) {
 		RequestID:    protocol.Ptr("set-deadline"),
 	})
 
-	var res protocol.AutomationActionResultMessage
+	var res protocol.AutomationSetEnabledResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "deadline exceeded") {
 		t.Fatalf("set_enabled result = %+v, want success=false with a deadline error", res)
@@ -897,7 +938,7 @@ func TestAutomationSetEnabledWSDeadlineAbortsWithoutMutating(t *testing.T) {
 		Enabled:      false,
 		RequestID:    protocol.Ptr("set-after"),
 	})
-	var res2 protocol.AutomationActionResultMessage
+	var res2 protocol.AutomationSetEnabledResultMessage
 	readNotebookWSEvent(t, client2.send, &res2)
 	if !res2.Success {
 		t.Fatalf("set_enabled after lock freed = %+v, want success", res2)
@@ -967,7 +1008,7 @@ func TestAutomationRunWSRetryWithSameRequestIDDoesNotDuplicate(t *testing.T) {
 		RequestID:    "retry-request",
 	})
 
-	var res1, res2 protocol.AutomationActionResultMessage
+	var res1, res2 protocol.AutomationRunResultMessage
 	readNotebookWSEvent(t, client1.send, &res1)
 	readNotebookWSEvent(t, client2.send, &res2)
 	<-released
@@ -975,8 +1016,8 @@ func TestAutomationRunWSRetryWithSameRequestIDDoesNotDuplicate(t *testing.T) {
 	if !res1.Success || !res2.Success {
 		t.Fatalf("run results = %+v / %+v, want both success", res1, res2)
 	}
-	if res1.RunID == nil || res2.RunID == nil || *res1.RunID != run.ID || *res2.RunID != run.ID {
-		t.Fatalf("run ids = %v / %v, want both %s", res1.RunID, res2.RunID, run.ID)
+	if res1.Run == nil || res2.Run == nil || res1.Run.ID != run.ID || res2.Run.ID != run.ID {
+		t.Fatalf("runs = %+v / %+v, want both %s", res1.Run, res2.Run, run.ID)
 	}
 
 	runs, err := s.ListAutomationRuns(def.ID)
@@ -988,14 +1029,13 @@ func TestAutomationRunWSRetryWithSameRequestIDDoesNotDuplicate(t *testing.T) {
 	}
 }
 
-// A validate that passes has no payload to report, and the CLI's success
-// output depends on that absence being visible on the wire. json.Marshal of a
-// nil `any` yields the 4-byte literal `null` rather than an empty slice, which
-// defeats `json:"data,omitempty"` and leaves the client decoding a non-nil
-// json.RawMessage — so `attn automation validate` printed `null` instead of
-// {"valid": true}. Pinned here on the encoded bytes, because the bug lives in
-// the encoding and a decoded struct hides it.
-func TestAutomationCommandOmitsDataWhenActionHasNoPayload(t *testing.T) {
+// TestAutomationCommandValidateHasNoPayload pins automation_validate's
+// socket-transport result shape: success with no payload fields at all —
+// there is no generic `data` wrapper in the per-action typed-result design
+// (each action returns its own concrete result message directly), so a
+// payload-free action like validate simply has nothing beyond
+// event/success/request_id on the wire.
+func TestAutomationCommandValidateHasNoPayload(t *testing.T) {
 	s := store.New()
 	d := &Daemon{store: s, wsHub: newWSHub()}
 	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
@@ -1005,15 +1045,12 @@ func TestAutomationCommandOmitsDataWhenActionHasNoPayload(t *testing.T) {
 	go d.handleAutomationCommand(serverConn, protocol.CmdAutomationValidate,
 		&protocol.AutomationValidateMessage{Cmd: protocol.CmdAutomationValidate, DefinitionYaml: raw})
 
-	var encoded map[string]any
-	if err := json.NewDecoder(clientConn).Decode(&encoded); err != nil {
+	var res protocol.AutomationValidateResultMessage
+	if err := json.NewDecoder(clientConn).Decode(&res); err != nil {
 		t.Fatal(err)
 	}
-	if success, _ := encoded["success"].(bool); !success {
-		t.Fatalf("validate did not succeed: %+v", encoded)
-	}
-	if _, present := encoded["data"]; present {
-		t.Fatalf("a payload-free action put %v on the wire under \"data\"; it must be omitted entirely so the client can tell \"no payload\" from \"payload that is null\"", encoded["data"])
+	if !res.Success || res.Error != nil {
+		t.Fatalf("validate result = %+v, want success with no error", res)
 	}
 }
 
@@ -1057,27 +1094,27 @@ func TestAutomationCommandSetEnabledTogglesColumn(t *testing.T) {
 	}
 }
 
-// The sibling of the case above, pinned so the omitempty guard is not later
-// "simplified" into dropping null payloads generally. GetAutomationDefinition
-// returns a typed nil *store.AutomationDefinition, and assigning that to an
-// `any` produces a NON-nil interface, so show still marshals to null and its
-// output is unchanged. That distinction is the entire reason the guard is
-// written as a nil check on the interface rather than on the encoded bytes.
-func TestAutomationCommandStillReportsNullForMissingDefinition(t *testing.T) {
+// TestAutomationCommandDefinitionGetMissingDefinitionOverSocket is the
+// unix-socket-transport sibling of TestAutomationDefinitionGetWSUnknownID:
+// automation_definition_get for an unknown, non-empty id must surface as
+// success=false with an error over the raw socket dispatch
+// (handleAutomationCommand), the same business-failure shape WS gets — not a
+// transport failure, and not the old generic "data: null" wire quirk (which
+// the typed-per-action-result design no longer has a way to express).
+func TestAutomationCommandDefinitionGetMissingDefinitionOverSocket(t *testing.T) {
 	s := store.New()
 	d := &Daemon{store: s, wsHub: newWSHub()}
 
 	clientConn, serverConn := net.Pipe()
 	defer clientConn.Close()
-	go d.handleAutomationCommand(serverConn, protocol.CmdAutomationShow,
-		&protocol.AutomationShowMessage{Cmd: protocol.CmdAutomationShow, DefinitionID: "no-such-definition"})
+	go d.handleAutomationCommand(serverConn, protocol.CmdAutomationDefinitionGet,
+		&protocol.AutomationDefinitionGetMessage{Cmd: protocol.CmdAutomationDefinitionGet, DefinitionID: "no-such-definition"})
 
-	var encoded map[string]any
-	if err := json.NewDecoder(clientConn).Decode(&encoded); err != nil {
+	var res protocol.AutomationDefinitionResultMessage
+	if err := json.NewDecoder(clientConn).Decode(&res); err != nil {
 		t.Fatal(err)
 	}
-	value, present := encoded["data"]
-	if !present || value != nil {
-		t.Fatalf("show of a missing definition = %+v, want an explicit null data field", encoded)
+	if res.Success || res.Error == nil {
+		t.Fatalf("definition_get(missing) over socket = %+v, want success=false with an error", res)
 	}
 }

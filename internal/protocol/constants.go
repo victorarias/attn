@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "180"
+const ProtocolVersion = "181"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -159,10 +159,7 @@ const (
 	CmdWorkflowRunList                       = "workflow_run_list"
 	CmdWorkflowRunCancel                     = "workflow_run_cancel"
 	CmdAutomationApply                       = "automation_apply"
-	CmdAutomationList                        = "automation_list"
-	CmdAutomationShow                        = "automation_show"
 	CmdAutomationRun                         = "automation_run"
-	CmdAutomationRunList                     = "automation_run_list"
 	CmdAutomationDefinitionsGet              = "automation_definitions_get"
 	CmdAutomationDefinitionGet               = "automation_definition_get"
 	CmdAutomationRunsGet                     = "automation_runs_get"
@@ -207,7 +204,19 @@ const (
 	CmdSetChiefOfStaff                       = "set_chief_of_staff"
 )
 
-const EventAutomationActionResult = "automation_action_result"
+// Per-action automations result events (socket + WS share one command set;
+// see the Cmd constants above and internal/daemon/automations_actions.go).
+const (
+	EventAutomationApplyResult       = "automation_apply_result"
+	EventAutomationValidateResult    = "automation_validate_result"
+	EventAutomationDefinitionsResult = "automation_definitions_result"
+	EventAutomationDefinitionResult  = "automation_definition_result"
+	EventAutomationRunsResult        = "automation_runs_result"
+	EventAutomationRunResult         = "automation_run_result"
+	EventAutomationSetEnabledResult  = "automation_set_enabled_result"
+	EventAutomationDeleteResult      = "automation_delete_result"
+	EventAutomationCleanupResult     = "automation_cleanup_result"
+)
 
 // EventAutomationsChanged is the id-only automations broadcast: canonical state
 // stays in SQLite, so clients re-read via automation_definitions_get /
@@ -423,26 +432,8 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 			return "", nil, err
 		}
 		return peek.Cmd, &msg, nil
-	case CmdAutomationList:
-		var msg AutomationListMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-	case CmdAutomationShow:
-		var msg AutomationShowMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
 	case CmdAutomationRun:
 		var msg AutomationRunMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-	case CmdAutomationRunList:
-		var msg AutomationRunListMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

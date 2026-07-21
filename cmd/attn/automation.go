@@ -1,25 +1,25 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 
 	"github.com/google/uuid"
 	"github.com/victorarias/attn/internal/client"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 func automationUsage() {
 	fmt.Fprint(os.Stderr, "usage: attn automation <apply|validate|list|show|run|runs|enable|disable|delete|cleanup>\n")
 }
+
 func runAutomationCommand() {
 	if len(os.Args) < 3 {
 		automationUsage()
 		os.Exit(2)
 	}
 	c := client.New(client.DefaultSocketPath())
-	var data json.RawMessage
 	var err error
 	switch os.Args[2] {
 	case "apply":
@@ -37,7 +37,11 @@ func runAutomationCommand() {
 			err = e
 			break
 		}
-		data, err = c.AutomationApply(string(raw))
+		var result *protocol.AutomationApplyResultMessage
+		result, err = c.AutomationApply(string(raw))
+		if err == nil {
+			printJSON(result.Definition)
+		}
 	case "validate":
 		fs := flag.NewFlagSet("automation validate", flag.ContinueOnError)
 		file := fs.String("file", "", "definition YAML")
@@ -53,18 +57,25 @@ func runAutomationCommand() {
 			err = e
 			break
 		}
-		data, err = c.AutomationValidate(string(raw))
-		if err == nil && data == nil {
-			data, _ = json.Marshal(map[string]bool{"valid": true})
+		if err = c.AutomationValidate(string(raw)); err == nil {
+			printJSON(map[string]bool{"valid": true})
 		}
 	case "list":
-		data, err = c.AutomationList()
+		var result *protocol.AutomationDefinitionsResultMessage
+		result, err = c.AutomationDefinitions()
+		if err == nil {
+			printJSON(result.Definitions)
+		}
 	case "show":
 		if len(os.Args) != 4 {
 			err = fmt.Errorf("usage: attn automation show <definition-id>")
 			break
 		}
-		data, err = c.AutomationShow(os.Args[3])
+		var result *protocol.AutomationDefinitionResultMessage
+		result, err = c.AutomationDefinition(os.Args[3])
+		if err == nil && result.SpecYaml != nil {
+			fmt.Print(*result.SpecYaml)
+		}
 	case "run":
 		if len(os.Args) < 4 {
 			err = fmt.Errorf("usage: attn automation run <definition-id> [--input-file <file> | --pr-url <url>] [--request-id <id>]")
@@ -98,43 +109,67 @@ func runAutomationCommand() {
 		if *requestID == "" {
 			*requestID = uuid.NewString()
 		}
+		var result *protocol.AutomationRunResultMessage
 		if *prURL != "" {
-			data, err = c.AutomationRunPullRequest(definitionID, *requestID, *prURL)
+			result, err = c.AutomationRunPullRequest(definitionID, *requestID, *prURL)
 		} else {
-			data, err = c.AutomationRun(definitionID, *requestID, input)
+			result, err = c.AutomationRun(definitionID, *requestID, input)
+		}
+		if err == nil {
+			printJSON(result.Run)
 		}
 	case "runs":
 		if len(os.Args) != 4 {
 			err = fmt.Errorf("usage: attn automation runs <definition-id>")
 			break
 		}
-		data, err = c.AutomationRuns(os.Args[3])
+		var result *protocol.AutomationRunsResultMessage
+		result, err = c.AutomationRuns(os.Args[3])
+		if err == nil {
+			printJSON(result.Runs)
+		}
 	case "enable":
 		if len(os.Args) != 4 {
 			err = fmt.Errorf("usage: attn automation enable <definition-id>")
 			break
 		}
-		data, err = c.AutomationSetEnabled(os.Args[3], true)
+		var result *protocol.AutomationSetEnabledResultMessage
+		result, err = c.AutomationSetEnabled(os.Args[3], true)
+		if err == nil {
+			printJSON(result.Definition)
+		}
 	case "disable":
 		if len(os.Args) != 4 {
 			err = fmt.Errorf("usage: attn automation disable <definition-id>")
 			break
 		}
-		data, err = c.AutomationSetEnabled(os.Args[3], false)
+		var result *protocol.AutomationSetEnabledResultMessage
+		result, err = c.AutomationSetEnabled(os.Args[3], false)
+		if err == nil {
+			printJSON(result.Definition)
+		}
 	case "delete":
 		if len(os.Args) != 4 {
 			err = fmt.Errorf("usage: attn automation delete <definition-id>")
 			break
 		}
 		if err = c.AutomationDelete(os.Args[3]); err == nil {
-			data, _ = json.Marshal(map[string]string{"deleted": os.Args[3]})
+			printJSON(map[string]string{"deleted": os.Args[3]})
 		}
 	case "cleanup":
 		if len(os.Args) != 4 {
 			err = fmt.Errorf("usage: attn automation cleanup <definition-id>")
 			break
 		}
-		data, err = c.AutomationCleanup(os.Args[3])
+		var result *protocol.AutomationCleanupResultMessage
+		result, err = c.AutomationCleanup(os.Args[3])
+		if err == nil {
+			printJSON(map[string][]string{
+				"cleaned":     result.Cleaned,
+				"kept_dirty":  result.KeptDirty,
+				"kept_active": result.KeptActive,
+			})
+		}
 	default:
 		err = fmt.Errorf("unknown automation command %q", os.Args[2])
 	}
@@ -142,11 +177,4 @@ func runAutomationCommand() {
 		fmt.Fprintf(os.Stderr, "automation: %v\n", err)
 		os.Exit(1)
 	}
-	var pretty any
-	if json.Unmarshal(data, &pretty) == nil {
-		encoded, _ := json.MarshalIndent(pretty, "", "  ")
-		fmt.Println(string(encoded))
-		return
-	}
-	fmt.Println(string(data))
 }
