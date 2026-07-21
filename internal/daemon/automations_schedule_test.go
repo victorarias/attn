@@ -501,6 +501,48 @@ func TestScheduledPendingRunRecoversOnRestart(t *testing.T) {
 	}
 }
 
+// TestScheduledPendingRunRetriedOnNextDeliveryPass pins the scheduled-path
+// analogue of the GitHub reviewer stuck-pending regression (bug #608, see
+// TestGitHubReviewObservationRetriesAcceptedPendingRunOnSameDemand): a
+// retryable delivery failure leaves the run pending (not failed), and a
+// scheduled run isn't gated behind refreshed provider demand the way a
+// GitHub review is — the next delivery attempt (recoverAutomations, in
+// production) redelivers it unconditionally rather than it being stranded.
+// Driven through deliverObservedAutomationRun/automationDeliveryHook rather
+// than recoverAutomations itself, mirroring
+// TestScheduledPendingRunDeliversImmutableSnapshotAfterDefinitionEdit, so the
+// test can inspect retry behavior without a real PTY spawn.
+func TestScheduledPendingRunRetriedOnNextDeliveryPass(t *testing.T) {
+	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
+	intended := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	run := claimPendingScheduledRun(t, s, def, intended, intended.Add(time.Second))
+
+	attempts := 0
+	d.automationDeliveryHook = func(r *store.AutomationRun) error {
+		attempts++
+		if attempts == 1 {
+			return &retryableAutomationDeliveryError{cause: fmt.Errorf("transient launch failure")}
+		}
+		return s.MarkAutomationRunDelivered(r.ID, `{}`, time.Now())
+	}
+
+	if err := d.deliverObservedAutomationRun(run); err == nil {
+		t.Fatal("expected the first (retryable) delivery attempt to return an error")
+	}
+	stillPending, err := s.GetAutomationRun(run.ID)
+	if err != nil || stillPending == nil || stillPending.State != store.AutomationRunStatePending || attempts != 1 {
+		t.Fatalf("after first (retryable) delivery attempt: run=%#v attempts=%d err=%v", stillPending, attempts, err)
+	}
+
+	if err := d.deliverObservedAutomationRun(stillPending); err != nil {
+		t.Fatalf("second delivery attempt: %v", err)
+	}
+	delivered, err := s.GetAutomationRun(run.ID)
+	if err != nil || delivered == nil || delivered.State != store.AutomationRunStateDelivered || attempts != 2 {
+		t.Fatalf("after second delivery attempt: run=%#v attempts=%d err=%v, want delivered", delivered, attempts, err)
+	}
+}
+
 // TestScheduledPendingRunDeliversImmutableSnapshotAfterDefinitionEdit drives
 // delivery through deliverObservedAutomationRun (the hookable entry point
 // also used by the observation path) rather than recoverAutomations, so the
