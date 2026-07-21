@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/victorarias/attn/internal/automation"
@@ -200,6 +201,133 @@ func (d *Daemon) handleAutomationRunWS(client *wsClient, msg *protocol.Automatio
 		}
 		d.sendToClient(client, result)
 	}()
+}
+
+// handleAutomationApplyWS is the WS counterpart of the unix-socket
+// CmdAutomationApply path, used by the app editor's Save. Unlike the socket
+// path's automationApply (last-writer-wins), this goes through
+// automationApplyWithGuards so expected_id/expected_revision (D4/D5 in the
+// design) can refuse an id change or a stale save — see that function's doc
+// comment for why both checks are safe against a concurrent apply. On
+// success the result carries the saved definition's summary (including its
+// new revision) so the editor can update its expected_revision for the next
+// save without a round trip through automation_definitions_get.
+func (d *Daemon) handleAutomationApplyWS(client *wsClient, msg *protocol.AutomationApplyMessage) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), d.wsAutomationMutationTimeoutDuration())
+		defer cancel()
+		definition, err := d.automationApplyWithGuards(ctx, msg.DefinitionYaml, protocol.Deref(msg.ExpectedID), int(protocol.Deref(msg.ExpectedRevision)))
+		result := protocol.AutomationActionResultMessage{
+			Event:     protocol.EventAutomationActionResult,
+			Action:    "apply",
+			RequestID: msg.RequestID,
+			Success:   err == nil,
+		}
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+		} else {
+			result.Definitions = []protocol.AutomationDefinitionSummary{d.buildAutomationDefinitionSummary(*definition)}
+			result.SpecYaml = protocol.Ptr(msg.DefinitionYaml)
+			result.Revision = protocol.Ptr(definition.Revision)
+		}
+		d.sendToClient(client, result)
+	}()
+}
+
+// handleAutomationValidateWS is the WS counterpart of the unix-socket
+// CmdAutomationValidate path: validate-without-apply, so the editor can show
+// an error before Save.
+//
+// It takes no automationMu: validateAutomationSpec never mutates the store,
+// so it cannot contend with an in-flight apply/delete/set_enabled the way the
+// mutation handlers above can. It does still run on its own goroutine,
+// because "does not touch the store" is not the same as "is fast": each
+// location override is checked with git.ValidateLocalClone, which stats the
+// path and shells out to git twice. The dispatcher calls handlers inline on
+// the client's read loop, so validating synchronously would stall every other
+// message from that client behind those subprocesses — and a path on an
+// unresponsive mount would stall them indefinitely.
+func (d *Daemon) handleAutomationValidateWS(client *wsClient, msg *protocol.AutomationValidateMessage) {
+	go func() {
+		_, _, err := d.validateAutomationSpec(msg.DefinitionYaml)
+		result := protocol.AutomationActionResultMessage{
+			Event:     protocol.EventAutomationActionResult,
+			Action:    "validate",
+			RequestID: msg.RequestID,
+			Success:   err == nil,
+		}
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+		}
+		d.sendToClient(client, result)
+	}()
+}
+
+// handleAutomationDefinitionGetWS backs the editor's load path: definition_id
+// "" returns the starter template at revision 0 (new-definition case, D7 in
+// the design), so create and edit share one frontend code path. A non-empty
+// id resolves definition_yaml via automationDefinitionYAML's legacy-row
+// fallback and returns the stored revision, for the editor to echo back as
+// expected_revision on save.
+func (d *Daemon) handleAutomationDefinitionGetWS(client *wsClient, msg *protocol.AutomationDefinitionGetMessage) {
+	result := protocol.AutomationActionResultMessage{
+		Event:     protocol.EventAutomationActionResult,
+		Action:    "definition_get",
+		RequestID: msg.RequestID,
+	}
+	if msg.DefinitionID == "" {
+		template, err := automation.StarterTemplateYAML()
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+			d.sendToClient(client, result)
+			return
+		}
+		result.Success = true
+		result.SpecYaml = protocol.Ptr(string(template))
+		result.Revision = protocol.Ptr(0)
+		d.sendToClient(client, result)
+		return
+	}
+	definition, err := d.store.GetAutomationDefinition(msg.DefinitionID)
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+	if definition == nil {
+		result.Error = protocol.Ptr("automation definition not found")
+		d.sendToClient(client, result)
+		return
+	}
+	specYAML, err := automationDefinitionYAML(*definition)
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+	result.Success = true
+	result.SpecYaml = protocol.Ptr(specYAML)
+	result.Revision = protocol.Ptr(definition.Revision)
+	d.sendToClient(client, result)
+}
+
+// automationDefinitionYAML resolves def's definition_yaml: the stored
+// spec_yaml when present, else automation.MarshalDefinitionYAML rendered
+// from spec_json for a row written before migration 75 added spec_yaml (see
+// MarshalDefinitionYAML's doc comment).
+func automationDefinitionYAML(def store.AutomationDefinition) (string, error) {
+	if def.SpecYAML != "" {
+		return def.SpecYAML, nil
+	}
+	var spec automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(def.SpecJSON), &spec); err != nil {
+		return "", fmt.Errorf("parse stored definition %s: %w", def.ID, err)
+	}
+	rendered, err := automation.MarshalDefinitionYAML(spec)
+	if err != nil {
+		return "", fmt.Errorf("render definition %s: %w", def.ID, err)
+	}
+	return string(rendered), nil
 }
 
 // buildAutomationDefinitionSummary extracts the compact WS fields from a

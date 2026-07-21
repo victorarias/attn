@@ -58,6 +58,19 @@ func (c *Client) AutomationApply(raw string) (json.RawMessage, error) {
 	}
 	return r.Data, nil
 }
+
+// AutomationValidate runs the same validateAutomationSpec seam automation
+// apply persists through, without persisting anything — see
+// Daemon.validateAutomationSpec's doc comment for why the two share one
+// function. A non-nil error is the validation failure message itself, not a
+// transport error.
+func (c *Client) AutomationValidate(raw string) (json.RawMessage, error) {
+	r, e := c.sendAutomation(protocol.AutomationValidateMessage{Cmd: protocol.CmdAutomationValidate, DefinitionYaml: raw})
+	if e != nil {
+		return nil, e
+	}
+	return r.Data, nil
+}
 func (c *Client) AutomationList() (json.RawMessage, error) {
 	r, e := c.sendAutomation(protocol.AutomationListMessage{Cmd: protocol.CmdAutomationList})
 	if e != nil {

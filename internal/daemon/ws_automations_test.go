@@ -1,7 +1,10 @@
 package daemon
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -407,6 +410,504 @@ func TestAutomationRunWSRoutesPRURL(t *testing.T) {
 	}
 }
 
+// TestAutomationValidateAndApplyAgreeOnCorpus is the regression test for D3
+// (internal/daemon/automations.go's validateAutomationSpec doc comment): a
+// validate command that only ran ParseDefinitionYAML would green-light YAML
+// automation_apply then rejects, because apply layers four more checks on
+// top of parse (resolveDelegationAgent, validateDelegationModelEffort, the
+// codex|claude automatic-approval allowlist, and per-override
+// ValidateLocalClone). Every case here must produce the SAME success/failure
+// verdict — and, on failure, the same error text — from both
+// handleAutomationValidateWS and handleAutomationApplyWS, whether the
+// rejection comes from yaml.v3/ValidateDefinition (parse-level) or from one
+// of validateAutomationSpec's extra checks (seam-level, the case this test
+// exists to pin).
+func TestAutomationValidateAndApplyAgreeOnCorpus(t *testing.T) {
+	const template = `api_version: attn.dev/automations/v1alpha1
+id: %s
+name: Corpus case
+enabled: true
+trigger: {type: manual}
+prompt: Do the thing.
+launch: {driver: %s}
+location: {type: directory, path: "%s"}
+policy: {continuity: fresh, overlap: coalesce}
+`
+	cases := []struct {
+		name      string
+		id        string
+		driver    string
+		mutate    func(raw string) string
+		wantValid bool
+		wantErr   string
+	}{
+		{name: "valid codex baseline", id: "corpus-valid-codex", driver: "codex", wantValid: true},
+		{name: "valid claude baseline", id: "corpus-valid-claude", driver: "claude", wantValid: true},
+		{
+			name:      "driver outside the automatic-approval allowlist is rejected beyond parse",
+			id:        "corpus-shell-driver",
+			driver:    "shell",
+			wantValid: false,
+			wantErr:   "does not support automation automatic approval",
+		},
+		{
+			name:      "unresolvable agent is rejected beyond parse",
+			id:        "corpus-fake-driver",
+			driver:    "totally-not-a-real-agent",
+			wantValid: false,
+			wantErr:   "not available",
+		},
+		{
+			name:   "missing prompt is rejected at parse",
+			id:     "corpus-missing-prompt",
+			driver: "codex",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "prompt: Do the thing.\n", "", 1)
+			},
+			wantValid: false,
+			wantErr:   "prompt is required",
+		},
+		{
+			name:   "bad api_version is rejected at parse",
+			id:     "corpus-bad-api-version",
+			driver: "codex",
+			mutate: func(raw string) string {
+				return strings.Replace(raw, "attn.dev/automations/v1alpha1", "attn.dev/automations/v0", 1)
+			},
+			wantValid: false,
+			wantErr:   "api_version must be",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := store.New()
+			d := &Daemon{store: s, wsHub: newWSHub()}
+			raw := fmt.Sprintf(template, tc.id, tc.driver, t.TempDir())
+			if tc.mutate != nil {
+				raw = tc.mutate(raw)
+			}
+
+			validateClient := &wsClient{send: make(chan outboundMessage, 4)}
+			d.handleAutomationValidateWS(validateClient, &protocol.AutomationValidateMessage{
+				Cmd:            protocol.CmdAutomationValidate,
+				DefinitionYaml: raw,
+				RequestID:      protocol.Ptr("validate"),
+			})
+			var validateRes protocol.AutomationActionResultMessage
+			readNotebookWSEvent(t, validateClient.send, &validateRes)
+
+			applyClient := &wsClient{send: make(chan outboundMessage, 4)}
+			d.handleAutomationApplyWS(applyClient, &protocol.AutomationApplyMessage{
+				Cmd:            protocol.CmdAutomationApply,
+				DefinitionYaml: raw,
+				RequestID:      protocol.Ptr("apply"),
+			})
+			var applyRes protocol.AutomationActionResultMessage
+			readNotebookWSEvent(t, applyClient.send, &applyRes)
+
+			if validateRes.Success != applyRes.Success {
+				t.Fatalf("validate/apply disagree on %q: validate success=%v (err=%v), apply success=%v (err=%v)",
+					tc.name, validateRes.Success, validateRes.Error, applyRes.Success, applyRes.Error)
+			}
+			if validateRes.Success != tc.wantValid {
+				t.Fatalf("success = %v, want %v (validate error=%v, apply error=%v)", validateRes.Success, tc.wantValid, validateRes.Error, applyRes.Error)
+			}
+			if !tc.wantValid {
+				if validateRes.Error == nil || !strings.Contains(*validateRes.Error, tc.wantErr) {
+					t.Fatalf("validate error = %v, want to contain %q", validateRes.Error, tc.wantErr)
+				}
+				if applyRes.Error == nil || !strings.Contains(*applyRes.Error, tc.wantErr) {
+					t.Fatalf("apply error = %v, want to contain %q", applyRes.Error, tc.wantErr)
+				}
+			}
+		})
+	}
+}
+
+// TestAutomationApplyWSRefusesIDMismatch pins D4: the WS editor's Save
+// carries expected_id (the id of the definition it loaded), and the daemon
+// must refuse an apply whose YAML id differs rather than silently upserting
+// a second definition and leaving the original (still enabled, still
+// running) untouched — see automationApplyWithGuards's doc comment.
+func TestAutomationApplyWSRefusesIDMismatch(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	original, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	renamed := strings.Replace(raw, "id: manual-check", "id: manual-check-renamed", 1)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(client, &protocol.AutomationApplyMessage{
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   renamed,
+		ExpectedID:       protocol.Ptr(original.ID),
+		ExpectedRevision: protocol.Ptr(original.Revision),
+		RequestID:        protocol.Ptr("apply-id-mismatch"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "does not match the definition being edited") {
+		t.Fatalf("apply result = %+v, want success=false with an id-mismatch error", res)
+	}
+
+	// The original definition must be untouched, and no second definition
+	// created under the renamed id.
+	stillOriginal, err := s.GetAutomationDefinition(original.ID)
+	if err != nil || stillOriginal == nil || stillOriginal.Revision != original.Revision {
+		t.Fatalf("original definition after refused apply = %#v err=%v, want unchanged", stillOriginal, err)
+	}
+	if got, err := s.GetAutomationDefinition("manual-check-renamed"); err != nil || got != nil {
+		t.Fatalf("renamed id after refused apply = %#v err=%v, want no definition created", got, err)
+	}
+}
+
+// TestAutomationApplyWSRefusesCreateOverLiveDefinition pins the create half
+// of the identity guard. Apply is keyed on the id inside the YAML, so a
+// create whose id collides with a live definition would UPDATE that
+// definition in place — the user typing an existing id into a form labelled
+// "New automation" would replace an automation they never opened. A
+// soft-deleted row is not a collision: re-applying its id is how resurrect
+// works, and the editor's list never showed it.
+func TestAutomationApplyWSRefusesCreateOverLiveDefinition(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	original, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create (no expected_id, no expected_revision) carrying the same id but
+	// entirely different content.
+	colliding := strings.Replace(raw, "Check locally.", "Something else entirely.", 1)
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(client, &protocol.AutomationApplyMessage{
+		Cmd:            protocol.CmdAutomationApply,
+		DefinitionYaml: colliding,
+		RequestID:      protocol.Ptr("apply-create-collision"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "already exists") {
+		t.Fatalf("apply result = %+v, want success=false with an already-exists error", res)
+	}
+	survivor, err := s.GetAutomationDefinition(original.ID)
+	if err != nil || survivor == nil {
+		t.Fatalf("definition after refused create = %#v err=%v, want it to survive", survivor, err)
+	}
+	if survivor.Revision != original.Revision || !strings.Contains(survivor.SpecYAML, "Check locally.") {
+		t.Fatalf("definition after refused create = revision %d yaml %q, want the original untouched",
+			survivor.Revision, survivor.SpecYAML)
+	}
+
+	// Soft-deleted is not a collision: the same create now resurrects.
+	if err := d.automationDelete(context.Background(), original.ID); err != nil {
+		t.Fatal(err)
+	}
+	resurrectClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(resurrectClient, &protocol.AutomationApplyMessage{
+		Cmd:            protocol.CmdAutomationApply,
+		DefinitionYaml: colliding,
+		RequestID:      protocol.Ptr("apply-create-resurrect"),
+	})
+	var resurrectRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, resurrectClient.send, &resurrectRes)
+	if !resurrectRes.Success {
+		t.Fatalf("resurrect apply result = %+v, want success", resurrectRes)
+	}
+	resurrected, err := s.GetAutomationDefinition(original.ID)
+	if err != nil || resurrected == nil || !strings.Contains(resurrected.SpecYAML, "Something else entirely.") {
+		t.Fatalf("definition after resurrect = %#v err=%v, want the new content live", resurrected, err)
+	}
+}
+
+// TestAutomationApplyWSRefusesStaleRevision pins D5: the WS editor's Save
+// carries expected_revision (the revision it loaded), and the daemon must
+// refuse to clobber a definition that changed elsewhere (another app window,
+// or the CLI) since the editor loaded it — the app cannot silently overwrite
+// a concurrent apply. expected_revision 0 (the create case) never triggers
+// this guard.
+func TestAutomationApplyWSRefusesStaleRevision(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	original, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A concurrent CLI apply bumps the revision out from under the editor.
+	concurrentlyApplied := strings.Replace(raw, "Manual check", "Manual check (renamed elsewhere)", 1)
+	if _, err := d.automationApply(concurrentlyApplied); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(client, &protocol.AutomationApplyMessage{
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   strings.Replace(raw, "Manual check", "Manual check (from the stale editor)", 1),
+		ExpectedID:       protocol.Ptr(original.ID),
+		ExpectedRevision: protocol.Ptr(original.Revision),
+		RequestID:        protocol.Ptr("apply-stale-revision"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "changed elsewhere") {
+		t.Fatalf("apply result = %+v, want success=false with a changed-elsewhere error", res)
+	}
+
+	stored, err := s.GetAutomationDefinition(original.ID)
+	if err != nil || stored == nil || stored.Name != "Manual check (renamed elsewhere)" {
+		t.Fatalf("definition after refused stale apply = %#v err=%v, want the concurrent apply's name to survive", stored, err)
+	}
+}
+
+// TestAutomationApplyWSRefusesEditOfDeletedDefinition pins the edit half of
+// the delete/resurrect guard: DeleteAutomationDefinition sets deleted_at
+// without touching revision, so a stale editor's expected_revision still
+// matches after someone else deletes the definition it has open. Unlike a
+// create (expected_revision 0), which deliberately treats a soft-deleted row
+// as resurrectable, a Save from an open editor must refuse rather than
+// silently bring back a definition that automationDelete already tore down
+// (failed pending runs, fenced provider cursors, purged continuity/
+// review-request state) — the alternative is an unattended cron the user
+// deliberately deleted starting to fire again, reported as "saved
+// successfully".
+func TestAutomationApplyWSRefusesEditOfDeletedDefinition(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	original, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Someone else deletes the definition while the editor still has it open.
+	if err := d.automationDelete(context.Background(), original.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(client, &protocol.AutomationApplyMessage{
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   strings.Replace(raw, "Manual check", "Manual check (from the stale editor)", 1),
+		ExpectedID:       protocol.Ptr(original.ID),
+		ExpectedRevision: protocol.Ptr(original.Revision),
+		RequestID:        protocol.Ptr("apply-edit-deleted"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "deleted") || !strings.Contains(*res.Error, "New") {
+		t.Fatalf("apply result = %+v, want success=false with an error naming the deletion and pointing at New", res)
+	}
+
+	// The definition must remain deleted, not resurrected.
+	if live, err := s.GetAutomationDefinition(original.ID); err != nil || live != nil {
+		t.Fatalf("definition after refused edit-of-deleted apply = %#v err=%v, want still absent from the live set", live, err)
+	}
+	stillDeleted, err := s.GetAutomationDefinitionIncludingDeleted(original.ID)
+	if err != nil || stillDeleted == nil || stillDeleted.DeletedAt == nil {
+		t.Fatalf("definition after refused edit-of-deleted apply = %#v err=%v, want still soft-deleted", stillDeleted, err)
+	}
+	if stillDeleted.Revision != original.Revision {
+		t.Fatalf("deleted definition revision = %d, want unchanged %d", stillDeleted.Revision, original.Revision)
+	}
+}
+
+// TestAutomationDefinitionGetWSStarterTemplate pins D7: definition_id "" is
+// the new-definition case and must return the starter template at revision
+// 0, so create and edit share one frontend code path.
+func TestAutomationDefinitionGetWSStarterTemplate(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDefinitionGetWS(client, &protocol.AutomationDefinitionGetMessage{
+		Cmd:          protocol.CmdAutomationDefinitionGet,
+		DefinitionID: "",
+		RequestID:    protocol.Ptr("get-starter"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.SpecYaml == nil || res.Revision == nil {
+		t.Fatalf("definition_get(\"\") result = %+v, want success with spec_yaml and revision set", res)
+	}
+	if *res.Revision != 0 {
+		t.Fatalf("starter template revision = %d, want 0", *res.Revision)
+	}
+	if !strings.Contains(*res.SpecYaml, "id: my-automation") {
+		t.Fatalf("starter template spec_yaml = %q, want the StarterDefinition placeholder", *res.SpecYaml)
+	}
+}
+
+// TestAutomationDefinitionGetWSResolvesLegacyEmptySpecYAML pins D1's fallback
+// for a definition applied before migration 75 added spec_yaml: an existing
+// store row with SpecYAML == "" (what every UpsertAutomationDefinition call
+// wrote before this PR) must still come back from definition_get as valid,
+// re-appliable YAML — reconstructed from spec_json via
+// automation.MarshalDefinitionYAML — not as an empty string.
+func TestAutomationDefinitionGetWSResolvesLegacyEmptySpecYAML(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	applied, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a pre-migration-75 row: same spec_json, but spec_yaml wiped
+	// back to "" as every legacy UpsertAutomationDefinition call left it.
+	legacy, err := s.UpsertAutomationDefinition(applied.ID, applied.Name, applied.SpecJSON, "", applied.Enabled, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.SpecYAML != "" {
+		t.Fatalf("seeded legacy row spec_yaml = %q, want empty", legacy.SpecYAML)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDefinitionGetWS(client, &protocol.AutomationDefinitionGetMessage{
+		Cmd:          protocol.CmdAutomationDefinitionGet,
+		DefinitionID: applied.ID,
+		RequestID:    protocol.Ptr("get-legacy"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if !res.Success || res.SpecYaml == nil {
+		t.Fatalf("definition_get(%q) result = %+v, want success with spec_yaml set", applied.ID, res)
+	}
+	if *res.Revision != legacy.Revision {
+		t.Fatalf("definition_get revision = %v, want %d", res.Revision, legacy.Revision)
+	}
+	// The fallback-rendered YAML must itself be a legal input to
+	// validateAutomationSpec — proving the legacy row is still appliable,
+	// not just present.
+	if _, _, err := d.validateAutomationSpec(*res.SpecYaml); err != nil {
+		t.Fatalf("validateAutomationSpec(legacy fallback spec_yaml) error = %v, spec_yaml:\n%s", err, *res.SpecYaml)
+	}
+}
+
+// TestAutomationDefinitionGetWSUnknownID surfaces an unknown id as
+// success=false with an error, matching the rest of the automations WS
+// surface's business-failure shape (delete/cleanup/set_enabled), not a
+// transport-level failure.
+func TestAutomationDefinitionGetWSUnknownID(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDefinitionGetWS(client, &protocol.AutomationDefinitionGetMessage{
+		Cmd:          protocol.CmdAutomationDefinitionGet,
+		DefinitionID: "does-not-exist",
+		RequestID:    protocol.Ptr("get-missing"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil {
+		t.Fatalf("definition_get(unknown) result = %+v, want success=false with an error", res)
+	}
+}
+
+// automationToggleSplitBrainYAML is manualAutomationYAML with a trailing
+// comment on enabled, used by
+// TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling to
+// prove SetEnabledInYAML's headline guarantee — comments survive a toggle —
+// holds all the way through the daemon's own editor read path, not just
+// inside the store.
+const automationToggleSplitBrainYAML = `api_version: attn.dev/automations/v1alpha1
+id: manual-check
+name: Manual check
+enabled: true  # turn me off from the panel
+trigger: {type: manual}
+prompt: Check locally.
+launch: {driver: codex}
+location: {type: directory, path: "%s"}
+policy: {continuity: fresh, overlap: coalesce}
+`
+
+// TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling
+// closes the enabled split-brain defect end-to-end, through the exact path
+// the app uses: apply a definition, toggle it off via
+// handleAutomationSetEnabledWS (what the panel's toggle sends), then fetch it
+// back via handleAutomationDefinitionGetWS — the editor's own load path,
+// backed by automationDefinitionYAML. Before this fix, SetAutomationEnabled
+// wrote only the enabled COLUMN, so this fetch would still show
+// `enabled: true` (spec_yaml never having been updated); saving that stale
+// buffer back — even for an unrelated comment edit, exercised here as the
+// final step by re-applying exactly what definition_get returned — would
+// silently flip the definition back on. It must instead show
+// `enabled: false` with the comment intact, and re-applying it must leave
+// the definition disabled.
+func TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(automationToggleSplitBrainYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationSetEnabledWS(setClient, &protocol.AutomationSetEnabledMessage{
+		Cmd:          protocol.CmdAutomationSetEnabled,
+		DefinitionID: def.ID,
+		Enabled:      false,
+		RequestID:    protocol.Ptr("toggle-off"),
+	})
+	var setRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, setClient.send, &setRes)
+	if !setRes.Success || len(setRes.Definitions) != 1 || setRes.Definitions[0].Enabled {
+		t.Fatalf("set_enabled result = %+v, want a disabled summary", setRes)
+	}
+
+	getClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDefinitionGetWS(getClient, &protocol.AutomationDefinitionGetMessage{
+		Cmd:          protocol.CmdAutomationDefinitionGet,
+		DefinitionID: def.ID,
+		RequestID:    protocol.Ptr("get-after-toggle"),
+	})
+	var getRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, getClient.send, &getRes)
+	if !getRes.Success || getRes.SpecYaml == nil {
+		t.Fatalf("definition_get after toggle = %+v, want success with spec_yaml", getRes)
+	}
+	fetched := *getRes.SpecYaml
+	if !strings.Contains(fetched, "enabled: false") {
+		t.Fatalf("editor's own read path still shows the definition enabled:\n%s", fetched)
+	}
+	if !strings.Contains(fetched, "# turn me off from the panel") {
+		t.Fatalf("comment lost from the editor's read path:\n%s", fetched)
+	}
+
+	applyClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(applyClient, &protocol.AutomationApplyMessage{
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   fetched,
+		ExpectedID:       protocol.Ptr(def.ID),
+		ExpectedRevision: getRes.Revision,
+		RequestID:        protocol.Ptr("save-after-get"),
+	})
+	var applyRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, applyClient.send, &applyRes)
+	if !applyRes.Success {
+		t.Fatalf("re-applying the fetched (disabled) yaml failed: %+v", applyRes)
+	}
+
+	final, err := s.GetAutomationDefinition(def.ID)
+	if err != nil || final == nil || final.Enabled {
+		t.Fatalf("definition after re-applying fetched yaml = %#v err=%v, want it to stay disabled", final, err)
+	}
+}
+
 // TestAutomationSetEnabledWSDeadlineAbortsWithoutMutating pins the
 // timeout-vs-mutation trap from PR #619's review: automationSetEnabled must
 // abort once its daemon-side deadline (wsAutomationMutationTimeout) elapses
@@ -557,5 +1058,59 @@ func TestAutomationRunWSRetryWithSameRequestIDDoesNotDuplicate(t *testing.T) {
 	}
 	if len(runs) != 1 {
 		t.Fatalf("runs for definition = %d, want exactly 1 (no duplicate claim from the retried request_id)", len(runs))
+	}
+}
+
+// A validate that passes has no payload to report, and the CLI's success
+// output depends on that absence being visible on the wire. json.Marshal of a
+// nil `any` yields the 4-byte literal `null` rather than an empty slice, which
+// defeats `json:"data,omitempty"` and leaves the client decoding a non-nil
+// json.RawMessage — so `attn automation validate` printed `null` instead of
+// {"valid": true}. Pinned here on the encoded bytes, because the bug lives in
+// the encoding and a decoded struct hides it.
+func TestAutomationCommandOmitsDataWhenActionHasNoPayload(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	go d.handleAutomationCommand(serverConn, protocol.CmdAutomationValidate,
+		&protocol.AutomationValidateMessage{Cmd: protocol.CmdAutomationValidate, DefinitionYaml: raw})
+
+	var encoded map[string]any
+	if err := json.NewDecoder(clientConn).Decode(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	if success, _ := encoded["success"].(bool); !success {
+		t.Fatalf("validate did not succeed: %+v", encoded)
+	}
+	if _, present := encoded["data"]; present {
+		t.Fatalf("a payload-free action put %v on the wire under \"data\"; it must be omitted entirely so the client can tell \"no payload\" from \"payload that is null\"", encoded["data"])
+	}
+}
+
+// The sibling of the case above, pinned so the omitempty guard is not later
+// "simplified" into dropping null payloads generally. GetAutomationDefinition
+// returns a typed nil *store.AutomationDefinition, and assigning that to an
+// `any` produces a NON-nil interface, so show still marshals to null and its
+// output is unchanged. That distinction is the entire reason the guard is
+// written as a nil check on the interface rather than on the encoded bytes.
+func TestAutomationCommandStillReportsNullForMissingDefinition(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	go d.handleAutomationCommand(serverConn, protocol.CmdAutomationShow,
+		&protocol.AutomationShowMessage{Cmd: protocol.CmdAutomationShow, DefinitionID: "no-such-definition"})
+
+	var encoded map[string]any
+	if err := json.NewDecoder(clientConn).Decode(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	value, present := encoded["data"]
+	if !present || value != nil {
+		t.Fatalf("show of a missing definition = %+v, want an explicit null data field", encoded)
 	}
 }

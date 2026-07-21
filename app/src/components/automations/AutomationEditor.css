@@ -1,0 +1,130 @@
+.automation-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+}
+
+.automation-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+}
+
+.automation-editor__title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  margin: 0;
+}
+
+.automation-editor__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  padding: 4px;
+}
+
+.automation-editor__close:hover {
+  color: var(--color-text-primary);
+}
+
+.automation-editor__status {
+  color: var(--color-text-tertiary);
+  padding: 16px 0;
+}
+
+.automation-editor__hint {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.automation-editor__buffer {
+  flex: 1 1 auto;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* The @uiw/react-codemirror wrapper div (rendered around the CM editor) has no
+   height of its own; without this it stays auto-sized to its content and the
+   buffer grows unbounded instead of scrolling within this panel. Same fix as
+   .notebook-browser-live-editor in NotebookBrowser.css. */
+.automation-editor__buffer > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.automation-editor__buffer .cm-editor {
+  height: 100%;
+}
+
+.automation-editor__buffer .cm-scroller {
+  overflow: auto;
+}
+
+.automation-editor__validation,
+.automation-editor__error {
+  font-size: var(--font-size-xs);
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.automation-editor__validation--ok {
+  color: var(--color-accent);
+}
+
+.automation-editor__validation--error,
+.automation-editor__error {
+  color: var(--color-error);
+}
+
+.automation-editor__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.automation-editor__actions-primary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.automation-editor__actions button {
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+
+.automation-editor__actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.automation-editor__actions button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.automation-editor__save {
+  border-color: var(--accent) !important;
+}
+
+.automation-editor__reload {
+  color: var(--color-text-secondary);
+}

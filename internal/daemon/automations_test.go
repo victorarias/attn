@@ -311,7 +311,7 @@ func TestEnsureAutomationSessionPassesOneUnattendedContract(t *testing.T) {
 func TestFailAutomationRunFailsRunAndVisibleTicket(t *testing.T) {
 	s := store.New()
 	now := time.Now()
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +357,7 @@ func TestFailAutomationRunFailsRunAndVisibleTicket(t *testing.T) {
 func TestRetryableAutomationDeliveryKeepsRunAndTicketActive(t *testing.T) {
 	s := store.New()
 	now := time.Now()
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestRetryableAutomationDeliveryKeepsRunAndTicketActive(t *testing.T) {
 func TestDisabledAutomationRefusesRecoveredPendingDelivery(t *testing.T) {
 	s := store.New()
 	now := time.Now()
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestDisabledAutomationRefusesRecoveredPendingDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, def.SpecJSON, false, now.Add(time.Minute)); err != nil {
+	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, def.SpecJSON, "", false, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	d := &Daemon{store: s, wsHub: newWSHub()}
@@ -469,7 +469,7 @@ func TestAutomationRecoveryWaitsForInitialGitHubDiscovery(t *testing.T) {
 func TestAutomationRecoveryLeavesGitHubRunsForFreshProviderObservation(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,7 +534,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition("requested-review", "Requested review", string(canonical), true, time.Now()); err != nil {
+	if _, err := s.UpsertAutomationDefinition("requested-review", "Requested review", string(canonical), "", true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var delivered atomic.Int32
@@ -620,7 +620,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), true, time.Now()); err != nil {
+	if _, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), "", true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	delivered := make(chan struct{}, 1)
@@ -672,7 +672,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition("retry-review", "Retry review", string(canonical), true, time.Now()); err != nil {
+	if _, err := s.UpsertAutomationDefinition("retry-review", "Retry review", string(canonical), "", true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var attempts atomic.Int32
@@ -714,7 +714,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 func TestContinuationFailurePreservesOriginTicketOutcome(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -761,7 +761,7 @@ func TestContinuationFailurePreservesOriginTicketOutcome(t *testing.T) {
 func TestSuccessfulContinuationReopensOriginTicketAfterDelivery(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -841,7 +841,7 @@ func TestContinuationActivationFailsIfTicketDisappeared(t *testing.T) {
 func TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -891,7 +891,7 @@ func TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne(t *testing.T) {
 func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -946,7 +946,7 @@ func TestStoppedContinuationResumesRecordedReviewerWithPinnedContract(t *testing
 	backend := &automationResumeBackend{fakeSpawnBackend: &fakeSpawnBackend{}}
 	d.ptyBackend = backend
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
-	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1053,7 +1053,7 @@ func setupContinuationWorktree(t *testing.T) (*Daemon, automation.WorkRequest, s
 	d := newDaemonForTest(t)
 	d.dataRoot = filepath.Join(root, "profile")
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
-	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1137,7 +1137,7 @@ func TestWithdrawnBeforeLaunchReRequestCreatesFirstWorktree(t *testing.T) {
 func TestReRequestCanStartReviewerWhenWithdrawnOriginNeverLaunched(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1181,7 +1181,7 @@ func TestReviewRequestWithdrawalStopsLaunchedPendingReviewer(t *testing.T) {
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1240,7 +1240,7 @@ func TestReviewRequestWithdrawalLeavesDeliveredReviewerToTicketLifecycle(t *test
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1286,7 +1286,7 @@ func TestReviewRequestCancellationRecoversBeforeReactivation(t *testing.T) {
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1337,7 +1337,7 @@ func TestContinuationWithdrawalDoesNotCancelDeliveredOriginReviewer(t *testing.T
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}

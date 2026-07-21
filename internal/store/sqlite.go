@@ -769,6 +769,7 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 			FOREIGN KEY(ticket_id) REFERENCES tickets(id)
 		);
 	`},
+	{75, "persist the applied automation definition YAML", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -999,6 +1000,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
 			if err := applyMigration73(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 75 {
+			if err := applyMigration75(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -1373,6 +1379,30 @@ func applyMigration72(tx *sql.Tx) error {
 		return nil
 	}
 	_, err = tx.Exec(`ALTER TABLE delegation_operations ADD COLUMN chief_session_id TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+// applyMigration75 adds spec_yaml to automation_definitions, persisting the
+// user's own applied YAML (not just its canonical JSON re-derivation) so a
+// later edit round-trips through the editor without silently discarding
+// comments and formatting. Guarded with tableExists (a partial-schema test DB
+// may seed only some tables) and columnExists (idempotent re-run safety).
+func applyMigration75(tx *sql.Tx) error {
+	exists, err := tableExists(tx, "automation_definitions")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	hasColumn, err := columnExists(tx, "automation_definitions", "spec_yaml")
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+	_, err = tx.Exec(`ALTER TABLE automation_definitions ADD COLUMN spec_yaml TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 

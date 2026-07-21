@@ -1057,7 +1057,95 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       or a thread as living forever; each is fixed with regression tests, and
       the shared-identity and thread-lifetime invariants are recorded above as
       domain context.
-- [ ] Add the self-service YAML editor and validate-without-apply (Slice 7 PR B).
+- [x] Add the self-service YAML editor and validate-without-apply (Slice 7 PR B).
+      One buffer serves create and edit: create loads through the same
+      `getDefinition('')` path and gets the starter template at revision 0, so
+      there is no second code path to keep in step (D7). Validate runs the full
+      definition check without writing anything, and Save is the only writer.
+      Three mistakes are refused rather than silently absorbed — changing the
+      `id` of the definition being edited (apply is keyed on the id inside the
+      YAML, so a rename is a separate create), creating an automation whose
+      `id` already belongs to a live definition (which would replace it
+      wholesale), and saving over a definition that changed elsewhere, which
+      offers Reload as the recovery path (D4/D5). The buffer is populated only
+      on mount or an explicit Reload, never by an `automations_changed`
+      broadcast, so a background refetch cannot stomp text being typed (D6).
+      Proven by the packaged scenario `real-app:scenario-automation-editor`,
+      ten legs (starter template, invalid-rejected-and-nothing-stored, create,
+      create-collision refusal, comment round-trip, id-change refusal,
+      stale-revision refusal followed by a successful Reload, a comment-only
+      edit bumping the revision, a save refused after the definition was
+      deleted elsewhere, and a panel toggle-off surviving a later edit), with
+      the daemon's own state cross-checked through the bundled CLI at every
+      leg — run `automation-editor-2026-07-21T01-31-48-079Z` against the app
+      built from `09cfb0b6` (2026-07-21, protocol 180, profile `togglefix`),
+      all ten green.
+      D1 (comments survive)
+      is proven by the stored `SpecYAML` still carrying the run's
+      `# harness-marker:` line after the save/reload round-trip; definitions
+      created before migration 75 have no stored YAML and re-render comment-free
+      on first open, which the editor says in-line rather than hiding.
+      Reviewing the product code directly — not the subagent reports — found
+      three defects the tests had not caught: a Reload button offered while
+      creating (it would have re-fetched the starter template over the draft
+      being typed), validate running inline on the client read loop where
+      `git.ValidateLocalClone` stats paths and shells out to git twice per
+      override, and a create silently overwriting a live definition that shared
+      its id. The Reload gate and the collision guard each carry a regression
+      test, and the collision guard was mutation-verified: without it the create
+      succeeds and bumps the victim to revision 2. The read-loop fix carries no
+      test — it moves a handler onto its own goroutine, and a test at that seam
+      would assert Go's scheduling rather than any behavior of ours.
+      An adversarial gate over six dimensions then found five further defects,
+      all fixed here with mutation-verified regression tests. Three were the
+      same mistake in different clothes — trusting a value that another writer
+      can move underneath you. The revision counter did not cover `spec_yaml`,
+      so a comment-only save bumped nothing and the stale-save guard was blind
+      to precisely the edits this editor exists to make. `DeleteAutomationDefinition`
+      likewise leaves `revision` untouched, so a stale editor's Save passed the
+      guard and silently resurrected a definition someone had deleted — live,
+      enabled, and for a cron trigger firing unattended sessions again, reported
+      to the user as a successful save. And a Validate response that arrived
+      after further typing overwrote the cleared state, rendering "Looks good."
+      against text the daemon never saw. The other two: edits typed during an
+      in-flight Save were discarded when the editor closed, and
+      `attn automation validate` printed `null` on success because
+      `json.Marshal` of a nil payload yields the literal `null`, which defeats
+      `omitempty` and leaves the client decoding a non-nil four-byte `Data`.
+      Review then found a third instance of that same trusting-a-moving-value
+      mistake, and this one had two writers rather than one stale reader:
+      `enabled` was written both by the panel's toggle (the column alone) and
+      by a Save (from the YAML), with nothing keeping them in step. Disabling
+      an automation and then editing it — even only adding a comment — saved
+      the stale `enabled: true` back and re-ran the real enable transition,
+      reported as an ordinary successful save; for a cron trigger that meant
+      unattended sessions firing after the operator had turned them off. Line
+      501 of this guide already settles the authority question — `enabled` is
+      current management state, so the column is the single authority — which
+      ruled out a read-time overlay: that would leave the row permanently
+      inconsistent and oblige every future reader to remember to overlay.
+      `SetAutomationEnabled` now writes through on a real transition,
+      re-marshaling `spec_json` and rewriting `spec_yaml` byte-for-byte via
+      `automation.SetEnabledInYAML`, which locates the top-level `enabled`
+      scalar by its parsed yaml.v3 Line/Column and replaces only that token, so
+      comments, key order, and quoting survive — the guarantee D1 depends on.
+      It bumps `revision` for the same reason the two earlier instances did.
+      That bump was verified safe rather than assumed: occurrence keys are
+      time- and subject-based and never embed the revision, and
+      `Snapshot.DefinitionRevision` is run provenance only, so a bump can
+      neither re-fire nor duplicate a run. Covered at three levels, each
+      mutation-verified against a build with the write-through removed:
+      `TestSetAutomationEnabledWritesThroughToStoredSpec` (store),
+      `TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling`
+      (the daemon's real WS handlers), and scenario leg 10 above, where the
+      leg's headline assertion — editing a disabled automation does not
+      silently re-enable it — was isolated and confirmed red under that build
+      (`automation-editor-2026-07-21T01-30-23-763Z`) rather than merely
+      failing at an earlier diagnostic. A toggle landing while the same
+      editor is open is deliberately not in the scenario: `AutomationsPanel`
+      renders the editor as a full replacement of the panel body, so the
+      toggle control is not in the DOM at all then, and there is no way to
+      drive that race through the real UI.
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
 

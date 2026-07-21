@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AutomationDefinitionSummary, AutomationRunSummary } from '../types/generated';
 import { useAutomationsStore, selectDefinitionById, selectLatestRunForDefinition } from '../store/automations';
 import { AutomationActionTimeoutError } from '../hooks/useDaemonSocket';
+import { AutomationEditor, automationEditorKey } from './automations/AutomationEditor';
 import './AutomationsPanel.css';
 
 export interface AutomationsPanelProps {
@@ -14,10 +15,24 @@ export interface AutomationsPanelProps {
     definitionId: string,
     requestId: string,
   ) => Promise<{ runId?: string; ticketId?: string; sessionId?: string }>;
+  getDefinition: (definitionId: string) => Promise<{ specYaml: string; revision: number }>;
+  validateDefinition: (definitionYaml: string) => Promise<void>;
+  applyDefinition: (
+    definitionYaml: string,
+    expectedId: string,
+    expectedRevision: number,
+  ) => Promise<{ definition: AutomationDefinitionSummary; specYaml: string; revision: number }>;
   onOpenTicket: (ticketId: string) => void;
   onSelectSession: (sessionId: string) => void;
   onFocusPane: (sessionId: string, paneId: string) => void;
 }
+
+// What the editor overlay is showing: closed, a fresh template (New
+// automation), or an existing definition (Edit). Kept as a single value
+// (rather than two booleans) so there is exactly one source of truth for
+// "which target is open" — AutomationEditor is keyed off it, so switching
+// targets always remounts a fresh editor instance (see automationEditorKey).
+type EditorTarget = { definitionId: string | null } | null;
 
 // Where a run row navigates. The wire nit applies here: ticket_id/session_id/
 // pane_id are always present on AutomationRunSummary but "" means absent, so
@@ -90,6 +105,9 @@ export function AutomationsPanel({
   fetchRuns,
   setEnabled,
   runNow,
+  getDefinition,
+  validateDefinition,
+  applyDefinition,
   onOpenTicket,
   onSelectSession,
   onFocusPane,
@@ -106,6 +124,12 @@ export function AutomationsPanel({
   const [toggleInFlight, setToggleInFlight] = useState<Record<string, boolean>>({});
   const [runErrors, setRunErrors] = useState<Record<string, string>>({});
   const [runInFlight, setRunInFlight] = useState<Record<string, boolean>>({});
+  // D6: this is the ONLY state that opens/closes/targets the editor. The list
+  // refetch effect below never touches it, so an automations_changed broadcast
+  // arriving while it's non-null cannot close the editor or swap its target —
+  // see AutomationEditor.tsx's doc comment for the other half of the guarantee
+  // (its buffer is loaded once per mount, not derived from the store).
+  const [editorTarget, setEditorTarget] = useState<EditorTarget>(null);
 
   // Refetch on open and on every automations_changed tick. Also eagerly
   // fetches every definition's runs (not just the selected one) — the
@@ -239,18 +263,49 @@ export function AutomationsPanel({
 
   const showEmpty = definitionsLoaded && !definitionsError && definitions.length === 0;
 
+  // The editor is a full replacement of the panel body, not a sub-view of the
+  // list — see EditorTarget's doc comment for why closing it is the only way
+  // canonical list state (definitions/runsByDefinition) can affect it again.
+  // Keyed on the target so switching from one Edit to another (or New) always
+  // remounts AutomationEditor, which is what makes its mount-only load correct.
+  if (editorTarget) {
+    return (
+      <div className="automations-panel" data-testid="automations-panel">
+        <AutomationEditor
+          key={automationEditorKey(editorTarget.definitionId)}
+          definitionId={editorTarget.definitionId}
+          getDefinition={getDefinition}
+          validateDefinition={validateDefinition}
+          applyDefinition={applyDefinition}
+          onCancel={() => setEditorTarget(null)}
+          onSaved={() => setEditorTarget(null)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="automations-panel" data-testid="automations-panel">
       <div className="automations-panel__header">
         <span className="automations-panel__kicker">Automations</span>
-        <button
-          type="button"
-          className="automations-panel__close"
-          onClick={onClose}
-          aria-label="Close automations"
-        >
-          ✕
-        </button>
+        <div className="automations-panel__header-actions">
+          <button
+            type="button"
+            className="automations-panel__new"
+            onClick={() => setEditorTarget({ definitionId: null })}
+            data-testid="automation-new"
+          >
+            New automation
+          </button>
+          <button
+            type="button"
+            className="automations-panel__close"
+            onClick={onClose}
+            aria-label="Close automations"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       {definitionsError && (
@@ -260,9 +315,17 @@ export function AutomationsPanel({
       )}
 
       {showEmpty ? (
-        <p className="automations-panel__empty" data-testid="automations-panel-empty">
-          No automations defined — create one with <code>attn automation apply</code>.
-        </p>
+        <div className="automations-panel__empty" data-testid="automations-panel-empty">
+          <p>No automations yet.</p>
+          <button
+            type="button"
+            className="automations-panel__new"
+            onClick={() => setEditorTarget({ definitionId: null })}
+            data-testid="automation-new-empty"
+          >
+            New automation
+          </button>
+        </div>
       ) : (
         <ul className="automations-panel__list" data-testid="automations-panel-list">
           {definitions.map((definition) => {
@@ -317,6 +380,15 @@ export function AutomationsPanel({
                     Run now
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  className="automations-panel__edit"
+                  onClick={() => setEditorTarget({ definitionId: definition.id })}
+                  data-testid={`automation-edit-${definition.id}`}
+                >
+                  Edit
+                </button>
 
                 {toggleErrors[definition.id] && (
                   <p

@@ -9,14 +9,32 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-20]
 
 ### Added
+- **You can now write and edit automations in the app.** The Automations panel
+  has New and Edit buttons that open the definition's YAML in an editor, so
+  creating an automation no longer means dropping to a terminal. Validate
+  checks a definition without storing anything and reports the first problem
+  it finds; Save stores it. Three mistakes are refused rather than silently
+  accepted: changing the `id` of a definition you are editing (which would
+  leave the original running and quietly create a second one), creating a new
+  automation whose `id` already belongs to one you have (which would replace
+  it wholesale), and saving over a definition that changed elsewhere since you
+  opened it — the last offers a reload. If the definition was *deleted* while
+  you had it open, saving is refused rather than quietly bringing it back, so
+  an automation you turned off does not start running again behind you.
+  Your YAML is now stored as you wrote it, so comments and formatting survive
+  an edit round-trip — including against someone else editing the same
+  definition, since a comment-only change counts as a change; definitions
+  applied before this release are rendered from their stored form the first
+  time and keep their new text afterwards.
 - **Automations now have a panel in the app.** A new toolbar button opens an
   Automations panel that lists every definition with its trigger and
   enabled state, lets you enable/disable or run a manual automation now,
   shows each definition's run history with failures called out inline, and
-  jumps straight to the ticket or session a run produced. Definitions are
-  still created from the CLI (`attn automation apply`); changes made there
-  appear in the panel immediately, and daemon rejections are shown in the
-  panel rather than silently swallowed.
+  jumps straight to the ticket or session a run produced. Changes made from
+  the CLI (`attn automation apply`) appear in the panel immediately, and
+  daemon rejections are shown in the panel rather than silently swallowed.
+- **`attn automation validate --file <path>`** checks a definition without
+  applying it, using the exact same checks `apply` runs.
 - **Automations can now run on a schedule.** A definition can declare a cron
   schedule with a required time zone and fire an ordinary visible agent
   session at each intended instant — for example, a recurring merged-worktree
@@ -66,6 +84,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   of silently starting in the wrong context.
 
 ### Fixed
+- **Turning an automation off in the panel now sticks.** The enable/disable
+  toggle and the `enabled:` line in a definition's YAML were tracked
+  separately, so disabling an automation and then editing it — even just
+  adding a comment — saved the old `enabled: true` back and started it running
+  again, reported as an ordinary successful save. For a scheduled automation
+  that meant unattended sessions firing after you had turned them off. The
+  toggle now updates the definition itself, so the editor opens on the
+  automation's real current state and a later edit cannot undo it. Your
+  comments and formatting survive the toggle untouched.
 - **Reverting an automation's prompt to an earlier version no longer
   permanently blocks new runs.** A→B→A edits used to refuse every future run
   once any earlier revision shared the same prompt/launch/location, even

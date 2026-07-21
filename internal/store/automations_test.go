@@ -1,16 +1,19 @@
 package store
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/victorarias/attn/internal/automation"
 )
 
 func TestAutomationClaimIsIdempotentAndSnapshotsRevision(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +39,7 @@ func TestAutomationClaimIsIdempotentAndSnapshotsRevision(t *testing.T) {
 func TestScheduledAutomationClaimIsIdempotent(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,13 +69,13 @@ func TestScheduledAutomationClaimIsIdempotent(t *testing.T) {
 func TestScheduledAutomationClaimRejectsStaleRevision(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// A second apply bumps the revision, simulating the definition changing
 	// between the caller's revision read and this claim's transaction.
-	if _, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly","edited":true}`, true, now); err != nil {
+	if _, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly","edited":true}`, "", true, now); err != nil {
 		t.Fatal(err)
 	}
 	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
@@ -95,7 +98,7 @@ func TestScheduledAutomationClaimRejectsStaleRevision(t *testing.T) {
 func TestScheduledAutomationClaimRejectsDisabledDefinition(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, false, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", false, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +117,7 @@ func TestScheduledAutomationClaimRejectsDisabledDefinition(t *testing.T) {
 func TestScheduledAutomationDifferentInstantsClaimDifferentRuns(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +137,7 @@ func TestScheduledAutomationDifferentInstantsClaimDifferentRuns(t *testing.T) {
 func TestScheduledAutomationSingletonContinuityReusesBinding(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +174,7 @@ func TestScheduledAutomationSingletonContinuityReusesBinding(t *testing.T) {
 func TestAutomationContinuityRunHistoryReturnsPriorRuns(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +220,7 @@ func TestAutomationContinuityRunHistoryReturnsPriorRuns(t *testing.T) {
 func TestScheduledAutomationSingletonContinuityBlocksUndeliveredPredecessor(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +239,7 @@ func TestScheduledAutomationSingletonContinuityBlocksUndeliveredPredecessor(t *t
 func TestAutomationScheduleCursorGetSetRoundtrip(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +270,7 @@ func TestAutomationScheduleCursorGetSetRoundtrip(t *testing.T) {
 func TestListAutomationRunsWithOccurrenceKeysOrdersNewestFirstWithLimit(t *testing.T) {
 	s := New()
 	base := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, base)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, "", true, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +316,7 @@ func TestListAutomationRunsWithOccurrenceKeysOrdersNewestFirstWithLimit(t *testi
 func TestListPendingAutomationRunsIncludesScheduledProvider(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +370,7 @@ func TestEnsureAutomationTicketAdoptsByRun(t *testing.T) {
 func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +431,7 @@ func TestGitHubReviewEdgeRetriesThenReusesContinuityBinding(t *testing.T) {
 func TestGitHubReviewAcceptedPendingRunRemainsRetryableWhileDemandIsActive(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +471,7 @@ func TestGitHubReviewAcceptedPendingRunRemainsRetryableWhileDemandIsActive(t *te
 func TestGitHubReviewReRequestDoesNotReuseWithdrawnUndeliveredBinding(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +508,7 @@ func TestGitHubReviewReRequestDoesNotReuseWithdrawnUndeliveredBinding(t *testing
 func TestGitHubReviewWithdrawalExposesPendingRunAndReleasesEmptyBinding(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +565,7 @@ func TestGitHubReviewWithdrawalExposesPendingRunAndReleasesEmptyBinding(t *testi
 func TestGitHubReviewClaimAndTicketEventAreIdempotent(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{"id":"review"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -638,7 +641,7 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	const spec = `{"id":"review"}`
-	def, err := s.UpsertAutomationDefinition("review", "Review", spec, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", spec, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,10 +653,10 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 	if _, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, ids); err != nil || !created {
 		t.Fatalf("initial claim created=%v err=%v", created, err)
 	}
-	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, false, now.Add(time.Minute)); err != nil {
+	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, "", false, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, true, now.Add(2*time.Minute)); err != nil {
+	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, spec, "", true, now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	stale, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(90*time.Second))
@@ -669,7 +672,7 @@ func TestReenabledGitHubAutomationCatchesUpCurrentReviewDemand(t *testing.T) {
 func TestContinuationOccurrenceRecordsOnTerminalTicketExactlyOnce(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +732,7 @@ func TestContinuationOccurrenceRecordsOnTerminalTicketExactlyOnce(t *testing.T) 
 func TestGitHubReviewCursorOrdersObservationsWithinOneSecond(t *testing.T) {
 	s := New()
 	base := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, base)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -756,7 +759,7 @@ func TestGitHubReviewCursorOrdersObservationsWithinOneSecond(t *testing.T) {
 func TestSetAutomationEnabledFlipsStateAndIsIdempotent(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +803,7 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 	s := New()
 	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 	const spec = `{"id":"review"}`
-	def, err := s.UpsertAutomationDefinition("review", "Review", spec, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", spec, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -828,6 +831,116 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 	}
 }
 
+// enabledToggleYAML is a realistic hand-written definition, comments and all,
+// used by the SetAutomationEnabled write-through tests below.
+const enabledToggleYAML = `# keep this automation lean
+api_version: attn.dev/automations/v1alpha1
+id: nightly-sweep
+name: Nightly sweep
+enabled: true  # flip me from the panel
+trigger: {type: manual}
+prompt: Sweep the repo.
+launch: {driver: codex}
+location: {type: directory, path: "PATH"}
+policy: {continuity: fresh}
+`
+
+// TestSetAutomationEnabledWritesThroughToStoredSpec pins the fix for the
+// split-brain defect this PR closes: SetAutomationEnabled (the panel's
+// toggle) used to write only the enabled COLUMN, leaving spec_json/spec_yaml
+// saying the old value, so the next unrelated Save would silently re-enable
+// a definition the operator had just turned off. On a real transition, both
+// spec_json and spec_yaml must show the new value, with every other byte —
+// comments included — carried over from spec_yaml.
+func TestSetAutomationEnabledWritesThroughToStoredSpec(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	yamlDoc := strings.ReplaceAll(enabledToggleYAML, "PATH", t.TempDir())
+	spec, canonical, err := automation.ParseDefinitionYAML([]byte(yamlDoc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), yamlDoc, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startRevision := def.Revision
+
+	disabled, changed, err := s.SetAutomationEnabled(def.ID, false, now.Add(time.Minute))
+	if err != nil || !changed || disabled == nil || disabled.Enabled {
+		t.Fatalf("disable: def=%#v changed=%v err=%v", disabled, changed, err)
+	}
+	if disabled.Revision != startRevision+1 {
+		t.Fatalf("real transition did not bump revision: got %d, want %d", disabled.Revision, startRevision+1)
+	}
+
+	if !strings.Contains(disabled.SpecJSON, `"enabled":false`) {
+		t.Fatalf("spec_json still says enabled:true: %s", disabled.SpecJSON)
+	}
+	var disabledSpec automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(disabled.SpecJSON), &disabledSpec); err != nil {
+		t.Fatalf("spec_json no longer parses: %v: %s", err, disabled.SpecJSON)
+	}
+	if disabledSpec.Enabled || disabledSpec.ID != spec.ID || disabledSpec.Prompt != spec.Prompt {
+		t.Fatalf("spec_json lost or mis-set fields: %#v", disabledSpec)
+	}
+
+	if !strings.Contains(disabled.SpecYAML, "enabled: false  # flip me from the panel") {
+		t.Fatalf("spec_yaml still says enabled: true, or lost its trailing comment: %s", disabled.SpecYAML)
+	}
+	if !strings.Contains(disabled.SpecYAML, "# keep this automation lean") {
+		t.Fatalf("spec_yaml lost its head comment: %s", disabled.SpecYAML)
+	}
+
+	// The no-op re-application of the same state must not bump revision: it
+	// is not a transition, so nothing to keep in sync changed.
+	noop, changed, err := s.SetAutomationEnabled(def.ID, false, now.Add(2*time.Minute))
+	if err != nil || changed || noop == nil {
+		t.Fatalf("no-op disable: def=%#v changed=%v err=%v", noop, changed, err)
+	}
+	if noop.Revision != disabled.Revision {
+		t.Fatalf("no-op bumped revision: got %d, want %d", noop.Revision, disabled.Revision)
+	}
+
+	// The editor's own read path (automationDefinitionYAML in
+	// internal/daemon/ws_automations.go) prefers spec_yaml verbatim when
+	// present, so this is exactly what re-opening the editor after the
+	// toggle would show. That full round trip — toggle, reopen, save an
+	// unrelated edit, confirm the automation is still off — is pinned at two
+	// levels above this one, not here:
+	// TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling
+	// over the daemon's real WS handlers, and leg 10 of
+	// app/scripts/real-app-harness/scenario-automation-editor.mjs against the
+	// packaged app driving the actual panel toggle.
+}
+
+// TestSetAutomationEnabledDegradesGracefullyOnCorruptSpecJSON pins that a row
+// whose spec_json cannot be parsed (a corrupt or otherwise unexpected value —
+// this store method never validates what UpsertAutomationDefinition was
+// given) never blocks the toggle: enabling, and especially disabling — a
+// safety control for turning off an unattended cron — must always take
+// effect on the column, even when the spec can't be kept in sync.
+func TestSetAutomationEnabledDegradesGracefullyOnCorruptSpecJSON(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	const corruptJSON = `not-json`
+	def, err := s.UpsertAutomationDefinition("corrupt-spec", "Corrupt spec", corruptJSON, "", true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	disabled, changed, err := s.SetAutomationEnabled(def.ID, false, now.Add(time.Minute))
+	if err != nil || !changed || disabled == nil || disabled.Enabled {
+		t.Fatalf("disable must still succeed on a corrupt spec: def=%#v changed=%v err=%v", disabled, changed, err)
+	}
+	if disabled.Revision != def.Revision+1 {
+		t.Fatalf("column-only transition did not bump revision: got %d, want %d", disabled.Revision, def.Revision+1)
+	}
+	if disabled.SpecJSON != corruptJSON {
+		t.Fatalf("corrupt spec_json was touched instead of left alone: %s", disabled.SpecJSON)
+	}
+}
+
 // TestListPrunableAutomationRunsProtectsBoundThreadOrigin pins the fix for
 // Slice 7 PR A's continuity-bricking blocker: a thread's ticket.automation_run_id
 // is written once at ticket creation and never updated, so it permanently
@@ -840,7 +953,7 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 func TestListPrunableAutomationRunsProtectsBoundThreadOrigin(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -881,7 +994,7 @@ func TestListPrunableAutomationRunsProtectsBoundThreadOrigin(t *testing.T) {
 func TestListPrunableAutomationRunsStillPrunesNonContinuityRuns(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,7 +1032,7 @@ func TestSweepExpiredTicketsCascadesToContinuityBindings(t *testing.T) {
 	s := New()
 	base := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	const ttl = 30 * 24 * time.Hour
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, base)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -991,7 +1104,7 @@ func TestSweepExpiredTicketsCascadesToContinuityBindings(t *testing.T) {
 func TestSweepExpiredTicketsUnblocksPruningOfBoundThreadOrigin(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1044,5 +1157,50 @@ func TestSweepExpiredTicketsUnblocksPruningOfBoundThreadOrigin(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected the origin run to become prunable once its ticket aged out, got %#v", prunable)
+	}
+}
+
+// TestUpsertAutomationDefinitionBumpsRevisionOnSpecYAMLOnlyChange pins the
+// revision-bump condition against the class of edit this editor exists to
+// make: comments live only in spec_yaml (never re-derived into spec_json),
+// so a comment-only save leaves spec_json byte-identical while spec_yaml
+// changes. Before this fix the bump condition only compared spec_json, so
+// that edit persisted new YAML while leaving revision unchanged — and the
+// daemon's stale-save guard (automationApplyWithGuards), which compares only
+// revision, was structurally blind to it. This also pins the sibling
+// contract: a byte-identical reapply of both spec_json and spec_yaml must
+// still not bump.
+func TestUpsertAutomationDefinitionBumpsRevisionOnSpecYAMLOnlyChange(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "prompt: sweep\n", true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def.Revision != 1 {
+		t.Fatalf("initial revision = %d, want 1", def.Revision)
+	}
+
+	// A byte-identical reapply (same spec_json, same spec_yaml) is a no-op:
+	// revision must not move.
+	noop, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "prompt: sweep\n", true, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noop.Revision != def.Revision {
+		t.Fatalf("no-op reapply revision = %d, want unchanged %d", noop.Revision, def.Revision)
+	}
+
+	// spec_yaml changes (a comment added) while spec_json stays byte-identical:
+	// this must still bump.
+	commented, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "# swept nightly\nprompt: sweep\n", true, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commented.Revision != def.Revision+1 {
+		t.Fatalf("comment-only edit revision = %d, want %d", commented.Revision, def.Revision+1)
+	}
+	if commented.SpecYAML != "# swept nightly\nprompt: sweep\n" {
+		t.Fatalf("comment-only edit spec_yaml = %q, want the new YAML persisted", commented.SpecYAML)
 	}
 }

@@ -10,6 +10,10 @@ import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId, type Combo, isChord, resolveBinding } from '../shortcuts';
 import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid/gridAutomation';
 import {
+  getAutomationEditorAutomationHandle,
+  INACTIVE_AUTOMATION_EDITOR_STATE,
+} from '../components/automations/automationEditorAutomation';
+import {
   getMarkdownAnnotationsAutomationHandle,
   INACTIVE_MARKDOWN_ANNOTATIONS_STATE,
 } from '../components/MarkdownReader/annotations/annotationsAutomation';
@@ -1300,6 +1304,13 @@ function collectAutomationsUiState() {
     definitions,
     runs,
   };
+}
+
+// Unlike collectAutomationsUiState above, the editor's buffer text can't be
+// scraped from the DOM (CodeMirror virtualizes long documents), so this reads
+// through the registered handle instead — see automationEditorAutomation.ts.
+function collectAutomationEditorUiState() {
+  return getAutomationEditorAutomationHandle()?.getState() ?? INACTIVE_AUTOMATION_EDITOR_STATE;
 }
 
 function getLocationPickerRoot() {
@@ -2695,6 +2706,52 @@ export function useUiAutomationBridge({
         clickTestId(`automation-definition-select-${definitionId}`);
         await settleUi(3);
         return collectAutomationsUiState();
+      }
+      // Automation editor (self-service YAML buffer). getState reads live
+      // component state through the registered handle rather than scraping
+      // the DOM — see collectAutomationEditorUiState above for why.
+      case 'automation_editor_open': {
+        const definitionId = typeof payload.definitionId === 'string' ? payload.definitionId : '';
+        clickTestId(definitionId ? `automation-edit-${definitionId}` : 'automation-new');
+        await settleUi(3);
+        return collectAutomationEditorUiState();
+      }
+      case 'automation_editor_get_state':
+        return collectAutomationEditorUiState();
+      case 'automation_editor_set_text': {
+        const text = typeof payload.text === 'string' ? payload.text : null;
+        if (text === null) throw new Error('automation_editor_set_text requires text');
+        const handle = getAutomationEditorAutomationHandle();
+        if (!handle) throw new Error('automation editor is not mounted');
+        handle.setText(text);
+        await settleUi(2);
+        return collectAutomationEditorUiState();
+      }
+      case 'automation_editor_click': {
+        const button = typeof payload.button === 'string' ? payload.button : '';
+        let testid: string;
+        switch (button) {
+          case 'validate':
+            testid = 'automation-editor-validate';
+            break;
+          case 'save':
+            testid = 'automation-editor-save';
+            break;
+          case 'cancel':
+            testid = 'automation-editor-cancel';
+            break;
+          case 'reload':
+            testid = 'automation-editor-reload';
+            break;
+          case 'close':
+            testid = 'automation-editor-close';
+            break;
+          default:
+            throw new Error(`automation_editor_click: unknown button "${button}"`);
+        }
+        clickTestId(testid);
+        await settleUi(3);
+        return collectAutomationEditorUiState();
       }
       case 'click_nudge_trigger': {
         // The "deliver now" trigger renders only in NudgeIndicator's paused mode
