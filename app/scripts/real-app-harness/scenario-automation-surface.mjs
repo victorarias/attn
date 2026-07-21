@@ -138,8 +138,6 @@ launch:
 location:
   type: directory
   path: ${JSON.stringify(locationPath)}
-policy:
-  continuity: fresh
 `;
 }
 
@@ -153,6 +151,8 @@ trigger:
   schedule:
     cron: "0 0 1 1 *"
     time_zone: UTC
+  continuity: fresh
+  catch_up: latest
 prompt: |
   Slice 6 non-manual trigger fixture. Never fires during the scenario window
   (once-a-year cron); exists only to prove the panel hides run-now for a
@@ -165,9 +165,6 @@ launch:
 location:
   type: directory
   path: ${JSON.stringify(locationPath)}
-policy:
-  continuity: fresh
-  catch_up: latest
 `;
 }
 

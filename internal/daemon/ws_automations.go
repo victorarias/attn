@@ -352,8 +352,9 @@ func (d *Daemon) buildAutomationDefinitionSummary(def store.AutomationDefinition
 		summary.ScheduleCron = protocol.Ptr(spec.Trigger.Schedule.Cron)
 		summary.ScheduleTimeZone = protocol.Ptr(spec.Trigger.Schedule.TimeZone)
 	}
-	summary.Continuity = protocol.Ptr(spec.Policy.Continuity)
-	summary.CatchUp = protocol.Ptr(spec.Policy.CatchUp)
+	continuity, catchUp := automation.ResolvedTriggerPolicy(spec)
+	summary.Continuity = protocol.Ptr(continuity)
+	summary.CatchUp = protocol.Ptr(catchUp)
 	return summary
 }
 

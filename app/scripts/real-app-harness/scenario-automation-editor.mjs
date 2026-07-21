@@ -160,8 +160,6 @@ launch:
 location:
   type: directory
   path: ${JSON.stringify(locationPath)}
-policy:
-  continuity: fresh
 `;
 }
 
@@ -181,8 +179,6 @@ launch:
 location:
   type: directory
   path: ${JSON.stringify(locationPath)}
-policy:
-  continuity: fresh
 `;
 }
 

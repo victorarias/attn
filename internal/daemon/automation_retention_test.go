@@ -89,6 +89,39 @@ func TestAutomationRetentionSweepCountBoundary(t *testing.T) {
 	}
 }
 
+// TestAutomationRetentionSweepPrunesCancelledRunsLikeFailed pins that a
+// cancelled run (e.g. withdrawn before delivery) shares failed's retention
+// window rather than being either exempt or protected indefinitely — the v2
+// state model treats delivered/failed/cancelled as equally terminal for
+// retention purposes (see store.ListPrunableAutomationRuns).
+func TestAutomationRetentionSweepPrunesCancelledRunsLikeFailed(t *testing.T) {
+	t.Setenv("ATTN_AUTOMATION_RETENTION_KEEP", "0")
+	t.Setenv("ATTN_AUTOMATION_RETENTION_MIN_AGE", "1h")
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	sweepAt := base.Add(48 * time.Hour)
+
+	run, created, err := s.ClaimManualAutomationRun(def.ID, "cancelled-1", "", `{}`, def.Revision, `{}`, base, store.AutomationRunReservation{
+		RunID: "run-cancelled-1", OccurrenceID: "occ-cancelled-1", TicketID: "ticket-cancelled-1", SessionID: "session-cancelled-1", WorkspaceID: "workspace-cancelled-1", PaneID: "pane-cancelled-1",
+	})
+	if err != nil || !created {
+		t.Fatalf("claim created=%v err=%v", created, err)
+	}
+	if err := s.MarkAutomationRunCancelled(run.ID, store.AutomationCancelReasonReviewWithdrawn, base); err != nil {
+		t.Fatal(err)
+	}
+	d.automationRetentionSweepPass(sweepAt)
+	if got, err := s.GetAutomationRun(run.ID); err != nil || got != nil {
+		t.Fatalf("expected the aged-out cancelled run to be pruned like a failed one, got %#v err=%v", got, err)
+	}
+}
+
 // TestAutomationRetentionSweepPendingRunsNeverPruned pins that a pending run
 // is never a candidate regardless of age or the keep window (ListPrunableAutomationRuns
 // only considers delivered/failed runs).

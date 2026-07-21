@@ -15,7 +15,12 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-var errAutomationReviewWithdrawn = errors.New(store.AutomationReviewWithdrawnError)
+// automationReviewWithdrawnMessage is the user-facing wording for a
+// withdrawal cancellation, kept separate from store.AutomationCancelReasonReviewWithdrawn
+// (the machine-readable cancel_reason) since the two serve different readers.
+const automationReviewWithdrawnMessage = "GitHub review request withdrawn before delivery"
+
+var errAutomationReviewWithdrawn = errors.New(automationReviewWithdrawnMessage)
 
 func (d *Daemon) automationRunPullRequest(ctx context.Context, definitionID, requestID, rawURL string) (*store.AutomationRun, error) {
 	if strings.TrimSpace(requestID) == "" {
@@ -203,7 +208,7 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 			d.broadcastAutomationsChanged(definition.ID)
 			d.automationMu.Lock()
 			current, loadErr := d.store.GetAutomationRun(run.ID)
-			if loadErr == nil && current != nil && current.State == "pending" {
+			if loadErr == nil && current != nil && current.State == store.AutomationRunStatePending {
 				if deliverErr := d.deliverObservedAutomationRun(current); deliverErr != nil {
 					_, deliverErr = d.handleAutomationDeliveryError(current, deliverErr)
 					loadErr = deliverErr
@@ -269,8 +274,8 @@ func (d *Daemon) cancelWithdrawnAutomationRun(run *store.AutomationRun) error {
 			d.forgetSession(run.SessionID)
 		}
 	}
-	failureComment := automationFailureComment(run, ticket, store.AutomationReviewWithdrawnError)
-	if run.State == "failed" {
+	failureComment := automationFailureComment(run, ticket, automationReviewWithdrawnMessage)
+	if run.State == store.AutomationRunStateCancelled && run.CancelReason == store.AutomationCancelReasonReviewWithdrawn {
 		if ticket == nil || (ticket.AutomationRunID == run.ID && ticket.Status == store.TicketStatusFailed) {
 			return nil
 		}
@@ -283,8 +288,8 @@ func (d *Daemon) cancelWithdrawnAutomationRun(run *store.AutomationRun) error {
 			}
 		}
 	}
-	_, failErr := d.failAutomationRun(run, errAutomationReviewWithdrawn)
-	return failErr
+	_, cancelErr := d.cancelAutomationRun(run, store.AutomationCancelReasonReviewWithdrawn, automationReviewWithdrawnMessage)
+	return cancelErr
 }
 func (d *Daemon) hasAutomationSession(sessionID string) bool {
 	if d.store.Get(sessionID) != nil {

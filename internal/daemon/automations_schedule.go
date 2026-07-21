@@ -115,7 +115,7 @@ func (d *Daemon) observeDueSchedule(definition store.AutomationDefinition, spec 
 	// never fire, so at most one claim happens per definition per tick.
 	intended := instants[len(instants)-1]
 	fire := true
-	if spec.Policy.CatchUp == "skip" {
+	if spec.Trigger.CatchUp == "skip" {
 		fire = now.Sub(intended) <= scheduleSkipGrace
 	}
 	if fire {
@@ -174,7 +174,8 @@ func (d *Daemon) claimAndDeliverScheduledRun(definition store.AutomationDefiniti
 		return err
 	}
 	continuityKey := ""
-	if spec.Policy.Continuity == "singleton" {
+	continuity, _ := automation.ResolvedTriggerPolicy(spec)
+	if continuity == "singleton" {
 		continuityKey = "singleton"
 	}
 	run, _, claimErr := d.store.ClaimScheduledAutomationRun(definition.ID, automation.ScheduledOccurrenceKey(intended), continuityKey, definition.Revision, string(payload), string(snapshotJSON), observedAt, newAutomationRunReservation())
@@ -190,7 +191,7 @@ func (d *Daemon) claimAndDeliverScheduledRun(definition store.AutomationDefiniti
 	d.broadcastAutomationsChanged(definition.ID)
 	d.automationMu.Lock()
 	current, loadErr := d.store.GetAutomationRun(run.ID)
-	if loadErr == nil && current != nil && current.State == "pending" {
+	if loadErr == nil && current != nil && current.State == store.AutomationRunStatePending {
 		if deliverErr := d.deliverObservedAutomationRun(current); deliverErr != nil {
 			_, deliverErr = d.handleAutomationDeliveryError(current, deliverErr)
 			loadErr = deliverErr

@@ -426,7 +426,6 @@ trigger: {type: manual}
 prompt: Check locally.
 launch: {driver: codex}
 location: {type: directory, path: "` + t.TempDir() + `"}
-policy: {continuity: fresh, overlap: coalesce}
 `
 	def, err := d.automationApply(raw)
 	if err != nil {
@@ -442,7 +441,7 @@ policy: {continuity: fresh, overlap: coalesce}
 		t.Fatal(err)
 	}
 	got, err := s.GetAutomationRun(run.ID)
-	if err != nil || got == nil || got.State != "failed" || !strings.Contains(got.LastError, "disabled before delivery") {
+	if err != nil || got == nil || got.State != store.AutomationRunStateCancelled || got.CancelReason != store.AutomationCancelReasonDefinitionDisabled {
 		t.Fatalf("disabled queued run=%#v err=%v", got, err)
 	}
 }
@@ -527,7 +526,6 @@ launch: {driver: codex, effort: high}
 location:
   type: repository_worktree
   repository_sources: {default: {type: managed_cache}}
-policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 `
 	_, canonical, err := automation.ParseDefinitionYAML([]byte(yaml))
 	if err != nil {
@@ -613,7 +611,6 @@ trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
 prompt: Review locally.
 launch: {driver: codex}
 location: {type: repository_worktree, repository_sources: {default: {type: managed_cache}}}
-policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -664,7 +661,6 @@ trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
 prompt: Review locally.
 launch: {driver: codex}
 location: {type: repository_worktree, repository_sources: {default: {type: managed_cache}}}
-policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1113,7 +1109,7 @@ func TestWithdrawnBeforeLaunchReRequestCreatesFirstWorktree(t *testing.T) {
 	if err != nil || ticket == nil {
 		t.Fatalf("ticket=%#v err=%v", ticket, err)
 	}
-	if err := d.store.MarkAutomationRunFailed(ticket.AutomationRunID, store.AutomationReviewWithdrawnError, time.Now()); err != nil {
+	if err := d.store.MarkAutomationRunCancelled(ticket.AutomationRunID, store.AutomationCancelReasonReviewWithdrawn, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(worktree); err != nil {
@@ -1218,7 +1214,7 @@ func TestReviewRequestWithdrawalStopsLaunchedPendingReviewer(t *testing.T) {
 		t.Fatalf("startup recovery did not finish withdrawn reviewer cancellation: %v", err)
 	}
 	failed, err := s.GetAutomationRun(run.ID)
-	if err != nil || failed == nil || failed.State != "failed" || failed.LastError != store.AutomationReviewWithdrawnError {
+	if err != nil || failed == nil || failed.State != store.AutomationRunStateCancelled || failed.CancelReason != store.AutomationCancelReasonReviewWithdrawn {
 		t.Fatalf("withdrawn run=%#v err=%v", failed, err)
 	}
 	if session := s.Get(run.SessionID); session != nil {
@@ -1314,7 +1310,7 @@ func TestReviewRequestCancellationRecoversBeforeReactivation(t *testing.T) {
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkAutomationRunFailed(run.ID, store.AutomationReviewWithdrawnError, now.Add(time.Minute)); err != nil {
+	if err := s.MarkAutomationRunCancelled(run.ID, store.AutomationCancelReasonReviewWithdrawn, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	candidates, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
@@ -1322,7 +1318,7 @@ func TestReviewRequestCancellationRecoversBeforeReactivation(t *testing.T) {
 		t.Fatalf("reactivation candidates=%#v err=%v", candidates, err)
 	}
 	failed, err := s.GetAutomationRun(run.ID)
-	if err != nil || failed == nil || failed.State != "failed" || failed.LastError != store.AutomationReviewWithdrawnError {
+	if err != nil || failed == nil || failed.State != store.AutomationRunStateCancelled || failed.CancelReason != store.AutomationCancelReasonReviewWithdrawn {
 		t.Fatalf("recovered withdrawal run=%#v err=%v", failed, err)
 	}
 	if s.Get(run.SessionID) != nil || !backend.WasKilledAndRemoved(run.SessionID) {
@@ -1379,7 +1375,7 @@ func TestContinuationWithdrawalDoesNotCancelDeliveredOriginReviewer(t *testing.T
 		t.Fatal(err)
 	}
 	failed, err := s.GetAutomationRun(second.ID)
-	if err != nil || failed == nil || failed.State != "failed" || failed.LastError != store.AutomationReviewWithdrawnError {
+	if err != nil || failed == nil || failed.State != store.AutomationRunStateCancelled || failed.CancelReason != store.AutomationCancelReasonReviewWithdrawn {
 		t.Fatalf("withdrawn continuation=%#v err=%v", failed, err)
 	}
 	if s.Get(first.SessionID) == nil || backend.WasKilledAndRemoved(first.SessionID) {
@@ -1447,7 +1443,6 @@ trigger: {type: manual}
 prompt: Check locally.
 launch: {driver: codex}
 location: {type: directory, path: "%s"}
-policy: {continuity: fresh, overlap: coalesce}
 `
 
 func TestAutomationApplyBroadcastsOnUpsert(t *testing.T) {
@@ -1557,8 +1552,8 @@ func TestAutomationSetEnabledDisableFailsPendingRunsAndBroadcasts(t *testing.T) 
 		t.Fatalf("definition = %#v, want disabled", got)
 	}
 	failed, err := s.GetAutomationRun(run.ID)
-	if err != nil || failed == nil || failed.State != "failed" || !strings.Contains(failed.LastError, "disabled before delivery") {
-		t.Fatalf("pending run after disable = %#v err=%v, want failed", failed, err)
+	if err != nil || failed == nil || failed.State != store.AutomationRunStateCancelled || failed.CancelReason != store.AutomationCancelReasonDefinitionDisabled {
+		t.Fatalf("pending run after disable = %#v err=%v, want cancelled/definition_disabled", failed, err)
 	}
 	if ids := broadcasts(); len(ids) == 0 {
 		t.Fatal("automationSetEnabled disable did not broadcast")

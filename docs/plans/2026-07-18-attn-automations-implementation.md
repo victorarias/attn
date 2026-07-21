@@ -1,5 +1,7 @@
 # Implementation guide: attn Automations
 
+> **Superseded 2026-07-21** by [2026-07-21-automations-v2-simplification.md](2026-07-21-automations-v2-simplification.md). The v1 build shipped (#597–#623) but its internals are being rebuilt clean-slate; remaining unchecked slices below are not planned and are kept only as historical record.
+
 **Status:** implementation in progress.
 
 ## Current implementation state

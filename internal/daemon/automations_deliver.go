@@ -38,6 +38,10 @@ func (d *Daemon) handleAutomationDeliveryError(run *store.AutomationRun, deliver
 		current, err := d.store.GetAutomationRun(run.ID)
 		return current, errors.Join(deliveryErr, err)
 	}
+	if errors.Is(deliveryErr, errAutomationReviewWithdrawn) {
+		cancelled, cancelErr := d.cancelAutomationRun(run, store.AutomationCancelReasonReviewWithdrawn, deliveryErr.Error())
+		return cancelled, errors.Join(deliveryErr, cancelErr)
+	}
 	failed, failErr := d.failAutomationRun(run, deliveryErr)
 	return failed, errors.Join(deliveryErr, failErr)
 }
@@ -82,6 +86,41 @@ func automationFailureComment(run *store.AutomationRun, ticket *store.Ticket, me
 	}
 	return comment
 }
+
+// cancelAutomationRun mirrors failAutomationRun's ticket/broadcast side
+// effects for a run that never gets to run, rather than one that ran and
+// failed: state becomes cancelled with reason, not failed. Used for
+// withdrawal (reason review_withdrawn) so the terminal state matches why
+// nothing was delivered, distinct from a genuine delivery failure.
+func (d *Daemon) cancelAutomationRun(run *store.AutomationRun, reason, message string) (*store.AutomationRun, error) {
+	now := time.Now()
+	var persistErr error
+	if err := d.store.MarkAutomationRunCancelled(run.ID, reason, now); err != nil {
+		persistErr = errors.Join(persistErr, fmt.Errorf("mark run cancelled: %w", err))
+	}
+	if ticket, err := d.store.GetTicket(run.TicketID); err != nil {
+		persistErr = errors.Join(persistErr, fmt.Errorf("find automation ticket: %w", err))
+	} else if ticket != nil {
+		comment := automationFailureComment(run, ticket, message)
+		if ticket.AutomationRunID != "" && ticket.AutomationRunID != run.ID {
+			if _, err := d.store.AddTicketComment(ticket.ID, "automation:"+run.DefinitionID, comment, now); err != nil {
+				persistErr = errors.Join(persistErr, fmt.Errorf("record continuation cancellation: %w", err))
+			}
+			d.notifyTicketObservers(ticket.ID)
+		} else if ticket.Status != store.TicketStatusFailed {
+			if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusFailed, store.TicketAuthorAttn, comment, now); err != nil {
+				persistErr = errors.Join(persistErr, fmt.Errorf("mark automation ticket failed: %w", err))
+			}
+		}
+	}
+	d.broadcastTicketsUpdated()
+	d.broadcastAutomationsChanged(run.DefinitionID)
+	cancelled, err := d.store.GetAutomationRun(run.ID)
+	if err != nil {
+		persistErr = errors.Join(persistErr, fmt.Errorf("reload cancelled run: %w", err))
+	}
+	return cancelled, persistErr
+}
 func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.AutomationRun) error {
 	definition, err := d.store.GetAutomationDefinition(run.DefinitionID)
 	if err != nil {
@@ -115,7 +154,7 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 		}
 	}
 	continuityKey := ""
-	switch snapshot.Policy.Continuity {
+	switch snapshot.Continuity {
 	case "per_subject":
 		continuityKey = occurrence.SubjectKey
 	case "singleton":
@@ -179,6 +218,39 @@ func (d *Daemon) materializeAutomationRun(ctx context.Context, req automation.Wo
 	return automation.DeliveryResult{TicketID: req.IDs.TicketID, SessionID: req.IDs.SessionID, WorkspaceID: req.IDs.WorkspaceID, Directory: location.Directory, Revision: location.Revision, Resolved: location.Resolved, Mode: "created"}, nil
 }
 
+// automationBindingStoreAdapter adapts *store.Store to automation.BindingStore,
+// the dependency-inverted seam ResolveContinuation depends on instead of
+// touching tickets directly. internal/automation never imports internal/store.
+type automationBindingStoreAdapter struct{ store *store.Store }
+
+func (a automationBindingStoreAdapter) GetActiveContinuityBinding(definitionID, continuityKey string) (*automation.Binding, error) {
+	binding, err := a.store.GetActiveAutomationContinuityBinding(definitionID, continuityKey)
+	if err != nil || binding == nil {
+		return nil, err
+	}
+	return &automation.Binding{TicketID: binding.TicketID, SessionID: binding.SessionID, WorkspaceID: binding.WorkspaceID, PaneID: binding.PaneID}, nil
+}
+func (a automationBindingStoreAdapter) ReleaseContinuityBinding(definitionID, continuityKey, reason string, now time.Time) error {
+	return a.store.ReleaseAutomationContinuityBinding(definitionID, continuityKey, reason, now)
+}
+func (a automationBindingStoreAdapter) TicketExists(ticketID string) (bool, error) {
+	ticket, err := a.store.GetTicket(ticketID)
+	if err != nil {
+		return false, err
+	}
+	return ticket != nil, nil
+}
+func (d *Daemon) resolveAutomationContinuation(definitionID, continuityKey, ownTicketID string) (automation.Continuation, error) {
+	cont, err := automation.ResolveContinuation(automationBindingStoreAdapter{d.store}, definitionID, continuityKey, ownTicketID, time.Now())
+	if err != nil {
+		return automation.Continuation{}, err
+	}
+	if cont.SelfHealedDanglingBinding {
+		d.logf("automation continuity: definition %s key %s had an active binding whose ticket vanished (e.g. TTL sweep); released it and delivering fresh", definitionID, continuityKey)
+	}
+	return cont, nil
+}
+
 // validateAutomationContinuation fails unsafe later cycles before materializeAutomationRun's
 // ticket-first side effects. prepareAutomationLocation and ensureAutomationSession repeat the critical
 // checks as defense in depth after the durable event has been accepted.
@@ -191,14 +263,13 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 		return err
 	}
 	if ticket == nil {
-		hasPrior, err := d.hasPriorAutomationContinuityRun(req)
-		if err != nil {
-			return err
-		}
-		if hasPrior {
-			return errors.New("automation continuity ticket is missing; refusing to reuse its session or worktree")
-		}
-		return nil
+		// req's own thread's binding is either absent, active pointing at req's
+		// own not-yet-created ticket (the thread being born right now), or
+		// active with a ticket that has genuinely vanished (e.g.
+		// store.SweepExpiredTickets) — only the last case self-heals; see
+		// automation.ResolveContinuation.
+		_, err := d.resolveAutomationContinuation(req.DefinitionID, req.ContinuityKey, req.IDs.TicketID)
+		return err
 	}
 	if ticket.AutomationRunID == "" || ticket.AutomationRunID == req.RunID {
 		return nil
@@ -307,96 +378,18 @@ func (d *Daemon) ensureAutomationTicket(_ context.Context, req automation.WorkRe
 		return nil
 	}
 	if req.ContinuityKey != "" {
-		hasPrior, err := d.hasPriorAutomationContinuityRun(req)
-		if err != nil {
+		// See resolveAutomationContinuation: an active binding pointing at req's
+		// own not-yet-created ticket is the thread being born right now, not
+		// dangling; only a binding whose ticket has genuinely vanished
+		// self-heals (releases the binding) rather than refusing here.
+		if _, err := d.resolveAutomationContinuation(req.DefinitionID, req.ContinuityKey, req.IDs.TicketID); err != nil {
 			return err
-		}
-		if hasPrior {
-			return errors.New("automation continuity ticket is missing; refusing to reuse its session or worktree")
 		}
 	}
 	_, err = d.store.EnsureAutomationTicket(store.Ticket{ID: req.IDs.TicketID, Title: def.Name, Description: req.Prompt, Status: store.TicketStatusWorking, Assignee: req.IDs.SessionID, Cwd: req.Location.Path, LastAgentID: req.Launch.Agent, AutomationRunID: req.RunID}, author, store.TicketRoleChiefOfStaff, time.Now())
 	return err
 }
 
-// hasPriorAutomationContinuityRun reports whether some earlier same-contract
-// thread under this continuity key has genuinely lost its ticket. It lets
-// delivery distinguish first-run crash recovery (no earlier thread shares
-// req's contract, so this ticket may legitimately not exist yet) from a
-// thread whose bound ticket was removed out from under it (an earlier
-// same-contract thread's own ticket is gone).
-//
-// Two things matter here, both found the hard way:
-//
-//  1. Comparing by ContinuationContract, not just "does any history exist
-//     for this continuity key": a contract-changing edit (automationApply)
-//     deletes the old binding and the next occurrence mints a brand-new
-//     ticket for the same continuity key while the old run remains in
-//     history. That old run's contract differs from the new one's by
-//     construction, so it must be excluded — a plain existence check would
-//     wrongly treat it as binding on the new thread and spuriously refuse
-//     every post-rotation delivery with "ticket is missing".
-//
-//  2. Checking each same-contract entry's OWN ticket, not just "does any
-//     same-contract entry exist": edit A→B then revert B→A rotates the
-//     binding twice, minting a fresh ticket T3 whose thread's contract
-//     equals the original A thread's (T1). If T1's ticket is still alive,
-//     that's not a lost thread — a fresh T3 is a legitimate new thread under
-//     a since-reused contract, and must be allowed. Checking existence
-//     against T1's own ticket_id (not T3's, and not "any history exists")
-//     is what tells that apart from a real sweep: if T1's own ticket were
-//     later removed too, this must go back to refusing, since a same-
-//     contract thread's ticket really did disappear.
-//
-//  3. Scoping the disqualification to the entry's OWN session, not any
-//     same-contract entry's: the ticket TTL sweep (store.SweepExpiredTickets)
-//     releases a thread's continuity binding along with its ticket, by
-//     design — so a same-contract entry's ticket being gone is the routine
-//     end of that entry's own thread, not evidence about req's thread. Only
-//     when entry.SessionID equals req.IDs.SessionID is the vanished ticket
-//     actually req's OWN documenting ticket — i.e. req would be reusing that
-//     exact thread's session/worktree with no record of what happened to it.
-//     A different session id means req already holds a freshly reserved
-//     identity (no binding survived to hand it an old one), so nothing is
-//     being reused and there's nothing to refuse.
-func (d *Daemon) hasPriorAutomationContinuityRun(req automation.WorkRequest) (bool, error) {
-	if req.ContinuityKey == "" {
-		return false, nil
-	}
-	history, err := d.store.AutomationContinuityRunHistory(req.DefinitionID, req.ContinuityKey, req.RunID)
-	if err != nil {
-		return false, err
-	}
-	if len(history) == 0 {
-		return false, nil
-	}
-	reqContract := automation.NewContinuationContract(req.Prompt, req.Launch, req.Location)
-	checkedTicketIDs := make(map[string]bool, len(history))
-	for _, entry := range history {
-		var snapshot automation.Snapshot
-		if err := json.Unmarshal([]byte(entry.SnapshotJSON), &snapshot); err != nil {
-			continue
-		}
-		if !snapshot.ContinuationContract().Equal(reqContract) {
-			continue
-		}
-		if checkedTicketIDs[entry.TicketID] {
-			continue
-		}
-		checkedTicketIDs[entry.TicketID] = true
-		if entry.SessionID != req.IDs.SessionID {
-			continue
-		}
-		ticket, err := d.store.GetTicket(entry.TicketID)
-		if err != nil {
-			return false, err
-		}
-		if ticket == nil {
-			return true, nil
-		}
-	}
-	return false, nil
-}
 func (d *Daemon) activateAutomationContinuationTicket(req automation.WorkRequest) error {
 	if req.ContinuityKey == "" {
 		return nil
@@ -522,7 +515,7 @@ func (d *Daemon) prepareAutomationLocation(_ context.Context, req automation.Wor
 			sessionPersisted = true
 		}
 	}
-	if originRun != nil && originRun.State == "delivered" {
+	if originRun != nil && originRun.State == store.AutomationRunStateDelivered {
 		ticket, err := d.store.GetTicket(req.IDs.TicketID)
 		if err != nil {
 			return automation.PreparedLocation{}, err
@@ -637,7 +630,7 @@ func (d *Daemon) startAutomationSession(req automation.WorkRequest, directory, i
 	return d.verifyUnattendedLaunch(req)
 }
 func (d *Daemon) canStartWithdrawnUndeliveredReviewer(origin *store.AutomationRun, sessionID string) bool {
-	return origin != nil && origin.State == "failed" && origin.LastError == store.AutomationReviewWithdrawnError && d.store.Get(sessionID) == nil
+	return origin != nil && origin.State == store.AutomationRunStateCancelled && origin.CancelReason == store.AutomationCancelReasonReviewWithdrawn && d.store.Get(sessionID) == nil
 }
 func (d *Daemon) automationContinuationOrigin(req automation.WorkRequest) (*store.AutomationRun, error) {
 	if req.ContinuityKey == "" {

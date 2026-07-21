@@ -92,7 +92,7 @@ func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, inp
 	// broadcast so a WS client watching this definition's runs sees it appear
 	// without waiting on the delivery outcome.
 	d.broadcastAutomationsChanged(definitionID)
-	if run.State != "pending" {
+	if run.State != store.AutomationRunStatePending {
 		return run, nil
 	}
 	if err := d.deliverAutomationRun(ctx, run); err != nil {

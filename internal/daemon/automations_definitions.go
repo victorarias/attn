@@ -173,7 +173,7 @@ func (d *Daemon) automationApplyLocked(ctx context.Context, spec automation.Defi
 	if definition.Enabled {
 		return definition, nil
 	}
-	return definition, d.failPendingAutomationRuns(spec.ID)
+	return definition, d.cancelPendingAutomationRuns(spec.ID, store.AutomationCancelReasonDefinitionDisabled)
 }
 
 // rotateContinuityBindingsIfContractChanged drops definitionID's continuity
@@ -208,26 +208,33 @@ func (d *Daemon) rotateContinuityBindingsIfContractChanged(existing *store.Autom
 	if !rotate {
 		return nil
 	}
-	return d.store.DeleteAutomationContinuityBindings(spec.ID)
+	return d.store.ReleaseAutomationContinuityBindings(spec.ID, store.AutomationBindingReleasedContractRotated, time.Now())
 }
 
-// failPendingAutomationRuns fails every pending run for definitionID via
-// failAutomationRun, e.g. when a definition is disabled before its pending
-// occurrences were delivered. One run's failure does not stop the rest;
-// errors are joined. Shared by automationApply's disable path and
-// automationSetEnabled's disable path so both fail pending runs identically.
-func (d *Daemon) failPendingAutomationRuns(definitionID string) error {
+// cancelPendingAutomationRuns cancels every pending run for definitionID with
+// reason, e.g. when a definition is disabled or deleted before its pending
+// occurrences were delivered. These runs never got a chance to run — that's
+// cancelled, not failed, in the v2 state model (see
+// docs/plans/2026-07-21-automations-v2-simplification.md). One run's
+// cancellation does not stop the rest; errors are joined. Shared by
+// automationApply's disable path, automationSetEnabled's disable path, and
+// automationDelete, each with its own reason.
+func (d *Daemon) cancelPendingAutomationRuns(definitionID, reason string) error {
 	pending, err := d.store.ListPendingAutomationRuns()
 	if err != nil {
 		return err
+	}
+	message := "automation definition disabled before delivery"
+	if reason == store.AutomationCancelReasonDefinitionDeleted {
+		message = "automation definition deleted before delivery"
 	}
 	for i := range pending {
 		run := pending[i]
 		if run.DefinitionID != definitionID {
 			continue
 		}
-		if _, failErr := d.failAutomationRun(&run, errors.New("automation definition disabled before delivery")); failErr != nil {
-			err = errors.Join(err, failErr)
+		if _, cancelErr := d.cancelAutomationRun(&run, reason, message); cancelErr != nil {
+			err = errors.Join(err, cancelErr)
 		}
 	}
 	return err
@@ -263,7 +270,7 @@ func (d *Daemon) automationSetEnabled(ctx context.Context, definitionID string, 
 		return definition, nil
 	}
 	if !enabled {
-		err = d.failPendingAutomationRuns(definitionID)
+		err = d.cancelPendingAutomationRuns(definitionID, store.AutomationCancelReasonDefinitionDisabled)
 	}
 	d.broadcastAutomationsChanged(definitionID)
 	return definition, err
@@ -297,13 +304,13 @@ func (d *Daemon) automationDelete(ctx context.Context, definitionID string) erro
 	if definition == nil {
 		return fmt.Errorf("automation %q not found", definitionID)
 	}
-	if err := d.failPendingAutomationRuns(definitionID); err != nil {
+	if err := d.cancelPendingAutomationRuns(definitionID, store.AutomationCancelReasonDefinitionDeleted); err != nil {
 		return err
 	}
 	if err := d.store.DeleteAutomationReviewRequestEdges(definitionID); err != nil {
 		return err
 	}
-	if err := d.store.DeleteAutomationContinuityBindings(definitionID); err != nil {
+	if err := d.store.ReleaseAutomationContinuityBindings(definitionID, store.AutomationBindingReleasedDefinitionDeleted, time.Now()); err != nil {
 		return err
 	}
 	if err := d.store.FenceAutomationProviderCursors(definitionID, time.Now()); err != nil {

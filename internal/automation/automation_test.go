@@ -28,7 +28,6 @@ trigger: {type: manual}
 prompt: Inspect.
 launch: {driver: codex}
 location: {type: directory, path: PATH}
-policy: {continuity: fresh}
 `, `PATH`, link)
 	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
 	if err != nil {
@@ -58,7 +57,6 @@ trigger: {type: manual}
 prompt: Do the thing.
 launch: {driver: codex, model: gpt-5, effort: high}
 location: {type: directory, path: "` + t.TempDir() + `"}
-policy: {continuity: fresh, overlap: coalesce}
 `
 	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
 	if err != nil {
@@ -115,7 +113,6 @@ trigger: {type: manual}
 prompt: Inspect the supplied context.
 launch: {driver: codex, model: gpt-5.5, effort: high}
 location: {type: directory, path: PATH}
-policy: {continuity: fresh}
 `, `PATH`, dir)
 	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
 	if err != nil {
@@ -146,7 +143,6 @@ trigger: {type: manual}
 prompt: Inspect.
 launch: {driver: " CoDeX "}
 location: {type: directory, path: PATH}
-policy: {continuity: fresh}
 `, `PATH`, dir)
 	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
 	if err != nil {
@@ -165,7 +161,6 @@ trigger: {type: manual}
 prompt: x
 launch: {driver: codex, approval: yolo}
 location: {type: directory, path: /tmp}
-policy: {continuity: fresh}
 `))
 	if err == nil || !strings.Contains(err.Error(), "field approval not found") {
 		t.Fatalf("err=%v", err)
@@ -187,7 +182,6 @@ trigger: {type: manual}
 prompt: x
 launch: {driver: codex}
 location: {type: directory, path: /tmp}
-policy: {continuity: fresh}
 `))
 	if err == nil || !strings.Contains(err.Error(), "enabled is managed outside the spec") {
 		t.Fatalf("err=%v, want an error naming enabled as managed outside the spec", err)
@@ -208,7 +202,6 @@ location:
     default: {type: managed_cache}
     overrides:
       "GitHub.COM/Owner/Repo": {type: local_clone, path: PATH}
-policy: {continuity: fresh, overlap: coalesce}
 `, "PATH", repo)
 	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
 	if err != nil {
@@ -233,7 +226,6 @@ location:
   type: repository_worktree
   path: /tmp
   repository_sources: {default: {type: managed_cache}}
-policy: {continuity: fresh}
 `
 	if _, _, err := ParseDefinitionYAML([]byte(raw)); err == nil || !strings.Contains(err.Error(), "cannot configure path") {
 		t.Fatalf("err = %v", err)
@@ -255,7 +247,6 @@ launch: {driver: codex, effort: high}
 location:
   type: repository_worktree
   repository_sources: {default: {type: managed_cache}}
-policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 `
 	if _, _, err := ParseDefinitionYAML([]byte(raw)); err == nil || !strings.Contains(err.Error(), "both included and excluded") {
 		t.Fatalf("conflicting filter err = %v", err)
@@ -274,7 +265,13 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	}
 }
 
-func TestGitHubReviewDefinitionRequiresAcceptedPolicyAndLocation(t *testing.T) {
+// TestGitHubReviewDefinitionRejectsPolicyAndRequiresWorktree pins the v2 rule
+// that github_review_requested's continuity/catch_up are fully implied
+// (per_subject/latest) and must be ABSENT from the trigger — unlike a
+// scheduled trigger, there is no accepted explicit value, not even the
+// implied one — plus the pre-existing repository_worktree location
+// requirement.
+func TestGitHubReviewDefinitionRejectsPolicyAndRequiresWorktree(t *testing.T) {
 	base := `api_version: attn.dev/automations/v1alpha1
 id: requested-review
 name: Requested review
@@ -284,16 +281,27 @@ launch: {driver: codex}
 location:
   type: repository_worktree
   repository_sources: {default: {type: managed_cache}}
-policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 `
-	for name, raw := range map[string]string{
-		"fresh continuity": strings.Replace(base, "continuity: per_subject", "continuity: fresh", 1),
-		"skip catch up":    strings.Replace(base, "catch_up: latest", "catch_up: skip", 1),
-		"directory":        strings.Replace(base, "type: repository_worktree\n  repository_sources: {default: {type: managed_cache}}", "type: directory\n  path: /tmp", 1),
+	for name, tc := range map[string]struct {
+		raw     string
+		wantErr string
+	}{
+		"continuity present": {
+			raw:     strings.Replace(base, "repositories: {mode: all_accessible}}", "repositories: {mode: all_accessible}, continuity: per_subject}", 1),
+			wantErr: "does not configure trigger.continuity",
+		},
+		"catch_up present": {
+			raw:     strings.Replace(base, "repositories: {mode: all_accessible}}", "repositories: {mode: all_accessible}, catch_up: latest}", 1),
+			wantErr: "does not configure trigger.catch_up",
+		},
+		"directory location": {
+			raw:     strings.Replace(base, "type: repository_worktree\n  repository_sources: {default: {type: managed_cache}}", "type: directory\n  path: /tmp", 1),
+			wantErr: "requires repository_worktree location",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := ParseDefinitionYAML([]byte(raw)); err == nil {
-				t.Fatal("accepted invalid GitHub review definition")
+			if _, _, err := ParseDefinitionYAML([]byte(tc.raw)); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
 			}
 		})
 	}
@@ -307,10 +315,11 @@ name: Nightly
 trigger:
   type: scheduled
   schedule: {cron: "0 3 * * *", time_zone: America/New_York}
+  continuity: fresh
+  catch_up: skip
 prompt: Sweep.
 launch: {driver: codex}
 location: {type: directory, path: PATH}
-policy: {continuity: fresh, catch_up: skip}
 `, "PATH", dir)
 	if _, _, err := ParseDefinitionYAML([]byte(base)); err != nil {
 		t.Fatalf("valid scheduled definition rejected: %v", err)
@@ -324,8 +333,8 @@ policy: {continuity: fresh, catch_up: skip}
 		"missing time zone":            strings.Replace(base, ", time_zone: America/New_York", "", 1),
 		"invalid time zone":            strings.Replace(base, "time_zone: America/New_York", "time_zone: Not/AZone", 1),
 		"repository_worktree location": strings.Replace(base, "location: {type: directory, path: "+dir+"}", "location: {type: repository_worktree, repository_sources: {default: {type: managed_cache}}}", 1),
-		"per_subject continuity":       strings.Replace(base, "continuity: fresh, catch_up: skip", "continuity: per_subject, catch_up: skip", 1),
-		"missing catch_up":             strings.Replace(base, "continuity: fresh, catch_up: skip", "continuity: fresh", 1),
+		"per_subject continuity":       strings.Replace(base, "continuity: fresh", "continuity: per_subject", 1),
+		"missing catch_up":             strings.Replace(base, "\n  catch_up: skip", "", 1),
 		"catch_up queue":               strings.Replace(base, "catch_up: skip", "catch_up: queue", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -364,7 +373,6 @@ trigger:
 prompt: Inspect.
 launch: {driver: codex}
 location: {type: directory, path: PATH}
-policy: {continuity: fresh}
 `, "PATH", dir)
 	if _, _, err := ParseDefinitionYAML([]byte(manual)); err == nil || !strings.Contains(err.Error(), "cannot configure schedule") {
 		t.Fatalf("err = %v", err)
@@ -381,7 +389,6 @@ launch: {driver: codex}
 location:
   type: repository_worktree
   repository_sources: {default: {type: managed_cache}}
-policy: {continuity: per_subject, catch_up: latest}
 `
 	if _, _, err := ParseDefinitionYAML([]byte(github)); err == nil || !strings.Contains(err.Error(), "cannot configure schedule") {
 		t.Fatalf("err = %v", err)
@@ -403,7 +410,6 @@ trigger: {type: manual}
 prompt: Inspect.
 launch: {driver: codex}
 location: {type: directory, path: PATH}
-policy: {continuity: fresh}
 `, "PATH", dir)
 	_, canonical, err := ParseDefinitionYAML([]byte(manual))
 	if err != nil {
@@ -425,10 +431,11 @@ name: Nightly
 trigger:
   type: scheduled
   schedule: {cron: "0 3 * * *", time_zone: America/New_York}
+  continuity: fresh
+  catch_up: skip
 prompt: Sweep.
 launch: {driver: codex}
 location: {type: directory, path: PATH}
-policy: {continuity: fresh, catch_up: skip}
 `, "PATH", dir)
 	spec, canonical, err := ParseDefinitionYAML([]byte(raw))
 	if err != nil {
@@ -446,19 +453,37 @@ policy: {continuity: fresh, catch_up: skip}
 	}
 }
 
-func TestManualTriggerRejectsCatchUp(t *testing.T) {
+// TestManualTriggerRejectsContinuityAndCatchUp pins the v2 rule that a
+// manual trigger's continuity/catch_up are fully implied (fresh, no
+// catch_up) and must be ABSENT from the trigger, just like github's.
+func TestManualTriggerRejectsContinuityAndCatchUp(t *testing.T) {
 	dir := t.TempDir()
-	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
+	base := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: manual-with-catchup
 name: Manual
 trigger: {type: manual}
 prompt: Inspect.
 launch: {driver: codex}
 location: {type: directory, path: PATH}
-policy: {continuity: fresh, catch_up: skip}
 `, "PATH", dir)
-	if _, _, err := ParseDefinitionYAML([]byte(raw)); err == nil || !strings.Contains(err.Error(), "cannot configure policy.catch_up") {
-		t.Fatalf("err = %v", err)
+	for name, tc := range map[string]struct {
+		raw     string
+		wantErr string
+	}{
+		"continuity present": {
+			raw:     strings.Replace(base, "trigger: {type: manual}", "trigger: {type: manual, continuity: fresh}", 1),
+			wantErr: "does not configure trigger.continuity",
+		},
+		"catch_up present": {
+			raw:     strings.Replace(base, "trigger: {type: manual}", "trigger: {type: manual, catch_up: skip}", 1),
+			wantErr: "does not configure trigger.catch_up",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := ParseDefinitionYAML([]byte(tc.raw)); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
+			}
+		})
 	}
 }
 

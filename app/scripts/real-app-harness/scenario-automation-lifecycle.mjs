@@ -179,6 +179,8 @@ trigger:
   schedule:
     cron: "* * * * *"
     time_zone: UTC
+  continuity: singleton
+  catch_up: latest
 prompt: |
   ${prompt}
 launch:
@@ -189,9 +191,6 @@ launch:
 location:
   type: directory
   path: ${JSON.stringify(locationPath)}
-policy:
-  continuity: singleton
-  catch_up: latest
 `;
 }
 
@@ -212,8 +211,6 @@ launch:
 location:
   type: directory
   path: ${JSON.stringify(locationPath)}
-policy:
-  continuity: fresh
 `;
 }
 
@@ -244,10 +241,6 @@ location:
       ${CLEANUP_IDENTITY}:
         type: local_clone
         path: ${JSON.stringify(repoPath)}
-policy:
-  continuity: per_subject
-  catch_up: latest
-  overlap: coalesce
 `;
 }
 

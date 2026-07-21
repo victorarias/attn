@@ -314,9 +314,14 @@ func TestMigration76ClearsAutomationStateAndDropsSpecYAML(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Roll the fresh (head-schema) automation_definitions table back to its
-	// migration-75 shape: spec_yaml present, migration 76 unrecorded.
+	// migration-75 shape: spec_yaml present, migration 76 unrecorded. The
+	// review edges table is also rolled back to its pre-77 shape (accepted_cycle
+	// present) purely so this test's seed data — carried over unmodified from
+	// before migration 77 existed — can still insert; migration 76 itself
+	// never touched that column.
 	if _, err := db.Exec(`
 		ALTER TABLE automation_definitions ADD COLUMN spec_yaml TEXT NOT NULL DEFAULT '';
+		ALTER TABLE automation_review_request_edges ADD COLUMN accepted_cycle INTEGER NOT NULL DEFAULT 0;
 		DELETE FROM schema_migrations WHERE version >= 76;
 	`); err != nil {
 		db.Close()
@@ -426,6 +431,235 @@ func TestMigration76ClearsAutomationStateAndDropsSpecYAML(t *testing.T) {
 	}
 	if automationRunID.Valid {
 		t.Fatalf("ticket automation_run_id = %q, want NULL", automationRunID.String)
+	}
+}
+
+// TestMigration77ClearsRunsBindingsAndEdges pins the v2 explicit run/binding
+// state rebuild (docs/plans/2026-07-21-automations-v2-simplification.md,
+// PR2b): roll a real DB forward to migration 76's shape (accepted_cycle
+// present on review edges, continuity bindings keyed by definition+continuity
+// only, runs without cancel_reason/attempts), seed one row in every automation
+// table plus a ticket wired to a run via automation_run_id, then reopen so
+// migration 77 runs for real. Every automation table must come back empty,
+// accepted_cycle must be gone from automation_review_request_edges, the new
+// cancel_reason/attempts columns must exist on automation_runs, the new
+// id/status/released_reason/released_at columns must exist on
+// automation_continuity_bindings with its unique-active index, and the
+// ticket's automation_run_id must be NULL.
+func TestMigration77ClearsRunsBindingsAndEdges(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-77.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() setup error = %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Roll the fresh (head-schema) automation tables back to their
+	// migration-76 shape: accepted_cycle present, bindings without
+	// id/status, runs without cancel_reason/attempts, migration 77
+	// unrecorded.
+	if _, err := db.Exec(`
+		DROP TABLE automation_runs;
+		CREATE TABLE automation_runs (
+			id TEXT PRIMARY KEY,
+			definition_id TEXT NOT NULL,
+			occurrence_id TEXT NOT NULL,
+			definition_revision INTEGER NOT NULL,
+			snapshot_json TEXT NOT NULL,
+			state TEXT NOT NULL,
+			last_error TEXT NOT NULL DEFAULT '',
+			ticket_id TEXT,
+			session_id TEXT,
+			workspace_id TEXT,
+			pane_id TEXT,
+			resolved_location_json TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			delivered_at TEXT,
+			FOREIGN KEY (definition_id) REFERENCES automation_definitions(id),
+			FOREIGN KEY (occurrence_id) REFERENCES automation_occurrences(id)
+		);
+		CREATE INDEX idx_automation_runs_definition_created ON automation_runs(definition_id, created_at);
+
+		DROP TABLE automation_continuity_bindings;
+		CREATE TABLE automation_continuity_bindings (
+			definition_id TEXT NOT NULL,
+			continuity_key TEXT NOT NULL,
+			ticket_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			pane_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (definition_id, continuity_key),
+			FOREIGN KEY (definition_id) REFERENCES automation_definitions(id)
+		);
+
+		DROP TABLE automation_review_request_edges;
+		CREATE TABLE automation_review_request_edges (
+			definition_id TEXT NOT NULL,
+			subject_key TEXT NOT NULL,
+			host TEXT NOT NULL,
+			active INTEGER NOT NULL,
+			cycle INTEGER NOT NULL,
+			accepted_cycle INTEGER NOT NULL DEFAULT 0,
+			last_observed_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (definition_id, subject_key, host),
+			FOREIGN KEY (definition_id) REFERENCES automation_definitions(id)
+		);
+		CREATE INDEX idx_automation_review_edges_host ON automation_review_request_edges(host, active);
+
+		DELETE FROM schema_migrations WHERE version >= 77;
+	`); err != nil {
+		db.Close()
+		t.Fatalf("roll back to pre-migration-77 schema: %v", err)
+	}
+
+	if _, err := db.Exec(
+		`INSERT INTO automation_definitions (id, name, enabled, revision, spec_json, created_at, updated_at, deleted_at) VALUES (?, ?, 1, 1, ?, ?, ?, '')`,
+		"legacy-def", "Legacy", `{"id":"legacy-def","name":"Legacy"}`, now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_definitions: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_occurrences (id, definition_id, provider, occurrence_key, observed_at, payload_json, created_at) VALUES (?, ?, 'manual', 'request-1', ?, '{}', ?)`,
+		"occ-1", "legacy-def", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_occurrences: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_runs (id, definition_id, occurrence_id, definition_revision, snapshot_json, state, ticket_id, session_id, workspace_id, pane_id, created_at, updated_at) VALUES (?, ?, ?, 1, '{}', 'delivered', ?, 'session-1', 'workspace-1', 'pane-1', ?, ?)`,
+		"run-1", "legacy-def", "occ-1", "legacy-ticket", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_runs: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_ticket_occurrence_events (run_id, ticket_id, created_at) VALUES (?, ?, ?)`,
+		"run-1", "legacy-ticket", now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_ticket_occurrence_events: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_continuity_bindings (definition_id, continuity_key, ticket_id, session_id, workspace_id, pane_id, created_at, updated_at) VALUES (?, 'fresh', ?, 'session-1', 'workspace-1', 'pane-1', ?, ?)`,
+		"legacy-def", "legacy-ticket", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_continuity_bindings: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_review_request_edges (definition_id, subject_key, host, active, cycle, accepted_cycle, last_observed_at, updated_at) VALUES (?, 'subject-1', 'github.com', 1, 1, 1, ?, ?)`,
+		"legacy-def", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_review_request_edges: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_provider_cursors (definition_id, provider, scope, observed_at) VALUES (?, 'github', 'repo', ?)`,
+		"legacy-def", now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_provider_cursors: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO tickets (id, title, status, automation_run_id, created_at, updated_at) VALUES ('legacy-ticket', 'Legacy ticket', 'working', ?, ?, ?)`,
+		"run-1", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed tickets: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close seeded db: %v", err)
+	}
+
+	migrated, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() migration 77 = %v", err)
+	}
+	defer migrated.Close()
+
+	for _, table := range []string{
+		"automation_ticket_occurrence_events", "automation_runs", "automation_occurrences",
+		"automation_continuity_bindings", "automation_review_request_edges", "automation_provider_cursors",
+	} {
+		var count int
+		if err := migrated.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s`, table)).Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s row count = %d, want 0 (migration 77 must wipe automation state)", table, count)
+		}
+	}
+
+	var automationRunID sql.NullString
+	if err := migrated.QueryRow(`SELECT automation_run_id FROM tickets WHERE id = 'legacy-ticket'`).Scan(&automationRunID); err != nil {
+		t.Fatalf("query ticket automation_run_id: %v", err)
+	}
+	if automationRunID.Valid {
+		t.Fatalf("ticket automation_run_id = %q, want NULL", automationRunID.String)
+	}
+
+	var acceptedCycleColumns int
+	if err := migrated.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('automation_review_request_edges') WHERE name = 'accepted_cycle'`,
+	).Scan(&acceptedCycleColumns); err != nil {
+		t.Fatalf("query automation_review_request_edges.accepted_cycle: %v", err)
+	}
+	if acceptedCycleColumns != 0 {
+		t.Fatalf("automation_review_request_edges.accepted_cycle columns = %d, want 0 (migration 77 drops it)", acceptedCycleColumns)
+	}
+
+	for _, col := range []string{"cancel_reason", "attempts"} {
+		var n int
+		if err := migrated.QueryRow(
+			`SELECT COUNT(*) FROM pragma_table_info('automation_runs') WHERE name = ?`, col,
+		).Scan(&n); err != nil {
+			t.Fatalf("query automation_runs.%s: %v", col, err)
+		}
+		if n != 1 {
+			t.Fatalf("automation_runs.%s columns = %d, want 1", col, n)
+		}
+	}
+
+	for _, col := range []string{"id", "status", "released_reason", "released_at"} {
+		var n int
+		if err := migrated.QueryRow(
+			`SELECT COUNT(*) FROM pragma_table_info('automation_continuity_bindings') WHERE name = ?`, col,
+		).Scan(&n); err != nil {
+			t.Fatalf("query automation_continuity_bindings.%s: %v", col, err)
+		}
+		if n != 1 {
+			t.Fatalf("automation_continuity_bindings.%s columns = %d, want 1", col, n)
+		}
+	}
+
+	var activeIndexCount int
+	if err := migrated.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_automation_bindings_active'`,
+	).Scan(&activeIndexCount); err != nil {
+		t.Fatalf("query idx_automation_bindings_active: %v", err)
+	}
+	if activeIndexCount != 1 {
+		t.Fatalf("idx_automation_bindings_active count = %d, want 1", activeIndexCount)
+	}
+
+	// The unique-active partial index must reject a second active binding
+	// for the same definition+continuity_key.
+	if _, err := migrated.Exec(
+		`INSERT INTO automation_continuity_bindings (id, definition_id, continuity_key, ticket_id, session_id, workspace_id, pane_id, status, created_at, updated_at) VALUES ('b1', 'legacy-def', 'fresh', 't1', 's1', 'w1', 'p1', 'active', ?, ?)`,
+		now, now,
+	); err != nil {
+		t.Fatalf("seed first active binding: %v", err)
+	}
+	if _, err := migrated.Exec(
+		`INSERT INTO automation_continuity_bindings (id, definition_id, continuity_key, ticket_id, session_id, workspace_id, pane_id, status, created_at, updated_at) VALUES ('b2', 'legacy-def', 'fresh', 't2', 's2', 'w2', 'p2', 'active', ?, ?)`,
+		now, now,
+	); err == nil {
+		t.Fatal("expected unique-active index to reject a second active binding for the same definition+continuity_key")
 	}
 }
 
