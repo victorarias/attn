@@ -212,7 +212,7 @@ func (d *Daemon) automationRunCleanupSafety(run store.AutomationRun) (automation
 
 // automationRunWorktreePath resolves a run's worktree directory (if any)
 // from its persisted ResolvedLocationJSON — automation.ResolvedLocation, not
-// the transient automation.PreparedLocation returned by PrepareLocation.
+// the transient automation.PreparedLocation returned by prepareAutomationLocation.
 // Never re-derived by path convention: an absent resolved worktree means
 // nothing to remove, not a signal to guess the path.
 func automationRunWorktreePath(run store.AutomationRun) (string, error) {
@@ -229,7 +229,7 @@ func automationRunWorktreePath(run store.AutomationRun) (string, error) {
 // removeAutomationRunWorktree removes a run's worktree from disk, assuming
 // automationRunCleanupSafety already returned automationRunCleanupOK.
 // Automation worktrees are created via git.EnsureAutomationSessionWorktree
-// (PrepareLocation/PrepareGitHubReviewLocation in automations.go) without
+// (prepareAutomationLocation/PrepareGitHubReviewLocation in automations.go) without
 // ever calling store.AddWorktree, so — unlike interactive-session worktrees —
 // they are never registered in the store's worktree registry; this always
 // goes through git.DeleteWorktree directly rather than Daemon.doDeleteWorktree's
