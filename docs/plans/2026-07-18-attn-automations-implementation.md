@@ -1070,13 +1070,14 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       offers Reload as the recovery path (D4/D5). The buffer is populated only
       on mount or an explicit Reload, never by an `automations_changed`
       broadcast, so a background refetch cannot stomp text being typed (D6).
-      Proven by the packaged scenario `real-app:scenario-automation-editor` —
-      run `automation-editor-2026-07-21T00-05-15-547Z`, all seven legs green
-      (starter template, invalid-rejected-and-nothing-stored, create,
-      create-collision refusal, comment round-trip, id-change refusal, and
-      stale-revision refusal followed by a successful Reload) against the app
-      built from `8c17eb2c` (2026-07-21), with the daemon's own state
-      cross-checked through the bundled CLI at every leg. D1 (comments survive)
+      Proven by the packaged scenario `real-app:scenario-automation-editor`,
+      nine legs (starter template, invalid-rejected-and-nothing-stored, create,
+      create-collision refusal, comment round-trip, id-change refusal,
+      stale-revision refusal followed by a successful Reload, a comment-only
+      edit bumping the revision, and a save refused after the definition was
+      deleted elsewhere), with the daemon's own state cross-checked through the
+      bundled CLI at every leg; the run id and build head are recorded below.
+      D1 (comments survive)
       is proven by the stored `SpecYAML` still carrying the run's
       `# harness-marker:` line after the save/reload round-trip; definitions
       created before migration 75 have no stored YAML and re-render comment-free
@@ -1087,9 +1088,27 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       being typed), validate running inline on the client read loop where
       `git.ValidateLocalClone` stats paths and shells out to git twice per
       override, and a create silently overwriting a live definition that shared
-      its id. Each is fixed with a regression test, and the collision guard was
-      mutation-verified: without it the create succeeds and bumps the victim to
-      revision 2.
+      its id. The Reload gate and the collision guard each carry a regression
+      test, and the collision guard was mutation-verified: without it the create
+      succeeds and bumps the victim to revision 2. The read-loop fix carries no
+      test — it moves a handler onto its own goroutine, and a test at that seam
+      would assert Go's scheduling rather than any behavior of ours.
+      An adversarial gate over six dimensions then found five further defects,
+      all fixed here with mutation-verified regression tests. Three were the
+      same mistake in different clothes — trusting a value that another writer
+      can move underneath you. The revision counter did not cover `spec_yaml`,
+      so a comment-only save bumped nothing and the stale-save guard was blind
+      to precisely the edits this editor exists to make. `DeleteAutomationDefinition`
+      likewise leaves `revision` untouched, so a stale editor's Save passed the
+      guard and silently resurrected a definition someone had deleted — live,
+      enabled, and for a cron trigger firing unattended sessions again, reported
+      to the user as a successful save. And a Validate response that arrived
+      after further typing overwrote the cleared state, rendering "Looks good."
+      against text the daemon never saw. The other two: edits typed during an
+      in-flight Save were discarded when the editor closed, and
+      `attn automation validate` printed `null` on success because
+      `json.Marshal` of a nil payload yields the literal `null`, which defeats
+      `omitempty` and leaves the client decoding a non-nil four-byte `Data`.
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
 
