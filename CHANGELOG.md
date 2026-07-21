@@ -18,8 +18,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   leave the original running and quietly create a second one), creating a new
   automation whose `id` already belongs to one you have (which would replace
   it wholesale), and saving over a definition that changed elsewhere since you
-  opened it — the last offers a reload. Your YAML is now stored as you wrote
-  it, so comments and formatting survive an edit round-trip; definitions
+  opened it — the last offers a reload. If the definition was *deleted* while
+  you had it open, saving is refused rather than quietly bringing it back, so
+  an automation you turned off does not start running again behind you.
+  Your YAML is now stored as you wrote it, so comments and formatting survive
+  an edit round-trip — including against someone else editing the same
+  definition, since a comment-only change counts as a change; definitions
   applied before this release are rendered from their stored form the first
   time and keep their new text afterwards.
 - **Automations now have a panel in the app.** A new toolbar button opens an
