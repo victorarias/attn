@@ -995,9 +995,11 @@ func (s *Store) ArchiveTicket(id string, now time.Time) error {
 }
 
 // SweepExpiredTickets hard-deletes terminal tickets whose closed_at is older than
-// now-ttl, cascading to their activity, attachments, events, event cursors, and
-// (see the automation_continuity_bindings delete below) any automation continuity
-// binding the ticket documents. Open tickets (a durable backlog) are never swept.
+// now-ttl, cascading to their activity, attachments, events, and event cursors.
+// Any still-active automation continuity binding the ticket documents is
+// released (status=released, reason=ticket_swept — see the
+// automation_continuity_bindings update below), not deleted: binding rows are
+// append-only history in v2. Open tickets (a durable backlog) are never swept.
 // Returns the number of tickets removed. The caller
 // passes now and the TTL (production: time.Now() and 30 days); tests inject both.
 func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, error) {
@@ -1039,15 +1041,24 @@ func (s *Store) SweepExpiredTickets(now time.Time, ttl time.Duration) (int, erro
 	}
 	// A continuity binding's ticket_id pins it to one thread's documenting
 	// ticket; once that ticket is swept there is nothing left to resume, so
-	// release the binding atomically with it. This is what actually bounds a
-	// bound thread's worktree lifetime (see AutomationSessionHasContinuityBinding
-	// and ListPrunableAutomationRuns): the per-subject reap in
-	// ReconcileAutomationReviewRequests only fires once, at the moment a review
-	// request's edge goes inactive, and no-ops if the ticket is still open at
-	// that instant — it does not revisit an edge that stays inactive while its
-	// ticket later ages out. Leave that reap alone; it still covers the case
-	// where the ticket was already gone at withdraw time.
-	if _, err := tx.Exec(`DELETE FROM automation_continuity_bindings WHERE ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`, cutoff); err != nil {
+	// release the binding atomically with it. Bindings are append-only (v2's
+	// Data Model invariant, docs/plans/2026-07-21-automations-v2-simplification.md):
+	// this releases the row (status/released_reason/released_at), it never
+	// deletes it, so a swept thread still leaves a released row as history —
+	// exactly the reason the ticket_swept release reason exists. Already-released
+	// rows are left untouched (their own reason/timestamps stand); only a row
+	// still active when its ticket sweeps is affected. This is what actually
+	// bounds a bound thread's worktree lifetime (see
+	// AutomationSessionHasContinuityBinding and ListPrunableAutomationRuns): the
+	// per-subject reap in ReconcileAutomationReviewRequests only fires once, at
+	// the moment a review request's edge goes inactive, and no-ops if the ticket
+	// is still open at that instant — it does not revisit an edge that stays
+	// inactive while its ticket later ages out. Leave that reap alone; it still
+	// covers the case where the ticket was already gone at withdraw time.
+	if _, err := tx.Exec(
+		`UPDATE automation_continuity_bindings SET status=?,released_reason=?,released_at=?,updated_at=? WHERE status=? AND ticket_id IN (SELECT id FROM tickets WHERE `+expired+`)`,
+		AutomationBindingStatusReleased, AutomationBindingReleasedTicketSwept, formatTicketTime(now), formatTicketTime(now), AutomationBindingStatusActive, cutoff,
+	); err != nil {
 		return 0, err
 	}
 	res, err := tx.Exec(`DELETE FROM tickets WHERE `+expired, cutoff)

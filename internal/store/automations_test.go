@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"strings"
 	"sync"
 	"testing"
@@ -1141,13 +1142,16 @@ func TestListPrunableAutomationRunsStillPrunesNonContinuityRuns(t *testing.T) {
 	}
 }
 
-// TestSweepExpiredTicketsCascadesToContinuityBindings pins the other half of
-// the fix ListPrunableAutomationRunsProtectsBoundThreadOrigin (above) relies
-// on: a binding is only a temporary hold, not a permanent one. Once the
-// ticket it documents ages past the TTL, SweepExpiredTickets must release
-// the binding in the same transaction — a within-TTL or still-open thread's
-// binding must be left alone.
-func TestSweepExpiredTicketsCascadesToContinuityBindings(t *testing.T) {
+// TestSweepExpiredTicketsReleasesActiveContinuityBindings pins the other half
+// of the fix ListPrunableAutomationRunsProtectsBoundThreadOrigin (above)
+// relies on: a binding is only a temporary hold, not a permanent one. Once
+// the ticket it documents ages past the TTL, SweepExpiredTickets must
+// release the binding (status=released, reason=ticket_swept) in the same
+// transaction — never delete the row, since bindings are append-only history
+// in v2 — and GetActiveAutomationContinuityBinding must stop returning it so
+// the next occurrence claims fresh. A within-TTL or still-open thread's
+// binding must be left alone (still active).
+func TestSweepExpiredTicketsReleasesActiveContinuityBindings(t *testing.T) {
 	s := New()
 	base := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	const ttl = 30 * 24 * time.Hour
@@ -1194,22 +1198,32 @@ func TestSweepExpiredTicketsCascadesToContinuityBindings(t *testing.T) {
 		t.Fatalf("removed = %d, want 1 (only swept)", removed)
 	}
 
-	bindingExists := func(continuityKey string) bool {
+	// Bindings are append-only in v2 (docs/plans/2026-07-21-automations-v2-simplification.md
+	// Data Model): a swept binding's row must still exist afterward, released
+	// rather than deleted, so history survives. No exported store method lists
+	// a binding by status, so query directly.
+	bindingStatus := func(continuityKey string) (status, reason string, exists bool) {
 		t.Helper()
-		var exists int
-		if err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?)`, def.ID, continuityKey).Scan(&exists); err != nil {
+		err := s.db.QueryRow(`SELECT status,released_reason FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?`, def.ID, continuityKey).Scan(&status, &reason)
+		if err == sql.ErrNoRows {
+			return "", "", false
+		}
+		if err != nil {
 			t.Fatalf("query binding %s: %v", continuityKey, err)
 		}
-		return exists != 0
+		return status, reason, true
 	}
-	if bindingExists("swept") {
-		t.Fatal("swept thread's binding survived its ticket's sweep")
+	if status, reason, exists := bindingStatus("swept"); !exists || status != AutomationBindingStatusReleased || reason != AutomationBindingReleasedTicketSwept {
+		t.Fatalf("swept thread's binding = status=%q reason=%q exists=%v, want released/ticket_swept and still present", status, reason, exists)
 	}
-	if !bindingExists("recent") {
-		t.Fatal("within-TTL thread's binding was released early")
+	if active, err := s.GetActiveAutomationContinuityBinding(def.ID, "swept"); err != nil || active != nil {
+		t.Fatalf("swept thread's binding still active = %#v err=%v, want none", active, err)
 	}
-	if !bindingExists("open") {
-		t.Fatal("open thread's binding was released even though its ticket was never closed")
+	if status, _, exists := bindingStatus("recent"); !exists || status != AutomationBindingStatusActive {
+		t.Fatalf("within-TTL thread's binding = status=%q exists=%v, want still active", status, exists)
+	}
+	if status, _, exists := bindingStatus("open"); !exists || status != AutomationBindingStatusActive {
+		t.Fatalf("open thread's binding = status=%q exists=%v, want still active (its ticket was never closed)", status, exists)
 	}
 }
 

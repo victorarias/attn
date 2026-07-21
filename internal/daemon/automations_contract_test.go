@@ -404,20 +404,21 @@ func TestAutomationApplyRevertAllowsFreshThreadEvenWhenOldTicketWasSwept(t *test
 // second occurrence of the exact same thread as run1, inheriting its session
 // and ticket id. That models the real race this exists for: a claim reads
 // the binding (inheriting session-1/ticket-1) just before the TTL sweep
-// deletes that same ticket out from under it.
+// removes that same ticket out from under it.
 //
-// Note this exercises store.SweepExpiredTickets' ticket+binding cascade
-// (tickets.go's SweepExpiredTickets), not automation.ResolveContinuation's
-// own dangling-binding self-heal branch: the sweep atomically deletes the
-// active binding alongside its ticket, so by the time req validates,
-// GetActiveContinuityBinding already returns nil — the "no active binding"
-// Fresh path, not SelfHealedDanglingBinding. (A binding that stays active
-// while its own ticket is independently gone — ResolveContinuation's actual
-// self-heal branch — has no reachable trigger via the public Store API today,
-// since the only ticket-deleting path cascades the binding with it; that
-// branch is pinned directly against automation.BindingStore instead, see
+// This exercises store.SweepExpiredTickets' ticket sweep releasing the
+// active binding alongside it (see tickets.go's SweepExpiredTickets), not
+// automation.ResolveContinuation's own dangling-binding self-heal branch: the
+// sweep atomically releases the binding when it removes its ticket, so by
+// the time req validates, GetActiveContinuityBinding already returns nil —
+// the "no active binding" Fresh path, not SelfHealedDanglingBinding. (A
+// binding that stays active while its own ticket is independently gone —
+// ResolveContinuation's actual self-heal branch — has no reachable trigger
+// via the public Store API today, since the only ticket-removing path
+// releases the binding with it; that branch is pinned directly against
+// automation.BindingStore instead, see
 // TestResolveContinuationDanglingBindingSelfHeals.) What this test actually
-// pins: after that cascade, delivery must not treat req's own now-nil
+// pins: after that release, delivery must not treat req's own now-nil
 // identifiers as a refusal — it must proceed fresh, since there is nothing
 // left of that thread to reuse. It is independent of the ownTicketID fix in
 // automation.ResolveContinuation (see TestResolveContinuationOwnBindingIsFreshWithoutRelease
@@ -472,8 +473,8 @@ func TestValidateAutomationContinuationSelfHealsItsOwnVanishedTicket(t *testing.
 	}
 
 	// The TTL sweep races the claim above: it fires before delivery gets a
-	// chance to validate, removing run1/run2's shared ticket (and, via the
-	// cascade, the binding) out from under req.
+	// chance to validate, removing run1/run2's shared ticket and releasing
+	// its binding out from under req.
 	if removed, err := s.SweepExpiredTickets(now.Add(6*time.Hour), time.Hour); err != nil || removed != 1 {
 		t.Fatalf("sweep removed=%d err=%v", removed, err)
 	}
