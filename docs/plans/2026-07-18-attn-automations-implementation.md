@@ -1057,7 +1057,39 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       or a thread as living forever; each is fixed with regression tests, and
       the shared-identity and thread-lifetime invariants are recorded above as
       domain context.
-- [ ] Add the self-service YAML editor and validate-without-apply (Slice 7 PR B).
+- [x] Add the self-service YAML editor and validate-without-apply (Slice 7 PR B).
+      One buffer serves create and edit: create loads through the same
+      `getDefinition('')` path and gets the starter template at revision 0, so
+      there is no second code path to keep in step (D7). Validate runs the full
+      definition check without writing anything, and Save is the only writer.
+      Three mistakes are refused rather than silently absorbed — changing the
+      `id` of the definition being edited (apply is keyed on the id inside the
+      YAML, so a rename is a separate create), creating an automation whose
+      `id` already belongs to a live definition (which would replace it
+      wholesale), and saving over a definition that changed elsewhere, which
+      offers Reload as the recovery path (D4/D5). The buffer is populated only
+      on mount or an explicit Reload, never by an `automations_changed`
+      broadcast, so a background refetch cannot stomp text being typed (D6).
+      Proven by the packaged scenario `real-app:scenario-automation-editor` —
+      run `automation-editor-2026-07-21T00-05-15-547Z`, all seven legs green
+      (starter template, invalid-rejected-and-nothing-stored, create,
+      create-collision refusal, comment round-trip, id-change refusal, and
+      stale-revision refusal followed by a successful Reload) against the app
+      built from `8c17eb2c` (2026-07-21), with the daemon's own state
+      cross-checked through the bundled CLI at every leg. D1 (comments survive)
+      is proven by the stored `SpecYAML` still carrying the run's
+      `# harness-marker:` line after the save/reload round-trip; definitions
+      created before migration 75 have no stored YAML and re-render comment-free
+      on first open, which the editor says in-line rather than hiding.
+      Reviewing the product code directly — not the subagent reports — found
+      three defects the tests had not caught: a Reload button offered while
+      creating (it would have re-fetched the starter template over the draft
+      being typed), validate running inline on the client read loop where
+      `git.ValidateLocalClone` stats paths and shells out to git twice per
+      override, and a create silently overwriting a live definition that shared
+      its id. Each is fixed with a regression test, and the collision guard was
+      mutation-verified: without it the create succeeds and bumps the victim to
+      revision 2.
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
 
