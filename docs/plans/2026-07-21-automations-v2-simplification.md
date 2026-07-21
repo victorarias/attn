@@ -112,17 +112,27 @@ real concept and drives binding rotation.
 
 ## Implementation Steps
 
-- [ ] **PR1 — mechanical split.** Delete `internal/workdelivery` (inline the
+- [x] **PR1 — mechanical split.** Delete `internal/workdelivery` (inline the
       seven steps into one daemon deliver function); split
       `daemon/automations.go` by concern (definitions / observe-github /
-      deliver / recover). No behavior change; tests move along.
-- [ ] **PR2 — v2 schema + explicit state.** Clean-slate migration (drop and
-      recreate automation tables — none in real use; check burned migration
-      versions against real DBs before numbering). Run `cancelled` +
-      `cancel_reason`; binding `status`/`released_reason` (never delete rows);
-      `enabled` column-only (`attn automation enable|disable`, spec loses the
-      field); drop `spec_yaml`. Engine `Store` interface lands here; delete
-      history-replay continuity inference.
+      deliver / recover). No behavior change; tests move along. Live-verified
+      on the dev profile (manual run reached `delivered`).
+- [ ] **PR2a — definitions: enabled + spec storage.** Migration 76 recreates
+      `automation_definitions` without `spec_yaml`; `enabled` becomes
+      column-only (spec loses the field; YAML containing `enabled:` is a
+      parse error pointing at `attn automation enable|disable`); new CLI
+      verbs `attn automation enable|disable`; `SetEnabledInYAML` and the
+      spec-rewrite path in `SetAutomationEnabled` are deleted; the WS
+      definition-YAML surface falls back to rendering YAML from spec JSON.
+- [ ] **PR2b — runs + bindings: explicit state.** Migration 77 recreates
+      `automation_runs` (adds `cancel_reason`, `attempts`) and
+      `automation_continuity_bindings` (append-only: surrogate id, `status`
+      active|released, `released_reason`, `released_at`; unique active row
+      per (definition, continuity_key)). Withdrawal / disable / delete
+      become `cancelled` + reason; the `AutomationReviewWithdrawnError`
+      sentinel and `hasPriorAutomationContinuityRun` history replay are
+      deleted — delivery reads binding status directly. Go constants replace
+      bare state strings. Edges keep `accepted_cycle` until PR3.
 - [ ] **PR3 — claim/retry rework.** Drop `accepted_cycle`; candidacy from run
       existence per (subject, cycle); pending runs re-delivered on each
       observation/tick; scheduled cursor logic simplified to match. Kills the
@@ -160,6 +170,20 @@ real concept and drives binding rotation.
 - Continuity bindings become append-only with status instead of
   delete-then-infer: v1's three "found the hard way" inference subtleties were
   each production bugs; explicit state makes them unrepresentable.
+- PR2 split into PR2a/PR2b and the engine `Store` interface deferred to PR3:
+  the schema + state rework across the 1,384-line store file already brushes
+  the PR-size budget, and the interface only pays off with PR3's claim/retry
+  rework.
+- Migration numbering: production `~/.attn/attn.db` is at 73 — the v1
+  automation migrations 74–75 never reached production. v2 clean-slate
+  migrations are 76/77 and must apply from both 73 and 75; they also null
+  `tickets.automation_run_id` since all runs are wiped.
+- `SetAutomationEnabled` no longer bumps `revision`: revision guards spec
+  content, and enabled is no longer spec content. Enable still clears review
+  edges and fences provider cursors, as in v1.
+- Active binding whose ticket no longer exists self-heals at delivery time
+  (release with `ticket_swept`, log, deliver fresh) rather than hard-failing:
+  one well-defined transition, not inference.
 
 ## Open Questions
 
