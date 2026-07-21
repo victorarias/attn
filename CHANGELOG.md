@@ -6,6 +6,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-21]
+
+### Fixed
+- **New bash shell tiles no longer print a spurious "No such file or
+  directory" for `.bashrc` before dropping to the prompt.** The PATH-restore
+  overlay introduced for bash/sh login startup temporarily swaps `$HOME` to
+  an ephemeral directory; bash caches the `~` home-directory lookup from
+  that startup moment and doesn't notice the overlay resetting `$HOME` back
+  to the real value, so the first `~` reference in the user's own startup
+  files (commonly `source ~/.bashrc`) resolved against the now-deleted
+  overlay directory instead. The overlay now forks one throwaway external
+  command right after restoring `$HOME`, which flushes bash's stale cache
+  before any of the user's real startup files run.
+
 ## [2026-07-19]
 
 ### Added
