@@ -1212,7 +1212,7 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       renders the editor as a full replacement of the panel body, so the
       toggle control is not in the DOM at all then, and there is no way to
       drive that race through the real UI.
-- [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
+- [x] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
       Slices merged directly to `main` through their own PRs, so there is no
       long-lived integration branch and no separate integration PR to open; this
@@ -1225,17 +1225,45 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
         call was to ship and document rather than close the gap. The honest
         per-checkpoint table is under "Partial failure" above; checkpoints 7 and
         8 are the ones worth returning to.
-      - **Packaged-app matrix — not yet run.** Blocked on macOS revoking the
-        Accessibility grant for
-        `app/scripts/real-app-harness/.build/attn-real-input-driver` after it was
-        rebuilt. Every input-driven scenario fails at
-        `AXIsProcessTrustedWithOptions` until that binary is re-granted in System
-        Settings → Privacy & Security → Accessibility. A run attempted on
-        2026-07-21 failed 8 of 14 scenarios entirely for this reason — seven with
-        the explicit permission error and one timing out on an undelivered
-        keystroke — with no product regression among them. Re-run
-        `pnpm --dir app run real-app:serial-matrix` against a rebuilt
-        non-production profile once the grant is restored.
+      - **Packaged-app matrix — run 2026-07-21.** Non-production profile
+        `togglefix`, packaged app built from `e855c66a`, clean profile state.
+        All five automations scenarios pass: `automation-lifecycle` (in the
+        serial matrix) plus `automation-editor`, `automation-pr-continuity`,
+        `automation-scheduled-cleanup`, and `ticket-resume` run individually.
+        `automation-scheduled-cleanup` is the strongest of these — a live codex
+        agent removed the merged-clean worktree while leaving the dirty-wip
+        worktree and its uncommitted file untouched, occurrences coalesced onto
+        one singleton ticket and session, and exactly one process spawn backed
+        the catch-up run (no replay storm).
+
+        The serial matrix itself is **17 pass / 18 fail**, and no failure is
+        attributable to this epic. Each was traced to a cause verified to be a
+        git ancestor of the pre-epic commit `1e300bf7`, or to the environment:
+
+        | Cause | Origin | Scenarios |
+        | --- | --- | --- |
+        | `kind: "shell"` panes removed; `PaneKindAgent` is now the only pane kind, so the harness's `waitForNewShellPane` can never match | `340a8dff` 2026-05-30 | 9 |
+        | `daemonObserver.mjs` sends no `client_hello`, so `add_endpoint` is rejected by the workspace-sessions guard | `2deea077` 2026-05-30 | 4 |
+        | `attn ticket comment` refuses to write when unread ticket activity exists; the scenario does not handle the retry | `03a232e2` (#594) 2026-07-18 | 1 |
+        | codex account out of credits (codex renders a usage-limit banner, adding a second bordered frame) | environment, resolved | 1 |
+
+        Three failures remain unattributed and are **not** claimed to be clean:
+        `notebook-editor-undo`, `nudge-trigger`, and
+        `workspace-close-last-session-switches-back` (the last passed on an
+        earlier run, so it is flaky). None touch automations code paths.
+
+        Two operational corrections to earlier notes in this guide. First, the
+        Accessibility grant is **not** held by
+        `app/scripts/real-app-harness/.build/attn-real-input-driver`: macOS
+        attributes the request to the responsible process, which for an agent
+        session under attn is `com.attn.manager`. The driver's CDHash was
+        byte-identical across the failure window, so rebuilding it was never the
+        cause; re-signing `attn.app` on 2026-07-19 stale-broke a TCC row that the
+        UI still displayed as allowed. `tccutil reset Accessibility
+        com.attn.manager` plus a fresh grant cleared it. Second, an aborted
+        matrix run orphans sessions and `pty-worker` processes that survive
+        `attn daemon stop`, and the next run then fails with unrelated-looking
+        pane timeouts; reset the profile between runs.
 
 When implementation forces a choice that changes the product behavior described
 in the vision, stop and update the vision by agreement. When it only changes code
