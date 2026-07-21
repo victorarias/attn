@@ -1058,6 +1058,61 @@ func TestAutomationCommandSetEnabledTogglesColumn(t *testing.T) {
 	}
 }
 
+// TestAutomationSetEnabledRoutesThroughSocketDispatch pins the daemon.go
+// dispatch case list itself: handleConnection's `switch cmd` must route
+// CmdAutomationSetEnabled to handleAutomationCommand. That routing hole is
+// exactly what let `attn automation enable|disable` regress to "daemon
+// error: unknown command" in production while every other
+// automation_set_enabled test — including
+// TestAutomationCommandSetEnabledTogglesColumn immediately above, which
+// calls handleAutomationCommand directly — stayed green: none of them go
+// through handleConnection's own switch, so none of them could see a
+// missing case there. This drives the command through the full real
+// unix-socket path (handleConnection -> ParseMessage -> switch ->
+// handleAutomationCommand), the same path the CLI/client uses, following
+// notebook_test.go's sendNotebookCmd technique (net.Pipe + handleConnection
+// + one JSON-encoded request, one JSON-decoded response, connection closed
+// via the deferred client-side Close).
+func TestAutomationSetEnabledRoutesThroughSocketDispatch(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !def.Enabled {
+		t.Fatalf("fixture definition = %#v, want enabled", def)
+	}
+
+	server, clientConn := net.Pipe()
+	defer clientConn.Close()
+	go d.handleConnection(server)
+	if err := json.NewEncoder(clientConn).Encode(protocol.AutomationSetEnabledMessage{
+		Cmd:          protocol.CmdAutomationSetEnabled,
+		DefinitionID: def.ID,
+		Enabled:      false,
+	}); err != nil {
+		t.Fatalf("encode automation_set_enabled: %v", err)
+	}
+
+	var encoded map[string]any
+	if err := json.NewDecoder(clientConn).Decode(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	if success, _ := encoded["success"].(bool); !success {
+		t.Fatalf("automation_set_enabled over the real socket dispatch failed: %+v", encoded)
+	}
+
+	stored, err := s.GetAutomationDefinition(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Enabled {
+		t.Fatalf("definition after real-dispatch automation_set_enabled(false) = %#v, want disabled", stored)
+	}
+}
+
 // The sibling of the case above, pinned so the omitempty guard is not later
 // "simplified" into dropping null payloads generally. GetAutomationDefinition
 // returns a typed nil *store.AutomationDefinition, and assigning that to an
