@@ -107,6 +107,16 @@ func (c *Client) AutomationRuns(id string) (json.RawMessage, error) {
 	}
 	return r.Data, nil
 }
+
+// AutomationSetEnabled toggles a definition's enabled flag over the same
+// automation_set_enabled command the WS panel's toggle uses.
+func (c *Client) AutomationSetEnabled(id string, enabled bool) (json.RawMessage, error) {
+	r, e := c.sendAutomation(protocol.AutomationSetEnabledMessage{Cmd: protocol.CmdAutomationSetEnabled, DefinitionID: id, Enabled: enabled})
+	if e != nil {
+		return nil, e
+	}
+	return r.Data, nil
+}
 func (c *Client) AutomationDelete(id string) error {
 	_, e := c.sendAutomation(protocol.AutomationDeleteMessage{Cmd: protocol.CmdAutomationDelete, DefinitionID: id})
 	return e

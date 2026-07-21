@@ -11,7 +11,7 @@ import (
 )
 
 func automationUsage() {
-	fmt.Fprint(os.Stderr, "usage: attn automation <apply|validate|list|show|run|runs|delete|cleanup>\n")
+	fmt.Fprint(os.Stderr, "usage: attn automation <apply|validate|list|show|run|runs|enable|disable|delete|cleanup>\n")
 }
 func runAutomationCommand() {
 	if len(os.Args) < 3 {
@@ -109,6 +109,18 @@ func runAutomationCommand() {
 			break
 		}
 		data, err = c.AutomationRuns(os.Args[3])
+	case "enable":
+		if len(os.Args) != 4 {
+			err = fmt.Errorf("usage: attn automation enable <definition-id>")
+			break
+		}
+		data, err = c.AutomationSetEnabled(os.Args[3], true)
+	case "disable":
+		if len(os.Args) != 4 {
+			err = fmt.Errorf("usage: attn automation disable <definition-id>")
+			break
+		}
+		data, err = c.AutomationSetEnabled(os.Args[3], false)
 	case "delete":
 		if len(os.Args) != 4 {
 			err = fmt.Errorf("usage: attn automation delete <definition-id>")

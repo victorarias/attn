@@ -426,7 +426,6 @@ func TestAutomationValidateAndApplyAgreeOnCorpus(t *testing.T) {
 	const template = `api_version: attn.dev/automations/v1alpha1
 id: %s
 name: Corpus case
-enabled: true
 trigger: {type: manual}
 prompt: Do the thing.
 launch: {driver: %s}
@@ -601,9 +600,9 @@ func TestAutomationApplyWSRefusesCreateOverLiveDefinition(t *testing.T) {
 	if err != nil || survivor == nil {
 		t.Fatalf("definition after refused create = %#v err=%v, want it to survive", survivor, err)
 	}
-	if survivor.Revision != original.Revision || !strings.Contains(survivor.SpecYAML, "Check locally.") {
-		t.Fatalf("definition after refused create = revision %d yaml %q, want the original untouched",
-			survivor.Revision, survivor.SpecYAML)
+	if survivor.Revision != original.Revision || !strings.Contains(survivor.SpecJSON, "Check locally.") {
+		t.Fatalf("definition after refused create = revision %d spec_json %q, want the original untouched",
+			survivor.Revision, survivor.SpecJSON)
 	}
 
 	// Soft-deleted is not a collision: the same create now resurrects.
@@ -622,7 +621,7 @@ func TestAutomationApplyWSRefusesCreateOverLiveDefinition(t *testing.T) {
 		t.Fatalf("resurrect apply result = %+v, want success", resurrectRes)
 	}
 	resurrected, err := s.GetAutomationDefinition(original.ID)
-	if err != nil || resurrected == nil || !strings.Contains(resurrected.SpecYAML, "Something else entirely.") {
+	if err != nil || resurrected == nil || !strings.Contains(resurrected.SpecJSON, "Something else entirely.") {
 		t.Fatalf("definition after resurrect = %#v err=%v, want the new content live", resurrected, err)
 	}
 }
@@ -748,53 +747,6 @@ func TestAutomationDefinitionGetWSStarterTemplate(t *testing.T) {
 	}
 }
 
-// TestAutomationDefinitionGetWSResolvesLegacyEmptySpecYAML pins D1's fallback
-// for a definition applied before migration 75 added spec_yaml: an existing
-// store row with SpecYAML == "" (what every UpsertAutomationDefinition call
-// wrote before this PR) must still come back from definition_get as valid,
-// re-appliable YAML — reconstructed from spec_json via
-// automation.MarshalDefinitionYAML — not as an empty string.
-func TestAutomationDefinitionGetWSResolvesLegacyEmptySpecYAML(t *testing.T) {
-	s := store.New()
-	d := &Daemon{store: s, wsHub: newWSHub()}
-	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
-	applied, err := d.automationApply(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Simulate a pre-migration-75 row: same spec_json, but spec_yaml wiped
-	// back to "" as every legacy UpsertAutomationDefinition call left it.
-	legacy, err := s.UpsertAutomationDefinition(applied.ID, applied.Name, applied.SpecJSON, "", applied.Enabled, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if legacy.SpecYAML != "" {
-		t.Fatalf("seeded legacy row spec_yaml = %q, want empty", legacy.SpecYAML)
-	}
-
-	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.handleAutomationDefinitionGetWS(client, &protocol.AutomationDefinitionGetMessage{
-		Cmd:          protocol.CmdAutomationDefinitionGet,
-		DefinitionID: applied.ID,
-		RequestID:    protocol.Ptr("get-legacy"),
-	})
-
-	var res protocol.AutomationActionResultMessage
-	readNotebookWSEvent(t, client.send, &res)
-	if !res.Success || res.SpecYaml == nil {
-		t.Fatalf("definition_get(%q) result = %+v, want success with spec_yaml set", applied.ID, res)
-	}
-	if *res.Revision != legacy.Revision {
-		t.Fatalf("definition_get revision = %v, want %d", res.Revision, legacy.Revision)
-	}
-	// The fallback-rendered YAML must itself be a legal input to
-	// validateAutomationSpec — proving the legacy row is still appliable,
-	// not just present.
-	if _, _, err := d.validateAutomationSpec(*res.SpecYaml); err != nil {
-		t.Fatalf("validateAutomationSpec(legacy fallback spec_yaml) error = %v, spec_yaml:\n%s", err, *res.SpecYaml)
-	}
-}
-
 // TestAutomationDefinitionGetWSUnknownID surfaces an unknown id as
 // success=false with an error, matching the rest of the automations WS
 // surface's business-failure shape (delete/cleanup/set_enabled), not a
@@ -817,40 +769,19 @@ func TestAutomationDefinitionGetWSUnknownID(t *testing.T) {
 	}
 }
 
-// automationToggleSplitBrainYAML is manualAutomationYAML with a trailing
-// comment on enabled, used by
-// TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling to
-// prove SetEnabledInYAML's headline guarantee — comments survive a toggle —
-// holds all the way through the daemon's own editor read path, not just
-// inside the store.
-const automationToggleSplitBrainYAML = `api_version: attn.dev/automations/v1alpha1
-id: manual-check
-name: Manual check
-enabled: true  # turn me off from the panel
-trigger: {type: manual}
-prompt: Check locally.
-launch: {driver: codex}
-location: {type: directory, path: "%s"}
-policy: {continuity: fresh, overlap: coalesce}
-`
-
-// TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling
-// closes the enabled split-brain defect end-to-end, through the exact path
-// the app uses: apply a definition, toggle it off via
-// handleAutomationSetEnabledWS (what the panel's toggle sends), then fetch it
-// back via handleAutomationDefinitionGetWS — the editor's own load path,
-// backed by automationDefinitionYAML. Before this fix, SetAutomationEnabled
-// wrote only the enabled COLUMN, so this fetch would still show
-// `enabled: true` (spec_yaml never having been updated); saving that stale
-// buffer back — even for an unrelated comment edit, exercised here as the
-// final step by re-applying exactly what definition_get returned — would
-// silently flip the definition back on. It must instead show
-// `enabled: false` with the comment intact, and re-applying it must leave
-// the definition disabled.
-func TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling(t *testing.T) {
+// TestAutomationDefinitionGetWSAfterToggleDerivesFromSpecJSON is the
+// replacement for the pre-PR2a split-brain regression test: enabled now has
+// exactly one authority (the store's enabled column) and is never present in
+// spec_yaml/spec_json at all, so there is no split-brain to close. This pins
+// the remaining contract instead — toggling via handleAutomationSetEnabledWS
+// must not touch spec content, and definition_get's derive-from-spec_json
+// path (automationDefinitionYAML, now the only path) must keep returning
+// re-appliable YAML after the toggle, with the definition staying disabled
+// across a re-apply of that fetched YAML.
+func TestAutomationDefinitionGetWSAfterToggleDerivesFromSpecJSON(t *testing.T) {
 	s := store.New()
 	d := &Daemon{store: s, wsHub: newWSHub()}
-	raw := fmt.Sprintf(automationToggleSplitBrainYAML, t.TempDir())
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
 	def, err := d.automationApply(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -881,11 +812,8 @@ func TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling(t *t
 		t.Fatalf("definition_get after toggle = %+v, want success with spec_yaml", getRes)
 	}
 	fetched := *getRes.SpecYaml
-	if !strings.Contains(fetched, "enabled: false") {
-		t.Fatalf("editor's own read path still shows the definition enabled:\n%s", fetched)
-	}
-	if !strings.Contains(fetched, "# turn me off from the panel") {
-		t.Fatalf("comment lost from the editor's read path:\n%s", fetched)
+	if strings.Contains(fetched, "enabled:") {
+		t.Fatalf("derived spec_yaml must never carry an enabled key:\n%s", fetched)
 	}
 
 	applyClient := &wsClient{send: make(chan outboundMessage, 4)}
@@ -904,7 +832,7 @@ func TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling(t *t
 
 	final, err := s.GetAutomationDefinition(def.ID)
 	if err != nil || final == nil || final.Enabled {
-		t.Fatalf("definition after re-applying fetched yaml = %#v err=%v, want it to stay disabled", final, err)
+		t.Fatalf("definition after re-applying fetched yaml = %#v err=%v, want it to stay disabled (apply never toggles enabled)", final, err)
 	}
 }
 
@@ -1087,6 +1015,46 @@ func TestAutomationCommandOmitsDataWhenActionHasNoPayload(t *testing.T) {
 	}
 	if _, present := encoded["data"]; present {
 		t.Fatalf("a payload-free action put %v on the wire under \"data\"; it must be omitted entirely so the client can tell \"no payload\" from \"payload that is null\"", encoded["data"])
+	}
+}
+
+// TestAutomationCommandSetEnabledTogglesColumn is the unix-socket-command half
+// of the enable/disable CLI verbs (cmd/attn/automation.go's "enable"/
+// "disable" cases): CmdAutomationSetEnabled must reach the same
+// automationSetEnabled the WS panel's toggle uses, over
+// handleAutomationCommand's plain net.Pipe transport, following the same
+// technique as TestAutomationCommandOmitsDataWhenActionHasNoPayload.
+func TestAutomationCommandSetEnabledTogglesColumn(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !def.Enabled {
+		t.Fatalf("fixture definition = %#v, want enabled", def)
+	}
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	go d.handleAutomationCommand(serverConn, protocol.CmdAutomationSetEnabled,
+		&protocol.AutomationSetEnabledMessage{Cmd: protocol.CmdAutomationSetEnabled, DefinitionID: def.ID, Enabled: false})
+
+	var encoded map[string]any
+	if err := json.NewDecoder(clientConn).Decode(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	if success, _ := encoded["success"].(bool); !success {
+		t.Fatalf("automation_set_enabled did not succeed: %+v", encoded)
+	}
+
+	stored, err := s.GetAutomationDefinition(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Enabled {
+		t.Fatalf("definition after socket automation_set_enabled(false) = %#v, want disabled", stored)
 	}
 }
 

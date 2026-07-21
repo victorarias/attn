@@ -24,7 +24,6 @@ type DefinitionSpec struct {
 	APIVersion string       `yaml:"api_version" json:"api_version"`
 	ID         string       `yaml:"id" json:"id"`
 	Name       string       `yaml:"name" json:"name"`
-	Enabled    bool         `yaml:"enabled" json:"enabled"`
 	Trigger    TriggerSpec  `yaml:"trigger" json:"trigger"`
 	Prompt     string       `yaml:"prompt" json:"prompt"`
 	Launch     LaunchSpec   `yaml:"launch" json:"launch"`
@@ -87,8 +86,21 @@ type Snapshot struct {
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// errEnabledManagedOutsideSpec is returned by ParseDefinitionYAML when the
+// document carries a top-level `enabled` key. `enabled` has exactly one
+// authority — the automation_definitions.enabled column — so a spec that
+// tries to set it is rejected outright rather than silently ignored.
+var errEnabledManagedOutsideSpec = errors.New("enabled is managed outside the spec; use 'attn automation enable' or 'attn automation disable'")
+
 func ParseDefinitionYAML(data []byte) (DefinitionSpec, []byte, error) {
 	var spec DefinitionSpec
+	var probe map[string]any
+	if err := yaml.Unmarshal(data, &probe); err != nil {
+		return spec, nil, fmt.Errorf("parse definition: %w", err)
+	}
+	if _, hasEnabled := probe["enabled"]; hasEnabled {
+		return spec, nil, errEnabledManagedOutsideSpec
+	}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&spec); err != nil {
@@ -124,7 +136,6 @@ var StarterDefinition = DefinitionSpec{
 	APIVersion: APIVersion,
 	ID:         "my-automation",
 	Name:       "My automation",
-	Enabled:    true,
 	Trigger:    TriggerSpec{Type: "manual"},
 	Prompt:     "Describe what the agent should do when this automation runs.",
 	Launch:     LaunchSpec{Driver: "codex"},

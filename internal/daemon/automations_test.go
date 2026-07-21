@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -311,7 +312,7 @@ func TestEnsureAutomationSessionPassesOneUnattendedContract(t *testing.T) {
 func TestFailAutomationRunFailsRunAndVisibleTicket(t *testing.T) {
 	s := store.New()
 	now := time.Now()
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +358,7 @@ func TestFailAutomationRunFailsRunAndVisibleTicket(t *testing.T) {
 func TestRetryableAutomationDeliveryKeepsRunAndTicketActive(t *testing.T) {
 	s := store.New()
 	now := time.Now()
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +392,7 @@ func TestRetryableAutomationDeliveryKeepsRunAndTicketActive(t *testing.T) {
 func TestDisabledAutomationRefusesRecoveredPendingDelivery(t *testing.T) {
 	s := store.New()
 	now := time.Now()
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +402,7 @@ func TestDisabledAutomationRefusesRecoveredPendingDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, def.SpecJSON, "", false, now.Add(time.Minute)); err != nil {
+	if _, _, err := s.SetAutomationEnabled(def.ID, false, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	d := &Daemon{store: s, wsHub: newWSHub()}
@@ -415,13 +416,12 @@ func TestDisabledAutomationRefusesRecoveredPendingDelivery(t *testing.T) {
 	}
 }
 
-func TestAutomationApplyDisableFailsQueuedPendingRun(t *testing.T) {
+func TestAutomationSetEnabledDisableFailsQueuedPendingRun(t *testing.T) {
 	s := store.New()
 	d := &Daemon{store: s, wsHub: newWSHub()}
 	raw := `api_version: attn.dev/automations/v1alpha1
 id: queued
 name: Queued
-enabled: true
 trigger: {type: manual}
 prompt: Check locally.
 launch: {driver: codex}
@@ -438,7 +438,7 @@ policy: {continuity: fresh, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.automationApply(strings.Replace(raw, "enabled: true", "enabled: false", 1)); err != nil {
+	if _, err := d.automationSetEnabled(context.Background(), def.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.GetAutomationRun(run.ID)
@@ -469,7 +469,7 @@ func TestAutomationRecoveryWaitsForInitialGitHubDiscovery(t *testing.T) {
 func TestAutomationRecoveryLeavesGitHubRunsForFreshProviderObservation(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +519,6 @@ func TestGitHubReviewObservationDedupesPollsAndReusesReviewer(t *testing.T) {
 	yaml := `api_version: attn.dev/automations/v1alpha1
 id: requested-review
 name: Requested review
-enabled: true
 trigger:
   type: github_review_requested
   repositories: {mode: all_accessible, include: [github.com/owner/repo], exclude: []}
@@ -534,7 +533,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition("requested-review", "Requested review", string(canonical), "", true, time.Now()); err != nil {
+	if _, err := s.UpsertAutomationDefinition("requested-review", "Requested review", string(canonical), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var delivered atomic.Int32
@@ -610,7 +609,6 @@ func TestManualPRRefreshFeedsGitHubAutomationObserver(t *testing.T) {
 	spec, canonical, err := automation.ParseDefinitionYAML([]byte(`api_version: attn.dev/automations/v1alpha1
 id: refresh-review
 name: Refresh review
-enabled: true
 trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
 prompt: Review locally.
 launch: {driver: codex}
@@ -620,7 +618,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), "", true, time.Now()); err != nil {
+	if _, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	delivered := make(chan struct{}, 1)
@@ -662,7 +660,6 @@ func TestGitHubReviewObservationRetriesAcceptedPendingRunOnSameDemand(t *testing
 	_, canonical, err := automation.ParseDefinitionYAML([]byte(`api_version: attn.dev/automations/v1alpha1
 id: retry-review
 name: Retry review
-enabled: true
 trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
 prompt: Review locally.
 launch: {driver: codex}
@@ -672,7 +669,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition("retry-review", "Retry review", string(canonical), "", true, time.Now()); err != nil {
+	if _, err := s.UpsertAutomationDefinition("retry-review", "Retry review", string(canonical), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var attempts atomic.Int32
@@ -714,7 +711,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 func TestContinuationFailurePreservesOriginTicketOutcome(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -761,7 +758,7 @@ func TestContinuationFailurePreservesOriginTicketOutcome(t *testing.T) {
 func TestSuccessfulContinuationReopensOriginTicketAfterDelivery(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -841,7 +838,7 @@ func TestContinuationActivationFailsIfTicketDisappeared(t *testing.T) {
 func TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -891,7 +888,7 @@ func TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne(t *testing.T) {
 func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -946,7 +943,7 @@ func TestStoppedContinuationResumesRecordedReviewerWithPinnedContract(t *testing
 	backend := &automationResumeBackend{fakeSpawnBackend: &fakeSpawnBackend{}}
 	d.ptyBackend = backend
 	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
-	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1053,7 +1050,7 @@ func setupContinuationWorktree(t *testing.T) (*Daemon, automation.WorkRequest, s
 	d := newDaemonForTest(t)
 	d.dataRoot = filepath.Join(root, "profile")
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
-	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1137,7 +1134,7 @@ func TestWithdrawnBeforeLaunchReRequestCreatesFirstWorktree(t *testing.T) {
 func TestReRequestCanStartReviewerWhenWithdrawnOriginNeverLaunched(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1181,7 +1178,7 @@ func TestReviewRequestWithdrawalStopsLaunchedPendingReviewer(t *testing.T) {
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1240,7 +1237,7 @@ func TestReviewRequestWithdrawalLeavesDeliveredReviewerToTicketLifecycle(t *test
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1286,7 +1283,7 @@ func TestReviewRequestCancellationRecoversBeforeReactivation(t *testing.T) {
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1337,7 +1334,7 @@ func TestContinuationWithdrawalDoesNotCancelDeliveredOriginReviewer(t *testing.T
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1446,7 +1443,6 @@ func automationBroadcastRecorder(d *Daemon) func() []string {
 const manualAutomationYAML = `api_version: attn.dev/automations/v1alpha1
 id: manual-check
 name: Manual check
-enabled: true
 trigger: {type: manual}
 prompt: Check locally.
 launch: {driver: codex}
@@ -1468,11 +1464,11 @@ func TestAutomationApplyBroadcastsOnUpsert(t *testing.T) {
 		t.Fatalf("broadcasts after enabled apply = %v, want [%s]", got, def.ID)
 	}
 
-	if _, err := d.automationApply(strings.Replace(raw, "enabled: true", "enabled: false", 1)); err != nil {
+	if _, err := d.automationSetEnabled(context.Background(), def.ID, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := broadcasts(); len(got) != 2 || got[1] != def.ID {
-		t.Fatalf("broadcasts after disable apply = %v, want two entries ending in %s", got, def.ID)
+		t.Fatalf("broadcasts after disable = %v, want two entries ending in %s", got, def.ID)
 	}
 }
 
@@ -1570,6 +1566,67 @@ func TestAutomationSetEnabledDisableFailsPendingRunsAndBroadcasts(t *testing.T) 
 
 	if _, err := d.automationSetEnabled(context.Background(), "does-not-exist", false); err == nil {
 		t.Fatal("expected error for unknown definition")
+	}
+}
+
+// TestAutomationSetEnabledReachesRealSocketDispatch closes the gap that let
+// `attn automation enable|disable` regress to "unknown command" in
+// production while every other automation_set_enabled test still passed:
+// TestAutomationCommandSetEnabledTogglesColumn (ws_automations_test.go) calls
+// handleAutomationCommand directly, and the WS-level tests call
+// handleAutomationSetEnabledWS directly — neither one exercises
+// handleConnection's own switch in daemon.go, which is where
+// protocol.CmdAutomationSetEnabled was actually missing from the case list
+// routed to handleAutomationCommand. This drives the command through the
+// real unix-socket dispatch path (handleConnection -> ParseMessage ->
+// switch -> handleAutomationCommand), the same path the CLI uses, so a
+// missing case here fails with "unknown command" the way the live bug did.
+func TestAutomationSetEnabledReachesRealSocketDispatch(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !def.Enabled {
+		t.Fatalf("fixture definition = %#v, want enabled", def)
+	}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	go d.handleConnection(server)
+	if err := json.NewEncoder(client).Encode(protocol.AutomationSetEnabledMessage{
+		Cmd:          protocol.CmdAutomationSetEnabled,
+		DefinitionID: def.ID,
+		Enabled:      false,
+	}); err != nil {
+		t.Fatalf("encode automation_set_enabled: %v", err)
+	}
+
+	var result struct {
+		Success bool            `json:"success"`
+		Error   *string         `json:"error"`
+		Data    json.RawMessage `json:"data"`
+	}
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := json.NewDecoder(client).Decode(&result); err != nil {
+		t.Fatalf("decode automation_set_enabled response: %v", err)
+	}
+	if !result.Success {
+		errMsg := ""
+		if result.Error != nil {
+			errMsg = *result.Error
+		}
+		t.Fatalf("automation_set_enabled over the real socket dispatch failed: %s", errMsg)
+	}
+
+	stored, err := s.GetAutomationDefinition(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Enabled {
+		t.Fatalf("definition after real-dispatch automation_set_enabled(false) = %#v, want disabled", stored)
 	}
 }
 
