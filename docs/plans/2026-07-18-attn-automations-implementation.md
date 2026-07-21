@@ -918,6 +918,37 @@ upgrade and packaged-app matrix pass from the integration branch.
 
 ## Verification strategy
 
+### Upgrade
+
+Run at epic close (2026-07-21) against merged `main` `310fbc8e`.
+
+A database was built by the **pre-automations binary** — `1e300bf7`, the last
+commit before migration 73 — rather than by rewinding head code, so the starting
+schema is what an installed pre-epic app actually produced:
+
+```
+pre-epic binary (1e300bf7) -> schema_head=72  automation_tables=[]
+head binary     (310fbc8e) -> schema_head=75  automation_tables=[7 tables]
+```
+
+Migration 72 → 75 applied cleanly and wrote its pre-migration backup first. A
+copy of the real production database was not used: it sits at version 73, and
+reading `~/.attn` is deliberately out of reach from this workflow.
+
+`TestMigratesPopulatedPreAutomationsDatabaseToHead`
+(`internal/store/sqlite_test.go`) pins this as a regression test, because none
+existed. It seeds tickets, a session, and a PR, rewinds to the pre-73 shape
+(dropping the automation tables, the `idx_tickets_automation_run` index, and the
+`tickets.automation_run_id` column — not merely deleting `schema_migrations`
+rows, which would leave 73/74 hitting their `IF NOT EXISTS` no-op path and prove
+nothing), then migrates and asserts every legacy row survives intact alongside
+the new column and tables. The `ALTER TABLE tickets ADD COLUMN` in migration 73
+is the risk this covers: before this test it had only ever run against an empty
+or already-migrated `tickets` table. Mutation-verified by no-oping that `ALTER`
+and its dependent index so migration 73 still reports success — the test fails at
+the per-ticket integrity assertion (`sqlite_test.go:417`,
+`no such column: automation_run_id`), not at an upstream diagnostic.
+
 ### Idempotency
 
 - Same definition/provider/occurrence key returns the existing occurrence and run.
@@ -949,6 +980,41 @@ Inject a crash/error after each durable or external boundary and run recovery:
 Every case must finish with at most one ticket, worktree, workspace, pane, and live
 session for the reserved delivery IDs. Mismatch or dirty evidence produces a
 visible failure; tests must never make recovery pass by deleting evidence.
+
+#### Actual coverage as shipped (2026-07-21)
+
+The table above is the specification. It is not what shipped. Surveyed on merged
+`main` (`310fbc8e`) at epic close, the nine checkpoints stand at **one covered,
+four partial, four uncovered**, and the epic was closed on that basis by explicit
+decision rather than by meeting the spec. Recorded here so the gap is visible to
+whoever next touches this code instead of being implied-covered by a checked box.
+
+"Partial" means the test re-invokes a function and asserts key idempotency. It
+does not restart a daemon, kill a process, or resume from durable state written
+mid-sequence — which is what this section actually asks for.
+
+| # | Checkpoint | Status | Where |
+|---|---|---|---|
+| 1 | occurrence/run txn commits | partial | `TestAutomationClaimIsIdempotentAndSnapshotsRevision`, `TestScheduledAutomationClaimIsIdempotent` (`internal/store/automations_test.go`); `TestScheduledPendingRunRecoversOnRestart` (`internal/daemon/automations_schedule_test.go`) forces delivery to fail, so it proves recovery was attempted, not that exactly one delivery proceeded |
+| 2 | ticket commits | partial | `TestEnsureAutomationTicketAdoptsByRun`, `TestContinuationOccurrenceRecordsOnTerminalTicketExactlyOnce` (`internal/store/automations_test.go`); enforcement is the partial unique index in `applyMigration73`. Nothing crashes between ticket commit and the next step |
+| 3 | managed clone/fetch | **none** | The per-repository lock (`internal/daemon/automations.go`, `d.automationRepos`) has no concurrency test, and no test re-enters after an interrupted publish |
+| 4 | worktree added | partial | Best of the nine. `TestEnsureDetachedWorktreeAtRevisionCreateAdoptAndProtectEvidence` and `…RecoversFreshStaleMetadata` (`internal/git/worktree_test.go`) — the latter is a genuine interruption test. No daemon-layer re-entry after a simulated crash |
+| 5 | workspace registered | **none** | `Daemon.EnsureWorkspace` has zero test callers; only the `fakePorts` stub in `internal/workdelivery/workdelivery_test.go` |
+| 6 | pane added | **none** | `Daemon.EnsurePane` likewise has zero test callers outside `fakePorts` |
+| 7 | PTY spawn before session row | partial | `TestAutomationRecoveryWaitsForInitialGitHubDiscovery` pins only the GitHub-ready gate. `automationSessionIsLive` — the guard against a second spawn of the stable session ID — has **no test**, and the startup ordering in `daemon.go` is unpinned. This is the window this guide's own risk list calls "a real crash window" |
+| 8 | session row before run link | **none** | `VerifyDelivery` is never called by any test; its link assertions never execute. `internal/daemon/automations.go` says so in a source comment: reaching that line for real needs a full workdelivery spawn, out of reach for a unit test |
+| 9 | delivered commit, response lost | **covered** | `TestAutomationRunWSRetryWithSameRequestIDDoesNotDuplicate` (`internal/daemon/ws_automations_test.go`) — holds `automationMu` while two concurrent same-`request_id` retries queue behind it, asserts both return the same run ID and exactly one run exists |
+
+Highest residual risk, in order: checkpoint 8 (a run can strand in `pending`
+forever with a live session, or mark delivered on mismatched links) and
+checkpoint 7 (a duplicate live agent session). Both fail silently. Checkpoints
+3, 5, and 6 are adopt-or-create guards with smaller blast radius.
+
+The only automated evidence anywhere that asserts "at most one" after a genuine
+daemon stop/start lives in the packaged scenarios, not in `go test`:
+`leg1_restart_catchup` and `leg4_storm_guard_restart` in
+`app/scripts/real-app-harness/scenario-automation-scheduled-cleanup.mjs`. Those
+restart the daemon *between* runs, not at a mid-delivery boundary.
 
 ### Daemon restart
 
@@ -1148,6 +1214,28 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       drive that race through the real UI.
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
+      Slices merged directly to `main` through their own PRs, so there is no
+      long-lived integration branch and no separate integration PR to open; this
+      item reduces to the three-part matrix. Status at 2026-07-21:
+      - **Upgrade — done.** Pre-epic binary `1e300bf7` produced a real v72
+        database; head migrated it 72 → 75 cleanly. Pinned going forward by
+        `TestMigratesPopulatedPreAutomationsDatabaseToHead`. See "Upgrade" above.
+      - **Failure recovery — closed by decision, not by evidence.** One of nine
+        checkpoints is covered, four are partial, four have nothing. Victor's
+        call was to ship and document rather than close the gap. The honest
+        per-checkpoint table is under "Partial failure" above; checkpoints 7 and
+        8 are the ones worth returning to.
+      - **Packaged-app matrix — not yet run.** Blocked on macOS revoking the
+        Accessibility grant for
+        `app/scripts/real-app-harness/.build/attn-real-input-driver` after it was
+        rebuilt. Every input-driven scenario fails at
+        `AXIsProcessTrustedWithOptions` until that binary is re-granted in System
+        Settings → Privacy & Security → Accessibility. A run attempted on
+        2026-07-21 failed 8 of 14 scenarios entirely for this reason — seven with
+        the explicit permission error and one timing out on an undelivered
+        keystroke — with no product regression among them. Re-run
+        `pnpm --dir app run real-app:serial-matrix` against a rebuilt
+        non-production profile once the grant is restored.
 
 When implementation forces a choice that changes the product behavior described
 in the vision, stop and update the vision by agreement. When it only changes code
