@@ -82,6 +82,21 @@ function runJSON(binary, args, env) {
   return JSON.parse(run(binary, args, env));
 }
 
+// `attn automation show <id>` prints the canonical rendered YAML alone (no
+// JSON wrapper — see cmd/attn/automation.go), unlike the pre-unification CLI
+// which printed the raw store row (Enabled/Revision/SpecYAML/SpecJSON). Get
+// the definition summary (id/enabled/revision) from `automation list`
+// instead, filtered by id — the two together are the CLI-observable
+// replacement for the old single `show` call.
+function showSpecYAML(binary, id, env) {
+  return run(binary, ['automation', 'show', id], env);
+}
+
+function findListRow(binary, id, env) {
+  const list = runJSON(binary, ['automation', 'list'], env) || [];
+  return list.find((row) => row.id === id) || null;
+}
+
 async function poll(fn, description, timeoutMs = 30_000) {
   const started = Date.now();
   let last = null;
@@ -292,7 +307,7 @@ async function main() {
     // guard or the editor's error surfacing regresses.
     await runner.step('leg2_invalid_rejected_nothing_stored', async () => {
       const listBefore = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
-      runner.assert(!listBefore.some((row) => row.ID === primaryID), 'sanity: primary id does not exist yet', listBefore);
+      runner.assert(!listBefore.some((row) => row.id === primaryID), 'sanity: primary id does not exist yet', listBefore);
 
       const invalidYAML = invalidDefinitionYAML({ id: primaryID, locationPath: fixturePath });
       const afterSetText = await client.request('automation_editor_set_text', { text: invalidYAML });
@@ -313,7 +328,7 @@ async function main() {
 
       const listAfter = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
       runner.assert(
-        listAfter.length === listBefore.length && !listAfter.some((row) => row.ID === primaryID),
+        listAfter.length === listBefore.length && !listAfter.some((row) => row.id === primaryID),
         'nothing is stored after the refused create',
         { listBefore, listAfter },
       );
@@ -341,12 +356,13 @@ async function main() {
       }, `created definition ${primaryID} to appear in the panel`, PANEL_TIMEOUT_MS);
       await captureEvidenceScreenshot(runner, client, 'leg3-after-save.png');
 
-      const shown = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
-      runner.assert(shown && shown.ID === primaryID, 'the CLI shows the created definition by id', shown);
-      runner.assert(shown.Revision === 1, 'a fresh create lands at revision 1', shown);
-      runner.assert(shown.SpecYAML.includes(harnessMarkerComment), 'the stored YAML includes the hand-written comment', shown);
-      leg3Revision = shown.Revision;
-      leg3SpecYAML = shown.SpecYAML;
+      const shownRow = findListRow(binary, primaryID, daemonEnv);
+      const shownYAML = showSpecYAML(binary, primaryID, daemonEnv);
+      runner.assert(shownRow && shownRow.id === primaryID, 'the CLI shows the created definition by id', shownRow);
+      runner.assert(shownRow.revision === 1, 'a fresh create lands at revision 1', shownRow);
+      runner.assert(shownYAML.includes(harnessMarkerComment), 'the stored YAML includes the hand-written comment', shownYAML);
+      leg3Revision = shownRow.revision;
+      leg3SpecYAML = shownYAML;
     });
 
     // Leg 4 (new, per team-lead): creating a SECOND definition that reuses
@@ -376,11 +392,15 @@ async function main() {
         afterSave,
       );
 
-      const afterCollision = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
+      const afterCollisionRow = findListRow(binary, primaryID, daemonEnv);
+      const afterCollisionYAML = showSpecYAML(binary, primaryID, daemonEnv);
       runner.assert(
-        afterCollision.Revision === leg3Revision && afterCollision.SpecYAML === leg3SpecYAML,
+        afterCollisionRow.revision === leg3Revision && afterCollisionYAML === leg3SpecYAML,
         "the original definition's revision and content are unchanged by the refused collision",
-        { before: { revision: leg3Revision, specYaml: leg3SpecYAML }, after: afterCollision },
+        {
+          before: { revision: leg3Revision, specYaml: leg3SpecYAML },
+          after: { revision: afterCollisionRow.revision, specYaml: afterCollisionYAML },
+        },
       );
 
       const afterCancel = await client.request('automation_editor_click', { button: 'cancel' });
@@ -427,7 +447,7 @@ async function main() {
 
       const listAfter = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
       runner.assert(
-        !listAfter.some((row) => row.ID === renamedID) && listAfter.filter((row) => row.ID === primaryID).length === 1,
+        !listAfter.some((row) => row.id === renamedID) && listAfter.filter((row) => row.id === primaryID).length === 1,
         'no definition was created under the renamed id; the original still exists exactly once',
         listAfter,
       );
@@ -448,11 +468,11 @@ async function main() {
       const outOfBandPrompt = 'Mutated out of band via the bundled CLI while the editor was open.';
       const outOfBandFile = path.join(runner.sessionDir, 'out-of-band.yml');
       fs.writeFileSync(outOfBandFile, editorDefinitionYAML({ id: primaryID, locationPath: fixturePath, prompt: outOfBandPrompt, comment: null }));
-      runJSON(binary, ['automation', 'apply', '--file', outOfBandFile], daemonEnv);
+      run(binary, ['automation', 'apply', '--file', outOfBandFile], daemonEnv);
 
-      const outOfBandShown = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
-      runner.assert(outOfBandShown.Revision > leg3Revision, 'the out-of-band CLI apply bumps the revision past what the open editor has', outOfBandShown);
-      const outOfBandRevision = outOfBandShown.Revision;
+      const outOfBandRow = findListRow(binary, primaryID, daemonEnv);
+      runner.assert(outOfBandRow.revision > leg3Revision, 'the out-of-band CLI apply bumps the revision past what the open editor has', outOfBandRow);
+      const outOfBandRevision = outOfBandRow.revision;
 
       const afterStaleSave = await client.request('automation_editor_click', { button: 'save' });
       runner.assert(afterStaleSave.present === true, 'the editor stays open after a refused stale-revision save', afterStaleSave);
@@ -565,7 +585,7 @@ async function main() {
       run(binary, ['automation', 'delete', primaryID], daemonEnv);
       const listAfterDelete = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
       runner.assert(
-        !listAfterDelete.some((row) => row.ID === primaryID),
+        !listAfterDelete.some((row) => row.id === primaryID),
         'sanity: the out-of-band CLI delete removes the definition from the live list while the editor is still open on it',
         listAfterDelete,
       );
@@ -602,7 +622,7 @@ async function main() {
       // would be exactly the failure this leg exists to catch.
       const listAfterRefusedSave = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
       runner.assert(
-        !listAfterRefusedSave.some((row) => row.ID === primaryID),
+        !listAfterRefusedSave.some((row) => row.id === primaryID),
         'the definition is still gone after the refused save — it was not resurrected',
         listAfterRefusedSave,
       );

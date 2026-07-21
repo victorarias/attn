@@ -17,15 +17,18 @@ import './AutomationEditor.css';
 
 export interface AutomationEditorProps {
   // null → create (getDefinition is called with '', which returns the starter
-  // template at revision 0). Non-null → edit that definition.
+  // template with no definition — revision 0). Non-null → edit that
+  // definition.
   definitionId: string | null;
-  getDefinition: (definitionId: string) => Promise<{ specYaml: string; revision: number }>;
+  getDefinition: (
+    definitionId: string,
+  ) => Promise<{ specYaml: string; definition?: AutomationDefinitionSummary }>;
   validateDefinition: (definitionYaml: string) => Promise<void>;
   applyDefinition: (
     definitionYaml: string,
     expectedId: string,
     expectedRevision: number,
-  ) => Promise<{ definition: AutomationDefinitionSummary; specYaml: string; revision: number }>;
+  ) => Promise<{ definition: AutomationDefinitionSummary; specYaml: string }>;
   onCancel: () => void;
   // Called once Save succeeds. The caller (AutomationsPanel) closes the editor
   // back to the list — canonical state (including the new/updated row) arrives
@@ -74,7 +77,7 @@ export function AutomationEditor({
       .then((result) => {
         if (cancelled) return;
         setValue(result.specYaml);
-        setRevision(result.revision);
+        setRevision(result.definition?.revision ?? 0);
         setStatus('ready');
       })
       .catch((error) => {
@@ -181,7 +184,7 @@ export function AutomationEditor({
     setReloadError(null);
     getDefinition(loadedId ?? '')
       .then((result) => {
-        setRevision(result.revision);
+        setRevision(result.definition?.revision ?? 0);
         editorRef.current?.applyExternalContent(result.specYaml);
         setReloading(false);
       })

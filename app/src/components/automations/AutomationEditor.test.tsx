@@ -87,12 +87,11 @@ function makeDefinition(overrides: Partial<AutomationDefinitionSummary> & { id: 
 function baseProps() {
   return {
     definitionId: null as string | null,
-    getDefinition: vi.fn().mockResolvedValue({ specYaml: 'id: new-automation\n', revision: 0 }),
+    getDefinition: vi.fn().mockResolvedValue({ specYaml: 'id: new-automation\n' }),
     validateDefinition: vi.fn().mockResolvedValue(undefined),
     applyDefinition: vi.fn().mockResolvedValue({
       definition: makeDefinition({ id: 'new-automation', revision: 1 }),
       specYaml: 'id: new-automation\n',
-      revision: 1,
     }),
     onCancel: vi.fn(),
     onSaved: vi.fn(),
@@ -112,7 +111,10 @@ describe('AutomationEditor', () => {
   it('loads the definition_yaml for an existing id', async () => {
     const props = baseProps();
     props.definitionId = 'd1';
-    props.getDefinition.mockResolvedValue({ specYaml: 'id: d1\nname: PR reviewer\n', revision: 5 });
+    props.getDefinition.mockResolvedValue({
+      specYaml: 'id: d1\nname: PR reviewer\n',
+      definition: makeDefinition({ id: 'd1', revision: 5 }),
+    });
     render(<AutomationEditor {...props} />);
 
     await waitFor(() => expect(props.getDefinition).toHaveBeenCalledWith('d1'));
@@ -261,7 +263,10 @@ describe('AutomationEditor', () => {
     const user = userEvent.setup();
     const props = baseProps();
     props.definitionId = 'd1';
-    props.getDefinition.mockResolvedValue({ specYaml: 'id: d1\n', revision: 7 });
+    props.getDefinition.mockResolvedValue({
+      specYaml: 'id: d1\n',
+      definition: makeDefinition({ id: 'd1', revision: 7 }),
+    });
     render(<AutomationEditor {...props} />);
 
     await screen.findByDisplayValue('id: d1\n', EXACT_VALUE);
@@ -280,7 +285,7 @@ describe('AutomationEditor', () => {
     const user = userEvent.setup();
     const props = baseProps();
     let resolveApply:
-      | ((result: { definition: AutomationDefinitionSummary; specYaml: string; revision: number }) => void)
+      | ((result: { definition: AutomationDefinitionSummary; specYaml: string }) => void)
       | undefined;
     props.applyDefinition.mockImplementation(
       () =>
@@ -307,7 +312,6 @@ describe('AutomationEditor', () => {
       resolveApply?.({
         definition: makeDefinition({ id: 'new-automation', revision: 1 }),
         specYaml: 'id: new-automation\n',
-        revision: 1,
       }),
     );
     await waitFor(() => expect(props.onSaved).toHaveBeenCalled());
@@ -365,12 +369,18 @@ describe('AutomationEditor', () => {
     const user = userEvent.setup();
     const props = baseProps();
     props.definitionId = 'd1';
-    props.getDefinition.mockResolvedValueOnce({ specYaml: 'id: d1\nname: v1\n', revision: 1 });
+    props.getDefinition.mockResolvedValueOnce({
+      specYaml: 'id: d1\nname: v1\n',
+      definition: makeDefinition({ id: 'd1', revision: 1 }),
+    });
     render(<AutomationEditor {...props} />);
 
     await screen.findByDisplayValue('id: d1\nname: v1\n', EXACT_VALUE);
 
-    props.getDefinition.mockResolvedValueOnce({ specYaml: 'id: d1\nname: v2\n', revision: 2 });
+    props.getDefinition.mockResolvedValueOnce({
+      specYaml: 'id: d1\nname: v2\n',
+      definition: makeDefinition({ id: 'd1', revision: 2 }),
+    });
     await user.click(screen.getByTestId('automation-editor-reload'));
 
     await waitFor(() => expect(props.getDefinition).toHaveBeenCalledTimes(2));
@@ -385,7 +395,10 @@ describe('AutomationEditor', () => {
     const user = userEvent.setup();
     const props = baseProps();
     props.definitionId = 'd1';
-    props.getDefinition.mockResolvedValueOnce({ specYaml: 'id: d1\n', revision: 1 });
+    props.getDefinition.mockResolvedValueOnce({
+      specYaml: 'id: d1\n',
+      definition: makeDefinition({ id: 'd1', revision: 1 }),
+    });
     render(<AutomationEditor {...props} />);
 
     await screen.findByDisplayValue('id: d1\n', EXACT_VALUE);
@@ -414,7 +427,7 @@ describe('AutomationEditor', () => {
     // Editing an existing definition still gets it.
     const editProps = baseProps();
     editProps.definitionId = 'd1';
-    editProps.getDefinition.mockResolvedValueOnce({ specYaml: 'id: d1\n', revision: 1 });
+    editProps.getDefinition.mockResolvedValueOnce({ specYaml: 'id: d1\n', definition: makeDefinition({ id: 'd1', revision: 1 }) });
     render(<AutomationEditor {...editProps} />);
 
     await screen.findByDisplayValue('id: d1\n', EXACT_VALUE);
@@ -463,7 +476,7 @@ describe('AutomationEditor automation bridge handle', () => {
     editProps.validateDefinition.mockRejectedValue(
       new Error('trigger.schedule.cron: invalid cron expression'),
     );
-    editProps.getDefinition.mockResolvedValueOnce({ specYaml: 'id: d1\n', revision: 7 });
+    editProps.getDefinition.mockResolvedValueOnce({ specYaml: 'id: d1\n', definition: makeDefinition({ id: 'd1', revision: 7 }) });
     render(<AutomationEditor {...editProps} />);
     await screen.findByDisplayValue('id: d1\n', EXACT_VALUE);
 
