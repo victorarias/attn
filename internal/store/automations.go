@@ -104,22 +104,29 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON, specYAML string, 
 	}
 	defer tx.Rollback()
 	var revision, oldEnabled int
-	var oldSpec, deletedAt string
+	var oldSpec, oldSpecYAML, deletedAt string
 	// Deliberately not filtered by deleted_at='': a soft-deleted row must be
 	// found here too, so applying the same id resurrects it (clears
 	// deleted_at) instead of colliding with the PRIMARY KEY on an INSERT.
-	err = tx.QueryRow(`SELECT revision, spec_json, enabled, deleted_at FROM automation_definitions WHERE id=?`, id).Scan(&revision, &oldSpec, &oldEnabled, &deletedAt)
+	err = tx.QueryRow(`SELECT revision, spec_json, spec_yaml, enabled, deleted_at FROM automation_definitions WHERE id=?`, id).Scan(&revision, &oldSpec, &oldSpecYAML, &oldEnabled, &deletedAt)
 	switch err {
 	case sql.ErrNoRows:
 		revision = 1
 		_, err = tx.Exec(`INSERT INTO automation_definitions(id,name,enabled,revision,spec_json,spec_yaml,created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,'')`, id, name, enabled, revision, specJSON, specYAML, formatTicketTime(now), formatTicketTime(now))
 	case nil:
 		wasDeleted := deletedAt != ""
-		if oldSpec != specJSON || wasDeleted {
+		if oldSpec != specJSON || oldSpecYAML != specYAML || wasDeleted {
 			// A resurrection always bumps revision, even with an unchanged spec,
 			// so the daemon's contract comparison (old revision vs new) can tell
 			// resurrection apart from a no-op reapply and always rotate continuity
-			// bindings for it.
+			// bindings for it. spec_yaml must be compared too, not just spec_json:
+			// comments live only in spec_yaml (never re-derived into spec_json), so
+			// a comment-only edit changes spec_yaml but not spec_json. Without this,
+			// that edit would persist new YAML while leaving revision unchanged, and
+			// the daemon's stale-save guard (automationApplyWithGuards, which
+			// compares only revision) would be structurally blind to it — two
+			// concurrent editors could silently drop each other's comments with no
+			// "changed elsewhere" refusal.
 			revision++
 		}
 		_, err = tx.Exec(`UPDATE automation_definitions SET name=?, enabled=?, revision=?, spec_json=?, spec_yaml=?, updated_at=?, deleted_at='' WHERE id=?`, name, enabled, revision, specJSON, specYAML, formatTicketTime(now), id)

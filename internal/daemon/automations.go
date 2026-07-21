@@ -156,6 +156,18 @@ func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw, expectedID 
 		if existing == nil || existing.Revision != expectedRevision {
 			return errors.New("automation definition changed elsewhere — reload before saving")
 		}
+		if existing.DeletedAt != nil {
+			// DeleteAutomationDefinition sets deleted_at without touching
+			// revision, so a stale editor's expectedRevision can still match a
+			// row that was soft-deleted out from under it. Unlike the create
+			// path above, an edit must never resurrect: automationDelete already
+			// failed this definition's pending runs, fenced its provider
+			// cursors, and purged its continuity bindings and review-request
+			// edges on the assumption it is gone, so a Save silently bringing it
+			// back live would restart an unattended cron the user deliberately
+			// deleted, with "saved successfully" as the only feedback.
+			return fmt.Errorf("automation %q was deleted elsewhere while you were editing it — your changes were not saved; close this editor and use New if you want to bring it back", spec.ID)
+		}
 		return nil
 	}
 	return d.automationApplyLocked(ctx, raw, spec, canonical, guard)
@@ -1560,7 +1572,15 @@ func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 	result := automationActionResult{Event: protocol.EventAutomationActionResult, Action: cmd, Success: err == nil}
 	if err != nil {
 		result.Error = protocol.Ptr(err.Error())
-	} else {
+	} else if data != nil {
+		// Guarded on nil rather than marshalling unconditionally: an action with
+		// no payload (validate) leaves data as a nil `any`, and json.Marshal of
+		// that yields the 4-byte literal `null`, not an empty slice — so
+		// `json:"data,omitempty"` would not drop the field and the wire would
+		// carry "data":null. json.RawMessage implements Unmarshaler and is
+		// invoked even for JSON null, so the client would decode a non-nil
+		// 4-byte Data and every "did I get a payload?" check downstream would
+		// answer yes. Leaving Data nil here is what lets omitempty do its job.
 		result.Data, _ = json.Marshal(data)
 	}
 	_ = json.NewEncoder(conn).Encode(result)

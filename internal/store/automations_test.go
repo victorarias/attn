@@ -1046,3 +1046,48 @@ func TestSweepExpiredTicketsUnblocksPruningOfBoundThreadOrigin(t *testing.T) {
 		t.Fatalf("expected the origin run to become prunable once its ticket aged out, got %#v", prunable)
 	}
 }
+
+// TestUpsertAutomationDefinitionBumpsRevisionOnSpecYAMLOnlyChange pins the
+// revision-bump condition against the class of edit this editor exists to
+// make: comments live only in spec_yaml (never re-derived into spec_json),
+// so a comment-only save leaves spec_json byte-identical while spec_yaml
+// changes. Before this fix the bump condition only compared spec_json, so
+// that edit persisted new YAML while leaving revision unchanged — and the
+// daemon's stale-save guard (automationApplyWithGuards), which compares only
+// revision, was structurally blind to it. This also pins the sibling
+// contract: a byte-identical reapply of both spec_json and spec_yaml must
+// still not bump.
+func TestUpsertAutomationDefinitionBumpsRevisionOnSpecYAMLOnlyChange(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "prompt: sweep\n", true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def.Revision != 1 {
+		t.Fatalf("initial revision = %d, want 1", def.Revision)
+	}
+
+	// A byte-identical reapply (same spec_json, same spec_yaml) is a no-op:
+	// revision must not move.
+	noop, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "prompt: sweep\n", true, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if noop.Revision != def.Revision {
+		t.Fatalf("no-op reapply revision = %d, want unchanged %d", noop.Revision, def.Revision)
+	}
+
+	// spec_yaml changes (a comment added) while spec_json stays byte-identical:
+	// this must still bump.
+	commented, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, "# swept nightly\nprompt: sweep\n", true, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commented.Revision != def.Revision+1 {
+		t.Fatalf("comment-only edit revision = %d, want %d", commented.Revision, def.Revision+1)
+	}
+	if commented.SpecYAML != "# swept nightly\nprompt: sweep\n" {
+		t.Fatalf("comment-only edit spec_yaml = %q, want the new YAML persisted", commented.SpecYAML)
+	}
+}

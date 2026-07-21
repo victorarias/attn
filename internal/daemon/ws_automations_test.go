@@ -666,6 +666,59 @@ func TestAutomationApplyWSRefusesStaleRevision(t *testing.T) {
 	}
 }
 
+// TestAutomationApplyWSRefusesEditOfDeletedDefinition pins the edit half of
+// the delete/resurrect guard: DeleteAutomationDefinition sets deleted_at
+// without touching revision, so a stale editor's expected_revision still
+// matches after someone else deletes the definition it has open. Unlike a
+// create (expected_revision 0), which deliberately treats a soft-deleted row
+// as resurrectable, a Save from an open editor must refuse rather than
+// silently bring back a definition that automationDelete already tore down
+// (failed pending runs, fenced provider cursors, purged continuity/
+// review-request state) — the alternative is an unattended cron the user
+// deliberately deleted starting to fire again, reported as "saved
+// successfully".
+func TestAutomationApplyWSRefusesEditOfDeletedDefinition(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	original, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Someone else deletes the definition while the editor still has it open.
+	if err := d.automationDelete(context.Background(), original.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(client, &protocol.AutomationApplyMessage{
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   strings.Replace(raw, "Manual check", "Manual check (from the stale editor)", 1),
+		ExpectedID:       protocol.Ptr(original.ID),
+		ExpectedRevision: protocol.Ptr(original.Revision),
+		RequestID:        protocol.Ptr("apply-edit-deleted"),
+	})
+
+	var res protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "deleted") || !strings.Contains(*res.Error, "New") {
+		t.Fatalf("apply result = %+v, want success=false with an error naming the deletion and pointing at New", res)
+	}
+
+	// The definition must remain deleted, not resurrected.
+	if live, err := s.GetAutomationDefinition(original.ID); err != nil || live != nil {
+		t.Fatalf("definition after refused edit-of-deleted apply = %#v err=%v, want still absent from the live set", live, err)
+	}
+	stillDeleted, err := s.GetAutomationDefinitionIncludingDeleted(original.ID)
+	if err != nil || stillDeleted == nil || stillDeleted.DeletedAt == nil {
+		t.Fatalf("definition after refused edit-of-deleted apply = %#v err=%v, want still soft-deleted", stillDeleted, err)
+	}
+	if stillDeleted.Revision != original.Revision {
+		t.Fatalf("deleted definition revision = %d, want unchanged %d", stillDeleted.Revision, original.Revision)
+	}
+}
+
 // TestAutomationDefinitionGetWSStarterTemplate pins D7: definition_id "" is
 // the new-definition case and must return the starter template at revision
 // 0, so create and edit share one frontend code path.
