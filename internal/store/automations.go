@@ -1201,46 +1201,6 @@ func (s *Store) ListAutomationRunsWithOccurrenceKeys(definitionID string, limit 
 	return out, rows.Err()
 }
 
-// ListAutomationRunsByContinuityKey returns every run recorded for
-// definitionID under continuityKey (matched via occurrence.subject_key, the
-// field every continuity-bearing claim path records it into), excluding
-// excludeRunID, newest first.
-//
-// TODO(PR2b commit 2): this is a transitional bridge for
-// Daemon.hasPriorAutomationContinuityRun, kept only so that function's
-// pre-existing contract/session/ticket-existence logic keeps working against
-// the v2 schema. Commit 2 replaces both with the internal/automation engine
-// seam (ResolveContinuation), which decides continuation from binding status
-// alone and self-heals a dangling active binding instead of walking run
-// history.
-func (s *Store) ListAutomationRunsByContinuityKey(definitionID, continuityKey, excludeRunID string) ([]AutomationRun, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.db == nil {
-		return nil, errors.New("automation persistence unavailable")
-	}
-	rows, err := s.db.Query(`
-		SELECT `+automationRunColumnsQualified+`
-		FROM automation_runs r
-		JOIN automation_occurrences o ON o.id=r.occurrence_id
-		WHERE r.definition_id=? AND o.subject_key=? AND r.id<>?
-		ORDER BY r.created_at DESC
-	`, definitionID, continuityKey, excludeRunID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []AutomationRun
-	for rows.Next() {
-		r, err := scanAutomationRun(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *r)
-	}
-	return out, rows.Err()
-}
-
 func (s *Store) ListPendingAutomationRuns() ([]AutomationRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

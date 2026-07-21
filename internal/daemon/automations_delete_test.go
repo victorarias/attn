@@ -10,8 +10,9 @@ import (
 )
 
 // TestAutomationDeleteHappyPath pins A2's soft-delete side effects: a
-// pending run is failed (the same mechanism automationSetEnabled's disable
-// path uses), the definition is soft-deleted (filtered out of
+// pending run is cancelled with reason definition_deleted (the same
+// mechanism automationSetEnabled's disable path uses, with its own reason),
+// the definition is soft-deleted (filtered out of
 // GetAutomationDefinition), a change broadcast fires, and the run itself
 // remains listable/inspectable — delete never touches run/occurrence/ticket
 // rows or on-disk artifacts.
@@ -47,8 +48,8 @@ func TestAutomationDeleteHappyPath(t *testing.T) {
 	if err != nil || reloadedRun == nil {
 		t.Fatalf("the run should remain listable after delete, got %#v err=%v", reloadedRun, err)
 	}
-	if reloadedRun.State != "failed" {
-		t.Fatalf("expected the pending run to be failed by delete, got state=%q", reloadedRun.State)
+	if reloadedRun.State != store.AutomationRunStateCancelled || reloadedRun.CancelReason != store.AutomationCancelReasonDefinitionDeleted {
+		t.Fatalf("expected the pending run to be cancelled/definition_deleted by delete, got state=%q reason=%q", reloadedRun.State, reloadedRun.CancelReason)
 	}
 
 	runs, err := s.ListAutomationRuns(def.ID)

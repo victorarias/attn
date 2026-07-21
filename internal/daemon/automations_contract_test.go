@@ -397,8 +397,8 @@ func TestAutomationApplyRevertAllowsFreshThreadEvenWhenOldTicketWasSwept(t *test
 	}
 }
 
-// TestValidateAutomationContinuationRefusesOnlyForItsOwnVanishedTicket pins
-// the hazard hasPriorAutomationContinuityRun's session scoping must still
+// TestValidateAutomationContinuationSelfHealsItsOwnVanishedTicket pins the
+// hazard automation.ResolveContinuation's binding-status check must still
 // catch: req's own thread — not some unrelated rotated-away thread — losing
 // its ticket. Unlike the revert scenario above, there is no contract edit
 // here, so the continuity binding never rotates; run2 is a second occurrence
@@ -407,8 +407,10 @@ func TestAutomationApplyRevertAllowsFreshThreadEvenWhenOldTicketWasSwept(t *test
 // (inheriting session-1/ticket-1) just before the TTL sweep deletes that
 // same ticket (and, atomically, the binding) out from under it — by the time
 // delivery validates, req's own identifiers point at artifacts that just
-// vanished.
-func TestValidateAutomationContinuationRefusesOnlyForItsOwnVanishedTicket(t *testing.T) {
+// vanished. The v2 engine seam self-heals this rather than refusing: the
+// dangling active binding is released (reason ticket_swept) and delivery
+// proceeds fresh, since there is nothing left of that thread to reuse.
+func TestValidateAutomationContinuationSelfHealsItsOwnVanishedTicket(t *testing.T) {
 	s := store.New()
 	d := &Daemon{store: s, wsHub: newWSHub()}
 	dir := t.TempDir()
@@ -463,8 +465,11 @@ func TestValidateAutomationContinuationRefusesOnlyForItsOwnVanishedTicket(t *tes
 	}
 
 	req := automation.WorkRequest{RunID: run2.ID, DefinitionID: def.ID, ContinuityKey: "singleton", Provider: "schedule", Prompt: snapshot.Prompt, Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run2.TicketID, SessionID: run2.SessionID}}
-	if err := d.validateAutomationContinuation(req); err == nil {
-		t.Fatal("expected refusal: req's own thread (same session as the vanished ticket) must not be resumed blind")
+	if err := d.validateAutomationContinuation(req); err != nil {
+		t.Fatalf("expected self-heal (release dangling binding, deliver fresh), got refusal: %v", err)
+	}
+	if binding, err := s.GetActiveAutomationContinuityBinding(def.ID, "singleton"); err != nil || binding != nil {
+		t.Fatalf("expected no active binding after self-heal, got %#v err=%v", binding, err)
 	}
 }
 

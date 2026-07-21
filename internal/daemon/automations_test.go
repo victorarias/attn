@@ -442,7 +442,7 @@ policy: {continuity: fresh, overlap: coalesce}
 		t.Fatal(err)
 	}
 	got, err := s.GetAutomationRun(run.ID)
-	if err != nil || got == nil || got.State != "failed" || !strings.Contains(got.LastError, "disabled before delivery") {
+	if err != nil || got == nil || got.State != store.AutomationRunStateCancelled || got.CancelReason != store.AutomationCancelReasonDefinitionDisabled {
 		t.Fatalf("disabled queued run=%#v err=%v", got, err)
 	}
 }
@@ -1557,8 +1557,8 @@ func TestAutomationSetEnabledDisableFailsPendingRunsAndBroadcasts(t *testing.T) 
 		t.Fatalf("definition = %#v, want disabled", got)
 	}
 	failed, err := s.GetAutomationRun(run.ID)
-	if err != nil || failed == nil || failed.State != "failed" || !strings.Contains(failed.LastError, "disabled before delivery") {
-		t.Fatalf("pending run after disable = %#v err=%v, want failed", failed, err)
+	if err != nil || failed == nil || failed.State != store.AutomationRunStateCancelled || failed.CancelReason != store.AutomationCancelReasonDefinitionDisabled {
+		t.Fatalf("pending run after disable = %#v err=%v, want cancelled/definition_disabled", failed, err)
 	}
 	if ids := broadcasts(); len(ids) == 0 {
 		t.Fatal("automationSetEnabled disable did not broadcast")
