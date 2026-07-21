@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -965,5 +967,59 @@ func TestAutomationRunWSRetryWithSameRequestIDDoesNotDuplicate(t *testing.T) {
 	}
 	if len(runs) != 1 {
 		t.Fatalf("runs for definition = %d, want exactly 1 (no duplicate claim from the retried request_id)", len(runs))
+	}
+}
+
+// A validate that passes has no payload to report, and the CLI's success
+// output depends on that absence being visible on the wire. json.Marshal of a
+// nil `any` yields the 4-byte literal `null` rather than an empty slice, which
+// defeats `json:"data,omitempty"` and leaves the client decoding a non-nil
+// json.RawMessage — so `attn automation validate` printed `null` instead of
+// {"valid": true}. Pinned here on the encoded bytes, because the bug lives in
+// the encoding and a decoded struct hides it.
+func TestAutomationCommandOmitsDataWhenActionHasNoPayload(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	go d.handleAutomationCommand(serverConn, protocol.CmdAutomationValidate,
+		&protocol.AutomationValidateMessage{Cmd: protocol.CmdAutomationValidate, DefinitionYaml: raw})
+
+	var encoded map[string]any
+	if err := json.NewDecoder(clientConn).Decode(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	if success, _ := encoded["success"].(bool); !success {
+		t.Fatalf("validate did not succeed: %+v", encoded)
+	}
+	if _, present := encoded["data"]; present {
+		t.Fatalf("a payload-free action put %v on the wire under \"data\"; it must be omitted entirely so the client can tell \"no payload\" from \"payload that is null\"", encoded["data"])
+	}
+}
+
+// The sibling of the case above, pinned so the omitempty guard is not later
+// "simplified" into dropping null payloads generally. GetAutomationDefinition
+// returns a typed nil *store.AutomationDefinition, and assigning that to an
+// `any` produces a NON-nil interface, so show still marshals to null and its
+// output is unchanged. That distinction is the entire reason the guard is
+// written as a nil check on the interface rather than on the encoded bytes.
+func TestAutomationCommandStillReportsNullForMissingDefinition(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	go d.handleAutomationCommand(serverConn, protocol.CmdAutomationShow,
+		&protocol.AutomationShowMessage{Cmd: protocol.CmdAutomationShow, DefinitionID: "no-such-definition"})
+
+	var encoded map[string]any
+	if err := json.NewDecoder(clientConn).Decode(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	value, present := encoded["data"]
+	if !present || value != nil {
+		t.Fatalf("show of a missing definition = %+v, want an explicit null data field", encoded)
 	}
 }
