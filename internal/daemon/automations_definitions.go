@@ -208,7 +208,7 @@ func (d *Daemon) rotateContinuityBindingsIfContractChanged(existing *store.Autom
 	if !rotate {
 		return nil
 	}
-	return d.store.DeleteAutomationContinuityBindings(spec.ID)
+	return d.store.ReleaseAutomationContinuityBindings(spec.ID, store.AutomationBindingReleasedContractRotated, time.Now())
 }
 
 // failPendingAutomationRuns fails every pending run for definitionID via
@@ -303,7 +303,7 @@ func (d *Daemon) automationDelete(ctx context.Context, definitionID string) erro
 	if err := d.store.DeleteAutomationReviewRequestEdges(definitionID); err != nil {
 		return err
 	}
-	if err := d.store.DeleteAutomationContinuityBindings(definitionID); err != nil {
+	if err := d.store.ReleaseAutomationContinuityBindings(definitionID, store.AutomationBindingReleasedDefinitionDeleted, time.Now()); err != nil {
 		return err
 	}
 	if err := d.store.FenceAutomationProviderCursors(definitionID, time.Now()); err != nil {

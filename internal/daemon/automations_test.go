@@ -1113,7 +1113,7 @@ func TestWithdrawnBeforeLaunchReRequestCreatesFirstWorktree(t *testing.T) {
 	if err != nil || ticket == nil {
 		t.Fatalf("ticket=%#v err=%v", ticket, err)
 	}
-	if err := d.store.MarkAutomationRunFailed(ticket.AutomationRunID, store.AutomationReviewWithdrawnError, time.Now()); err != nil {
+	if err := d.store.MarkAutomationRunCancelled(ticket.AutomationRunID, store.AutomationCancelReasonReviewWithdrawn, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.RemoveAll(worktree); err != nil {
@@ -1218,7 +1218,7 @@ func TestReviewRequestWithdrawalStopsLaunchedPendingReviewer(t *testing.T) {
 		t.Fatalf("startup recovery did not finish withdrawn reviewer cancellation: %v", err)
 	}
 	failed, err := s.GetAutomationRun(run.ID)
-	if err != nil || failed == nil || failed.State != "failed" || failed.LastError != store.AutomationReviewWithdrawnError {
+	if err != nil || failed == nil || failed.State != store.AutomationRunStateCancelled || failed.CancelReason != store.AutomationCancelReasonReviewWithdrawn {
 		t.Fatalf("withdrawn run=%#v err=%v", failed, err)
 	}
 	if session := s.Get(run.SessionID); session != nil {
@@ -1314,7 +1314,7 @@ func TestReviewRequestCancellationRecoversBeforeReactivation(t *testing.T) {
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkAutomationRunFailed(run.ID, store.AutomationReviewWithdrawnError, now.Add(time.Minute)); err != nil {
+	if err := s.MarkAutomationRunCancelled(run.ID, store.AutomationCancelReasonReviewWithdrawn, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	candidates, err := d.reconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
@@ -1322,7 +1322,7 @@ func TestReviewRequestCancellationRecoversBeforeReactivation(t *testing.T) {
 		t.Fatalf("reactivation candidates=%#v err=%v", candidates, err)
 	}
 	failed, err := s.GetAutomationRun(run.ID)
-	if err != nil || failed == nil || failed.State != "failed" || failed.LastError != store.AutomationReviewWithdrawnError {
+	if err != nil || failed == nil || failed.State != store.AutomationRunStateCancelled || failed.CancelReason != store.AutomationCancelReasonReviewWithdrawn {
 		t.Fatalf("recovered withdrawal run=%#v err=%v", failed, err)
 	}
 	if s.Get(run.SessionID) != nil || !backend.WasKilledAndRemoved(run.SessionID) {
@@ -1379,7 +1379,7 @@ func TestContinuationWithdrawalDoesNotCancelDeliveredOriginReviewer(t *testing.T
 		t.Fatal(err)
 	}
 	failed, err := s.GetAutomationRun(second.ID)
-	if err != nil || failed == nil || failed.State != "failed" || failed.LastError != store.AutomationReviewWithdrawnError {
+	if err != nil || failed == nil || failed.State != store.AutomationRunStateCancelled || failed.CancelReason != store.AutomationCancelReasonReviewWithdrawn {
 		t.Fatalf("withdrawn continuation=%#v err=%v", failed, err)
 	}
 	if s.Get(first.SessionID) == nil || backend.WasKilledAndRemoved(first.SessionID) {

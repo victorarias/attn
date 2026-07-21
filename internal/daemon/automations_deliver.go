@@ -38,6 +38,10 @@ func (d *Daemon) handleAutomationDeliveryError(run *store.AutomationRun, deliver
 		current, err := d.store.GetAutomationRun(run.ID)
 		return current, errors.Join(deliveryErr, err)
 	}
+	if errors.Is(deliveryErr, errAutomationReviewWithdrawn) {
+		cancelled, cancelErr := d.cancelAutomationRun(run, store.AutomationCancelReasonReviewWithdrawn, deliveryErr.Error())
+		return cancelled, errors.Join(deliveryErr, cancelErr)
+	}
 	failed, failErr := d.failAutomationRun(run, deliveryErr)
 	return failed, errors.Join(deliveryErr, failErr)
 }
@@ -81,6 +85,41 @@ func automationFailureComment(run *store.AutomationRun, ticket *store.Ticket, me
 		comment += " (automation run " + run.ID + ")"
 	}
 	return comment
+}
+
+// cancelAutomationRun mirrors failAutomationRun's ticket/broadcast side
+// effects for a run that never gets to run, rather than one that ran and
+// failed: state becomes cancelled with reason, not failed. Used for
+// withdrawal (reason review_withdrawn) so the terminal state matches why
+// nothing was delivered, distinct from a genuine delivery failure.
+func (d *Daemon) cancelAutomationRun(run *store.AutomationRun, reason, message string) (*store.AutomationRun, error) {
+	now := time.Now()
+	var persistErr error
+	if err := d.store.MarkAutomationRunCancelled(run.ID, reason, now); err != nil {
+		persistErr = errors.Join(persistErr, fmt.Errorf("mark run cancelled: %w", err))
+	}
+	if ticket, err := d.store.GetTicket(run.TicketID); err != nil {
+		persistErr = errors.Join(persistErr, fmt.Errorf("find automation ticket: %w", err))
+	} else if ticket != nil {
+		comment := automationFailureComment(run, ticket, message)
+		if ticket.AutomationRunID != "" && ticket.AutomationRunID != run.ID {
+			if _, err := d.store.AddTicketComment(ticket.ID, "automation:"+run.DefinitionID, comment, now); err != nil {
+				persistErr = errors.Join(persistErr, fmt.Errorf("record continuation cancellation: %w", err))
+			}
+			d.notifyTicketObservers(ticket.ID)
+		} else if ticket.Status != store.TicketStatusFailed {
+			if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusFailed, store.TicketAuthorAttn, comment, now); err != nil {
+				persistErr = errors.Join(persistErr, fmt.Errorf("mark automation ticket failed: %w", err))
+			}
+		}
+	}
+	d.broadcastTicketsUpdated()
+	d.broadcastAutomationsChanged(run.DefinitionID)
+	cancelled, err := d.store.GetAutomationRun(run.ID)
+	if err != nil {
+		persistErr = errors.Join(persistErr, fmt.Errorf("reload cancelled run: %w", err))
+	}
+	return cancelled, persistErr
 }
 func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.AutomationRun) error {
 	definition, err := d.store.GetAutomationDefinition(run.DefinitionID)
@@ -359,11 +398,19 @@ func (d *Daemon) ensureAutomationTicket(_ context.Context, req automation.WorkRe
 //     A different session id means req already holds a freshly reserved
 //     identity (no binding survived to hand it an old one), so nothing is
 //     being reused and there's nothing to refuse.
+//
+// TODO(PR2b commit 2): this is a transitional bridge kept only so this
+// pre-existing logic keeps working against the v2 schema (run history is now
+// read via store.ListAutomationRunsByContinuityKey instead of the deleted
+// AutomationContinuityRunHistory). Commit 2 replaces it with the
+// internal/automation engine seam (ResolveContinuation), which decides
+// continuation from binding status alone and self-heals a dangling active
+// binding (release + deliver fresh) instead of a hard refusal.
 func (d *Daemon) hasPriorAutomationContinuityRun(req automation.WorkRequest) (bool, error) {
 	if req.ContinuityKey == "" {
 		return false, nil
 	}
-	history, err := d.store.AutomationContinuityRunHistory(req.DefinitionID, req.ContinuityKey, req.RunID)
+	history, err := d.store.ListAutomationRunsByContinuityKey(req.DefinitionID, req.ContinuityKey, req.RunID)
 	if err != nil {
 		return false, err
 	}
@@ -522,7 +569,7 @@ func (d *Daemon) prepareAutomationLocation(_ context.Context, req automation.Wor
 			sessionPersisted = true
 		}
 	}
-	if originRun != nil && originRun.State == "delivered" {
+	if originRun != nil && originRun.State == store.AutomationRunStateDelivered {
 		ticket, err := d.store.GetTicket(req.IDs.TicketID)
 		if err != nil {
 			return automation.PreparedLocation{}, err
@@ -637,7 +684,7 @@ func (d *Daemon) startAutomationSession(req automation.WorkRequest, directory, i
 	return d.verifyUnattendedLaunch(req)
 }
 func (d *Daemon) canStartWithdrawnUndeliveredReviewer(origin *store.AutomationRun, sessionID string) bool {
-	return origin != nil && origin.State == "failed" && origin.LastError == store.AutomationReviewWithdrawnError && d.store.Get(sessionID) == nil
+	return origin != nil && origin.State == store.AutomationRunStateCancelled && origin.CancelReason == store.AutomationCancelReasonReviewWithdrawn && d.store.Get(sessionID) == nil
 }
 func (d *Daemon) automationContinuationOrigin(req automation.WorkRequest) (*store.AutomationRun, error) {
 	if req.ContinuityKey == "" {

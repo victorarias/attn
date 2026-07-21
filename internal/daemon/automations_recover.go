@@ -32,7 +32,7 @@ func (d *Daemon) recoverAutomations() {
 		// be delivered directly without refreshing any external demand first.
 		d.automationMu.Lock()
 		run, err := d.store.GetAutomationRun(runs[i].ID)
-		if err == nil && run.State == "pending" {
+		if err == nil && run.State == store.AutomationRunStatePending {
 			err = d.deliverAutomationRun(context.Background(), run)
 			if err != nil {
 				err = d.handleAutomationRecoveryError(run, err)

@@ -162,58 +162,200 @@ func TestScheduledAutomationSingletonContinuityReusesBinding(t *testing.T) {
 	}
 }
 
-// TestAutomationContinuityRunHistoryReturnsPriorRuns covers
-// AutomationContinuityRunHistory directly: no history for a continuity key
-// returns nothing; a prior run under the same key returns that run's own
-// pinned snapshot_json paired with its own ticket_id, excluding the current
-// run itself. The daemon (see hasPriorAutomationContinuityRun in
-// internal/daemon/automations.go) is responsible for deciding what a
-// returned entry *means* (by comparing its ContinuationContract to the
-// current request and checking its own ticket's existence) — this test only
-// pins what the store hands back.
-func TestAutomationContinuityRunHistoryReturnsPriorRuns(t *testing.T) {
+// TestAutomationContinuityBindingLifecycleReleaseThenReclaim pins the v2
+// append-only binding model: a claim creates (or reuses) the ACTIVE row for
+// (definition, continuity_key); releasing it flips status/reason without
+// deleting the row; and a later claim for the same key appends a fresh
+// active row rather than resurrecting the released one.
+func TestAutomationContinuityBindingLifecycleReleaseThenReclaim(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	firstIDs := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
-	first, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-20T03:00:00Z", "singleton", def.Revision, `{}`, `{"prompt":"v1"}`, now, firstIDs)
-	if err != nil || !created {
+	if _, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:1", "singleton", def.Revision, `{}`, `{}`, now, firstIDs); err != nil || !created {
 		t.Fatalf("first claim created=%v err=%v", created, err)
 	}
+	binding, err := s.GetActiveAutomationContinuityBinding(def.ID, "singleton")
+	if err != nil || binding == nil || binding.TicketID != firstIDs.TicketID || binding.Status != AutomationBindingStatusActive {
+		t.Fatalf("active binding = %#v err=%v", binding, err)
+	}
+	firstBindingID := binding.ID
 
-	// No history yet for a run's own continuity key excludes itself; nothing prior.
-	history, err := s.AutomationContinuityRunHistory(def.ID, "singleton", first.ID)
-	if err != nil {
+	// Deliver the first run so a second claim isn't refused by the
+	// undelivered-predecessor guard (a separate protection, exercised
+	// elsewhere) — this test is about binding release/reclaim, not that guard.
+	if err := s.MarkAutomationRunDelivered(firstIDs.RunID, `{}`, now.Add(30*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if len(history) != 0 {
-		t.Fatalf("expected no prior history for the first run, got %#v", history)
-	}
 
-	if _, err := s.EnsureAutomationTicket(Ticket{ID: first.TicketID, Title: "Nightly", Status: TicketStatusWorking, Assignee: first.SessionID, AutomationRunID: first.ID}, "automation:nightly", TicketRoleChiefOfStaff, now); err != nil {
+	if err := s.ReleaseAutomationContinuityBinding(def.ID, "singleton", AutomationBindingReleasedTicketSwept, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	if released, err := s.GetActiveAutomationContinuityBinding(def.ID, "singleton"); err != nil || released != nil {
+		t.Fatalf("expected no active binding after release, got %#v err=%v", released, err)
+	}
+	// Releasing again (no active row left) is a no-op, not an error.
+	if err := s.ReleaseAutomationContinuityBinding(def.ID, "singleton", AutomationBindingReleasedTicketSwept, now.Add(90*time.Second)); err != nil {
+		t.Fatalf("re-release of an already-released binding errored: %v", err)
+	}
+
 	secondIDs := AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"}
-	second, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2026-07-21T03:00:00Z", "singleton", def.Revision, `{}`, `{"prompt":"v1"}`, now.Add(24*time.Hour), secondIDs)
+	second, created, err := s.ClaimScheduledAutomationRun(def.ID, "scheduled:2", "singleton", def.Revision, `{}`, `{}`, now.Add(2*time.Minute), secondIDs)
 	if err != nil || !created {
 		t.Fatalf("second claim created=%v err=%v", created, err)
 	}
+	if second.TicketID != secondIDs.TicketID {
+		t.Fatalf("second claim reused a released binding instead of a fresh one: %#v", second)
+	}
+	fresh, err := s.GetActiveAutomationContinuityBinding(def.ID, "singleton")
+	if err != nil || fresh == nil || fresh.ID == firstBindingID || fresh.TicketID != secondIDs.TicketID {
+		t.Fatalf("fresh active binding = %#v err=%v (first id %s)", fresh, err, firstBindingID)
+	}
 
-	history, err = s.AutomationContinuityRunHistory(def.ID, "singleton", second.ID)
+	var releasedStatus, releasedReason string
+	if err := s.db.QueryRow(`SELECT status,released_reason FROM automation_continuity_bindings WHERE id=?`, firstBindingID).Scan(&releasedStatus, &releasedReason); err != nil {
+		t.Fatal(err)
+	}
+	if releasedStatus != AutomationBindingStatusReleased || releasedReason != AutomationBindingReleasedTicketSwept {
+		t.Fatalf("original binding row = status=%s reason=%s, want released/%s", releasedStatus, releasedReason, AutomationBindingReleasedTicketSwept)
+	}
+}
+
+// TestAutomationContinuityBindingUniqueActiveIndexRejectsSecondActiveRow pins
+// idx_automation_bindings_active: at most one active row may exist per
+// (definition_id, continuity_key), enforced at the schema level so a bug in
+// the get-or-create path can never silently create two live claimants for
+// the same thread.
+func TestAutomationContinuityBindingUniqueActiveIndexRejectsSecondActiveRow(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history) != 1 || history[0].SnapshotJSON != `{"prompt":"v1"}` || history[0].TicketID != "ticket-1" {
-		t.Fatalf("expected the first run's own pinned snapshot+ticket as second's prior history, got %#v", history)
+	nowRaw := formatTicketTime(now)
+	if _, err := s.db.Exec(`INSERT INTO automation_continuity_bindings(id,definition_id,continuity_key,ticket_id,session_id,workspace_id,pane_id,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		"binding-1", def.ID, "singleton", "ticket-1", "session-1", "workspace-1", "pane-1", AutomationBindingStatusActive, nowRaw, nowRaw); err != nil {
+		t.Fatal(err)
 	}
+	_, err = s.db.Exec(`INSERT INTO automation_continuity_bindings(id,definition_id,continuity_key,ticket_id,session_id,workspace_id,pane_id,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		"binding-2", def.ID, "singleton", "ticket-2", "session-2", "workspace-2", "pane-2", AutomationBindingStatusActive, nowRaw, nowRaw)
+	if err == nil {
+		t.Fatal("expected a second active binding row for the same (definition, continuity_key) to be rejected")
+	}
+}
 
-	// Empty continuity key never has history to report.
-	if history, err := s.AutomationContinuityRunHistory(def.ID, "", second.ID); err != nil || len(history) != 0 {
-		t.Fatalf("expected no history for an empty continuity key, got %#v err=%v", history, err)
+// TestMarkAutomationRunCancelledSetsStateAndReason pins the cancelled+reason
+// terminal transition: it sets state and cancel_reason only, leaving
+// last_error and every other column untouched, since cancellation is not a
+// delivery failure.
+func TestMarkAutomationRunCancelledSetsStateAndReason(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{"id":"nightly"}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	run, created, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("claim created=%v err=%v", created, err)
+	}
+	if err := s.MarkAutomationRunCancelled(run.ID, AutomationCancelReasonDefinitionDisabled, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := s.GetAutomationRun(run.ID)
+	if err != nil || cancelled == nil || cancelled.State != AutomationRunStateCancelled || cancelled.CancelReason != AutomationCancelReasonDefinitionDisabled {
+		t.Fatalf("cancelled run = %#v err=%v", cancelled, err)
+	}
+	if cancelled.LastError != "" {
+		t.Fatalf("cancellation set last_error: %q", cancelled.LastError)
+	}
+}
+
+// TestListPrunableAndTerminalAutomationRunsIncludeCancelledRuns pins that a
+// cancelled run is terminal exactly like delivered/failed for both the
+// retention sweep and the on-demand cleanup listing — it shares failed's
+// retention window rather than having its own.
+func TestListPrunableAndTerminalAutomationRunsIncludeCancelledRuns(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("cleanup", "Cleanup", `{"id":"cleanup"}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := AutomationRunReservation{RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1"}
+	run, created, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, now, ids)
+	if err != nil || !created {
+		t.Fatalf("claim created=%v err=%v", created, err)
+	}
+	if err := s.MarkAutomationRunCancelled(run.ID, AutomationCancelReasonDefinitionDisabled, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := s.ListTerminalAutomationRuns(def.ID)
+	if err != nil || len(terminal) != 1 || terminal[0].ID != run.ID {
+		t.Fatalf("terminal runs = %#v err=%v", terminal, err)
+	}
+	far := now.Add(365 * 24 * time.Hour)
+	prunable, err := s.ListPrunableAutomationRuns(def.ID, 0, far)
+	if err != nil || len(prunable) != 1 || prunable[0].ID != run.ID {
+		t.Fatalf("prunable runs = %#v err=%v", prunable, err)
+	}
+}
+
+// TestListWithdrawnGitHubReviewUndeliveredRunsIncludesCancelledReviewWithdrawnNotFailed
+// pins the v2 undelivered-withdrawal predicate: state=pending OR
+// (state=cancelled AND cancel_reason=review_withdrawn) — the sentinel
+// LastError match is gone. A run that failed for an ordinary delivery reason
+// (not a withdrawal cancellation) must not be swept up here even once its
+// review request is later withdrawn.
+func TestListWithdrawnGitHubReviewUndeliveredRunsIncludesCancelledReviewWithdrawnNotFailed(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subjectA = "github.com/owner/repo#1"
+	const subjectB = "github.com/owner/repo#2"
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subjectA, subjectB}, now); err != nil {
+		t.Fatal(err)
+	}
+	runA, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subjectA, 1, def.Revision, `{}`, `{}`, now, AutomationRunReservation{
+		RunID: "run-a", OccurrenceID: "occ-a", TicketID: "ticket-a", SessionID: "session-a", WorkspaceID: "workspace-a", PaneID: "pane-a",
+	})
+	if err != nil || !created {
+		t.Fatalf("claim A created=%v err=%v", created, err)
+	}
+	runB, created, err := s.ClaimGitHubReviewAutomationRun(def.ID, subjectB, 1, def.Revision, `{}`, `{}`, now, AutomationRunReservation{
+		RunID: "run-b", OccurrenceID: "occ-b", TicketID: "ticket-b", SessionID: "session-b", WorkspaceID: "workspace-b", PaneID: "pane-b",
+	})
+	if err != nil || !created {
+		t.Fatalf("claim B created=%v err=%v", created, err)
+	}
+	// B fails for an ordinary (non-withdrawal) delivery reason before either
+	// request is withdrawn.
+	if err := s.MarkAutomationRunFailed(runB.ID, "spawn unavailable", now.Add(30*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// Both requests are withdrawn.
+	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	// Only A's outcome is a withdrawal cancellation (mirrors the daemon's
+	// cancelWithdrawnAutomationRun) — B stays failed for its own reason.
+	if err := s.MarkAutomationRunCancelled(runA.ID, AutomationCancelReasonReviewWithdrawn, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	withdrawn, err := s.ListWithdrawnGitHubReviewUndeliveredRuns(def.ID, "github.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withdrawn) != 1 || withdrawn[0].ID != runA.ID {
+		t.Fatalf("withdrawn runs = %#v, want only cancelled run %s", withdrawn, runA.ID)
 	}
 }
 
@@ -488,7 +630,7 @@ func TestGitHubReviewReRequestDoesNotReuseWithdrawnUndeliveredBinding(t *testing
 	if _, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", nil, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkAutomationRunFailed(first.ID, AutomationReviewWithdrawnError, now.Add(time.Minute)); err != nil {
+	if err := s.MarkAutomationRunFailed(first.ID, "review withdrawn", now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
@@ -539,12 +681,21 @@ func TestGitHubReviewWithdrawalExposesPendingRunAndReleasesEmptyBinding(t *testi
 	if current, err := s.GitHubReviewAutomationRunStillRequested(first.ID); err != nil || current {
 		t.Fatalf("withdrawn run current=%v err=%v", current, err)
 	}
-	if err := s.MarkAutomationRunFailed(first.ID, AutomationReviewWithdrawnError, now.Add(time.Minute)); err != nil {
+	if err := s.MarkAutomationRunFailed(first.ID, "review withdrawn", now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	var bindings int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?`, def.ID, subject).Scan(&bindings); err != nil || bindings != 0 {
-		t.Fatalf("empty binding count=%d err=%v", bindings, err)
+	// The binding row is never deleted, only released: its ticket never
+	// existed, so ReconcileAutomationReviewRequests' deactivate step already
+	// released it above.
+	if binding, err := s.GetActiveAutomationContinuityBinding(def.ID, subject); err != nil || binding != nil {
+		t.Fatalf("expected no active binding for the empty (never-ticketed) thread, got %#v err=%v", binding, err)
+	}
+	var releasedReason string
+	if err := s.db.QueryRow(`SELECT released_reason FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?`, def.ID, subject).Scan(&releasedReason); err != nil {
+		t.Fatal(err)
+	}
+	if releasedReason != AutomationBindingReleasedTicketSwept {
+		t.Fatalf("released_reason = %q, want %q", releasedReason, AutomationBindingReleasedTicketSwept)
 	}
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(2*time.Minute))
 	if err != nil || len(candidates) != 1 {

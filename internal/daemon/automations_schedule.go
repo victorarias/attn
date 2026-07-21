@@ -190,7 +190,7 @@ func (d *Daemon) claimAndDeliverScheduledRun(definition store.AutomationDefiniti
 	d.broadcastAutomationsChanged(definition.ID)
 	d.automationMu.Lock()
 	current, loadErr := d.store.GetAutomationRun(run.ID)
-	if loadErr == nil && current != nil && current.State == "pending" {
+	if loadErr == nil && current != nil && current.State == store.AutomationRunStatePending {
 		if deliverErr := d.deliverObservedAutomationRun(current); deliverErr != nil {
 			_, deliverErr = d.handleAutomationDeliveryError(current, deliverErr)
 			loadErr = deliverErr

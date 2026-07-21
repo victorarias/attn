@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func parseOptionalAutomationTime(value string) *time.Time {
@@ -14,6 +16,36 @@ func parseOptionalAutomationTime(value string) *time.Time {
 	parsed := parseTicketTime(value)
 	return &parsed
 }
+
+// Automation run states. A run's state transitions are one-way:
+// pending -> delivered, pending -> failed, or pending -> cancelled.
+const (
+	AutomationRunStatePending   = "pending"
+	AutomationRunStateDelivered = "delivered"
+	AutomationRunStateFailed    = "failed"
+	AutomationRunStateCancelled = "cancelled"
+)
+
+// Automation run cancel reasons, set alongside AutomationRunStateCancelled.
+const (
+	AutomationCancelReasonReviewWithdrawn    = "review_withdrawn"
+	AutomationCancelReasonDefinitionDisabled = "definition_disabled"
+	AutomationCancelReasonDefinitionDeleted  = "definition_deleted"
+)
+
+// Automation continuity binding statuses and release reasons. Bindings are
+// append-only: a released row is never reactivated or deleted, only
+// superseded by a fresh row on the next claim for that (definition,
+// continuity_key).
+const (
+	AutomationBindingStatusActive   = "active"
+	AutomationBindingStatusReleased = "released"
+)
+const (
+	AutomationBindingReleasedContractRotated   = "contract_rotated"
+	AutomationBindingReleasedTicketSwept       = "ticket_swept"
+	AutomationBindingReleasedDefinitionDeleted = "definition_deleted"
+)
 
 type AutomationDefinition struct {
 	ID, Name, SpecJSON   string
@@ -26,11 +58,27 @@ type AutomationDefinition struct {
 type AutomationRun struct {
 	ID, DefinitionID, OccurrenceID           string
 	DefinitionRevision                       int
-	SnapshotJSON, State, LastError           string
+	SnapshotJSON, State, CancelReason        string
+	Attempts                                 int
+	LastError                                string
 	TicketID, SessionID, WorkspaceID, PaneID string
 	ResolvedLocationJSON                     string
 	CreatedAt, UpdatedAt                     time.Time
 	DeliveredAt                              *time.Time
+}
+
+// AutomationContinuityBinding is one append-only row recording a continuity
+// thread's stable ticket/session/workspace/pane identity. A definition/
+// continuity_key pair has at most one active row at a time (enforced by
+// idx_automation_bindings_active); releasing it never deletes the row, it
+// only flips status and records why, so a later claim for the same key
+// appends a fresh active row rather than resurrecting the old one.
+type AutomationContinuityBinding struct {
+	ID, DefinitionID, ContinuityKey          string
+	TicketID, SessionID, WorkspaceID, PaneID string
+	Status, ReleasedReason                   string
+	ReleasedAt                               *time.Time
+	CreatedAt, UpdatedAt                     time.Time
 }
 
 type AutomationOccurrence struct {
@@ -47,16 +95,14 @@ type AutomationReviewRequestCandidate struct {
 	Cycle      int
 }
 
-const AutomationReviewWithdrawnError = "GitHub review request withdrawn before delivery"
-
 func (s *Store) AutomationReviewRequestNeedsClaim(definitionID, subjectKey string, cycle int) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.db == nil {
 		return false, errors.New("automation persistence unavailable")
 	}
-	var active, currentCycle, acceptedCycle int
-	err := s.db.QueryRow(`SELECT active,cycle,accepted_cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &currentCycle, &acceptedCycle)
+	var active, currentCycle int
+	err := s.db.QueryRow(`SELECT active,cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &currentCycle)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -66,20 +112,22 @@ func (s *Store) AutomationReviewRequestNeedsClaim(definitionID, subjectKey strin
 	if active != 1 || currentCycle != cycle {
 		return false, nil
 	}
-	if acceptedCycle < cycle {
+	occurrenceKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)
+	var state string
+	err = s.db.QueryRow(`
+		SELECT r.state
+		FROM automation_occurrences o
+		JOIN automation_runs r ON r.occurrence_id=o.id
+		WHERE o.definition_id=? AND o.provider='github' AND o.occurrence_key=?
+	`, definitionID, occurrenceKey).Scan(&state)
+	if err == sql.ErrNoRows {
+		// No run has ever been claimed for this cycle yet.
 		return true, nil
 	}
-	occurrenceKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)
-	var pending int
-	err = s.db.QueryRow(`
-		SELECT EXISTS(
-			SELECT 1
-			FROM automation_occurrences o
-			JOIN automation_runs r ON r.occurrence_id=o.id
-			WHERE o.definition_id=? AND o.provider='github' AND o.occurrence_key=? AND r.state='pending'
-		)
-	`, definitionID, occurrenceKey).Scan(&pending)
-	return pending != 0, err
+	if err != nil {
+		return false, err
+	}
+	return state == AutomationRunStatePending, nil
 }
 
 // UpsertAutomationDefinition applies a definition's name/spec_json. `enabled`
@@ -292,24 +340,100 @@ func (s *Store) GetAutomationDefinitionIncludingDeleted(id string) (*AutomationD
 	return d, err
 }
 
-// DeleteAutomationContinuityBindings removes every continuity binding for a
-// definition, so the next claim under a matching continuity key starts a
-// fresh ticket/session thread instead of reusing one pinned to a stale
-// contract. Called when an apply changes a definition's ContinuationContract
-// or resurrects a soft-deleted definition (both in automationApply), and by
-// automationDelete before soft-deleting.
-func (s *Store) DeleteAutomationContinuityBindings(definitionID string) error {
+const automationContinuityBindingColumns = `id,definition_id,continuity_key,ticket_id,session_id,workspace_id,pane_id,status,released_reason,released_at,created_at,updated_at`
+
+func scanAutomationContinuityBinding(scanner interface{ Scan(...any) error }) (*AutomationContinuityBinding, error) {
+	var b AutomationContinuityBinding
+	var releasedAt, created, updated string
+	if err := scanner.Scan(&b.ID, &b.DefinitionID, &b.ContinuityKey, &b.TicketID, &b.SessionID, &b.WorkspaceID, &b.PaneID, &b.Status, &b.ReleasedReason, &releasedAt, &created, &updated); err != nil {
+		return nil, err
+	}
+	b.ReleasedAt = parseOptionalAutomationTime(releasedAt)
+	b.CreatedAt = parseTicketTime(created)
+	b.UpdatedAt = parseTicketTime(updated)
+	return &b, nil
+}
+
+// GetActiveAutomationContinuityBinding returns the active binding row for
+// (definitionID, continuityKey), or nil if none is active. There is at most
+// one, enforced by idx_automation_bindings_active.
+func (s *Store) GetActiveAutomationContinuityBinding(definitionID, continuityKey string) (*AutomationContinuityBinding, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, errors.New("automation persistence unavailable")
+	}
+	b, err := scanAutomationContinuityBinding(s.db.QueryRow(`SELECT `+automationContinuityBindingColumns+` FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=? AND status=?`, definitionID, continuityKey, AutomationBindingStatusActive))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return b, err
+}
+
+// ReleaseAutomationContinuityBinding releases the active binding row for
+// (definitionID, continuityKey), if any — a no-op (not an error) when there
+// is none. The row is never deleted: status flips to released and
+// released_reason/released_at record why and when, so the next claim for
+// this key appends a fresh active row instead of reusing this one.
+func (s *Store) ReleaseAutomationContinuityBinding(definitionID, continuityKey, reason string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
 		return errors.New("automation persistence unavailable")
 	}
-	_, err := s.db.Exec(`DELETE FROM automation_continuity_bindings WHERE definition_id=?`, definitionID)
+	_, err := s.db.Exec(
+		`UPDATE automation_continuity_bindings SET status=?,released_reason=?,released_at=?,updated_at=? WHERE definition_id=? AND continuity_key=? AND status=?`,
+		AutomationBindingStatusReleased, reason, formatTicketTime(now), formatTicketTime(now), definitionID, continuityKey, AutomationBindingStatusActive,
+	)
 	return err
 }
 
+// ReleaseAutomationContinuityBindings releases every active binding row for
+// definitionID (see ReleaseAutomationContinuityBinding) — used when a
+// definition's contract is deleted wholesale (automationDelete), rather than
+// one continuity key at a time.
+func (s *Store) ReleaseAutomationContinuityBindings(definitionID, reason string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("automation persistence unavailable")
+	}
+	_, err := s.db.Exec(
+		`UPDATE automation_continuity_bindings SET status=?,released_reason=?,released_at=?,updated_at=? WHERE definition_id=? AND status=?`,
+		AutomationBindingStatusReleased, reason, formatTicketTime(now), formatTicketTime(now), definitionID, AutomationBindingStatusActive,
+	)
+	return err
+}
+
+// getOrCreateActiveAutomationContinuityBindingTx resolves the active binding
+// for (definitionID, continuityKey), reusing its ticket/session/workspace/
+// pane ids into ids when one exists, or appending a fresh active row seeded
+// from ids when none does. Bindings are never updated back to active and
+// never deleted (see AutomationContinuityBinding's doc comment) — a released
+// row is simply superseded by this fresh one.
+func getOrCreateActiveAutomationContinuityBindingTx(tx *sql.Tx, definitionID, continuityKey string, ids *AutomationRunReservation, now time.Time) error {
+	var createdAt, updatedAt string
+	err := tx.QueryRow(
+		`SELECT ticket_id,session_id,workspace_id,pane_id,created_at,updated_at FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=? AND status=?`,
+		definitionID, continuityKey, AutomationBindingStatusActive,
+	).Scan(&ids.TicketID, &ids.SessionID, &ids.WorkspaceID, &ids.PaneID, &createdAt, &updatedAt)
+	switch err {
+	case sql.ErrNoRows:
+		nowRaw := formatTicketTime(now)
+		_, err = tx.Exec(
+			`INSERT INTO automation_continuity_bindings(id,definition_id,continuity_key,ticket_id,session_id,workspace_id,pane_id,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			uuid.NewString(), definitionID, continuityKey, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, AutomationBindingStatusActive, nowRaw, nowRaw,
+		)
+		return err
+	case nil:
+		return nil
+	default:
+		return err
+	}
+}
+
 // AutomationSessionHasContinuityBinding reports whether sessionID is still
-// referenced by some continuity binding, checked globally across every
+// referenced by some ACTIVE continuity binding, checked globally across every
 // definition rather than scoped to one. That matches
 // automationRunWorktreePath's worktree layout (worktrees/<sessionID>/<repo>),
 // which is keyed on session id alone: a bound thread's shared worktree can
@@ -317,7 +441,7 @@ func (s *Store) DeleteAutomationContinuityBindings(definitionID string) error {
 // automationRunCleanupSafety uses this to protect that shared worktree even
 // once the thread's own session row has been garbage collected — the
 // session-liveness check above it only catches the case where the row is
-// still there.
+// still there. A released binding no longer protects its worktree.
 func (s *Store) AutomationSessionHasContinuityBinding(sessionID string) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -328,7 +452,7 @@ func (s *Store) AutomationSessionHasContinuityBinding(sessionID string) (bool, e
 		return false, errors.New("automation persistence unavailable")
 	}
 	var exists int
-	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM automation_continuity_bindings WHERE session_id=?)`, sessionID).Scan(&exists)
+	err := s.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM automation_continuity_bindings WHERE session_id=? AND status=?)`, sessionID, AutomationBindingStatusActive).Scan(&exists)
 	if err != nil {
 		return false, err
 	}
@@ -485,7 +609,7 @@ func (s *Store) ClaimManualAutomationRun(definitionID, requestID, subjectKey, pa
 	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'manual',?,?,?,?,?)`, ids.OccurrenceID, definitionID, key, subjectKey, now, payloadJSON, now); err != nil {
 		return nil, false, err
 	}
-	if _, err = tx.Exec(`INSERT INTO automation_runs(id,definition_id,occurrence_id,definition_revision,snapshot_json,state,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?,?,?,?)`, ids.RunID, definitionID, ids.OccurrenceID, revision, snapshotJSON, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
+	if _, err = tx.Exec(`INSERT INTO automation_runs(id,definition_id,occurrence_id,definition_revision,snapshot_json,state,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, ids.RunID, definitionID, ids.OccurrenceID, revision, snapshotJSON, AutomationRunStatePending, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
 		return nil, false, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -502,11 +626,12 @@ func (s *Store) ClaimManualAutomationRun(definitionID, requestID, subjectKey, pa
 // observation race where the snapshot was built from a definition revision
 // read before this transaction: a mismatch rejects the claim and lets the
 // next tick re-read and re-decide, mirroring ClaimGitHubReviewAutomationRun.
-// continuityKey is "" for policy.continuity fresh (every occurrence gets its
-// own reservation IDs) or "singleton" for policy.continuity singleton, in
-// which case the reservation's ticket/session/workspace/pane IDs are bound
-// once per definition and reused by every later occurrence, mirroring
-// ClaimGitHubReviewAutomationRun's per-subject binding reuse.
+// continuityKey is "" for scheduled continuity fresh (every occurrence gets
+// its own reservation IDs) or "singleton" for scheduled continuity singleton,
+// in which case the reservation's ticket/session/workspace/pane IDs are bound
+// once per definition (via the active continuity binding row) and reused by
+// every later occurrence, mirroring ClaimGitHubReviewAutomationRun's
+// per-subject binding reuse.
 func (s *Store) ClaimScheduledAutomationRun(definitionID, occurrenceKey, continuityKey string, expectedRevision int, payloadJSON, snapshotJSON string, observedAt time.Time, reservation AutomationRunReservation) (*AutomationRun, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -550,36 +675,26 @@ func (s *Store) ClaimScheduledAutomationRun(definitionID, occurrenceKey, continu
 				SELECT 1
 				FROM automation_runs r
 				JOIN automation_occurrences o ON o.id=r.occurrence_id
-				WHERE r.definition_id=? AND o.provider='schedule' AND r.state='pending'
+				WHERE r.definition_id=? AND o.provider='schedule' AND r.state=?
 				  AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.id=r.ticket_id)
 			)
-		`, definitionID).Scan(&undeliveredPredecessor); err != nil {
+		`, definitionID, AutomationRunStatePending).Scan(&undeliveredPredecessor); err != nil {
 			return nil, false, err
 		}
 		if undeliveredPredecessor != 0 {
 			return nil, false, errors.New("an earlier scheduled automation run for this definition has not created its ticket yet")
 		}
-		var createdAt, updatedAt string
-		err = tx.QueryRow(`SELECT ticket_id,session_id,workspace_id,pane_id,created_at,updated_at FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?`, definitionID, continuityKey).Scan(&ids.TicketID, &ids.SessionID, &ids.WorkspaceID, &ids.PaneID, &createdAt, &updatedAt)
-		switch err {
-		case sql.ErrNoRows:
-			now := formatTicketTime(observedAt)
-			if _, err = tx.Exec(`INSERT INTO automation_continuity_bindings(definition_id,continuity_key,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, definitionID, continuityKey, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
-				return nil, false, err
-			}
-		case nil:
-		default:
+		if err := getOrCreateActiveAutomationContinuityBindingTx(tx, definitionID, continuityKey, &ids, observedAt); err != nil {
 			return nil, false, err
 		}
 	}
 	now := formatTicketTime(observedAt)
-	// subject_key is recorded as continuityKey (not always ""): AutomationContinuityRunHistory
-	// keys its lookup on subject_key, so the continuity key must be recorded there for the
-	// deleted-ticket safety guard to ever match a scheduled singleton's prior run.
+	// subject_key is recorded as continuityKey (not always ""): binding
+	// lookups elsewhere key off of it for a scheduled singleton's history.
 	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'schedule',?,?,?,?,?)`, ids.OccurrenceID, definitionID, occurrenceKey, continuityKey, now, payloadJSON, now); err != nil {
 		return nil, false, err
 	}
-	if _, err = tx.Exec(`INSERT INTO automation_runs(id,definition_id,occurrence_id,definition_revision,snapshot_json,state,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?,?,?,?)`, ids.RunID, definitionID, ids.OccurrenceID, revision, snapshotJSON, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
+	if _, err = tx.Exec(`INSERT INTO automation_runs(id,definition_id,occurrence_id,definition_revision,snapshot_json,state,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, ids.RunID, definitionID, ids.OccurrenceID, revision, snapshotJSON, AutomationRunStatePending, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
 		return nil, false, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -625,9 +740,10 @@ func (s *Store) SetAutomationScheduleCursor(definitionID string, at time.Time) e
 }
 
 // ReconcileAutomationReviewRequests records the provider's complete current
-// review-request demand for one host. It returns active edges whose current cycle
-// either has not been accepted or still owns a pending run, so both detail-fetch
-// and delivery failures retry on a later observation without inventing a cycle.
+// review-request demand for one host. It returns active edges whose current
+// cycle either has no run yet or still owns a pending run, so both
+// detail-fetch and delivery failures retry on a later observation without
+// inventing a cycle.
 func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, subjectKeys []string, observedAt time.Time) ([]AutomationReviewRequestCandidate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -679,7 +795,7 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		err := tx.QueryRow(`SELECT active,cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &cycle)
 		switch err {
 		case sql.ErrNoRows:
-			_, err = tx.Exec(`INSERT INTO automation_review_request_edges(definition_id,subject_key,host,active,cycle,accepted_cycle,last_observed_at,updated_at) VALUES(?,?,?,1,1,0,?,?)`, definitionID, subjectKey, host, observedRaw, updatedRaw)
+			_, err = tx.Exec(`INSERT INTO automation_review_request_edges(definition_id,subject_key,host,active,cycle,last_observed_at,updated_at) VALUES(?,?,?,1,1,?,?)`, definitionID, subjectKey, host, observedRaw, updatedRaw)
 		case nil:
 			if active == 0 {
 				cycle++
@@ -712,30 +828,35 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		if _, err := tx.Exec(`UPDATE automation_review_request_edges SET active=0,updated_at=? WHERE definition_id=? AND subject_key=?`, updatedRaw, definitionID, subjectKey); err != nil {
 			return nil, err
 		}
+		// The binding stays active as long as its ticket exists (a re-request
+		// continues the thread); only when the ticket is genuinely gone does
+		// withdrawal release the binding, via ReleaseAutomationContinuityBinding
+		// (see automations_github.go's cancellation path) rather than deleting
+		// this row.
 		if _, err := tx.Exec(`
-			DELETE FROM automation_continuity_bindings
-			WHERE definition_id=? AND continuity_key=?
+			UPDATE automation_continuity_bindings
+			SET status=?,released_reason=?,released_at=?,updated_at=?
+			WHERE definition_id=? AND continuity_key=? AND status=?
 			  AND NOT EXISTS (
 				SELECT 1 FROM tickets
 				WHERE tickets.id=automation_continuity_bindings.ticket_id
 			  )
-		`, definitionID, subjectKey); err != nil {
+		`, AutomationBindingStatusReleased, AutomationBindingReleasedTicketSwept, updatedRaw, updatedRaw, definitionID, subjectKey, AutomationBindingStatusActive); err != nil {
 			return nil, err
 		}
 	}
-	rows, err = tx.Query(`SELECT subject_key,cycle,accepted_cycle FROM automation_review_request_edges WHERE definition_id=? AND host=? AND active=1 ORDER BY subject_key`, definitionID, host)
+	rows, err = tx.Query(`SELECT subject_key,cycle FROM automation_review_request_edges WHERE definition_id=? AND host=? AND active=1 ORDER BY subject_key`, definitionID, host)
 	if err != nil {
 		return nil, err
 	}
 	type activeReviewEdge struct {
-		subjectKey    string
-		cycle         int
-		acceptedCycle int
+		subjectKey string
+		cycle      int
 	}
 	var activeEdges []activeReviewEdge
 	for rows.Next() {
 		var edge activeReviewEdge
-		if err := rows.Scan(&edge.subjectKey, &edge.cycle, &edge.acceptedCycle); err != nil {
+		if err := rows.Scan(&edge.subjectKey, &edge.cycle); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -746,24 +867,24 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 	}
 	var candidates []AutomationReviewRequestCandidate
 	for _, edge := range activeEdges {
-		if edge.acceptedCycle < edge.cycle {
-			candidates = append(candidates, AutomationReviewRequestCandidate{SubjectKey: edge.subjectKey, Cycle: edge.cycle})
-			continue
-		}
 		occurrenceKey := fmt.Sprintf("review_requested:%s:%d", edge.subjectKey, edge.cycle)
-		var pending int
-		if err := tx.QueryRow(`
-			SELECT EXISTS(
-				SELECT 1
-				FROM automation_occurrences o
-				JOIN automation_runs r ON r.occurrence_id=o.id
-				WHERE o.definition_id=? AND o.provider='github' AND o.occurrence_key=? AND r.state='pending'
-			)
-		`, definitionID, occurrenceKey).Scan(&pending); err != nil {
-			return nil, err
-		}
-		if pending != 0 {
+		var state string
+		err := tx.QueryRow(`
+			SELECT r.state
+			FROM automation_occurrences o
+			JOIN automation_runs r ON r.occurrence_id=o.id
+			WHERE o.definition_id=? AND o.provider='github' AND o.occurrence_key=?
+		`, definitionID, occurrenceKey).Scan(&state)
+		switch err {
+		case sql.ErrNoRows:
+			// No run has ever been claimed for this cycle: it's a candidate.
 			candidates = append(candidates, AutomationReviewRequestCandidate{SubjectKey: edge.subjectKey, Cycle: edge.cycle})
+		case nil:
+			if state == AutomationRunStatePending {
+				candidates = append(candidates, AutomationReviewRequestCandidate{SubjectKey: edge.subjectKey, Cycle: edge.cycle})
+			}
+		default:
+			return nil, err
 		}
 	}
 	if _, err := tx.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'github_review_requested',?,?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at WHERE excluded.observed_at >= automation_provider_cursors.observed_at`, definitionID, host, observedRaw); err != nil {
@@ -782,15 +903,15 @@ func (s *Store) GitHubReviewAutomationRunStillRequested(runID string) (bool, err
 		return false, errors.New("automation persistence unavailable")
 	}
 	var occurrenceKey, subjectKey string
-	var active, cycle, acceptedCycle int
+	var active, cycle int
 	err := s.db.QueryRow(`
-		SELECT o.occurrence_key,o.subject_key,e.active,e.cycle,e.accepted_cycle
+		SELECT o.occurrence_key,o.subject_key,e.active,e.cycle
 		FROM automation_runs r
 		JOIN automation_occurrences o ON o.id=r.occurrence_id
 		JOIN automation_review_request_edges e
 		  ON e.definition_id=r.definition_id AND e.subject_key=o.subject_key
 		WHERE r.id=? AND o.provider='github'
-	`, runID).Scan(&occurrenceKey, &subjectKey, &active, &cycle, &acceptedCycle)
+	`, runID).Scan(&occurrenceKey, &subjectKey, &active, &cycle)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -798,13 +919,15 @@ func (s *Store) GitHubReviewAutomationRunStillRequested(runID string) (bool, err
 		return false, err
 	}
 	wantKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)
-	return active == 1 && acceptedCycle == cycle && occurrenceKey == wantKey, nil
+	return active == 1 && occurrenceKey == wantKey, nil
 }
 
-// ListWithdrawnGitHubReviewUndeliveredRuns returns the current withdrawn cycle's
-// pending run, or its failed run when cancellation still needs to be reconciled.
-// Delivery is the handoff to ordinary ticket/session ownership; persisted stable
-// IDs alone are not, because they may precede successful launch verification.
+// ListWithdrawnGitHubReviewUndeliveredRuns returns the current withdrawn
+// cycle's pending run, or its cancelled run when cancellation still needs to
+// be reconciled (e.g. the daemon exited between recording withdrawal and
+// stopping a partially launched PTY). Delivery is the handoff to ordinary
+// ticket/session ownership; persisted stable IDs alone are not, because they
+// may precede successful launch verification.
 func (s *Store) ListWithdrawnGitHubReviewUndeliveredRuns(definitionID, host string) ([]AutomationRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -812,17 +935,17 @@ func (s *Store) ListWithdrawnGitHubReviewUndeliveredRuns(definitionID, host stri
 		return nil, errors.New("automation persistence unavailable")
 	}
 	rows, err := s.db.Query(`
-		SELECT r.id,r.definition_id,r.occurrence_id,r.definition_revision,r.snapshot_json,r.state,r.last_error,r.ticket_id,r.session_id,r.workspace_id,r.pane_id,r.resolved_location_json,r.created_at,r.updated_at,r.delivered_at
+		SELECT `+automationRunColumnsQualified+`
 		FROM automation_runs r
 		JOIN automation_occurrences o ON o.id=r.occurrence_id
 		JOIN automation_review_request_edges e
 		  ON e.definition_id=r.definition_id AND e.subject_key=o.subject_key
 		WHERE r.definition_id=? AND e.host=? AND e.active=0
-		  AND (r.state='pending' OR (r.state='failed' AND r.last_error=?))
+		  AND (r.state=? OR (r.state=? AND r.cancel_reason=?))
 		  AND o.provider='github'
 		  AND o.occurrence_key=('review_requested:' || e.subject_key || ':' || CAST(e.cycle AS TEXT))
 		ORDER BY r.created_at
-	`, definitionID, host, AutomationReviewWithdrawnError)
+	`, definitionID, host, AutomationRunStatePending, AutomationRunStateCancelled, AutomationCancelReasonReviewWithdrawn)
 	if err != nil {
 		return nil, err
 	}
@@ -849,23 +972,29 @@ func (s *Store) ClaimGitHubReviewAutomationRun(definitionID, subjectKey string, 
 		return nil, false, err
 	}
 	defer tx.Rollback()
-	var active, currentCycle, acceptedCycle int
-	if err := tx.QueryRow(`SELECT active,cycle,accepted_cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &currentCycle, &acceptedCycle); err != nil {
+	var active, currentCycle int
+	if err := tx.QueryRow(`SELECT active,cycle FROM automation_review_request_edges WHERE definition_id=? AND subject_key=?`, definitionID, subjectKey).Scan(&active, &currentCycle); err != nil {
 		return nil, false, err
 	}
-	occurrenceKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)
 	if active == 0 || currentCycle != cycle {
 		return nil, false, errors.New("review-request edge changed before occurrence claim")
 	}
-	if acceptedCycle >= cycle {
-		var runID string
-		err := tx.QueryRow(`SELECT r.id FROM automation_occurrences o JOIN automation_runs r ON r.occurrence_id=o.id WHERE o.definition_id=? AND o.provider='github' AND o.occurrence_key=?`, definitionID, occurrenceKey).Scan(&runID)
-		if err != nil {
-			return nil, false, err
-		}
+	occurrenceKey := fmt.Sprintf("review_requested:%s:%d", subjectKey, cycle)
+	// Idempotent on (definition_id, provider, occurrence_key): any existing
+	// run for this exact cycle — pending, delivered, failed, or cancelled —
+	// is returned as-is rather than reclaimed. A pending run is re-delivered
+	// by the caller on this same observation (see
+	// AutomationReviewRequestNeedsClaim/ReconcileAutomationReviewRequests'
+	// candidacy check), not by minting a second run row here.
+	var existingID string
+	err = tx.QueryRow(`SELECT r.id FROM automation_occurrences o JOIN automation_runs r ON r.occurrence_id=o.id WHERE o.definition_id=? AND o.provider='github' AND o.occurrence_key=?`, definitionID, occurrenceKey).Scan(&existingID)
+	if err == nil {
 		tx.Rollback()
-		run, err := s.getAutomationRunUnlocked(runID)
-		return run, false, err
+		run, e := s.getAutomationRunUnlocked(existingID)
+		return run, false, e
+	}
+	if err != sql.ErrNoRows {
+		return nil, false, err
 	}
 	var revision, enabled int
 	if err := tx.QueryRow(`SELECT revision,enabled FROM automation_definitions WHERE id=? AND deleted_at=''`, definitionID).Scan(&revision, &enabled); err != nil {
@@ -888,36 +1017,24 @@ func (s *Store) ClaimGitHubReviewAutomationRun(definitionID, subjectKey string, 
 			SELECT 1
 			FROM automation_runs r
 			JOIN automation_occurrences o ON o.id=r.occurrence_id
-			WHERE r.definition_id=? AND o.subject_key=? AND r.state='pending'
+			WHERE r.definition_id=? AND o.subject_key=? AND r.state=?
 			  AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.id=r.ticket_id)
 		)
-	`, definitionID, subjectKey).Scan(&undeliveredPredecessor); err != nil {
+	`, definitionID, subjectKey, AutomationRunStatePending).Scan(&undeliveredPredecessor); err != nil {
 		return nil, false, err
 	}
 	if undeliveredPredecessor != 0 {
 		return nil, false, errors.New("an earlier automation run for this subject has not created its ticket yet")
 	}
 	ids := reserved
-	var createdAt, updatedAt string
-	err = tx.QueryRow(`SELECT ticket_id,session_id,workspace_id,pane_id,created_at,updated_at FROM automation_continuity_bindings WHERE definition_id=? AND continuity_key=?`, definitionID, subjectKey).Scan(&ids.TicketID, &ids.SessionID, &ids.WorkspaceID, &ids.PaneID, &createdAt, &updatedAt)
-	switch err {
-	case sql.ErrNoRows:
-		now := formatTicketTime(observedAt)
-		if _, err = tx.Exec(`INSERT INTO automation_continuity_bindings(definition_id,continuity_key,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, definitionID, subjectKey, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
-			return nil, false, err
-		}
-	case nil:
-	default:
+	if err := getOrCreateActiveAutomationContinuityBindingTx(tx, definitionID, subjectKey, &ids, observedAt); err != nil {
 		return nil, false, err
 	}
 	now := formatTicketTime(observedAt)
 	if _, err = tx.Exec(`INSERT INTO automation_occurrences(id,definition_id,provider,occurrence_key,subject_key,observed_at,payload_json,created_at) VALUES(?,?, 'github',?,?,?,?,?)`, ids.OccurrenceID, definitionID, occurrenceKey, subjectKey, now, payloadJSON, now); err != nil {
 		return nil, false, err
 	}
-	if _, err = tx.Exec(`INSERT INTO automation_runs(id,definition_id,occurrence_id,definition_revision,snapshot_json,state,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?,?,?,?,?)`, ids.RunID, definitionID, ids.OccurrenceID, revision, snapshotJSON, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
-		return nil, false, err
-	}
-	if _, err = tx.Exec(`UPDATE automation_review_request_edges SET accepted_cycle=?,updated_at=? WHERE definition_id=? AND subject_key=? AND active=1 AND cycle=?`, cycle, now, definitionID, subjectKey, cycle); err != nil {
+	if _, err = tx.Exec(`INSERT INTO automation_runs(id,definition_id,occurrence_id,definition_revision,snapshot_json,state,ticket_id,session_id,workspace_id,pane_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, ids.RunID, definitionID, ids.OccurrenceID, revision, snapshotJSON, AutomationRunStatePending, ids.TicketID, ids.SessionID, ids.WorkspaceID, ids.PaneID, now, now); err != nil {
 		return nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -966,72 +1083,10 @@ func (s *Store) EnsureAutomationContinuationTicket(ticketID, sessionID, runID, o
 	return tx.Commit()
 }
 
-// AutomationContinuityRunHistoryEntry is one other run recorded under a
-// continuity key: its own pinned snapshot_json (to test contract equality)
-// paired with its own delivery ticket_id (to test whether that specific
-// thread's ticket still exists) and session_id (to test whether that thread
-// is the very one the current request would reuse — see
-// hasPriorAutomationContinuityRun's use of it). Continuation runs of the same
-// thread carry the same ticket_id/session_id as their origin (they reuse the
-// thread's continuity binding), so per-entry resolution is exact — it never
-// needs to fall back to grouping by tickets.automation_run_id origin linkage.
-type AutomationContinuityRunHistoryEntry struct {
-	SnapshotJSON string
-	TicketID     string
-	SessionID    string
-}
-
-// AutomationContinuityRunHistory returns every other run recorded under this
-// continuity key, most recent first. Delivery uses this to decide whether
-// the current cycle continues an earlier thread (and so must find that
-// thread's own ticket still present) or starts a fresh one: A1's
-// continuity-binding rotation (automationApply, on a contract-changing edit)
-// mints a brand-new ticket for the same continuity key while older runs
-// remain in history under their own old ticket, so a plain "does history
-// exist for this continuity key" check would wrongly treat that stale
-// history as binding on the new thread too. The caller (which holds the
-// domain type) compares each entry's ContinuationContract against the
-// current request and, only for a same-contract entry, checks whether that
-// entry's own ticket_id still exists — a rotation changes the contract, so
-// unrelated old threads are skipped entirely regardless of their ticket
-// state; a same-contract thread (e.g. after a revert back to an earlier
-// contract) is only treated as lost if its own ticket is actually gone, not
-// merely because some other thread's fresh ticket hasn't been created yet.
-func (s *Store) AutomationContinuityRunHistory(definitionID, continuityKey, currentRunID string) ([]AutomationContinuityRunHistoryEntry, error) {
-	if continuityKey == "" {
-		return nil, nil
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.db == nil {
-		return nil, errors.New("automation persistence unavailable")
-	}
-	rows, err := s.db.Query(`
-		SELECT r.snapshot_json, r.ticket_id, r.session_id
-		FROM automation_runs r
-		JOIN automation_occurrences o ON o.id=r.occurrence_id
-		WHERE r.definition_id=? AND o.subject_key=? AND r.id<>?
-		ORDER BY r.created_at DESC
-	`, definitionID, continuityKey, currentRunID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var history []AutomationContinuityRunHistoryEntry
-	for rows.Next() {
-		var entry AutomationContinuityRunHistoryEntry
-		if err := rows.Scan(&entry.SnapshotJSON, &entry.TicketID, &entry.SessionID); err != nil {
-			return nil, err
-		}
-		history = append(history, entry)
-	}
-	return history, rows.Err()
-}
-
 func scanAutomationRun(scanner interface{ Scan(...any) error }) (*AutomationRun, error) {
 	var r AutomationRun
 	var created, updated, delivered string
-	err := scanner.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered)
+	err := scanner.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.CancelReason, &r.Attempts, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered)
 	if err != nil {
 		return nil, err
 	}
@@ -1041,7 +1096,13 @@ func scanAutomationRun(scanner interface{ Scan(...any) error }) (*AutomationRun,
 	return &r, nil
 }
 
-const automationRunColumns = `id,definition_id,occurrence_id,definition_revision,snapshot_json,state,last_error,ticket_id,session_id,workspace_id,pane_id,resolved_location_json,created_at,updated_at,delivered_at`
+const automationRunColumns = `id,definition_id,occurrence_id,definition_revision,snapshot_json,state,cancel_reason,attempts,last_error,ticket_id,session_id,workspace_id,pane_id,resolved_location_json,created_at,updated_at,delivered_at`
+
+// automationRunColumnsQualified is automationRunColumns with each column
+// prefixed by the automation_runs alias `r`, for queries that join against
+// another table (automation_occurrences, automation_review_request_edges)
+// which also has an `id` column — an unqualified `id` there is ambiguous.
+const automationRunColumnsQualified = `r.id,r.definition_id,r.occurrence_id,r.definition_revision,r.snapshot_json,r.state,r.cancel_reason,r.attempts,r.last_error,r.ticket_id,r.session_id,r.workspace_id,r.pane_id,r.resolved_location_json,r.created_at,r.updated_at,r.delivered_at`
 
 func (s *Store) getAutomationRunUnlocked(id string) (*AutomationRun, error) {
 	r, e := scanAutomationRun(s.db.QueryRow(`SELECT `+automationRunColumns+` FROM automation_runs WHERE id=?`, id))
@@ -1114,7 +1175,7 @@ func (s *Store) ListAutomationRunsWithOccurrenceKeys(definitionID string, limit 
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-		SELECT r.id,r.definition_id,r.occurrence_id,r.definition_revision,r.snapshot_json,r.state,r.last_error,r.ticket_id,r.session_id,r.workspace_id,r.pane_id,r.resolved_location_json,r.created_at,r.updated_at,r.delivered_at,o.occurrence_key
+		SELECT `+automationRunColumnsQualified+`,o.occurrence_key
 		FROM automation_runs r
 		JOIN automation_occurrences o ON o.id=r.occurrence_id
 		WHERE r.definition_id=?
@@ -1129,7 +1190,7 @@ func (s *Store) ListAutomationRunsWithOccurrenceKeys(definitionID string, limit 
 	for rows.Next() {
 		var r AutomationRun
 		var created, updated, delivered, occurrenceKey string
-		if err := rows.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered, &occurrenceKey); err != nil {
+		if err := rows.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.CancelReason, &r.Attempts, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered, &occurrenceKey); err != nil {
 			return nil, err
 		}
 		r.CreatedAt = parseTicketTime(created)
@@ -1140,13 +1201,53 @@ func (s *Store) ListAutomationRunsWithOccurrenceKeys(definitionID string, limit 
 	return out, rows.Err()
 }
 
+// ListAutomationRunsByContinuityKey returns every run recorded for
+// definitionID under continuityKey (matched via occurrence.subject_key, the
+// field every continuity-bearing claim path records it into), excluding
+// excludeRunID, newest first.
+//
+// TODO(PR2b commit 2): this is a transitional bridge for
+// Daemon.hasPriorAutomationContinuityRun, kept only so that function's
+// pre-existing contract/session/ticket-existence logic keeps working against
+// the v2 schema. Commit 2 replaces both with the internal/automation engine
+// seam (ResolveContinuation), which decides continuation from binding status
+// alone and self-heals a dangling active binding instead of walking run
+// history.
+func (s *Store) ListAutomationRunsByContinuityKey(definitionID, continuityKey, excludeRunID string) ([]AutomationRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, errors.New("automation persistence unavailable")
+	}
+	rows, err := s.db.Query(`
+		SELECT `+automationRunColumnsQualified+`
+		FROM automation_runs r
+		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		WHERE r.definition_id=? AND o.subject_key=? AND r.id<>?
+		ORDER BY r.created_at DESC
+	`, definitionID, continuityKey, excludeRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AutomationRun
+	for rows.Next() {
+		r, err := scanAutomationRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListPendingAutomationRuns() ([]AutomationRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.db == nil {
 		return nil, nil
 	}
-	rows, e := s.db.Query(`SELECT ` + automationRunColumns + ` FROM automation_runs WHERE state='pending' ORDER BY created_at`)
+	rows, e := s.db.Query(`SELECT `+automationRunColumns+` FROM automation_runs WHERE state=? ORDER BY created_at`, AutomationRunStatePending)
 	if e != nil {
 		return nil, e
 	}
@@ -1164,27 +1265,44 @@ func (s *Store) ListPendingAutomationRuns() ([]AutomationRun, error) {
 func (s *Store) MarkAutomationRunDelivered(id, resolved string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, e := s.db.Exec(`UPDATE automation_runs SET state='delivered',last_error='',resolved_location_json=?,updated_at=?,delivered_at=? WHERE id=?`, resolved, formatTicketTime(now), formatTicketTime(now), id)
+	_, e := s.db.Exec(`UPDATE automation_runs SET state=?,last_error='',resolved_location_json=?,updated_at=?,delivered_at=? WHERE id=?`, AutomationRunStateDelivered, resolved, formatTicketTime(now), formatTicketTime(now), id)
 	return e
 }
 func (s *Store) MarkAutomationRunFailed(id, message string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, e := s.db.Exec(`UPDATE automation_runs SET state='failed',last_error=?,updated_at=? WHERE id=?`, message, formatTicketTime(now), id)
+	_, e := s.db.Exec(`UPDATE automation_runs SET state=?,last_error=?,updated_at=? WHERE id=?`, AutomationRunStateFailed, message, formatTicketTime(now), id)
 	return e
 }
 
-// ListPrunableAutomationRuns returns definitionID's terminal (delivered or
-// failed) runs older than olderThan that fall outside the newest keep runs
-// (by created_at, across all states — a pending run still counts toward
-// keep, so it DOES bump an older terminal run out of protection, same as any
-// other run would), and are not the origin run of a still-bound continuity
-// thread (tickets.automation_run_id is set once at thread creation and never
-// updated, so it always points at the thread's oldest run — pruning it would
-// permanently break every later occurrence, see
-// automationContinuationOrigin). Session liveness and worktree cleanliness
-// are daemon-side concerns this package cannot check; this only narrows by
-// count/state/age/origin, per A3's fixed retention policy.
+// MarkAutomationRunCancelled transitions a run to cancelled, recording why.
+// It sets state and cancel_reason only — last_error, resolved_location_json,
+// and every other column are left as they were, since cancellation is not a
+// delivery failure: it's withdrawal, disable, or delete overtaking a run
+// that hadn't been delivered yet.
+func (s *Store) MarkAutomationRunCancelled(id, reason string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return errors.New("automation persistence unavailable")
+	}
+	_, err := s.db.Exec(`UPDATE automation_runs SET state=?,cancel_reason=?,updated_at=? WHERE id=?`, AutomationRunStateCancelled, reason, formatTicketTime(now), id)
+	return err
+}
+
+// ListPrunableAutomationRuns returns definitionID's terminal (delivered,
+// failed, or cancelled) runs older than olderThan that fall outside the
+// newest keep runs (by created_at, across all states — a pending run still
+// counts toward keep, so it DOES bump an older terminal run out of
+// protection, same as any other run would), and are not the origin run of a
+// still-bound continuity thread (tickets.automation_run_id is set once at
+// thread creation and never updated, so it always points at the thread's
+// oldest run — pruning it would permanently break every later occurrence,
+// see automationContinuationOrigin). Session liveness and worktree
+// cleanliness are daemon-side concerns this package cannot check; this only
+// narrows by count/state/age/origin, per A3's fixed retention policy.
+// Cancelled runs share failed's retention window rather than a separate one:
+// both are non-delivered terminal outcomes with the same evidentiary value.
 func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderThan time.Time) ([]AutomationRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1194,7 +1312,7 @@ func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderT
 	rows, err := s.db.Query(`
 		SELECT `+automationRunColumns+`
 		FROM automation_runs
-		WHERE definition_id=? AND state IN ('delivered','failed') AND created_at<?
+		WHERE definition_id=? AND state IN (?,?,?) AND created_at<?
 		  AND id NOT IN (
 			SELECT id FROM automation_runs WHERE definition_id=? ORDER BY created_at DESC LIMIT ?
 		  )
@@ -1206,7 +1324,7 @@ func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderT
 			WHERE t.automation_run_id IS NOT NULL AND t.automation_run_id <> ''
 		  )
 		ORDER BY created_at
-	`, definitionID, formatTicketTime(olderThan), definitionID, keep)
+	`, definitionID, AutomationRunStateDelivered, AutomationRunStateFailed, AutomationRunStateCancelled, formatTicketTime(olderThan), definitionID, keep)
 	if err != nil {
 		return nil, err
 	}
@@ -1222,7 +1340,7 @@ func (s *Store) ListPrunableAutomationRuns(definitionID string, keep int, olderT
 	return out, rows.Err()
 }
 
-// ListTerminalAutomationRuns returns every delivered/failed run for
+// ListTerminalAutomationRuns returns every delivered/failed/cancelled run for
 // definitionID, oldest first, with no count or age gate — unlike
 // ListPrunableAutomationRuns, which only surfaces runs outside the retention
 // window. A4's explicit "automation cleanup" command uses this: it reclaims
@@ -1237,9 +1355,9 @@ func (s *Store) ListTerminalAutomationRuns(definitionID string) ([]AutomationRun
 	rows, err := s.db.Query(`
 		SELECT `+automationRunColumns+`
 		FROM automation_runs
-		WHERE definition_id=? AND state IN ('delivered','failed')
+		WHERE definition_id=? AND state IN (?,?,?)
 		ORDER BY created_at
-	`, definitionID)
+	`, definitionID, AutomationRunStateDelivered, AutomationRunStateFailed, AutomationRunStateCancelled)
 	if err != nil {
 		return nil, err
 	}

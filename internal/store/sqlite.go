@@ -771,6 +771,7 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 	`},
 	{75, "persist the applied automation definition YAML", ""},
 	{76, "automations v2: definitions clean slate", ""},
+	{77, "automations v2: explicit run and binding state", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1011,6 +1012,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 76 {
 			if err := applyMigration76(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 77 {
+			if err := applyMigration77(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -1459,6 +1465,113 @@ func applyMigration76(tx *sql.Tx) error {
 			deleted_at TEXT NOT NULL DEFAULT ''
 		)`,
 		`UPDATE tickets SET automation_run_id = NULL WHERE automation_run_id IS NOT NULL`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyMigration77 is the v2 clean-slate rebuild of runs and binding state
+// (docs/plans/2026-07-21-automations-v2-simplification.md, PR2b): like 76,
+// the automations feature has zero production usage, so every run/binding/
+// edge row is wiped rather than evolved in place. automation_runs gains
+// cancel_reason and attempts (attempts is populated by a later PR; the
+// column lands now to avoid a further migration). automation_continuity_bindings
+// becomes append-only: a surrogate id, a status (active|released), and
+// released_reason/released_at, with a unique index enforcing at most one
+// active row per (definition_id, continuity_key) — delivery reads binding
+// status directly instead of inferring it from run history.
+// automation_review_request_edges drops accepted_cycle: candidacy becomes
+// "no run exists for (subject, cycle), or one exists but is still pending"
+// (see store.ReconcileAutomationReviewRequests), so the column no longer has
+// a reader or writer.
+//
+// Children are cleared before automation_definitions could be touched (it
+// isn't, this time) so no row survives referencing a run/binding/edge this
+// migration is about to drop. tickets.automation_run_id is nulled since
+// every run it could reference is gone, mirroring migration 76's own
+// nulling. Guarded with tableExists (a partial-schema test DB may seed only
+// some tables) — if automation_runs was never created, none of its
+// dependents exist either, so there is nothing to wipe.
+//
+// This must apply cleanly from a DB at version 73 (production) and from one
+// freshly migrated through 76 in this same test run: migrations 74-76 have
+// already run by the time 77 does, so 77 always sees the full v1 runs/
+// bindings/edges shape.
+func applyMigration77(tx *sql.Tx) error {
+	exists, err := tableExists(tx, "automation_runs")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	for _, stmt := range []string{
+		`DELETE FROM automation_ticket_occurrence_events`,
+		`DELETE FROM automation_runs`,
+		`DELETE FROM automation_occurrences`,
+		`DELETE FROM automation_continuity_bindings`,
+		`DELETE FROM automation_review_request_edges`,
+		`DELETE FROM automation_provider_cursors`,
+		`UPDATE tickets SET automation_run_id = NULL WHERE automation_run_id IS NOT NULL`,
+		`DROP TABLE automation_runs`,
+		`CREATE TABLE automation_runs (
+			id TEXT PRIMARY KEY,
+			definition_id TEXT NOT NULL,
+			occurrence_id TEXT NOT NULL UNIQUE,
+			definition_revision INTEGER NOT NULL,
+			snapshot_json TEXT NOT NULL,
+			state TEXT NOT NULL,
+			cancel_reason TEXT NOT NULL DEFAULT '',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			ticket_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			pane_id TEXT NOT NULL,
+			resolved_location_json TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			delivered_at TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY(definition_id) REFERENCES automation_definitions(id),
+			FOREIGN KEY(occurrence_id) REFERENCES automation_occurrences(id)
+		)`,
+		`CREATE INDEX idx_automation_runs_definition_created
+			ON automation_runs(definition_id, created_at DESC)`,
+		`DROP TABLE automation_continuity_bindings`,
+		`CREATE TABLE automation_continuity_bindings (
+			id TEXT PRIMARY KEY,
+			definition_id TEXT NOT NULL,
+			continuity_key TEXT NOT NULL,
+			ticket_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			pane_id TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			released_reason TEXT NOT NULL DEFAULT '',
+			released_at TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY(definition_id) REFERENCES automation_definitions(id)
+		)`,
+		`CREATE UNIQUE INDEX idx_automation_bindings_active
+			ON automation_continuity_bindings(definition_id, continuity_key) WHERE status='active'`,
+		`DROP TABLE automation_review_request_edges`,
+		`CREATE TABLE automation_review_request_edges (
+			definition_id TEXT NOT NULL,
+			subject_key TEXT NOT NULL,
+			host TEXT NOT NULL,
+			active INTEGER NOT NULL DEFAULT 0,
+			cycle INTEGER NOT NULL DEFAULT 0,
+			last_observed_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(definition_id, subject_key),
+			FOREIGN KEY(definition_id) REFERENCES automation_definitions(id)
+		)`,
+		`CREATE INDEX idx_automation_review_edges_host
+			ON automation_review_request_edges(definition_id, host, active)`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			return err
