@@ -173,6 +173,8 @@ trigger:
   schedule:
     cron: "* * * * *"
     time_zone: UTC
+  continuity: singleton
+  catch_up: latest
 prompt: |
   Review git worktrees of \`repo/\`; remove with \`git worktree remove\` (never --force) each linked worktree whose branch is fully merged into main AND whose tree is completely clean, then delete that fully-merged branch with \`git branch -d\`. NEVER remove a worktree with staged, unstaged, or untracked changes — list preserved worktrees with reasons. Summarize actions in the ticket.
 launch:
@@ -182,9 +184,6 @@ launch:
 location:
   type: directory
   path: ${JSON.stringify(locationPath)}
-policy:
-  continuity: singleton
-  catch_up: latest
 `;
 }
 
@@ -198,6 +197,8 @@ trigger:
   schedule:
     cron: "* * * * *"
     time_zone: UTC
+  continuity: fresh
+  catch_up: latest
 prompt: |
   Scheduler storm-guard probe. Do nothing; this executable is a test double.
 launch:
@@ -208,9 +209,6 @@ launch:
 location:
   type: directory
   path: ${JSON.stringify(locationPath)}
-policy:
-  continuity: fresh
-  catch_up: latest
 `;
 }
 

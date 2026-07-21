@@ -426,7 +426,6 @@ trigger: {type: manual}
 prompt: Check locally.
 launch: {driver: codex}
 location: {type: directory, path: "` + t.TempDir() + `"}
-policy: {continuity: fresh, overlap: coalesce}
 `
 	def, err := d.automationApply(raw)
 	if err != nil {
@@ -527,7 +526,6 @@ launch: {driver: codex, effort: high}
 location:
   type: repository_worktree
   repository_sources: {default: {type: managed_cache}}
-policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 `
 	_, canonical, err := automation.ParseDefinitionYAML([]byte(yaml))
 	if err != nil {
@@ -613,7 +611,6 @@ trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
 prompt: Review locally.
 launch: {driver: codex}
 location: {type: repository_worktree, repository_sources: {default: {type: managed_cache}}}
-policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -664,7 +661,6 @@ trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
 prompt: Review locally.
 launch: {driver: codex}
 location: {type: repository_worktree, repository_sources: {default: {type: managed_cache}}}
-policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1447,7 +1443,6 @@ trigger: {type: manual}
 prompt: Check locally.
 launch: {driver: codex}
 location: {type: directory, path: "%s"}
-policy: {continuity: fresh, overlap: coalesce}
 `
 
 func TestAutomationApplyBroadcastsOnUpsert(t *testing.T) {

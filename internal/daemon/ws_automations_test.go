@@ -430,7 +430,6 @@ trigger: {type: manual}
 prompt: Do the thing.
 launch: {driver: %s}
 location: {type: directory, path: "%s"}
-policy: {continuity: fresh, overlap: coalesce}
 `
 	cases := []struct {
 		name      string

@@ -28,7 +28,6 @@ type DefinitionSpec struct {
 	Prompt     string       `yaml:"prompt" json:"prompt"`
 	Launch     LaunchSpec   `yaml:"launch" json:"launch"`
 	Location   LocationSpec `yaml:"location" json:"location"`
-	Policy     PolicySpec   `yaml:"policy" json:"policy"`
 }
 type TriggerSpec struct {
 	Type         string               `yaml:"type" json:"type"`
@@ -40,6 +39,14 @@ type TriggerSpec struct {
 	// definition's canonical JSON and bump UpsertAutomationDefinition's
 	// revision on every byte-identical re-apply.
 	Schedule *ScheduleSpec `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+	// Continuity and CatchUp are valid only on a scheduled trigger — manual is
+	// always implied fresh, github_review_requested is always implied
+	// per_subject+latest (see ValidateDefinition and ResolvedTriggerPolicy).
+	// Continuity defaults to "fresh" when omitted on scheduled; values
+	// fresh|singleton. CatchUp has no default — scheduled requires it
+	// explicitly; values skip|latest.
+	Continuity string `yaml:"continuity,omitempty" json:"continuity,omitempty"`
+	CatchUp    string `yaml:"catch_up,omitempty" json:"catch_up,omitempty"`
 }
 type ScheduleSpec struct {
 	Cron     string `yaml:"cron,omitempty" json:"cron,omitempty"`
@@ -69,11 +76,6 @@ type RepositorySource struct {
 	Type string `yaml:"type" json:"type"`
 	Path string `yaml:"path,omitempty" json:"path,omitempty"`
 }
-type PolicySpec struct {
-	Continuity string `yaml:"continuity" json:"continuity"`
-	CatchUp    string `yaml:"catch_up,omitempty" json:"catch_up,omitempty"`
-	Overlap    string `yaml:"overlap,omitempty" json:"overlap,omitempty"`
-}
 type EffectiveLaunch = launchcontract.UnattendedLaunchSpec
 type Snapshot struct {
 	APIVersion         string          `json:"api_version"`
@@ -81,7 +83,12 @@ type Snapshot struct {
 	Prompt             string          `json:"prompt"`
 	Launch             EffectiveLaunch `json:"launch"`
 	Location           LocationSpec    `json:"location"`
-	Policy             PolicySpec      `json:"policy"`
+	// Continuity and CatchUp are resolved at Effective() time from the
+	// trigger's implied or configured policy (see ResolvedTriggerPolicy) —
+	// delivery code reads them from here, in one place, regardless of
+	// trigger type.
+	Continuity string `json:"continuity"`
+	CatchUp    string `json:"catch_up,omitempty"`
 }
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -92,6 +99,16 @@ var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // tries to set it is rejected outright rather than silently ignored.
 var errEnabledManagedOutsideSpec = errors.New("enabled is managed outside the spec; use 'attn automation enable' or 'attn automation disable'")
 
+// errPolicyRemoved is returned by ParseDefinitionYAML when the document
+// carries a top-level `policy` key. The v1 policy block (continuity/
+// catch_up/overlap) is gone: scheduled triggers take continuity and catch_up
+// directly (trigger.continuity/trigger.catch_up); manual and
+// github_review_requested no longer configure them at all (see
+// ValidateDefinition, ResolvedTriggerPolicy). Probed the same way as
+// errEnabledManagedOutsideSpec so the error is directed rather than a
+// confusing KnownFields "field policy not found" decode failure.
+var errPolicyRemoved = errors.New("policy has been removed; scheduled triggers take continuity and catch_up directly")
+
 func ParseDefinitionYAML(data []byte) (DefinitionSpec, []byte, error) {
 	var spec DefinitionSpec
 	var probe map[string]any
@@ -100,6 +117,9 @@ func ParseDefinitionYAML(data []byte) (DefinitionSpec, []byte, error) {
 	}
 	if _, hasEnabled := probe["enabled"]; hasEnabled {
 		return spec, nil, errEnabledManagedOutsideSpec
+	}
+	if _, hasPolicy := probe["policy"]; hasPolicy {
+		return spec, nil, errPolicyRemoved
 	}
 	dec := yaml.NewDecoder(strings.NewReader(string(data)))
 	dec.KnownFields(true)
@@ -140,7 +160,6 @@ var StarterDefinition = DefinitionSpec{
 	Prompt:     "Describe what the agent should do when this automation runs.",
 	Launch:     LaunchSpec{Driver: "codex"},
 	Location:   LocationSpec{Type: "directory", Path: "/path/to/repository"},
-	Policy:     PolicySpec{Continuity: "fresh"},
 }
 
 // StarterTemplateYAML renders StarterDefinition through the same
@@ -238,42 +257,62 @@ func ValidateDefinition(s *DefinitionSpec) error {
 	default:
 		return errors.New("location.type must be directory or repository_worktree")
 	}
-	if s.Policy.Continuity == "" {
-		s.Policy.Continuity = "fresh"
-	}
-	if s.Policy.Overlap != "" && s.Policy.Overlap != "coalesce" {
-		return errors.New("policy.overlap must be coalesce")
-	}
 	switch s.Trigger.Type {
 	case "github_review_requested":
 		if s.Location.Type != "repository_worktree" {
 			return errors.New("github_review_requested trigger requires repository_worktree location")
 		}
-		if s.Policy.Continuity != "per_subject" {
-			return errors.New("github_review_requested trigger requires policy.continuity per_subject")
+		if s.Trigger.Continuity != "" {
+			return errors.New("github_review_requested trigger does not configure trigger.continuity; it is always per_subject")
 		}
-		if s.Policy.CatchUp != "latest" {
-			return errors.New("github_review_requested trigger requires policy.catch_up latest")
+		if s.Trigger.CatchUp != "" {
+			return errors.New("github_review_requested trigger does not configure trigger.catch_up; it is always latest")
 		}
 	case "scheduled":
 		if s.Location.Type != "directory" {
 			return errors.New("scheduled trigger requires directory location")
 		}
-		if s.Policy.Continuity != "fresh" && s.Policy.Continuity != "singleton" {
-			return errors.New("scheduled trigger requires policy.continuity fresh or singleton")
+		if s.Trigger.Continuity == "" {
+			s.Trigger.Continuity = "fresh"
 		}
-		if s.Policy.CatchUp != "skip" && s.Policy.CatchUp != "latest" {
-			return errors.New("scheduled trigger requires policy.catch_up skip or latest")
+		if s.Trigger.Continuity != "fresh" && s.Trigger.Continuity != "singleton" {
+			return errors.New("scheduled trigger requires trigger.continuity fresh or singleton")
+		}
+		if s.Trigger.CatchUp != "skip" && s.Trigger.CatchUp != "latest" {
+			return errors.New("scheduled trigger requires trigger.catch_up skip or latest")
 		}
 	default:
-		if s.Policy.Continuity != "fresh" {
-			return errors.New("manual trigger supports only policy.continuity fresh")
+		if s.Trigger.Continuity != "" {
+			return errors.New("manual trigger does not configure trigger.continuity; it is always fresh")
 		}
-		if s.Policy.CatchUp != "" {
-			return errors.New("manual trigger cannot configure policy.catch_up")
+		if s.Trigger.CatchUp != "" {
+			return errors.New("manual trigger does not configure trigger.catch_up")
 		}
 	}
 	return nil
+}
+
+// ResolvedTriggerPolicy returns the continuity and catch_up values that
+// govern spec's delivery, whether or not the trigger configures them
+// explicitly: manual is always fresh (no catch_up), github_review_requested
+// is always per_subject+latest, and scheduled uses whatever
+// ValidateDefinition resolved onto the trigger (continuity defaulted to
+// fresh if omitted; catch_up is mandatory there). Shared by Effective() and
+// any caller (e.g. the WS definition summary) that needs the same resolved
+// values without re-deriving delivery's Snapshot.
+func ResolvedTriggerPolicy(spec DefinitionSpec) (string, string) {
+	switch spec.Trigger.Type {
+	case "github_review_requested":
+		return "per_subject", "latest"
+	case "scheduled":
+		continuity := spec.Trigger.Continuity
+		if continuity == "" {
+			continuity = "fresh"
+		}
+		return continuity, spec.Trigger.CatchUp
+	default:
+		return "fresh", ""
+	}
 }
 
 func validateRepositoryFilter(filter *RepositoryFilterSpec) error {
@@ -488,14 +527,15 @@ func Effective(spec DefinitionSpec, revision int) (Snapshot, error) {
 	if err := launch.Validate(); err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{APIVersion: APIVersion, DefinitionRevision: revision, Prompt: spec.Prompt, Launch: launch, Location: spec.Location, Policy: spec.Policy}, nil
+	continuity, catchUp := ResolvedTriggerPolicy(spec)
+	return Snapshot{APIVersion: APIVersion, DefinitionRevision: revision, Prompt: spec.Prompt, Launch: launch, Location: spec.Location, Continuity: continuity, CatchUp: catchUp}, nil
 }
 
 // ContinuationContract is the subset of a Snapshot that governs whether a
 // continuity binding (ticket/session/worktree) is safe to reuse across
 // occurrences: the reviewer-facing prompt, launch configuration, and
-// location. It deliberately excludes Policy (continuity/catch_up policy
-// changes don't invalidate an in-flight thread) and any per-occurrence
+// location. It deliberately excludes Continuity/CatchUp (a policy change
+// doesn't invalidate an in-flight thread) and any per-occurrence
 // freshness signal (e.g. GitHub HeadSHA, checked separately by
 // validateAutomationContinuation as per-PR freshness, not contract
 // identity).

@@ -154,7 +154,7 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 		}
 	}
 	continuityKey := ""
-	switch snapshot.Policy.Continuity {
+	switch snapshot.Continuity {
 	case "per_subject":
 		continuityKey = occurrence.SubjectKey
 	case "singleton":

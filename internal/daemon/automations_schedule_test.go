@@ -24,11 +24,12 @@ name: Nightly
 trigger:
   type: scheduled
   schedule: {cron: %q, time_zone: UTC}
+  continuity: %s
+  catch_up: %s
 prompt: %s
 launch: {driver: codex}
 location: {type: directory, path: %s}
-policy: {continuity: %s, catch_up: %s}
-`, cron, prompt, dir, continuity, catchUp)
+`, cron, continuity, catchUp, prompt, dir)
 }
 
 // setupScheduledDaemon parses and persists one scheduled automation
