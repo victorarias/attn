@@ -240,8 +240,8 @@ func (a automationBindingStoreAdapter) TicketExists(ticketID string) (bool, erro
 	}
 	return ticket != nil, nil
 }
-func (d *Daemon) resolveAutomationContinuation(definitionID, continuityKey string) (automation.Continuation, error) {
-	cont, err := automation.ResolveContinuation(automationBindingStoreAdapter{d.store}, definitionID, continuityKey, time.Now())
+func (d *Daemon) resolveAutomationContinuation(definitionID, continuityKey, ownTicketID string) (automation.Continuation, error) {
+	cont, err := automation.ResolveContinuation(automationBindingStoreAdapter{d.store}, definitionID, continuityKey, ownTicketID, time.Now())
 	if err != nil {
 		return automation.Continuation{}, err
 	}
@@ -263,11 +263,12 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 		return err
 	}
 	if ticket == nil {
-		// req's own thread's binding is either absent, or active with a ticket
-		// that has genuinely vanished (e.g. store.SweepExpiredTickets) — either
-		// way there is nothing left to continue, so this self-heals rather than
-		// refusing (see automation.ResolveContinuation).
-		_, err := d.resolveAutomationContinuation(req.DefinitionID, req.ContinuityKey)
+		// req's own thread's binding is either absent, active pointing at req's
+		// own not-yet-created ticket (the thread being born right now), or
+		// active with a ticket that has genuinely vanished (e.g.
+		// store.SweepExpiredTickets) — only the last case self-heals; see
+		// automation.ResolveContinuation.
+		_, err := d.resolveAutomationContinuation(req.DefinitionID, req.ContinuityKey, req.IDs.TicketID)
 		return err
 	}
 	if ticket.AutomationRunID == "" || ticket.AutomationRunID == req.RunID {
@@ -377,10 +378,11 @@ func (d *Daemon) ensureAutomationTicket(_ context.Context, req automation.WorkRe
 		return nil
 	}
 	if req.ContinuityKey != "" {
-		// See resolveAutomationContinuation: an active binding whose ticket has
-		// genuinely vanished self-heals (releases the binding) rather than
-		// refusing here, since there is nothing left for req to reuse.
-		if _, err := d.resolveAutomationContinuation(req.DefinitionID, req.ContinuityKey); err != nil {
+		// See resolveAutomationContinuation: an active binding pointing at req's
+		// own not-yet-created ticket is the thread being born right now, not
+		// dangling; only a binding whose ticket has genuinely vanished
+		// self-heals (releases the binding) rather than refusing here.
+		if _, err := d.resolveAutomationContinuation(req.DefinitionID, req.ContinuityKey, req.IDs.TicketID); err != nil {
 			return err
 		}
 	}

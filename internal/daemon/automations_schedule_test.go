@@ -502,6 +502,93 @@ func TestScheduledPendingRunRecoversOnRestart(t *testing.T) {
 	}
 }
 
+// TestScheduledSingletonSecondOccurrenceContinuesFirstOccurrencesThread is the
+// load-bearing regression for the ownTicketID fix in
+// automation.ResolveContinuation: on a singleton continuity definition's very
+// first delivered occurrence, the claim creates the active binding pointing
+// at that occurrence's own reserved, not-yet-created ticket. Both
+// validateAutomationContinuation and ensureAutomationTicket run
+// resolveAutomationContinuation before that ticket row exists, so
+// GetTicket(ownTicketID) is nil - before the fix, resolveAutomationContinuation
+// mistook the binding's own unborn ticket for a dangling one and released it
+// (reason ticket_swept), so the SECOND occurrence found no active binding and
+// started a brand new thread instead of continuing the first's.
+//
+// The hook drives the real ticket-first sequence for both occurrences:
+// validateAutomationContinuation only runs when the own ticket doesn't exist
+// yet (exactly the bug's trigger, and only true for the first occurrence -
+// the second occurrence's ticket already exists, and continuing it through
+// validateAutomationContinuation would require a live/resumable PTY session,
+// an orthogonal concern already covered by automations_contract_test.go's
+// resume-path tests). ensureAutomationTicket runs for both, since it handles
+// the existing-ticket reassignment without needing a PTY. Only the
+// PTY-touching materialize steps are skipped, per deliverAutomationRun's own
+// comment on why a full spawn is out of reach for a unit test. Asserts the
+// second occurrence inherits the first's ticket and session, with exactly one
+// binding row surviving both.
+func TestScheduledSingletonSecondOccurrenceContinuesFirstOccurrencesThread(t *testing.T) {
+	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "singleton", "latest")
+	d.dataRoot = t.TempDir() // ensureAutomationTicket writes an occurrence artifact under here
+	var delivered []*store.AutomationRun
+	d.automationDeliveryHook = func(run *store.AutomationRun) error {
+		var snapshot automation.Snapshot
+		if err := json.Unmarshal([]byte(run.SnapshotJSON), &snapshot); err != nil {
+			return err
+		}
+		occurrence, err := s.GetAutomationOccurrence(run.OccurrenceID)
+		if err != nil {
+			return err
+		}
+		if occurrence == nil {
+			return fmt.Errorf("occurrence missing")
+		}
+		req := automation.WorkRequest{
+			RunID: run.ID, DefinitionID: run.DefinitionID, SubjectKey: occurrence.SubjectKey,
+			ContinuityKey: "singleton", Provider: occurrence.Provider, Prompt: snapshot.Prompt,
+			Context: json.RawMessage(occurrence.PayloadJSON), Launch: snapshot.Launch, Location: snapshot.Location,
+			IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID},
+		}
+		existingTicket, err := s.GetTicket(req.IDs.TicketID)
+		if err != nil {
+			return err
+		}
+		if existingTicket == nil {
+			// Exactly the bug's trigger condition: own ticket doesn't exist yet.
+			if err := d.validateAutomationContinuation(req); err != nil {
+				return err
+			}
+		}
+		if err := d.ensureAutomationTicket(context.Background(), req); err != nil {
+			return err
+		}
+		if err := d.activateAutomationContinuationTicket(req); err != nil {
+			return err
+		}
+		delivered = append(delivered, run)
+		return s.MarkAutomationRunDelivered(run.ID, "{}", time.Now())
+	}
+
+	now0 := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
+	d.observeDueSchedules(now0)                        // anchor, no delivery
+	d.observeDueSchedules(now0.Add(70 * time.Second))  // first occurrence
+	d.observeDueSchedules(now0.Add(130 * time.Second)) // second occurrence
+
+	if len(delivered) != 2 {
+		t.Fatalf("delivered %d occurrences, want 2 (%#v)", len(delivered), delivered)
+	}
+	run1, run2 := delivered[0], delivered[1]
+	if run2.TicketID != run1.TicketID || run2.SessionID != run1.SessionID {
+		t.Fatalf("second occurrence ids=%s/%s, want inherited from first (%s/%s): singleton continuity broke", run2.TicketID, run2.SessionID, run1.TicketID, run1.SessionID)
+	}
+	binding, err := s.GetActiveAutomationContinuityBinding(def.ID, "singleton")
+	if err != nil || binding == nil {
+		t.Fatalf("binding=%#v err=%v, want one active binding surviving both occurrences", binding, err)
+	}
+	if binding.TicketID != run1.TicketID {
+		t.Fatalf("active binding ticket=%s, want original %s", binding.TicketID, run1.TicketID)
+	}
+}
+
 // TestScheduledPendingRunRetriedOnNextDeliveryPass pins the scheduled-path
 // analogue of the GitHub reviewer stuck-pending regression (bug #608, see
 // TestGitHubReviewObservationRetriesAcceptedPendingRunOnSameDemand): a

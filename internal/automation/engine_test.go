@@ -30,7 +30,7 @@ func (f *fakeBindingStore) TicketExists(ticketID string) (bool, error) {
 
 func TestResolveContinuationNoActiveBindingIsFresh(t *testing.T) {
 	fake := &fakeBindingStore{binding: nil}
-	got, err := ResolveContinuation(fake, "def", "key", time.Now())
+	got, err := ResolveContinuation(fake, "def", "key", "own-ticket", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestResolveContinuationNoActiveBindingIsFresh(t *testing.T) {
 func TestResolveContinuationActiveBindingWithLiveTicketContinues(t *testing.T) {
 	binding := &Binding{TicketID: "t1", SessionID: "s1", WorkspaceID: "w1", PaneID: "p1"}
 	fake := &fakeBindingStore{binding: binding, ticketExists: true}
-	got, err := ResolveContinuation(fake, "def", "key", time.Now())
+	got, err := ResolveContinuation(fake, "def", "key", "own-ticket", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +57,33 @@ func TestResolveContinuationActiveBindingWithLiveTicketContinues(t *testing.T) {
 	}
 }
 
+// TestResolveContinuationOwnBindingIsFreshWithoutRelease pins the fix for the
+// hazard where a run's own claim already created the active binding (pointing
+// at this run's own reserved, not-yet-created ticket) before
+// ResolveContinuation runs: TicketExists on that ticket is false purely
+// because it hasn't been created yet, not because it was swept. Releasing
+// here would silently break singleton/per_subject continuity on every first
+// occurrence, since the very next occurrence would find no binding and start
+// a new one instead of continuing this one's still-being-born thread.
+func TestResolveContinuationOwnBindingIsFreshWithoutRelease(t *testing.T) {
+	binding := &Binding{TicketID: "own-ticket", SessionID: "s1", WorkspaceID: "w1", PaneID: "p1"}
+	fake := &fakeBindingStore{binding: binding, ticketExists: false}
+	got, err := ResolveContinuation(fake, "def", "key", "own-ticket", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Fresh || got.Binding != nil || got.SelfHealedDanglingBinding {
+		t.Fatalf("got %#v, want plain Fresh (no self-heal flag)", got)
+	}
+	if fake.released {
+		t.Fatal("own not-yet-created ticket, but ReleaseContinuityBinding was called")
+	}
+}
+
 func TestResolveContinuationDanglingBindingSelfHeals(t *testing.T) {
 	binding := &Binding{TicketID: "t1", SessionID: "s1", WorkspaceID: "w1", PaneID: "p1"}
 	fake := &fakeBindingStore{binding: binding, ticketExists: false}
-	got, err := ResolveContinuation(fake, "def", "key", time.Now())
+	got, err := ResolveContinuation(fake, "def", "key", "own-ticket", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
