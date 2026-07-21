@@ -817,6 +817,97 @@ func TestAutomationDefinitionGetWSUnknownID(t *testing.T) {
 	}
 }
 
+// automationToggleSplitBrainYAML is manualAutomationYAML with a trailing
+// comment on enabled, used by
+// TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling to
+// prove SetEnabledInYAML's headline guarantee — comments survive a toggle —
+// holds all the way through the daemon's own editor read path, not just
+// inside the store.
+const automationToggleSplitBrainYAML = `api_version: attn.dev/automations/v1alpha1
+id: manual-check
+name: Manual check
+enabled: true  # turn me off from the panel
+trigger: {type: manual}
+prompt: Check locally.
+launch: {driver: codex}
+location: {type: directory, path: "%s"}
+policy: {continuity: fresh, overlap: coalesce}
+`
+
+// TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling
+// closes the enabled split-brain defect end-to-end, through the exact path
+// the app uses: apply a definition, toggle it off via
+// handleAutomationSetEnabledWS (what the panel's toggle sends), then fetch it
+// back via handleAutomationDefinitionGetWS — the editor's own load path,
+// backed by automationDefinitionYAML. Before this fix, SetAutomationEnabled
+// wrote only the enabled COLUMN, so this fetch would still show
+// `enabled: true` (spec_yaml never having been updated); saving that stale
+// buffer back — even for an unrelated comment edit, exercised here as the
+// final step by re-applying exactly what definition_get returned — would
+// silently flip the definition back on. It must instead show
+// `enabled: false` with the comment intact, and re-applying it must leave
+// the definition disabled.
+func TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(automationToggleSplitBrainYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationSetEnabledWS(setClient, &protocol.AutomationSetEnabledMessage{
+		Cmd:          protocol.CmdAutomationSetEnabled,
+		DefinitionID: def.ID,
+		Enabled:      false,
+		RequestID:    protocol.Ptr("toggle-off"),
+	})
+	var setRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, setClient.send, &setRes)
+	if !setRes.Success || len(setRes.Definitions) != 1 || setRes.Definitions[0].Enabled {
+		t.Fatalf("set_enabled result = %+v, want a disabled summary", setRes)
+	}
+
+	getClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationDefinitionGetWS(getClient, &protocol.AutomationDefinitionGetMessage{
+		Cmd:          protocol.CmdAutomationDefinitionGet,
+		DefinitionID: def.ID,
+		RequestID:    protocol.Ptr("get-after-toggle"),
+	})
+	var getRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, getClient.send, &getRes)
+	if !getRes.Success || getRes.SpecYaml == nil {
+		t.Fatalf("definition_get after toggle = %+v, want success with spec_yaml", getRes)
+	}
+	fetched := *getRes.SpecYaml
+	if !strings.Contains(fetched, "enabled: false") {
+		t.Fatalf("editor's own read path still shows the definition enabled:\n%s", fetched)
+	}
+	if !strings.Contains(fetched, "# turn me off from the panel") {
+		t.Fatalf("comment lost from the editor's read path:\n%s", fetched)
+	}
+
+	applyClient := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleAutomationApplyWS(applyClient, &protocol.AutomationApplyMessage{
+		Cmd:              protocol.CmdAutomationApply,
+		DefinitionYaml:   fetched,
+		ExpectedID:       protocol.Ptr(def.ID),
+		ExpectedRevision: getRes.Revision,
+		RequestID:        protocol.Ptr("save-after-get"),
+	})
+	var applyRes protocol.AutomationActionResultMessage
+	readNotebookWSEvent(t, applyClient.send, &applyRes)
+	if !applyRes.Success {
+		t.Fatalf("re-applying the fetched (disabled) yaml failed: %+v", applyRes)
+	}
+
+	final, err := s.GetAutomationDefinition(def.ID)
+	if err != nil || final == nil || final.Enabled {
+		t.Fatalf("definition after re-applying fetched yaml = %#v err=%v, want it to stay disabled", final, err)
+	}
+}
+
 // TestAutomationSetEnabledWSDeadlineAbortsWithoutMutating pins the
 // timeout-vs-mutation trap from PR #619's review: automationSetEnabled must
 // abort once its daemon-side deadline (wsAutomationMutationTimeout) elapses

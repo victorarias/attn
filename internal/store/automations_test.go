@@ -1,10 +1,13 @@
 package store
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/victorarias/attn/internal/automation"
 )
 
 func TestAutomationClaimIsIdempotentAndSnapshotsRevision(t *testing.T) {
@@ -825,6 +828,116 @@ func TestSetAutomationEnabledReenableCatchesUpCurrentReviewDemand(t *testing.T) 
 	candidates, err := s.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now.Add(3*time.Minute))
 	if err != nil || len(candidates) != 1 || candidates[0].Cycle != 2 {
 		t.Fatalf("re-enabled latest catch-up candidates=%#v err=%v", candidates, err)
+	}
+}
+
+// enabledToggleYAML is a realistic hand-written definition, comments and all,
+// used by the SetAutomationEnabled write-through tests below.
+const enabledToggleYAML = `# keep this automation lean
+api_version: attn.dev/automations/v1alpha1
+id: nightly-sweep
+name: Nightly sweep
+enabled: true  # flip me from the panel
+trigger: {type: manual}
+prompt: Sweep the repo.
+launch: {driver: codex}
+location: {type: directory, path: "PATH"}
+policy: {continuity: fresh}
+`
+
+// TestSetAutomationEnabledWritesThroughToStoredSpec pins the fix for the
+// split-brain defect this PR closes: SetAutomationEnabled (the panel's
+// toggle) used to write only the enabled COLUMN, leaving spec_json/spec_yaml
+// saying the old value, so the next unrelated Save would silently re-enable
+// a definition the operator had just turned off. On a real transition, both
+// spec_json and spec_yaml must show the new value, with every other byte —
+// comments included — carried over from spec_yaml.
+func TestSetAutomationEnabledWritesThroughToStoredSpec(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	yamlDoc := strings.ReplaceAll(enabledToggleYAML, "PATH", t.TempDir())
+	spec, canonical, err := automation.ParseDefinitionYAML([]byte(yamlDoc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), yamlDoc, true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startRevision := def.Revision
+
+	disabled, changed, err := s.SetAutomationEnabled(def.ID, false, now.Add(time.Minute))
+	if err != nil || !changed || disabled == nil || disabled.Enabled {
+		t.Fatalf("disable: def=%#v changed=%v err=%v", disabled, changed, err)
+	}
+	if disabled.Revision != startRevision+1 {
+		t.Fatalf("real transition did not bump revision: got %d, want %d", disabled.Revision, startRevision+1)
+	}
+
+	if !strings.Contains(disabled.SpecJSON, `"enabled":false`) {
+		t.Fatalf("spec_json still says enabled:true: %s", disabled.SpecJSON)
+	}
+	var disabledSpec automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(disabled.SpecJSON), &disabledSpec); err != nil {
+		t.Fatalf("spec_json no longer parses: %v: %s", err, disabled.SpecJSON)
+	}
+	if disabledSpec.Enabled || disabledSpec.ID != spec.ID || disabledSpec.Prompt != spec.Prompt {
+		t.Fatalf("spec_json lost or mis-set fields: %#v", disabledSpec)
+	}
+
+	if !strings.Contains(disabled.SpecYAML, "enabled: false  # flip me from the panel") {
+		t.Fatalf("spec_yaml still says enabled: true, or lost its trailing comment: %s", disabled.SpecYAML)
+	}
+	if !strings.Contains(disabled.SpecYAML, "# keep this automation lean") {
+		t.Fatalf("spec_yaml lost its head comment: %s", disabled.SpecYAML)
+	}
+
+	// The no-op re-application of the same state must not bump revision: it
+	// is not a transition, so nothing to keep in sync changed.
+	noop, changed, err := s.SetAutomationEnabled(def.ID, false, now.Add(2*time.Minute))
+	if err != nil || changed || noop == nil {
+		t.Fatalf("no-op disable: def=%#v changed=%v err=%v", noop, changed, err)
+	}
+	if noop.Revision != disabled.Revision {
+		t.Fatalf("no-op bumped revision: got %d, want %d", noop.Revision, disabled.Revision)
+	}
+
+	// The editor's own read path (automationDefinitionYAML in
+	// internal/daemon/ws_automations.go) prefers spec_yaml verbatim when
+	// present, so this is exactly what re-opening the editor after the
+	// toggle would show. That full round trip — toggle, reopen, save an
+	// unrelated edit, confirm the automation is still off — is pinned at two
+	// levels above this one, not here:
+	// TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling
+	// over the daemon's real WS handlers, and leg 10 of
+	// app/scripts/real-app-harness/scenario-automation-editor.mjs against the
+	// packaged app driving the actual panel toggle.
+}
+
+// TestSetAutomationEnabledDegradesGracefullyOnCorruptSpecJSON pins that a row
+// whose spec_json cannot be parsed (a corrupt or otherwise unexpected value —
+// this store method never validates what UpsertAutomationDefinition was
+// given) never blocks the toggle: enabling, and especially disabling — a
+// safety control for turning off an unattended cron — must always take
+// effect on the column, even when the spec can't be kept in sync.
+func TestSetAutomationEnabledDegradesGracefullyOnCorruptSpecJSON(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	const corruptJSON = `not-json`
+	def, err := s.UpsertAutomationDefinition("corrupt-spec", "Corrupt spec", corruptJSON, "", true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	disabled, changed, err := s.SetAutomationEnabled(def.ID, false, now.Add(time.Minute))
+	if err != nil || !changed || disabled == nil || disabled.Enabled {
+		t.Fatalf("disable must still succeed on a corrupt spec: def=%#v changed=%v err=%v", disabled, changed, err)
+	}
+	if disabled.Revision != def.Revision+1 {
+		t.Fatalf("column-only transition did not bump revision: got %d, want %d", disabled.Revision, def.Revision+1)
+	}
+	if disabled.SpecJSON != corruptJSON {
+		t.Fatalf("corrupt spec_json was touched instead of left alone: %s", disabled.SpecJSON)
 	}
 }
 
