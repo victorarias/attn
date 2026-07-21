@@ -4,6 +4,10 @@ import { test, expect, type Page } from '@playwright/test';
 // tests below — same shape as LiveMarkdownEditorHarness's.
 declare global {
   interface Window {
+    // Declaration-merged with live-markdown-editor.spec.ts's identical block,
+    // so the shape must stay in step with it: it describes whichever harness
+    // page is loaded, and LiveMarkdownEditorHarness still exposes swapValue.
+    // AutomationYamlEditorHarness does not — this spec never calls it.
     __EDITOR_HARNESS__?: {
       applyExternal: (next: string) => void;
       swapValue: (next: string) => void;
@@ -14,7 +18,9 @@ declare global {
 // Scroll well into the long automation buffer and wait for CodeMirror to
 // ACKNOWLEDGE the scroll (a deep, virtualized line attaches to the DOM) before
 // returning the settled scrollTop — same rationale as
-// live-markdown-editor.spec.ts's scrollIntoLongNote, which this mirrors.
+// live-markdown-editor.spec.ts's scrollIntoLongNote, which this mirrors. The
+// selection test needs this because the line it anchors on is virtualized: it
+// has to be attached to the DOM before it can be clicked.
 async function scrollIntoLongBuffer(page: Page): Promise<number> {
   const scroller = page.locator('.cm-scroller');
   await scroller.evaluate((el) => { el.scrollTop = 600; });
@@ -30,7 +36,7 @@ async function scrollIntoLongBuffer(page: Page): Promise<number> {
 // which mock this leaf component out for exactly that reason). This is where
 // its three load-bearing, hard-to-get-right behaviors are actually verified:
 // syntax-highlighting theme (classHighlighter, not CM's built-in white-in-dark
-// theme), the Cmd-rewritten search keymap, and minimal-edit scroll
+// theme), the Cmd-rewritten search keymap, and minimal-edit selection
 // preservation for Reload.
 test.describe('AutomationYamlEditor', () => {
   test('renders YAML syntax highlighting via classHighlighter tok- classes, over the dark app theme', async ({ page }) => {
@@ -84,21 +90,44 @@ test.describe('AutomationYamlEditor', () => {
     await expect(page.locator('.cm-panel.cm-search')).toBeVisible();
   });
 
-  test('keeps the buffer scrolled in place when Reload applies new content (minimal edit)', async ({ page }) => {
-    // Mirrors live-markdown-editor.spec.ts's equivalent test: AutomationEditor's
-    // Reload button drives applyExternalContent, which must not yank the
-    // viewport back to the top when it re-confirms mostly-unchanged text.
+  test('Reload leaves a selection above the edit exactly where it was (minimal edit)', async ({ page }) => {
+    // This is what pins the minimal-edit path for Reload, and it is
+    // deliberately an assertion about change MAPPING, not about scroll
+    // position.
+    //
+    // There used to be a scroll-position pair here, mirroring
+    // live-markdown-editor.spec.ts: one test asserting Reload holds the
+    // viewport, and a contrast test asserting a full-document value swap
+    // snaps it to the top. Both are gone because neither could fail for THIS
+    // buffer. The contrast test went red in CI while passing locally, and
+    // mutation testing then showed the positive one survived every mutation
+    // aimed at it — a forced full-document replace AND scrollIntoView:true,
+    // with the edit placed off screen. Scroll position after a doc-wide
+    // replace is a measurement side effect of CodeMirror's height map, so it
+    // varies with line heights, wrapping, and font metrics; the YAML buffer's
+    // short comment lines simply do not reproduce what the markdown buffer's
+    // wrapped prose does. A test that cannot fail is worse than no test.
+    //
+    // Change mapping is specified rather than measured: an edit confined to
+    // line 80 is entirely after this selection, so mapping must leave the
+    // selection byte-identical. A full replace (from 0 to doc.length, which is
+    // what a plain controlled-value swap dispatches) deletes the selected text
+    // out from under it and cannot preserve it. Verified red under exactly
+    // that mutation.
     await page.goto('/test-harness/?component=AutomationYamlEditor&long=1');
     await page.waitForFunction(() => window.__HARNESS__?.ready === true);
     await page.waitForSelector('.cm-content');
 
-    const scroller = page.locator('.cm-scroller');
-    const before = await scrollIntoLongBuffer(page);
-    expect(before).toBeGreaterThan(400);
+    await scrollIntoLongBuffer(page);
 
-    // The daemon's reload response changes only the last comment line; the
-    // rest of the document — including everything above the fold — is
-    // unchanged.
+    // Select a whole line well above the edit site.
+    const anchorLine = page.locator('.cm-line', { hasText: 'comment line number 25 of the long automation' });
+    await anchorLine.click();
+    await page.keyboard.press('Home');
+    await page.keyboard.press('Shift+End');
+    const selectedBefore = await page.evaluate(() => window.getSelection()?.toString() ?? '');
+    expect(selectedBefore).toContain('comment line number 25 of the long automation');
+
     await page.evaluate(() => {
       const lines = Array.from({ length: 80 }, (_, i) => `comment line number ${i + 1} of the long automation`);
       lines[79] = 'comment line number 80 of the long automation — RELOADED';
@@ -110,25 +139,7 @@ test.describe('AutomationYamlEditor', () => {
       const last = calls[calls.length - 1]?.[0] as string | undefined;
       return !!last && last.includes('RELOADED');
     });
-    await expect
-      .poll(() => scroller.evaluate((el, b) => Math.abs(el.scrollTop - b), before))
-      .toBeLessThanOrEqual(4);
-  });
 
-  test('contrast: a full value swap snaps the scroller to the top (the bug the fix avoids)', async ({ page }) => {
-    await page.goto('/test-harness/?component=AutomationYamlEditor&long=1');
-    await page.waitForFunction(() => window.__HARNESS__?.ready === true);
-    await page.waitForSelector('.cm-content');
-
-    const scroller = page.locator('.cm-scroller');
-    expect(await scrollIntoLongBuffer(page)).toBeGreaterThan(400);
-
-    await page.evaluate(() => {
-      const lines = Array.from({ length: 80 }, (_, i) => `comment line number ${i + 1} of the long automation`);
-      lines[79] = 'comment line number 80 of the long automation — RELOADED';
-      window.__EDITOR_HARNESS__!.swapValue(`id: long-automation\nname: Long automation\n# ${lines.join('\n# ')}\n`);
-    });
-
-    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeLessThan(50);
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toBe(selectedBefore);
   });
 });

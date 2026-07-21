@@ -36,14 +36,17 @@ action:
 // can target one, same shape as LiveMarkdownEditorHarness's LONG fixture.
 const LONG = `id: long-automation\nname: Long automation\n# ${Array.from({ length: 80 }, (_, i) => `comment line number ${i + 1} of the long automation`).join('\n# ')}\n`;
 
-// Editing-harness controls the spec drives directly (kept off the typed
+// Editing-harness control the spec drives directly (kept off the typed
 // HarnessAPI, which is a fixed shape). applyExternal pushes content through
-// the scroll-preserving minimal-edit handle; swapValue replaces the
-// controlled `value` wholesale (the old full-document-replace path) so the
-// spec can contrast the two.
+// the minimal-edit handle — the same path AutomationEditor's Reload uses.
+//
+// LiveMarkdownEditorHarness also exposes a swapValue that replaces the
+// controlled `value` wholesale, so its spec can contrast the two scroll
+// outcomes. This harness deliberately does not: see the selection test in
+// automation-yaml-editor.spec.ts for why that contrast is not sound evidence
+// for this buffer.
 interface EditorHarnessControls {
   applyExternal: (next: string) => void;
-  swapValue: (next: string) => void;
 }
 declare global {
   interface Window {
@@ -68,7 +71,6 @@ export function AutomationYamlEditorHarness({ onReady, setTriggerRerender }: Har
     setTriggerRerender(() => force((n) => n + 1));
     window.__EDITOR_HARNESS__ = {
       applyExternal: (next: string) => editorRef.current?.applyExternalContent(next),
-      swapValue: (next: string) => setValue(next),
     };
     onReady();
   }, [onReady, setTriggerRerender]);
