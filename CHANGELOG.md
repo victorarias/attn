@@ -21,6 +21,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   triggered a redraw.
 - Closing a shell pane now hangs the shell up promptly instead of stalling ~10 seconds and force-killing it; remote pane/session close reliably confirms worker teardown instead of timing out mid-kill.
 
+### Changed
+- **The automations CLI's `attn automation show` now prints the definition's
+  YAML directly to stdout** instead of a JSON-wrapped blob, and `delete`,
+  `validate`, and `cleanup` print small purpose-built summaries instead of raw
+  store rows. The Automations panel's list badge (which run failed, and when)
+  now loads with the rest of the list in one request instead of a separate
+  fetch per definition, so opening the panel with many automations feels
+  noticeably snappier.
+
 ## [2026-07-21]
 
 ### Fixed
