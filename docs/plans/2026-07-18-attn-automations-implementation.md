@@ -1071,13 +1071,15 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       on mount or an explicit Reload, never by an `automations_changed`
       broadcast, so a background refetch cannot stomp text being typed (D6).
       Proven by the packaged scenario `real-app:scenario-automation-editor`,
-      nine legs (starter template, invalid-rejected-and-nothing-stored, create,
+      ten legs (starter template, invalid-rejected-and-nothing-stored, create,
       create-collision refusal, comment round-trip, id-change refusal,
       stale-revision refusal followed by a successful Reload, a comment-only
-      edit bumping the revision, and a save refused after the definition was
-      deleted elsewhere), with the daemon's own state cross-checked through the
-      bundled CLI at every leg — run `automation-editor-2026-07-21T00-46-50-361Z`
-      against the app built from `c5629930` (2026-07-21), all nine green.
+      edit bumping the revision, a save refused after the definition was
+      deleted elsewhere, and a panel toggle-off surviving a later edit), with
+      the daemon's own state cross-checked through the bundled CLI at every
+      leg — run `automation-editor-2026-07-21T01-31-48-079Z` against the app
+      built from `09cfb0b6` (2026-07-21, protocol 180, profile `togglefix`),
+      all ten green.
       D1 (comments survive)
       is proven by the stored `SpecYAML` still carrying the run's
       `# harness-marker:` line after the save/reload round-trip; definitions
@@ -1110,6 +1112,40 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       `attn automation validate` printed `null` on success because
       `json.Marshal` of a nil payload yields the literal `null`, which defeats
       `omitempty` and leaves the client decoding a non-nil four-byte `Data`.
+      Review then found a third instance of that same trusting-a-moving-value
+      mistake, and this one had two writers rather than one stale reader:
+      `enabled` was written both by the panel's toggle (the column alone) and
+      by a Save (from the YAML), with nothing keeping them in step. Disabling
+      an automation and then editing it — even only adding a comment — saved
+      the stale `enabled: true` back and re-ran the real enable transition,
+      reported as an ordinary successful save; for a cron trigger that meant
+      unattended sessions firing after the operator had turned them off. Line
+      501 of this guide already settles the authority question — `enabled` is
+      current management state, so the column is the single authority — which
+      ruled out a read-time overlay: that would leave the row permanently
+      inconsistent and oblige every future reader to remember to overlay.
+      `SetAutomationEnabled` now writes through on a real transition,
+      re-marshaling `spec_json` and rewriting `spec_yaml` byte-for-byte via
+      `automation.SetEnabledInYAML`, which locates the top-level `enabled`
+      scalar by its parsed yaml.v3 Line/Column and replaces only that token, so
+      comments, key order, and quoting survive — the guarantee D1 depends on.
+      It bumps `revision` for the same reason the two earlier instances did.
+      That bump was verified safe rather than assumed: occurrence keys are
+      time- and subject-based and never embed the revision, and
+      `Snapshot.DefinitionRevision` is run provenance only, so a bump can
+      neither re-fire nor duplicate a run. Covered at three levels, each
+      mutation-verified against a build with the write-through removed:
+      `TestSetAutomationEnabledWritesThroughToStoredSpec` (store),
+      `TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling`
+      (the daemon's real WS handlers), and scenario leg 10 above, where the
+      leg's headline assertion — editing a disabled automation does not
+      silently re-enable it — was isolated and confirmed red under that build
+      (`automation-editor-2026-07-21T01-30-23-763Z`) rather than merely
+      failing at an earlier diagnostic. A toggle landing while the same
+      editor is open is deliberately not in the scenario: `AutomationsPanel`
+      renders the editor as a full replacement of the panel body, so the
+      toggle control is not in the DOM at all then, and there is no way to
+      drive that race through the real UI.
 - [ ] Run the final upgrade, failure-recovery, and packaged-app matrix from the
       integration branch and open the single integration PR to `main`.
 

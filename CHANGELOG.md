@@ -84,6 +84,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   of silently starting in the wrong context.
 
 ### Fixed
+- **Turning an automation off in the panel now sticks.** The enable/disable
+  toggle and the `enabled:` line in a definition's YAML were tracked
+  separately, so disabling an automation and then editing it — even just
+  adding a comment — saved the old `enabled: true` back and started it running
+  again, reported as an ordinary successful save. For a scheduled automation
+  that meant unattended sessions firing after you had turned them off. The
+  toggle now updates the definition itself, so the editor opens on the
+  automation's real current state and a later edit cannot undo it. Your
+  comments and formatting survive the toggle untouched.
 - **Reverting an automation's prompt to an earlier version no longer
   permanently blocks new runs.** A→B→A edits used to refuse every future run
   once any earlier revision shared the same prompt/launch/location, even

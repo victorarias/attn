@@ -6,12 +6,15 @@
  * create with a hand-written comment, the create-collision refusal, D1
  * (comments survive a save/reload round-trip), the id-change refusal (D4),
  * the stale-revision refusal plus Reload recovery (D5), a comment-only edit
- * that still bumps the revision, and a Save that is refused rather than
- * silently resurrecting a definition deleted elsewhere — the last two pin
- * the two multi-writer races fixed in 649a7e52 (spec_yaml missing from the
- * revision-bump condition; DeleteAutomationDefinition leaving revision
- * untouched) — all driven through the real rendered editor via the
- * automation_editor_* UI-automation bridge verbs, cross-checked against the
+ * that still bumps the revision, a Save that is refused rather than
+ * silently resurrecting a definition deleted elsewhere, and a panel
+ * toggle-off that survives a later unrelated edit — the last three pin the
+ * three multi-writer races fixed in 649a7e52 and 09cfb0b6 (spec_yaml missing
+ * from the revision-bump condition; DeleteAutomationDefinition leaving
+ * revision untouched; SetAutomationEnabled writing only the enabled column
+ * and leaving the stored spec saying otherwise) — all driven through the
+ * real rendered editor and panel via the automation_editor_* and
+ * automations_* UI-automation bridge verbs, cross-checked against the
  * daemon's own state via the bundled `attn` CLI (`automation show`/`list`),
  * not just the DOM.
  *
@@ -25,9 +28,12 @@
  * exists only as the (refused) target of the id-change leg; it must never
  * actually be created.
  *
- * No fake-agent probe is needed: this scenario never triggers a run (every
- * definition it applies is enabled: false throughout), so `launch.executable`
- * is never invoked and can stay unset like the starter template's.
+ * No fake-agent probe is needed: this scenario never triggers a run. Every
+ * definition it applies is manual-trigger, and all but leg10's are also
+ * enabled: false, so `launch.executable` is never invoked and can stay unset
+ * like the starter template's. leg10 must start from an enabled definition in
+ * order to disable it from the panel; being manual-trigger, it still never
+ * fires, and the leg deletes it before finishing.
  *
  * Run serially (packaged-app scenarios are single-tenant):
  *   ATTN_HARNESS_PROFILE=<name> node scripts/real-app-harness/scenario-automation-editor.mjs
@@ -98,21 +104,53 @@ async function waitForDaemonReady(binary, daemonEnv) {
   }, 'profile daemon');
 }
 
+// Click the panel's real enable/disable toggle and wait for the daemon to
+// come back. Two waits are needed and neither is optional:
+//
+//   - The row must be RENDERED before the click. A definition created through
+//     the editor reaches the panel by broadcast, not synchronously, so
+//     clicking straight after a save hits an element that does not exist yet.
+//   - automations_toggle_enabled clicks and settles a few UI frames without
+//     awaiting the daemon round-trip, so the panel is the thing to poll for
+//     the new state; once it renders the flip, the store has already
+//     committed it and a following CLI read is no longer a race.
+//
+// Editor saves need neither: they are request/result and are daemon-confirmed
+// by the time they return. Same shape as scenario-automation-surface.mjs's
+// toggle legs, which is where this pattern is house convention.
+async function toggleEnabledAndWait(client, definitionId, wantEnabled) {
+  await poll(async () => {
+    const current = await client.request('automations_get_state');
+    return findDefinitionRow(current, definitionId) ? current : null;
+  }, `definition ${definitionId} to appear in the panel before toggling it`, PANEL_TIMEOUT_MS);
+
+  await client.request('automations_toggle_enabled', { definitionId });
+
+  return poll(async () => {
+    const current = await client.request('automations_get_state');
+    const row = findDefinitionRow(current, definitionId);
+    return row && row.enabled === wantEnabled ? current : null;
+  }, `definition ${definitionId} to render ${wantEnabled ? 'enabled' : 'disabled'} after the toggle broadcast`, PANEL_TIMEOUT_MS);
+}
+
 // --- automation definition YAML ----------------------------------------
 
 const API_VERSION = 'attn.dev/automations/v1alpha1';
 
-// Deliberately enabled: false throughout — this scenario never triggers a
-// run, and leaving these definitions disabled means the finally block does
-// not need to disable-before-teardown like scenario-automation-lifecycle.mjs
-// (an enabled directory-location definition re-validates its path on every
-// future daemon tick, which would spam errors once the fixture dir is gone).
-function editorDefinitionYAML({ id, locationPath, prompt, comment }) {
+// Defaults to enabled: false — this scenario never triggers a run, and
+// leaving these definitions disabled means the finally block does not need to
+// disable-before-teardown like scenario-automation-lifecycle.mjs (an enabled
+// directory-location definition re-validates its path on every future daemon
+// tick, which would spam errors once the fixture dir is gone). leg10 is the
+// one caller that opts into enabled: true, because it has to start from an
+// enabled definition to disable it from the panel; it deletes that definition
+// at the end of the leg for the same reason.
+function editorDefinitionYAML({ id, locationPath, prompt, comment, enabled = false }) {
   const commentLine = comment ? `${comment}\n` : '';
   return `${commentLine}api_version: ${API_VERSION}
 id: ${id}
 name: Slice 7 packaged editor proof
-enabled: false
+enabled: ${enabled ? 'true' : 'false'}
 trigger:
   type: manual
 prompt: |
@@ -578,6 +616,117 @@ async function main() {
         'the CLI also reports the definition as gone (filtered like any soft-deleted row) after the refused save',
         shownAfterRefusedSave,
       );
+    });
+
+    // The reviewer-reported split brain: `enabled` was written by the panel
+    // toggle (column only) AND by a save (from the YAML), with nothing keeping
+    // them in step. Disable, then edit, and the stale `enabled: true` in the
+    // stored YAML came back — for a cron trigger, unattended sessions firing
+    // again after the operator turned them off, reported as a clean save.
+    //
+    // Every out-of-band step here goes through the REAL panel toggle verb
+    // (automations_toggle_enabled), not a CLI shortcut, because the toggle is
+    // the surface that was writing only half the state.
+    await runner.step('leg10_panel_toggle_off_survives_a_later_edit', async () => {
+      const leg10ID = `automation-editor-toggle-${suffix}`;
+      const leg10Comment = `# harness-marker-leg10: ${suffix}`;
+      const createYAML = editorDefinitionYAML({
+        id: leg10ID,
+        locationPath: fixturePath,
+        prompt: 'Definition that the operator disables from the panel and then edits.',
+        comment: leg10Comment,
+        enabled: true,
+      });
+
+      // leg9 deliberately ends with the editor still open on its refused save.
+      const cleared = await client.request('automation_editor_click', { button: 'cancel' });
+      runner.assert(cleared.present === false, "leg9's editor is closed before this leg opens its own", cleared);
+
+      await client.request('automation_editor_open', {});
+      await client.request('automation_editor_set_text', { text: createYAML });
+      const afterCreate = await client.request('automation_editor_click', { button: 'save' });
+      runner.assert(afterCreate.present === false, 'the enabled definition is created and the editor closes', afterCreate);
+
+      const created = runJSON(binary, ['automation', 'show', leg10ID], daemonEnv);
+      runner.assert(created && created.Enabled === true, 'sanity: the definition starts enabled', created);
+
+      // The panel toggle — the exact surface the reviewer named.
+      await toggleEnabledAndWait(client, leg10ID, false);
+
+      const disabled = runJSON(binary, ['automation', 'show', leg10ID], daemonEnv);
+      runner.assert(disabled.Enabled === false, 'the panel toggle disables the definition', disabled);
+      runner.assert(
+        disabled.Revision === created.Revision + 1,
+        'the toggle bumps the revision — otherwise the stale-save guard cannot see it at all',
+        { before: created.Revision, after: disabled.Revision },
+      );
+      // Write-through, not a read-time overlay: the stored definition itself
+      // now says disabled, so the CLI, the editor, and the column agree.
+      runner.assert(
+        disabled.SpecYAML.includes('enabled: false') && !disabled.SpecYAML.includes('enabled: true'),
+        'the toggle wrote through into the stored YAML — no stale `enabled: true` left behind to be saved back',
+        disabled.SpecYAML,
+      );
+      runner.assert(
+        disabled.SpecYAML.includes(leg10Comment),
+        "the toggle preserved the author's comment — it rewrote one scalar, not the document",
+        disabled.SpecYAML,
+      );
+      runner.assert(
+        JSON.parse(disabled.SpecJSON).enabled === false,
+        'the canonical spec_json agrees too — one authority, not two',
+        disabled.SpecJSON,
+      );
+
+      // Now the operator opens it and makes an unrelated edit.
+      const opened = await client.request('automation_editor_open', { definitionId: leg10ID });
+      runner.assert(
+        opened.text.includes('enabled: false'),
+        'the editor opens on the automation\'s REAL current state, so the operator is not editing a lie',
+        opened,
+      );
+      runner.assert(opened.revision === disabled.Revision, 'the editor holds the post-toggle revision', { opened, disabled });
+
+      await client.request('automation_editor_set_text', { text: `# unrelated edit ${suffix}\n${opened.text}` });
+      const afterEdit = await client.request('automation_editor_click', { button: 'save' });
+      runner.assert(afterEdit.present === false, 'the unrelated edit saves cleanly', afterEdit);
+
+      // The assertion this whole leg exists for.
+      const afterSave = runJSON(binary, ['automation', 'show', leg10ID], daemonEnv);
+      runner.assert(
+        afterSave.Enabled === false,
+        'D-F: editing a disabled automation does NOT silently re-enable it — the toggle is not reversed by a save',
+        afterSave,
+      );
+
+      // And back on, through the panel again, so the leg proves the toggle is
+      // symmetric rather than only pinning the disable direction.
+      await toggleEnabledAndWait(client, leg10ID, true);
+      const reEnabled = runJSON(binary, ['automation', 'show', leg10ID], daemonEnv);
+      runner.assert(
+        reEnabled.Enabled === true && reEnabled.SpecYAML.includes('enabled: true'),
+        'toggling back on writes through the same way — the disable direction is not a special case',
+        reEnabled,
+      );
+      runner.assert(
+        reEnabled.SpecYAML.includes(leg10Comment),
+        "the author's comment survives a full off-and-on cycle, not just one rewrite",
+        reEnabled.SpecYAML,
+      );
+
+      // Not covered here: a toggle landing while THIS editor is open, which
+      // would exercise the stale-save guard against the toggle's revision
+      // bump. AutomationsPanel renders the editor as a full replacement of the
+      // panel body (see its EditorTarget doc comment), so the toggle control
+      // is not in the DOM at all while the editor is up — there is no way to
+      // drive that race through the real UI, and faking it here would be
+      // testing the harness rather than the product. The guard itself is
+      // pinned where it is reachable: the revision assertion above, plus
+      // TestSetAutomationEnabledWritesThroughToStoredSpec (store) and
+      // TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling
+      // (daemon).
+
+      run(binary, ['automation', 'delete', leg10ID], daemonEnv);
     });
 
     runner.finishSuccess({ profile, primaryID, renamedID, leg3Revision, appBuild, protocolVersion });
