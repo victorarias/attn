@@ -85,11 +85,13 @@ import { recordTerminalLinkHitTestEvent } from '../utils/terminalLinkHitTestLog'
 import {
   recordDiag,
   recordPaint,
+  noteModelFault,
   noteRecovery,
   noteResize,
   registerRenderProbe,
   disposePaneDiagnostics,
 } from '../utils/terminalDiagnosticsLog';
+import { captureUiSnapshot, recordUiDiag, UI_DIAGNOSTICS_FILE } from '../utils/uiDiagnosticsLog';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import { analyzeTerminalVisibleLines } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot, TerminalVisibleStyleLineSnapshot } from '../utils/terminalStyleSummary';
@@ -143,6 +145,9 @@ interface GhosttyTerminalProps {
   // history is gone from the model; the owner should re-request the attach
   // replay once the geometry settles.
   onReplayInterrupted?: () => void;
+  // A corrupt Ghostty WASM model was discarded and replaced. The owner uses
+  // this only for the user-facing notice; onReady performs the actual reattach.
+  onTerminalModelRecovered?: () => void;
 }
 
 export interface GhosttyTerminalHandle {
@@ -499,7 +504,7 @@ function cellText(
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
-  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onOpenMarkdown, onReady, onResize, onReplayInterrupted }, ref) {
+  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onOpenMarkdown, onReady, onResize, onReplayInterrupted, onTerminalModelRecovered }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const terminalRef = useRef<GhosttyModel | null>(null);
@@ -577,6 +582,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const onReadyRef = useRef(onReady);
     const onResizeRef = useRef(onResize);
     const onReplayInterruptedRef = useRef(onReplayInterrupted);
+    const onTerminalModelRecoveredRef = useRef(onTerminalModelRecovered);
     const runtimeMetaRef = useRef(runtimeLogMeta);
     const debugNameRef = useRef(debugName);
     const diagKeyRef = useRef<string>(runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName);
@@ -591,6 +597,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // triggering a render.
     const recoveryAttemptRef = useRef(0);
     const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Dedupe failures from the same model while React applies the epoch bump.
+    // Do not use this to represent a pending recovery: a replacement can fault
+    // during its own initial fit and must trigger another rebuild.
+    const modelFaultDedupeRef = useRef<{
+      operation: string;
+      error: string;
+      model: number;
+      rendererEpoch: number;
+    } | null>(null);
+    // Survives epoch rebuilds until a replacement has completed its initial
+    // fit and become ready. Only then may the app announce recovery.
+    const modelRecoveryPendingRef = useRef(false);
     const [error, setError] = useState<string | null>(null);
     const [linkCursorActive, setLinkCursorActive] = useState(false);
     const [findUi, setFindUi] = useState({ open: false, matchCount: 0, focusedIndex: -1, scanning: false, caseSensitive: false });
@@ -610,6 +628,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     onReadyRef.current = onReady;
     onResizeRef.current = onResize;
     onReplayInterruptedRef.current = onReplayInterrupted;
+    onTerminalModelRecoveredRef.current = onTerminalModelRecovered;
     runtimeMetaRef.current = runtimeLogMeta;
     debugNameRef.current = debugName;
     cwdRef.current = cwd;
@@ -619,6 +638,74 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // debugName can change (its agent/title segment is reassigned on relabel).
     // A ref keeps the key out of callback dependency arrays.
     diagKeyRef.current = runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName;
+
+    const recoverFromModelFault = useCallback((operation: string, reason: unknown) => {
+      // An invalid model can make several queued render/write operations fail
+      // before React applies the epoch bump. One rebuild per model is enough;
+      // a fault from a replacement model has a new epoch and must not be
+      // suppressed by the old model's dedupe record.
+      if (modelFaultDedupeRef.current?.rendererEpoch === rendererEpoch) return;
+      const error = reason instanceof Error ? reason.message : String(reason);
+      const stack = reason instanceof Error ? reason.stack : undefined;
+      const terminal = terminalRef.current;
+      let cols: number | undefined;
+      let rows: number | undefined;
+      try {
+        cols = terminal?.cols;
+        rows = terminal?.rows;
+      } catch {
+        // The fault itself may make a model accessor unsafe. The model id and
+        // operation still correlate this record with the surrounding timeline.
+      }
+      const fault = {
+        operation,
+        error,
+        model: modelInstanceRef.current,
+        rendererEpoch,
+      };
+      modelFaultDedupeRef.current = fault;
+      modelRecoveryPendingRef.current = true;
+      const session = runtimeMetaRef.current?.sessionId ?? undefined;
+      const paneKind = runtimeMetaRef.current?.paneKind ?? undefined;
+      let snapshot: Record<string, unknown> | undefined;
+      try {
+        snapshot = captureUiSnapshot();
+      } catch {
+        // Capturing supplementary DOM state must never defeat containment.
+      }
+      noteModelFault(diagKeyRef.current, {
+        session,
+        paneKind,
+        ...fault,
+        stack,
+        cols,
+        rows,
+      });
+      noteRecovery(diagKeyRef.current, {
+        session,
+        paneKind,
+        attempt: 1,
+        outcome: 'modelFault',
+        error,
+      });
+      recordUiDiag({
+        kind: 'ghostty_model_fault',
+        diagnosticFile: UI_DIAGNOSTICS_FILE,
+        pane: diagKeyRef.current,
+        session,
+        paneKind,
+        ...fault,
+        stack,
+        cols,
+        rows,
+        snapshot,
+      });
+      // The bad model lives in WASM, so do not try to reset or redraw it. A
+      // new epoch replaces both the canvas and model; onReady then reattaches
+      // the daemon-owned PTY and replays its retained screen state.
+      setError(null);
+      setRendererEpoch((value) => value + 1);
+    }, [rendererEpoch]);
 
     const getViewportCells = useCallback((): GhosttyCell[] | undefined => {
       const terminal = terminalRef.current;
@@ -637,8 +724,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const renderSurface = useCallback((force = false) => {
       const terminal = terminalRef.current;
       const renderer = rendererRef.current;
-      if (!terminal || !renderer) return;
-      if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) return;
+      if (!terminal || !renderer) return true;
+      if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) return true;
+      try {
       const range = selectionRef.current ? normalizeSelection(selectionRef.current) : null;
       const scrollbackLength = terminal.getScrollbackLength();
       const overlays: WebGlOverlay[] = [];
@@ -750,7 +838,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         skipNull: sample ? sample.printableSkippedNull : null,
         skipZeroWidth: sample ? sample.printableSkippedZeroWidth : null,
       });
-    }, [getViewportCells, resolvedTheme]);
+      return true;
+      } catch (reason) {
+        // `renderer.render()` reads Ghostty's WASM-owned dirty cells. A bounds
+        // trap or invalid code point there used to escape React and unmount the
+        // whole application. Contain it to this pane and rebuild from daemon
+        // replay instead.
+        recoverFromModelFault('render', reason);
+        return false;
+      }
+    }, [getViewportCells, recoverFromModelFault, resolvedTheme]);
 
     const clearSynchronizedOutputRenderTimer = useCallback(() => {
       if (!synchronizedOutputRenderTimerRef.current) return;
@@ -1199,18 +1296,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       containerRef.current?.focus();
     }, [renderSurface]);
 
-    const enqueueOperation = useCallback((operation: () => void | Promise<void>) => {
+    const enqueueOperation = useCallback((label: string, operation: () => void | Promise<void>) => {
       writeChainRef.current = writeChainRef.current
         .catch(() => undefined)
         .then(async () => {
           try {
             await operation();
           } catch (reason) {
-            setError(`Ghostty terminal update failed: ${String(reason)}`);
+            recoverFromModelFault(label, reason);
           }
         });
       return writeChainRef.current;
-    }, []);
+    }, [recoverFromModelFault]);
 
     // Coalesce a verification fit into the next animation frame, replacing
     // any frame already queued. Shared by the overflow-correction path and
@@ -1238,7 +1335,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (options?.historicalReplay) {
         pendingReplayOpsRef.current += 1;
       }
-      return enqueueOperation(async () => {
+      return enqueueOperation('write', async () => {
         if (options?.historicalReplay) {
           pendingReplayOpsRef.current = Math.max(0, pendingReplayOpsRef.current - 1);
           if (pendingReplayOpsRef.current === 0 && droppedReplayResizeRef.current) {
@@ -1481,7 +1578,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           }
         }
       }
-      return enqueueOperation(() => {
+      return enqueueOperation('resizeLocal', () => {
         if (options?.historicalReplay) {
           pendingReplayOpsRef.current = Math.max(0, pendingReplayOpsRef.current - 1);
           if (pendingReplayGeometryRef.current) {
@@ -1630,19 +1727,23 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // owner re-requests the attach replay once geometry settles.
         onReplayInterruptedRef.current?.();
       }
-      const fromCols = terminal.cols;
-      const fromRows = terminal.rows;
-      resizeGhosttyWithoutReflow(terminal, dims.cols, dims.rows);
-      reconcileBlocksAfterResize(dims.cols !== fromCols);
-      modelSizeRef.current = dims;
-      renderer.resize(dims.cols, dims.rows);
-      hoverGenerationRef.current += 1;
-      noteResize(diagKeyRef.current, {
-        session, paneKind, source: 'fit', fromCols, fromRows, toCols: dims.cols, toRows: dims.rows,
-      });
-      renderSurface(true);
-      onResizeRef.current(dims.cols, dims.rows, { reason: 'ghostty_fit' });
-    }, [reconcileBlocksAfterResize, renderSurface]);
+      try {
+        const fromCols = terminal.cols;
+        const fromRows = terminal.rows;
+        resizeGhosttyWithoutReflow(terminal, dims.cols, dims.rows);
+        reconcileBlocksAfterResize(dims.cols !== fromCols);
+        modelSizeRef.current = dims;
+        renderer.resize(dims.cols, dims.rows);
+        hoverGenerationRef.current += 1;
+        noteResize(diagKeyRef.current, {
+          session, paneKind, source: 'fit', fromCols, fromRows, toCols: dims.cols, toRows: dims.rows,
+        });
+        if (!renderSurface(true)) return;
+        onResizeRef.current(dims.cols, dims.rows, { reason: 'ghostty_fit' });
+      } catch (reason) {
+        recoverFromModelFault('fit', reason);
+      }
+    }, [reconcileBlocksAfterResize, recoverFromModelFault, renderSurface]);
 
     applyFitDimensionsRef.current = applyFitDimensions;
 
@@ -1825,14 +1926,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
         terminalRef.current = terminal;
         rendererRef.current = renderer;
-        if (recoveryAttemptRef.current > 0) {
-          noteRecovery(diagKeyRef.current, {
-            session: runtimeMetaRef.current?.sessionId ?? undefined,
-            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
-            attempt: recoveryAttemptRef.current,
-            outcome: 'recovered',
-          });
-        }
+        const recoveryAttempt = recoveryAttemptRef.current;
+        const recoveredModelFault = modelRecoveryPendingRef.current;
         recoveryAttemptRef.current = 0;
         setError(null);
         // The bundled Nerd Font may not be loaded yet, so the first glyphs that
@@ -1885,6 +1980,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           (mode) => terminal.getMode(mode),
         );
         fit();
+        // `fit()` contains WASM traps and schedules a fresh epoch. Do not mark
+        // this model ready (or announce recovery) if its initial fit was the
+        // next fault in the chain.
+        if (modelFaultDedupeRef.current?.rendererEpoch === rendererEpoch) return;
+        if (recoveryAttempt > 0 || recoveredModelFault) {
+          noteRecovery(diagKeyRef.current, {
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            paneKind: runtimeMetaRef.current?.paneKind ?? undefined,
+            attempt: recoveryAttempt || 1,
+            outcome: 'recovered',
+          });
+        }
         readyRef.current = true;
         startupRef.current.firstReadyAt = Date.now();
         startupRef.current.firstReadyCols = terminal.cols;
@@ -1923,6 +2030,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           getBlockState,
           drain: () => writeChainRef.current,
         });
+        if (recoveredModelFault) {
+          modelRecoveryPendingRef.current = false;
+          onTerminalModelRecoveredRef.current?.();
+        }
       }).catch((reason) => {
         if (!active) return;
         noteRecovery(diagKeyRef.current, {
@@ -2007,9 +2118,23 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         cancelScheduledOutputRender();
         fitResizeCoalescerRef.current?.cancel();
         fitResizeCoalescerRef.current = null;
-        inputRef.current?.dispose();
-        rendererRef.current?.dispose();
-        terminalRef.current?.free();
+        try {
+          inputRef.current?.dispose();
+          rendererRef.current?.dispose();
+          terminalRef.current?.free();
+        } catch (reason) {
+          // If the invalid model also faults during disposal, the epoch
+          // replacement must still complete rather than leaking that error
+          // through React's effect cleanup.
+          recordUiDiag({
+            kind: 'ghostty_model_cleanup_fault',
+            diagnosticFile: UI_DIAGNOSTICS_FILE,
+            pane: diagKeyRef.current,
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            error: reason instanceof Error ? reason.message : String(reason),
+            stack: reason instanceof Error ? reason.stack : undefined,
+          });
+        }
         inputRef.current = null;
         rendererRef.current = null;
         terminalRef.current = null;

@@ -3,10 +3,11 @@ import './ErrorToast.css';
 
 interface ErrorToastProps {
   message: string | null;
+  durationMs?: number;
   onDone: () => void;
 }
 
-export function ErrorToast({ message, onDone }: ErrorToastProps) {
+export function ErrorToast({ message, durationMs = 3000, onDone }: ErrorToastProps) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -15,10 +16,10 @@ export function ErrorToast({ message, onDone }: ErrorToastProps) {
       const timer = setTimeout(() => {
         setVisible(false);
         setTimeout(onDone, 200); // Wait for fade out
-      }, 3000); // Show error for 3 seconds (longer than copy toast)
+      }, durationMs);
       return () => clearTimeout(timer);
     }
-  }, [message, onDone]);
+  }, [durationMs, message, onDone]);
 
   if (!message) return null;
 
@@ -40,15 +41,15 @@ export function ErrorToast({ message, onDone }: ErrorToastProps) {
 
 // Hook to manage toast state
 export function useErrorToast() {
-  const [message, setMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; durationMs: number } | null>(null);
 
-  const showError = useCallback((msg: string) => {
-    setMessage(msg);
+  const showError = useCallback((message: string, options?: { durationMs?: number }) => {
+    setToast({ message, durationMs: options?.durationMs ?? 3000 });
   }, []);
 
   const clearError = useCallback(() => {
-    setMessage(null);
+    setToast(null);
   }, []);
 
-  return { message, showError, clearError };
+  return { message: toast?.message ?? null, durationMs: toast?.durationMs ?? 3000, showError, clearError };
 }
