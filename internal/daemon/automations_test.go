@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,8 +20,50 @@ import (
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 )
+
+type automationResumeBackend struct {
+	*fakeSpawnBackend
+	snapshotCalls int
+}
+
+func writeCodexRolloutFixture(t *testing.T, resumeID string) {
+	t.Helper()
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	sessionsDir := filepath.Join(codexHome, "sessions", "2026", "07", "20")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("mkdir Codex sessions dir: %v", err)
+	}
+	rollout := []byte(`{"type":"session_meta","payload":{"id":"` + resumeID + `","cwd":"/tmp"}}` + "\n")
+	if err := os.WriteFile(filepath.Join(sessionsDir, "rollout-fixture.jsonl"), rollout, 0o644); err != nil {
+		t.Fatalf("write Codex rollout fixture: %v", err)
+	}
+}
+
+func (b *automationResumeBackend) Snapshot(context.Context, string) (ptybackend.AttachInfo, error) {
+	b.snapshotCalls++
+	if b.snapshotCalls == 1 {
+		return ptybackend.AttachInfo{ScreenSnapshot: []byte(codexDirectoryTrustPrompt)}, nil
+	}
+	return ptybackend.AttachInfo{ScreenSnapshot: []byte("reviewer ready")}, nil
+}
+
+func testAutomationLaunch(agent string) automation.EffectiveLaunch {
+	driverMode := launchcontract.ApprovalAuto
+	if agent == string(protocol.SessionAgentCodex) {
+		driverMode = launchcontract.ApprovalAutoReview
+	}
+	return automation.EffectiveLaunch{
+		Agent: agent, Model: "review-model", Effort: "high",
+		ApprovalProductMode: launchcontract.ApprovalAuto,
+		ApprovalDriverMode:  driverMode,
+		DirectoryTrust:      launchcontract.TrustConfiguredDirectory,
+		Recovery:            launchcontract.RecoveryAdoptOrRestartFresh,
+	}
+}
 
 func TestPrepareRepositoryWorktreeUsesLocalOverrideAndExactRevision(t *testing.T) {
 	root := t.TempDir()
@@ -267,7 +311,7 @@ func TestEnsureAutomationSessionPassesOneUnattendedContract(t *testing.T) {
 func TestFailAutomationRunFailsRunAndVisibleTicket(t *testing.T) {
 	s := store.New()
 	now := time.Now()
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +357,7 @@ func TestFailAutomationRunFailsRunAndVisibleTicket(t *testing.T) {
 func TestRetryableAutomationDeliveryKeepsRunAndTicketActive(t *testing.T) {
 	s := store.New()
 	now := time.Now()
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +391,7 @@ func TestRetryableAutomationDeliveryKeepsRunAndTicketActive(t *testing.T) {
 func TestDisabledAutomationRefusesRecoveredPendingDelivery(t *testing.T) {
 	s := store.New()
 	now := time.Now()
-	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, true, now)
+	def, err := s.UpsertAutomationDefinition("daily-check", "Daily check", `{"id":"daily-check"}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +401,7 @@ func TestDisabledAutomationRefusesRecoveredPendingDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, def.SpecJSON, false, now.Add(time.Minute)); err != nil {
+	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, def.SpecJSON, "", false, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	d := &Daemon{store: s, wsHub: newWSHub()}
@@ -382,7 +426,7 @@ trigger: {type: manual}
 prompt: Check locally.
 launch: {driver: codex}
 location: {type: directory, path: "` + t.TempDir() + `"}
-policy: {continuity: fresh, catch_up: none, overlap: coalesce}
+policy: {continuity: fresh, overlap: coalesce}
 `
 	def, err := d.automationApply(raw)
 	if err != nil {
@@ -425,7 +469,7 @@ func TestAutomationRecoveryWaitsForInitialGitHubDiscovery(t *testing.T) {
 func TestAutomationRecoveryLeavesGitHubRunsForFreshProviderObservation(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,7 +534,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition("requested-review", "Requested review", string(canonical), true, time.Now()); err != nil {
+	if _, err := s.UpsertAutomationDefinition("requested-review", "Requested review", string(canonical), "", true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var delivered atomic.Int32
@@ -576,7 +620,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), true, time.Now()); err != nil {
+	if _, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), "", true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	delivered := make(chan struct{}, 1)
@@ -628,7 +672,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition("retry-review", "Retry review", string(canonical), true, time.Now()); err != nil {
+	if _, err := s.UpsertAutomationDefinition("retry-review", "Retry review", string(canonical), "", true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var attempts atomic.Int32
@@ -639,12 +683,21 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 		}
 		return s.MarkAutomationRunDelivered(run.ID, `{}`, time.Now())
 	}
+	var broadcasts []string
+	d.automationsBroadcastHook = func(msg *protocol.AutomationsChangedMessage) {
+		broadcasts = append(broadcasts, msg.DefinitionIds...)
+	}
 	demand := []*protocol.PR{{Host: "github.com", Repo: "owner/repo", Number: 42, Role: protocol.PRRoleReviewer, State: protocol.PRStateWaiting, Reason: protocol.PRReasonReviewNeeded}}
 	observedAt := time.Now()
 	d.observeGitHubReviewRequests("github.com", demand, observedAt)
 	runs, err := s.ListAutomationRuns("retry-review")
 	if err != nil || len(runs) != 1 || runs[0].State != "pending" || attempts.Load() != 1 {
 		t.Fatalf("first observation runs=%#v attempts=%d err=%v", runs, attempts.Load(), err)
+	}
+	// Fix F1: the claim broadcasts before delivery is attempted, so an open WS
+	// panel sees the pending run even though delivery below fails retryably.
+	if len(broadcasts) == 0 || broadcasts[0] != "retry-review" {
+		t.Fatalf("broadcasts at claim time=%#v, want [\"retry-review\", ...]", broadcasts)
 	}
 
 	d.observeGitHubReviewRequests("github.com", demand, observedAt.Add(time.Second))
@@ -661,7 +714,7 @@ policy: {continuity: per_subject, catch_up: latest, overlap: coalesce}
 func TestContinuationFailurePreservesOriginTicketOutcome(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -708,7 +761,7 @@ func TestContinuationFailurePreservesOriginTicketOutcome(t *testing.T) {
 func TestSuccessfulContinuationReopensOriginTicketAfterDelivery(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -765,10 +818,30 @@ func TestContinuationActivationFailsIfTicketDisappeared(t *testing.T) {
 	}
 }
 
-func TestMissingContinuityTicketFailsBeforeReusingBoundArtifacts(t *testing.T) {
+// TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne pins the
+// GitHub-review-provider side of the same fix
+// TestValidateAutomationContinuationRefusesOnlyForItsOwnVanishedTicket pins
+// for the scheduled provider (automations_contract_test.go): once the old
+// thread's ticket (and, via SweepExpiredTickets' cascade, its binding) is
+// gone, the withdraw+re-request cycle here already released the binding too
+// (the pre-existing per-subject reap at :693-702, since the ticket was
+// already gone by then), so `second` claims with no binding to inherit from
+// — exactly like a real second review-request cycle after the first one's
+// thread fully aged out. That must mint its own fresh ticket, not refuse.
+//
+// This test used to assert a refusal ("continuity ticket is missing"), with
+// `second`'s reservation deliberately omitting ticket/session ids to lean on
+// a binding that, in this exact scenario, no longer exists — so it resolved
+// to an empty ticket id, not a realistic fresh one. Real callers always
+// reserve full ids up front (see the sole production reservation site,
+// automations.go:319); giving `second` the same shape here is what exposed
+// that the old refusal was firing for the wrong reason (any same-contract
+// history missing its ticket, not specifically req's own thread) rather than
+// a real hazard — see hasPriorAutomationContinuityRun's point 3.
+func TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -796,24 +869,29 @@ func TestMissingContinuityTicketFailsBeforeReusingBoundArtifacts(t *testing.T) {
 	if err != nil || len(candidates) != 1 {
 		t.Fatalf("second candidates=%#v err=%v", candidates, err)
 	}
-	second, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(4*time.Hour), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2"})
+	second, _, err := s.ClaimGitHubReviewAutomationRun(def.ID, subject, candidates[0].Cycle, def.Revision, `{}`, `{}`, now.Add(4*time.Hour), store.AutomationRunReservation{RunID: "run-2", OccurrenceID: "occ-2", TicketID: "ticket-2", SessionID: "session-2", WorkspaceID: "workspace-2", PaneID: "pane-2"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if second.SessionID != "session-2" || second.TicketID != "ticket-2" {
+		t.Fatalf("second ids=%s/%s, want its own freshly reserved ones (no binding survived to hand it session-1/ticket-1)", second.SessionID, second.TicketID)
+	}
 	d := &Daemon{store: s, wsHub: newWSHub()}
-	err = d.EnsureTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}})
-	if err == nil || !strings.Contains(err.Error(), "continuity ticket is missing") {
-		t.Fatalf("missing continuity ticket err=%v", err)
+	if err := d.EnsureTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}); err != nil {
+		t.Fatalf("a fresh thread with no artifacts to reuse must not be refused: %v", err)
 	}
 	if ticket, err := s.GetTicket(first.TicketID); err != nil || ticket != nil {
 		t.Fatalf("swept ticket was recreated: ticket=%#v err=%v", ticket, err)
+	}
+	if ticket, err := s.GetTicket(second.TicketID); err != nil || ticket == nil {
+		t.Fatalf("expected the fresh thread's own ticket to be created: ticket=%#v err=%v", ticket, err)
 	}
 }
 
 func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -842,7 +920,7 @@ func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T
 		t.Fatal(err)
 	}
 	d := &Daemon{store: s, ptyBackend: &fakeSpawnBackend{sessionIDs: []string{first.SessionID}}}
-	req := automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Context: json.RawMessage(secondPayload), IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}
+	req := automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Provider: "github", Context: json.RawMessage(secondPayload), IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}
 	changedContract := req
 	changedContract.Context = json.RawMessage(firstPayload)
 	changedContract.Prompt = "Updated review instructions"
@@ -863,10 +941,203 @@ func TestChangedHeadContinuationFailsBeforePublishingTicketActivity(t *testing.T
 	}
 }
 
+func TestStoppedContinuationResumesRecordedReviewerWithPinnedContract(t *testing.T) {
+	d := newDaemonForTest(t)
+	backend := &automationResumeBackend{fakeSpawnBackend: &fakeSpawnBackend{}}
+	d.ptyBackend = backend
+	now := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := d.store.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	origin, _, err := d.store.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, `{}`, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if _, err := d.store.EnsureAutomationTicket(store.Ticket{ID: origin.TicketID, Title: "Review", Status: store.TicketStatusDone, Assignee: origin.SessionID, Cwd: directory, LastAgentID: "codex", AutomationRunID: origin.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{Cmd: protocol.CmdRegisterWorkspace, ID: origin.WorkspaceID, Title: "review", Directory: directory})
+	d.store.Add(&protocol.Session{ID: origin.SessionID, Agent: protocol.SessionAgentCodex, Directory: directory, WorkspaceID: origin.WorkspaceID})
+	writeCodexRolloutFixture(t, "codex-rollout-1")
+	d.store.SetResumeSessionID(origin.SessionID, "codex-rollout-1")
+
+	req := automation.WorkRequest{
+		RunID: "run-2", DefinitionID: def.ID, SubjectKey: subject, ContinuityKey: subject,
+		Prompt: "Review locally", Context: json.RawMessage(`{}`), Launch: testAutomationLaunch("codex"),
+		IDs: automation.DeliveryIDs{TicketID: origin.TicketID, SessionID: origin.SessionID, WorkspaceID: origin.WorkspaceID, PaneID: origin.PaneID},
+	}
+	if err := d.EnsureSession(context.Background(), req, directory); err != nil {
+		t.Fatal(err)
+	}
+	spawn, ok := backend.LastSpawn()
+	if !ok || spawn.ResumeSessionID != "codex-rollout-1" || spawn.UnattendedLaunch != req.Launch {
+		t.Fatalf("resume spawn=%#v ok=%v", spawn, ok)
+	}
+}
+
+func TestStoppedContinuationRequiresAvailableTranscript(t *testing.T) {
+	d := newDaemonForTest(t)
+	req := automation.WorkRequest{Launch: testAutomationLaunch("claude"), IDs: automation.DeliveryIDs{SessionID: "session-1"}}
+	d.store.Add(&protocol.Session{ID: req.IDs.SessionID, Agent: protocol.SessionAgentClaude})
+	d.store.SetResumeSessionID(req.IDs.SessionID, "missing-transcript")
+	if _, err := d.automationResumeSessionID(req); err == nil || !strings.Contains(err.Error(), "transcript is unavailable") {
+		t.Fatalf("unavailable transcript err=%v", err)
+	}
+	d.store.SetResumeSessionID(req.IDs.SessionID, "")
+	if _, err := d.automationResumeSessionID(req); err == nil || !strings.Contains(err.Error(), "without a recorded transcript") {
+		t.Fatalf("missing transcript id err=%v", err)
+	}
+
+	t.Setenv("CODEX_HOME", t.TempDir())
+	codexReq := automation.WorkRequest{Launch: testAutomationLaunch("codex"), IDs: automation.DeliveryIDs{SessionID: "session-2"}}
+	d.store.Add(&protocol.Session{ID: codexReq.IDs.SessionID, Agent: protocol.SessionAgentCodex})
+	d.store.SetResumeSessionID(codexReq.IDs.SessionID, "missing-codex-rollout")
+	if _, err := d.automationResumeSessionID(codexReq); err == nil || !strings.Contains(err.Error(), "transcript is unavailable") {
+		t.Fatalf("unavailable Codex rollout err=%v", err)
+	}
+}
+
+func TestSuccessfulContinuationReopensArchivedTicket(t *testing.T) {
+	s := store.New()
+	now := time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC)
+	if _, err := s.CreateTicket(store.Ticket{ID: "ticket-1", Title: "Review", Status: store.TicketStatusDone, Assignee: "session-1", AutomationRunID: "run-1"}, "automation:review", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ArchiveTicket("ticket-1", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	req := automation.WorkRequest{RunID: "run-2", DefinitionID: "review", ContinuityKey: "github.com/owner/repo#42", IDs: automation.DeliveryIDs{TicketID: "ticket-1"}}
+	if err := d.activateAutomationContinuationTicket(req); err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := s.GetTicket("ticket-1")
+	if err != nil || ticket == nil || ticket.Status != store.TicketStatusWorking || ticket.ArchivedAt != nil {
+		t.Fatalf("reopened archived ticket=%#v err=%v", ticket, err)
+	}
+}
+
+func setupContinuationWorktree(t *testing.T) (*Daemon, automation.WorkRequest, string) {
+	t.Helper()
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitDaemon(t, repo, "init")
+	runGitDaemon(t, repo, "commit", "--allow-empty", "-m", "snapshot")
+	runGitDaemon(t, repo, "remote", "add", "origin", "git@github.com:owner/repo.git")
+	revisionBytes, err := attngit.Output(attngit.OpMetadata, repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := strings.TrimSpace(string(revisionBytes))
+	payload, _ := json.Marshal(automation.PullRequestInput{
+		Provider: "github", Host: "github.com", Owner: "owner", Repository: "repo", Number: 42,
+		URL: "https://github.com/owner/repo/pull/42", State: "open", HeadSHA: revision,
+	})
+	location := automation.LocationSpec{Type: "repository_worktree", RepositorySources: automation.RepositorySources{
+		Default: automation.RepositorySource{Type: "managed_cache"},
+		Overrides: map[string]automation.RepositorySource{
+			"github.com/owner/repo": {Type: "local_clone", Path: repo},
+		},
+	}}
+	d := newDaemonForTest(t)
+	d.dataRoot = filepath.Join(root, "profile")
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	def, err := d.store.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const subject = "github.com/owner/repo#42"
+	if _, err := d.store.ReconcileAutomationReviewRequests(def.ID, "github.com", []string{subject}, now); err != nil {
+		t.Fatal(err)
+	}
+	origin, _, err := d.store.ClaimGitHubReviewAutomationRun(def.ID, subject, 1, def.Revision, string(payload), `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstReq := automation.WorkRequest{RunID: origin.ID, DefinitionID: def.ID, SubjectKey: subject, ContinuityKey: subject, Context: payload, Location: location, Launch: testAutomationLaunch("codex"), IDs: automation.DeliveryIDs{TicketID: origin.TicketID, SessionID: origin.SessionID, WorkspaceID: origin.WorkspaceID, PaneID: origin.PaneID}}
+	prepared, err := d.PrepareLocation(context.Background(), firstReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.store.EnsureAutomationTicket(store.Ticket{ID: origin.TicketID, Title: "Review", Status: store.TicketStatusDone, Assignee: origin.SessionID, Cwd: prepared.Directory, LastAgentID: "codex", AutomationRunID: origin.ID}, "automation:review", store.TicketRoleChiefOfStaff, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.MarkAutomationRunDelivered(origin.ID, string(prepared.Resolved), now); err != nil {
+		t.Fatal(err)
+	}
+	continuation := firstReq
+	continuation.RunID = "run-2"
+	return d, continuation, prepared.Directory
+}
+
+func TestContinuationPreservesOwnedDirtyWorktree(t *testing.T) {
+	d, req, worktree := setupContinuationWorktree(t)
+	if err := os.WriteFile(filepath.Join(worktree, "review-notes.txt"), []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := d.PrepareLocation(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Directory != worktree {
+		t.Fatalf("continuation worktree=%q want=%q", prepared.Directory, worktree)
+	}
+	if data, err := os.ReadFile(filepath.Join(worktree, "review-notes.txt")); err != nil || string(data) != "keep me" {
+		t.Fatalf("dirty evidence changed: data=%q err=%v", data, err)
+	}
+}
+
+func TestContinuationFailsWhenOwnedWorktreeIsMissing(t *testing.T) {
+	d, req, worktree := setupContinuationWorktree(t)
+	if err := os.RemoveAll(worktree); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.PrepareLocation(context.Background(), req); err == nil || !strings.Contains(err.Error(), "worktree is missing") {
+		t.Fatalf("missing worktree err=%v", err)
+	}
+}
+
+func TestWithdrawnBeforeLaunchReRequestCreatesFirstWorktree(t *testing.T) {
+	d, req, worktree := setupContinuationWorktree(t)
+	ticket, err := d.store.GetTicket(req.IDs.TicketID)
+	if err != nil || ticket == nil {
+		t.Fatalf("ticket=%#v err=%v", ticket, err)
+	}
+	if err := d.store.MarkAutomationRunFailed(ticket.AutomationRunID, store.AutomationReviewWithdrawnError, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(worktree); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := d.PrepareLocation(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Directory != worktree {
+		t.Fatalf("re-request worktree=%q want=%q", prepared.Directory, worktree)
+	}
+	if _, err := os.Stat(worktree); err != nil {
+		t.Fatalf("first worktree was not provisioned: %v", err)
+	}
+}
+
 func TestReRequestCanStartReviewerWhenWithdrawnOriginNeverLaunched(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -898,7 +1169,7 @@ func TestReRequestCanStartReviewerWhenWithdrawnOriginNeverLaunched(t *testing.T)
 		t.Fatal(err)
 	}
 	req := automation.WorkRequest{
-		RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Prompt: "Review", Context: json.RawMessage(payload),
+		RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, Provider: "github", Prompt: "Review", Context: json.RawMessage(payload),
 		IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID},
 	}
 	if err := d.validateAutomationContinuation(req); err != nil {
@@ -910,7 +1181,7 @@ func TestReviewRequestWithdrawalStopsLaunchedPendingReviewer(t *testing.T) {
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -969,7 +1240,7 @@ func TestReviewRequestWithdrawalLeavesDeliveredReviewerToTicketLifecycle(t *test
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1015,7 +1286,7 @@ func TestReviewRequestCancellationRecoversBeforeReactivation(t *testing.T) {
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1066,7 +1337,7 @@ func TestContinuationWithdrawalDoesNotCancelDeliveredOriginReviewer(t *testing.T
 	d := newDaemonForTest(t)
 	s := d.store
 	now := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, true, now)
+	def, err := s.UpsertAutomationDefinition("review", "Review", `{}`, "", true, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1150,5 +1421,177 @@ func TestContinuationWithdrawalDoesNotCancelDeliveredOriginReviewer(t *testing.T
 	origin, err := s.GetAutomationRun(first.ID)
 	if err != nil || origin == nil || origin.State != "delivered" {
 		t.Fatalf("origin run changed after continuation withdrawal: run=%#v err=%v", origin, err)
+	}
+}
+
+// automationBroadcastRecorder installs an automationsBroadcastHook on d and
+// returns a function that snapshots every definition ID broadcast so far,
+// safe for concurrent use since automationSetEnabledWS-style callers run the
+// mutation in a goroutine.
+func automationBroadcastRecorder(d *Daemon) func() []string {
+	var mu sync.Mutex
+	var ids []string
+	d.automationsBroadcastHook = func(msg *protocol.AutomationsChangedMessage) {
+		mu.Lock()
+		ids = append(ids, msg.DefinitionIds...)
+		mu.Unlock()
+	}
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), ids...)
+	}
+}
+
+const manualAutomationYAML = `api_version: attn.dev/automations/v1alpha1
+id: manual-check
+name: Manual check
+enabled: true
+trigger: {type: manual}
+prompt: Check locally.
+launch: {driver: codex}
+location: {type: directory, path: "%s"}
+policy: {continuity: fresh, overlap: coalesce}
+`
+
+func TestAutomationApplyBroadcastsOnUpsert(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	broadcasts := automationBroadcastRecorder(d)
+
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := broadcasts(); len(got) != 1 || got[0] != def.ID {
+		t.Fatalf("broadcasts after enabled apply = %v, want [%s]", got, def.ID)
+	}
+
+	if _, err := d.automationApply(strings.Replace(raw, "enabled: true", "enabled: false", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if got := broadcasts(); len(got) != 2 || got[1] != def.ID {
+		t.Fatalf("broadcasts after disable apply = %v, want two entries ending in %s", got, def.ID)
+	}
+}
+
+// TestAutomationRunBroadcastsAfterClaim exercises automationRun's post-claim
+// broadcast (automations.go's "after claim" call) without reaching real
+// delivery/backend machinery: the run is pre-claimed and pre-marked delivered
+// directly through the store, so automationRun's own ClaimManualAutomationRun
+// call hits the idempotent same-request-id dedup path and returns without
+// re-entering deliverAutomationRun (run.State != "pending").
+func TestAutomationRunBroadcastsAfterClaim(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	run, _, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+
+	broadcasts := automationBroadcastRecorder(d)
+	got, err := d.automationRun(context.Background(), def.ID, "request-1", `{}`)
+	if err != nil {
+		t.Fatalf("automationRun on already-delivered idempotent claim: %v", err)
+	}
+	if got.State != "delivered" {
+		t.Fatalf("automationRun state = %q, want delivered (idempotent dedup, no re-delivery)", got.State)
+	}
+	if ids := broadcasts(); len(ids) != 1 || ids[0] != def.ID {
+		t.Fatalf("broadcasts after automationRun claim = %v, want [%s]", ids, def.ID)
+	}
+}
+
+// TestAutomationRunRejectsNonManualTrigger pins Fix F8: driving
+// d.automationRun against a provider-driven (scheduled) definition must be
+// rejected before any occurrence/run row is created — schedule/GitHub
+// observation are the only paths allowed to produce a run for it.
+func TestAutomationRunRejectsNonManualTrigger(t *testing.T) {
+	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
+
+	_, err := d.automationRun(context.Background(), def.ID, "request-1", `{}`)
+	if err == nil || !strings.Contains(err.Error(), "cannot be run manually") {
+		t.Fatalf("automationRun err=%v, want a manual-trigger rejection", err)
+	}
+	// automationRun's non-manual check runs before any store write, so runs
+	// being empty is sufficient proof no occurrence was created either — the
+	// two are always inserted together in one transaction (see
+	// ClaimManualAutomationRun).
+	runs, err := s.ListAutomationRuns(def.ID)
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("runs=%#v err=%v, want no run created", runs, err)
+	}
+}
+
+func TestAutomationSetEnabledDisableFailsPendingRunsAndBroadcasts(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, time.Now(), store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	broadcasts := automationBroadcastRecorder(d)
+	got, err := d.automationSetEnabled(context.Background(), def.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled {
+		t.Fatalf("definition = %#v, want disabled", got)
+	}
+	failed, err := s.GetAutomationRun(run.ID)
+	if err != nil || failed == nil || failed.State != "failed" || !strings.Contains(failed.LastError, "disabled before delivery") {
+		t.Fatalf("pending run after disable = %#v err=%v, want failed", failed, err)
+	}
+	if ids := broadcasts(); len(ids) == 0 {
+		t.Fatal("automationSetEnabled disable did not broadcast")
+	}
+
+	if _, err := d.automationSetEnabled(context.Background(), "does-not-exist", false); err == nil {
+		t.Fatal("expected error for unknown definition")
+	}
+}
+
+func TestAutomationSetEnabledNoOpDoesNotBroadcast(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	broadcasts := automationBroadcastRecorder(d)
+	got, err := d.automationSetEnabled(context.Background(), def.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Enabled {
+		t.Fatalf("definition = %#v, want still enabled", got)
+	}
+	if ids := broadcasts(); len(ids) != 0 {
+		t.Fatalf("no-op automationSetEnabled broadcast = %v, want none", ids)
 	}
 }

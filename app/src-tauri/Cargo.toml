@@ -16,6 +16,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Used by build.rs to read `build.frontendDist` out of tauri.conf.json so the
+# built frontend can be declared a cargo input. Already a runtime dependency of
+# this crate, so this resolves to the same version and leaves Cargo.lock alone.
+serde_json = "1"
 
 [dependencies]
 tauri = { version = "=2.11.2", features = ["protocol-asset", "unstable"] }

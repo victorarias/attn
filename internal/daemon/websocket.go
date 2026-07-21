@@ -1075,6 +1075,24 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkflowRunListWS(client, msg.(*protocol.WorkflowRunListMessage))
 	case protocol.CmdWorkflowRunCancel:
 		d.handleWorkflowRunCancelWS(client, msg.(*protocol.WorkflowRunCancelMessage))
+	case protocol.CmdAutomationDefinitionsGet:
+		d.handleAutomationDefinitionsGetWS(client, msg.(*protocol.AutomationDefinitionsGetMessage))
+	case protocol.CmdAutomationDefinitionGet:
+		d.handleAutomationDefinitionGetWS(client, msg.(*protocol.AutomationDefinitionGetMessage))
+	case protocol.CmdAutomationRunsGet:
+		d.handleAutomationRunsGetWS(client, msg.(*protocol.AutomationRunsGetMessage))
+	case protocol.CmdAutomationSetEnabled:
+		d.handleAutomationSetEnabledWS(client, msg.(*protocol.AutomationSetEnabledMessage))
+	case protocol.CmdAutomationApply:
+		d.handleAutomationApplyWS(client, msg.(*protocol.AutomationApplyMessage))
+	case protocol.CmdAutomationValidate:
+		d.handleAutomationValidateWS(client, msg.(*protocol.AutomationValidateMessage))
+	case protocol.CmdAutomationDelete:
+		d.handleAutomationDeleteWS(client, msg.(*protocol.AutomationDeleteMessage))
+	case protocol.CmdAutomationCleanup:
+		d.handleAutomationCleanupWS(client, msg.(*protocol.AutomationCleanupMessage))
+	case protocol.CmdAutomationRun:
+		d.handleAutomationRunWS(client, msg.(*protocol.AutomationRunMessage))
 	case protocol.CmdSpawnSession:
 		d.handleSpawnSession(client, msg.(*protocol.SpawnSessionMessage))
 	case protocol.CmdAttachSession:

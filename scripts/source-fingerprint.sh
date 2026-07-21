@@ -69,6 +69,7 @@ should_exclude_path() {
     plugins/attn-opencode/src/*) return 1 ;;
     plugins/attn-opencode/package.json|plugins/attn-opencode/bun.lock|plugins/attn-opencode/attn-plugin.toml|plugins/attn-opencode/README.md) return 1 ;;
     plugins/attn-pi/src/*) return 1 ;;
+    plugins/attn-pi/suite/*) return 1 ;;
     plugins/attn-pi/package.json|plugins/attn-pi/bun.lock|plugins/attn-pi/attn-plugin.toml|plugins/attn-pi/README.md) return 1 ;;
     scripts/build-app-profile.sh|scripts/build-bundled-plugins.sh) return 1 ;;
     app/scripts/real-app-harness/*) return 0 ;;

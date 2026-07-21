@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures';
+import { test, expect, waitForMockPtyBanner } from './fixtures';
 
 async function createSession(
   page: import('@playwright/test').Page,
@@ -133,6 +133,9 @@ async function openTerminalSession(
       { timeout: 10000 },
     )
     .not.toBeNull();
+  // A measured pane does not mean the session's startup output has arrived.
+  // Let the mock banner land before the caller clears the screen.
+  await waitForMockPtyBanner(page, sessionId);
   return terminal;
 }
 

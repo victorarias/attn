@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/automation"
 	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
@@ -31,6 +32,15 @@ type automationActionResult struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
+// automationCleanupResult is automation_cleanup's socket/CLI data payload —
+// mirrors AutomationActionResultMessage's cleaned/kept_dirty/kept_active WS
+// fields.
+type automationCleanupResult struct {
+	Cleaned    []string `json:"cleaned"`
+	KeptDirty  []string `json:"kept_dirty"`
+	KeptActive []string `json:"kept_active"`
+}
+
 type retryableAutomationDeliveryError struct{ cause error }
 
 func (e *retryableAutomationDeliveryError) Error() string { return e.cause.Error() }
@@ -38,45 +48,307 @@ func (e *retryableAutomationDeliveryError) Unwrap() error { return e.cause }
 
 var errAutomationReviewWithdrawn = errors.New(store.AutomationReviewWithdrawnError)
 
-func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error) {
+// defaultWSAutomationMutationTimeout is the fallback for
+// Daemon.wsAutomationMutationTimeout (see wsAutomationMutationTimeoutDuration).
+// 25s is deliberately strictly inside the frontend's 30s client timeout
+// (useDaemonSocket.ts) so a WS set_enabled mutation either completes or
+// aborts with a definitive error before the client gives up waiting — the
+// client's timer can never observe a flip that happens after it already
+// reported failure.
+const defaultWSAutomationMutationTimeout = 25 * time.Second
+
+// wsAutomationMutationTimeoutDuration resolves the effective deadline for a
+// WS-originated automation mutation: the configured override if set, else
+// defaultWSAutomationMutationTimeout.
+func (d *Daemon) wsAutomationMutationTimeoutDuration() time.Duration {
+	if d.wsAutomationMutationTimeout > 0 {
+		return d.wsAutomationMutationTimeout
+	}
+	return defaultWSAutomationMutationTimeout
+}
+
+// validateAutomationSpec is the single seam every surface that judges
+// automation definition YAML must call: automation_validate (validate-only,
+// nothing persisted) and automationApply (validate-then-persist) both run
+// through this, so a YAML document that validate accepts is guaranteed to be
+// one apply also accepts — the two cannot drift apart by one of them
+// forgetting a check. It runs ParseDefinitionYAML's schema validation plus
+// every check automationApply used to run inline: the delegation agent must
+// resolve, --model/--effort must be supported by it, the driver must be one
+// of the automations subset that supports unattended automatic approval
+// (codex|claude), and every repository_sources override must be a valid,
+// reachable local clone.
+func (d *Daemon) validateAutomationSpec(raw string) (automation.DefinitionSpec, []byte, error) {
 	spec, canonical, err := automation.ParseDefinitionYAML([]byte(raw))
 	if err != nil {
-		return nil, err
+		return spec, nil, err
 	}
 	if _, err := d.resolveDelegationAgent("", protocol.Ptr(spec.Launch.Driver)); err != nil {
-		return nil, err
+		return spec, nil, err
 	}
 	if err := d.validateDelegationModelEffort(spec.Launch.Driver, spec.Launch.Model, spec.Launch.Effort); err != nil {
-		return nil, err
+		return spec, nil, err
 	}
 	if spec.Launch.Driver != "codex" && spec.Launch.Driver != "claude" {
-		return nil, fmt.Errorf("agent %q does not support automation automatic approval", spec.Launch.Driver)
+		return spec, nil, fmt.Errorf("agent %q does not support automation automatic approval", spec.Launch.Driver)
 	}
 	for identity, source := range spec.Location.RepositorySources.Overrides {
 		if _, err := attngit.ValidateLocalClone(source.Path, identity); err != nil {
-			return nil, fmt.Errorf("repository override %s: %w", identity, err)
+			return spec, nil, fmt.Errorf("repository override %s: %w", identity, err)
 		}
 	}
+	return spec, canonical, nil
+}
+
+// automationApply applies definition YAML unconditionally: parse, validate,
+// upsert. This is the unix-socket/CLI/agent surface (attn automation apply)
+// — "last writer wins," unguarded, exactly as before this PR. The WS
+// editor's Save goes through automationApplyWithGuards instead.
+func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error) {
+	spec, canonical, err := d.validateAutomationSpec(raw)
+	if err != nil {
+		return nil, err
+	}
+	return d.automationApplyLocked(context.Background(), raw, spec, canonical, nil)
+}
+
+// automationApplyWithGuards is automationApply's WS counterpart, used by the
+// app editor's Save. expectedID and expectedRevision implement D4/D5 from
+// the design: apply is an upsert keyed on the id *inside* the YAML, so an
+// edited id would silently fork the definition and leave the original
+// enabled and running (D4) — expectedID ("" when creating) refuses a
+// mismatch. And a stale expectedRevision (0 when creating) would silently
+// clobber a concurrent apply from the CLI or another app window (D5) — the
+// caller sees "changed elsewhere — reload" instead. Both guards run inside
+// automationApplyLocked's automationMu, atomically with the pre-upsert
+// existing-row read they depend on, so there is no window between the check
+// and the write where a concurrent apply could slip through.
+func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw, expectedID string, expectedRevision int) (*store.AutomationDefinition, error) {
+	spec, canonical, err := d.validateAutomationSpec(raw)
+	if err != nil {
+		return nil, err
+	}
+	if expectedID != "" && spec.ID != expectedID {
+		return nil, fmt.Errorf("definition id %q in the YAML does not match the definition being edited (%q) — apply is keyed on the id inside the YAML, so an id change must be made as a separate create", spec.ID, expectedID)
+	}
+	guard := func(existing *store.AutomationDefinition) error {
+		if expectedRevision == 0 {
+			// Create. Revisions start at 1 (see UpsertAutomationDefinition), so
+			// this is unambiguous — it is never an edit of a revision-0 row.
+			//
+			// Apply is keyed on the id inside the YAML, so a create whose id
+			// happens to match a live definition would UPDATE that definition
+			// in place: the user typing an id that already exists would replace
+			// someone else's automation wholesale, from a form that said
+			// "New automation" and never mentioned it. Refuse instead. The
+			// socket/CLI path keeps its unconditional last-writer-wins
+			// semantics — it passes no guard at all.
+			//
+			// A soft-deleted row is deliberately NOT a collision: re-applying a
+			// deleted definition's id is how resurrect works, and the editor's
+			// list only shows live definitions, so the user cannot be
+			// overwriting anything they can see.
+			if existing != nil && existing.DeletedAt == nil {
+				return fmt.Errorf("an automation with id %q already exists — edit it instead of creating a second one", spec.ID)
+			}
+			return nil
+		}
+		if existing == nil || existing.Revision != expectedRevision {
+			return errors.New("automation definition changed elsewhere — reload before saving")
+		}
+		if existing.DeletedAt != nil {
+			// DeleteAutomationDefinition sets deleted_at without touching
+			// revision, so a stale editor's expectedRevision can still match a
+			// row that was soft-deleted out from under it. Unlike the create
+			// path above, an edit must never resurrect: automationDelete already
+			// failed this definition's pending runs, fenced its provider
+			// cursors, and purged its continuity bindings and review-request
+			// edges on the assumption it is gone, so a Save silently bringing it
+			// back live would restart an unattended cron the user deliberately
+			// deleted, with "saved successfully" as the only feedback.
+			return fmt.Errorf("automation %q was deleted elsewhere while you were editing it — your changes were not saved; close this editor and use New if you want to bring it back", spec.ID)
+		}
+		return nil
+	}
+	return d.automationApplyLocked(ctx, raw, spec, canonical, guard)
+}
+
+// automationApplyLocked is the locked validate-then-persist step shared by
+// automationApply and automationApplyWithGuards. ctx bounds how long the
+// caller is willing to wait to acquire automationMu (mirroring
+// automationSetEnabled/automationDelete's contract): once locked, ctx.Err()
+// is checked before any store mutation, so a caller whose deadline already
+// passed aborts without writing anything. guard (nil for the unconditional
+// socket/CLI path) runs after the pre-upsert existing-row read but still
+// inside automationMu, so a WS caller's expected_id/expected_revision check
+// is atomic with the write it gates.
+func (d *Daemon) automationApplyLocked(ctx context.Context, raw string, spec automation.DefinitionSpec, canonical []byte, guard func(*store.AutomationDefinition) error) (*store.AutomationDefinition, error) {
 	d.automationMu.Lock()
 	defer d.automationMu.Unlock()
-	definition, err := d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), spec.Enabled, time.Now())
-	if err != nil || spec.Enabled {
-		return definition, err
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("deadline exceeded waiting for an in-flight automation delivery: %w", err)
 	}
-	pending, err := d.store.ListPendingAutomationRuns()
+	existing, err := d.store.GetAutomationDefinitionIncludingDeleted(spec.ID)
+	if err != nil {
+		return nil, err
+	}
+	if guard != nil {
+		if err := guard(existing); err != nil {
+			return nil, err
+		}
+	}
+	definition, err := d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), raw, spec.Enabled, time.Now())
 	if err != nil {
 		return definition, err
 	}
+	if err := d.rotateContinuityBindingsIfContractChanged(existing, spec, definition); err != nil {
+		return definition, err
+	}
+	d.broadcastAutomationsChanged(spec.ID)
+	if spec.Enabled {
+		return definition, nil
+	}
+	return definition, d.failPendingAutomationRuns(spec.ID)
+}
+
+// rotateContinuityBindingsIfContractChanged drops definitionID's continuity
+// bindings (see A1 in docs/plans/2026-07-18-attn-automations-implementation.md)
+// when this apply changed what a resumed session would be asked to do:
+// resurrecting a soft-deleted definition always rotates (its old bindings
+// may point at threads built under an arbitrarily stale contract), and
+// otherwise rotates only when the new effective spec's
+// automation.ContinuationContract (Prompt/Launch/Location) differs from the
+// previous one — a cron/catch_up-only edit leaves bindings alone so an
+// in-flight thread survives. existing is nil for a brand-new definition,
+// which never has bindings to rotate.
+func (d *Daemon) rotateContinuityBindingsIfContractChanged(existing *store.AutomationDefinition, spec automation.DefinitionSpec, updated *store.AutomationDefinition) error {
+	if existing == nil {
+		return nil
+	}
+	rotate := existing.DeletedAt != nil
+	if !rotate && existing.Revision != updated.Revision {
+		var oldSpec automation.DefinitionSpec
+		if err := json.Unmarshal([]byte(existing.SpecJSON), &oldSpec); err != nil {
+			// Can't prove the old contract was unchanged; rotate rather than risk
+			// reusing a session under an instruction set we can no longer compare.
+			rotate = true
+		} else if old, oldErr := automation.Effective(oldSpec, existing.Revision); oldErr != nil {
+			rotate = true
+		} else if newSnapshot, newErr := automation.Effective(spec, updated.Revision); newErr != nil {
+			rotate = true
+		} else {
+			rotate = !old.ContinuationContract().Equal(newSnapshot.ContinuationContract())
+		}
+	}
+	if !rotate {
+		return nil
+	}
+	return d.store.DeleteAutomationContinuityBindings(spec.ID)
+}
+
+// failPendingAutomationRuns fails every pending run for definitionID via
+// failAutomationRun, e.g. when a definition is disabled before its pending
+// occurrences were delivered. One run's failure does not stop the rest;
+// errors are joined. Shared by automationApply's disable path and
+// automationSetEnabled's disable path so both fail pending runs identically.
+func (d *Daemon) failPendingAutomationRuns(definitionID string) error {
+	pending, err := d.store.ListPendingAutomationRuns()
+	if err != nil {
+		return err
+	}
 	for i := range pending {
 		run := pending[i]
-		if run.DefinitionID != spec.ID {
+		if run.DefinitionID != definitionID {
 			continue
 		}
 		if _, failErr := d.failAutomationRun(&run, errors.New("automation definition disabled before delivery")); failErr != nil {
 			err = errors.Join(err, failErr)
 		}
 	}
+	return err
+}
+
+// automationSetEnabled flips definitionID's enabled flag, reusing the store's
+// shared enable-transition side effects (review-edge clear + provider-cursor
+// fence — see store.SetAutomationEnabled) and, on a disable transition,
+// failing any pending runs through the same path automationApply uses. It is
+// a no-op (success, no broadcast) when the definition already has the
+// requested state, and errors for an unknown or soft-deleted definition.
+//
+// ctx bounds how long the caller is willing to wait to acquire automationMu:
+// once locked, ctx.Err() is checked before any store mutation, so a caller
+// whose deadline already passed aborts without flipping the flag (see
+// wsAutomationMutationTimeoutDuration for the WS caller's deadline). The
+// unix-socket caller passes context.Background() — the CLI/agent path waits
+// synchronously with no deadline of its own, so behavior there is unchanged.
+func (d *Daemon) automationSetEnabled(ctx context.Context, definitionID string, enabled bool) (*store.AutomationDefinition, error) {
+	d.automationMu.Lock()
+	defer d.automationMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("deadline exceeded waiting for an in-flight automation delivery: %w", err)
+	}
+	definition, changed, err := d.store.SetAutomationEnabled(definitionID, enabled, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if definition == nil {
+		return nil, fmt.Errorf("automation %q not found", definitionID)
+	}
+	if !changed {
+		return definition, nil
+	}
+	if !enabled {
+		err = d.failPendingAutomationRuns(definitionID)
+	}
+	d.broadcastAutomationsChanged(definitionID)
 	return definition, err
+}
+
+// automationDelete soft-deletes definitionID (see A2): fails any pending
+// runs (the same mechanism automationSetEnabled's disable path uses), clears
+// review-request edges and continuity bindings, fences provider cursors so
+// an in-flight stale observation can't act on it, then soft-deletes the row
+// and broadcasts. Runs, occurrences, tickets, sessions, and on-disk
+// worktrees/artifacts are untouched and remain fully listable/inspectable —
+// A3/A4 govern their eventual cleanup. automationApply resurrects a
+// soft-deleted definition by reapplying the same id.
+//
+// Mirrors automationSetEnabled's lock/deadline contract exactly: ctx bounds
+// how long the caller is willing to wait for automationMu, checked
+// immediately after acquiring it and before any store write, so a caller
+// whose deadline already passed aborts without deleting anything (see
+// wsAutomationMutationTimeoutDuration for the WS caller's deadline; the
+// unix-socket caller passes context.Background()).
+func (d *Daemon) automationDelete(ctx context.Context, definitionID string) error {
+	d.automationMu.Lock()
+	defer d.automationMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("deadline exceeded waiting for an in-flight automation delivery: %w", err)
+	}
+	definition, err := d.store.GetAutomationDefinition(definitionID)
+	if err != nil {
+		return err
+	}
+	if definition == nil {
+		return fmt.Errorf("automation %q not found", definitionID)
+	}
+	if err := d.failPendingAutomationRuns(definitionID); err != nil {
+		return err
+	}
+	if err := d.store.DeleteAutomationReviewRequestEdges(definitionID); err != nil {
+		return err
+	}
+	if err := d.store.DeleteAutomationContinuityBindings(definitionID); err != nil {
+		return err
+	}
+	if err := d.store.FenceAutomationProviderCursors(definitionID, time.Now()); err != nil {
+		return err
+	}
+	if err := d.store.DeleteAutomationDefinition(definitionID, time.Now()); err != nil {
+		return err
+	}
+	d.broadcastAutomationsChanged(definitionID)
+	return nil
 }
 
 func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, input string) (*store.AutomationRun, error) {
@@ -133,6 +405,11 @@ func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, inp
 	if err != nil {
 		return nil, err
 	}
+	// A run now exists for this definition (freshly claimed, or the idempotent
+	// dedup of an already-claimed one) whether or not delivery below succeeds;
+	// broadcast so a WS client watching this definition's runs sees it appear
+	// without waiting on the delivery outcome.
+	d.broadcastAutomationsChanged(definitionID)
 	if run.State != "pending" {
 		return run, nil
 	}
@@ -341,6 +618,12 @@ func (d *Daemon) observeGitHubReviewRequests(host string, prs []*protocol.PR, ob
 				d.logf("automation GitHub observation claim %s: %v", candidate.SubjectKey, err)
 				continue
 			}
+			// A run now exists for this definition (freshly claimed, or the
+			// idempotent dedup of an already-claimed one) whether or not
+			// delivery below succeeds; broadcast so a WS client watching this
+			// definition's runs sees it appear without waiting on the
+			// delivery outcome.
+			d.broadcastAutomationsChanged(definition.ID)
 			d.automationMu.Lock()
 			current, loadErr := d.store.GetAutomationRun(run.ID)
 			if loadErr == nil && current != nil && current.State == "pending" {
@@ -492,6 +775,7 @@ func (d *Daemon) failAutomationRun(run *store.AutomationRun, deliveryErr error) 
 		}
 	}
 	d.broadcastTicketsUpdated()
+	d.broadcastAutomationsChanged(run.DefinitionID)
 	failed, err := d.store.GetAutomationRun(run.ID)
 	if err != nil {
 		persistErr = errors.Join(persistErr, fmt.Errorf("reload failed run: %w", err))
@@ -540,10 +824,13 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 		}
 	}
 	continuityKey := ""
-	if snapshot.Policy.Continuity == "per_subject" {
+	switch snapshot.Policy.Continuity {
+	case "per_subject":
 		continuityKey = occurrence.SubjectKey
+	case "singleton":
+		continuityKey = "singleton"
 	}
-	req := automation.WorkRequest{RunID: run.ID, DefinitionID: run.DefinitionID, SubjectKey: occurrence.SubjectKey, ContinuityKey: continuityKey, Prompt: snapshot.Prompt, Context: json.RawMessage(occurrence.PayloadJSON), Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID}}
+	req := automation.WorkRequest{RunID: run.ID, DefinitionID: run.DefinitionID, SubjectKey: occurrence.SubjectKey, ContinuityKey: continuityKey, Provider: occurrence.Provider, Prompt: snapshot.Prompt, Context: json.RawMessage(occurrence.PayloadJSON), Launch: snapshot.Launch, Location: snapshot.Location, IDs: automation.DeliveryIDs{TicketID: run.TicketID, SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, PaneID: run.PaneID}}
 	if err := d.validateAutomationContinuation(req); err != nil {
 		return err
 	}
@@ -558,6 +845,17 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 		return err
 	}
 	d.broadcastTicketsUpdated()
+	// This pending->delivered transition broadcast has no unit-test coverage:
+	// every unit test that reaches deliverAutomationRun's success path does so
+	// through automationDeliveryHook (bypassing this real delivery return) or
+	// forces a deterministic pre-broadcast failure (e.g.
+	// TestDisabledAutomationRefusesRecoveredPendingDelivery,
+	// TestScheduledPendingRunRecoversOnRestart's failed-transition variant).
+	// Reaching this line for real requires a full workdelivery spawn, which is
+	// out of reach for a unit test; the invariant is pinned live instead by
+	// scenario-automation-surface.mjs leg2_run_now_and_navigable, which drives
+	// a real run-now to `delivered` and asserts the panel reflects it.
+	d.broadcastAutomationsChanged(run.DefinitionID)
 	return nil
 }
 
@@ -573,7 +871,7 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 		return err
 	}
 	if ticket == nil {
-		hasPrior, err := d.store.HasPriorAutomationContinuityRun(req.DefinitionID, req.ContinuityKey, req.RunID)
+		hasPrior, err := d.hasPriorAutomationContinuityRun(req)
 		if err != nil {
 			return err
 		}
@@ -596,36 +894,65 @@ func (d *Daemon) validateAutomationContinuation(req automation.WorkRequest) erro
 	if err := json.Unmarshal([]byte(origin.SnapshotJSON), &originSnapshot); err != nil {
 		return fmt.Errorf("continuity origin snapshot: %w", err)
 	}
-	if originSnapshot.Prompt != req.Prompt || originSnapshot.Launch != req.Launch || !sameAutomationLocation(originSnapshot.Location, req.Location) {
+	reqContract := automation.NewContinuationContract(req.Prompt, req.Launch, req.Location)
+	if !originSnapshot.ContinuationContract().Equal(reqContract) {
 		return errors.New("automation reviewer contract changed; refusing to reuse a session with stale instructions")
 	}
-	originOccurrence, err := d.store.GetAutomationOccurrence(origin.OccurrenceID)
-	if err != nil || originOccurrence == nil {
-		return errors.Join(errors.New("continuity origin occurrence missing"), err)
-	}
-	originPR, err := automation.ParsePullRequestInput(json.RawMessage(originOccurrence.PayloadJSON))
-	if err != nil {
-		return fmt.Errorf("continuity origin payload: %w", err)
-	}
-	currentPR, err := automation.ParsePullRequestInput(req.Context)
-	if err != nil {
-		return err
-	}
-	if originPR.HeadSHA != currentPR.HeadSHA {
-		return errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+	// The origin/current pull-request revision comparison only applies to
+	// GitHub-provider occurrences. A scheduled occurrence's payload is
+	// ScheduledInput, not a pull request; parsing it here would always fail.
+	if req.Provider == "github" {
+		originOccurrence, err := d.store.GetAutomationOccurrence(origin.OccurrenceID)
+		if err != nil || originOccurrence == nil {
+			return errors.Join(errors.New("continuity origin occurrence missing"), err)
+		}
+		originPR, err := automation.ParsePullRequestInput(json.RawMessage(originOccurrence.PayloadJSON))
+		if err != nil {
+			return fmt.Errorf("continuity origin payload: %w", err)
+		}
+		currentPR, err := automation.ParsePullRequestInput(req.Context)
+		if err != nil {
+			return err
+		}
+		if originPR.HeadSHA != currentPR.HeadSHA {
+			return errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
+		}
 	}
 	if d.canStartWithdrawnUndeliveredReviewer(origin, req.IDs.SessionID) {
 		return nil
 	}
+	if d.automationSessionIsLive(req.IDs.SessionID) {
+		return nil
+	}
+	_, err = d.automationResumeSessionID(req)
+	return err
+}
+
+func (d *Daemon) automationSessionIsLive(sessionID string) bool {
 	if d.ptyBackend == nil {
-		return errors.New("reviewer continuity cannot verify the existing session")
+		return false
 	}
 	for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
-		if liveID == req.IDs.SessionID {
-			return nil
+		if liveID == sessionID {
+			return true
 		}
 	}
-	return errors.New("reviewer continuity requires the existing session to still be live")
+	return false
+}
+
+func (d *Daemon) automationResumeSessionID(req automation.WorkRequest) (string, error) {
+	resumeID := strings.TrimSpace(d.store.GetResumeSessionID(req.IDs.SessionID))
+	if resumeID == "" {
+		resumeID = strings.TrimSpace(d.store.GetTicketResumeSessionID(req.IDs.SessionID))
+	}
+	if resumeID == "" {
+		return "", errors.New("reviewer continuity cannot resume the stopped session without a recorded transcript")
+	}
+	driver := agentdriver.Get(req.Launch.Agent)
+	if !agentdriver.ResumeAvailable(driver, resumeID) {
+		return "", errors.New("reviewer continuity transcript is unavailable; refusing an unattended fresh session")
+	}
+	return resumeID, nil
 }
 
 func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) error {
@@ -663,7 +990,7 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 		return nil
 	}
 	if req.ContinuityKey != "" {
-		hasPrior, err := d.store.HasPriorAutomationContinuityRun(req.DefinitionID, req.ContinuityKey, req.RunID)
+		hasPrior, err := d.hasPriorAutomationContinuityRun(req)
 		if err != nil {
 			return err
 		}
@@ -673,6 +1000,85 @@ func (d *Daemon) EnsureTicket(_ context.Context, req automation.WorkRequest) err
 	}
 	_, err = d.store.EnsureAutomationTicket(store.Ticket{ID: req.IDs.TicketID, Title: def.Name, Description: req.Prompt, Status: store.TicketStatusWorking, Assignee: req.IDs.SessionID, Cwd: req.Location.Path, LastAgentID: req.Launch.Agent, AutomationRunID: req.RunID}, author, store.TicketRoleChiefOfStaff, time.Now())
 	return err
+}
+
+// hasPriorAutomationContinuityRun reports whether some earlier same-contract
+// thread under this continuity key has genuinely lost its ticket. It lets
+// delivery distinguish first-run crash recovery (no earlier thread shares
+// req's contract, so this ticket may legitimately not exist yet) from a
+// thread whose bound ticket was removed out from under it (an earlier
+// same-contract thread's own ticket is gone).
+//
+// Two things matter here, both found the hard way:
+//
+//  1. Comparing by ContinuationContract, not just "does any history exist
+//     for this continuity key": a contract-changing edit (automationApply)
+//     deletes the old binding and the next occurrence mints a brand-new
+//     ticket for the same continuity key while the old run remains in
+//     history. That old run's contract differs from the new one's by
+//     construction, so it must be excluded — a plain existence check would
+//     wrongly treat it as binding on the new thread and spuriously refuse
+//     every post-rotation delivery with "ticket is missing".
+//
+//  2. Checking each same-contract entry's OWN ticket, not just "does any
+//     same-contract entry exist": edit A→B then revert B→A rotates the
+//     binding twice, minting a fresh ticket T3 whose thread's contract
+//     equals the original A thread's (T1). If T1's ticket is still alive,
+//     that's not a lost thread — a fresh T3 is a legitimate new thread under
+//     a since-reused contract, and must be allowed. Checking existence
+//     against T1's own ticket_id (not T3's, and not "any history exists")
+//     is what tells that apart from a real sweep: if T1's own ticket were
+//     later removed too, this must go back to refusing, since a same-
+//     contract thread's ticket really did disappear.
+//
+//  3. Scoping the disqualification to the entry's OWN session, not any
+//     same-contract entry's: the ticket TTL sweep (store.SweepExpiredTickets)
+//     releases a thread's continuity binding along with its ticket, by
+//     design — so a same-contract entry's ticket being gone is the routine
+//     end of that entry's own thread, not evidence about req's thread. Only
+//     when entry.SessionID equals req.IDs.SessionID is the vanished ticket
+//     actually req's OWN documenting ticket — i.e. req would be reusing that
+//     exact thread's session/worktree with no record of what happened to it.
+//     A different session id means req already holds a freshly reserved
+//     identity (no binding survived to hand it an old one), so nothing is
+//     being reused and there's nothing to refuse.
+func (d *Daemon) hasPriorAutomationContinuityRun(req automation.WorkRequest) (bool, error) {
+	if req.ContinuityKey == "" {
+		return false, nil
+	}
+	history, err := d.store.AutomationContinuityRunHistory(req.DefinitionID, req.ContinuityKey, req.RunID)
+	if err != nil {
+		return false, err
+	}
+	if len(history) == 0 {
+		return false, nil
+	}
+	reqContract := automation.NewContinuationContract(req.Prompt, req.Launch, req.Location)
+	checkedTicketIDs := make(map[string]bool, len(history))
+	for _, entry := range history {
+		var snapshot automation.Snapshot
+		if err := json.Unmarshal([]byte(entry.SnapshotJSON), &snapshot); err != nil {
+			continue
+		}
+		if !snapshot.ContinuationContract().Equal(reqContract) {
+			continue
+		}
+		if checkedTicketIDs[entry.TicketID] {
+			continue
+		}
+		checkedTicketIDs[entry.TicketID] = true
+		if entry.SessionID != req.IDs.SessionID {
+			continue
+		}
+		ticket, err := d.store.GetTicket(entry.TicketID)
+		if err != nil {
+			return false, err
+		}
+		if ticket == nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (d *Daemon) activateAutomationContinuationTicket(req automation.WorkRequest) error {
@@ -698,12 +1104,6 @@ func (d *Daemon) activateAutomationContinuationTicket(req automation.WorkRequest
 	return nil
 }
 
-func sameAutomationLocation(left, right automation.LocationSpec) bool {
-	leftJSON, leftErr := json.Marshal(left)
-	rightJSON, rightErr := json.Marshal(right)
-	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
-}
-
 func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) (automation.PreparedLocation, error) {
 	if req.Location.Type == "directory" {
 		directory, err := validateDelegationDirectory(req.Location.Path)
@@ -723,9 +1123,11 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 	if err != nil {
 		return automation.PreparedLocation{}, err
 	}
-	if originRun, err := d.automationContinuationOrigin(req); err != nil {
+	originRun, err := d.automationContinuationOrigin(req)
+	if err != nil {
 		return automation.PreparedLocation{}, err
-	} else if originRun != nil {
+	}
+	if originRun != nil {
 		originOccurrence, err := d.store.GetAutomationOccurrence(originRun.OccurrenceID)
 		if err != nil || originOccurrence == nil {
 			return automation.PreparedLocation{}, errors.Join(errors.New("continuity origin occurrence missing"), err)
@@ -735,9 +1137,6 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 			return automation.PreparedLocation{}, fmt.Errorf("continuity origin payload: %w", err)
 		}
 		if originPR.HeadSHA != pr.HeadSHA {
-			// The stable session's CWD is the origin run's exact detached worktree.
-			// Until the next continuity slice defines resume/fallback rules for a new
-			// revision, failing is safer than silently reviewing the wrong checkout.
 			return automation.PreparedLocation{}, errors.New("reviewer continuity across a changed pull-request revision is not enabled yet")
 		}
 	}
@@ -808,6 +1207,24 @@ func (d *Daemon) PrepareLocation(_ context.Context, req automation.WorkRequest) 
 			sessionPersisted = true
 		}
 	}
+	if originRun != nil && originRun.State == "delivered" {
+		ticket, err := d.store.GetTicket(req.IDs.TicketID)
+		if err != nil {
+			return automation.PreparedLocation{}, err
+		}
+		if ticket == nil || filepath.Clean(ticket.Cwd) != filepath.Clean(worktree) {
+			return automation.PreparedLocation{}, errors.New("reviewer continuity ticket does not own the expected worktree")
+		}
+		if _, err := os.Stat(worktree); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return automation.PreparedLocation{}, errors.New("reviewer continuity worktree is missing; refusing to recreate it silently")
+			}
+			return automation.PreparedLocation{}, fmt.Errorf("inspect reviewer continuity worktree: %w", err)
+		}
+		// A delivered origin proves that this stable session owned the worktree.
+		// Preserve its commits, branch switch, and local changes when resuming.
+		sessionPersisted = true
+	}
 	if _, err := attngit.EnsureAutomationSessionWorktree(mainRepo, worktree, pr.HeadSHA, authorization, sessionPersisted); err != nil {
 		return automation.PreparedLocation{}, &retryableAutomationDeliveryError{cause: err}
 	}
@@ -873,23 +1290,34 @@ func (d *Daemon) EnsureSession(_ context.Context, req automation.WorkRequest, di
 	if err != nil {
 		return err
 	}
-	for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
-		if liveID == req.IDs.SessionID {
-			// Worker recovery adopted the already-correct original launch. Do not
-			// ask the backend to spawn the stable session ID a second time.
-			return d.verifyUnattendedLaunch(req)
-		}
+	if d.automationSessionIsLive(req.IDs.SessionID) {
+		// Worker recovery adopted the already-correct original launch. Do not ask
+		// the backend to spawn the stable session ID a second time.
+		return d.verifyUnattendedLaunch(req)
 	}
 	if continuationRun != nil {
-		if !d.canStartWithdrawnUndeliveredReviewer(continuationRun, req.IDs.SessionID) {
-			return errors.New("reviewer continuity requires the existing session to still be live")
+		if d.canStartWithdrawnUndeliveredReviewer(continuationRun, req.IDs.SessionID) {
+			return d.startAutomationSession(req, directory, inputPath, "")
 		}
+		resumeID, err := d.automationResumeSessionID(req)
+		if err != nil {
+			return err
+		}
+		return d.startAutomationSession(req, directory, inputPath, resumeID)
 	}
+	return d.startAutomationSession(req, directory, inputPath, "")
+}
+
+func (d *Daemon) startAutomationSession(req automation.WorkRequest, directory, inputPath, resumeID string) error {
 	_, pullRequestErr := automation.ParsePullRequestInput(req.Context)
 	prompt := automationSessionPrompt(req.Prompt, inputPath, pullRequestErr == nil)
 	client := newInternalWSClient()
-	d.handleSpawnSessionWithPolicy(client, &protocol.SpawnSessionMessage{Cmd: protocol.CmdSpawnSession, ID: req.IDs.SessionID, Cwd: directory, WorkspaceID: req.IDs.WorkspaceID, Agent: req.Launch.Agent, Cols: 80, Rows: 24, Label: protocol.Ptr(filepath.Base(directory)), InitialPrompt: protocol.Ptr(prompt), Model: protocol.Ptr(req.Launch.Model), Effort: protocol.Ptr(req.Launch.Effort), Executable: protocol.Ptr(req.Launch.Executable)}, internalSpawnPolicy{unattendedLaunch: req.Launch})
-	_, err = readInternalActionResult(client)
+	message := &protocol.SpawnSessionMessage{Cmd: protocol.CmdSpawnSession, ID: req.IDs.SessionID, Cwd: directory, WorkspaceID: req.IDs.WorkspaceID, Agent: req.Launch.Agent, Cols: 80, Rows: 24, Label: protocol.Ptr(filepath.Base(directory)), InitialPrompt: protocol.Ptr(prompt), Model: protocol.Ptr(req.Launch.Model), Effort: protocol.Ptr(req.Launch.Effort), Executable: protocol.Ptr(req.Launch.Executable)}
+	if resumeID != "" {
+		message.ResumeSessionID = protocol.Ptr(resumeID)
+	}
+	d.handleSpawnSessionWithPolicy(client, message, internalSpawnPolicy{unattendedLaunch: req.Launch})
+	_, err := readInternalActionResult(client)
 	if err != nil {
 		return err
 	}
@@ -1069,6 +1497,10 @@ func (d *Daemon) recoverAutomations() {
 			// recovery must not race that snapshot using yesterday's active edge.
 			continue
 		}
+		// Scheduled runs (occurrence.Provider == "schedule") fall through to
+		// generic recovery: their payload is self-contained (the intended
+		// instant, immutably snapshotted at claim time), so a pending run can
+		// be delivered directly without refreshing any external demand first.
 		d.automationMu.Lock()
 		run, err := d.store.GetAutomationRun(runs[i].ID)
 		if err == nil && run.State == "pending" {
@@ -1104,6 +1536,9 @@ func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 	case protocol.CmdAutomationApply:
 		m := msg.(*protocol.AutomationApplyMessage)
 		data, err = d.automationApply(m.DefinitionYaml)
+	case protocol.CmdAutomationValidate:
+		m := msg.(*protocol.AutomationValidateMessage)
+		_, _, err = d.validateAutomationSpec(m.DefinitionYaml)
 	case protocol.CmdAutomationList:
 		data, err = d.store.ListAutomationDefinitions()
 	case protocol.CmdAutomationShow:
@@ -1123,11 +1558,29 @@ func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 	case protocol.CmdAutomationRunList:
 		m := msg.(*protocol.AutomationRunListMessage)
 		data, err = d.store.ListAutomationRuns(m.DefinitionID)
+	case protocol.CmdAutomationDelete:
+		m := msg.(*protocol.AutomationDeleteMessage)
+		err = d.automationDelete(context.Background(), m.DefinitionID)
+	case protocol.CmdAutomationCleanup:
+		m := msg.(*protocol.AutomationCleanupMessage)
+		var cleaned, keptDirty, keptActive []string
+		cleaned, keptDirty, keptActive, err = d.automationCleanup(context.Background(), m.DefinitionID)
+		if err == nil {
+			data = automationCleanupResult{Cleaned: cleaned, KeptDirty: keptDirty, KeptActive: keptActive}
+		}
 	}
 	result := automationActionResult{Event: protocol.EventAutomationActionResult, Action: cmd, Success: err == nil}
 	if err != nil {
 		result.Error = protocol.Ptr(err.Error())
-	} else {
+	} else if data != nil {
+		// Guarded on nil rather than marshalling unconditionally: an action with
+		// no payload (validate) leaves data as a nil `any`, and json.Marshal of
+		// that yields the 4-byte literal `null`, not an empty slice — so
+		// `json:"data,omitempty"` would not drop the field and the wire would
+		// carry "data":null. json.RawMessage implements Unmarshaler and is
+		// invoked even for JSON null, so the client would decode a non-nil
+		// 4-byte Data and every "did I get a payload?" check downstream would
+		// answer yes. Leaving Data nil here is what lets omitempty do its job.
 		result.Data, _ = json.Marshal(data)
 	}
 	_ = json.NewEncoder(conn).Encode(result)

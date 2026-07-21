@@ -235,6 +235,240 @@ func TestMigration73RepairsAutomationProfileMigration70Collision(t *testing.T) {
 	}
 }
 
+// TestMigration75DefaultsExistingRowsToEmptySpecYAML mirrors
+// TestMigration73RepairsAutomationProfileMigration70Collision's technique:
+// roll a real DB back to just before migration 75 (drop the column it adds,
+// delete its schema_migrations record), seed a row in that pre-75 shape, then
+// reopen so migration 75 runs for real. Every row that existed before the
+// migration must come back with an empty spec_yaml (the column's DEFAULT) —
+// that empty value is exactly what internal/daemon's automationDefinitionYAML
+// fallback (via automation.MarshalDefinitionYAML) is keyed on to reconstruct
+// definition_yaml for a definition applied before this PR.
+func TestMigration75DefaultsExistingRowsToEmptySpecYAML(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-75.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() setup error = %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.Exec(
+		`INSERT INTO automation_definitions (id, name, enabled, revision, spec_json, created_at, updated_at, deleted_at) VALUES (?, ?, 1, 1, ?, ?, ?, '')`,
+		"legacy-def", "Legacy", `{"id":"legacy-def","name":"Legacy"}`, now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed legacy row: %v", err)
+	}
+	if _, err := db.Exec(`
+		ALTER TABLE automation_definitions DROP COLUMN spec_yaml;
+		DELETE FROM schema_migrations WHERE version >= 75;
+	`); err != nil {
+		db.Close()
+		t.Fatalf("roll back to pre-migration-75 schema: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close seeded db: %v", err)
+	}
+
+	migrated, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() migration 75 = %v", err)
+	}
+	defer migrated.Close()
+
+	var specYAML string
+	if err := migrated.QueryRow(`SELECT spec_yaml FROM automation_definitions WHERE id = ?`, "legacy-def").Scan(&specYAML); err != nil {
+		t.Fatalf("query legacy row spec_yaml: %v", err)
+	}
+	if specYAML != "" {
+		t.Fatalf("legacy row spec_yaml = %q, want empty (migration 75's column default)", specYAML)
+	}
+}
+
+// TestMigratesPopulatedPreAutomationsDatabaseToHead guards migrations 73-75
+// against a REAL pre-existing database, not an empty or already-migrated one.
+// Migration 73's `ALTER TABLE tickets ADD COLUMN automation_run_id` is the
+// highest-risk statement in the trio: every other test exercises it against a
+// fresh or already-migrated tickets table. Just deleting schema_migrations
+// rows wouldn't exercise that risk either — 73/74's CREATE TABLE IF NOT
+// EXISTS and the ALTER's columnExists guard would silently no-op against a
+// DB that still has the automation schema. So this test seeds tickets,
+// sessions, and prs rows through a real head-schema store, physically
+// rewinds the on-disk schema to its pre-73 shape (dropping the automation
+// tables and the tickets column, mirroring
+// TestMigration75DefaultsExistingRowsToEmptySpecYAML's technique), reopens so
+// migrations 73-75 run for real, and asserts every legacy row survived
+// alongside the new schema.
+func TestMigratesPopulatedPreAutomationsDatabaseToHead(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pre-automations.db")
+
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewWithDB() setup error = %v", err)
+	}
+
+	now := time.Now().UTC()
+	// Seeded via raw SQL rather than CreateTicket: CreateTicket's INSERT
+	// names automation_run_id explicitly, which would make seeding itself
+	// (not just the post-migration assertions below) depend on migration 73
+	// having already run — muddying the mutation-check this test exists for.
+	tickets := []Ticket{
+		{ID: "legacy-ticket-1", Title: "Legacy ticket one", Status: TicketStatusTodo},
+		{ID: "legacy-ticket-2", Title: "Legacy ticket two", Status: TicketStatusWorking, Assignee: "agent-a"},
+		{ID: "legacy-ticket-3", Title: "Legacy ticket three", Status: TicketStatusDone},
+	}
+	for _, tk := range tickets {
+		if _, err := s.db.Exec(
+			`INSERT INTO tickets (id, title, status, assignee, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			tk.ID, tk.Title, string(tk.Status), tk.Assignee, now.Format(time.RFC3339), now.Format(time.RFC3339),
+		); err != nil {
+			t.Fatalf("seed ticket %s: %v", tk.ID, err)
+		}
+	}
+
+	s.Add(&protocol.Session{
+		ID:         "legacy-session-1",
+		Label:      "Legacy session",
+		Directory:  "/repo/legacy",
+		Agent:      "claude",
+		State:      protocol.SessionStateIdle,
+		StateSince: protocol.TimestampNow().String(),
+		LastSeen:   protocol.TimestampNow().String(),
+	})
+
+	s.AddPR(&protocol.PR{
+		ID:          "github.com:owner/repo#42",
+		Host:        "github.com",
+		Repo:        "owner/repo",
+		Number:      42,
+		Title:       "Legacy PR",
+		URL:         "https://github.com/owner/repo/pull/42",
+		Author:      "octocat",
+		Role:        protocol.PRRoleAuthor,
+		State:       protocol.PRStateWaiting,
+		LastUpdated: now.Format(time.RFC3339),
+		LastPolled:  now.Format(time.RFC3339),
+	})
+
+	if err := s.Close(); err != nil {
+		t.Fatalf("close seeded store: %v", err)
+	}
+
+	raw, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := raw.Exec(`
+		DROP TABLE IF EXISTS automation_ticket_occurrence_events;
+		DROP TABLE IF EXISTS automation_continuity_bindings;
+		DROP TABLE IF EXISTS automation_review_request_edges;
+		DROP TABLE IF EXISTS automation_provider_cursors;
+		DROP TABLE IF EXISTS automation_runs;
+		DROP TABLE IF EXISTS automation_occurrences;
+		DROP TABLE IF EXISTS automation_definitions;
+		DROP INDEX IF EXISTS idx_tickets_automation_run;
+	`); err != nil {
+		raw.Close()
+		t.Fatalf("roll back to pre-migration-73/74 tables: %v", err)
+	}
+	var hasAutomationRunID int
+	if err := raw.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('tickets') WHERE name = 'automation_run_id'`,
+	).Scan(&hasAutomationRunID); err != nil {
+		raw.Close()
+		t.Fatalf("check tickets.automation_run_id before rollback: %v", err)
+	}
+	if hasAutomationRunID == 1 {
+		if _, err := raw.Exec(`ALTER TABLE tickets DROP COLUMN automation_run_id`); err != nil {
+			raw.Close()
+			t.Fatalf("drop tickets.automation_run_id: %v", err)
+		}
+	}
+	if _, err := raw.Exec(`DELETE FROM schema_migrations WHERE version >= 73`); err != nil {
+		raw.Close()
+		t.Fatalf("unrecord migrations 73-75: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw rollback db: %v", err)
+	}
+
+	migrated, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewWithDB() migrate pre-automations db: %v", err)
+	}
+	defer migrated.Close()
+
+	version, err := GetSchemaVersion(migrated.db)
+	if err != nil {
+		t.Fatalf("GetSchemaVersion() error = %v", err)
+	}
+	if version != latestSchemaVersion() {
+		t.Fatalf("schema version = %d, want %d", version, latestSchemaVersion())
+	}
+
+	// Every pre-existing row must survive with its original values, and
+	// automation_run_id must exist and be NULL for all of them (a legacy
+	// ticket has no automation provenance).
+	for _, tk := range tickets {
+		var title, status, assignee string
+		var automationRunID sql.NullString
+		if err := migrated.db.QueryRow(
+			`SELECT title, status, assignee, automation_run_id FROM tickets WHERE id = ?`, tk.ID,
+		).Scan(&title, &status, &assignee, &automationRunID); err != nil {
+			t.Fatalf("query migrated ticket %s: %v", tk.ID, err)
+		}
+		if title != tk.Title || status != string(tk.Status) || assignee != tk.Assignee {
+			t.Fatalf("migrated ticket %s = (title %q, status %q, assignee %q), want (%q, %q, %q)",
+				tk.ID, title, status, assignee, tk.Title, tk.Status, tk.Assignee)
+		}
+		if automationRunID.Valid {
+			t.Fatalf("migrated ticket %s automation_run_id = %q, want NULL", tk.ID, automationRunID.String)
+		}
+	}
+	var ticketCount int
+	if err := migrated.db.QueryRow(`SELECT COUNT(*) FROM tickets`).Scan(&ticketCount); err != nil {
+		t.Fatalf("count migrated tickets: %v", err)
+	}
+	if ticketCount != len(tickets) {
+		t.Fatalf("migrated ticket count = %d, want %d", ticketCount, len(tickets))
+	}
+
+	gotSession := migrated.Get("legacy-session-1")
+	if gotSession == nil {
+		t.Fatal("legacy session missing after migration")
+	}
+	if gotSession.Label != "Legacy session" || gotSession.Directory != "/repo/legacy" || gotSession.Agent != "claude" {
+		t.Fatalf("migrated session = %+v, want label/directory/agent preserved", gotSession)
+	}
+
+	gotPR := migrated.GetPR("github.com:owner/repo#42")
+	if gotPR == nil {
+		t.Fatal("legacy PR missing after migration")
+	}
+	if gotPR.Title != "Legacy PR" || gotPR.Repo != "owner/repo" || gotPR.Number != 42 {
+		t.Fatalf("migrated PR = %+v, want title/repo/number preserved", gotPR)
+	}
+
+	// The new automation schema must exist alongside the preserved data.
+	for _, table := range []string{
+		"automation_definitions", "automation_occurrences", "automation_runs",
+		"automation_provider_cursors", "automation_review_request_edges",
+		"automation_continuity_bindings", "automation_ticket_occurrence_events",
+	} {
+		if !tableExistsForTest(t, migrated.db, table) {
+			t.Fatalf("table %s missing after migration", table)
+		}
+	}
+	var specYAMLColumns int
+	if err := migrated.db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('automation_definitions') WHERE name = 'spec_yaml'`,
+	).Scan(&specYAMLColumns); err != nil {
+		t.Fatalf("query automation_definitions.spec_yaml: %v", err)
+	}
+	if specYAMLColumns != 1 {
+		t.Fatalf("automation_definitions.spec_yaml columns = %d, want 1", specYAMLColumns)
+	}
+}
+
 func TestMigration67RenamesTicketArtifactRecords(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "migration-67.db")
 	db, err := OpenDB(dbPath)
@@ -367,6 +601,7 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		{"chief_of_staff_dispatches", "structured_report_json"},
 		{"tickets", "reconciled_at"},
 		{"sessions", "closed_intentionally_at"},
+		{"automation_definitions", "spec_yaml"},
 	}
 
 	for _, tc := range migratedColumns {

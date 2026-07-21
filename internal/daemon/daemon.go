@@ -97,17 +97,23 @@ const (
 
 // Daemon manages Claude sessions
 type Daemon struct {
-	socketPath                 string
-	pidPath                    string
-	pidFile                    *os.File // Held open with flock for exclusive access
-	dataRoot                   string
-	daemonInstanceID           string
-	store                      *store.Store
-	automationMu               sync.Mutex // serializes idempotent ensure/adopt delivery per profile
-	automationObservationMu    sync.Mutex
-	automationObservationLocks map[string]*sync.Mutex
-	automationRepoMu           sync.Mutex
-	automationRepos            map[string]*sync.Mutex
+	socketPath       string
+	pidPath          string
+	pidFile          *os.File // Held open with flock for exclusive access
+	dataRoot         string
+	daemonInstanceID string
+	store            *store.Store
+	automationMu     sync.Mutex // serializes idempotent ensure/adopt delivery per profile
+	// wsAutomationMutationTimeout bounds how long a WS-originated automation
+	// mutation (set_enabled) waits to acquire automationMu before aborting
+	// without mutating. 0 resolves to defaultWSAutomationMutationTimeout via
+	// wsAutomationMutationTimeoutDuration; tests shrink it to exercise the
+	// deadline without holding the lock for tens of seconds.
+	wsAutomationMutationTimeout time.Duration
+	automationObservationMu     sync.Mutex
+	automationObservationLocks  map[string]*sync.Mutex
+	automationRepoMu            sync.Mutex
+	automationRepos             map[string]*sync.Mutex
 	// automationDeliveryHook replaces only the final delivery call in focused
 	// provider-observation tests; production always leaves it nil.
 	automationDeliveryHook func(*store.AutomationRun) error
@@ -318,6 +324,12 @@ type Daemon struct {
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
 	workflowAttentionHook func(attention.Result)                    // optional, tests only
 	ticketsBroadcastHook  func([]protocol.Ticket)                   // optional, tests only
+
+	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
+	// WS surface (automations_broadcast.go): invoked before every
+	// automations_changed broadcast so tests can observe it deterministically
+	// without a live socket.
+	automationsBroadcastHook func(*protocol.AutomationsChangedMessage)
 
 	workspaceContextCheckoutMu sync.Mutex
 
@@ -916,6 +928,20 @@ func (d *Daemon) Start() error {
 	// a daemon death mid-seam) and repairs claims whose verdict never landed.
 	go d.runTicketReconcileSweep()
 
+	// Automation run retention sweep (A3): bounds unbounded automation run
+	// history, pruning terminal runs/artifacts/worktrees outside the keep
+	// window once they're old and safe to touch. Dedicated ticker rather than
+	// piggybacking the schedule-observation tick — that tick's cadence is
+	// driven by cron granularity, not retention policy.
+	go d.runAutomationRetentionSweep()
+
+	// Ticket TTL sweep: hard-deletes terminal tickets past their retention
+	// window. This is also what actually bounds a bound continuity thread's
+	// worktree lifetime (see SweepExpiredTickets' automation_continuity_bindings
+	// cascade) — without this loop running, AutomationSessionHasContinuityBinding
+	// never stops protecting a thread's worktree from A3/A4 pruning.
+	go d.runTicketRetentionSweep()
+
 	// Construct + start the durable compaction runner (kinds compact_context,
 	// summarize_session, narrate_workspace).
 	d.startCompactRunner()
@@ -933,6 +959,10 @@ func (d *Daemon) Start() error {
 	// onto the durable runner when due). Launched AFTER startCompactRunner so the
 	// narrate executor is registered before the first tick fires.
 	go d.startNotebookCronEnqueuer(d.done)
+
+	// Start the scheduled-automation observation loop (claims and delivers due
+	// scheduled-trigger occurrences).
+	go d.startAutomationScheduleLoop(d.done)
 
 	d.signalStarted()
 	startSucceeded = true
@@ -2094,7 +2124,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleRegister(conn, msg.(*protocol.RegisterMessage))
 	case protocol.CmdDelegate:
 		d.handleDelegate(conn, msg.(*protocol.DelegateMessage))
-	case protocol.CmdAutomationApply, protocol.CmdAutomationList, protocol.CmdAutomationShow, protocol.CmdAutomationRun, protocol.CmdAutomationRunList:
+	case protocol.CmdAutomationApply, protocol.CmdAutomationValidate, protocol.CmdAutomationList, protocol.CmdAutomationShow, protocol.CmdAutomationRun, protocol.CmdAutomationRunList, protocol.CmdAutomationDelete, protocol.CmdAutomationCleanup:
 		d.handleAutomationCommand(conn, cmd, msg)
 	case protocol.CmdDelegateStatus:
 		d.handleDelegateStatus(conn, msg.(*protocol.DelegateStatusMessage))

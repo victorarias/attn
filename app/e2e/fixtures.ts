@@ -630,4 +630,53 @@ export const test = base.extend<Fixtures>({
   },
 });
 
+/**
+ * Wait until the mock PTY's startup banner has landed in a session's pane.
+ *
+ * The mock backend emits `attn mock pty: <id>` on a 30ms timer inside
+ * `ptyAttach` (`src/pty/bridge.ts`). The pane is already registered by then —
+ * `useGhosttyPaneRuntime` records `connect_terminal` *before* it calls
+ * `ptyAttach` — so the banner reliably reaches the pane; the only question is
+ * whether it arrives before or after the test's own first write.
+ *
+ * Tests that open a session and immediately write `[2J[H` + content
+ * are racing that timer. Usually `expect.poll` notices `connect_terminal` on a
+ * tick 100ms+ later, the banner has already landed, and the `[2J` wipes it. But
+ * when the poll happens to catch it inside the 30ms window, the test writes
+ * first and the banner then lands *at the cursor*, directly appended to the
+ * test's own output. Two CI failures on 2026-07-20, both of which passed on a
+ * re-run of the same commit:
+ *
+ *   terminal-interactions: "…/terminal-link" + "attn mock pty: s-link"
+ *                          → link hit-test returned "…/terminal-linkattn"
+ *   terminal-find:         "Case case CASE" + "attn mock pty: s-find-case"
+ *                          → find counted 4 matches for "case" instead of 3
+ *                            (the session id itself contains "case")
+ *
+ * Note that the screen assertions these tests make first — `.toContain(...)` on
+ * the pane text — cannot catch this: they are satisfied by a screen that also
+ * carries the banner. Only the *derived* assertion (a match count, an extracted
+ * URL) sees the damage, which is why the failure looks unrelated to timing.
+ *
+ * Gating on the banner makes the subsequent `[2J[H` meaningful: it clears a
+ * known screen instead of an arbitrary point in the startup race. Call this
+ * after the pane is ready and before writing test output.
+ */
+export async function waitForMockPtyBanner(
+  page: import('@playwright/test').Page,
+  sessionId: string,
+) {
+  await expect
+    .poll(
+      async () => page.evaluate((id) => window.__TEST_GET_SESSION_PANE_TEXT?.(id) ?? '', sessionId),
+      {
+        timeout: 5000,
+        message:
+          `mock pty banner never reached the pane for ${sessionId}; the session did not `
+          + `attach, or startup output is being dropped before the pane registers`,
+      },
+    )
+    .toContain(`attn mock pty: ${sessionId}`);
+}
+
 export { expect };

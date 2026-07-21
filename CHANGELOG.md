@@ -20,6 +20,100 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   command right after restoring `$HOME`, which flushes bash's stale cache
   before any of the user's real startup files run.
 
+### Added
+- **You can now write and edit automations in the app.** The Automations panel
+  has New and Edit buttons that open the definition's YAML in an editor, so
+  creating an automation no longer means dropping to a terminal. Validate
+  checks a definition without storing anything and reports the first problem
+  it finds; Save stores it. Three mistakes are refused rather than silently
+  accepted: changing the `id` of a definition you are editing (which would
+  leave the original running and quietly create a second one), creating a new
+  automation whose `id` already belongs to one you have (which would replace
+  it wholesale), and saving over a definition that changed elsewhere since you
+  opened it — the last offers a reload. If the definition was *deleted* while
+  you had it open, saving is refused rather than quietly bringing it back, so
+  an automation you turned off does not start running again behind you.
+  Your YAML is now stored as you wrote it, so comments and formatting survive
+  an edit round-trip — including against someone else editing the same
+  definition, since a comment-only change counts as a change; definitions
+  applied before this release are rendered from their stored form the first
+  time and keep their new text afterwards.
+- **Automations now have a panel in the app.** A new toolbar button opens an
+  Automations panel that lists every definition with its trigger and
+  enabled state, lets you enable/disable or run a manual automation now,
+  shows each definition's run history with failures called out inline, and
+  jumps straight to the ticket or session a run produced. Changes made from
+  the CLI (`attn automation apply`) appear in the panel immediately, and
+  daemon rejections are shown in the panel rather than silently swallowed.
+- **`attn automation validate --file <path>`** checks a definition without
+  applying it, using the exact same checks `apply` runs.
+- **Automations can now run on a schedule.** A definition can declare a cron
+  schedule with a required time zone and fire an ordinary visible agent
+  session at each intended instant — for example, a recurring merged-worktree
+  cleanup. After daemon downtime, `catch_up: latest` runs the newest missed
+  instant once, while `catch_up: skip` quietly drops instants older than a few
+  minutes; a backlog never replays as a storm of runs. `continuity: singleton`
+  keeps every occurrence on the same ticket and session instead of opening a
+  new one each time.
+- **pi sessions now report their own state and take steering in-band.** A pi
+  session launched by attn loads a bundled companion extension that declares
+  when the agent is working, tells attn how a turn ended — done, or waiting
+  on your reply — and receives ticket nudges and doorbell wakes as real user
+  messages steered into the conversation instead of keystrokes typed into
+  the terminal. Forking or starting a new session inside pi keeps attn's
+  resume token current.
+- **Automations can now be retired and their worktrees reclaimed.** `attn
+  automation delete <id>` retires a definition; its finished runs keep their
+  tickets and history. `attn automation cleanup <id>` reclaims worktree disk
+  space for a definition's finished runs on demand, reporting each one it
+  skips rather than leaving it unmentioned: a worktree with uncommitted
+  changes, and a worktree still in use by a live session or a live
+  continuity thread, are both reported as kept, not silently dropped from the
+  result. A background sweep now does the same automatically for old
+  finished runs — keeping the newest 200 per definition, or anything younger
+  than two weeks. A run whose session is still open, or whose continuity
+  thread is still bound to it via a shared worktree, is never touched, so a
+  recurring automation is never bricked by its own retention. Both of those
+  hold the disk independently, and both have to lift before it comes back:
+  the session has to end, and the thread's documenting ticket has to age out
+  (see the ticket retention entry below). This release fixes the second one,
+  which previously never lifted at all.
+- **Closed tickets are now hard-deleted after 30 days.** A ticket closed as
+  done, failed, or crashed is kept for 30 days in case you need to refer back
+  to it, then permanently removed along with its activity, attachments, and
+  events. Open tickets are never touched, however old.
+
+### Changed
+- **`catch_up` is now schedule-only.** Applying an automation whose manual or
+  GitHub trigger carries a `catch_up` policy fails validation with a clear
+  error; remove the field from the definition. Already-stored definitions are
+  unaffected.
+- **Later review requests return to a safe existing reviewer.** Per-PR
+  automations now resume a stopped reviewer with its recorded transcript and
+  pinned unattended policy, reopen archived tickets after successful delivery,
+  and preserve reviewer changes in the owned worktree. Missing worktrees,
+  unavailable transcripts, and changed pull-request heads fail visibly instead
+  of silently starting in the wrong context.
+
+### Fixed
+- **Turning an automation off in the panel now sticks.** The enable/disable
+  toggle and the `enabled:` line in a definition's YAML were tracked
+  separately, so disabling an automation and then editing it — even just
+  adding a comment — saved the old `enabled: true` back and started it running
+  again, reported as an ordinary successful save. For a scheduled automation
+  that meant unattended sessions firing after you had turned them off. The
+  toggle now updates the definition itself, so the editor opens on the
+  automation's real current state and a later edit cannot undo it. Your
+  comments and formatting survive the toggle untouched.
+- **Reverting an automation's prompt to an earlier version no longer
+  permanently blocks new runs.** A→B→A edits used to refuse every future run
+  once any earlier revision shared the same prompt/launch/location, even
+  after that revision's own ticket was long gone. Continuity is now checked
+  per prior run's own thread: a revert is refused only when it would reuse a
+  thread whose own ticket vanished out from under it, not merely because some
+  unrelated earlier thread's ticket is gone — including once that ticket has
+  aged out via the ticket retention sweep above.
+
 ## [2026-07-19]
 
 ### Added
@@ -53,6 +147,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   selected agent model and effort without changing the environment.
 
 ### Fixed
+- **Delegated worktrees no longer land in an unrelated repository.** When `attn
+  delegate --workspace <id> --worktree <branch>` ran without `--repo`, it chose
+  the repository from the workspace's recorded directory — a value that is
+  rewritten every time the workspace is registered and never updated when its
+  sessions move, so it could name a repository the workspace had nothing to do
+  with. The repository now comes from the sessions already in that workspace,
+  and a workspace whose sessions span several repositories asks for `--repo`
+  instead of silently picking one. Delegating into an existing workspace now
+  starts the branch from the repository's default branch — `origin/<default>`
+  when it exists, so the work begins from what upstream has. Those sessions may
+  sit in several worktrees of one repository, so starting from whichever one the
+  daemon happened to list first was arbitrary, and starting from whatever the
+  main checkout had checked out was just as incidental. Pass `--from` to start
+  elsewhere.
 - **Retried delegations no longer create duplicate agents or tickets.** `attn
   delegate` now prints a durable request and operation identity before slow
   worktree preparation, shows concise progress while it waits, and lets callers

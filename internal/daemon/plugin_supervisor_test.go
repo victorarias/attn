@@ -221,7 +221,7 @@ func TestExecPluginProcessLauncherRunsExecutableWithoutBun(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "bin", "provider"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write provider: %v", err)
 	}
-	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 4\n\n[plugin]\nkind = \"executable\"\npath = \"bin/provider\"\n")
+	manifestData := []byte("name = \"provider\"\nversion = \"0.1.0\"\nattn_api_version = 5\n\n[plugin]\nkind = \"executable\"\npath = \"bin/provider\"\n")
 	if err := os.WriteFile(filepath.Join(root, pluginManifestName), manifestData, 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}

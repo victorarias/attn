@@ -10,7 +10,9 @@ import (
 	"github.com/victorarias/attn/internal/client"
 )
 
-func automationUsage() { fmt.Fprint(os.Stderr, "usage: attn automation <apply|list|show|run|runs>\n") }
+func automationUsage() {
+	fmt.Fprint(os.Stderr, "usage: attn automation <apply|validate|list|show|run|runs|delete|cleanup>\n")
+}
 func runAutomationCommand() {
 	if len(os.Args) < 3 {
 		automationUsage()
@@ -36,6 +38,25 @@ func runAutomationCommand() {
 			break
 		}
 		data, err = c.AutomationApply(string(raw))
+	case "validate":
+		fs := flag.NewFlagSet("automation validate", flag.ContinueOnError)
+		file := fs.String("file", "", "definition YAML")
+		if e := fs.Parse(os.Args[3:]); e != nil {
+			os.Exit(2)
+		}
+		if *file == "" {
+			err = fmt.Errorf("--file is required")
+			break
+		}
+		raw, e := os.ReadFile(*file)
+		if e != nil {
+			err = e
+			break
+		}
+		data, err = c.AutomationValidate(string(raw))
+		if err == nil && data == nil {
+			data, _ = json.Marshal(map[string]bool{"valid": true})
+		}
 	case "list":
 		data, err = c.AutomationList()
 	case "show":
@@ -88,6 +109,20 @@ func runAutomationCommand() {
 			break
 		}
 		data, err = c.AutomationRuns(os.Args[3])
+	case "delete":
+		if len(os.Args) != 4 {
+			err = fmt.Errorf("usage: attn automation delete <definition-id>")
+			break
+		}
+		if err = c.AutomationDelete(os.Args[3]); err == nil {
+			data, _ = json.Marshal(map[string]string{"deleted": os.Args[3]})
+		}
+	case "cleanup":
+		if len(os.Args) != 4 {
+			err = fmt.Errorf("usage: attn automation cleanup <definition-id>")
+			break
+		}
+		data, err = c.AutomationCleanup(os.Args[3])
 	default:
 		err = fmt.Errorf("unknown automation command %q", os.Args[2])
 	}

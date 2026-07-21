@@ -15,6 +15,7 @@ import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPro
 import { TicketDetailPanel } from './components/TicketDetailPanel';
 import { TicketBoardSurface } from './components/TicketBoardSurface';
 import { WorkflowRunView } from './components/WorkflowRunView';
+import { AutomationsPanel } from './components/AutomationsPanel';
 import {
   useWorkflowRunsStore,
   selectLatestWorkflowRunForSession,
@@ -226,6 +227,21 @@ function NotificationsBellIcon() {
         strokeLinejoin="round"
       />
       <path d="M6.6 12.6a1.5 1.5 0 0 0 2.8 0" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AutomationsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M8 1.6 9.6 5l3.6.6-2.6 2.6.6 3.6-3.2-1.7-3.2 1.7.6-3.6L2.8 5.6 6.4 5 8 1.6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -645,6 +661,13 @@ function App() {
     getRepoInfo,
     listWorkflowRuns,
     getWorkflowRun,
+    listAutomationDefinitions,
+    listAutomationRuns,
+    setAutomationEnabled,
+    runAutomationNow,
+    getAutomationDefinition,
+    validateAutomationDefinition,
+    applyAutomationDefinition,
     fetchTicket,
     sendTicketChangeStatus,
     sendTicketAddComment,
@@ -856,6 +879,13 @@ function App() {
         getRepoInfo={getRepoInfo}
         listWorkflowRuns={listWorkflowRuns}
         getWorkflowRun={getWorkflowRun}
+        listAutomationDefinitions={listAutomationDefinitions}
+        listAutomationRuns={listAutomationRuns}
+        setAutomationEnabled={setAutomationEnabled}
+        runAutomationNow={runAutomationNow}
+        getAutomationDefinition={getAutomationDefinition}
+        validateAutomationDefinition={validateAutomationDefinition}
+        applyAutomationDefinition={applyAutomationDefinition}
         fetchTicket={fetchTicket}
         sendTicketChangeStatus={sendTicketChangeStatus}
         sendTicketAddComment={sendTicketAddComment}
@@ -974,6 +1004,13 @@ interface AppContentProps {
   getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
   listWorkflowRuns: ReturnType<typeof useDaemonSocket>['listWorkflowRuns'];
   getWorkflowRun: ReturnType<typeof useDaemonSocket>['getWorkflowRun'];
+  listAutomationDefinitions: ReturnType<typeof useDaemonSocket>['listAutomationDefinitions'];
+  listAutomationRuns: ReturnType<typeof useDaemonSocket>['listAutomationRuns'];
+  setAutomationEnabled: ReturnType<typeof useDaemonSocket>['setAutomationEnabled'];
+  runAutomationNow: ReturnType<typeof useDaemonSocket>['runAutomationNow'];
+  getAutomationDefinition: ReturnType<typeof useDaemonSocket>['getAutomationDefinition'];
+  validateAutomationDefinition: ReturnType<typeof useDaemonSocket>['validateAutomationDefinition'];
+  applyAutomationDefinition: ReturnType<typeof useDaemonSocket>['applyAutomationDefinition'];
   fetchTicket: ReturnType<typeof useDaemonSocket>['fetchTicket'];
   sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
   sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
@@ -1086,6 +1123,13 @@ sendFetchPRDetails,
   getRepoInfo,
   listWorkflowRuns,
   getWorkflowRun,
+  listAutomationDefinitions,
+  listAutomationRuns,
+  setAutomationEnabled,
+  runAutomationNow,
+  getAutomationDefinition,
+  validateAutomationDefinition,
+  applyAutomationDefinition,
   fetchTicket,
   sendTicketChangeStatus,
   sendTicketAddComment,
@@ -1477,7 +1521,7 @@ sendFetchPRDetails,
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'workflowRun' | 'attention' | 'ticketDetail';
+  type DockPanelId = 'workflowRun' | 'attention' | 'ticketDetail' | 'automations';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1495,6 +1539,7 @@ sendFetchPRDetails,
         workflowRun: false,
         attention: false,
         ticketDetail: false,
+        automations: false,
     },
     stack: [],
   });
@@ -1864,6 +1909,7 @@ sendFetchPRDetails,
   const workflowRunPanelOpen = openDockPanels.workflowRun;
   const attentionPanelOpen = openDockPanels.attention;
   const ticketDetailPanelOpen = openDockPanels.ticketDetail;
+  const automationsPanelOpen = openDockPanels.automations;
   const blockingOverlayOpen = locationPickerOpen
     || whatsNew.isOpen
     || settingsOpen
@@ -2549,6 +2595,7 @@ sendFetchPRDetails,
       setSelectedTicketId(null);
     },
     tickets,
+    openAutomationsPanel: () => openDockPanel('automations'),
     presentationNotices,
     resetSessionPaneTerminal,
     injectSessionPaneBytes,
@@ -3323,6 +3370,13 @@ sendFetchPRDetails,
       badge: notificationsUnread > 0 ? notificationsUnread : undefined,
       onClick: toggleNotificationsPanel,
     },
+    {
+      id: 'automations',
+      title: automationsPanelOpen ? 'Hide Automations' : 'Show Automations',
+      icon: <AutomationsIcon />,
+      active: automationsPanelOpen,
+      onClick: () => toggleDockPanel('automations'),
+    },
   ]), [
     activeSessionId,
     remoteEditorAvailable,
@@ -3337,6 +3391,7 @@ sendFetchPRDetails,
     openBoardSurface,
     notificationsPanelOpen,
     notificationsUnread,
+    automationsPanelOpen,
     toggleNotificationsPanel,
   ]);
 
@@ -3799,6 +3854,28 @@ sendFetchPRDetails,
                   }}
                   onResume={handleResumeTicket}
                   onClose={handleCloseTicketDetail}
+                />
+              ),
+            },
+            {
+              id: 'automations',
+              isOpen: automationsPanelOpen,
+              width: 'clamp(420px, 42vw, 640px)',
+              className: 'dock-panel dock-panel--automations',
+              children: (
+                <AutomationsPanel
+                  isOpen={automationsPanelOpen}
+                  onClose={() => closeDockPanel('automations')}
+                  fetchDefinitions={listAutomationDefinitions}
+                  fetchRuns={listAutomationRuns}
+                  setEnabled={setAutomationEnabled}
+                  runNow={runAutomationNow}
+                  getDefinition={getAutomationDefinition}
+                  validateDefinition={validateAutomationDefinition}
+                  applyDefinition={applyAutomationDefinition}
+                  onOpenTicket={handleOpenTicketDetail}
+                  onSelectSession={handleSelectSession}
+                  onFocusPane={(sessionId, paneId) => focusSessionPane(sessionId, paneId, 40)}
                 />
               ),
             },

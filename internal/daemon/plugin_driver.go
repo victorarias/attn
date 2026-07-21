@@ -15,6 +15,7 @@ import (
 )
 
 const pluginDriverCallTimeout = 30 * time.Second
+const pluginDeliverMessageTimeout = 15 * time.Second
 
 type pluginDriverRegistration struct {
 	PluginName   string
@@ -88,6 +89,26 @@ type pluginDriverSessionClosedParams struct {
 
 type pluginDriverSessionClosedResult struct {
 	OK bool `json:"ok"`
+}
+
+type pluginDeliverMessageParams struct {
+	SessionID string `json:"session_id"`
+	RunID     string `json:"run_id"`
+	Text      string `json:"text"`
+}
+
+type pluginDeliverMessageResult struct {
+	OK bool `json:"ok"`
+}
+
+type pluginClassifyStopParams struct {
+	SessionID     string `json:"session_id"`
+	RunID         string `json:"run_id"`
+	AssistantText string `json:"assistant_text"`
+}
+
+type pluginClassifyStopResult struct {
+	Verdict string `json:"verdict"`
 }
 
 type pendingPluginReport struct {
@@ -170,6 +191,7 @@ func validatePluginDriverCapabilities(values map[string]bool) (map[string]bool, 
 		"classifier":          {},
 		"state_reporting":     {},
 		"pending_approval":    {},
+		"message_delivery":    {},
 		"model_pin":           {},
 		"effort_pin":          {},
 		"launch_instructions": {},
@@ -271,6 +293,41 @@ func (d *Daemon) authorizePluginSessionReport(plugin *pluginConnection, sessionI
 		return fmt.Errorf("plugin %q does not own active run %q for session %q", plugin.name, strings.TrimSpace(runID), sessionID)
 	}
 	return nil
+}
+
+// handlePluginClassifyStop backs the attn.classify_stop plugin->daemon method:
+// a text-in/verdict-out stop classification service for drivers whose agent
+// declares its own state (rather than attn scraping or classifying it). It
+// validates and authorizes synchronously so malformed or unowned requests
+// fail fast, then classifies on a goroutine and sends the JSON-RPC result
+// itself. This must not block the caller: handlePluginMethod runs on the
+// plugin connection's synchronous read loop, and the classifier LLM call can
+// take 30+ seconds — running it inline would stall every other driver.*
+// request and state report on this plugin connection.
+func (d *Daemon) handlePluginClassifyStop(plugin *pluginConnection, msg jsonRPCMessage) {
+	var params pluginClassifyStopParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, fmt.Sprintf("decode attn.classify_stop params: %v", err)))
+		return
+	}
+	text := strings.TrimSpace(params.AssistantText)
+	if text == "" {
+		_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "assistant_text is required"))
+		return
+	}
+	if err := d.authorizePluginSessionReport(plugin, params.SessionID, params.RunID); err != nil {
+		_ = plugin.send(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, err.Error()))
+		return
+	}
+	session := d.store.Get(params.SessionID)
+	id := msg.ID
+	go func() {
+		verdict, err := d.runClassifier(session, text, 30*time.Second)
+		if err != nil {
+			verdict = protocol.StateUnknown
+		}
+		_ = plugin.send(jsonRPCResult(id, pluginClassifyStopResult{Verdict: verdict}))
+	}()
 }
 
 func validatePluginReportedState(params pluginReportStateParams) error {
@@ -502,6 +559,34 @@ func (d *Daemon) resolvePluginDriverLaunch(reg pluginDriverRegistration, params 
 		return pluginDriverSpawnResult{}, fmt.Errorf("plugin %q returned an empty argv", reg.PluginName)
 	}
 	return result, nil
+}
+
+// deliverDoorbellViaPluginDriver delivers prompt in-band through session's
+// active plugin driver run when that run's registered driver declares
+// message_delivery, reporting delivered=true so typeDoorbell never falls back
+// to PTY typing for it (a typed fallback would reintroduce the splice risk
+// in-band delivery removes). delivered=false means the caller should use the
+// PTY paste path instead.
+func (d *Daemon) deliverDoorbellViaPluginDriver(session *protocol.Session, prompt string) (bool, error) {
+	cursor := d.store.GetAgentDriverRun(session.ID)
+	if cursor.PluginName == "" {
+		return false, nil
+	}
+	driver, ok := d.ensurePluginRegistry().driver(string(session.Agent))
+	if !ok || driver.PluginName != cursor.PluginName || !driver.Capabilities["message_delivery"] {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), pluginDeliverMessageTimeout)
+	defer cancel()
+	var result pluginDeliverMessageResult
+	params := pluginDeliverMessageParams{SessionID: session.ID, RunID: cursor.RunID, Text: prompt}
+	if err := d.callPlugin(ctx, cursor.PluginName, "driver.deliver_message", params, &result); err != nil {
+		return true, fmt.Errorf("deliver message via plugin %q: %w", cursor.PluginName, err)
+	}
+	if !result.OK {
+		return true, fmt.Errorf("plugin %q declined message delivery for session %s", cursor.PluginName, session.ID)
+	}
+	return true, nil
 }
 
 func pluginCommandEnv(values map[string]string) ([]string, error) {

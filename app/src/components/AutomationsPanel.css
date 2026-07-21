@@ -1,0 +1,296 @@
+.automations-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  padding: 16px;
+  overflow-y: auto;
+  color: var(--color-text-primary);
+  background: var(--color-bg-panel);
+  font-size: var(--font-size-sm);
+}
+
+.automations-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+}
+
+.automations-panel__kicker {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.automations-panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.automations-panel__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  padding: 4px;
+}
+
+.automations-panel__close:hover {
+  color: var(--color-text-primary);
+}
+
+.automations-panel__new {
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.automations-panel__new:hover {
+  border-color: var(--accent);
+}
+
+.automations-panel__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--color-text-tertiary);
+  padding: 16px 0;
+}
+
+.automations-panel__empty p {
+  margin: 0;
+}
+
+.automations-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.automations-panel__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.automations-panel__row.is-selected {
+  border-color: var(--color-border-hover);
+}
+
+.automations-panel__row-main {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.automations-panel__name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automations-panel__trigger {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.automations-panel__badge {
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  padding: 1px 8px;
+}
+
+.automations-panel__badge--failed {
+  background: color-mix(in srgb, var(--color-error) 20%, transparent);
+  color: var(--color-error);
+}
+
+.automations-panel__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.automations-panel__run-now {
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.automations-panel__run-now:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.automations-panel__run-now:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.automations-panel__edit {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.automations-panel__edit:hover {
+  border-color: var(--accent);
+  color: var(--color-text-primary);
+}
+
+.automations-panel__error {
+  color: var(--color-error);
+  flex-basis: 100%;
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.automations-panel__last-error {
+  color: var(--color-text-tertiary);
+  flex-basis: 100%;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automations-panel__runs {
+  border-top: 1px solid var(--color-border);
+  padding-top: 12px;
+}
+
+.automations-panel__runs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.automations-panel__runs-title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  margin: 0;
+}
+
+.automations-panel__runs-close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+
+.automations-panel__runs-close:hover {
+  color: var(--color-text-primary);
+}
+
+.automations-panel__run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.automations-panel__run-row {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.automations-panel__run-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: inherit;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+button.automations-panel__run-row-main {
+  cursor: pointer;
+}
+
+.automations-panel__run-state {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.automations-panel__run-state--failed {
+  color: var(--color-error);
+}
+
+.automations-panel__run-state--delivered {
+  color: var(--color-accent);
+}
+
+.automations-panel__run-created,
+.automations-panel__run-delivered,
+.automations-panel__run-occurrence {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.automations-panel__run-error {
+  color: var(--color-error);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs);
+  margin: 4px 0 0;
+}
+
+.automations-panel__run-empty {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  padding: 8px 0;
+}

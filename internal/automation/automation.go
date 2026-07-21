@@ -34,6 +34,17 @@ type DefinitionSpec struct {
 type TriggerSpec struct {
 	Type         string               `yaml:"type" json:"type"`
 	Repositories RepositoryFilterSpec `yaml:"repositories,omitempty" json:"repositories,omitempty"`
+	// Schedule is a pointer so that encoding/json's omitempty actually omits it
+	// for non-scheduled triggers: a zero-value ScheduleSpec struct is never
+	// "empty" to json.Marshal, so a value field would put a spurious
+	// "schedule":{...} key in every manual/github_review_requested
+	// definition's canonical JSON and bump UpsertAutomationDefinition's
+	// revision on every byte-identical re-apply.
+	Schedule *ScheduleSpec `yaml:"schedule,omitempty" json:"schedule,omitempty"`
+}
+type ScheduleSpec struct {
+	Cron     string `yaml:"cron,omitempty" json:"cron,omitempty"`
+	TimeZone string `yaml:"time_zone,omitempty" json:"time_zone,omitempty"`
 }
 type RepositoryFilterSpec struct {
 	Mode    string   `yaml:"mode,omitempty" json:"mode,omitempty"`
@@ -90,6 +101,45 @@ func ParseDefinitionYAML(data []byte) (DefinitionSpec, []byte, error) {
 	return spec, canonical, err
 }
 
+// MarshalDefinitionYAML renders spec back to valid, re-appliable YAML — every
+// field of DefinitionSpec and its nested structs already carries a `yaml:`
+// tag, so this is a direct yaml.v3 marshal. It is the fallback used to
+// reconstruct definition_yaml for rows written before migration 75 added
+// spec_yaml (empty spec_yaml column): the result loses whatever comments the
+// original author's YAML carried, but ParseDefinitionYAML(MarshalDefinitionYAML(spec))
+// round-trips to an equal spec, so it stays a legal input to
+// validateAutomationSpec / automationApply.
+func MarshalDefinitionYAML(spec DefinitionSpec) ([]byte, error) {
+	return yaml.Marshal(spec)
+}
+
+// StarterDefinition is the placeholder spec automation_definition_get returns
+// for id: "" (new-definition case). It is deliberately not a valid,
+// appliable definition as-is — Location.Path is a placeholder, not a real
+// directory, so it fails canonicalizeDirectory in ValidateDefinition until
+// the user edits it — but every field is filled in so the editor opens on a
+// complete, self-explanatory document rather than an empty buffer the user
+// has to build field-by-field from documentation.
+var StarterDefinition = DefinitionSpec{
+	APIVersion: APIVersion,
+	ID:         "my-automation",
+	Name:       "My automation",
+	Enabled:    true,
+	Trigger:    TriggerSpec{Type: "manual"},
+	Prompt:     "Describe what the agent should do when this automation runs.",
+	Launch:     LaunchSpec{Driver: "codex"},
+	Location:   LocationSpec{Type: "directory", Path: "/path/to/repository"},
+	Policy:     PolicySpec{Continuity: "fresh"},
+}
+
+// StarterTemplateYAML renders StarterDefinition through the same
+// MarshalDefinitionYAML path every legacy-row fallback uses, so the starter
+// template can never drift into a shape validateAutomationSpec would reject
+// for reasons other than the intentional placeholder path.
+func StarterTemplateYAML() ([]byte, error) {
+	return MarshalDefinitionYAML(StarterDefinition)
+}
+
 func ValidateDefinition(s *DefinitionSpec) error {
 	if s == nil {
 		return errors.New("definition is required")
@@ -108,12 +158,28 @@ func ValidateDefinition(s *DefinitionSpec) error {
 		if s.Trigger.Repositories.Mode != "" || len(s.Trigger.Repositories.Include) > 0 || len(s.Trigger.Repositories.Exclude) > 0 {
 			return errors.New("manual trigger cannot configure repositories")
 		}
+		if s.Trigger.Schedule != nil {
+			return errors.New("manual trigger cannot configure schedule")
+		}
 	case "github_review_requested":
 		if err := validateRepositoryFilter(&s.Trigger.Repositories); err != nil {
 			return err
 		}
+		if s.Trigger.Schedule != nil {
+			return errors.New("github_review_requested trigger cannot configure schedule")
+		}
+	case "scheduled":
+		if s.Trigger.Repositories.Mode != "" || len(s.Trigger.Repositories.Include) > 0 || len(s.Trigger.Repositories.Exclude) > 0 {
+			return errors.New("scheduled trigger cannot configure repositories")
+		}
+		if s.Trigger.Schedule == nil {
+			return errors.New("scheduled trigger requires schedule")
+		}
+		if _, err := CompileSchedule(*s.Trigger.Schedule); err != nil {
+			return err
+		}
 	default:
-		return errors.New("trigger.type must be manual or github_review_requested")
+		return errors.New("trigger.type must be manual, github_review_requested, or scheduled")
 	}
 	if strings.TrimSpace(s.Prompt) == "" {
 		return errors.New("prompt is required")
@@ -167,7 +233,8 @@ func ValidateDefinition(s *DefinitionSpec) error {
 	if s.Policy.Overlap != "" && s.Policy.Overlap != "coalesce" {
 		return errors.New("policy.overlap must be coalesce")
 	}
-	if s.Trigger.Type == "github_review_requested" {
+	switch s.Trigger.Type {
+	case "github_review_requested":
 		if s.Location.Type != "repository_worktree" {
 			return errors.New("github_review_requested trigger requires repository_worktree location")
 		}
@@ -177,8 +244,23 @@ func ValidateDefinition(s *DefinitionSpec) error {
 		if s.Policy.CatchUp != "latest" {
 			return errors.New("github_review_requested trigger requires policy.catch_up latest")
 		}
-	} else if s.Policy.Continuity != "fresh" {
-		return errors.New("manual trigger supports only policy.continuity fresh")
+	case "scheduled":
+		if s.Location.Type != "directory" {
+			return errors.New("scheduled trigger requires directory location")
+		}
+		if s.Policy.Continuity != "fresh" && s.Policy.Continuity != "singleton" {
+			return errors.New("scheduled trigger requires policy.continuity fresh or singleton")
+		}
+		if s.Policy.CatchUp != "skip" && s.Policy.CatchUp != "latest" {
+			return errors.New("scheduled trigger requires policy.catch_up skip or latest")
+		}
+	default:
+		if s.Policy.Continuity != "fresh" {
+			return errors.New("manual trigger supports only policy.continuity fresh")
+		}
+		if s.Policy.CatchUp != "" {
+			return errors.New("manual trigger cannot configure policy.catch_up")
+		}
 	}
 	return nil
 }
@@ -398,14 +480,53 @@ func Effective(spec DefinitionSpec, revision int) (Snapshot, error) {
 	return Snapshot{APIVersion: APIVersion, DefinitionRevision: revision, Prompt: spec.Prompt, Launch: launch, Location: spec.Location, Policy: spec.Policy}, nil
 }
 
+// ContinuationContract is the subset of a Snapshot that governs whether a
+// continuity binding (ticket/session/worktree) is safe to reuse across
+// occurrences: the reviewer-facing prompt, launch configuration, and
+// location. It deliberately excludes Policy (continuity/catch_up policy
+// changes don't invalidate an in-flight thread) and any per-occurrence
+// freshness signal (e.g. GitHub HeadSHA, checked separately by
+// validateAutomationContinuation as per-PR freshness, not contract
+// identity).
+type ContinuationContract struct {
+	Prompt   string
+	Launch   EffectiveLaunch
+	Location LocationSpec
+}
+
+// NewContinuationContract builds a ContinuationContract from its comparison
+// fields directly, for callers (e.g. a WorkRequest) that don't hold a full
+// Snapshot.
+func NewContinuationContract(prompt string, launch EffectiveLaunch, location LocationSpec) ContinuationContract {
+	return ContinuationContract{Prompt: prompt, Launch: launch, Location: location}
+}
+
+// ContinuationContract extracts the Snapshot's continuation contract.
+func (s Snapshot) ContinuationContract() ContinuationContract {
+	return NewContinuationContract(s.Prompt, s.Launch, s.Location)
+}
+
+// Equal reports whether two contracts would be treated as identical by
+// validateAutomationContinuation. Location has a non-comparable map field
+// (RepositorySources.Overrides), so it is compared via JSON marshal rather
+// than struct equality.
+func (c ContinuationContract) Equal(other ContinuationContract) bool {
+	if c.Prompt != other.Prompt || c.Launch != other.Launch {
+		return false
+	}
+	leftJSON, leftErr := json.Marshal(c.Location)
+	rightJSON, rightErr := json.Marshal(other.Location)
+	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
+}
+
 type DeliveryIDs struct{ TicketID, SessionID, WorkspaceID, PaneID string }
 type WorkRequest struct {
-	RunID, DefinitionID, SubjectKey, ContinuityKey string
-	Prompt                                         string
-	Context                                        json.RawMessage
-	Launch                                         EffectiveLaunch
-	Location                                       LocationSpec
-	IDs                                            DeliveryIDs
+	RunID, DefinitionID, SubjectKey, ContinuityKey, Provider string
+	Prompt                                                   string
+	Context                                                  json.RawMessage
+	Launch                                                   EffectiveLaunch
+	Location                                                 LocationSpec
+	IDs                                                      DeliveryIDs
 }
 type PreparedLocation struct {
 	Directory string          `json:"directory"`

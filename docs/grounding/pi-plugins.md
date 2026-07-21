@@ -80,7 +80,7 @@ vs claude/codex. All three grounded 2026-07-19; none invalidates the vision.
 
 ## Driver pattern (opencode walkthrough)
 
-- `attn-plugin.toml` with `attn_api_version=4` hard gate
+- `attn-plugin.toml` with `attn_api_version=5` hard gate
   (internal/plugins/plugins.go:83); `driver.register` with fixed capability
   vocabulary (internal/daemon/plugin_driver.go:165-186), response returns
   `active_runs` for crash/restart reconciliation; `driver.spawn`/`resume`

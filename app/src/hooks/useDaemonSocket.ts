@@ -27,6 +27,8 @@ import type {
   PresentCommentInput,
   PRRole,
   HeatState,
+  AutomationDefinitionSummary,
+  AutomationRunSummary,
 } from '../types/generated';
 import {
   emitPtyEvent,
@@ -61,6 +63,7 @@ import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
+import { useAutomationsStore } from '../store/automations';
 
 // Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
@@ -170,8 +173,18 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '175';
+export const PROTOCOL_VERSION = '180';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
+
+// AutomationActionTimeoutError distinguishes "the daemon never sent a
+// definitive result within the client's wait window" from an ordinary
+// rejection carrying a daemon-reported error string (e.g. "automation is
+// disabled"). The four automation wrappers below (listAutomationDefinitions,
+// listAutomationRuns, setAutomationEnabled, runAutomationNow) all reject with
+// this on their timeout path so callers — notably AutomationsPanel's run-now
+// handler — can tell "no outcome yet, retry is safe" apart from "the daemon
+// definitively said no, don't retry blindly".
+export class AutomationActionTimeoutError extends Error {}
 
 interface PRActionResult {
   success: boolean;
@@ -1301,6 +1314,12 @@ export function useDaemonSocket({
             }
             hasReceivedInitialStateRef.current = true;
             setHasReceivedInitialState(true);
+            // Automations aren't part of initial_state (they're pulled on
+            // demand via automation_definitions_list), so a panel open across
+            // a daemon restart/reconnect never sees a fresh event to refetch
+            // on. Bump changedTick on every (re)connect so an open panel
+            // re-reads instead of staying on a stale error.
+            useAutomationsStore.getState().bumpChanged();
             flushQueuedCommands(ws);
             requestTileContentsForWorkspaces(ws, nextWorkspaces);
             // The daemon's terminal theme is in-memory only, so a restarted
@@ -2835,6 +2854,34 @@ export function useDaemonSocket({
                 }
               }
             }
+            break;
+          }
+
+          // Single generic result event for the automations WS surface
+          // (definitions_get / runs_get / set_enabled / run) — see
+          // AutomationActionResultMessage's doc comment. Correlated by
+          // request_id, not action, so concurrent calls (e.g. listing runs for
+          // two different definitions) never cross-resolve; each caller wraps
+          // its own extraction of the raw payload at registration time.
+          case 'automation_action_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') break;
+            const key = `automation:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) break;
+            pendingActionsRef.current.delete(key);
+            if ((data as any).success) {
+              pending.resolve(data);
+            } else {
+              pending.reject(new Error((data as any).error || 'Automation action failed'));
+            }
+            break;
+          }
+
+          // Canonical state stays daemon-side: this broadcast carries no
+          // payload views need. Bump the tick and let open views re-fetch.
+          case 'automations_changed': {
+            useAutomationsStore.getState().bumpChanged();
             break;
           }
 
@@ -5229,6 +5276,238 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const listAutomationDefinitions = useCallback((): Promise<AutomationDefinitionSummary[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('automation_definitions_get');
+      const key = `automation:${requestId}`;
+      pendingActionsRef.current.set(key, {
+        resolve: (result: any) => resolve((result.definitions ?? []) as AutomationDefinitionSummary[]),
+        reject,
+      });
+      ws.send(JSON.stringify({ cmd: 'automation_definitions_get', request_id: requestId }));
+      // Mutations can serialize behind an in-flight automation delivery
+      // (daemon holds automationMu across full run delivery); 30s matches the
+      // repo's async-action convention.
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new AutomationActionTimeoutError('List automation definitions timed out'));
+        }
+      }, 30000);
+    });
+  }, [nextRequestID]);
+
+  const listAutomationRuns = useCallback((definitionId: string): Promise<AutomationRunSummary[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('automation_runs_get');
+      const key = `automation:${requestId}`;
+      pendingActionsRef.current.set(key, {
+        resolve: (result: any) => resolve((result.runs ?? []) as AutomationRunSummary[]),
+        reject,
+      });
+      ws.send(JSON.stringify({ cmd: 'automation_runs_get', definition_id: definitionId, request_id: requestId }));
+      // Mutations can serialize behind an in-flight automation delivery
+      // (daemon holds automationMu across full run delivery); 30s matches the
+      // repo's async-action convention.
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new AutomationActionTimeoutError('List automation runs timed out'));
+        }
+      }, 30000);
+    });
+  }, [nextRequestID]);
+
+  const setAutomationEnabled = useCallback((definitionId: string, enabled: boolean): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('automation_set_enabled');
+      const key = `automation:${requestId}`;
+      // Success carries the daemon's updated definition, but canonical state
+      // flows back through the automations_changed broadcast + refetch, not
+      // this promise — resolve void and let the caller's store stay
+      // untouched here.
+      pendingActionsRef.current.set(key, { resolve: () => resolve(undefined), reject });
+      ws.send(
+        JSON.stringify({ cmd: 'automation_set_enabled', definition_id: definitionId, enabled, request_id: requestId }),
+      );
+      // Mutations can serialize behind an in-flight automation delivery
+      // (daemon holds automationMu across full run delivery); 30s matches the
+      // repo's async-action convention.
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new AutomationActionTimeoutError('Set automation enabled timed out'));
+        }
+      }, 30000);
+    });
+  }, [nextRequestID]);
+
+  const runAutomationNow = useCallback(
+    (definitionId: string, requestId: string): Promise<{ runId?: string; ticketId?: string; sessionId?: string }> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        // requestId is caller-owned (useAutomationsStore's
+        // ensureRunRequest), not nextRequestID's counter scheme: the daemon
+        // persists it as ClaimManualAutomationRun's idempotency key
+        // (internal/daemon/automations.go automationRun), so callers reuse
+        // the same id across a retry of the same click (e.g. after this
+        // promise rejects with AutomationActionTimeoutError) to claim the
+        // same run instead of creating a duplicate.
+        const key = `automation:${requestId}`;
+        pendingActionsRef.current.set(key, {
+          resolve: (result: any) =>
+            resolve({ runId: result.run_id, ticketId: result.ticket_id, sessionId: result.session_id }),
+          reject,
+        });
+        ws.send(JSON.stringify({ cmd: 'automation_run', definition_id: definitionId, request_id: requestId }));
+        // Mutations can serialize behind an in-flight automation delivery
+        // (daemon holds automationMu across full run delivery); 30s matches
+        // the repo's async-action convention.
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new AutomationActionTimeoutError('Run automation timed out'));
+          }
+        }, 30000);
+      });
+    },
+    [],
+  );
+
+  // getAutomationDefinition backs the editor's load path. definitionId '' asks
+  // for the starter template at revision 0 (the create case, D7 in the
+  // design) — create and edit share this one call.
+  const getAutomationDefinition = useCallback(
+    (definitionId: string): Promise<{ specYaml: string; revision: number }> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        const requestId = nextRequestID('automation_definition_get');
+        const key = `automation:${requestId}`;
+        pendingActionsRef.current.set(key, {
+          resolve: (result: any) => resolve({ specYaml: result.spec_yaml ?? '', revision: result.revision ?? 0 }),
+          reject,
+        });
+        ws.send(
+          JSON.stringify({ cmd: 'automation_definition_get', definition_id: definitionId, request_id: requestId }),
+        );
+        // Mutations can serialize behind an in-flight automation delivery
+        // (daemon holds automationMu across full run delivery); 30s matches the
+        // repo's async-action convention. get/definition_get is read-only and
+        // doesn't itself take automationMu, but shares the same timeout for
+        // consistency with the rest of the automations WS surface.
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new AutomationActionTimeoutError('Get automation definition timed out'));
+          }
+        }, 30000);
+      });
+    },
+    [nextRequestID],
+  );
+
+  // validateAutomationSpec runs the daemon's shared validation seam
+  // (validateAutomationSpec, D3 in the design) without persisting anything, so
+  // the editor can show an error before Save.
+  const validateAutomationDefinition = useCallback(
+    (definitionYaml: string): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        const requestId = nextRequestID('automation_validate');
+        const key = `automation:${requestId}`;
+        pendingActionsRef.current.set(key, { resolve: () => resolve(undefined), reject });
+        ws.send(
+          JSON.stringify({ cmd: 'automation_validate', definition_yaml: definitionYaml, request_id: requestId }),
+        );
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new AutomationActionTimeoutError('Validate automation timed out'));
+          }
+        }, 30000);
+      });
+    },
+    [nextRequestID],
+  );
+
+  // applyAutomationDefinition is validate-then-persist, carrying expected_id
+  // (D4) and expected_revision (D5) so the daemon can refuse an id change or a
+  // stale save. expectedId is '' when creating, expectedRevision is 0 when
+  // creating — matching AutomationEditor's loadedId/revision state, which
+  // start from getAutomationDefinition('')'s template response.
+  const applyAutomationDefinition = useCallback(
+    (
+      definitionYaml: string,
+      expectedId: string,
+      expectedRevision: number,
+    ): Promise<{ definition: AutomationDefinitionSummary; specYaml: string; revision: number }> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        const requestId = nextRequestID('automation_apply');
+        const key = `automation:${requestId}`;
+        pendingActionsRef.current.set(key, {
+          resolve: (result: any) =>
+            resolve({
+              definition: (result.definitions ?? [])[0],
+              specYaml: result.spec_yaml ?? '',
+              revision: result.revision ?? 0,
+            }),
+          reject,
+        });
+        ws.send(
+          JSON.stringify({
+            cmd: 'automation_apply',
+            definition_yaml: definitionYaml,
+            expected_id: expectedId,
+            expected_revision: expectedRevision,
+            request_id: requestId,
+          }),
+        );
+        // Mutations can serialize behind an in-flight automation delivery
+        // (daemon holds automationMu across full run delivery); 30s matches
+        // the repo's async-action convention.
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new AutomationActionTimeoutError('Apply automation timed out'));
+          }
+        }, 30000);
+      });
+    },
+    [nextRequestID],
+  );
+
   // Fetch the current open/closed presentations (for the main-window banner).
   const getPresentations = useCallback((): Promise<Presentation[]> => {
     return new Promise((resolve, reject) => {
@@ -5463,6 +5742,13 @@ export function useDaemonSocket({
     getRepoInfo,
     getWorkflowRun,
     listWorkflowRuns,
+    listAutomationDefinitions,
+    listAutomationRuns,
+    setAutomationEnabled,
+    runAutomationNow,
+    getAutomationDefinition,
+    validateAutomationDefinition,
+    applyAutomationDefinition,
     getPresentations,
     getPresentationRound,
     submitPresentationRound,
