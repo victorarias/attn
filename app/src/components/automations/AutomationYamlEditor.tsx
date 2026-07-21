@@ -49,6 +49,20 @@ interface AutomationYamlEditorProps {
   onChange: (value: string) => void;
   ariaLabel?: string;
   autoFocus?: boolean;
+  // Locks the buffer against user edits without unmounting it — used by
+  // AutomationEditor while a Save is in flight (see its handleSave doc
+  // comment). Threaded to BOTH of @uiw/react-codemirror's editable/readOnly
+  // props rather than just one: `editable={false}` drops the content DOM's
+  // `contenteditable` attribute (the visible/interaction cue — no caret, the
+  // element stops accepting keyboard input), while `readOnly` sets
+  // EditorState.readOnly (the actual guarantee — the view's own input
+  // handlers, e.g. paste/drop/cut, check this directly; it also gets us
+  // aria-readonly for free). Neither blocks a programmatic view.dispatch —
+  // by design, since applyExternalContent's Reload path still needs to work.
+  // Both react to prop changes at runtime (useCodeMirror reconfigures via
+  // StateEffect.reconfigure on change), so toggling this doesn't remount the
+  // editor or disturb scroll/selection.
+  readOnly?: boolean;
 }
 
 // Themed via CSS variables, same rationale as LiveMarkdownEditor.tsx: skip
@@ -127,7 +141,7 @@ const editorTheme = EditorView.theme({
 });
 
 export const AutomationYamlEditor = forwardRef<AutomationYamlEditorHandle, AutomationYamlEditorProps>(
-  function AutomationYamlEditor({ value, onChange, ariaLabel, autoFocus }, ref) {
+  function AutomationYamlEditor({ value, onChange, ariaLabel, autoFocus, readOnly }, ref) {
     const cmRef = useRef<ReactCodeMirrorRef>(null);
 
     useImperativeHandle(
@@ -170,6 +184,8 @@ export const AutomationYamlEditor = forwardRef<AutomationYamlEditorHandle, Autom
         onChange={onChange}
         extensions={extensions}
         autoFocus={autoFocus}
+        editable={!readOnly}
+        readOnly={readOnly}
         height="100%"
         aria-label={ariaLabel}
         // Skip @uiw/react-codemirror's built-in theme — see editorTheme's doc

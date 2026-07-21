@@ -23,7 +23,12 @@ vi.mock('./AutomationYamlEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');
   return {
     AutomationYamlEditor: forwardRef(function MockAutomationYamlEditor(
-      { value, onChange, ariaLabel }: { value: string; onChange: (value: string) => void; ariaLabel?: string },
+      {
+        value,
+        onChange,
+        ariaLabel,
+        readOnly,
+      }: { value: string; onChange: (value: string) => void; ariaLabel?: string; readOnly?: boolean },
       ref: React.Ref<{ applyExternalContent: (next: string) => void; focus: () => void; getDocText: () => string }>,
     ) {
       // Mirrors the real imperative handle: pushing external content reports
@@ -47,8 +52,22 @@ vi.mock('./AutomationYamlEditor', async () => {
         focus: () => {},
         getDocText: () => value,
       }), [onChange, value]);
+      // Mirrors AutomationYamlEditor's `readOnly` prop with the native
+      // textarea attribute of the same name: user-event's isEditable() check
+      // respects `readOnly` on a textarea (like the real CodeMirror content
+      // DOM's contenteditable=false under `editable={false}`) and refuses to
+      // type into it, so a Defect D test driving this mock through
+      // user.type() exercises the same "typing during save is blocked"
+      // behavior the real editor provides. Load-bearing, not decoration: a
+      // mock that ignored `readOnly` would let a Defect D regression test
+      // pass whether or not AutomationEditor actually threads the prop.
       return (
-        <textarea aria-label={ariaLabel ?? 'Automation definition'} value={value} onChange={(event) => onChange(event.target.value)} />
+        <textarea
+          aria-label={ariaLabel ?? 'Automation definition'}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          readOnly={readOnly}
+        />
       );
     }),
   };
@@ -154,6 +173,74 @@ describe('AutomationEditor', () => {
     expect(screen.queryByTestId('automation-editor-validation-ok')).not.toBeInTheDocument();
   });
 
+  // Defect C: handleValidate has no staleness guard, so a Validate resolving
+  // after the buffer already changed underneath it can re-assert a verdict
+  // about text the daemon never saw. The previous test proves the DISPLAYED
+  // result is cleared the instant the user types; this one proves the
+  // in-flight request's own resolution can't undo that clear when it finally
+  // arrives — the actual race the bug report describes.
+  it('a stale Validate resolution does not re-assert a verdict after the buffer changed underneath it', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    let resolveValidate: (() => void) | undefined;
+    props.validateDefinition.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveValidate = resolve;
+        }),
+    );
+    render(<AutomationEditor {...props} />);
+
+    const textarea = await screen.findByDisplayValue('id: new-automation\n', EXACT_VALUE);
+    await user.click(screen.getByTestId('automation-editor-validate'));
+    await waitFor(() => expect(props.validateDefinition).toHaveBeenCalledTimes(1));
+
+    // Edit while the request is still outstanding — its eventual answer will
+    // describe a buffer that no longer exists.
+    await user.type(textarea, 'x');
+    expect(screen.queryByTestId('automation-editor-validation-ok')).not.toBeInTheDocument();
+
+    // The stale request finally resolves...
+    act(() => resolveValidate?.());
+    await waitFor(() => expect(screen.getByTestId('automation-editor-validate')).not.toBeDisabled());
+
+    // ...but "Looks good." must never appear against the edited buffer.
+    expect(screen.queryByTestId('automation-editor-validation-ok')).not.toBeInTheDocument();
+  });
+
+  // The second half of Defect C's fix: handleChange must not clear a
+  // 'checking' state just because the buffer changed, or the button's
+  // disabled gate re-opens mid-flight and a second click can stack a second
+  // request on top of the first — the two could then resolve out of order.
+  it('Validate stays disabled while a request is outstanding, even after the buffer is edited', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    let resolveValidate: (() => void) | undefined;
+    props.validateDefinition.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveValidate = resolve;
+        }),
+    );
+    render(<AutomationEditor {...props} />);
+
+    const textarea = await screen.findByDisplayValue('id: new-automation\n', EXACT_VALUE);
+    await user.click(screen.getByTestId('automation-editor-validate'));
+    await waitFor(() => expect(props.validateDefinition).toHaveBeenCalledTimes(1));
+
+    await user.type(textarea, 'x');
+    expect(screen.getByTestId('automation-editor-validate')).toBeDisabled();
+
+    // A click on a disabled button fires no click event — browsers don't
+    // dispatch one, and neither does user-event — so this cannot stack a
+    // second validateDefinition call.
+    await user.click(screen.getByTestId('automation-editor-validate'));
+    expect(props.validateDefinition).toHaveBeenCalledTimes(1);
+
+    act(() => resolveValidate?.());
+    await waitFor(() => expect(screen.getByTestId('automation-editor-validate')).not.toBeDisabled());
+  });
+
   it('Save applies with expected_id "" and expected_revision 0 when creating', async () => {
     const user = userEvent.setup();
     const props = baseProps();
@@ -181,6 +268,49 @@ describe('AutomationEditor', () => {
     await user.click(screen.getByTestId('automation-editor-save'));
 
     await waitFor(() => expect(props.applyDefinition).toHaveBeenCalledWith('id: d1\n', 'd1', 7));
+  });
+
+  // Defect D: handleSave captures `value` at click time but nothing froze the
+  // buffer for the request's duration, so characters typed while Save was
+  // outstanding were written into `value` and then silently discarded when
+  // onSaved unmounted the editor. Locking the buffer (readOnly while saving)
+  // is the fix; this proves both halves — the visible cue and the actual
+  // block on further edits, not just the label on the Save button.
+  it('locks the buffer against edits while Save is in flight, so typed characters are not silently discarded', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    let resolveApply:
+      | ((result: { definition: AutomationDefinitionSummary; specYaml: string; revision: number }) => void)
+      | undefined;
+    props.applyDefinition.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveApply = resolve;
+        }),
+    );
+    render(<AutomationEditor {...props} />);
+
+    const textarea = await screen.findByDisplayValue('id: new-automation\n', EXACT_VALUE);
+    await user.click(screen.getByTestId('automation-editor-save'));
+    await waitFor(() => expect(props.applyDefinition).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByTestId('automation-editor-locked-hint')).toBeInTheDocument();
+
+    // Typing while locked must not change the buffer — this is the actual
+    // guarantee, not just the visible hint above. Without readOnly threaded
+    // through to the buffer, this keystroke would silently succeed and the
+    // character would vanish, unsent, when the editor unmounts on success.
+    await user.type(textarea, 'x');
+    expect(textarea).toHaveValue('id: new-automation\n');
+
+    act(() =>
+      resolveApply?.({
+        definition: makeDefinition({ id: 'new-automation', revision: 1 }),
+        specYaml: 'id: new-automation\n',
+        revision: 1,
+      }),
+    );
+    await waitFor(() => expect(props.onSaved).toHaveBeenCalled());
   });
 
   it('a Save rejection surfaces the error and does not call onSaved', async () => {

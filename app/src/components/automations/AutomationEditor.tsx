@@ -88,22 +88,67 @@ export function AutomationEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Defect C guard: a dispatched Validate request has no cancel — it's a WS
+  // request/result pair (handleAutomationValidateWS), not fetch, so
+  // AbortController doesn't apply, and the daemon-side git shell-outs it
+  // triggers keep running regardless of what the buffer does afterward.
+  // Bumping this token on every dispatch AND on every edit gives the resolve
+  // handlers below a generation identity to check against — same shape as
+  // the daemon's classifierObservation convention (capture the observation
+  // identity before the async call, reject stale results).
+  const validateTokenRef = useRef(0);
+
   const handleChange = useCallback((next: string) => {
     setValue(next);
     // A prior Validate/Save result no longer describes the current text.
-    setValidation((prev) => (prev.state === 'idle' ? prev : { state: 'idle' }));
+    // Bump the token so an in-flight Validate's eventual answer is
+    // recognized as stale once it arrives (Defect C): typing invalidates it
+    // because the verdict is about text the daemon never saw, and
+    // re-asserting it here would be actively misleading either direction —
+    // "Looks good." against a buffer that would now be rejected, or a
+    // rejection pointing at a line the user already fixed. Deliberately do
+    // NOT clear a 'checking' state here: the request itself is still
+    // outstanding, and the Validate button's disabled gate must track that,
+    // not the buffer — otherwise a second click here could stack a second
+    // request on top of the first and the two could resolve out of order.
+    // handleValidate's resolve handlers below are what move validation out
+    // of 'checking', once the one outstanding request actually settles.
+    validateTokenRef.current += 1;
+    setValidation((prev) => (prev.state === 'idle' || prev.state === 'checking' ? prev : { state: 'idle' }));
     setSaveError(null);
   }, []);
 
   const handleValidate = useCallback(() => {
+    const token = ++validateTokenRef.current;
     setValidation({ state: 'checking' });
     validateDefinition(value)
-      .then(() => setValidation({ state: 'ok' }))
+      .then(() => {
+        // Superseded by an edit since dispatch: the text this describes is
+        // gone, so fall back to idle rather than assert a verdict about a
+        // buffer nobody can see anymore.
+        setValidation(validateTokenRef.current === token ? { state: 'ok' } : { state: 'idle' });
+      })
       .catch((error) => {
-        setValidation({ state: 'error', message: error instanceof Error ? error.message : 'Validation failed' });
+        setValidation(
+          validateTokenRef.current === token
+            ? { state: 'error', message: error instanceof Error ? error.message : 'Validation failed' }
+            : { state: 'idle' },
+        );
       });
   }, [validateDefinition, value]);
 
+  // Defect D: handleSave captures `value` at click time, but nothing else in
+  // the tree freezes the buffer for the request's duration —
+  // handleAutomationApplyWS waits on the daemon's automationMu, held across a
+  // full delivery (clone/fetch, agent spawn), bounded at 25s. AutomationYamlEditor
+  // stays mounted and focused while `saving` is true, so a user who keeps
+  // typing writes characters into `value` that were never part of what was
+  // sent; on success onSaved unmounts the editor (AutomationsPanel's
+  // setEditorTarget(null)) and those characters vanish with no warning. Fixed
+  // by locking the buffer (readOnly, below) for the duration rather than
+  // re-checking/warning on resolve: locking keeps "what was submitted" and
+  // "what's on screen" identical throughout, so there's nothing to reconcile
+  // or warn about after the fact.
   const handleSave = useCallback(() => {
     setSaving(true);
     setSaveError(null);
@@ -231,6 +276,12 @@ export function AutomationEditor({
             </p>
           )}
 
+          {saving && (
+            <p className="automation-editor__hint" data-testid="automation-editor-locked-hint">
+              Buffer locked while saving…
+            </p>
+          )}
+
           <div className="automation-editor__buffer">
             <AutomationYamlEditor
               ref={editorRef}
@@ -238,6 +289,7 @@ export function AutomationEditor({
               onChange={handleChange}
               ariaLabel="Automation definition"
               autoFocus
+              readOnly={saving}
             />
           </div>
 

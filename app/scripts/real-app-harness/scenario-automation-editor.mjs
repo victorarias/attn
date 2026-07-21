@@ -5,17 +5,25 @@
  * the starter template, invalid-YAML rejection (nothing stored), a real
  * create with a hand-written comment, the create-collision refusal, D1
  * (comments survive a save/reload round-trip), the id-change refusal (D4),
- * and the stale-revision refusal plus Reload recovery (D5) — all driven
- * through the real rendered editor via the automation_editor_* UI-automation
- * bridge verbs, cross-checked against the daemon's own state via the bundled
- * `attn` CLI (`automation show`/`list`), not just the DOM.
+ * the stale-revision refusal plus Reload recovery (D5), a comment-only edit
+ * that still bumps the revision, and a Save that is refused rather than
+ * silently resurrecting a definition deleted elsewhere — the last two pin
+ * the two multi-writer races fixed in 649a7e52 (spec_yaml missing from the
+ * revision-bump condition; DeleteAutomationDefinition leaving revision
+ * untouched) — all driven through the real rendered editor via the
+ * automation_editor_* UI-automation bridge verbs, cross-checked against the
+ * daemon's own state via the bundled `attn` CLI (`automation show`/`list`),
+ * not just the DOM.
  *
  * One definition id is reused across most legs (`automation-editor-<suffix>`)
  * so the id-change and stale-revision legs exercise the SAME live definition
  * D1 just proved comment-preservation on, rather than fresh throwaway ids —
  * matching how a real user edits one automation repeatedly in one sitting.
- * A second id (`automation-editor-renamed-<suffix>`) exists only as the
- * (refused) target of the id-change leg; it must never actually be created.
+ * The same id carries through the comment-only-revision-bump leg and finally
+ * into the delete-elsewhere leg, which ends the scenario with it soft-
+ * deleted on purpose. A second id (`automation-editor-renamed-<suffix>`)
+ * exists only as the (refused) target of the id-change leg; it must never
+ * actually be created.
  *
  * No fake-agent probe is needed: this scenario never triggers a run (every
  * definition it applies is enabled: false throughout), so `launch.executable`
@@ -435,6 +443,141 @@ async function main() {
       const finalShown = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
       runner.assert(finalShown.Revision === outOfBandRevision + 1, 'the recovered save bumps the revision once more', finalShown);
       runner.assert(finalShown.SpecYAML.includes(localPromptA), 'the recovered save persists the locally re-applied content', finalShown);
+    });
+
+    // Leg 8 (defect A regression proof): a comment-only edit — the exact
+    // shape of change this editor exists to make — still bumps the
+    // revision. Before the store fix, the bump condition compared only
+    // spec_json, so a save that changed spec_yaml alone (comments live only
+    // there, never re-derived into spec_json) left revision untouched and
+    // the stale-save guard blind to it. The new buffer is built by
+    // prepending exactly ONE comment line to the exact bytes the editor
+    // loaded, so everything after that line is untouched by construction —
+    // if spec_json also moved, this leg would prove nothing.
+    await runner.step('leg8_comment_only_edit_bumps_revision', async () => {
+      const shownBefore = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
+
+      const opened = await client.request('automation_editor_open', { definitionId: primaryID });
+      runner.assert(opened.mode === 'edit', 'opening the shared definition for edit starts in edit mode', opened);
+      runner.assert(opened.definitionId === primaryID, 'edit mode reports the definition id being edited', opened);
+      runner.assert(
+        opened.revision === shownBefore.Revision,
+        "the editor's revision matches the CLI's independently-read revision",
+        { opened, shownBefore },
+      );
+      runner.assert(
+        opened.text === shownBefore.SpecYAML,
+        'the editor buffer loads exactly the stored spec_yaml bytes — the baseline this leg edits from',
+        { opened, shownBefore },
+      );
+
+      const leg8Comment = `# harness-marker-leg8: ${suffix}`;
+      const commentOnlyYAML = `${leg8Comment}\n${opened.text}`;
+      await client.request('automation_editor_set_text', { text: commentOnlyYAML });
+
+      const afterValidate = await client.request('automation_editor_click', { button: 'validate' });
+      runner.assert(afterValidate.validation.state === 'ok', 'the comment-only buffer is still schema-valid', afterValidate);
+
+      const afterSave = await client.request('automation_editor_click', { button: 'save' });
+      runner.assert(afterSave.present === false, 'the comment-only save succeeds and closes the editor', afterSave);
+
+      const shownAfter = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
+      runner.assert(
+        shownAfter.Revision === shownBefore.Revision + 1,
+        'D-A: a comment-only edit still bumps the revision — the stale-save guard is no longer blind to comment-only changes',
+        { before: shownBefore.Revision, after: shownAfter.Revision },
+      );
+      runner.assert(
+        shownAfter.SpecYAML === commentOnlyYAML,
+        'the stored spec_yaml is exactly the comment-prepended buffer — nothing else moved',
+        { expected: commentOnlyYAML, actual: shownAfter.SpecYAML },
+      );
+      // The assertion that actually matters for D-A: prove this was a pure
+      // comment edit by checking the CANONICAL spec, not just the YAML text.
+      // A future refactor that starts folding comments into spec_json would
+      // otherwise leave this leg passing for the wrong reason.
+      runner.assert(
+        shownAfter.SpecJSON === shownBefore.SpecJSON,
+        'the canonical spec_json is byte-identical before/after — this was a pure comment edit, not a disguised content change',
+        { before: shownBefore.SpecJSON, after: shownAfter.SpecJSON },
+      );
+    });
+
+    // Leg 9 (defect B regression proof): a definition deleted out of band
+    // while an editor has it open must not be resurrected by that editor's
+    // Save. Before the daemon fix, DeleteAutomationDefinition left revision
+    // untouched, so the stale editor's expected_revision still matched the
+    // soft-deleted row, the guard passed, and the upsert cleared
+    // deleted_at — reported to the user as a successful save. Mirrors leg7's
+    // out-of-band-mutation shape, but via `automation delete` instead of
+    // `automation apply`.
+    await runner.step('leg9_delete_elsewhere_then_save_refused', async () => {
+      const shownBefore = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
+      runner.assert(
+        shownBefore && shownBefore.ID === primaryID,
+        'sanity: the shared definition is still live before this leg deletes it',
+        shownBefore,
+      );
+
+      const opened = await client.request('automation_editor_open', { definitionId: primaryID });
+      runner.assert(opened.mode === 'edit', 'opening the shared definition for edit starts in edit mode', opened);
+      runner.assert(opened.definitionId === primaryID, 'edit mode reports the definition id being edited', opened);
+      runner.assert(
+        opened.revision === shownBefore.Revision,
+        "the editor holds the definition's current revision before the out-of-band delete",
+        opened,
+      );
+
+      run(binary, ['automation', 'delete', primaryID], daemonEnv);
+      const listAfterDelete = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
+      runner.assert(
+        !listAfterDelete.some((row) => row.ID === primaryID),
+        'sanity: the out-of-band CLI delete removes the definition from the live list while the editor is still open on it',
+        listAfterDelete,
+      );
+
+      const staleEditPrompt = 'Edited after the definition was deleted elsewhere — this save must be refused.';
+      const staleEditYAML = editorDefinitionYAML({ id: primaryID, locationPath: fixturePath, prompt: staleEditPrompt, comment: null });
+      await client.request('automation_editor_set_text', { text: staleEditYAML });
+
+      const afterValidate = await client.request('automation_editor_click', { button: 'validate' });
+      runner.assert(
+        afterValidate.validation.state === 'ok',
+        'the buffer is schema-valid on its own — the guard is the out-of-band delete, not shape',
+        afterValidate,
+      );
+
+      const afterSave = await client.request('automation_editor_click', { button: 'save' });
+      runner.assert(
+        afterSave.present === true,
+        "the editor stays open after a refused save — the user's in-progress edit is not destroyed",
+        afterSave,
+      );
+      runner.assert(afterSave.mode === 'edit', 'the editor remains in edit mode for the deleted definition', afterSave);
+      runner.assert(afterSave.definitionId === primaryID, 'the editor is still keyed on the same definition id', afterSave);
+      runner.assert(
+        afterSave.saveError.includes('deleted elsewhere') &&
+          afterSave.saveError.includes(primaryID) &&
+          afterSave.saveError.includes('New'),
+        'Save refuses the edit of a deleted definition, naming the deletion and pointing the user at New',
+        afterSave,
+      );
+
+      // The part that actually matters: the daemon's own state, not just the
+      // UI string — a refusal message sitting in front of a resurrected row
+      // would be exactly the failure this leg exists to catch.
+      const listAfterRefusedSave = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
+      runner.assert(
+        !listAfterRefusedSave.some((row) => row.ID === primaryID),
+        'the definition is still gone after the refused save — it was not resurrected',
+        listAfterRefusedSave,
+      );
+      const shownAfterRefusedSave = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
+      runner.assert(
+        shownAfterRefusedSave === null,
+        'the CLI also reports the definition as gone (filtered like any soft-deleted row) after the refused save',
+        shownAfterRefusedSave,
+      );
     });
 
     runner.finishSuccess({ profile, primaryID, renamedID, leg3Revision, appBuild, protocolVersion });
