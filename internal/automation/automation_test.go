@@ -24,7 +24,6 @@ func TestDefinitionPersistsCanonicalDirectory(t *testing.T) {
 	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: canonical
 name: Canonical
-enabled: true
 trigger: {type: manual}
 prompt: Inspect.
 launch: {driver: codex}
@@ -55,7 +54,6 @@ func TestMarshalDefinitionYAMLRoundTripsThroughParse(t *testing.T) {
 	raw := `api_version: attn.dev/automations/v1alpha1
 id: roundtrip
 name: Roundtrip
-enabled: true
 trigger: {type: manual}
 prompt: Do the thing.
 launch: {driver: codex, model: gpt-5, effort: high}
@@ -113,7 +111,6 @@ func TestDefinitionHasNoApprovalAndRequiresDirectory(t *testing.T) {
 	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: harmless
 name: Harmless
-enabled: true
 trigger: {type: manual}
 prompt: Inspect the supplied context.
 launch: {driver: codex, model: gpt-5.5, effort: high}
@@ -145,7 +142,6 @@ func TestDefinitionCanonicalizesLaunchDriver(t *testing.T) {
 	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: canonical-driver
 name: Canonical driver
-enabled: true
 trigger: {type: manual}
 prompt: Inspect.
 launch: {driver: " CoDeX "}
@@ -165,7 +161,6 @@ func TestDefinitionRejectsUnknownFields(t *testing.T) {
 	_, _, err := ParseDefinitionYAML([]byte(`api_version: attn.dev/automations/v1alpha1
 id: bad
 name: Bad
-enabled: true
 trigger: {type: manual}
 prompt: x
 launch: {driver: codex, approval: yolo}
@@ -177,12 +172,33 @@ policy: {continuity: fresh}
 	}
 }
 
+// TestDefinitionRejectsEnabledKey pins enabled having exactly one authority
+// (the store's enabled column, not the spec): a YAML document carrying a
+// top-level enabled key must be rejected at parse, before ValidateDefinition
+// or KnownFields even runs, with an error pointing the user at
+// 'attn automation enable'/'disable' rather than a generic unknown-field
+// error.
+func TestDefinitionRejectsEnabledKey(t *testing.T) {
+	_, _, err := ParseDefinitionYAML([]byte(`api_version: attn.dev/automations/v1alpha1
+id: bad
+name: Bad
+enabled: true
+trigger: {type: manual}
+prompt: x
+launch: {driver: codex}
+location: {type: directory, path: /tmp}
+policy: {continuity: fresh}
+`))
+	if err == nil || !strings.Contains(err.Error(), "enabled is managed outside the spec") {
+		t.Fatalf("err=%v, want an error naming enabled as managed outside the spec", err)
+	}
+}
+
 func TestRepositoryWorktreeDefinitionCanonicalizesOverride(t *testing.T) {
 	repo := t.TempDir()
 	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: pr-review
 name: PR review
-enabled: true
 trigger: {type: manual}
 prompt: Review the pull request locally.
 launch: {driver: codex, effort: high}
@@ -210,7 +226,6 @@ func TestRepositoryWorktreeDefinitionRejectsDirectoryPath(t *testing.T) {
 	raw := `api_version: attn.dev/automations/v1alpha1
 id: pr-review
 name: PR review
-enabled: true
 trigger: {type: manual}
 prompt: Review.
 launch: {driver: codex}
@@ -229,7 +244,6 @@ func TestGitHubReviewDefinitionCanonicalizesAndAppliesRepositoryFilter(t *testin
 	raw := `api_version: attn.dev/automations/v1alpha1
 id: requested-review
 name: Requested review
-enabled: true
 trigger:
   type: github_review_requested
   repositories:
@@ -264,7 +278,6 @@ func TestGitHubReviewDefinitionRequiresAcceptedPolicyAndLocation(t *testing.T) {
 	base := `api_version: attn.dev/automations/v1alpha1
 id: requested-review
 name: Requested review
-enabled: true
 trigger: {type: github_review_requested, repositories: {mode: all_accessible}}
 prompt: Review locally.
 launch: {driver: codex}
@@ -291,7 +304,6 @@ func TestScheduledDefinitionValidation(t *testing.T) {
 	base := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: nightly
 name: Nightly
-enabled: true
 trigger:
   type: scheduled
   schedule: {cron: "0 3 * * *", time_zone: America/New_York}
@@ -346,7 +358,6 @@ func TestManualAndGitHubTriggersRejectSchedule(t *testing.T) {
 	manual := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: manual-with-schedule
 name: Manual
-enabled: true
 trigger:
   type: manual
   schedule: {cron: "0 3 * * *", time_zone: UTC}
@@ -361,7 +372,6 @@ policy: {continuity: fresh}
 	github := `api_version: attn.dev/automations/v1alpha1
 id: requested-review
 name: Requested review
-enabled: true
 trigger:
   type: github_review_requested
   repositories: {mode: all_accessible}
@@ -389,7 +399,6 @@ func TestCanonicalJSONOmitsScheduleForNonScheduledTriggers(t *testing.T) {
 	manual := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: manual-no-schedule
 name: Manual
-enabled: true
 trigger: {type: manual}
 prompt: Inspect.
 launch: {driver: codex}
@@ -413,7 +422,6 @@ func TestScheduledDefinitionRoundTripsCronAndTimeZone(t *testing.T) {
 	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: nightly
 name: Nightly
-enabled: true
 trigger:
   type: scheduled
   schedule: {cron: "0 3 * * *", time_zone: America/New_York}
@@ -443,7 +451,6 @@ func TestManualTriggerRejectsCatchUp(t *testing.T) {
 	raw := strings.ReplaceAll(`api_version: attn.dev/automations/v1alpha1
 id: manual-with-catchup
 name: Manual
-enabled: true
 trigger: {type: manual}
 prompt: Inspect.
 launch: {driver: codex}

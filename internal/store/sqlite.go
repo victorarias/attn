@@ -770,6 +770,7 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		);
 	`},
 	{75, "persist the applied automation definition YAML", ""},
+	{76, "automations v2: definitions clean slate", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1005,6 +1006,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 75 {
 			if err := applyMigration75(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 76 {
+			if err := applyMigration76(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -1404,6 +1410,61 @@ func applyMigration75(tx *sql.Tx) error {
 	}
 	_, err = tx.Exec(`ALTER TABLE automation_definitions ADD COLUMN spec_yaml TEXT NOT NULL DEFAULT ''`)
 	return err
+}
+
+// applyMigration76 is the v2 clean-slate rebuild of automation_definitions
+// (docs/plans/2026-07-21-automations-v2-simplification.md): the automations
+// feature has zero production usage, so rather than evolve the v1 schema in
+// place, every automation row is wiped and automation_definitions is
+// recreated without spec_yaml — enabled becomes the column's sole authority,
+// with no spec-side echo to keep in sync. Children are cleared before
+// parents (automation_ticket_occurrence_events -> automation_runs ->
+// automation_occurrences, then the continuity/review-edge/cursor tables) so
+// no row survives referencing a row this migration is about to drop.
+// tickets.automation_run_id is nulled since every run it could reference is
+// gone. Guarded with tableExists (a partial-schema test DB may seed only
+// some tables) — if automation_definitions was never created, none of its
+// dependents exist either, so there is nothing to wipe.
+//
+// This must apply cleanly from a DB at version 73 and from one at 75: in
+// both cases migrations 74-75 have already run by the time 76 does (74
+// creates the dependent tables, 75 adds spec_yaml), so 76 always sees the
+// full v1 shape and drops spec_yaml with the table — production
+// ~/.attn/attn.db is at 73; the v1 automation migrations 74-75 never
+// reached production.
+func applyMigration76(tx *sql.Tx) error {
+	exists, err := tableExists(tx, "automation_definitions")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	for _, stmt := range []string{
+		`DELETE FROM automation_ticket_occurrence_events`,
+		`DELETE FROM automation_runs`,
+		`DELETE FROM automation_occurrences`,
+		`DELETE FROM automation_continuity_bindings`,
+		`DELETE FROM automation_review_request_edges`,
+		`DELETE FROM automation_provider_cursors`,
+		`DROP TABLE automation_definitions`,
+		`CREATE TABLE automation_definitions (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			enabled INTEGER NOT NULL,
+			revision INTEGER NOT NULL,
+			spec_json TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			deleted_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`UPDATE tickets SET automation_run_id = NULL WHERE automation_run_id IS NOT NULL`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // applyMigration53 adds the closed_state column to chief_of_staff_dispatches,

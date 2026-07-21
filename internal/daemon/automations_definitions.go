@@ -74,7 +74,7 @@ func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error
 	if err != nil {
 		return nil, err
 	}
-	return d.automationApplyLocked(context.Background(), raw, spec, canonical, nil)
+	return d.automationApplyLocked(context.Background(), spec, canonical, nil)
 }
 
 // automationApplyWithGuards is automationApply's WS counterpart, used by the
@@ -135,7 +135,7 @@ func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw, expectedID 
 		}
 		return nil
 	}
-	return d.automationApplyLocked(ctx, raw, spec, canonical, guard)
+	return d.automationApplyLocked(ctx, spec, canonical, guard)
 }
 
 // automationApplyLocked is the locked validate-then-persist step shared by
@@ -147,7 +147,7 @@ func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw, expectedID 
 // socket/CLI path) runs after the pre-upsert existing-row read but still
 // inside automationMu, so a WS caller's expected_id/expected_revision check
 // is atomic with the write it gates.
-func (d *Daemon) automationApplyLocked(ctx context.Context, raw string, spec automation.DefinitionSpec, canonical []byte, guard func(*store.AutomationDefinition) error) (*store.AutomationDefinition, error) {
+func (d *Daemon) automationApplyLocked(ctx context.Context, spec automation.DefinitionSpec, canonical []byte, guard func(*store.AutomationDefinition) error) (*store.AutomationDefinition, error) {
 	d.automationMu.Lock()
 	defer d.automationMu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -162,7 +162,7 @@ func (d *Daemon) automationApplyLocked(ctx context.Context, raw string, spec aut
 			return nil, err
 		}
 	}
-	definition, err := d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), raw, spec.Enabled, time.Now())
+	definition, err := d.store.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), time.Now())
 	if err != nil {
 		return definition, err
 	}
@@ -170,7 +170,7 @@ func (d *Daemon) automationApplyLocked(ctx context.Context, raw string, spec aut
 		return definition, err
 	}
 	d.broadcastAutomationsChanged(spec.ID)
-	if spec.Enabled {
+	if definition.Enabled {
 		return definition, nil
 	}
 	return definition, d.failPendingAutomationRuns(spec.ID)

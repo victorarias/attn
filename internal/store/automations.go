@@ -2,13 +2,9 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
-
-	"github.com/victorarias/attn/internal/automation"
 )
 
 func parseOptionalAutomationTime(value string) *time.Time {
@@ -20,12 +16,7 @@ func parseOptionalAutomationTime(value string) *time.Time {
 }
 
 type AutomationDefinition struct {
-	ID, Name, SpecJSON string
-	// SpecYAML is the raw YAML text the caller applied, preserved verbatim
-	// (comments and all) rather than re-derived from SpecJSON. Empty for rows
-	// written before migration 75 added the column; callers that need YAML
-	// back for such a row fall back to automation.MarshalDefinitionYAML.
-	SpecYAML             string
+	ID, Name, SpecJSON   string
 	Enabled              bool
 	Revision             int
 	CreatedAt, UpdatedAt time.Time
@@ -91,7 +82,12 @@ func (s *Store) AutomationReviewRequestNeedsClaim(definitionID, subjectKey strin
 	return pending != 0, err
 }
 
-func (s *Store) UpsertAutomationDefinition(id, name, specJSON, specYAML string, enabled bool, now time.Time) (*AutomationDefinition, error) {
+// UpsertAutomationDefinition applies a definition's name/spec_json. `enabled`
+// is not a parameter: it has exactly one authority, the enabled COLUMN. A
+// brand-new row (including the resurrection of a soft-deleted one) is always
+// inserted enabled; an update of a live row leaves its current enabled value
+// untouched — apply never toggles enabled, only SetAutomationEnabled does.
+func (s *Store) UpsertAutomationDefinition(id, name, specJSON string, now time.Time) (*AutomationDefinition, error) {
 	s.mu.Lock()
 	locked := true
 	defer func() {
@@ -108,37 +104,37 @@ func (s *Store) UpsertAutomationDefinition(id, name, specJSON, specYAML string, 
 	}
 	defer tx.Rollback()
 	var revision, oldEnabled int
-	var oldSpec, oldSpecYAML, deletedAt string
+	var oldSpec, deletedAt string
 	// Deliberately not filtered by deleted_at='': a soft-deleted row must be
 	// found here too, so applying the same id resurrects it (clears
 	// deleted_at) instead of colliding with the PRIMARY KEY on an INSERT.
-	err = tx.QueryRow(`SELECT revision, spec_json, spec_yaml, enabled, deleted_at FROM automation_definitions WHERE id=?`, id).Scan(&revision, &oldSpec, &oldSpecYAML, &oldEnabled, &deletedAt)
+	err = tx.QueryRow(`SELECT revision, spec_json, enabled, deleted_at FROM automation_definitions WHERE id=?`, id).Scan(&revision, &oldSpec, &oldEnabled, &deletedAt)
+	enabled := true
 	switch err {
 	case sql.ErrNoRows:
 		revision = 1
-		_, err = tx.Exec(`INSERT INTO automation_definitions(id,name,enabled,revision,spec_json,spec_yaml,created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,'')`, id, name, enabled, revision, specJSON, specYAML, formatTicketTime(now), formatTicketTime(now))
+		_, err = tx.Exec(`INSERT INTO automation_definitions(id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,?,'')`, id, name, enabled, revision, specJSON, formatTicketTime(now), formatTicketTime(now))
 	case nil:
 		wasDeleted := deletedAt != ""
-		if oldSpec != specJSON || oldSpecYAML != specYAML || wasDeleted {
-			// A resurrection always bumps revision, even with an unchanged spec,
-			// so the daemon's contract comparison (old revision vs new) can tell
-			// resurrection apart from a no-op reapply and always rotate continuity
-			// bindings for it. spec_yaml must be compared too, not just spec_json:
-			// comments live only in spec_yaml (never re-derived into spec_json), so
-			// a comment-only edit changes spec_yaml but not spec_json. Without this,
-			// that edit would persist new YAML while leaving revision unchanged, and
-			// the daemon's stale-save guard (automationApplyWithGuards, which
-			// compares only revision) would be structurally blind to it — two
-			// concurrent editors could silently drop each other's comments with no
-			// "changed elsewhere" refusal.
+		if wasDeleted {
+			// Resurrection always re-enables and always bumps revision, even with
+			// an unchanged spec, so the daemon's contract comparison (old revision
+			// vs new) can tell resurrection apart from a no-op reapply and always
+			// rotate continuity bindings for it.
 			revision++
+		} else {
+			enabled = oldEnabled != 0
+			if oldSpec != specJSON {
+				revision++
+			}
 		}
-		_, err = tx.Exec(`UPDATE automation_definitions SET name=?, enabled=?, revision=?, spec_json=?, spec_yaml=?, updated_at=?, deleted_at='' WHERE id=?`, name, enabled, revision, specJSON, specYAML, formatTicketTime(now), id)
-		if err == nil && oldEnabled == 0 && enabled {
-			// Re-enabling begins from the provider's current truth. A request that
-			// arrived while disabled must be eligible for latest catch-up even if an
-			// older cycle for the same subject had been active before disable. Shared
-			// with SetAutomationEnabled's own enabled-state transition.
+		_, err = tx.Exec(`UPDATE automation_definitions SET name=?, enabled=?, revision=?, spec_json=?, updated_at=?, deleted_at='' WHERE id=?`, name, enabled, revision, specJSON, formatTicketTime(now), id)
+		if err == nil && wasDeleted {
+			// Re-enabling (via resurrection) begins from the provider's current
+			// truth. A request that arrived while disabled/deleted must be eligible
+			// for latest catch-up even if an older cycle for the same subject had
+			// been active before. Shared with SetAutomationEnabled's own
+			// enabled-state transition.
 			err = clearAutomationReviewRequestEdgesTx(tx, id, now)
 		}
 	}
@@ -190,29 +186,15 @@ func fenceAutomationProviderCursorsTx(tx *sql.Tx, definitionID string, now time.
 // Returns (nil, false, nil) for an unknown or soft-deleted definition.
 //
 // Unlike UpsertAutomationDefinition, this is not a spec apply — the caller
-// (the panel's toggle) supplies only a bool, not a new YAML document. But
-// `enabled` is "Current management state" (docs/plans/2026-07-18-attn-
-// automations-implementation.md): the enabled COLUMN is the single
-// authority, and spec_json/spec_yaml must stay in sync with it, or the row
-// becomes internally inconsistent — automationDefinitionYAML (what the
-// editor and `attn automation show` read) would keep showing the OLD
-// enabled value, and the next Save, even an unrelated comment edit, would
-// silently write that stale value back out AND re-run the real
-// enable/disable transition it implies. So on a real transition this writes
-// the new enabled value into both spec_json (re-marshaled; it's canonical
-// machine JSON, so reformatting it is harmless) and spec_yaml (rewritten
-// byte-for-byte via automation.SetEnabledInYAML, which preserves everything
-// else — comments included — since spec_yaml is the one copy that carries
-// them and they are never re-derived from spec_json).
+// (the panel's toggle, or the CLI's enable/disable verbs) supplies only a
+// bool, not a new spec. `enabled` has exactly one authority, the enabled
+// COLUMN — the spec carries no enabled field at all — so there is nothing
+// else to keep in sync here.
 //
-// revision bumps on every real transition, same as Upsert. This is the third
-// instance of one lesson (git log 649a7e52, "close three stale-value holes
-// the editor exposed"): the editor's stale-save guard
-// (automationApplyWithGuards) compares only revision, so any write that
-// changes what a Save would silently overwrite must bump it. Without this,
-// toggling here while someone has the editor open would be invisible to
-// that guard, and their stale buffer's Save would silently reverse the
-// toggle it never saw.
+// revision does NOT bump on this transition: revision guards spec content,
+// and enabled is no longer spec content, so a toggle changes nothing a
+// concurrent editor's stale-save guard (automationApplyWithGuards, which
+// compares only revision) needs to catch.
 func (s *Store) SetAutomationEnabled(id string, enabled bool, now time.Time) (*AutomationDefinition, bool, error) {
 	s.mu.Lock()
 	locked := true
@@ -229,9 +211,8 @@ func (s *Store) SetAutomationEnabled(id string, enabled bool, now time.Time) (*A
 		return nil, false, err
 	}
 	defer tx.Rollback()
-	var oldEnabled, revision int
-	var specJSON, specYAML string
-	err = tx.QueryRow(`SELECT enabled, revision, spec_json, spec_yaml FROM automation_definitions WHERE id=? AND deleted_at=''`, id).Scan(&oldEnabled, &revision, &specJSON, &specYAML)
+	var oldEnabled int
+	err = tx.QueryRow(`SELECT enabled FROM automation_definitions WHERE id=? AND deleted_at=''`, id).Scan(&oldEnabled)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -246,21 +227,7 @@ func (s *Store) SetAutomationEnabled(id string, enabled bool, now time.Time) (*A
 		def, getErr := s.GetAutomationDefinition(id)
 		return def, false, getErr
 	}
-	newSpecJSON, newSpecYAML := specJSON, specYAML
-	if rewrittenJSON, rewrittenYAML, err := automationSpecWithEnabled(specJSON, specYAML, enabled); err != nil {
-		// A corrupt/unparseable spec must never block a toggle: enabling and
-		// especially disabling (a safety control — the operator turning off
-		// an unattended cron) must always take effect. Leave spec_json/
-		// spec_yaml exactly as they were; the column and revision are still
-		// written below, so an editor with this row open is refused by the
-		// stale-save guard on its next Save rather than silently clobbering
-		// the toggle with a stale enabled value.
-		log.Printf("[store] SetAutomationEnabled: definition %s: could not sync spec to the new enabled state, leaving spec_json/spec_yaml untouched: %v", id, err)
-	} else {
-		newSpecJSON, newSpecYAML = rewrittenJSON, rewrittenYAML
-	}
-	revision++
-	if _, err := tx.Exec(`UPDATE automation_definitions SET enabled=?, revision=?, spec_json=?, spec_yaml=?, updated_at=? WHERE id=?`, enabled, revision, newSpecJSON, newSpecYAML, formatTicketTime(now), id); err != nil {
+	if _, err := tx.Exec(`UPDATE automation_definitions SET enabled=?, updated_at=? WHERE id=?`, enabled, formatTicketTime(now), id); err != nil {
 		return nil, false, err
 	}
 	if enabled {
@@ -280,41 +247,11 @@ func (s *Store) SetAutomationEnabled(id string, enabled bool, now time.Time) (*A
 	return def, true, getErr
 }
 
-// automationSpecWithEnabled re-derives specJSON/specYAML with their enabled
-// field set to enabled. specJSON must unmarshal as an automation.
-// DefinitionSpec; specYAML, when non-empty, is rewritten via
-// automation.SetEnabledInYAML rather than re-marshaled, so it keeps every
-// other byte — comments included. Returns an error, without touching
-// either input, if specJSON doesn't parse or specYAML doesn't rewrite;
-// SetAutomationEnabled treats either as a corrupt/legacy row and leaves the
-// stored spec as-is rather than blocking the toggle on it.
-func automationSpecWithEnabled(specJSON, specYAML string, enabled bool) (newSpecJSON, newSpecYAML string, err error) {
-	var spec automation.DefinitionSpec
-	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
-		return "", "", fmt.Errorf("parse spec_json: %w", err)
-	}
-	spec.Enabled = enabled
-	marshaled, err := json.Marshal(spec)
-	if err != nil {
-		return "", "", fmt.Errorf("marshal spec_json: %w", err)
-	}
-	newSpecJSON = string(marshaled)
-	newSpecYAML = specYAML
-	if specYAML != "" {
-		rewritten, err := automation.SetEnabledInYAML([]byte(specYAML), enabled)
-		if err != nil {
-			return "", "", fmt.Errorf("rewrite spec_yaml: %w", err)
-		}
-		newSpecYAML = string(rewritten)
-	}
-	return newSpecJSON, newSpecYAML, nil
-}
-
 func scanAutomationDefinition(scanner interface{ Scan(...any) error }) (*AutomationDefinition, error) {
 	var d AutomationDefinition
 	var enabled int
 	var created, updated, deleted string
-	if err := scanner.Scan(&d.ID, &d.Name, &enabled, &d.Revision, &d.SpecJSON, &d.SpecYAML, &created, &updated, &deleted); err != nil {
+	if err := scanner.Scan(&d.ID, &d.Name, &enabled, &d.Revision, &d.SpecJSON, &created, &updated, &deleted); err != nil {
 		return nil, err
 	}
 	d.Enabled = enabled != 0
@@ -330,7 +267,7 @@ func (s *Store) GetAutomationDefinition(id string) (*AutomationDefinition, error
 	if s.db == nil {
 		return nil, nil
 	}
-	d, err := scanAutomationDefinition(s.db.QueryRow(`SELECT id,name,enabled,revision,spec_json,spec_yaml,created_at,updated_at,deleted_at FROM automation_definitions WHERE id=? AND deleted_at=''`, id))
+	d, err := scanAutomationDefinition(s.db.QueryRow(`SELECT id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at FROM automation_definitions WHERE id=? AND deleted_at=''`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -348,7 +285,7 @@ func (s *Store) GetAutomationDefinitionIncludingDeleted(id string) (*AutomationD
 	if s.db == nil {
 		return nil, nil
 	}
-	d, err := scanAutomationDefinition(s.db.QueryRow(`SELECT id,name,enabled,revision,spec_json,spec_yaml,created_at,updated_at,deleted_at FROM automation_definitions WHERE id=?`, id))
+	d, err := scanAutomationDefinition(s.db.QueryRow(`SELECT id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at FROM automation_definitions WHERE id=?`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -467,7 +404,7 @@ func (s *Store) ListAutomationDefinitions() ([]AutomationDefinition, error) {
 	if s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`SELECT id,name,enabled,revision,spec_json,spec_yaml,created_at,updated_at,deleted_at FROM automation_definitions WHERE deleted_at='' ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id,name,enabled,revision,spec_json,created_at,updated_at,deleted_at FROM automation_definitions WHERE deleted_at='' ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}

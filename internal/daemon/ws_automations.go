@@ -311,14 +311,13 @@ func (d *Daemon) handleAutomationDefinitionGetWS(client *wsClient, msg *protocol
 	d.sendToClient(client, result)
 }
 
-// automationDefinitionYAML resolves def's definition_yaml: the stored
-// spec_yaml when present, else automation.MarshalDefinitionYAML rendered
-// from spec_json for a row written before migration 75 added spec_yaml (see
-// MarshalDefinitionYAML's doc comment).
+// automationDefinitionYAML resolves def's definition_yaml by rendering
+// automation.MarshalDefinitionYAML from spec_json — spec_yaml storage is
+// gone (see MarshalDefinitionYAML's doc comment), so this is now the only
+// path; every read (the editor's Save-then-reopen, `attn automation show`)
+// gets its YAML re-derived from the canonical spec, comments and all
+// formatting choices not preserved.
 func automationDefinitionYAML(def store.AutomationDefinition) (string, error) {
-	if def.SpecYAML != "" {
-		return def.SpecYAML, nil
-	}
 	var spec automation.DefinitionSpec
 	if err := json.Unmarshal([]byte(def.SpecJSON), &spec); err != nil {
 		return "", fmt.Errorf("parse stored definition %s: %w", def.ID, err)

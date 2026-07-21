@@ -21,7 +21,6 @@ func scheduledDefinitionYAML(dir, cron, continuity, catchUp, prompt string) stri
 	return fmt.Sprintf(`api_version: attn.dev/automations/v1alpha1
 id: nightly
 name: Nightly
-enabled: true
 trigger:
   type: scheduled
   schedule: {cron: %q, time_zone: UTC}
@@ -43,7 +42,7 @@ func setupScheduledDaemon(t *testing.T, cron, continuity, catchUp string) (*Daem
 		t.Fatalf("parse definition: %v", err)
 	}
 	s := store.New()
-	def, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), "", true, time.Now())
+	def, err := s.UpsertAutomationDefinition(spec.ID, spec.Name, string(canonical), time.Now())
 	if err != nil {
 		t.Fatalf("upsert definition: %v", err)
 	}
@@ -278,7 +277,7 @@ func TestObserveDueScheduleClaimRejectionLeavesCursorForRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(editedSpec.ID, editedSpec.Name, string(editedCanonical), "", true, now0); err != nil {
+	if _, err := s.UpsertAutomationDefinition(editedSpec.ID, editedSpec.Name, string(editedCanonical), now0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -357,7 +356,7 @@ func TestObserveDueScheduleClaimRejectionRetryFiresNewestDueInstant(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(editedSpec.ID, editedSpec.Name, string(editedCanonical), "", true, now0); err != nil {
+	if _, err := s.UpsertAutomationDefinition(editedSpec.ID, editedSpec.Name, string(editedCanonical), now0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -469,7 +468,7 @@ func TestScheduledPendingRunRecoversOnRestart(t *testing.T) {
 	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
 	intended := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
 	run := claimPendingScheduledRun(t, s, def, intended, intended.Add(time.Second))
-	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, def.SpecJSON, "", false, intended.Add(time.Minute)); err != nil {
+	if _, _, err := s.SetAutomationEnabled(def.ID, false, intended.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -516,7 +515,7 @@ func TestScheduledPendingRunDeliversImmutableSnapshotAfterDefinitionEdit(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.UpsertAutomationDefinition(editedSpec.ID, editedSpec.Name, string(editedCanonical), "", true, intended.Add(time.Minute)); err != nil {
+	if _, err := s.UpsertAutomationDefinition(editedSpec.ID, editedSpec.Name, string(editedCanonical), intended.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -540,7 +539,7 @@ func TestScheduledPendingRunDeliversImmutableSnapshotAfterDefinitionEdit(t *test
 
 func TestObserveDueSchedulesSkipsDisabledDefinition(t *testing.T) {
 	d, s, def, _ := setupScheduledDaemon(t, "* * * * *", "fresh", "latest")
-	if _, err := s.UpsertAutomationDefinition(def.ID, def.Name, def.SpecJSON, "", false, time.Now()); err != nil {
+	if _, _, err := s.SetAutomationEnabled(def.ID, false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	delivered := 0
@@ -585,7 +584,7 @@ func TestObserveDueSchedulesFreshContinuityCreatesDistinctRuns(t *testing.T) {
 func TestScheduledSingletonContinuationSkipsPullRequestParsing(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -653,7 +652,7 @@ func TestScheduledSingletonContinuationSkipsPullRequestParsing(t *testing.T) {
 func TestScheduledSingletonFreshRunAfterTicketSweepGetsItsOwnTicket(t *testing.T) {
 	s := store.New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)
-	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{}`, "", true, now)
+	def, err := s.UpsertAutomationDefinition("nightly", "Nightly", `{}`, now)
 	if err != nil {
 		t.Fatal(err)
 	}

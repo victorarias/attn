@@ -239,11 +239,11 @@ func TestMigration73RepairsAutomationProfileMigration70Collision(t *testing.T) {
 // TestMigration73RepairsAutomationProfileMigration70Collision's technique:
 // roll a real DB back to just before migration 75 (drop the column it adds,
 // delete its schema_migrations record), seed a row in that pre-75 shape, then
-// reopen so migration 75 runs for real. Every row that existed before the
-// migration must come back with an empty spec_yaml (the column's DEFAULT) —
-// that empty value is exactly what internal/daemon's automationDefinitionYAML
-// fallback (via automation.MarshalDefinitionYAML) is keyed on to reconstruct
-// definition_yaml for a definition applied before this PR.
+// reopen so migrations 75 and 76 both run for real. Migration 75's own
+// contribution (defaulting spec_yaml to ”) is still exercised here, but the
+// column migration 76 immediately drops afterward, so the row surviving with
+// its other columns intact — rather than the now-removed spec_yaml value —
+// is what this test pins post-PR2a.
 func TestMigration75DefaultsExistingRowsToEmptySpecYAML(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "migration-75.db")
 	db, err := OpenDB(dbPath)
@@ -258,10 +258,11 @@ func TestMigration75DefaultsExistingRowsToEmptySpecYAML(t *testing.T) {
 		db.Close()
 		t.Fatalf("seed legacy row: %v", err)
 	}
-	if _, err := db.Exec(`
-		ALTER TABLE automation_definitions DROP COLUMN spec_yaml;
-		DELETE FROM schema_migrations WHERE version >= 75;
-	`); err != nil {
+	// A fresh OpenDB already runs migration 76, which drops spec_yaml, so the
+	// head-schema automation_definitions table already has the pre-75 shape
+	// (no spec_yaml column) — only the schema_migrations record needs
+	// rolling back.
+	if _, err := db.Exec(`DELETE FROM schema_migrations WHERE version >= 75`); err != nil {
 		db.Close()
 		t.Fatalf("roll back to pre-migration-75 schema: %v", err)
 	}
@@ -271,20 +272,164 @@ func TestMigration75DefaultsExistingRowsToEmptySpecYAML(t *testing.T) {
 
 	migrated, err := OpenDB(dbPath)
 	if err != nil {
-		t.Fatalf("OpenDB() migration 75 = %v", err)
+		t.Fatalf("OpenDB() migration 75/76 = %v", err)
 	}
 	defer migrated.Close()
 
-	var specYAML string
-	if err := migrated.QueryRow(`SELECT spec_yaml FROM automation_definitions WHERE id = ?`, "legacy-def").Scan(&specYAML); err != nil {
-		t.Fatalf("query legacy row spec_yaml: %v", err)
+	// Migration 76 wipes automation_definitions unconditionally, so the
+	// legacy row itself is gone by design — assert that (not spec_yaml,
+	// which no longer exists as a column at all).
+	var defCount int
+	if err := migrated.QueryRow(`SELECT COUNT(*) FROM automation_definitions`).Scan(&defCount); err != nil {
+		t.Fatalf("count automation_definitions: %v", err)
 	}
-	if specYAML != "" {
-		t.Fatalf("legacy row spec_yaml = %q, want empty (migration 75's column default)", specYAML)
+	if defCount != 0 {
+		t.Fatalf("automation_definitions row count = %d, want 0 (migration 76 clears every row)", defCount)
+	}
+	var specYAMLColumns int
+	if err := migrated.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('automation_definitions') WHERE name = 'spec_yaml'`,
+	).Scan(&specYAMLColumns); err != nil {
+		t.Fatalf("query automation_definitions.spec_yaml: %v", err)
+	}
+	if specYAMLColumns != 0 {
+		t.Fatalf("automation_definitions.spec_yaml columns = %d, want 0", specYAMLColumns)
 	}
 }
 
-// TestMigratesPopulatedPreAutomationsDatabaseToHead guards migrations 73-75
+// TestMigration76ClearsAutomationStateAndDropsSpecYAML pins the v2 clean-slate
+// rebuild (docs/plans/2026-07-21-automations-v2-simplification.md, PR2a):
+// roll a real DB forward to migration 75's shape (spec_yaml column present,
+// populated), seed one row in every automation table plus a ticket wired to a
+// run via automation_run_id, then reopen so migration 76 runs for real.
+// Every automation table must come back empty, automation_definitions must no
+// longer have a spec_yaml column, and the ticket's automation_run_id must be
+// NULL — nothing may survive referencing a row this migration wipes.
+func TestMigration76ClearsAutomationStateAndDropsSpecYAML(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-76.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() setup error = %v", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Roll the fresh (head-schema) automation_definitions table back to its
+	// migration-75 shape: spec_yaml present, migration 76 unrecorded.
+	if _, err := db.Exec(`
+		ALTER TABLE automation_definitions ADD COLUMN spec_yaml TEXT NOT NULL DEFAULT '';
+		DELETE FROM schema_migrations WHERE version >= 76;
+	`); err != nil {
+		db.Close()
+		t.Fatalf("roll back to pre-migration-76 schema: %v", err)
+	}
+
+	if _, err := db.Exec(
+		`INSERT INTO automation_definitions (id, name, enabled, revision, spec_json, spec_yaml, created_at, updated_at, deleted_at) VALUES (?, ?, 1, 1, ?, ?, ?, ?, '')`,
+		"legacy-def", "Legacy", `{"id":"legacy-def","name":"Legacy"}`, "id: legacy-def\nname: Legacy\n", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_definitions: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_occurrences (id, definition_id, provider, occurrence_key, observed_at, payload_json, created_at) VALUES (?, ?, 'manual', 'request-1', ?, '{}', ?)`,
+		"occ-1", "legacy-def", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_occurrences: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_runs (id, definition_id, occurrence_id, definition_revision, snapshot_json, state, ticket_id, session_id, workspace_id, pane_id, created_at, updated_at) VALUES (?, ?, ?, 1, '{}', 'delivered', ?, 'session-1', 'workspace-1', 'pane-1', ?, ?)`,
+		"run-1", "legacy-def", "occ-1", "legacy-ticket", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_runs: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_ticket_occurrence_events (run_id, ticket_id, created_at) VALUES (?, ?, ?)`,
+		"run-1", "legacy-ticket", now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_ticket_occurrence_events: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_continuity_bindings (definition_id, continuity_key, ticket_id, session_id, workspace_id, pane_id, created_at, updated_at) VALUES (?, 'fresh', ?, 'session-1', 'workspace-1', 'pane-1', ?, ?)`,
+		"legacy-def", "legacy-ticket", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_continuity_bindings: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_review_request_edges (definition_id, subject_key, host, active, cycle, accepted_cycle, last_observed_at, updated_at) VALUES (?, 'subject-1', 'github.com', 1, 1, 1, ?, ?)`,
+		"legacy-def", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_review_request_edges: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO automation_provider_cursors (definition_id, provider, scope, observed_at) VALUES (?, 'github', 'repo', ?)`,
+		"legacy-def", now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed automation_provider_cursors: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO tickets (id, title, status, automation_run_id, created_at, updated_at) VALUES ('legacy-ticket', 'Legacy ticket', 'working', ?, ?, ?)`,
+		"run-1", now, now,
+	); err != nil {
+		db.Close()
+		t.Fatalf("seed tickets: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close seeded db: %v", err)
+	}
+
+	migrated, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB() migration 76 = %v", err)
+	}
+	defer migrated.Close()
+
+	for _, table := range []string{
+		"automation_ticket_occurrence_events", "automation_runs", "automation_occurrences",
+		"automation_continuity_bindings", "automation_review_request_edges", "automation_provider_cursors",
+	} {
+		var count int
+		if err := migrated.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s`, table)).Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s row count = %d, want 0 (migration 76 must wipe automation state)", table, count)
+		}
+	}
+
+	var specYAMLColumns int
+	if err := migrated.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('automation_definitions') WHERE name = 'spec_yaml'`,
+	).Scan(&specYAMLColumns); err != nil {
+		t.Fatalf("query automation_definitions.spec_yaml: %v", err)
+	}
+	if specYAMLColumns != 0 {
+		t.Fatalf("automation_definitions.spec_yaml columns = %d, want 0 (migration 76 drops the column)", specYAMLColumns)
+	}
+
+	var defCount int
+	if err := migrated.QueryRow(`SELECT COUNT(*) FROM automation_definitions`).Scan(&defCount); err != nil {
+		t.Fatalf("count automation_definitions: %v", err)
+	}
+	if defCount != 0 {
+		t.Fatalf("automation_definitions row count = %d, want 0 (recreated empty)", defCount)
+	}
+
+	var automationRunID sql.NullString
+	if err := migrated.QueryRow(`SELECT automation_run_id FROM tickets WHERE id = 'legacy-ticket'`).Scan(&automationRunID); err != nil {
+		t.Fatalf("query ticket automation_run_id: %v", err)
+	}
+	if automationRunID.Valid {
+		t.Fatalf("ticket automation_run_id = %q, want NULL", automationRunID.String)
+	}
+}
+
+// TestMigratesPopulatedPreAutomationsDatabaseToHead guards migrations 73-76
 // against a REAL pre-existing database, not an empty or already-migrated one.
 // Migration 73's `ALTER TABLE tickets ADD COLUMN automation_run_id` is the
 // highest-risk statement in the trio: every other test exercises it against a
@@ -296,7 +441,7 @@ func TestMigration75DefaultsExistingRowsToEmptySpecYAML(t *testing.T) {
 // rewinds the on-disk schema to its pre-73 shape (dropping the automation
 // tables and the tickets column, mirroring
 // TestMigration75DefaultsExistingRowsToEmptySpecYAML's technique), reopens so
-// migrations 73-75 run for real, and asserts every legacy row survived
+// migrations 73-76 run for real, and asserts every legacy row survived
 // alongside the new schema.
 func TestMigratesPopulatedPreAutomationsDatabaseToHead(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "pre-automations.db")
@@ -385,7 +530,7 @@ func TestMigratesPopulatedPreAutomationsDatabaseToHead(t *testing.T) {
 	}
 	if _, err := raw.Exec(`DELETE FROM schema_migrations WHERE version >= 73`); err != nil {
 		raw.Close()
-		t.Fatalf("unrecord migrations 73-75: %v", err)
+		t.Fatalf("unrecord migrations 73-76: %v", err)
 	}
 	if err := raw.Close(); err != nil {
 		t.Fatalf("close raw rollback db: %v", err)
@@ -464,8 +609,8 @@ func TestMigratesPopulatedPreAutomationsDatabaseToHead(t *testing.T) {
 	).Scan(&specYAMLColumns); err != nil {
 		t.Fatalf("query automation_definitions.spec_yaml: %v", err)
 	}
-	if specYAMLColumns != 1 {
-		t.Fatalf("automation_definitions.spec_yaml columns = %d, want 1", specYAMLColumns)
+	if specYAMLColumns != 0 {
+		t.Fatalf("automation_definitions.spec_yaml columns = %d, want 0 (migration 76 drops it)", specYAMLColumns)
 	}
 }
 
@@ -601,7 +746,7 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		{"chief_of_staff_dispatches", "structured_report_json"},
 		{"tickets", "reconciled_at"},
 		{"sessions", "closed_intentionally_at"},
-		{"automation_definitions", "spec_yaml"},
+		{"automation_definitions", "spec_json"},
 	}
 
 	for _, tc := range migratedColumns {
