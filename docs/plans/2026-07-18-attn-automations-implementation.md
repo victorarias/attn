@@ -1076,7 +1076,8 @@ For every slice that touches daemon lifecycle, protocol, PTY, Git, or UI:
       stale-revision refusal followed by a successful Reload, a comment-only
       edit bumping the revision, and a save refused after the definition was
       deleted elsewhere), with the daemon's own state cross-checked through the
-      bundled CLI at every leg; the run id and build head are recorded below.
+      bundled CLI at every leg — run `automation-editor-2026-07-21T00-46-50-361Z`
+      against the app built from `c5629930` (2026-07-21), all nine green.
       D1 (comments survive)
       is proven by the stored `SpecYAML` still carrying the run's
       `# harness-marker:` line after the save/reload round-trip; definitions
