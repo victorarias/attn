@@ -690,7 +690,7 @@ func TestScheduledSingletonFreshRunAfterTicketSweepGetsItsOwnTicket(t *testing.T
 	}
 
 	d := &Daemon{store: s, wsHub: newWSHub()}
-	if err := d.EnsureTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: "singleton", IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}); err != nil {
+	if err := d.ensureAutomationTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: "singleton", IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}); err != nil {
 		t.Fatalf("a fresh thread with no artifacts to reuse must not be refused: %v", err)
 	}
 	if ticket, err := s.GetTicket(first.TicketID); err != nil || ticket != nil {

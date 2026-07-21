@@ -92,7 +92,7 @@ func TestPrepareRepositoryWorktreeUsesLocalOverrideAndExactRevision(t *testing.T
 		}},
 		IDs: automation.DeliveryIDs{SessionID: "session-1"},
 	}
-	prepared, err := d.PrepareLocation(context.Background(), req)
+	prepared, err := d.prepareAutomationLocation(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestPrepareRepositoryWorktreeDoesNotFallbackFromInvalidOverride(t *testing.
 		Provider: "github", Host: "github.com", Owner: "owner", Repository: "repo", Number: 42,
 		URL: "https://github.com/owner/repo/pull/42", State: "open", HeadSHA: strings.TrimSpace(string(revisionBytes)),
 	})
-	_, err = d.PrepareLocation(context.Background(), automation.WorkRequest{
+	_, err = d.prepareAutomationLocation(context.Background(), automation.WorkRequest{
 		Context: payload,
 		Location: automation.LocationSpec{Type: "repository_worktree", RepositorySources: automation.RepositorySources{
 			Default:   automation.RepositorySource{Type: "managed_cache"},
@@ -177,7 +177,7 @@ func TestPrepareRepositoryWorktreeChangedHeadCreatesNewExactSnapshot(t *testing.
 			Provider: "github", Host: "github.com", Owner: "owner", Repository: "repo", Number: 42,
 			URL: "https://github.com/owner/repo/pull/42", State: "open", HeadSHA: revision,
 		})
-		prepared, err := d.PrepareLocation(context.Background(), automation.WorkRequest{
+		prepared, err := d.prepareAutomationLocation(context.Background(), automation.WorkRequest{
 			Context: payload, Location: location, IDs: automation.DeliveryIDs{SessionID: sessionID},
 		})
 		if err != nil {
@@ -206,10 +206,10 @@ func TestPrepareManagedRepositoryWaitsForGitHubAuthentication(t *testing.T) {
 		}},
 		IDs: automation.DeliveryIDs{SessionID: "session-1"},
 	}
-	_, err := d.PrepareLocation(context.Background(), req)
+	_, err := d.prepareAutomationLocation(context.Background(), req)
 	var retryable *retryableAutomationDeliveryError
 	if !errors.As(err, &retryable) || !strings.Contains(err.Error(), "not authenticated") {
-		t.Fatalf("PrepareLocation err = %v, want retryable authentication error", err)
+		t.Fatalf("prepareAutomationLocation err = %v, want retryable authentication error", err)
 	}
 	managed := filepath.Join(root, "automation", "repos", attngit.RepositoryCacheKey("github.com/owner/repo"), "repo")
 	if _, statErr := os.Stat(managed); !os.IsNotExist(statErr) {
@@ -234,7 +234,7 @@ func TestPrepareRepositoryWorktreeLeavesRevisionFetchFailureRetryable(t *testing
 		URL: "https://github.com/owner/repo/pull/42", State: "open", HeadSHA: strings.Repeat("a", 40),
 	})
 	d := &Daemon{dataRoot: filepath.Join(root, "profile")}
-	_, err := d.PrepareLocation(context.Background(), automation.WorkRequest{
+	_, err := d.prepareAutomationLocation(context.Background(), automation.WorkRequest{
 		Context: payload,
 		Location: automation.LocationSpec{Type: "repository_worktree", RepositorySources: automation.RepositorySources{
 			Overrides: map[string]automation.RepositorySource{"github.com/owner/repo": {Type: "local_clone", Path: repo}},
@@ -243,7 +243,7 @@ func TestPrepareRepositoryWorktreeLeavesRevisionFetchFailureRetryable(t *testing
 	})
 	var retryable *retryableAutomationDeliveryError
 	if !errors.As(err, &retryable) || !strings.Contains(err.Error(), "fetch pull request head") {
-		t.Fatalf("PrepareLocation err = %v, want retryable revision-fetch failure", err)
+		t.Fatalf("prepareAutomationLocation err = %v, want retryable revision-fetch failure", err)
 	}
 }
 
@@ -286,7 +286,7 @@ func TestEnsureAutomationSessionPassesOneUnattendedContract(t *testing.T) {
 		ApprovalProductMode: launchcontract.ApprovalAuto, ApprovalDriverMode: launchcontract.ApprovalAuto,
 		DirectoryTrust: launchcontract.TrustConfiguredDirectory, Recovery: launchcontract.RecoveryAdoptOrRestartFresh,
 	}
-	err := d.EnsureSession(context.Background(), automation.WorkRequest{
+	err := d.ensureAutomationSession(context.Background(), automation.WorkRequest{
 		RunID: "run-1", Prompt: "Inspect the input.", Context: json.RawMessage(`{}`), Launch: spec,
 		IDs: automation.DeliveryIDs{SessionID: "session-1", WorkspaceID: "workspace-1"},
 	}, directory)
@@ -877,7 +877,7 @@ func TestFreshThreadAfterTicketSweepGetsItsOwnTicketNotTheOldOne(t *testing.T) {
 		t.Fatalf("second ids=%s/%s, want its own freshly reserved ones (no binding survived to hand it session-1/ticket-1)", second.SessionID, second.TicketID)
 	}
 	d := &Daemon{store: s, wsHub: newWSHub()}
-	if err := d.EnsureTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}); err != nil {
+	if err := d.ensureAutomationTicket(context.Background(), automation.WorkRequest{RunID: second.ID, DefinitionID: def.ID, ContinuityKey: subject, IDs: automation.DeliveryIDs{TicketID: second.TicketID, SessionID: second.SessionID}}); err != nil {
 		t.Fatalf("a fresh thread with no artifacts to reuse must not be refused: %v", err)
 	}
 	if ticket, err := s.GetTicket(first.TicketID); err != nil || ticket != nil {
@@ -974,7 +974,7 @@ func TestStoppedContinuationResumesRecordedReviewerWithPinnedContract(t *testing
 		Prompt: "Review locally", Context: json.RawMessage(`{}`), Launch: testAutomationLaunch("codex"),
 		IDs: automation.DeliveryIDs{TicketID: origin.TicketID, SessionID: origin.SessionID, WorkspaceID: origin.WorkspaceID, PaneID: origin.PaneID},
 	}
-	if err := d.EnsureSession(context.Background(), req, directory); err != nil {
+	if err := d.ensureAutomationSession(context.Background(), req, directory); err != nil {
 		t.Fatal(err)
 	}
 	spawn, ok := backend.LastSpawn()
@@ -1068,7 +1068,7 @@ func setupContinuationWorktree(t *testing.T) (*Daemon, automation.WorkRequest, s
 		t.Fatal(err)
 	}
 	firstReq := automation.WorkRequest{RunID: origin.ID, DefinitionID: def.ID, SubjectKey: subject, ContinuityKey: subject, Context: payload, Location: location, Launch: testAutomationLaunch("codex"), IDs: automation.DeliveryIDs{TicketID: origin.TicketID, SessionID: origin.SessionID, WorkspaceID: origin.WorkspaceID, PaneID: origin.PaneID}}
-	prepared, err := d.PrepareLocation(context.Background(), firstReq)
+	prepared, err := d.prepareAutomationLocation(context.Background(), firstReq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1088,7 +1088,7 @@ func TestContinuationPreservesOwnedDirtyWorktree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(worktree, "review-notes.txt"), []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := d.PrepareLocation(context.Background(), req)
+	prepared, err := d.prepareAutomationLocation(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1105,7 +1105,7 @@ func TestContinuationFailsWhenOwnedWorktreeIsMissing(t *testing.T) {
 	if err := os.RemoveAll(worktree); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.PrepareLocation(context.Background(), req); err == nil || !strings.Contains(err.Error(), "worktree is missing") {
+	if _, err := d.prepareAutomationLocation(context.Background(), req); err == nil || !strings.Contains(err.Error(), "worktree is missing") {
 		t.Fatalf("missing worktree err=%v", err)
 	}
 }
@@ -1122,7 +1122,7 @@ func TestWithdrawnBeforeLaunchReRequestCreatesFirstWorktree(t *testing.T) {
 	if err := os.RemoveAll(worktree); err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := d.PrepareLocation(context.Background(), req)
+	prepared, err := d.prepareAutomationLocation(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
