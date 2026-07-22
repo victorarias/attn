@@ -95,7 +95,7 @@ async function poll(fn, description, timeoutMs = 30_000) {
 }
 
 function sqliteRow(dbPath, sql) {
-  const out = execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim();
+  const out = execFileSync('sqlite3', ['-cmd', '.timeout 5000', dbPath, sql], { encoding: 'utf8' }).trim();
   return out.length === 0 ? null : out.split('|');
 }
 

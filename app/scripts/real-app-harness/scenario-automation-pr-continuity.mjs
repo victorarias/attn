@@ -276,7 +276,7 @@ async function main() {
       fs.writeFileSync(path.join(worktree, 'review-notes.txt'), 'preserve me across review cycles\n');
       run(binary, ['ticket', 'status', 'completed', '--ticket', ticketID, '--session', sessionID, '--comment', 'first review complete'], daemonEnv);
       const db = path.join(dataDirForProfile(profile), 'attn.db');
-      execFileSync('sqlite3', [db, `UPDATE tickets SET archived_at=datetime('now') WHERE id='${ticketID.replaceAll("'", "''")}';`]);
+      execFileSync('sqlite3', ['-cmd', '.timeout 5000', db, `UPDATE tickets SET archived_at=datetime('now') WHERE id='${ticketID.replaceAll("'", "''")}';`]);
       await client.request('close_session', { sessionId: sessionID });
       await observer.waitFor(() => !observer.getSession(sessionID) ? true : null, 'origin reviewer to unregister');
     });
