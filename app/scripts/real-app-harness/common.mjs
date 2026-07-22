@@ -141,6 +141,13 @@ export async function captureScreenshot(driver, outputPath) {
 // not to protect a dead run's leftovers, so it's the wrong gate for this
 // path; `unregister` is the same underlying op the app itself uses via
 // sendUnregisterSession, minus that interactive guard.
+// Path-component-aware containment: '/a/b-old/x' is NOT under '/a/b'. The
+// sweep may tear down chief-of-staff sessions, so this boundary must hold.
+export function isDirectoryUnderRoot(directory, roots) {
+  if (!directory) return false;
+  return roots.some((root) => directory === root || directory.startsWith(root + path.sep));
+}
+
 export async function sweepStaleHarnessSessions(observer, {
   sessionRootDir = process.env.ATTN_REAL_APP_SESSION_ROOT || path.join(os.tmpdir(), 'attn-real-app-sessions'),
   log = (m) => console.log(`[harness] ${m}`),
@@ -166,7 +173,7 @@ export async function sweepStaleHarnessSessions(observer, {
       return sessionRootDir;
     }
   })()])];
-  const isUnderSessionRoot = (directory) => Boolean(directory) && rootCandidates.some((root) => directory.startsWith(root));
+  const isUnderSessionRoot = (directory) => isDirectoryUnderRoot(directory, rootCandidates);
   const stale = [...observer.sessionsById.values()].filter((session) => isUnderSessionRoot(session.directory));
   if (stale.length === 0) {
     return { swept: 0 };
