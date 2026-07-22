@@ -82,6 +82,16 @@ type prReadiness struct {
 	Draft                                                     bool
 	Checks                                                    []prCheck
 	Comments                                                  []prComment
+	// ReviewerRequested is true when the reviewer is currently in the PR's
+	// requested reviewers, i.e. a (re-)review is pending. While it is set, any
+	// existing verdict from them is stale context, not their answer.
+	ReviewerRequested bool
+	// ReviewSubmittedAt is when the review that set ReviewState was submitted;
+	// zero when there is no verdict. LatestReviewAt is the newest review the
+	// reviewer has submitted in any state on any commit, and serves as the
+	// baseline the waiter records at start to recognize a stale verdict.
+	ReviewSubmittedAt time.Time
+	LatestReviewAt    time.Time
 }
 
 func (r *prReadiness) ready() bool {
@@ -342,6 +352,7 @@ query($owner:String!,$name:String!,$number:Int!){
         pageInfo{hasNextPage}
         nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}
       }}}}}
+      reviewRequests(first:100){nodes{requestedReviewer{__typename ... on User{login}}}}
       reviews(last:100){nodes{id state bodyText submittedAt author{__typename login} commit{oid}
         comments(first:100){pageInfo{hasNextPage} nodes{id createdAt author{__typename login}}}}}
       comments(last:100){nodes{id createdAt author{__typename login}}}
@@ -383,11 +394,16 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 		Data struct {
 			Repository struct {
 				PullRequest *struct {
-					Number     json.Number `json:"number"`
-					State      string      `json:"state"`
-					IsDraft    bool        `json:"isDraft"`
-					HeadRefOID string      `json:"headRefOid"`
-					Commits    struct {
+					Number         json.Number `json:"number"`
+					State          string      `json:"state"`
+					IsDraft        bool        `json:"isDraft"`
+					HeadRefOID     string      `json:"headRefOid"`
+					ReviewRequests struct {
+						Nodes []struct {
+							RequestedReviewer prGraphQLAuthor `json:"requestedReviewer"`
+						} `json:"nodes"`
+					} `json:"reviewRequests"`
+					Commits struct {
 						Nodes []struct {
 							Commit struct {
 								StatusCheckRollup *struct {
@@ -459,6 +475,13 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 		HeadSHA: pr.HeadRefOID, Reviewer: opts.Reviewer, ReviewState: "waiting",
 	}
 
+	for _, request := range pr.ReviewRequests.Nodes {
+		if request.RequestedReviewer.TypeName == "User" && strings.EqualFold(request.RequestedReviewer.Login, opts.Reviewer) {
+			result.ReviewerRequested = true
+			break
+		}
+	}
+
 	if len(pr.Commits.Nodes) > 0 {
 		if rollup := pr.Commits.Nodes[0].Commit.StatusCheckRollup; rollup != nil {
 			// Checks are fetched first:100. Truncation here could hide a
@@ -491,6 +514,11 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 	var latest time.Time
 	for _, review := range pr.Reviews.Nodes {
 		state := strings.ToUpper(review.State)
+		// The baseline recorded at wait start is the reviewer's newest review in
+		// any state on any commit, so a re-review can be recognized as newer.
+		if strings.EqualFold(review.Author.Login, opts.Reviewer) && review.SubmittedAt.After(result.LatestReviewAt) {
+			result.LatestReviewAt = review.SubmittedAt
+		}
 		// A review with no text of its own is just the wrapper GitHub creates
 		// around an inline comment; its comments are reported below, so
 		// counting the wrapper too would report one remark twice.
@@ -513,6 +541,7 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 			continue
 		}
 		latest = review.SubmittedAt
+		result.ReviewSubmittedAt = review.SubmittedAt
 		if state == "APPROVED" {
 			result.ReviewState = "approved"
 		} else {
@@ -589,6 +618,7 @@ func summarizePRChecks(checks []prCheck) string {
 func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prWaitOptions, progress io.Writer) (*prReadiness, prOutcome, error) {
 	var lastLine, lastHead string
 	var baseline map[string]bool
+	var reviewBaseline time.Time
 	last := &prReadiness{Number: strconv.Itoa(opts.Number), Reviewer: opts.Reviewer, CheckState: checksNone, ReviewState: "waiting"}
 
 	for {
@@ -618,6 +648,10 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 			for _, comment := range observation.Comments {
 				baseline[comment.ID] = true
 			}
+			// Mirror the comment baseline for reviews: the reviewer's newest
+			// review at wait start is stale context, so a verdict returns only
+			// when it (or a re-review) is newer than this.
+			reviewBaseline = observation.LatestReviewAt
 		} else if fresh := unseenPRComments(observation.Comments, baseline); len(fresh) > 0 {
 			observation.Comments = fresh
 			return observation, outcomeComment, nil
@@ -628,9 +662,9 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 			return observation, outcomeClosed, nil
 		case observation.CheckState == checksFailed:
 			return observation, outcomeChecksFailed, nil
-		case observation.ReviewState == "changes_requested":
+		case observation.ReviewState == "changes_requested" && freshReviewVerdict(observation, reviewBaseline):
 			return observation, outcomeChangesRequested, nil
-		case observation.ready():
+		case observation.ready() && freshReviewVerdict(observation, reviewBaseline):
 			return observation, outcomeApproved, nil
 		}
 
@@ -638,6 +672,19 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 			return observation, outcomeTimeout, nil
 		}
 	}
+}
+
+// freshReviewVerdict reports whether the reviewer's current verdict should end
+// the wait. A verdict is always the reviewer's current answer unless a re-review
+// is pending, in which case only a verdict submitted after the baseline recorded
+// at wait start counts; the pre-existing verdict is stale context. An
+// already-approved PR with no pending re-review still returns immediately —
+// approval is a state, not an event.
+func freshReviewVerdict(observation *prReadiness, baseline time.Time) bool {
+	if !observation.ReviewerRequested {
+		return true
+	}
+	return observation.ReviewSubmittedAt.After(baseline)
 }
 
 func unseenPRComments(comments []prComment, baseline map[string]bool) []prComment {
@@ -704,7 +751,11 @@ options:
   --json                          emit the result as JSON on stdout
 
 Bot comments are ignored. Comments already present when the wait starts are the
-baseline and never reported; only comments posted during the wait are.
+baseline and never reported; only comments posted during the wait are. A review
+verdict present at wait start is likewise baselined: while the reviewer is
+re-requested (a re-review is pending) the pre-existing verdict is stale and does
+not end the wait; only a review submitted after the baseline does. When the
+reviewer is not re-requested, an existing verdict returns immediately.
 
 exit: 0 approved; 1 checks failed; 2 usage; 3 changes requested; 4 new comment;
       5 error; 124 timeout
