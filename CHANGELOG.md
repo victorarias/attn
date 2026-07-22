@@ -6,6 +6,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-22]
+
+### Fixed
+- **Terminal panes no longer get stuck narrower than their pane after closing a
+  neighboring split.** Content now grows to fill the pane again; previously it
+  could stay wrapped at the old, narrower width until an unrelated layout change
+  triggered a redraw.
+- Closing a shell pane now hangs the shell up promptly instead of stalling ~10 seconds and force-killing it; remote pane/session close reliably confirms worker teardown instead of timing out mid-kill.
+
 ## [2026-07-21]
 
 ### Fixed

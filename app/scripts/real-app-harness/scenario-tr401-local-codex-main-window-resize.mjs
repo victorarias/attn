@@ -60,13 +60,25 @@ function codexHeaderOptions(description) {
 function assertCompleteCodexHeaderFrame(state, description) {
   const lines = state?.pane?.visibleContent?.lines || [];
   const text = lines.join('\n');
+  // Codex may print extra bordered boxes (e.g. the "Update available!" banner
+  // when a newer release exists), so border counts over the whole pane are not
+  // meaningful. Anchor on the box that CONTAINS the header line instead: the
+  // nearest ╭ line above it and the nearest ╰ line below it must both be
+  // complete at the current width.
   const headerCount = (text.match(/OpenAI Codex/g) || []).length;
-  const topBorders = lines.filter((line) => line.includes('╭'));
-  const bottomBorders = lines.filter((line) => line.includes('╰'));
-  const completeTopBorder = topBorders.length === 1 && topBorders[0].trimEnd().endsWith('╮');
-  const completeBottomBorder = bottomBorders.length === 1 && bottomBorders[0].trimEnd().endsWith('╯');
-  if (headerCount !== 1 || !completeTopBorder || !completeBottomBorder) {
-    throw new Error(`${description}: expected one complete Codex header frame, found ${headerCount} headers, ${topBorders.length} top borders, and ${bottomBorders.length} bottom borders\n${text}`);
+  const headerIndex = lines.findIndex((line) => line.includes('OpenAI Codex'));
+  let topBorder = null;
+  for (let i = headerIndex; i >= 0; i -= 1) {
+    if (lines[i].includes('╭')) { topBorder = lines[i]; break; }
+  }
+  let bottomBorder = null;
+  for (let i = headerIndex; i >= 0 && i < lines.length; i += 1) {
+    if (lines[i].includes('╰')) { bottomBorder = lines[i]; break; }
+  }
+  const completeTopBorder = topBorder != null && topBorder.trimEnd().endsWith('╮');
+  const completeBottomBorder = bottomBorder != null && bottomBorder.trimEnd().endsWith('╯');
+  if (headerCount !== 1 || headerIndex < 0 || !completeTopBorder || !completeBottomBorder) {
+    throw new Error(`${description}: expected one complete Codex header frame, found ${headerCount} headers, topBorderComplete=${completeTopBorder}, bottomBorderComplete=${completeBottomBorder}\n${text}`);
   }
 }
 

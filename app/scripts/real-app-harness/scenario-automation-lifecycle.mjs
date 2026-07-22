@@ -169,11 +169,10 @@ function createCodexProbe(root) {
 
 const API_VERSION = 'attn.dev/automations/v1alpha1';
 
-function editRebindDefinitionYAML({ id, locationPath, enabled, executable, prompt }) {
+function editRebindDefinitionYAML({ id, locationPath, executable, prompt }) {
   return `api_version: ${API_VERSION}
 id: ${id}
 name: Slice 7 packaged edit-rebind proof
-enabled: ${enabled}
 trigger:
   type: scheduled
   schedule:
@@ -194,11 +193,10 @@ location:
 `;
 }
 
-function deleteResurrectDefinitionYAML({ id, locationPath, enabled, executable }) {
+function deleteResurrectDefinitionYAML({ id, locationPath, executable }) {
   return `api_version: ${API_VERSION}
 id: ${id}
 name: Slice 7 packaged delete-resurrect proof
-enabled: ${enabled}
 trigger:
   type: manual
 prompt: |
@@ -216,11 +214,10 @@ location:
 
 const CLEANUP_IDENTITY = 'mock.github.local/owner/repo';
 
-function cleanupLifecycleDefinitionYAML({ id, enabled, executable, repoPath, prompt }) {
+function cleanupLifecycleDefinitionYAML({ id, executable, repoPath, prompt }) {
   return `api_version: ${API_VERSION}
 id: ${id}
 name: Slice 7 packaged cleanup-dirty-safe proof
-enabled: ${enabled}
 trigger:
   type: github_review_requested
   repositories:
@@ -441,7 +438,7 @@ async function main() {
     let run2 = null;
     let run3 = null;
     await runner.step('leg1_edit_rebind', async () => {
-      fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, enabled: true, executable: probe.executable, prompt: PROMPT_P1 }));
+      fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, executable: probe.executable, prompt: PROMPT_P1 }));
       runJSON(binary, ['automation', 'apply', '--file', editDefinitionFile], daemonEnv);
       editApplied = true;
       await waitForScheduleAnchor(dbPath, editID);
@@ -455,7 +452,7 @@ async function main() {
       runner.assert(Boolean(run1.TicketID) && Boolean(run1.SessionID), 'P1 delivery reserves a ticket and session', run1);
       runner.assert(run1.LastError === '', 'P1 delivery has no error', run1);
 
-      fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, enabled: true, executable: probe.executable, prompt: PROMPT_P2 }));
+      fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, executable: probe.executable, prompt: PROMPT_P2 }));
       runJSON(binary, ['automation', 'apply', '--file', editDefinitionFile], daemonEnv);
 
       run2 = await poll(() => {
@@ -472,7 +469,7 @@ async function main() {
         { before: run1, after: run1AfterEdit },
       );
 
-      fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, enabled: true, executable: probe.executable, prompt: PROMPT_P1 }));
+      fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, executable: probe.executable, prompt: PROMPT_P1 }));
       runJSON(binary, ['automation', 'apply', '--file', editDefinitionFile], daemonEnv);
 
       run3 = await poll(() => {
@@ -488,8 +485,7 @@ async function main() {
         { run1, run2, run3 },
       );
 
-      fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, enabled: false, executable: probe.executable, prompt: PROMPT_P1 }));
-      runJSON(binary, ['automation', 'apply', '--file', editDefinitionFile], daemonEnv);
+      runJSON(binary, ['automation', 'disable', editID], daemonEnv);
     });
 
     // Leg 2: delete-resurrect. Deleting has no UI affordance yet (see the
@@ -499,7 +495,7 @@ async function main() {
     // design A2/A4 actually shipped.
     let deleteRunID = '';
     await runner.step('leg2_delete_resurrect', async () => {
-      fs.writeFileSync(deleteDefinitionFile, deleteResurrectDefinitionYAML({ id: deleteID, locationPath: deleteFixture, enabled: true, executable: probe.executable }));
+      fs.writeFileSync(deleteDefinitionFile, deleteResurrectDefinitionYAML({ id: deleteID, locationPath: deleteFixture, executable: probe.executable }));
       runJSON(binary, ['automation', 'apply', '--file', deleteDefinitionFile], daemonEnv);
       deleteApplied = true;
 
@@ -536,7 +532,7 @@ async function main() {
       const deletedRow = sqliteRow(dbPath, `SELECT id, deleted_at FROM automation_definitions WHERE id='${sqlEscape(deleteID)}';`);
       runner.assert(deletedRow && deletedRow[1] !== '' && deletedRow[1] !== undefined, 'the definition row is soft-deleted (deleted_at set) in the DB', { deletedRow });
 
-      fs.writeFileSync(deleteDefinitionFile, deleteResurrectDefinitionYAML({ id: deleteID, locationPath: deleteFixture, enabled: true, executable: probe.executable }));
+      fs.writeFileSync(deleteDefinitionFile, deleteResurrectDefinitionYAML({ id: deleteID, locationPath: deleteFixture, executable: probe.executable }));
       runJSON(binary, ['automation', 'apply', '--file', deleteDefinitionFile], daemonEnv);
 
       await poll(async () => {
@@ -553,8 +549,7 @@ async function main() {
       const resurrectedRow = sqliteRow(dbPath, `SELECT id, deleted_at FROM automation_definitions WHERE id='${sqlEscape(deleteID)}';`);
       runner.assert(resurrectedRow && (resurrectedRow[1] ?? '') === '', 'the definition row is live again (deleted_at cleared) in the DB', { resurrectedRow });
 
-      fs.writeFileSync(deleteDefinitionFile, deleteResurrectDefinitionYAML({ id: deleteID, locationPath: deleteFixture, enabled: false, executable: probe.executable }));
-      runJSON(binary, ['automation', 'apply', '--file', deleteDefinitionFile], daemonEnv);
+      runJSON(binary, ['automation', 'disable', deleteID], daemonEnv);
     });
 
     // Leg 3: cleanup-dirty-safe. Three independent worktrees under ONE
@@ -568,7 +563,7 @@ async function main() {
     // dropped by the edits that rotated past them, so run1/run2 are
     // genuinely unbound and run3 is not.
     await runner.step('leg3_cleanup_dirty_safe', async () => {
-      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: true, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V1 }));
+      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V1 }));
       runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
       cleanupApplied = true;
 
@@ -583,7 +578,7 @@ async function main() {
       await client.request('close_session', { sessionId: cleanRun.SessionID });
       await waitSessionGone(observer, cleanRun.SessionID, 'first cleanup-leg session to unregister');
 
-      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: true, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V2 }));
+      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V2 }));
       runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
 
       await setRequested(mock.url, false);
@@ -608,7 +603,7 @@ async function main() {
       // A third edit rotates the binding again, dropping run2's binding (its
       // worktree is now unbound too, just dirty) and minting run3 as the
       // definition's new current thread.
-      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: true, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V3 }));
+      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V3 }));
       runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
 
       await setRequested(mock.url, false);
@@ -674,8 +669,7 @@ async function main() {
         second,
       );
 
-      fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: false, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V3 }));
-      runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
+      runJSON(binary, ['automation', 'disable', cleanupID], daemonEnv);
     });
 
     runner.finishSuccess({ profile, editID, deleteID, cleanupID, run1, run2, run3, deleteRunID });
@@ -694,20 +688,17 @@ async function main() {
     if (daemonEnv) {
       if (editApplied && editFixture && fs.existsSync(editFixture)) {
         try {
-          fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, enabled: false, executable: probe.executable, prompt: PROMPT_P1 }));
-          run(binary, ['automation', 'apply', '--file', editDefinitionFile], daemonEnv);
+          run(binary, ['automation', 'disable', editID], daemonEnv);
         } catch {}
       }
       if (deleteApplied && deleteFixture && fs.existsSync(deleteFixture)) {
         try {
-          fs.writeFileSync(deleteDefinitionFile, deleteResurrectDefinitionYAML({ id: deleteID, locationPath: deleteFixture, enabled: false, executable: probe.executable }));
-          run(binary, ['automation', 'apply', '--file', deleteDefinitionFile], daemonEnv);
+          run(binary, ['automation', 'disable', deleteID], daemonEnv);
         } catch {}
       }
       if (cleanupApplied && cleanupFixture) {
         try {
-          fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, enabled: false, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V3 }));
-          run(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
+          run(binary, ['automation', 'disable', cleanupID], daemonEnv);
         } catch {}
       }
     }
