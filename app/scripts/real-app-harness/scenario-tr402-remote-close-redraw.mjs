@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { assertCommonTargetAllowed, parseCommonArgs, printCommonHelp } from './common.mjs';
+import { assertCommonTargetAllowed, DEFAULT_REMOTE_SSH_TARGET, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
@@ -33,7 +33,7 @@ function parseArgs(argv) {
 
   const options = {
     ...parseCommonArgs([]),
-    sshTarget: process.env.ATTN_REMOTE_CLOSE_REDRAW_SSH_TARGET || 'ai-sandbox',
+    sshTarget: process.env.ATTN_REMOTE_CLOSE_REDRAW_SSH_TARGET || DEFAULT_REMOTE_SSH_TARGET,
     remoteDirectory: process.env.ATTN_REMOTE_CLOSE_REDRAW_REMOTE_DIRECTORY || '',
     remoteAgent: process.env.ATTN_REMOTE_CLOSE_REDRAW_REMOTE_AGENT || 'codex',
   };
@@ -78,7 +78,7 @@ async function main() {
   if (help) {
     printCommonHelp('scripts/real-app-harness/scenario-tr402-remote-close-redraw.mjs');
     console.log(`Additional options:
-  --ssh-target <target>          SSH target for the remote endpoint (default: ai-sandbox)
+  --ssh-target <target>          SSH target for the remote endpoint (default: attn-remote@orb — the provisioned OrbStack VM)
   --remote-directory <path>      Remote cwd for the spawned session (default: remote $HOME)
   --remote-agent <agent>         Agent for the remote session (default: codex)
 `);

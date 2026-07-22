@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import {
   createSessionAndWaitForInitialPane,
   assertCommonTargetAllowed,
+  DEFAULT_REMOTE_SSH_TARGET,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -19,7 +23,9 @@ import {
   assertPaneVisibleContent,
   assertPaneVisibleContentPreserved,
   captureSessionArtifacts,
+  sleep,
   waitForFirstWorkspacePane,
+  waitForPaneShellReady,
   waitForPaneText,
   waitForNewShellPane,
   waitForPaneState,
@@ -41,6 +47,7 @@ import {
   removeStaleHarnessScenarioSessions,
   waitForEndpointConnected,
 } from './scenarioRemote.mjs';
+import { currentHarnessProfile } from './harnessProfile.mjs';
 
 function isNativeCaptureUnavailable(error) {
   const message = error instanceof Error ? error.message : String(error || '');
@@ -59,7 +66,7 @@ function parseArgs(argv) {
 
   const options = {
     ...parseCommonArgs([]),
-    sshTarget: process.env.ATTN_REMOTE_RELAUNCH_CLOSE_REDRAW_SSH_TARGET || 'ai-sandbox',
+    sshTarget: process.env.ATTN_REMOTE_RELAUNCH_CLOSE_REDRAW_SSH_TARGET || DEFAULT_REMOTE_SSH_TARGET,
     remoteDirectory: process.env.ATTN_REMOTE_RELAUNCH_CLOSE_REDRAW_REMOTE_DIRECTORY || '',
     remoteAgent: process.env.ATTN_REMOTE_RELAUNCH_CLOSE_REDRAW_REMOTE_AGENT || 'codex',
   };
@@ -113,6 +120,148 @@ async function seedTranscriptAnchor(client, sessionId, paneId, anchorPrompt, anc
   );
 }
 
+const PROBE_AGENT_PREFIX = 'probe:';
+
+// `--remote-agent probe:codex` / `probe:claude` select the deterministic
+// `attn _probe-tui` fixture instead of a live agent. Returns null for any
+// other --remote-agent value (the real-agent path is unaffected).
+function parseProbeStyle(remoteAgent) {
+  const raw = String(remoteAgent || '');
+  if (!raw.startsWith(PROBE_AGENT_PREFIX)) {
+    return null;
+  }
+  const style = raw.slice(PROBE_AGENT_PREFIX.length).trim().toLowerCase();
+  if (style !== 'codex' && style !== 'claude') {
+    throw new Error(`Unsupported probe style in --remote-agent '${remoteAgent}' (expected probe:codex or probe:claude)`);
+  }
+  return style;
+}
+
+// Mirrors remoteBinaryName in internal/hub/ssh.go:29 — default profile
+// installs as "attn", named profiles install as "attn-<profile>".
+export function remoteProbeBinaryName(profile) {
+  const trimmed = String(profile || '').trim();
+  return trimmed === '' ? 'attn' : `attn-${trimmed}`;
+}
+
+// Mirrors the remote binary resolution in internal/hub/ssh.go:69 (used by
+// remoteAttnCommand) so the probe launches from whichever location the hub
+// actually installed to. This has to be resolved IN THE REMOTE SHELL, not
+// precomputed in JS: the launchEnv ATTN_REMOTE_ATTN_BIN this scenario passes
+// to the packaged app only reaches a daemon process it spawns fresh — an
+// already-running daemon (the common case once the harness reuses a live
+// app) never sees it, so the bootstrapper installs to the default
+// $HOME/.local/bin/<binaryName> path instead. Precomputing the path in JS
+// guesses which world the daemon is in and guesses wrong whenever a daemon
+// was already running; asking the shell to fall back the same way
+// remoteAttnCommand does is the only way to match the actual install
+// location in both worlds.
+export function buildProbeLaunchCommand(binaryName, style) {
+  return `ATTN_BIN="\${ATTN_REMOTE_ATTN_BIN:-$HOME/.local/bin/${binaryName}}"; if [ ! -x "$ATTN_BIN" ] && [ -z "\${ATTN_REMOTE_ATTN_BIN:-}" ]; then ATTN_BIN="$(command -v ${binaryName} 2>/dev/null || true)"; fi; exec "$ATTN_BIN" _probe-tui --style ${style}`;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// The probe's style row, independent of geometry/seq — mirrors bannerStyleRow
+// in internal/probetui/probetui.go ("style=<style> seq=<seq> READY").
+function probeStyleRowRegex(style) {
+  return new RegExp(`style=${escapeRegExp(style)} seq=\\d+ READY`);
+}
+
+// Truncation-tolerant style identity: just `style=<style>`, 11-12 chars, so it
+// survives right-truncation in panes as narrow as ~20 cols where the full
+// "style=<style> seq=<n> READY" row (24 chars) cannot fit. Used by the at-grid
+// wait, where the geometry row already proves a fresh repaint; full-row
+// readiness matching stays width-safe because it only runs pre-split at full
+// pane width (prepareRemoteProbeBaseline).
+export function probeStyleIdentityRegex(style) {
+  return new RegExp(`style=${escapeRegExp(style)}(?=\\s|$)`);
+}
+
+// Geometry and style are painted as two SEPARATE rows (bannerGeometryRow /
+// bannerStyleRow in internal/probetui/probetui.go) — split because a single
+// combined banner line truncated past recognition in narrow (~20-31 col)
+// panes. Both matchers must pass independently against the pane's joined
+// visible text; neither row alone proves the fixture is both alive and
+// painting the requested style.
+export function probeBannerReadyMatchers(style) {
+  return [/ATTN-PROBE \d+x\d+/, probeStyleRowRegex(style)];
+}
+
+// The probe's geometry row pinned to an exact grid — used to confirm the
+// fixture has repainted at the pane's *current* geometry after a
+// resize/relaunch, not a stale pre-resize frame. `(?!\d)` guards against a
+// grid like 31x2 matching as a prefix of 31x25.
+export function buildProbeBannerAtGridRegex(cols, rows) {
+  return new RegExp(`ATTN-PROBE ${cols}x${rows}(?!\\d)`);
+}
+
+// Additional probe-mode-only geometry assertion: waits for the pane's visible
+// content to contain the geometry row pinned to the pane's *current* grid
+// (cols x rows) AND the style identity for the expected style, so a redraw
+// claim is verified against ground truth instead of density heuristics alone.
+// The style check uses the truncation-tolerant identity regex, not the full
+// READY row, because narrow post-split panes truncate the style row.
+async function waitForProbeBannerAtGrid(client, sessionId, paneId, style, timeoutMs = 20_000) {
+  const styleRegex = probeStyleIdentityRegex(style);
+  return waitForPaneState(
+    client,
+    sessionId,
+    paneId,
+    (state) => {
+      const visibleContent = state?.pane?.visibleContent || null;
+      const cols = visibleContent?.cols;
+      const rows = Array.isArray(visibleContent?.lines) ? visibleContent.lines.length : null;
+      if (typeof cols !== 'number' || typeof rows !== 'number') {
+        return false;
+      }
+      const joined = (visibleContent.lines || []).join('\n');
+      return buildProbeBannerAtGridRegex(cols, rows).test(joined) && styleRegex.test(joined);
+    },
+    `pane ${paneId} probe banner at current grid (style=${style})`,
+    timeoutMs,
+  );
+}
+
+// Probe-mode counterpart to prepareRemoteAgentBaseline: the session is spawned
+// with agent 'shell' (not the probe style), so the initial pane is a plain
+// shell. Launch the probe TUI in it and wait for its readiness banner — the
+// probe reads no input, so there is no transcript-anchor prompt to seed; the
+// banner itself is the anchor for the rest of the scenario.
+async function prepareRemoteProbeBaseline(client, sessionId, style) {
+  await client.request('select_session', { sessionId });
+  const initialPane = await waitForFirstWorkspacePane(client, sessionId, `initial pane for probe session ${sessionId}`, 30_000);
+  const paneId = initialPane.paneId;
+  await waitForPaneVisible(client, sessionId, paneId, 20_000);
+  await waitForPaneShellReady(client, sessionId, paneId, {
+    timeoutMs: 30_000,
+    description: `probe pane ${paneId} shell ready before launching probe TUI`,
+  });
+  // Text and the doorbell CR are sent as SEPARATE write_pane calls — a fast
+  // burst ending in CR is treated as a bracketed paste and never submits.
+  const probeCommand = buildProbeLaunchCommand(remoteProbeBinaryName(currentHarnessProfile()), style);
+  await client.request('write_pane', { sessionId, paneId, text: probeCommand, submit: false });
+  await sleep(300);
+  await client.request('write_pane', { sessionId, paneId, text: '\r', submit: false });
+  const readyMatchers = probeBannerReadyMatchers(style);
+  await waitForPaneText(
+    client,
+    sessionId,
+    paneId,
+    (text) => readyMatchers.every((matcher) => matcher.test(text)),
+    `probe TUI ready banner (style=${style}) in pane ${paneId}`,
+    45_000,
+  );
+  // Stable across seq and relaunch — unlike the real-agent transcript anchor,
+  // this text never scrolls out or gets collapsed by agent redraw behavior.
+  // Just the geometry row's fixed prefix: the style row can itself truncate
+  // in very narrow panes, so it must not be the anchor other assertions key
+  // off of (see probeBannerReadyMatchers / bannerStyleRow).
+  return { paneId, requiredVisibleText: 'ATTN-PROBE' };
+}
+
 async function prepareRemoteAgentBaseline(client, runner, sessionId, remoteAgent, transcriptAnchorToken, transcriptAnchorPrompt) {
   const agent = String(remoteAgent || 'codex').toLowerCase();
   if (agent === 'claude') {
@@ -145,7 +294,7 @@ async function waitForPaneContentStable(client, sessionId, paneId, { intervalMs 
   }
 }
 
-async function captureInitialPaneHealthyState(client, runner, sessionId, paneId, prefix, descriptionBase, requiredVisibleText = null) {
+async function captureInitialPaneHealthyState(client, runner, sessionId, paneId, prefix, descriptionBase, requiredVisibleText = null, probeStyle = null) {
   await waitForPaneVisible(client, sessionId, paneId, 30_000);
   // No scroll: captures assert on the live bottom viewport — agent startup output has
   // outgrown one screen, so top-of-scrollback holds only banners, and the bottom is
@@ -160,6 +309,12 @@ async function captureInitialPaneHealthyState(client, runner, sessionId, paneId,
     timeoutMs: 30_000,
     description: `${descriptionBase} visible content`,
   });
+  if (probeStyle) {
+    // Probe mode only: verify the banner has repainted at the pane's current
+    // grid, not just that dense content is present (ground truth on top of
+    // the density heuristic above).
+    await waitForProbeBannerAtGrid(client, sessionId, paneId, probeStyle, 30_000);
+  }
   await assertPaneCoverage(client, sessionId, paneId, {
     minWidthRatio: 0.8,
     minHeightRatio: 0.7,
@@ -212,6 +367,7 @@ async function closePaneAndAssertRecovery({
   enforceNativeStability = true,
   requiredVisibleText = null,
   preserveVisibleContent = true,
+  probeStyle = null,
 }) {
   await client.request('select_session', { sessionId });
   await waitForPaneVisible(client, sessionId, initialPaneId, 20_000);
@@ -233,7 +389,13 @@ async function closePaneAndAssertRecovery({
     `${label} initial pane width recovery`,
     20_000,
   );
-  if (preserveVisibleContent) {
+  // Probe mode skips line-anchor preservation: every probe row encodes the
+  // current geometry/frame seq (by design), so baseline lines from a different
+  // grid can never match. The waitForProbeBannerAtGrid call below is the
+  // probe-mode replacement — it proves a fresh repaint at the recovered grid,
+  // which is strictly stronger evidence of redraw recovery than stale-line
+  // matching.
+  if (preserveVisibleContent && !probeStyle) {
     await assertPaneVisibleContentPreserved(
       client,
       sessionId,
@@ -266,6 +428,11 @@ async function closePaneAndAssertRecovery({
         description: `${label} initial pane anchor visibility`,
       })
     : null;
+  if (probeStyle) {
+    // Probe mode only: same ground-truth grid check as
+    // captureInitialPaneHealthyState, applied at this close/recovery point.
+    await waitForProbeBannerAtGrid(client, sessionId, initialPaneId, probeStyle, 20_000);
+  }
   await assertPaneCoverage(client, sessionId, initialPaneId, {
     minWidthRatio: 0.85,
     minHeightRatio: 0.7,
@@ -324,16 +491,24 @@ async function main() {
   if (help) {
     printCommonHelp('scripts/real-app-harness/scenario-tr205-remote-relaunch-close-redraw.mjs');
     console.log(`Additional options:
-  --ssh-target <target>          SSH target for the remote endpoint (default: ai-sandbox)
+  --ssh-target <target>          SSH target for the remote endpoint (default: attn-remote@orb — the provisioned OrbStack VM)
   --remote-directory <path>      Remote cwd for the spawned session (default: remote $HOME)
-  --remote-agent <agent>         Agent for the remote session (default: codex)
+  --remote-agent <agent>         Agent for the remote session (default: codex). Also accepts
+                                  probe:codex / probe:claude to run the deterministic
+                                  'attn _probe-tui' fixture instead of a live agent.
 `);
     return;
   }
 
+  const probeStyle = parseProbeStyle(options.remoteAgent);
+  const isProbeMode = probeStyle !== null;
+  // Probe mode spawns a plain shell — the scenario types the probe TUI
+  // command into it itself, rather than asking the daemon to launch an agent.
+  const spawnAgent = isProbeMode ? 'shell' : options.remoteAgent;
+
   const runner = createScenarioRunner(options, {
     scenarioId: 'TR-205',
-    tier: 'tier3-remote-real-agent',
+    tier: isProbeMode ? 'tier3-remote-probe' : 'tier3-remote-real-agent',
     prefix: 'scenario-tr205-remote-relaunch-close-redraw',
     metadata: {
       sshTarget: options.sshTarget,
@@ -370,6 +545,11 @@ async function main() {
   let finalMainState = null;
   const transcriptAnchorToken = `TR205ANCHOR${Date.now()}`;
   const transcriptAnchorPrompt = buildTranscriptAnchorPrompt(transcriptAnchorToken, 4);
+  // The stable anchor text used for redraw/recovery assertions throughout the
+  // rest of the run: transcriptAnchorToken for real agents, or the probe's
+  // ready banner (set once prepareRemoteProbeBaseline/prepareRemoteAgentBaseline
+  // returns) in probe mode.
+  let anchorText = transcriptAnchorToken;
   let cleanupStarted = false;
 
   const runFinalCleanup = async () => {
@@ -434,7 +614,7 @@ async function main() {
         observer,
         cwd: remoteDirectory,
         label: `tr205-${runner.runId}`,
-        agent: options.remoteAgent,
+        agent: spawnAgent,
         endpointId: endpoint.id,
         waitForInitialPaneVisible: false,
       });
@@ -449,15 +629,18 @@ async function main() {
 
     await runner.step('capture_baseline_initial_pane', async () => {
       await client.request('select_session', { sessionId });
-      const baseline = await prepareRemoteAgentBaseline(
-        client,
-        runner,
-        sessionId,
-        options.remoteAgent,
-        transcriptAnchorToken,
-        transcriptAnchorPrompt,
-      );
+      const baseline = isProbeMode
+        ? await prepareRemoteProbeBaseline(client, sessionId, probeStyle)
+        : await prepareRemoteAgentBaseline(
+            client,
+            runner,
+            sessionId,
+            options.remoteAgent,
+            transcriptAnchorToken,
+            transcriptAnchorPrompt,
+          );
       initialPaneId = baseline.paneId;
+      anchorText = baseline.requiredVisibleText;
       baselineMainState = await captureInitialPaneHealthyState(
         client,
         runner,
@@ -465,7 +648,8 @@ async function main() {
         initialPaneId,
         '01-baseline-initial-pane',
         'baseline initial pane before relaunch-close scenario',
-        baseline.requiredVisibleText,
+        anchorText,
+        isProbeMode ? probeStyle : null,
       );
       await captureSessionArtifacts(client, runner.runDir, '01-baseline', sessionId);
     });
@@ -488,7 +672,7 @@ async function main() {
         30_000,
       );
       await assertPaneVisibleContent(client, sessionId, initialPaneId, {
-        contains: transcriptAnchorToken,
+        contains: anchorText,
         allowWrappedContains: true,
         minNonEmptyLines: 8,
         minDenseLines: 3,
@@ -499,6 +683,9 @@ async function main() {
         timeoutMs: 20_000,
         description: 'initial pane transcript anchor preserved after initial split before relaunch',
       });
+      if (isProbeMode) {
+        await waitForProbeBannerAtGrid(client, sessionId, initialPaneId, probeStyle, 20_000);
+      }
       // Settle the agent TUI before capturing the baseline the post-relaunch
       // redraw is compared against — capturing mid-stream picks anchors from a
       // transient frame that legitimately no longer exists after relaunch.
@@ -510,7 +697,8 @@ async function main() {
         initialPaneId,
         '02-after-initial-split-initial-pane',
         'initial pane after initial split before relaunch',
-        transcriptAnchorToken,
+        anchorText,
+        isProbeMode ? probeStyle : null,
       );
       await captureSessionArtifacts(client, runner.runDir, '02-after-initial-split', sessionId);
       return newPane?.paneId || null;
@@ -528,7 +716,8 @@ async function main() {
         initialPaneId,
         '03-post-relaunch-initial-pane',
         'restored initial pane after relaunch',
-        transcriptAnchorToken,
+        anchorText,
+        isProbeMode ? probeStyle : null,
       );
       await assertPaneVisibleContentPreserved(
         client,
@@ -541,8 +730,8 @@ async function main() {
           minAnchorMatches: 2,
           // Anchor only on token lines (claude echo/reflow flake). Safe here: the baseline
           // is initialSplitMainState, captured via captureInitialPaneHealthyState with
-          // requiredVisibleText: transcriptAnchorToken, which asserts contains: token first.
-          ignoreAnchorPatterns: tokenAnchorIgnorePatterns(transcriptAnchorToken),
+          // requiredVisibleText: anchorText, which asserts contains: token first.
+          ignoreAnchorPatterns: tokenAnchorIgnorePatterns(anchorText),
           timeoutMs: 20_000,
           description: 'restored initial pane content matches pre-relaunch split state',
         },
@@ -568,7 +757,7 @@ async function main() {
         30_000,
       );
       await assertPaneVisibleContent(client, sessionId, initialPaneId, {
-        contains: transcriptAnchorToken,
+        contains: anchorText,
         allowWrappedContains: true,
         minNonEmptyLines: 8,
         // The pane can be ~20 cols once three panes share the main area after the
@@ -580,6 +769,9 @@ async function main() {
         timeoutMs: 20_000,
         description: 'initial pane transcript anchor preserved after relaunch split from initial pane',
       });
+      if (isProbeMode) {
+        await waitForProbeBannerAtGrid(client, sessionId, initialPaneId, probeStyle, 20_000);
+      }
       await captureSessionArtifacts(client, runner.runDir, '04-after-initial-pane-split', sessionId);
       return newPane?.paneId || null;
     });
@@ -624,7 +816,8 @@ async function main() {
         minCharCountRatio: 0.35,
         minAnchorMatches: 1,
         enforceNativeStability: false,
-        requiredVisibleText: transcriptAnchorToken,
+        requiredVisibleText: anchorText,
+        probeStyle: isProbeMode ? probeStyle : null,
       });
       previousInitialPaneWidth = firstRecovered?.state?.pane?.bounds?.width ?? firstRecovered?.widthState?.pane?.bounds?.width ?? previousInitialPaneWidth;
       await captureSessionArtifacts(client, runner.runDir, '06-after-closing-shell-split', sessionId);
@@ -644,7 +837,8 @@ async function main() {
         minCharCountRatio: 0.55,
         minAnchorMatches: 2,
         enforceNativeStability: true,
-        requiredVisibleText: transcriptAnchorToken,
+        requiredVisibleText: anchorText,
+        probeStyle: isProbeMode ? probeStyle : null,
       });
       previousInitialPaneWidth = secondRecovered?.state?.pane?.bounds?.width ?? secondRecovered?.widthState?.pane?.bounds?.width ?? previousInitialPaneWidth;
       await captureSessionArtifacts(client, runner.runDir, '07-after-closing-initial-pane-split', sessionId);
@@ -670,8 +864,9 @@ async function main() {
         minCharCountRatio: 0.6,
         minAnchorMatches: 3,
         enforceNativeStability: true,
-        requiredVisibleText: transcriptAnchorToken,
+        requiredVisibleText: anchorText,
         preserveVisibleContent: options.remoteAgent !== 'claude',
+        probeStyle: isProbeMode ? probeStyle : null,
       });
       await captureSessionArtifacts(client, runner.runDir, '08-after-closing-initial-split', sessionId);
     });
@@ -684,6 +879,8 @@ async function main() {
       remoteDirectory,
       remoteAgent: options.remoteAgent,
       transcriptAnchorToken,
+      anchorText,
+      probeStyle,
       panes: {
         initialPaneId,
         initialShellPaneId,
@@ -735,7 +932,13 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.stack || error.message : String(error));
-  process.exit(1);
-});
+// Guards direct execution only — this module is imported directly by
+// scenario-tr205.test.mjs for its pure helpers, and importing must not
+// trigger a real scenario run or process.exit.
+const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isMainModule) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.stack || error.message : String(error));
+    process.exit(1);
+  });
+}

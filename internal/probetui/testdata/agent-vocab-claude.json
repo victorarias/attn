@@ -1,0 +1,108 @@
+{
+  "boundaryOffset": 2824,
+  "phase1": {
+    "totalBytes": 2824,
+    "privateModeSet": {
+      "1000": 1,
+      "1002": 1,
+      "1003": 1,
+      "1004": 1,
+      "1006": 1,
+      "1049": 1,
+      "2004": 1,
+      "2026": 4,
+      "2031": 1,
+      "25": 5
+    },
+    "privateModeReset": {
+      "2026": 4,
+      "25": 4
+    },
+    "altScreenEnter": 1,
+    "altScreenExit": 0,
+    "ed": 1,
+    "el": 3,
+    "cup": 13,
+    "sgr": 62,
+    "smNonPrivate": 0,
+    "rmNonPrivate": 0,
+    "oscByCode": {
+      "0": 1,
+      "8": 2
+    },
+    "da1QueryFromChild": 1,
+    "cprQueryFromChild": 0,
+    "decrqmFromChild": 0,
+    "xtgettcapFromChild": 0,
+    "oscColorQueryFromChild": {},
+    "cursorSaveDECSC": 1,
+    "cursorRestoreDECRC": 1,
+    "cursorSaveCSI_s": 0,
+    "cursorRestoreCSI_u": 4,
+    "decstbm": 1,
+    "newlines": 1,
+    "carriageReturns": 20,
+    "otherCSIFinal": {
+      "B": 19,
+      "C": 9,
+      "G": 5,
+      "q": 1
+    },
+    "otherESCFinal": {}
+  },
+  "phase2": {
+    "totalBytes": 1591,
+    "privateModeSet": {
+      "1000": 1,
+      "1002": 1,
+      "1003": 1,
+      "1006": 1,
+      "2026": 2,
+      "25": 6
+    },
+    "privateModeReset": {
+      "1000": 3,
+      "1002": 3,
+      "1003": 3,
+      "1004": 3,
+      "1006": 3,
+      "1049": 1,
+      "2004": 3,
+      "2026": 2,
+      "2031": 3,
+      "25": 1
+    },
+    "altScreenEnter": 0,
+    "altScreenExit": 1,
+    "ed": 1,
+    "el": 0,
+    "cup": 3,
+    "sgr": 45,
+    "smNonPrivate": 0,
+    "rmNonPrivate": 0,
+    "oscByCode": {
+      "0": 1,
+      "8": 2
+    },
+    "da1QueryFromChild": 0,
+    "cprQueryFromChild": 0,
+    "decrqmFromChild": 0,
+    "xtgettcapFromChild": 0,
+    "oscColorQueryFromChild": {},
+    "cursorSaveDECSC": 2,
+    "cursorRestoreDECRC": 2,
+    "cursorSaveCSI_s": 0,
+    "cursorRestoreCSI_u": 4,
+    "decstbm": 2,
+    "newlines": 0,
+    "carriageReturns": 11,
+    "otherCSIFinal": {
+      "B": 11,
+      "C": 5,
+      "G": 5
+    },
+    "otherESCFinal": {
+      "(": 2
+    }
+  }
+}

@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   createSessionAndWaitForInitialPane,
   assertCommonTargetAllowed,
+  DEFAULT_REMOTE_SSH_TARGET,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -40,7 +41,7 @@ function parseArgs(argv) {
 
   const options = {
     ...parseCommonArgs([]),
-    sshTarget: process.env.ATTN_REMOTE_CLEANUP_SSH_TARGET || 'ai-sandbox',
+    sshTarget: process.env.ATTN_REMOTE_CLEANUP_SSH_TARGET || DEFAULT_REMOTE_SSH_TARGET,
     remoteDirectory: process.env.ATTN_REMOTE_CLEANUP_REMOTE_DIRECTORY || '',
     remoteAgent: process.env.ATTN_REMOTE_CLEANUP_REMOTE_AGENT || 'codex',
   };
@@ -80,7 +81,7 @@ async function main() {
   if (help) {
     printCommonHelp('scripts/real-app-harness/scenario-tr504-remote-cleanup.mjs');
     console.log(`Additional options:
-  --ssh-target <target>          SSH target for the remote endpoint (default: ai-sandbox)
+  --ssh-target <target>          SSH target for the remote endpoint (default: attn-remote@orb — the provisioned OrbStack VM)
   --remote-directory <path>      Remote cwd for the spawned session (default: unique harness workdir)
   --remote-agent <agent>         Agent for the remote session (default: codex)
 `);
@@ -94,7 +95,7 @@ async function main() {
     metadata: {
       sshTarget: options.sshTarget,
       agent: options.remoteAgent,
-      focus: 'remote session close tears down worker-side processes',
+      focus: 'closing every pane/session of a remote workspace tears down worker-side processes',
     },
   });
 
@@ -118,7 +119,9 @@ async function main() {
   let sessionId = null;
   let initialPaneId = null;
   let splitPaneId = null;
+  let shellSessionId = null;
   let activeProcessSnapshot = [];
+  let shellClosedProcessSnapshot = [];
   let postCloseProcessSnapshot = [];
   let cleanedProcessSnapshot = [];
   let postEndpointRemovalProcessSnapshot = [];
@@ -206,7 +209,7 @@ async function main() {
       return resultSessionId;
     });
 
-    splitPaneId = await runner.step('create_remote_split', async () => {
+    ({ splitPaneId, shellSessionId } = await runner.step('create_remote_split', async () => {
       await client.request('select_session', { sessionId });
       initialPaneId = (await waitForFirstWorkspacePane(client, sessionId, 'remote cleanup initial pane', 30_000)).paneId;
       await waitForPaneVisible(client, sessionId, initialPaneId, 45_000);
@@ -225,8 +228,8 @@ async function main() {
         30_000,
       );
       await waitForPaneVisible(client, sessionId, newPane.paneId, 20_000);
-      return newPane.paneId;
-    });
+      return { splitPaneId: newPane.paneId, shellSessionId: newPane.sessionId };
+    }));
 
     await runner.step('observe_remote_processes_before_cleanup', async () => {
       activeProcessSnapshot = await waitForRemoteProcessesByHarnessRoot(
@@ -239,10 +242,33 @@ async function main() {
       runner.writeJson('01-active-processes.json', activeProcessSnapshot);
     });
 
+    // Closing a session (sidebar close / ⌘W) closes only that session's own pane —
+    // a split shell pane deliberately survives in the workspace, locally and
+    // remotely. Full teardown requires closing the shell pane first, the way ⌘W
+    // does, which the hub forwards to the remote daemon as workspace_layout_close_pane.
+    await runner.step('close_shell_pane_and_verify_worker_exit', async () => {
+      await client.request('close_pane', { sessionId, paneId: splitPaneId });
+      await observer.waitFor(
+        () => !observer.getSession(shellSessionId),
+        `shell session ${shellSessionId} to disappear after close_pane`,
+        30_000,
+      );
+      shellClosedProcessSnapshot = await waitForRemoteProcessesByHarnessRoot(
+        options.sshTarget,
+        remotePaths.remoteHarnessRoot,
+        (processes) => (processes.some((p) => String(p?.cmdline || '').includes(shellSessionId)) ? null : processes),
+        'remote shell worker processes to exit after close_pane',
+        60_000,
+      );
+      runner.writeJson('02-shell-pane-closed-processes.json', shellClosedProcessSnapshot);
+    });
+
+    // This closes the last remaining session. Once it disappears, the remote
+    // workspace unregisters and every session worker process must exit.
     await runner.step('close_session_and_verify_remote_cleanup', async () => {
       await client.request('close_session', { sessionId });
       postCloseProcessSnapshot = await listRemoteProcessesByHarnessRoot(options.sshTarget, remotePaths.remoteHarnessRoot, 30_000);
-      runner.writeJson('02-post-close-processes.json', postCloseProcessSnapshot);
+      runner.writeJson('03-post-close-processes.json', postCloseProcessSnapshot);
       await observer.waitFor(
         () => !observer.getSession(sessionId) && !observer.getWorkspace(sessionId),
         `session ${sessionId} to disappear after close`,
@@ -255,7 +281,7 @@ async function main() {
         'remote session worker processes to exit after close_session',
         60_000,
       );
-      runner.writeJson('02-cleaned-processes.json', cleanedProcessSnapshot);
+      runner.writeJson('03-cleaned-processes.json', cleanedProcessSnapshot);
     });
 
     await runner.step('remove_endpoint_and_verify_harness_root_cleanup', async () => {
@@ -269,17 +295,19 @@ async function main() {
         'remote harness-root transport processes to exit after remove_endpoint',
         30_000,
       );
-      runner.writeJson('03-post-endpoint-remove-processes.json', postEndpointRemovalProcessSnapshot);
+      runner.writeJson('04-post-endpoint-remove-processes.json', postEndpointRemovalProcessSnapshot);
     });
 
     const summary = runner.finishSuccess({
       sessionId,
       endpointId: endpoint?.id || null,
       splitPaneId,
+      shellSessionId,
       sshTarget: options.sshTarget,
       remoteDirectory,
       remoteAgent: options.remoteAgent,
       activeProcessCount: activeProcessSnapshot.length,
+      shellClosedProcessCount: shellClosedProcessSnapshot.length,
       postCloseProcessCount: postCloseProcessSnapshot.length,
       cleanedProcessCount: cleanedProcessSnapshot.length,
       postEndpointRemovalProcessCount: postEndpointRemovalProcessSnapshot.length,
@@ -294,6 +322,7 @@ async function main() {
       await captureSessionArtifacts(client, runner.runDir, 'failure', sessionId).catch(() => {});
     }
     runner.writeJson('failure-active-processes.json', activeProcessSnapshot);
+    runner.writeJson('failure-shell-closed-processes.json', shellClosedProcessSnapshot);
     runner.writeJson('failure-post-close-processes.json', postCloseProcessSnapshot);
     runner.writeJson('failure-cleaned-processes.json', cleanedProcessSnapshot);
     runner.writeJson('failure-post-endpoint-remove-processes.json', postEndpointRemovalProcessSnapshot);
@@ -301,10 +330,12 @@ async function main() {
       sessionId,
       endpointId: endpoint?.id || null,
       splitPaneId,
+      shellSessionId,
       sshTarget: options.sshTarget,
       remoteDirectory,
       remoteAgent: options.remoteAgent,
       activeProcessCount: activeProcessSnapshot.length,
+      shellClosedProcessCount: shellClosedProcessSnapshot.length,
       postCloseProcessCount: postCloseProcessSnapshot.length,
       cleanedProcessCount: cleanedProcessSnapshot.length,
       postEndpointRemovalProcessCount: postEndpointRemovalProcessSnapshot.length,

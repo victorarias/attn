@@ -29,7 +29,13 @@ import (
 )
 
 const (
-	defaultRPCTimeout    = 5 * time.Second
+	defaultRPCTimeout = 5 * time.Second
+	// killRPCTimeout must outlive the worker's in-RPC kill escalation
+	// (pty's 10s kill timeout): the signal RPC replies only once the child
+	// has exited, and the 5s default deadline would abandon a confirmed
+	// kill mid-flight and tear down the serial control connection right
+	// before the follow-up remove call needs it.
+	killRPCTimeout       = 15 * time.Second
 	livenessRPCTimeout   = 2 * time.Second
 	reclaimRPCTimeout    = 3 * time.Second
 	pollerInterval       = 5 * time.Second
@@ -784,6 +790,11 @@ func (b *WorkerBackend) Kill(ctx context.Context, sessionID string, sig syscall.
 	session, err := b.getSession(sessionID)
 	if err != nil {
 		return err
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, killRPCTimeout)
+		defer cancel()
 	}
 	return b.callSimple(ctx, session, ptyworker.MethodSignal, ptyworker.SignalParams{Signal: signalName(sig)})
 }

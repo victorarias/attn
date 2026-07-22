@@ -120,14 +120,30 @@ export const scenarioCatalog = [
     timeoutMs: 360_000,
   },
   {
+    id: 'tr205-probe-codex',
+    label: 'TR-205 remote probe (codex vocabulary)',
+    command: ['pnpm', 'run', 'real-app:scenario-tr205', '--', '--remote-agent', 'probe:codex'],
+  },
+  {
+    id: 'tr205-probe-claude',
+    label: 'TR-205 remote probe (claude vocabulary)',
+    command: ['pnpm', 'run', 'real-app:scenario-tr205', '--', '--remote-agent', 'probe:claude'],
+  },
+  {
     id: 'tr205-codex',
-    label: 'TR-205 remote codex',
+    label: 'TR-205 remote codex (live agent)',
     command: ['pnpm', 'run', 'real-app:scenario-tr205'],
+    // Live-agent leg: needs codex credentials seeded in the VM. Not part of the
+    // matrix sweep — only runnable directly (run-soak) or manually.
+    soakOnly: true,
   },
   {
     id: 'tr205-claude',
-    label: 'TR-205 remote claude',
+    label: 'TR-205 remote claude (live agent)',
     command: ['pnpm', 'run', 'real-app:scenario-tr205', '--', '--remote-agent', 'claude'],
+    // Live-agent leg: needs claude credentials seeded in the VM. Not part of the
+    // matrix sweep — only runnable directly (run-soak) or manually.
+    soakOnly: true,
   },
   {
     id: 'tr502',

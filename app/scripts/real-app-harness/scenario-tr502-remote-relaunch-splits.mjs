@@ -3,6 +3,7 @@
 import {
   createSessionAndWaitForInitialPane,
   assertCommonTargetAllowed,
+  DEFAULT_REMOTE_SSH_TARGET,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -61,7 +62,7 @@ function parseArgs(argv) {
 
   const options = {
     ...parseCommonArgs([]),
-    sshTarget: process.env.ATTN_REMOTE_RELAUNCH_SPLITS_SSH_TARGET || 'ai-sandbox',
+    sshTarget: process.env.ATTN_REMOTE_RELAUNCH_SPLITS_SSH_TARGET || DEFAULT_REMOTE_SSH_TARGET,
     remoteDirectory: process.env.ATTN_REMOTE_RELAUNCH_SPLITS_REMOTE_DIRECTORY || '',
     remoteAgent: process.env.ATTN_REMOTE_RELAUNCH_SPLITS_REMOTE_AGENT || 'codex',
     echoThresholdMs: Number.parseInt(process.env.ATTN_REMOTE_RELAUNCH_SPLITS_ECHO_THRESHOLD_MS || '2500', 10),
@@ -94,7 +95,7 @@ async function main() {
   if (help) {
     printCommonHelp('scripts/real-app-harness/scenario-tr502-remote-relaunch-splits.mjs');
     console.log(`Additional options:
-  --ssh-target <target>          SSH target for the remote endpoint (default: ai-sandbox)
+  --ssh-target <target>          SSH target for the remote endpoint (default: attn-remote@orb — the provisioned OrbStack VM)
   --remote-directory <path>      Remote cwd for the spawned session (default: remote $HOME)
   --remote-agent <agent>         Agent for the remote session (default: codex)
   --echo-threshold-ms <ms>       Max acceptable shell echo latency per typed token (default: 2500)

@@ -1,0 +1,84 @@
+{
+  "boundaryOffset": 3710,
+  "phase1": {
+    "totalBytes": 3710,
+    "privateModeSet": {
+      "1004": 1,
+      "2004": 1,
+      "2026": 1
+    },
+    "privateModeReset": {
+      "2026": 1,
+      "25": 1
+    },
+    "altScreenEnter": 0,
+    "altScreenExit": 0,
+    "ed": 1,
+    "el": 24,
+    "cup": 38,
+    "sgr": 64,
+    "smNonPrivate": 0,
+    "rmNonPrivate": 0,
+    "oscByCode": {
+      "10": 1,
+      "11": 1,
+      "8": 94
+    },
+    "da1QueryFromChild": 1,
+    "cprQueryFromChild": 1,
+    "decrqmFromChild": 0,
+    "xtgettcapFromChild": 0,
+    "oscColorQueryFromChild": {
+      "10": 1,
+      "11": 1
+    },
+    "cursorSaveDECSC": 0,
+    "cursorRestoreDECRC": 0,
+    "cursorSaveCSI_s": 0,
+    "cursorRestoreCSI_u": 2,
+    "decstbm": 2,
+    "newlines": 0,
+    "carriageReturns": 0,
+    "otherCSIFinal": {
+      "S": 1
+    },
+    "otherESCFinal": {}
+  },
+  "phase2": {
+    "totalBytes": 3588,
+    "privateModeSet": {
+      "2026": 1
+    },
+    "privateModeReset": {
+      "2026": 1,
+      "25": 1
+    },
+    "altScreenEnter": 0,
+    "altScreenExit": 0,
+    "ed": 2,
+    "el": 26,
+    "cup": 41,
+    "sgr": 67,
+    "smNonPrivate": 0,
+    "rmNonPrivate": 0,
+    "oscByCode": {
+      "8": 90
+    },
+    "da1QueryFromChild": 0,
+    "cprQueryFromChild": 1,
+    "decrqmFromChild": 0,
+    "xtgettcapFromChild": 0,
+    "oscColorQueryFromChild": {},
+    "cursorSaveDECSC": 0,
+    "cursorRestoreDECRC": 0,
+    "cursorSaveCSI_s": 0,
+    "cursorRestoreCSI_u": 0,
+    "decstbm": 2,
+    "newlines": 0,
+    "carriageReturns": 0,
+    "otherCSIFinal": {
+      "S": 1
+    },
+    "otherESCFinal": {}
+  }
+}

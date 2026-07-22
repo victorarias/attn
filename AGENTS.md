@@ -97,6 +97,7 @@ starts are the baseline.
   `ATTN_HARNESS_PROFILE` overrides it.
 - Production requires both `ATTN_HARNESS_PROFILE=` and `--run-against-prod`.
 - On failure, inspect captured pane text and native screenshots before diagnosis.
+- Remote scenarios target the local OrbStack VM (`attn-remote@orb`); provision with `pnpm --dir app run real-app:provision-remote`.
 
 ## Test safety
 

@@ -103,6 +103,26 @@ describe('fitShouldBailAsSuspicious', () => {
   it('never bails when the floored fit is a normal usable size', () => {
     expect(fitShouldBailAsSuspicious('agent', { cols: 120, rows: 40 }, 120, 40, 9, 21, 1080, 840)).toBe(false);
   });
+
+  it('does NOT bail when an already-small model grows toward a container that is still in the suspicious range (TR-205 close-after-relaunch stall)', () => {
+    // Model stuck at 15x25 after a 4-way split; a sibling closes and the
+    // container now fits 20x25 (still <= MIN_USABLE_TERMINAL_COLS). The model
+    // does not overflow, but refusing the grow strands the pane at 15 cols.
+    expect(fitShouldBailAsSuspicious('agent', { cols: 20, rows: 25 }, 15, 25, 9, 21, 189, 540)).toBe(false);
+  });
+
+  it('still bails when a HEALTHY model sees a suspicious fit from an unlaid-out container', () => {
+    // Zero-sized container: dims collapse below the live model on both axes —
+    // a shrink — so the transient-measurement protection is retained.
+    expect(fitShouldBailAsSuspicious('agent', { cols: 2, rows: 1 }, 62, 27, 9, 21, 0, 0)).toBe(true);
+  });
+
+  it('still bails when an already-small model would SHRINK further on one axis', () => {
+    // Mixed grow/shrink (cols grow 15->20, rows shrink 25->8); container is
+    // comfortably large so the model doesn't overflow it on either axis, which
+    // isolates the shrink check.
+    expect(fitShouldBailAsSuspicious('agent', { cols: 20, rows: 8 }, 15, 25, 9, 21, 270, 540)).toBe(true);
+  });
 });
 
 describe('liveResizeConflictsWithQueuedReplay', () => {
