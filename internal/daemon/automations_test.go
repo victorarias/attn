@@ -1749,6 +1749,10 @@ func TestAutomationApplySocketPathIsUnguardedButWSPathEnforcesStaleRevision(t *t
 	if err == nil || !strings.Contains(err.Error(), "changed elsewhere") {
 		t.Fatalf("automationApplyWithGuards with stale expected_revision err=%v, want a stale-revision refusal", err)
 	}
+	var refusal *automationRefusal
+	if !errors.As(err, &refusal) || refusal.Code != automationErrCodeRevisionConflict {
+		t.Fatalf("automationApplyWithGuards stale-revision error = %v, want an automationRefusal tagged %q", err, automationErrCodeRevisionConflict)
+	}
 	stillAfterConcurrentEdit, err := s.GetAutomationDefinition(def.ID)
 	if err != nil {
 		t.Fatal(err)
