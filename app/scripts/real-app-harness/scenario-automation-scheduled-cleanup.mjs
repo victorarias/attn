@@ -5,7 +5,9 @@
  * definition fires at its intended minute, survives a daemon restart per its
  * catch_up policy, does real merged-worktree cleanup in a visible ticket/
  * session, never touches a dirty worktree, and coalesces later occurrences
- * onto the same singleton ticket/session.
+ * onto the same singleton ticket/session. The scenario quits the profile's app
+ * first (ensureFreshWorld) because a running app would respawn the daemon during
+ * the simulated downtime and invalidate the restart-catch-up leg.
  *
  * Two definitions are applied against one isolated profile daemon:
  *   - `scheduled-cleanup-<suffix>`: cron `* * * * *`, policy.continuity
@@ -34,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { parseCommonArgs, printCommonHelp } from './common.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { currentHarnessProfile, dataDirForProfile, resolveHarnessResources } from './harnessProfile.mjs';
+import { ensureFreshWorld } from './freshWorld.mjs';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -287,6 +290,7 @@ async function main() {
     probe = createCodexProbe(runner.sessionDir);
 
     await runner.step('restart_isolated_daemon', async () => {
+      await ensureFreshWorld({ profile, appPath: resources.appPath });
       try { run(binary, ['daemon', 'stop'], daemonEnv); } catch {}
       run(binary, ['daemon', 'ensure'], daemonEnv);
       await waitForDaemonReady(binary, daemonEnv);
