@@ -228,7 +228,11 @@ func describePROutcome(result *prReadiness, outcome prOutcome, opts prWaitOption
 	case outcomeClosed:
 		return fmt.Sprintf("pull request is %s", result.State)
 	case outcomeTimeout:
-		return fmt.Sprintf("no actionable update after %s (checks=%s review=%s)", opts.Timeout, result.CheckState, result.ReviewState)
+		detail := fmt.Sprintf("no actionable update after %s (checks=%s review=%s)", opts.Timeout, result.CheckState, result.ReviewState)
+		if result.ReviewerRequested && hasReviewVerdict(result) {
+			detail += "; held the pre-baseline verdict, awaiting a re-review"
+		}
+		return detail
 	default:
 		return string(outcome)
 	}
@@ -619,6 +623,7 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 	var lastLine, lastHead string
 	var baseline map[string]bool
 	var reviewBaseline time.Time
+	var notedStaleVerdict bool
 	last := &prReadiness{Number: strconv.Itoa(opts.Number), Reviewer: opts.Reviewer, CheckState: checksNone, ReviewState: "waiting"}
 
 	for {
@@ -655,6 +660,14 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 		} else if fresh := unseenPRComments(observation.Comments, baseline); len(fresh) > 0 {
 			observation.Comments = fresh
 			return observation, outcomeComment, nil
+		}
+
+		// An existing verdict that a pending re-review holds back is not a return
+		// but is easy to misread as a stuck wait; say so once when it first bites.
+		if !notedStaleVerdict && hasReviewVerdict(observation) && !freshReviewVerdict(observation, reviewBaseline) {
+			fmt.Fprintf(progress, "%s %s predates the pending re-review request; waiting for a new review\n",
+				observation.Reviewer, observation.ReviewState)
+			notedStaleVerdict = true
 		}
 
 		switch {
@@ -725,8 +738,20 @@ func readinessLine(r *prReadiness) string {
 	if len(parts) > 0 {
 		checks = strings.Join(parts, ",")
 	}
-	return fmt.Sprintf("pr=#%s head=%s state=%s draft=%t checks=%s [%s] review=%s reviewer=%s",
+	line := fmt.Sprintf("pr=#%s head=%s state=%s draft=%t checks=%s [%s] review=%s reviewer=%s",
 		r.Number, shortSHA(r.HeadSHA), r.State, r.Draft, r.CheckState, checks, r.ReviewState, r.Reviewer)
+	// A re-review request is why an existing verdict does not end the wait, so
+	// surface it; otherwise review=changes_requested with no return looks broken.
+	if r.ReviewerRequested {
+		line += " re-requested=true"
+	}
+	return line
+}
+
+// hasReviewVerdict reports whether the reviewer has left a verdict (approval or
+// changes requested) as opposed to no review yet.
+func hasReviewVerdict(r *prReadiness) bool {
+	return r.ReviewState == "approved" || r.ReviewState == "changes_requested"
 }
 
 func shortSHA(sha string) string {

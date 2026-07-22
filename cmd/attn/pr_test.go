@@ -428,7 +428,8 @@ func TestWaitForPRActionableIgnoresStaleVerdictWhileReReviewPending(t *testing.T
 	source := &fakeReadinessSource{results: []*prReadiness{stale, stillStale, approved}}
 	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
 
-	got, outcome, err := waitForPRActionable(context.Background(), source, opts, &bytes.Buffer{})
+	var output bytes.Buffer
+	got, outcome, err := waitForPRActionable(context.Background(), source, opts, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,6 +438,15 @@ func TestWaitForPRActionableIgnoresStaleVerdictWhileReReviewPending(t *testing.T
 	}
 	if source.calls != 3 {
 		t.Fatalf("returned after %d polls; the stale verdict must not end the wait", source.calls)
+	}
+	// The wait must not look stuck: the held verdict is annotated on the line and
+	// explained once, and the note fires exactly once.
+	text := output.String()
+	if !strings.Contains(text, "review=changes_requested reviewer=figgyster re-requested=true") {
+		t.Fatalf("re-request annotation missing from progress:\n%s", text)
+	}
+	if n := strings.Count(text, "predates the pending re-review request"); n != 1 {
+		t.Fatalf("stale-verdict note fired %d times, want 1:\n%s", n, text)
 	}
 }
 
