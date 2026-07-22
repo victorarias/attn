@@ -688,6 +688,12 @@ func (s *Session) resize(cols, rows uint16) error {
 	return creackpty.Setsize(s.ptmx, &creackpty.Winsize{Cols: cols, Rows: rows})
 }
 
+// sigtermToHUPGrace is how long kill waits for a SIGTERM'd child before
+// escalating to SIGHUP. Interactive shells ignore SIGTERM by design but
+// every shell honors terminal hangup; without this escalation a shell
+// pane close stalls the full kill timeout and ends in SIGKILL.
+const sigtermToHUPGrace = 2 * time.Second
+
 func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 	s.exitMu.RLock()
 	running := s.running
@@ -712,10 +718,25 @@ func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 		return err
 	}
 
+	deadline := time.Now().Add(waitTimeout)
+
+	if sig == syscall.SIGTERM {
+		grace := sigtermToHUPGrace
+		if half := waitTimeout / 2; grace > half {
+			grace = half
+		}
+		select {
+		case <-s.exited:
+			return nil
+		case <-time.After(grace):
+			_ = syscall.Kill(-pgid, syscall.SIGHUP)
+		}
+	}
+
 	select {
 	case <-s.exited:
 		return nil
-	case <-time.After(waitTimeout):
+	case <-time.After(time.Until(deadline)):
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		<-s.exited
 		return nil
