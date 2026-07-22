@@ -5,7 +5,7 @@ index 5cdcd11..6265e87 100644
 @@ -198,6 +198,36 @@ GHOSTTY_API GhosttyResult ghostty_formatter_format_alloc(GhosttyFormatter format
   */
  GHOSTTY_API void ghostty_formatter_free(GhosttyFormatter formatter);
- 
+
 +/**
 + * Serialize the full terminal state as a self-contained VT stream.
 + *
@@ -37,7 +37,7 @@ index 5cdcd11..6265e87 100644
 +    size_t* out_len);
 +
  /** @} */
- 
+
  #ifdef __cplusplus
 diff --git a/src/lib_vt.zig b/src/lib_vt.zig
 index b4a2722..a22edac 100644
@@ -58,7 +58,7 @@ index 5b4504c..f2982d1 100644
 @@ -218,6 +218,100 @@ pub fn free(formatter_: Formatter) callconv(lib.calling_conv) void {
      alloc.destroy(wrapper);
  }
- 
+
 +/// Serialize the full terminal state as a self-contained VT stream that
 +/// reconstructs the terminal (grid + scrollback + cursor + modes) when replayed
 +/// into a fresh, same-size terminal. Unlike the plain terminal formatter, this
@@ -165,6 +165,6 @@ index 37dc576..897aa50 100644
  pub const formatter_format_alloc = formatter.format_alloc;
  pub const formatter_free = formatter.free;
 +pub const terminal_serialize_vt = formatter.terminal_serialize_vt;
- 
+
  pub const render_state_new = render.new;
  pub const render_state_free = render.free;
