@@ -152,7 +152,7 @@ real concept and drives binding rotation.
       (unguarded last-writer-wins, matching the old `attn automation apply`
       behavior), the WS editor always sends both (enforced, including a
       create-time 0 vs. a live definition).
-- [ ] **PR6 — form UI.** Replace the YAML editor and validate-without-apply UI
+- [x] **PR6 — form UI.** Replace the YAML editor and validate-without-apply UI
       with a structured create/edit form. Design settled 2026-07-22 (HTML
       prototype reviewed): the trigger picker drives the form shape (location
       type is trigger-implied, never independently chosen); implied policy is
@@ -170,7 +170,9 @@ real concept and drives binding rotation.
       automation_definition_result. Form built on react-hook-form + zod
       (onBlur), with the zod schema mirroring `ValidateDefinition`. Typed
       save errors (revision conflict is distinguishable);
-      `expected_revision` guard survives.
+      `expected_revision` guard survives. Landed 2026-07-23; live-verified on the dev profile via
+      scenario-automation-form.mjs (11 legs) plus the lifecycle and surface
+      scenarios.
 - [ ] **PR7 — proving matrix.** Both vision proving cases end-to-end on a
       fresh profile (PR pre-review with continuity + scheduled worktree
       cleanup), daemon-restart recovery leg, changelog.
@@ -207,6 +209,11 @@ real concept and drives binding rotation.
 - Active binding whose ticket no longer exists self-heals at delivery time
   (release with `ticket_swept`, log, deliver fresh) rather than hard-failing:
   one well-defined transition, not inference.
+- The form treats an empty model/effort as "Agent default" (explicit option)
+  rather than requiring a choice: the daemon has always treated
+  launch.model/effort as optional, and live verification showed a
+  prompt-only edit of a CLI-authored, model-less definition must not be
+  blocked or forced to add launch keys.
 
 ## Open Questions
 

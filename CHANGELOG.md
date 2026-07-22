@@ -6,6 +6,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-23]
+
+### Changed
+- **Automations are now edited in a structured form instead of a YAML
+  editor.** Pick a trigger (manual, scheduled, or PR review requested) and the
+  form shows only the choices that matter for it, with a plain-words summary
+  of what the automation will do. The ID is derived from the name as you type
+  (customizable until the first save), schedules always use your machine's
+  local time zone, and the model and effort pickers offer what each agent
+  actually supports — including an "Agent default" choice. Mistakes are
+  caught as you edit, a save that conflicts with a change made elsewhere
+  offers a one-click Reload, and automations can now be deleted or
+  enabled/disabled from the editor too.
+
 ## [2026-07-22]
 
 ### Fixed
