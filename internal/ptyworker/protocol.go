@@ -134,6 +134,10 @@ type AttachResult struct {
 	ScreenCursorY       uint16 `json:"screen_cursor_y,omitempty"`
 	ScreenCursorVisible bool   `json:"screen_cursor_visible,omitempty"`
 	ScreenSnapshotFresh bool   `json:"screen_snapshot_fresh,omitempty"`
+
+	// GhosttySnapshot is the server-authoritative VT serialization of the whole
+	// terminal from libghostty-vt (geometry is Cols/Rows). Omitted when absent.
+	GhosttySnapshot []byte `json:"ghostty_snapshot,omitempty"`
 }
 
 type ReplaySegment struct {

@@ -78,6 +78,12 @@ func wsSubscriberID(client *wsClient, sessionID string) string {
 }
 
 type attachReplayPayload struct {
+	// ghosttySnapshot, when non-nil, is a self-contained VT serialization of the
+	// worker's parsed terminal (server-authoritative restore). It supersedes
+	// every raw-replay field below; the client resets its model and replays it.
+	ghosttySnapshot     []byte
+	ghosttyCols         uint16
+	ghosttyRows         uint16
 	scrollback          []byte
 	replaySegments      []ptybackend.ReplaySegment
 	scrollbackTruncated bool
@@ -209,6 +215,17 @@ func applyScreenSnapshot(payload *attachReplayPayload, snapshot pty.ReplayScreen
 	payload.rawReplayReason = reason
 }
 
+// attachSnapshotEnv gates server-authoritative snapshot attach (Phase 2). The
+// same flag is read worker-side (internal/pty) to forward the query responses
+// the scanner does not cover; both processes see the daemon's environment.
+const attachSnapshotEnv = "ATTN_ATTACH_SNAPSHOT"
+
+// attachSnapshotEnabled reports whether the daemon should serve a
+// server-authoritative ghostty snapshot on attach.
+func attachSnapshotEnabled() bool {
+	return os.Getenv(attachSnapshotEnv) == "1"
+}
+
 func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Session, policy protocol.AttachPolicy) attachReplayPayload {
 	payload := attachReplayPayload{
 		scrollbackTruncated: info.ScrollbackTruncated,
@@ -232,6 +249,32 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 		payload.screenCursorVisible = false
 		payload.screenSnapshotFresh = false
 		payload.rawReplayDecision = "omit_replay_for_policy"
+		return payload
+	}
+
+	// Server-authoritative restore (Phase 2, behind ATTN_ATTACH_SNAPSHOT). The
+	// worker always includes a ghostty VT serialization; when the flag is on and
+	// one is present, it supersedes every raw-replay path. The client resets its
+	// model and replays this stream — no mid-escape hazard, no oracle
+	// verification, no replay-vs-snapshot decision tree. With the flag off this
+	// branch is skipped and behavior is exactly today's.
+	if attachSnapshotEnabled() && len(info.GhosttySnapshot) > 0 {
+		payload.ghosttySnapshot = info.GhosttySnapshot
+		payload.ghosttyCols = info.Cols
+		payload.ghosttyRows = info.Rows
+		payload.scrollback = nil
+		payload.replaySegments = nil
+		payload.scrollbackTruncated = false
+		payload.screenSnapshot = nil
+		payload.screenCols = 0
+		payload.screenRows = 0
+		payload.screenCursorX = 0
+		payload.screenCursorY = 0
+		payload.screenCursorVisible = false
+		payload.screenSnapshotFresh = false
+		payload.derivedSnapshot = false
+		payload.rawReplayDecision = "use_ghostty_snapshot"
+		payload.rawReplayReason = "attn_attach_snapshot_enabled"
 		return payload
 	}
 
@@ -881,7 +924,7 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		replayBytes += len(segment.Data)
 	}
 	d.logf(
-		"PTY attach result: id=%s policy=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v replay_decision=%s replay_reason=%s size=%dx%d screen=%dx%d",
+		"PTY attach result: id=%s policy=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d ghostty_snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v replay_decision=%s replay_reason=%s size=%dx%d screen=%dx%d",
 		msg.ID,
 		protocol.Deref(msg.AttachPolicy),
 		info.Running,
@@ -889,6 +932,7 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		len(info.Scrollback),
 		replayBytes,
 		len(replay.screenSnapshot),
+		len(replay.ghosttySnapshot),
 		replay.screenSnapshotFresh,
 		replay.derivedSnapshot,
 		replay.rawReplayDecision,
@@ -942,6 +986,14 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		result.ScreenCursorY = protocol.Ptr(int(replay.screenCursorY))
 		result.ScreenCursorVisible = protocol.Ptr(replay.screenCursorVisible)
 		result.ScreenSnapshotFresh = protocol.Ptr(replay.screenSnapshotFresh)
+	}
+	if len(replay.ghosttySnapshot) > 0 {
+		result.Snapshot = &protocol.AttachSnapshot{
+			Cols:                int(replay.ghosttyCols),
+			Rows:                int(replay.ghosttyRows),
+			VtDumpB64:           base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
+			ScrollbackTruncated: replay.scrollbackTruncated,
+		}
 	}
 	d.sendToClient(client, result)
 }

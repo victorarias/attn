@@ -110,6 +110,10 @@ type AttachInfo struct {
 	ScreenCursorY       uint16
 	ScreenCursorVisible bool
 	ScreenSnapshotFresh bool
+	// GhosttySnapshot is the server-authoritative VT serialization of the whole
+	// terminal (primary + alt screens, scrollback, cursor) from libghostty-vt.
+	// Snapshot geometry is Cols/Rows. nil when the ghostty terminal is absent.
+	GhosttySnapshot []byte
 }
 
 type ExitInfo struct {
@@ -283,6 +287,8 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		startedAt:   time.Now(),
 		theme:       opts.Theme,
 		cleanup:     deferCleanup,
+
+		attachSnapshotMode: attachSnapshotEnabled(),
 	}
 	session.screen = newVirtualScreen(opts.Cols, opts.Rows)
 	// Shadow-mode server-authoritative terminal (Phase 1). A construction

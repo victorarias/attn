@@ -19,6 +19,13 @@ export interface AttachRequestContext {
   replayPreference: AttachReplayPreference;
 }
 
+export interface AttachGhosttySnapshot {
+  cols: number;
+  rows: number;
+  vt_dump_b64: string;
+  scrollback_truncated?: boolean;
+}
+
 export interface AttachReplayData {
   scrollback?: string;
   replay_segments?: AttachReplaySegment[];
@@ -28,6 +35,12 @@ export interface AttachReplayData {
   screen_rows?: number;
   cols?: number;
   rows?: number;
+  // Server-authoritative terminal snapshot (Phase 2, ATTN_ATTACH_SNAPSHOT).
+  // When present it is THE restore payload: a raw VT byte stream (base64) that
+  // reconstructs the daemon worker's full parsed grid + scrollback (primary and
+  // alt screen) when written into a fresh Ghostty model. The daemon zeroes the
+  // raw-replay fields above when it serves a snapshot, so this supersedes them.
+  snapshot?: AttachGhosttySnapshot;
 }
 
 export type AttachResultData = AttachReplayData & {
@@ -95,6 +108,8 @@ export function classifyAttachReplay(
   data: AttachReplayData,
   context?: AttachRequestContext,
 ) {
+  const ghosttySnapshot = data.snapshot && data.snapshot.vt_dump_b64 ? data.snapshot : null;
+  const hasGhosttySnapshot = ghosttySnapshot !== null;
   const availableScreenSnapshot = Boolean(data.screen_snapshot && data.screen_snapshot_fresh !== false);
   const availableRawScrollback = Boolean(data.scrollback || (data.replay_segments && data.replay_segments.length > 0));
   const replayPreference = context?.replayPreference ?? 'default';
@@ -105,29 +120,42 @@ export function classifyAttachReplay(
   const policyEligibleForCodexRawReplay = context?.policy === 'fresh_spawn';
   const codexRawReplayBootstrap = replayPreference === 'prefer_raw_scrollback'
     && policyEligibleForCodexRawReplay;
-  const respondToTerminalQueries = codexRawReplayBootstrap;
+  // A Ghostty snapshot is written into the fresh model with suppressResponses:
+  // the daemon worker already answered CPR/DA1/OSC during live parsing and
+  // forwarded the query gap over the wire, so the frontend must not re-answer
+  // queries embedded in the replayed dump.
+  const respondToTerminalQueries = !hasGhosttySnapshot && codexRawReplayBootstrap;
   const prefersRawScrollback = replayPreference === 'prefer_raw_scrollback'
     && (context?.policy === 'relaunch_restore' || context?.policy === 'same_app_remount' || policyEligibleForCodexRawReplay);
-  const screenSnapshotSuppressed = availableScreenSnapshot && availableRawScrollback && prefersRawScrollback;
-  const hasScreenSnapshot = availableScreenSnapshot && !screenSnapshotSuppressed;
-  const hasReplayPayload = Boolean(
+  // A Ghostty snapshot supersedes the legacy screen-snapshot/raw-scrollback
+  // payloads entirely; the daemon never sends both at once.
+  const screenSnapshotSuppressed = !hasGhosttySnapshot
+    && availableScreenSnapshot && availableRawScrollback && prefersRawScrollback;
+  const hasScreenSnapshot = !hasGhosttySnapshot && availableScreenSnapshot && !screenSnapshotSuppressed;
+  const hasReplayPayload = hasGhosttySnapshot || Boolean(
     (hasScreenSnapshot && data.screen_snapshot)
     || data.scrollback
     || (data.replay_segments && data.replay_segments.length > 0),
   );
-  const replayKind = hasScreenSnapshot
-    ? 'screen_snapshot'
-    : (data.scrollback || (data.replay_segments && data.replay_segments.length > 0))
-      ? 'scrollback'
-      : 'none';
+  const replayKind: 'ghostty_snapshot' | 'screen_snapshot' | 'scrollback' | 'none' = hasGhosttySnapshot
+    ? 'ghostty_snapshot'
+    : hasScreenSnapshot
+      ? 'screen_snapshot'
+      : (data.scrollback || (data.replay_segments && data.replay_segments.length > 0))
+        ? 'scrollback'
+        : 'none';
   const attachedCols = typeof data.cols === 'number' ? data.cols : null;
   const attachedRows = typeof data.rows === 'number' ? data.rows : null;
-  const replayCols = hasScreenSnapshot
-    ? (typeof data.screen_cols === 'number' ? data.screen_cols : attachedCols)
-    : attachedCols;
-  const replayRows = hasScreenSnapshot
-    ? (typeof data.screen_rows === 'number' ? data.screen_rows : attachedRows)
-    : attachedRows;
+  const replayCols = hasGhosttySnapshot
+    ? ghosttySnapshot.cols
+    : hasScreenSnapshot
+      ? (typeof data.screen_cols === 'number' ? data.screen_cols : attachedCols)
+      : attachedCols;
+  const replayRows = hasGhosttySnapshot
+    ? ghosttySnapshot.rows
+    : hasScreenSnapshot
+      ? (typeof data.screen_rows === 'number' ? data.screen_rows : attachedRows)
+      : attachedRows;
   const requestedCols = context?.requestedCols ?? null;
   const requestedRows = context?.requestedRows ?? null;
   const attachedGeometryMismatch = requestedCols !== null && requestedRows !== null && (
@@ -141,13 +169,18 @@ export function classifyAttachReplay(
   // subsequent fit/pty_resize remains authoritative.
   const replayAtAttachedGeometry = context?.policy === 'relaunch_restore'
     || context?.policy === 'same_app_remount';
-  const replayAllowedByPolicy = context?.policy === 'relaunch_restore'
+  // The daemon only serves a Ghostty snapshot when it decides the attach should
+  // restore, and the snapshot carries its own authoritative geometry (we resize
+  // to replayCols/replayRows before writing it), so it is always allowed and
+  // never skipped on a geometry mismatch.
+  const replayAllowedByPolicy = hasGhosttySnapshot
+    || context?.policy === 'relaunch_restore'
     || context?.policy === 'same_app_remount'
     || codexRawReplayBootstrap;
   const geometryMismatchSkipsReplay = !replayAtAttachedGeometry
     && hasScreenSnapshot
     && (attachedGeometryMismatch || replayGeometryMismatch);
-  const replaySkipped = hasReplayPayload && (
+  const replaySkipped = !hasGhosttySnapshot && hasReplayPayload && (
     !replayAllowedByPolicy ||
     geometryMismatchSkipsReplay
   );
@@ -162,6 +195,7 @@ export function classifyAttachReplay(
     availableRawScrollback,
     screenSnapshotSuppressed,
     hasScreenSnapshot,
+    hasGhosttySnapshot,
     hasReplayPayload,
     replayKind,
     attachedCols,
@@ -194,11 +228,14 @@ export function planAttachedRuntimeGeometry(
   const attachedCols = typeof attachResult.cols === 'number' ? attachResult.cols : null;
   const attachedRows = typeof attachResult.rows === 'number' ? attachResult.rows : null;
   const hasScreenSnapshotReplay = replayPlan.replayApplied && replayPlan.hasScreenSnapshot;
+  const hasGhosttySnapshotReplay = replayPlan.replayApplied && replayPlan.hasGhosttySnapshot;
   const hasRawScrollbackReplay = replayPlan.replayApplied && replayPlan.replayKind === 'scrollback';
   const replayCols = replayPlan.replayCols;
   const replayRows = replayPlan.replayRows;
   const ptyGeometryMatches = attachedCols === requestedCols && attachedRows === requestedRows;
-  const replayGeometryMatches = hasScreenSnapshotReplay
+  // A Ghostty snapshot carries its own authoritative grid (replayCols/Rows),
+  // exactly like a screen snapshot.
+  const replayGeometryMatches = hasScreenSnapshotReplay || hasGhosttySnapshotReplay
     ? replayCols === requestedCols && replayRows === requestedRows
     : hasRawScrollbackReplay
       ? ptyGeometryMatches
@@ -224,6 +261,7 @@ export function planAttachedRuntimeGeometry(
     ptyGeometryMatches,
     replayGeometryMatches,
     hasScreenSnapshotReplay,
+    hasGhosttySnapshotReplay,
     hasRawScrollbackReplay,
     replayKind: replayPlan.replayKind,
     replayApplied: replayPlan.replayApplied,
@@ -255,13 +293,21 @@ export function planAttachResultEffects({
     replayPlan.replayApplied || typeof previousSeq === 'number'
   );
   const resetReason = shouldReset
-    ? (replayPlan.hasScreenSnapshot && replayPlan.replayApplied ? 'snapshot_restore' : 'reattach')
+    ? ((replayPlan.hasScreenSnapshot || replayPlan.hasGhosttySnapshot) && replayPlan.replayApplied
+        ? 'snapshot_restore'
+        : 'reattach')
     : null;
   const replayAction = replayPlan.replaySkipped
     ? {
         kind: 'skipped' as const,
         replayKind: replayPlan.replayKind,
       }
+    : replayPlan.replayApplied && replayPlan.hasGhosttySnapshot && attachResult.snapshot?.vt_dump_b64
+      ? {
+          kind: 'ghostty_snapshot' as const,
+          replayKind: 'ghostty_snapshot' as const,
+          data: attachResult.snapshot.vt_dump_b64,
+        }
     : replayPlan.replayApplied && replayPlan.hasScreenSnapshot && attachResult.screen_snapshot
       ? {
           kind: 'screen_snapshot' as const,
@@ -309,6 +355,7 @@ export function planAttachResultEffects({
   );
   const shouldWarnTruncatedRestore = Boolean(
     !replayPlan.hasScreenSnapshot &&
+    !replayPlan.hasGhosttySnapshot &&
     attachResult.scrollback_truncated &&
     !hasVerifiedSegmentedReplay &&
     String(sessionAgent || '').toLowerCase() === 'codex',

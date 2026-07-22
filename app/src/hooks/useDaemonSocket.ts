@@ -173,7 +173,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '180';
+export const PROTOCOL_VERSION = '181';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2114,6 +2114,7 @@ export function useDaemonSocket({
                     screen_cursor_y: data.screen_cursor_y,
                     screen_cursor_visible: data.screen_cursor_visible,
                     screen_snapshot_fresh: data.screen_snapshot_fresh,
+                    snapshot: data.snapshot,
                     last_seq: data.last_seq,
                     cols: data.cols,
                     rows: data.rows,
@@ -2140,7 +2141,16 @@ export function useDaemonSocket({
                   queuedOutputs: ptyTransportRef.current.getQueuedAttachOutputs(data.id),
                   sessionAgent: session?.agent,
                 });
-                const snapshotGeometry = replayPlan.replayApplied
+                // A Ghostty snapshot is a raw VT dump authored at the daemon
+                // worker's exact grid; the fresh model must be resized to that
+                // grid before the dump is written or its line-wrapping desyncs.
+                const ghosttySnapshotGeometry = replayPlan.replayApplied
+                  && replayPlan.hasGhosttySnapshot
+                  && typeof replayPlan.replayCols === 'number'
+                  && typeof replayPlan.replayRows === 'number'
+                  ? { cols: replayPlan.replayCols, rows: replayPlan.replayRows }
+                  : null;
+                const snapshotGeometry = ghosttySnapshotGeometry || (replayPlan.replayApplied
                   && replayPlan.hasScreenSnapshot
                   && typeof replayPlan.replayCols === 'number'
                   && typeof replayPlan.replayRows === 'number'
@@ -2149,7 +2159,7 @@ export function useDaemonSocket({
                     || replayPlan.replayGeometryMismatch
                   )
                   ? { cols: replayPlan.replayCols, rows: replayPlan.replayRows }
-                  : null;
+                  : null);
                 const relaunchFallbackGeometry = attachContext?.policy === 'relaunch_restore'
                   && typeof data.cols === 'number'
                   && typeof data.rows === 'number'
@@ -2173,7 +2183,15 @@ export function useDaemonSocket({
                   });
                 }
                 ptyTransportRef.current.setLastSeq(data.id, attachEffects.nextSeq);
-                if (attachEffects.replayAction.kind === 'screen_snapshot') {
+                if (attachEffects.replayAction.kind === 'ghostty_snapshot') {
+                  emitPtyEvent({
+                    event: 'data',
+                    id: data.id,
+                    data: attachEffects.replayAction.data,
+                    source: 'attach_replay',
+                    suppressResponses: !replayPlan.respondToTerminalQueries,
+                  });
+                } else if (attachEffects.replayAction.kind === 'screen_snapshot') {
                   emitPtyEvent({
                     event: 'data',
                     id: data.id,
@@ -2190,7 +2208,8 @@ export function useDaemonSocket({
                     suppressResponses: !replayPlan.respondToTerminalQueries,
                   });
                 }
-                const replayWasEmitted = attachEffects.replayAction.kind === 'screen_snapshot'
+                const replayWasEmitted = attachEffects.replayAction.kind === 'ghostty_snapshot'
+                  || attachEffects.replayAction.kind === 'screen_snapshot'
                   || attachEffects.replayAction.kind === 'scrollback'
                   || attachEffects.replayAction.kind === 'scrollback_segments';
                 if (attachEffects.replayAction.kind === 'scrollback_segments') {

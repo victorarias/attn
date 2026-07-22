@@ -50,9 +50,12 @@ else
 NATIVE_VT_DEP :=
 endif
 
-# Rebuild the native archive when its pin or build script changes (or it is
-# absent). The script installs into third_party/ghostty-vt/{lib,include}.
-$(NATIVE_VT_LIB): ghostty-vt-native.pin scripts/build-libghostty-vt.sh
+# Rebuild the native archive when its pin, build script, or carried patch
+# changes (or it is absent). The patch is listed via $(wildcard) so a fresh
+# checkout without it still resolves the rule; once present, editing it forces a
+# rebuild (the script applies it, so a stale archive would miss the change). The
+# script installs into third_party/ghostty-vt/{lib,include}.
+$(NATIVE_VT_LIB): ghostty-vt-native.pin scripts/build-libghostty-vt.sh $(wildcard ghostty-vt-native.patch)
 	./scripts/build-libghostty-vt.sh
 
 build: $(NATIVE_VT_DEP)

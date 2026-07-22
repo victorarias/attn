@@ -540,4 +540,124 @@ describe('attachPlanning', () => {
       nextSeq: 10,
     });
   });
+
+  describe('server-authoritative Ghostty snapshot (Phase 2)', () => {
+    it('classifies a Ghostty snapshot as the authoritative restore payload', () => {
+      const plan = classifyAttachReplay({
+        cols: 80,
+        rows: 24,
+        snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
+      }, createAttachRequestContext({ cols: 80, rows: 24 }, 'relaunch_restore'));
+
+      expect(plan.hasGhosttySnapshot).toBe(true);
+      expect(plan.replayKind).toBe('ghostty_snapshot');
+      expect(plan.hasReplayPayload).toBe(true);
+      expect(plan.replayApplied).toBe(true);
+      expect(plan.replaySkipped).toBe(false);
+      expect(plan.replayAllowedByPolicy).toBe(true);
+      expect(plan.replayCols).toBe(80);
+      expect(plan.replayRows).toBe(24);
+      // The dump is written suppressed; the worker already answered queries.
+      expect(plan.respondToTerminalQueries).toBe(false);
+      // Snapshot supersedes the legacy screen-snapshot mechanism.
+      expect(plan.hasScreenSnapshot).toBe(false);
+    });
+
+    it('applies the Ghostty snapshot even when its grid differs from the requested geometry', () => {
+      // Unlike a screen snapshot, a geometry mismatch never skips it: the
+      // consumer resizes to the snapshot grid before writing.
+      const plan = classifyAttachReplay({
+        cols: 100,
+        rows: 40,
+        snapshot: { cols: 100, rows: 40, vt_dump_b64: 'ZHVtcA==' },
+      }, createAttachRequestContext({ cols: 58, rows: 46 }, 'same_app_remount'));
+
+      expect(plan.replayApplied).toBe(true);
+      expect(plan.replaySkipped).toBe(false);
+      expect(plan.replayGeometryMismatch).toBe(true);
+      expect(plan.replayCols).toBe(100);
+      expect(plan.replayRows).toBe(40);
+    });
+
+    it('supersedes raw scrollback and screen snapshot when all are present', () => {
+      const plan = classifyAttachReplay({
+        cols: 80,
+        rows: 24,
+        screen_cols: 80,
+        screen_rows: 24,
+        screen_snapshot: 'legacy',
+        screen_snapshot_fresh: true,
+        scrollback: 'raw',
+        snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
+      }, createAttachRequestContext({ cols: 80, rows: 24, agent: 'codex' }, 'relaunch_restore'));
+
+      expect(plan.replayKind).toBe('ghostty_snapshot');
+      expect(plan.hasScreenSnapshot).toBe(false);
+      expect(plan.screenSnapshotSuppressed).toBe(false);
+    });
+
+    it('ignores an empty Ghostty snapshot and falls back to the legacy path', () => {
+      const plan = classifyAttachReplay({
+        cols: 80,
+        rows: 24,
+        screen_cols: 80,
+        screen_rows: 24,
+        screen_snapshot: 'legacy',
+        screen_snapshot_fresh: true,
+        snapshot: { cols: 80, rows: 24, vt_dump_b64: '' },
+      }, createAttachRequestContext({ cols: 80, rows: 24 }, 'relaunch_restore'));
+
+      expect(plan.hasGhosttySnapshot).toBe(false);
+      expect(plan.replayKind).toBe('screen_snapshot');
+    });
+
+    it('plans a snapshot_restore reset and emits the vt dump as the replay action', () => {
+      const replayPlan = classifyAttachReplay({
+        cols: 80,
+        rows: 24,
+        snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
+      }, createAttachRequestContext({ cols: 80, rows: 24 }, 'relaunch_restore'));
+
+      const effects = planAttachResultEffects({
+        attachResult: {
+          last_seq: 7,
+          snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
+        },
+        replayPlan,
+        previousSeq: 6,
+      });
+
+      expect(effects.shouldReset).toBe(true);
+      expect(effects.resetReason).toBe('snapshot_restore');
+      expect(effects.replayAction).toEqual({
+        kind: 'ghostty_snapshot',
+        replayKind: 'ghostty_snapshot',
+        data: 'ZHVtcA==',
+      });
+      expect(effects.nextSeq).toBe(7);
+      // The snapshot carries its own truncation flag; the legacy codex
+      // raw-replay truncation warning must not fire.
+      expect(effects.shouldWarnTruncatedRestore).toBe(false);
+    });
+
+    it('reports the snapshot grid as the authoritative replay geometry', () => {
+      const attachContext = createAttachRequestContext({ cols: 80, rows: 24 }, 'same_app_remount');
+      const plan = planAttachedRuntimeGeometry({
+        cols: 80,
+        rows: 24,
+      }, {
+        cols: 80,
+        rows: 24,
+        snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
+      }, {
+        attachPolicy: 'same_app_remount',
+        attachContext,
+      });
+
+      expect(plan.hasGhosttySnapshotReplay).toBe(true);
+      expect(plan.replayApplied).toBe(true);
+      expect(plan.replayGeometryMatches).toBe(true);
+      expect(plan.replayKind).toBe('ghostty_snapshot');
+    });
+  });
 });

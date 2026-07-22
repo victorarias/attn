@@ -125,6 +125,9 @@ type AttachInfo struct {
 	ScreenCursorY       uint16
 	ScreenCursorVisible bool
 	ScreenSnapshotFresh bool
+	// GhosttySnapshot is the server-authoritative VT serialization of the whole
+	// terminal from libghostty-vt (geometry is Cols/Rows). nil when absent.
+	GhosttySnapshot []byte
 }
 
 type ReplaySegment struct {
