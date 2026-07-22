@@ -243,11 +243,14 @@ func TestCopilotSupportsInitialPrompt(t *testing.T) {
 	}
 }
 
-func TestCopilotBuildCommand_AlwaysDisablesMouse(t *testing.T) {
+func TestCopilotBuildCommand_RespectsMouseConfiguration(t *testing.T) {
 	c := &Copilot{}
 	cmd := c.BuildCommand(SpawnOpts{Executable: "copilot"})
-	if !slices.Contains(cmd.Args, "--no-mouse") {
-		t.Fatalf("expected --no-mouse in args, got: %v", cmd.Args)
+	if slices.Contains(cmd.Args, "--mouse=on") {
+		t.Fatalf("unexpected --mouse=on override in args: %v", cmd.Args)
+	}
+	if slices.Contains(cmd.Args, "--no-mouse") {
+		t.Fatalf("unexpected --no-mouse override in args: %v", cmd.Args)
 	}
 }
 

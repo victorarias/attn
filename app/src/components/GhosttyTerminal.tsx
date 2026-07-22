@@ -545,6 +545,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const selectionDragThresholdMetRef = useRef(false);
     const selectionDragCleanupRef = useRef<(() => void) | null>(null);
     const trackedMouseButtonRef = useRef<number | null>(null);
+    const trackedMouseCellRef = useRef<{ row: number; col: number } | null>(null);
+    const trackedMouseReleaseCleanupRef = useRef<(() => void) | null>(null);
     const hoveredCellRef = useRef<{ row: number; col: number } | null>(null);
     const acceleratorHeldRef = useRef(false);
     const cwdRef = useRef(cwd);
@@ -2327,7 +2329,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
     }, [lineAtVisibleRow]);
 
-    const mouseModifiers = (event: React.MouseEvent) =>
+    const mouseModifiers = (event: Pick<MouseEvent, 'shiftKey' | 'altKey' | 'ctrlKey'>) =>
       (event.shiftKey ? 4 : 0) + (event.altKey ? 8 : 0) + (event.ctrlKey ? 16 : 0);
 
     const mouseButton = (button: number) => {
@@ -2583,7 +2585,68 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     useEffect(() => () => {
       selectionDragCleanupRef.current?.();
       selectionDragCleanupRef.current = null;
+      trackedMouseReleaseCleanupRef.current?.();
+      trackedMouseReleaseCleanupRef.current = null;
+      const terminal = terminalRef.current;
+      const button = trackedMouseButtonRef.current;
+      const cell = trackedMouseCellRef.current;
+      if (terminal && button !== null && cell) {
+        onInputRef.current(applicationMouseInput(
+          'release',
+          button,
+          cell.col + 1,
+          cell.row + 1,
+          terminal.getMode(1006),
+        ));
+      }
+      trackedMouseButtonRef.current = null;
+      trackedMouseCellRef.current = null;
     }, []);
+
+    const stopTrackedMouseReleaseWatch = () => {
+      trackedMouseReleaseCleanupRef.current?.();
+      trackedMouseReleaseCleanupRef.current = null;
+    };
+
+    const releaseTrackedMouse = (
+      event?: React.MouseEvent | MouseEvent,
+    ): boolean => {
+      const terminal = terminalRef.current;
+      const button = trackedMouseButtonRef.current;
+      if (button === null) return false;
+      const cell = (event ? cellFromPointer(event) : null) ?? trackedMouseCellRef.current;
+      stopTrackedMouseReleaseWatch();
+      trackedMouseButtonRef.current = null;
+      trackedMouseCellRef.current = null;
+      if (!terminal || !cell) return false;
+      onInputRef.current(applicationMouseInput(
+        'release',
+        button,
+        cell.col + 1,
+        cell.row + 1,
+        terminal.getMode(1006),
+        event ? mouseModifiers(event) : 0,
+      ));
+      return true;
+    };
+
+    const startTrackedMouseReleaseWatch = () => {
+      stopTrackedMouseReleaseWatch();
+      const onUp = (event: MouseEvent) => {
+        releaseTrackedMouse(event);
+      };
+      const onCancel = () => {
+        releaseTrackedMouse();
+      };
+      document.addEventListener('mouseup', onUp);
+      window.addEventListener('blur', onCancel);
+      window.addEventListener('pointercancel', onCancel);
+      trackedMouseReleaseCleanupRef.current = () => {
+        document.removeEventListener('mouseup', onUp);
+        window.removeEventListener('blur', onCancel);
+        window.removeEventListener('pointercancel', onCancel);
+      };
+    };
 
     const sendTrackedMouse = (
       action: 'press' | 'move' | 'release',
@@ -2591,6 +2654,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     ): boolean => {
       if (isWorkspaceResizeActive(containerRef.current)) return false;
       const terminal = terminalRef.current;
+      if (action === 'release') {
+        const released = releaseTrackedMouse(event);
+        if (released) event.preventDefault();
+        return released;
+      }
       const cell = cellFromPointer(event);
       if (!terminal || !cell || !terminal.hasMouseTracking()) return false;
       const activeButton = trackedMouseButtonRef.current;
@@ -2603,14 +2671,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
         if (!shouldReport) {
           if (activeButton !== null && event.buttons === 0) {
-            trackedMouseButtonRef.current = null;
+            releaseTrackedMouse(event);
           }
           return true;
         }
-      } else if (action === 'release' && activeButton === null) {
-        return true;
       }
-      const button = action === 'press' ? mouseButton(event.button) : activeButton ?? 0;
+      // Under DECSET 1003, passive motion is reported even with no physical
+      // button held. Xterm encodes that as button 3 + motion (35), not button
+      // 0 + motion (32), which would tell the application left-drag is active.
+      const button = action === 'press' ? mouseButton(event.button) : activeButton ?? 3;
       onInputRef.current(applicationMouseInput(
         action,
         button,
@@ -2619,8 +2688,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         terminal.getMode(1006),
         mouseModifiers(event),
       ));
-      if (action === 'press') trackedMouseButtonRef.current = button;
-      if (action === 'release') trackedMouseButtonRef.current = null;
+      trackedMouseCellRef.current = cell;
+      if (action === 'press') {
+        trackedMouseButtonRef.current = button;
+        startTrackedMouseReleaseWatch();
+      }
       event.preventDefault();
       return true;
     };
