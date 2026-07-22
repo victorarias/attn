@@ -2767,10 +2767,25 @@ model SpawnResultMessage {
   error?: string;
 }
 
+// Server-authoritative restore snapshot: a self-contained VT serialization of
+// the worker's parsed terminal (grid + scrollback + cursor + modes, both
+// primary and alternate screens) produced by libghostty-vt. Present only when
+// the daemon serves a snapshot-first attach (ATTN_ATTACH_SNAPSHOT); the client
+// resets its model and replays vt_dump_b64 instead of the raw replay fields.
+model AttachSnapshot {
+  cols: int32;
+  rows: int32;
+  vt_dump_b64: string;           // base64 self-contained VT stream
+  scrollback_truncated: boolean;
+}
+
 model AttachResultMessage {
   event: "attach_result";
   id: string;
   success: boolean;
+  // Present when the daemon serves a server-authoritative snapshot attach. When
+  // set, the raw replay fields below are empty and the client restores from it.
+  snapshot?: AttachSnapshot;
   scrollback?: string;           // base64 bytes
   scrollback_truncated?: boolean;
   replay_segments?: ReplaySegment[];

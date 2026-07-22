@@ -88,6 +88,9 @@ type AttachResultMessage struct {
 	// "scrollback_truncated".
 	ScrollbackTruncated *bool `json:"scrollback_truncated,omitempty,omitzero"`
 
+	// Snapshot corresponds to the JSON schema field "snapshot".
+	Snapshot *AttachSnapshot `json:"snapshot,omitempty,omitzero"`
+
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
 }
@@ -101,6 +104,21 @@ type AttachSessionMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type AttachSnapshot struct {
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
+
+	// ScrollbackTruncated corresponds to the JSON schema field
+	// "scrollback_truncated".
+	ScrollbackTruncated bool `json:"scrollback_truncated"`
+
+	// VtDumpB64 corresponds to the JSON schema field "vt_dump_b64".
+	VtDumpB64 string `json:"vt_dump_b64"`
 }
 
 type AuthorState struct {

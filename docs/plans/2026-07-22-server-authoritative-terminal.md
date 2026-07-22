@@ -37,6 +37,13 @@ Phase 0 below and in Decisions. Phase 1+ can start immediately; the remaining
 Phase 0 checkboxes are productionizing the spike (build script + pin file),
 not research.
 
+**Status (2026-07-23):** Phase 0 + Phase 1 are DONE and MERGED to the epic
+branch `epic/server-authoritative-terminal` (PR #639, merge commit `7e8e1865`).
+Main is untouched. Phase 2 is in progress on the epic branch. Per Victor's
+standing instruction, every phase PR bases on and merges into the epic branch;
+main stays untouched until the whole initiative is complete — including Phase 3,
+which ships to the epic branch, not main.
+
 ## Architecture Map
 
 ```text
@@ -219,8 +226,19 @@ Residual items to productionize (not research):
       (`978c1d02…`). cgo `internal/ghosttyvt` links it; `cmd/attn` grows to
       ~39MB and codesigns cleanly (no ad-hoc fallback) — the plan's cgo
       signing worry is retired.
-- [ ] **Primary-screen-behind-alt-screen: CONFIRMED LOST — fix via a small
-      carried patch (decided with Victor 2026-07-22).** DEFERRED to Phase 2
+- [x] **Primary-screen-behind-alt-screen: FIXED via carried patch — DONE
+      2026-07-23.** `ghostty-vt-native.patch` adds one C-shim function,
+      `ghostty_terminal_serialize_vt`, that composes the upstream
+      `TerminalFormatter` + per-screen `ScreenFormatter` in Zig: when the
+      alternate screen is active it emits palette → primary screen
+      (scrollback + frame) → `?1049h\x1b[H` → alt frame, so leaving alt after a
+      restore reveals the primary content. `Serialize()` now calls it.
+      `TestRoundTripAltScreen` proves both screens survive and 1049l reveals the
+      primary prompt + scrollback. Reproducible build verified (build script
+      applies the patch; clean re-run). Patch is upstream-candidate. Below is the
+      original analysis, retained for context:
+
+      DEFERRED to Phase 2
       (Serialize needs it; Phase 1 shadow mode does not). The build script
       already applies `ghostty-vt-native.patch` when present, so landing the
       patch is drop-in. Spike-verified: the
@@ -295,50 +313,41 @@ Deliverable: with `ATTN_ATTACH_SNAPSHOT=1` (env/config read by the daemon),
 every attach serves a ghostty-serialized snapshot; without it, behavior is
 exactly today's. Protocol carries both shapes during transition.
 
-- [ ] Serializer: implement `Serialize()` per the Snapshot contract above —
-      it is a thin call into the upstream formatter, NOT a hand-rolled
-      cell walker. Rules a weaker model must not improvise on:
-      - one formatter call, `FORMAT_VT`, `unwrap=false`, all extras on,
-        NULL selection; then append the trailing CUP for the true cursor
-        position (upstream ordering bug, see Phase 0 notes).
-      - alt-screen: when the terminal is in alt-screen, use the patched
-        screen-selector API (see Phase 0 residual items) to emit primary
-        screen (scrollback + frame), then `1049h`, then the alt frame.
-        Leaving alt-screen after a restore MUST show the primary content.
-      - audit the dump for host-affecting sequences: it must never contain
-        anything interrogative (queries) nor OSC 52 clipboard writes. Add a
-        Go test asserting the dump of a corpus-fed terminal contains none
-        (scan for the sequence classes `stripDaemonOwnedResponses` handles,
-        plus OSC 52).
-      - never snapshot mid-`Write` — the existing lock already guarantees
-        the dump reflects committed state only (DEC 2026 etc.).
-- [ ] Protocol: add the `snapshot` field per Data Model section; TypeSpec →
-      `make generate-types` (rm -rf tsp-output first) → constants.go bump →
-      useDaemonSocket.ts bump → rebuild `./attn` (stale binary breaks e2e).
-- [ ] Daemon: in `buildAttachReplayPayload`, when the flag is on, return the
-      snapshot (serialized under `replayMu` with `last_seq`, reusing the
-      `info()` atomic-pair pattern) and set replay fields empty with
-      `replay_decision=use_ghostty_snapshot`. Keep every existing decision
-      path intact when the flag is off.
-- [ ] Frontend: in `attachPlanning.ts` + `useGhosttyPaneRuntime.ts`, when
-      `snapshot` is present: reset model → write scrollback → write frame,
-      all with `suppressResponses` (source `attach_replay`), then existing
-      seq dedup applies untouched. Geometry: model is created at snapshot
-      cols/rows; the existing fit/resize flow then runs as normal.
-- [ ] Codex bootstrap: with the flag on, `shouldIncludeAttachReplay`'s codex
-      fresh-spawn carve-out must keep working. The reason it exists: codex
-      emits startup queries (incl. kitty `CSI ? u`) that today's scan-based
-      responder does NOT answer — the client parser answers them from
-      replayed bytes. The spike confirmed libghostty-vt answers kitty
-      `CSI ? u` natively (`ESC[?0u` via the WRITE_PTY callback). Fix
-      properly: extend the worker's responder using
-      `ghostty.DrainResponses()` for exactly the queries the scanner misses
-      (drain after each Write; forward to PTY input; suppress any response
-      classes the scanner already answers to avoid double replies — dedup by
-      query type). Then codex fresh-spawn needs no replay at all. This is
-      the trickiest step in the plan; add a dedicated Go test feeding the
-      recorded codex startup corpus and asserting each query gets exactly
-      one reply, in ask order.
+- [x] Serializer: `Serialize()` implemented per the Snapshot contract above.
+      Rather than the "one formatter call + trailing CUP" recipe (which only
+      serializes the ACTIVE screen and thus loses primary+scrollback whenever a
+      dump is taken in alt-screen), it uses a carried Zig C-shim patch,
+      `ghostty_terminal_serialize_vt` (`ghostty-vt-native.patch`, applied by
+      `scripts/build-libghostty-vt.sh`). The shim composes upstream
+      `TerminalFormatter` (palette only) + per-screen `ScreenFormatter`
+      (primary then, if alt is active, `\x1b[?1049h\x1b[H` then the alt frame),
+      so leaving alt-screen after a restore shows the primary content. Go side
+      (`internal/ghosttyvt/ghosttyvt.go`) calls it via `serializeVTLocked()`.
+      Covered by `TestRoundTripAltScreen` + the existing round-trip corpus.
+- [x] Protocol: `snapshot` field added (TypeSpec `AttachSnapshot`
+      {cols, rows, vt_dump_b64, scrollback_truncated} on `AttachResultMessage`);
+      `make generate-types` regenerated Go+TS; `ProtocolVersion` 180→181;
+      `useDaemonSocket.ts` PROTOCOL_VERSION bumped to match.
+- [x] Daemon: `buildAttachReplayPayload` returns the ghostty snapshot when the
+      flag is on and one is present, zeroing every raw-replay field with
+      `replay_decision=use_ghostty_snapshot`. Worker always serializes into
+      `AttachInfo.GhosttySnapshot` under `replayMu` (atomic with the watermark,
+      like `info()`); the daemon decides whether to serve it. Flag off = every
+      existing decision path intact (verified byte-identical by the branch being
+      skipped entirely). Wire boundary plumbed pty→ptybackend→ptyworker→back.
+- [x] Frontend: `attachPlanning.ts` classifies a present `data.snapshot` as a
+      `ghostty_snapshot` replay kind that supersedes screen-snapshot/raw
+      scrollback, is always allowed, never geometry-skipped, and always written
+      with `suppressResponses`; `useDaemonSocket.ts` resets the model → resizes
+      to the snapshot grid → writes the base64 VT dump → replay_complete. 6 new
+      `attachPlanning.test.ts` cases; full frontend suite green (1963).
+- [x] Codex bootstrap: instead of keeping raw replay for codex fresh-spawn, the
+      worker forwards ghostty's query responses the scanner does NOT cover
+      (kitty `CSI ? u`, DECRQM `$y`, …) via `drainGhosttyResponses` +
+      `stripScannerOwnedResponses`, keeping the scanner the sole answerer for
+      CPR/DA1/OSC-color. Env-gated (`attachSnapshotMode`) so flag-off drains and
+      discards exactly as today. Covered by `TestStripScannerOwnedResponses`
+      (9 cases incl. the codex bootstrap trio).
 - [ ] Verify (flag ON via a throwaway profile — NEVER smoke daemon changes on
       the dev profile; use `eval "$(./attn profile-env <name>)"` + fresh
       install; run bundled preflight first):

@@ -811,6 +811,7 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			ScreenCursorY:       info.ScreenCursorY,
 			ScreenCursorVisible: info.ScreenCursorVisible,
 			ScreenSnapshotFresh: info.ScreenSnapshotFresh,
+			GhosttySnapshot:     info.GhosttySnapshot,
 		})
 	case MethodAttach:
 		var params AttachParams
@@ -917,6 +918,7 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			ScreenCursorY:       info.ScreenCursorY,
 			ScreenCursorVisible: info.ScreenCursorVisible,
 			ScreenSnapshotFresh: info.ScreenSnapshotFresh,
+			GhosttySnapshot:     info.GhosttySnapshot,
 		})
 	case MethodDetach:
 		if c.subID != "" {

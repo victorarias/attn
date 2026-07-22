@@ -260,7 +260,7 @@ func (t *Terminal) serializeLocked() Snapshot {
 	if t.closed {
 		return Snapshot{Cols: t.cols, Rows: t.rows}
 	}
-	dump := t.format(C.GHOSTTY_FORMATTER_FORMAT_VT)
+	dump := t.serializeVTLocked()
 
 	// Upstream ordering bug: the VT dump emits the cursor CUP before tabstop
 	// resets, and setting tabstops moves the cursor — so without a corrective
@@ -274,6 +274,25 @@ func (t *Terminal) serializeLocked() Snapshot {
 		Rows:   t.rows,
 		VTDump: dump,
 	}
+}
+
+// serializeVTLocked returns the alt-screen-aware VT serialization of the whole
+// terminal (primary + alternate screens, scrollback, modes, cursor) via the
+// carried ghostty_terminal_serialize_vt patch. When the alternate screen is
+// active it emits the primary screen (scrollback + frame), then ?1049h, then
+// the alt frame — so a restored terminal keeps its primary content behind an
+// alt-screen app. Caller holds t.mu and must not call after Close.
+func (t *Terminal) serializeVTLocked() []byte {
+	var ptr *C.uint8_t
+	var n C.size_t
+	if rc := C.ghostty_terminal_serialize_vt(nil, t.term, &ptr, &n); rc != C.GHOSTTY_SUCCESS {
+		return nil
+	}
+	defer C.ghostty_free(nil, ptr, n)
+	if n == 0 {
+		return nil
+	}
+	return C.GoBytes(unsafe.Pointer(ptr), C.int(n))
 }
 
 // cursorXYLocked returns the native cursor position (0-indexed). Caller holds t.mu.

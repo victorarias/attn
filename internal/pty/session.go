@@ -104,8 +104,15 @@ type Session struct {
 	// Write; those are drained-and-discarded here so the scan-based responder
 	// stays the sole answerer. May be nil if construction failed — shadow mode
 	// must never break a session, so every use is nil-guarded.
-	ghostty    *ghosttyvt.Terminal
-	seqCounter atomic.Uint32
+	ghostty *ghosttyvt.Terminal
+	// attachSnapshotMode mirrors the daemon's ATTN_ATTACH_SNAPSHOT flag (read
+	// from the worker's env at spawn). When true, the read loop forwards the
+	// ghostty terminal's query responses the scan-based responder does not cover
+	// (e.g. kitty CSI ? u) to the PTY, making the worker the complete query
+	// answerer so a snapshot-restored client can suppress every response. When
+	// false, behavior is exactly today's: responses are drained and discarded.
+	attachSnapshotMode bool
+	seqCounter         atomic.Uint32
 
 	// replayMu makes the attach replay payload (scrollback / replay segments /
 	// screen) and its sequence watermark (lastReplaySeq) a consistent pair, so
@@ -329,14 +336,18 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 					s.screen.Observe(data)
 				}
 				if s.ghostty != nil {
-					// Shadow feed. Discard query responses in Phase 1: the
-					// scan-based responder above is the only PTY answerer;
-					// double answers would corrupt child app input.
+					// Feed the server-authoritative terminal under the same lock
+					// as the seq watermark so a snapshot stays atomic with it.
 					s.ghostty.Write(data)
-					s.ghostty.DrainResponses()
 				}
 				s.lastReplaySeq = seq
 				s.replayMu.Unlock()
+				// Drain ghostty's query responses AFTER the lock (the sink has
+				// its own mutex). In snapshot mode, forward the responses the
+				// scanner does not cover (kitty CSI ? u, etc.) so the worker
+				// answers every query and a restored client can suppress all of
+				// them; otherwise drain-and-discard (scanner stays sole answerer).
+				s.drainGhosttyResponses(logf)
 				// The daemon is the single authority for CPR (cursor position)
 				// and DA1 (device attributes) replies. Answer after the chunk is
 				// applied so the reported cursor is current, and reply in the
@@ -396,10 +407,10 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 		}
 		if s.ghostty != nil {
 			s.ghostty.Write(carryover)
-			s.ghostty.DrainResponses()
 		}
 		s.lastReplaySeq = seq
 		s.replayMu.Unlock()
+		s.drainGhosttyResponses(logf)
 		s.fanOut(carryover, seq)
 	}
 
@@ -412,6 +423,114 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 	if onExit != nil {
 		onExit(exitCode, signal)
 	}
+}
+
+// attachSnapshotEnv gates server-authoritative snapshot attach. When set to "1"
+// the daemon serves a ghostty-serialized snapshot on attach and the worker
+// forwards the query responses the scanner does not cover. Read from the worker
+// process env at spawn, mirroring the daemon-side flag (both processes see it).
+const attachSnapshotEnv = "ATTN_ATTACH_SNAPSHOT"
+
+// attachSnapshotEnabled reports whether server-authoritative snapshot mode is on.
+func attachSnapshotEnabled() bool {
+	return os.Getenv(attachSnapshotEnv) == "1"
+}
+
+// drainGhosttyResponses clears the ghostty terminal's accumulated query
+// responses. In snapshot mode it forwards the responses the scan-based responder
+// does not cover (kitty CSI ? u and any other non-CPR/DA1/OSC-color reports) to
+// the PTY, so the worker answers every query and a snapshot-restored client can
+// suppress all responses. Otherwise the responses are discarded (the scanner
+// stays the sole answerer, byte-identical to pre-snapshot behavior). Must be
+// called after replayMu is released; the sink has its own lock.
+func (s *Session) drainGhosttyResponses(logf func(string, ...interface{})) {
+	if s.ghostty == nil {
+		return
+	}
+	drained := s.ghostty.DrainResponses()
+	if !s.attachSnapshotMode || len(drained) == 0 {
+		return
+	}
+	gap := stripScannerOwnedResponses(drained)
+	if len(gap) == 0 {
+		return
+	}
+	s.writeMu.Lock()
+	_, _ = s.ptmx.Write(gap)
+	s.writeMu.Unlock()
+	if logf != nil {
+		logf("pty ghostty gap reply: session=%s bytes=%d", s.id, len(gap))
+	}
+}
+
+// stripScannerOwnedResponses removes, from a ghostty query-response stream, the
+// response classes the scan-based responder already emits — CPR (CSI … R), DA
+// (CSI … c), and OSC 10/11/12 color reports — so forwarding the remainder never
+// double-answers a query the scanner handles. Kitty keyboard reports (CSI ? … u),
+// DECRQM reports (CSI ? … $ y), and anything else are kept. Unrecognized bytes
+// are preserved so a partial/interleaved stream is never silently dropped.
+func stripScannerOwnedResponses(resp []byte) []byte {
+	out := make([]byte, 0, len(resp))
+	for i := 0; i < len(resp); {
+		if resp[i] != 0x1b || i+1 >= len(resp) {
+			out = append(out, resp[i])
+			i++
+			continue
+		}
+		switch resp[i+1] {
+		case '[': // CSI … final byte in 0x40–0x7e
+			j := i + 2
+			for j < len(resp) && !(resp[j] >= 0x40 && resp[j] <= 0x7e) {
+				j++
+			}
+			if j >= len(resp) {
+				out = append(out, resp[i:]...)
+				i = len(resp)
+				continue
+			}
+			final := resp[j]
+			seq := resp[i : j+1]
+			// CPR (R) and DA (c) are the scanner's; drop them. Everything else
+			// (kitty u, DECRQM $y, …) is a gap the scanner misses — keep it.
+			if final != 'R' && final != 'c' {
+				out = append(out, seq...)
+			}
+			i = j + 1
+		case ']': // OSC … terminated by BEL or ST (ESC \)
+			j := i + 2
+			for j < len(resp) {
+				if resp[j] == 0x07 {
+					j++
+					break
+				}
+				if resp[j] == 0x1b && j+1 < len(resp) && resp[j+1] == '\\' {
+					j += 2
+					break
+				}
+				j++
+			}
+			seq := resp[i:j]
+			// OSC 10/11/12 color reports are the scanner's; drop them.
+			if !isOSCColorReport(seq) {
+				out = append(out, seq...)
+			}
+			i = j
+		default:
+			out = append(out, resp[i], resp[i+1])
+			i += 2
+		}
+	}
+	return out
+}
+
+// isOSCColorReport reports whether an OSC sequence is a 10/11/12 color report
+// (ESC ] 1{0,1,2} ;). It matches the codes the scan-based responder answers.
+func isOSCColorReport(seq []byte) bool {
+	const prefixLen = 5 // ESC ] 1 X ;
+	if len(seq) < prefixLen || seq[0] != 0x1b || seq[1] != ']' || seq[2] != '1' {
+		return false
+	}
+	return (seq[3] == '0' || seq[3] == '1' || seq[3] == '2') && seq[4] == ';'
 }
 
 // shadowDivergenceEnv gates the Phase 1 shadow divergence metric. When set to
@@ -668,6 +787,15 @@ func (s *Session) info() AttachInfo {
 			screenSnapshotFresh = true
 		}
 	}
+	// Serialize the server-authoritative ghostty terminal under the same lock,
+	// so its VT dump and the watermark below form the same atomic pair as the
+	// raw-replay payload: every byte in the dump has seq <= replayWatermark.
+	// Always captured when ghostty exists (cheap, ~180µs); the daemon decides
+	// whether to serve it (ATTN_ATTACH_SNAPSHOT). nil when construction failed.
+	var ghosttySnapshot []byte
+	if s.ghostty != nil {
+		ghosttySnapshot = s.ghostty.Serialize().VTDump
+	}
 	replayWatermark := s.lastReplaySeq
 	s.replayMu.Unlock()
 
@@ -702,6 +830,7 @@ func (s *Session) info() AttachInfo {
 		ScreenCursorY:       screenCursorY,
 		ScreenCursorVisible: screenCursorVisible,
 		ScreenSnapshotFresh: screenSnapshotFresh,
+		GhosttySnapshot:     ghosttySnapshot,
 	}
 }
 

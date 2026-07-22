@@ -695,6 +695,7 @@ func (b *WorkerBackend) Attach(ctx context.Context, sessionID, subscriberID stri
 				ScreenCursorY:       attachResult.ScreenCursorY,
 				ScreenCursorVisible: attachResult.ScreenCursorVisible,
 				ScreenSnapshotFresh: attachResult.ScreenSnapshotFresh,
+				GhosttySnapshot:     attachResult.GhosttySnapshot,
 			}, stream, nil
 		}
 	}

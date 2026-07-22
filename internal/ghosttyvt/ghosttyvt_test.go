@@ -107,6 +107,58 @@ func TestReflowAfterRestore(t *testing.T) {
 	}
 }
 
+// TestRoundTripAltScreen is the alt-screen fidelity invariant: when the
+// alternate screen is active, the serialized dump must carry BOTH screens — the
+// alt frame (visible now) and the primary screen (scrollback + prompt) hidden
+// behind it — so leaving the alt screen after a restore reveals the original
+// primary content. The plain terminal formatter serializes only the active
+// screen, so without the alt-aware serializer a restored terminal shows a blank
+// shell on 1049l. Phase 3 deletes the raw-replay fallback, so this path must be
+// correct in snapshot form.
+func TestRoundTripAltScreen(t *testing.T) {
+	a := newT(t, 80, 10)
+	a.Write(styledCorpus())        // primary: scrollback + "final-prompt$ "
+	a.Write([]byte("\x1b[?1049h")) // enter alt screen (vim/less/TUI)
+	a.Write([]byte("\x1b[2J\x1b[HVIM-EDITOR-SCREEN\r\n~\r\n~"))
+
+	snap := a.Serialize()
+	if len(snap.VTDump) == 0 {
+		t.Fatal("empty VT dump")
+	}
+
+	b := newT(t, snap.Cols, snap.Rows)
+	b.Write(snap.VTDump)
+
+	// While alt is active, B must match A and show the alt frame — not the
+	// primary content behind it.
+	if got, want := b.PlainText(), a.PlainText(); got != want {
+		t.Errorf("alt-active round-trip mismatch\n A=%q\n B=%q", firstN(want, 200), firstN(got, 200))
+	}
+	if !strings.Contains(b.PlainText(), "VIM-EDITOR-SCREEN") {
+		t.Errorf("alt frame lost after restore: %q", firstN(b.PlainText(), 200))
+	}
+	if strings.Contains(b.PlainText(), "final-prompt$") {
+		t.Errorf("primary content leaked into alt viewport: %q", firstN(b.PlainText(), 200))
+	}
+
+	// Leaving the alt screen must reveal the restored primary screen: scrollback
+	// and prompt, NOT a blank shell.
+	a.Write([]byte("\x1b[?1049l"))
+	b.Write([]byte("\x1b[?1049l"))
+	if got, want := b.PlainText(), a.PlainText(); got != want {
+		t.Errorf("primary round-trip mismatch after leaving alt\n A=%q\n B=%q", firstN(want, 240), firstN(got, 240))
+	}
+	if !strings.Contains(b.PlainText(), "final-prompt$") {
+		t.Errorf("primary prompt lost after leaving alt: %q", firstN(b.PlainText(), 240))
+	}
+	if !strings.Contains(b.PlainText(), "line-001") {
+		t.Errorf("primary scrollback lost after leaving alt: %q", firstN(b.PlainText(), 240))
+	}
+	if strings.Contains(b.PlainText(), "VIM-EDITOR-SCREEN") {
+		t.Errorf("alt content leaked into primary after leaving alt: %q", firstN(b.PlainText(), 240))
+	}
+}
+
 // TestQueryResponses asserts the terminal answers the codex bootstrap query
 // trio (CPR, DA1, kitty CSI ? u) via the write_pty callback, drained through
 // DrainResponses.

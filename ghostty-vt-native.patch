@@ -1,0 +1,170 @@
+diff --git a/include/ghostty/vt/formatter.h b/include/ghostty/vt/formatter.h
+index 5cdcd11..6265e87 100644
+--- a/include/ghostty/vt/formatter.h
++++ b/include/ghostty/vt/formatter.h
+@@ -198,6 +198,36 @@ GHOSTTY_API GhosttyResult ghostty_formatter_format_alloc(GhosttyFormatter format
+  */
+ GHOSTTY_API void ghostty_formatter_free(GhosttyFormatter formatter);
+ 
++/**
++ * Serialize the full terminal state as a self-contained VT stream.
++ *
++ * The returned stream reconstructs the terminal (grid + scrollback + cursor +
++ * modes) when replayed into a fresh, same-size terminal. Unlike the plain
++ * terminal formatter, this is alternate-screen aware: when the alternate screen
++ * is active it emits the primary screen (scrollback + frame) first, then enters
++ * the alternate screen and emits its frame, so leaving the alternate screen
++ * after a restore reveals the primary content.
++ *
++ * The buffer is allocated using the provided allocator (or the default
++ * allocator if NULL). The caller frees it with ghostty_free(), passing the same
++ * allocator (or NULL for the default) that was used for the allocation.
++ *
++ * Carried attn patch (ghostty-vt-native.patch); candidate for upstream.
++ *
++ * @param allocator Pointer to allocator, or NULL to use the default allocator
++ * @param terminal The terminal to serialize (must not be NULL)
++ * @param out_ptr Pointer to receive the allocated buffer
++ * @param out_len Pointer to receive the length of the output in bytes
++ * @return GHOSTTY_SUCCESS on success, or an error code on failure
++ *
++ * @ingroup formatter
++ */
++GHOSTTY_API GhosttyResult ghostty_terminal_serialize_vt(
++    const GhosttyAllocator* allocator,
++    GhosttyTerminal terminal,
++    uint8_t** out_ptr,
++    size_t* out_len);
++
+ /** @} */
+ 
+ #ifdef __cplusplus
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index b4a2722..a22edac 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -237,6 +237,7 @@ comptime {
+         @export(&c.formatter_format_buf, .{ .name = "ghostty_formatter_format_buf" });
+         @export(&c.formatter_format_alloc, .{ .name = "ghostty_formatter_format_alloc" });
+         @export(&c.formatter_free, .{ .name = "ghostty_formatter_free" });
++        @export(&c.terminal_serialize_vt, .{ .name = "ghostty_terminal_serialize_vt" });
+         @export(&c.terminal_selection_format_buf, .{ .name = "ghostty_terminal_selection_format_buf" });
+         @export(&c.terminal_selection_format_alloc, .{ .name = "ghostty_terminal_selection_format_alloc" });
+         @export(&c.render_state_new, .{ .name = "ghostty_render_state_new" });
+diff --git a/src/terminal/c/formatter.zig b/src/terminal/c/formatter.zig
+index 5b4504c..f2982d1 100644
+--- a/src/terminal/c/formatter.zig
++++ b/src/terminal/c/formatter.zig
+@@ -218,6 +218,100 @@ pub fn free(formatter_: Formatter) callconv(lib.calling_conv) void {
+     alloc.destroy(wrapper);
+ }
+ 
++/// Serialize the full terminal state as a self-contained VT stream that
++/// reconstructs the terminal (grid + scrollback + cursor + modes) when replayed
++/// into a fresh, same-size terminal. Unlike the plain terminal formatter, this
++/// is alt-screen aware: when the alternate screen is active it emits the primary
++/// screen (scrollback + frame) first, then enters the alternate screen and emits
++/// its frame, so leaving the alternate screen after a restore reveals the
++/// primary content. The terminal formatter alone serializes only the active
++/// screen, losing the primary screen behind an alt-screen app such as vim.
++///
++/// The caller frees the returned buffer with ghostty_free(), passing the same
++/// allocator (or NULL for the default) used here.
++///
++/// Carried attn patch (ghostty-vt-native.patch); candidate for upstream.
++pub fn terminal_serialize_vt(
++    alloc_: ?*const CAllocator,
++    terminal_: terminal_c.Terminal,
++    out_ptr: *?[*]u8,
++    out_len: *usize,
++) callconv(lib.calling_conv) Result {
++    const t: *ZigTerminal = (terminal_ orelse return .invalid_value).terminal;
++    const alloc = lib.alloc.default(alloc_);
++
++    var aw: std.Io.Writer.Allocating = .init(alloc);
++    defer aw.deinit();
++
++    serializeTerminal(t, &aw.writer) catch return .out_of_memory;
++
++    const buf = aw.toOwnedSlice() catch return .out_of_memory;
++    out_ptr.* = buf.ptr;
++    out_len.* = buf.len;
++    return .success;
++}
++
++fn serializeTerminal(
++    t: *ZigTerminal,
++    writer: *std.Io.Writer,
++) std.Io.Writer.Error!void {
++    const opts: formatterpkg.Options = .{ .emit = .vt, .unwrap = false, .trim = false };
++
++    // Primary active: a single terminal formatter faithfully reconstructs
++    // palette, modes, primary grid + scrollback, and cursor. No alt-screen mode
++    // is set, so there is no screen-switch ordering hazard.
++    if (t.screens.active_key == .primary) {
++        var tf: formatterpkg.TerminalFormatter = .init(t, opts);
++        tf.content = .{ .selection = null };
++        tf.extra = .all;
++        try tf.format(writer);
++        return;
++    }
++
++    // Alternate screen active. The terminal formatter would emit only the alt
++    // screen, and its modes block would emit ?1049h at an uncontrolled position,
++    // losing the primary screen. Reconstruct explicitly so the replay terminal
++    // lands each screen's content on the right screen:
++    //   palette -> primary content -> ?1049h -> alt content.
++    // Terminal modes are intentionally omitted: the mode block cannot be
++    // separated from the screen-switch mode, and any alt-screen app re-asserts
++    // its modes on the next redraw. The one structurally load-bearing mode
++    // (alternate screen active) is emitted explicitly below.
++
++    // Palette only (no content, no modes).
++    {
++        var pal: formatterpkg.TerminalFormatter = .init(t, opts);
++        pal.content = .none;
++        pal.extra = .none;
++        pal.extra.palette = true;
++        try pal.format(writer);
++    }
++
++    // Primary screen content + scrollback, drawn while the replay terminal is
++    // still on its (default) primary screen.
++    if (t.screens.get(.primary)) |primary| {
++        var sf: formatterpkg.ScreenFormatter = .init(primary, opts);
++        sf.content = .{ .selection = null };
++        sf.extra = .none;
++        try sf.format(writer);
++    }
++
++    // Enter the alternate screen (saves cursor, clears alt) with a single clean
++    // transition — deliberately not routed through the modes block. Home the
++    // cursor so the alt content lands at the top-left: the primary emission
++    // above left the cursor mid-screen, and the screen formatter emits rows from
++    // the current cursor, not absolute coordinates.
++    try writer.writeAll("\x1b[?1049h\x1b[H");
++
++    // Alternate screen content + its cursor/style/charset state.
++    if (t.screens.get(.alternate)) |alt| {
++        var sf: formatterpkg.ScreenFormatter = .init(alt, opts);
++        sf.content = .{ .selection = null };
++        sf.extra = .all;
++        try sf.format(writer);
++    }
++}
++
+ test "terminal_new/free" {
+     var t: terminal_c.Terminal = null;
+     try testing.expectEqual(Result.success, terminal_c.new(
+diff --git a/src/terminal/c/main.zig b/src/terminal/c/main.zig
+index 37dc576..897aa50 100644
+--- a/src/terminal/c/main.zig
++++ b/src/terminal/c/main.zig
+@@ -79,6 +79,7 @@ pub const formatter_terminal_new = formatter.terminal_new;
+ pub const formatter_format_buf = formatter.format_buf;
+ pub const formatter_format_alloc = formatter.format_alloc;
+ pub const formatter_free = formatter.free;
++pub const terminal_serialize_vt = formatter.terminal_serialize_vt;
+ 
+ pub const render_state_new = render.new;
+ pub const render_state_free = render.free;
