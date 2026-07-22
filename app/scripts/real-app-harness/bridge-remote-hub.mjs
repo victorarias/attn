@@ -7,7 +7,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import WebSocket from 'ws';
 
-import { createRunContext, parseCommonArgs, printCommonHelp } from './common.mjs';
+import { createRunContext, DEFAULT_REMOTE_SSH_TARGET, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 
@@ -141,7 +141,7 @@ function saveText(filePath, value) {
 function parseArgs(argv) {
   const remaining = [];
   const options = {
-    sshTarget: process.env.ATTN_REMOTE_HUB_SSH_TARGET || 'ai-sandbox',
+    sshTarget: process.env.ATTN_REMOTE_HUB_SSH_TARGET || DEFAULT_REMOTE_SSH_TARGET,
     remoteDirectory: process.env.ATTN_REMOTE_HUB_REMOTE_DIRECTORY || '',
     remoteAgent: process.env.ATTN_REMOTE_HUB_REMOTE_AGENT || 'codex',
   };
@@ -755,7 +755,7 @@ async function main() {
     printCommonHelp('scripts/real-app-harness/bridge-remote-hub.mjs');
     console.log(`
 Remote hub options:
-  --ssh-target <target>        SSH target for remote daemon smoke (default: ai-sandbox)
+  --ssh-target <target>        SSH target for remote daemon smoke (default: attn-remote@orb — the provisioned OrbStack VM)
   --remote-directory <path>    Remote cwd for the spawned remote session
   --remote-agent <agent>       Agent for the spawned remote session (default: codex)
 `);

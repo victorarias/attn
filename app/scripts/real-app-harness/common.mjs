@@ -11,6 +11,13 @@ import {
   profileForAppPath,
 } from './harnessProfile.mjs';
 
+// Default SSH target for remote-endpoint scenarios: the local OrbStack VM
+// provisioned by provision-orb-remote.sh. ATTN_HARNESS_REMOTE_SSH_TARGET
+// retargets every remote scenario at once; each scenario's own env var
+// still wins over it.
+export const DEFAULT_REMOTE_SSH_TARGET =
+  process.env.ATTN_HARNESS_REMOTE_SSH_TARGET || 'attn-remote@orb';
+
 export function parseCommonArgs(argv) {
   // Default to the active profile's install (the safe dev sibling unless
   // ATTN_PROFILE/ATTN_HARNESS_PROFILE says otherwise). Production requires both
