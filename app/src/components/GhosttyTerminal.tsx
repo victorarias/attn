@@ -319,6 +319,16 @@ export function geometryOverflowsContainer(
 // terminal beats a clipped one) and we do NOT bail. A not-yet-laid-out container
 // (clientWidth/clientHeight ~0) never registers as overflowing (see
 // geometryOverflowsContainer), so the transient case still bails.
+//
+// One more exception: when the live model is ITSELF already suspicious (e.g.
+// stuck at 15 cols after a relaunch race) and `dims` would only grow it —
+// never shrink either axis — the bail is refused even though `dims` is still
+// in the suspicious range. The guard exists to protect a HEALTHY grid from
+// transient small measurements; a model that's already at/below the usable
+// floor has nothing left to protect, and refusing a non-shrinking fit would
+// strand the pane smaller than its container forever. A shrink (including a
+// not-yet-laid-out container, whose ~0 dims are smaller than any live model)
+// still bails.
 export function fitShouldBailAsSuspicious(
   paneKind: string | undefined,
   dims: TerminalDimensions,
@@ -339,7 +349,18 @@ export function fitShouldBailAsSuspicious(
   // apply it to height (rows) and width (cols) so a narrow split is covered too.
   const overflows = geometryOverflowsContainer(modelRows, cellHeight, clientHeight)
     || geometryOverflowsContainer(modelCols, cellWidth, clientWidth);
-  return !overflows;
+  if (overflows) {
+    return false;
+  }
+  // The bail protects a HEALTHY grid from transient small measurements. A model
+  // already at/below the usable floor has nothing left to protect — refusing a
+  // fit that doesn't shrink it strands the pane smaller than its container
+  // forever (shrinks INTO the suspicious range always apply via the overflow
+  // path above, so the grow back out must apply too). A not-yet-laid-out
+  // container still bails here: its dims are smaller than any live model,
+  // which is a shrink.
+  const shrinksModel = dims.cols < modelCols || dims.rows < modelRows;
+  return !(isSuspiciousTerminalSize(modelCols, modelRows) && !shrinksModel);
 }
 
 // Geometry the queued (not yet applied) historical replay will end at.
