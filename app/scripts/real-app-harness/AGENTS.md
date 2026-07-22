@@ -96,16 +96,14 @@ Remote scenarios (tr205, tr402-remote, tr502, tr504, bridge-remote-hub) default
 to the local OrbStack VM `attn-remote` (`attn-remote@orb`).
 `ATTN_HARNESS_REMOTE_SSH_TARGET` retargets all of them at once; each
 scenario's own per-scenario env var still wins over it. Provision or repair
-the VM with `pnpm run real-app:provision-remote`. Claude requires a one-time
-`claude /login` inside the VM. The hub daemon installs/updates the attn binary
-on the remote automatically (internal/hub bootstrapper), so the VM never needs
-a manual attn install.
+the VM with `pnpm run real-app:provision-remote`. The hub daemon
+installs/updates the attn binary on the remote automatically (internal/hub
+bootstrapper), so the VM never needs a manual attn install.
 
 TR-205's matrix legs (`tr205-probe-codex`, `tr205-probe-claude`) run
 `attn _probe-tui` on the remote instead of a live agent: a deterministic
 agent-mimicking TUI whose styles are pinned to codex/claude VT vocabulary
 recorded under `internal/probetui/testdata`, with mirror tests in
-`internal/probetui` enforcing both directions. The real-agent legs
-(`tr205-codex`, `tr205-claude`) are `soakOnly` — excluded from the matrix,
-runnable via run-soak or manually — since they need credentials seeded in the
-VM. Re-capture the probe vocabulary with `go run ./cmd/agent-mirror`.
+`internal/probetui` enforcing both directions. The probe reads no credentials,
+so the TR-205 legs run unattended. Re-capture the probe vocabulary with
+`go run ./cmd/agent-mirror`.

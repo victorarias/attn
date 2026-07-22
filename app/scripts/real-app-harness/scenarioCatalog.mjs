@@ -130,22 +130,6 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-tr205', '--', '--remote-agent', 'probe:claude'],
   },
   {
-    id: 'tr205-codex',
-    label: 'TR-205 remote codex (live agent)',
-    command: ['pnpm', 'run', 'real-app:scenario-tr205'],
-    // Live-agent leg: needs codex credentials seeded in the VM. Not part of the
-    // matrix sweep — only runnable directly (run-soak) or manually.
-    soakOnly: true,
-  },
-  {
-    id: 'tr205-claude',
-    label: 'TR-205 remote claude (live agent)',
-    command: ['pnpm', 'run', 'real-app:scenario-tr205', '--', '--remote-agent', 'claude'],
-    // Live-agent leg: needs claude credentials seeded in the VM. Not part of the
-    // matrix sweep — only runnable directly (run-soak) or manually.
-    soakOnly: true,
-  },
-  {
     id: 'tr502',
     label: 'TR-502 remote relaunch splits',
     command: ['pnpm', 'run', 'real-app:scenario-tr502'],
