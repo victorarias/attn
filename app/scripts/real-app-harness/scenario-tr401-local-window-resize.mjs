@@ -26,6 +26,7 @@ import {
   waitForPaneState,
   waitForPaneText,
   waitForPaneVisible,
+  tokenAnchorIgnorePatterns,
 } from './scenarioAssertions.mjs';
 import {
   ensureCodexInitialPanePromptReady,
@@ -473,6 +474,15 @@ async function main() {
         },
       );
 
+      // The app resizes fit-driven geometry WITHOUT reflow
+      // (resizeGhosttyWithoutReflow, app/src/utils/ghosttyResize.ts), so
+      // shrinking the window truncates scrollback line tails permanently —
+      // restoring the window cannot bring them back. Re-capture the utility
+      // pane's post-shrink content here (after it has settled) so
+      // restore_window_and_assert can verify preservation against this
+      // narrow-width capture instead of the unreachable pre-shrink baseline.
+      shrunkUtilityState = await client.request('get_pane_state', { sessionId, paneId: utilityPaneId });
+
       await captureSessionArtifacts(client, runner.runDir, '02-shrunk', sessionId);
       return nextWindow;
     });
@@ -530,10 +540,8 @@ async function main() {
             minNonEmptyLineRatio: 0.6,
             minCharCountRatio: 0.5,
             minAnchorMatches: 3,
-            ignoreAnchorPatterns: [
-              /^\s*$/u,
-              /^\s*[│╭╰].*$/u,
-            ],
+            // Anchor only on token lines (claude echo/reflow flake).
+            ignoreAnchorPatterns: tokenAnchorIgnorePatterns(agentToken),
             timeoutMs: 20_000,
             description: 'initial pane content preserved after restoring window',
           },
@@ -542,13 +550,13 @@ async function main() {
           client,
           sessionId,
           utilityPaneId,
-          baselineUtilityState?.pane?.visibleContent || null,
+          shrunkUtilityState?.pane?.visibleContent || null,
           {
             minNonEmptyLineRatio: 0.55,
             minCharCountRatio: 0.45,
             minAnchorMatches: 3,
             timeoutMs: 20_000,
-            description: 'utility pane content preserved after restoring window',
+            description: 'utility pane shrunk-width content preserved after restoring window',
           },
         ),
         assertPaneCoverage(client, sessionId, initialPaneId, {

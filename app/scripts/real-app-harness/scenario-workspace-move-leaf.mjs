@@ -3,7 +3,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
@@ -18,6 +17,7 @@ import {
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -115,45 +115,87 @@ async function main() {
     return;
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'workspace-move-leaf');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'WORKSPACE-MOVE-LEAF',
+    tier: 'tier1-local-shell',
+    prefix: 'workspace-move-leaf',
+    metadata: {
+      agent: 'shell',
+      focus: 'moving a workspace pane (leaf) from one workspace into another via move_workspace_leaf',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const createdSessionIds = [];
+  const note = (m, extra) => runner.log(m, extra);
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+  // Cleanup, registered as soon as each resource exists so a signal mid-scenario
+  // still tears them down. Runner cleanups run in REVERSE registration order, so
+  // register observer/app first (they must close LAST) and the created sessions
+  // last (they must close FIRST) to reproduce the effective order below: close
+  // created session panes, quitApp, observer.close.
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
+  runner.registerCleanup('close_created_sessions', async () => {
+    for (const sessionId of [...createdSessionIds].reverse()) {
+      await closeWorkspacePanes(client, sessionId).catch(() => {});
+    }
+  });
 
   try {
-    process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
-    await launchFreshAppAndConnect(client, observer);
-    await closeExistingSessions(client, options.sessionRootDir);
+    await runner.step('launch_app', async () => {
+      process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
+      await launchFreshAppAndConnect(client, observer);
+      await closeExistingSessions(client, options.sessionRootDir);
+    });
 
-    const source = await createShellWorkspace(client, observer, path.join(sessionDir, 'source'), `ws-move-source-${runId}`);
-    createdSessionIds.push(source.sessionId);
-    const target = await createShellWorkspace(client, observer, path.join(sessionDir, 'target'), `ws-move-target-${runId}`);
-    createdSessionIds.push(target.sessionId);
+    let source;
+    await runner.step('create_source_workspace', async () => {
+      source = await createShellWorkspace(client, observer, path.join(runner.sessionDir, 'source'), `ws-move-source-${runner.runId}`);
+      createdSessionIds.push(source.sessionId);
+      note(`source workspace ready`, source);
+    });
 
-    if (!source.workspaceId || !target.workspaceId || source.workspaceId === target.workspaceId) {
-      throw new Error(`Unexpected workspace ids: source=${source.workspaceId} target=${target.workspaceId}`);
-    }
+    let target;
+    await runner.step('create_target_workspace', async () => {
+      target = await createShellWorkspace(client, observer, path.join(runner.sessionDir, 'target'), `ws-move-target-${runner.runId}`);
+      createdSessionIds.push(target.sessionId);
+      note(`target workspace ready`, target);
 
-    await client.request('select_session', { sessionId: target.sessionId });
-    const move = await client.request('move_workspace_leaf', {
-      sourceWorkspaceId: source.workspaceId,
-      targetWorkspaceId: target.workspaceId,
-      leafId: source.paneId,
-      anchorId: target.paneId,
-      edge: 'left',
-      ratio: 0.32,
-    }, { timeoutMs: 20_000 });
+      runner.assert(
+        Boolean(source.workspaceId) && Boolean(target.workspaceId) && source.workspaceId !== target.workspaceId,
+        `Unexpected workspace ids: source=${source.workspaceId} target=${target.workspaceId}`,
+        { source, target },
+      );
+    });
 
-    const moved = await waitForMovedWorkspace(client, source.sessionId, target.sessionId, target.workspaceId);
-    const sourceUi = await client.request('get_workspace_ui_state', { workspaceId: source.workspaceId }).catch((error) => ({ error: String(error) }));
+    let move;
+    let moved;
+    let sourceUi;
+    await runner.step('move_leaf', async () => {
+      await client.request('select_session', { sessionId: target.sessionId });
+      move = await client.request('move_workspace_leaf', {
+        sourceWorkspaceId: source.workspaceId,
+        targetWorkspaceId: target.workspaceId,
+        leafId: source.paneId,
+        anchorId: target.paneId,
+        edge: 'left',
+        ratio: 0.32,
+      }, { timeoutMs: 20_000 });
+      note(`move_workspace_leaf requested`, move);
+    });
 
-    const summary = {
-      ok: true,
-      runId,
+    await runner.step('verify_moved', async () => {
+      moved = await waitForMovedWorkspace(client, source.sessionId, target.sessionId, target.workspaceId);
+      sourceUi = await client.request('get_workspace_ui_state', { workspaceId: source.workspaceId }).catch((error) => ({ error: String(error) }));
+      note(`moved pane joined target workspace`, {
+        targetPaneCount: moved.targetUi.paneCount,
+        sourceUi,
+      });
+    });
+
+    const summary = runner.finishSuccess({
       source,
       target,
       move,
@@ -164,12 +206,15 @@ async function main() {
         targetPaneCount: moved.targetUi.paneCount,
       },
       sourceUi,
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+    });
     console.log('[RealAppHarness] Workspace pane move between workspaces passed.');
     console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    const summary = runner.finishFailure(error, { sessionIds: createdSessionIds });
+    console.error(summary.error);
+    process.exitCode = 1;
   } finally {
-    for (const sessionId of createdSessionIds.reverse()) {
+    for (const sessionId of [...createdSessionIds].reverse()) {
       await closeWorkspacePanes(client, sessionId).catch(() => {});
     }
     await client.quitApp().catch(() => {});

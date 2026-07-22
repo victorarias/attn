@@ -18,7 +18,6 @@ import {
   assertPaneVisibleContent,
   compactTerminalText,
   captureSessionArtifacts,
-  shellPanes,
   waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneShellReady,
@@ -281,14 +280,13 @@ async function main() {
         targetPaneId: initialPaneId,
         direction: 'vertical',
       });
-      const workspace = await waitForSessionWorkspace(
+      const initialPane = await waitForNewShellPane(
         client,
         sessionId,
-        (entry) => shellPanes(entry).length >= 1,
+        new Set([initialPaneId]),
         'initial remote split pane',
         30_000,
       );
-      const initialPane = shellPanes(workspace)[0];
       if (!initialPane?.paneId) {
         throw new Error('Initial remote split pane missing');
       }
@@ -590,7 +588,9 @@ async function main() {
       finalWorkspace: {
         activePaneId: finalWorkspace.activePaneId,
         paneIds: (finalWorkspace.panes || []).map((pane) => pane.paneId),
-        shellPaneIds: shellPanes(finalWorkspace).map((pane) => pane.paneId),
+        otherPaneIds: (finalWorkspace.panes || [])
+          .map((pane) => pane.paneId)
+          .filter((paneId) => paneId !== initialPaneId),
       },
       artifacts: {
         runDir: runner.runDir,

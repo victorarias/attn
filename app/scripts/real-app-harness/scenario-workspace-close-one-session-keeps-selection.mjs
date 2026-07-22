@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs';
-import path from 'node:path';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
@@ -17,6 +14,7 @@ import {
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -101,24 +99,34 @@ async function waitForActiveSession(client, sessionId, description, timeoutMs = 
   throw new Error(`Timed out waiting for ${description}. Last state:\n${JSON.stringify(lastState, null, 2)}`);
 }
 
-async function assertRemainingWorkspaceSelected(client, remainingSessionId, closedSessionId) {
+async function assertRemainingWorkspaceSelected(runner, client, remainingSessionId, closedSessionId) {
   const remaining = await client.request('get_session_ui_state', { sessionId: remainingSessionId });
   const closed = await client.request('get_session_ui_state', { sessionId: closedSessionId });
-  if (!remaining.selected) {
-    throw new Error(`Expected remaining session ${remainingSessionId} to be selected: ${JSON.stringify(remaining, null, 2)}`);
-  }
-  if (!remaining.sidebarItem) {
-    throw new Error(`Expected remaining session ${remainingSessionId} to remain in sidebar: ${JSON.stringify(remaining, null, 2)}`);
-  }
-  if (!remaining.workspace?.view?.sessionVisible) {
-    throw new Error(`Expected remaining workspace to stay visible: ${JSON.stringify(remaining, null, 2)}`);
-  }
-  if (remaining.workspace?.model?.panes?.length !== 1) {
-    throw new Error(`Expected remaining workspace to have exactly one pane: ${JSON.stringify(remaining.workspace?.model, null, 2)}`);
-  }
-  if (closed.exists !== false || closed.sidebarItem != null) {
-    throw new Error(`Expected closed session ${closedSessionId} to be absent from sidebar: ${JSON.stringify(closed, null, 2)}`);
-  }
+  runner.assert(
+    Boolean(remaining.selected),
+    `Expected remaining session ${remainingSessionId} to be selected: ${JSON.stringify(remaining, null, 2)}`,
+    remaining,
+  );
+  runner.assert(
+    Boolean(remaining.sidebarItem),
+    `Expected remaining session ${remainingSessionId} to remain in sidebar: ${JSON.stringify(remaining, null, 2)}`,
+    remaining,
+  );
+  runner.assert(
+    Boolean(remaining.workspace?.view?.sessionVisible),
+    `Expected remaining workspace to stay visible: ${JSON.stringify(remaining, null, 2)}`,
+    remaining,
+  );
+  runner.assert(
+    remaining.workspace?.model?.panes?.length === 1,
+    `Expected remaining workspace to have exactly one pane: ${JSON.stringify(remaining.workspace?.model, null, 2)}`,
+    remaining,
+  );
+  runner.assert(
+    closed.exists === false && closed.sidebarItem == null,
+    `Expected closed session ${closedSessionId} to be absent from sidebar: ${JSON.stringify(closed, null, 2)}`,
+    closed,
+  );
 }
 
 async function closeWorkspacePanes(client, sessionId) {
@@ -154,58 +162,88 @@ async function main() {
     return;
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'workspace-close-one-session-keeps-selection');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'WORKSPACE-CLOSE-ONE-SESSION-KEEPS-SELECTION',
+    tier: 'tier1-local-shell',
+    prefix: 'workspace-close-one-session-keeps-selection',
+    metadata: {
+      agent: 'shell',
+      focus: 'closing a split session keeps the remaining workspace session selected',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   let initialSessionId = null;
   let splitSessionId = null;
+  const note = (m, extra) => runner.log(m, extra);
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+  // Cleanup, registered as soon as each resource exists so a signal mid-scenario
+  // still tears them down. Runner cleanups run in REVERSE registration order, so
+  // register observer/app first (they must close LAST) and the session last (it
+  // must close FIRST) to reproduce the effective order below: close initial
+  // workspace panes, quitApp, observer.close.
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
 
   try {
-    await launchFreshAppAndConnect(client, observer);
-
-    initialSessionId = await createSessionAndWaitForInitialPane({
-      client,
-      observer,
-      cwd: sessionDir,
-      label: `ws-close-one-${runId}`,
-      agent: 'shell',
-      waitForInitialPaneVisible: false,
-      sessionWaitMs: 30_000,
+    await runner.step('launch_app', async () => {
+      await launchFreshAppAndConnect(client, observer);
     });
-    const initialWorkspace = await waitForPaneCount(client, initialSessionId, 1, 'initial shell workspace pane');
-    const initialPane = initialWorkspace.panes[0];
-    await client.request('select_session', { sessionId: initialSessionId });
-    await waitForShellPaneReady(client, initialSessionId, initialPane.paneId, 'initial shell pane ready');
 
-    const split = await splitWithShortcut(client, initialSessionId, 'terminal.splitVertical', 2);
-    splitSessionId = split.pane.runtimeId;
-    await client.request('focus_pane', { sessionId: initialSessionId, paneId: split.pane.paneId });
-    await waitForActiveSession(client, splitSessionId, 'split session selected before close');
+    await runner.step('create_initial_session', async () => {
+      initialSessionId = await createSessionAndWaitForInitialPane({
+        client,
+        observer,
+        cwd: runner.sessionDir,
+        label: `ws-close-one-${runner.runId}`,
+        agent: 'shell',
+        waitForInitialPaneVisible: false,
+        sessionWaitMs: 30_000,
+      });
+      runner.registerCleanup('close_initial_workspace', async () => {
+        await closeWorkspacePanes(client, initialSessionId);
+        await waitForNoSessionsInDir(client, runner.sessionDir);
+      });
+      const initialWorkspace = await waitForPaneCount(client, initialSessionId, 1, 'initial shell workspace pane');
+      const initialPane = initialWorkspace.panes[0];
+      await client.request('select_session', { sessionId: initialSessionId });
+      await waitForShellPaneReady(client, initialSessionId, initialPane.paneId, 'initial shell pane ready');
+      note(`initial shell session ready and selected`, { initialSessionId });
+    });
 
-    await client.request('dispatch_shortcut', { shortcutId: 'terminal.close' });
+    await runner.step('split_session', async () => {
+      const split = await splitWithShortcut(client, initialSessionId, 'terminal.splitVertical', 2);
+      splitSessionId = split.pane.runtimeId;
+      await client.request('focus_pane', { sessionId: initialSessionId, paneId: split.pane.paneId });
+      await waitForActiveSession(client, splitSessionId, 'split session selected before close');
+      note(`split session created and selected`, { splitSessionId });
+    });
 
-    await waitForSessionAbsentFromDaemon(observer, splitSessionId, 'split session unregistered after close');
-    await waitForSessionGoneFromUi(client, splitSessionId, 'split session gone from UI/sidebar after close');
-    await waitForActiveSession(client, initialSessionId, 'remaining workspace session selected after close');
-    await assertRemainingWorkspaceSelected(client, initialSessionId, splitSessionId);
+    await runner.step('close_split_session', async () => {
+      await client.request('dispatch_shortcut', { shortcutId: 'terminal.close' });
+      await waitForSessionAbsentFromDaemon(observer, splitSessionId, 'split session unregistered after close');
+      await waitForSessionGoneFromUi(client, splitSessionId, 'split session gone from UI/sidebar after close');
+      note(`split session closed`, { splitSessionId });
+    });
 
-    const summary = {
-      ok: true,
-      runId,
-      initialSessionId,
-      closedSessionId: splitSessionId,
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+    await runner.step('verify_selection_restored', async () => {
+      await waitForActiveSession(client, initialSessionId, 'remaining workspace session selected after close');
+      await assertRemainingWorkspaceSelected(runner, client, initialSessionId, splitSessionId);
+      note(`remaining workspace session selected after close`, { initialSessionId });
+    });
+
+    const summary = runner.finishSuccess({ initialSessionId, closedSessionId: splitSessionId });
     console.log('[RealAppHarness] Workspace close-one-session selection passed.');
     console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    const summary = runner.finishFailure(error, { initialSessionId, closedSessionId: splitSessionId });
+    console.error(summary.error);
+    process.exitCode = 1;
   } finally {
     if (initialSessionId) {
       await closeWorkspacePanes(client, initialSessionId).catch(() => {});
-      await waitForNoSessionsInDir(client, sessionDir).catch(() => {});
+      await waitForNoSessionsInDir(client, runner.sessionDir).catch(() => {});
     }
     await client.quitApp().catch(() => {});
     await observer.close();

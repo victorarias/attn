@@ -13,7 +13,6 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
@@ -27,6 +26,7 @@ import {
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '../../..');
@@ -91,104 +91,134 @@ async function main() {
     return;
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'tile-only-workspace-select');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'TILE-ONLY-WORKSPACE-SELECT',
+    tier: 'tier1-local-shell',
+    prefix: 'tile-only-workspace-select',
+    metadata: {
+      agent: 'shell',
+      focus: 'sessionless (tile-only) workspace select + render',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const socketPath = socketPathForProfile();
   let sessionId = null;
+  const note = (m, extra) => runner.log(m, extra);
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
-  console.log(`[RealAppHarness] attn socket=${socketPath}`);
+  runner.log(`[RealAppHarness] attn socket=${socketPath}`);
+
+  // Cleanup, registered as soon as each resource exists so a signal mid-scenario
+  // still tears them down. Runner cleanups run in REVERSE registration order, so
+  // register observer/app first (they must close LAST); the session pane close is
+  // registered later and guarded by `sessionId` so it is a no-op once the pane is
+  // closed as part of the scenario itself (step 3).
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
 
   try {
     process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
-    await launchFreshAppAndConnect(client, observer);
-    await closeExistingSessions(client, options.sessionRootDir);
+    await runner.step('launch_app', async () => {
+      await launchFreshAppAndConnect(client, observer);
+      await closeExistingSessions(client, options.sessionRootDir);
+    });
 
     // 1. A normal shell workspace with one terminal.
-    const cwd = path.join(sessionDir, 'notes-ws');
-    fs.mkdirSync(cwd, { recursive: true });
-    sessionId = await createSessionAndWaitForInitialPane({
-      client,
-      observer,
-      cwd,
-      label: `tile-only-${runId}`,
-      agent: 'shell',
-      waitForInitialPaneVisible: false,
-      sessionWaitMs: 30_000,
+    const cwd = path.join(runner.sessionDir, 'notes-ws');
+    await runner.step('create_shell_session', async () => {
+      fs.mkdirSync(cwd, { recursive: true });
+      sessionId = await createSessionAndWaitForInitialPane({
+        client,
+        observer,
+        cwd,
+        label: `tile-only-${runner.runId}`,
+        agent: 'shell',
+        waitForInitialPaneVisible: false,
+        sessionWaitMs: 30_000,
+      });
+      runner.registerCleanup('close_session_panes', () => (sessionId ? closeWorkspacePanes(client, sessionId) : null));
+      const pane = await waitForFirstWorkspacePane(client, sessionId, 'initial workspace pane');
+      await client.request('select_session', { sessionId });
+      await waitForPaneVisible(client, sessionId, pane.paneId, 20_000);
+      await waitForPaneShellReady(client, sessionId, pane.paneId, {
+        timeoutMs: 20_000,
+        description: 'shell prompt ready',
+      });
+      note(`shell session ready and selected`, { sessionId });
     });
-    const pane = await waitForFirstWorkspacePane(client, sessionId, 'initial workspace pane');
-    await client.request('select_session', { sessionId });
-    await waitForPaneVisible(client, sessionId, pane.paneId, 20_000);
-    await waitForPaneShellReady(client, sessionId, pane.paneId, {
-      timeoutMs: 20_000,
-      description: 'shell prompt ready',
-    });
-
-    const workspace = await client.request('get_workspace', { sessionId });
-    const workspaceId = workspace.workspaceId;
-    if (!workspaceId) {
-      throw new Error(`Could not resolve workspace id for session ${sessionId}: ${JSON.stringify(workspace)}`);
-    }
 
     // 2. Dock a markdown tile the way a user does: `attn open <file.md>`.
-    const markdownPath = path.join(cwd, 'notes.md');
-    fs.writeFileSync(markdownPath, '# Tile only notes\n\nDocked content.\n', 'utf8');
-    const openOutput = execFileSync(ATTN_BIN, ['open', markdownPath, '--session', sessionId], {
-      env: { ...process.env, ATTN_SOCKET_PATH: socketPath },
-      encoding: 'utf8',
-    });
-    console.log(`[RealAppHarness] attn open -> ${openOutput.trim()}`);
+    const { workspaceId, tileId, pane } = await runner.step('dock_markdown_tile', async () => {
+      const workspace = await client.request('get_workspace', { sessionId });
+      const id = workspace.workspaceId;
+      if (!id) {
+        throw new Error(`Could not resolve workspace id for session ${sessionId}: ${JSON.stringify(workspace)}`);
+      }
+      const initialPane = await waitForFirstWorkspacePane(client, sessionId, 'workspace pane before close');
 
-    const docked = await waitForWorkspaceUi(
-      client,
-      workspaceId,
-      (state) => Array.isArray(state?.tileIds) && state.tileIds.length === 1 && state.paneCount === 1,
-      'docked markdown tile to appear alongside the terminal pane',
-    );
-    const tileId = docked.tileIds[0];
-    console.log(`[RealAppHarness] docked tileId=${tileId}`);
+      const markdownPath = path.join(cwd, 'notes.md');
+      fs.writeFileSync(markdownPath, '# Tile only notes\n\nDocked content.\n', 'utf8');
+      const openOutput = execFileSync(ATTN_BIN, ['open', markdownPath, '--session', sessionId], {
+        env: { ...process.env, ATTN_SOCKET_PATH: socketPath },
+        encoding: 'utf8',
+      });
+      note(`attn open -> ${openOutput.trim()}`);
+
+      const docked = await waitForWorkspaceUi(
+        client,
+        id,
+        (state) => Array.isArray(state?.tileIds) && state.tileIds.length === 1 && state.paneCount === 1,
+        'docked markdown tile to appear alongside the terminal pane',
+      );
+      note(`docked tileId=${docked.tileIds[0]}`);
+      return { workspaceId: id, tileId: docked.tileIds[0], pane: initialPane };
+    });
 
     // 3. Close the only terminal. The workspace must survive on its tile alone.
-    await client.request('close_pane', { sessionId, paneId: pane.paneId });
-    await waitForSessionAbsentFromDaemon(observer, sessionId, 'terminal session unregistered after closing last pane');
-    const afterClose = await waitForWorkspaceUi(
-      client,
-      workspaceId,
-      (state) => state?.rendered === true && state.paneCount === 0 && Array.isArray(state?.tileIds) && state.tileIds.includes(tileId),
-      'tile-only workspace to keep rendering its docked tile with no panes',
-    );
-    sessionId = null; // closed; nothing to clean up under this id
+    const afterClose = await runner.step('close_terminal_pane', async () => {
+      await client.request('close_pane', { sessionId, paneId: pane.paneId });
+      await waitForSessionAbsentFromDaemon(observer, sessionId, 'terminal session unregistered after closing last pane');
+      const state = await waitForWorkspaceUi(
+        client,
+        workspaceId,
+        (s) => s?.rendered === true && s.paneCount === 0 && Array.isArray(s?.tileIds) && s.tileIds.includes(tileId),
+        'tile-only workspace to keep rendering its docked tile with no panes',
+      );
+      sessionId = null; // closed; nothing to clean up under this id
+      return state;
+    });
 
     // 4. Select the now-sessionless workspace by id (the sidebar click / ⌘1–9 path).
-    await client.request('select_workspace', { workspaceId });
-    const afterSelect = await waitForWorkspaceUi(
-      client,
-      workspaceId,
-      (state) => state?.active === true && state.sessionVisible === true && state.tileBodyFocused === true,
-      'tile-only workspace to become active, visible, and focus its tile body after selection',
-    );
-    if (!afterSelect.tileIds.includes(tileId) || afterSelect.paneCount !== 0) {
-      throw new Error(`Selected tile-only workspace lost its tile or grew panes: ${JSON.stringify(afterSelect, null, 2)}`);
-    }
-    // Title is derived from the markdown H1, not the file basename.
-    if (!afterSelect.tileTitles?.includes('Tile only notes')) {
-      throw new Error(`Tile header did not derive its title from the markdown H1: ${JSON.stringify(afterSelect, null, 2)}`);
-    }
+    const afterSelect = await runner.step('select_tile_only_workspace', async () => {
+      await client.request('select_workspace', { workspaceId });
+      const state = await waitForWorkspaceUi(
+        client,
+        workspaceId,
+        (s) => s?.active === true && s.sessionVisible === true && s.tileBodyFocused === true,
+        'tile-only workspace to become active, visible, and focus its tile body after selection',
+      );
+      runner.assert(
+        state.tileIds.includes(tileId) && state.paneCount === 0,
+        `Selected tile-only workspace lost its tile or grew panes: ${JSON.stringify(state, null, 2)}`,
+        state,
+      );
+      // Title is derived from the markdown H1, not the file basename.
+      runner.assert(
+        state.tileTitles?.includes('Tile only notes'),
+        `Tile header did not derive its title from the markdown H1: ${JSON.stringify(state, null, 2)}`,
+        state,
+      );
+      return state;
+    });
 
-    const summary = {
-      ok: true,
-      runId,
-      workspaceId,
-      tileId,
-      afterClose,
-      afterSelect,
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+    const summary = runner.finishSuccess({ workspaceId, tileId, afterClose, afterSelect });
     console.log('[RealAppHarness] Tile-only workspace select+render passed.');
     console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    const summary = runner.finishFailure(error, { sessionId });
+    console.error(summary.error);
+    process.exitCode = 1;
   } finally {
     if (sessionId) {
       await closeWorkspacePanes(client, sessionId).catch(() => {});

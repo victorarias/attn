@@ -109,15 +109,18 @@ async function main() {
       });
     });
 
-    await runner.step('switch_back_and_assert_utility_focus', async () => {
+    await runner.step('switch_back_and_refocus_utility', async () => {
       await client.request('select_session', { sessionId: primarySessionId });
       await waitForPaneVisible(client, primarySessionId, utilityPaneId, 20_000);
+      // Selecting a session focuses that session's own pane (App.tsx
+      // handleSelectSession, c9a14aa3); the utility split is a sibling shell
+      // session, so it is intentionally NOT the active pane after switch-back.
       await waitForPaneState(
         client,
         primarySessionId,
         utilityPaneId,
-        (state) => state?.activePaneId === utilityPaneId,
-        'primary utility pane to remain the active pane after session switch',
+        (state) => state?.activePaneId === primaryInitialPaneId,
+        'primary session pane to become active after session switch',
         20_000,
       );
       await assertPaneVisibleContent(client, primarySessionId, primaryInitialPaneId, {
@@ -128,6 +131,8 @@ async function main() {
         timeoutMs: 20_000,
         description: 'primary Claude initial pane content preserved after session switch',
       });
+      // Re-focusing the utility pane is now an explicit user action after a session switch.
+      await client.request('focus_pane', { sessionId: primarySessionId, paneId: utilityPaneId });
       await waitForPaneInputFocus(client, primarySessionId, utilityPaneId, 20_000, { stableMs: 700 });
       await client.request('type_pane_via_ui', {
         sessionId: primarySessionId,

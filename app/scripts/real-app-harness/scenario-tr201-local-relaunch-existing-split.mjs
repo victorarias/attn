@@ -23,6 +23,7 @@ import {
   waitForPaneText,
   waitForPaneVisible,
   waitForSessionWorkspace,
+  tokenAnchorIgnorePatterns,
 } from './scenarioAssertions.mjs';
 import {
   ensureClaudeInitialPanePromptReady,
@@ -226,6 +227,8 @@ async function main() {
           minNonEmptyLineRatio: 0.75,
           minCharCountRatio: 0.7,
           minAnchorMatches: 2,
+          // Anchor only on token lines (claude echo/reflow flake).
+          ignoreAnchorPatterns: tokenAnchorIgnorePatterns(agentToken),
           timeoutMs: 20_000,
           description: 'initial pane content preserved after relaunch',
         },

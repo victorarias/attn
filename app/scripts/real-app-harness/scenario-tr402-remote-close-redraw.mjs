@@ -11,7 +11,6 @@ import {
   assertPaneVisibleContent,
   assertPaneVisibleContentPreserved,
   captureSessionArtifacts,
-  shellPanes,
   waitForFirstWorkspacePane,
   waitForNewShellPane,
   waitForPaneState,
@@ -258,7 +257,10 @@ async function main() {
       await waitForSessionWorkspace(
         client,
         sessionId,
-        (workspace) => (workspace.panes || []).length === 1 && shellPanes(workspace).length === 0,
+        (workspace) => {
+          const panes = workspace.panes || [];
+          return panes.length === 1 && panes[0].paneId === initialPaneId;
+        },
         'workspace to collapse back to one pane after closing split',
         20_000,
       );

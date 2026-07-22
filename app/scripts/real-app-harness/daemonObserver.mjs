@@ -16,6 +16,17 @@ function workspacePaneIds(workspace) {
   return (workspace?.panes || []).map((pane) => pane.pane_id);
 }
 
+function sendClientHello(ws) {
+  ws.send(
+    JSON.stringify({
+      cmd: 'client_hello',
+      client_kind: 'harness-observer',
+      version: 'real-app-harness',
+      capabilities: ['workspace_sessions'],
+    }),
+  );
+}
+
 function pruneWorkspacesBySessions(sessionsById, workspacesBySessionId) {
   for (const sessionId of Array.from(workspacesBySessionId.keys())) {
     if (sessionsById.has(sessionId)) {
@@ -36,6 +47,7 @@ export class DaemonObserver {
     this.ws = null;
     this.sessionsById = new Map();
     this.workspacesBySessionId = new Map();
+    this.layoutsByWorkspaceId = new Map();
     this.endpointsById = new Map();
     this.connected = false;
     this.initialStateReceived = false;
@@ -126,7 +138,7 @@ export class DaemonObserver {
   }
 
   getWorkspace(sessionId) {
-    return this.workspacesBySessionId.get(sessionId) || null;
+    return this.#workspaceForSession(sessionId);
   }
 
   getSession(sessionId) {
@@ -187,7 +199,7 @@ export class DaemonObserver {
 
   async waitForWorkspace(sessionId, predicate, description, timeoutMs = 20_000) {
     return this.waitFor(() => {
-      const workspace = this.workspacesBySessionId.get(sessionId);
+      const workspace = this.#workspaceForSession(sessionId);
       if (!workspace) {
         return null;
       }
@@ -195,15 +207,16 @@ export class DaemonObserver {
     }, description || `workspace for session ${sessionId}`, timeoutMs);
   }
 
-  async waitForUtilityPane(sessionId, timeoutMs = 20_000) {
+  async waitForUtilityPane(sessionId, timeoutMs = 20_000, excludePaneIds = new Set()) {
+    const isNewRuntimePane = (pane) =>
+      !excludePaneIds.has(pane.pane_id) && typeof pane.runtime_id === 'string' && pane.runtime_id.length > 0;
     const workspace = await this.waitForWorkspace(
       sessionId,
-      (entry) =>
-        (entry.panes || []).some((pane) => pane.kind === 'shell' && typeof pane.runtime_id === 'string' && pane.runtime_id.length > 0),
+      (entry) => (entry.panes || []).some(isNewRuntimePane),
       `utility pane for session ${sessionId}`,
       timeoutMs
     );
-    return workspace.panes.find((pane) => pane.kind === 'shell' && pane.runtime_id) || null;
+    return workspace.panes.find(isNewRuntimePane) || null;
   }
 
   async readScrollback(runtimeId, timeoutMs = 5_000) {
@@ -316,6 +329,7 @@ export class DaemonObserver {
 
       ws.once('open', () => {
         clearTimeout(timeout);
+        sendClientHello(ws);
         succeed();
       });
 
@@ -351,8 +365,10 @@ export class DaemonObserver {
           this.sessionsById.set(session.id, session);
         }
         this.workspacesBySessionId.clear();
+        this.layoutsByWorkspaceId.clear();
         for (const workspace of data.workspaces || []) {
           const layout = workspace.layout;
+          if (layout?.workspace_id) this.layoutsByWorkspaceId.set(layout.workspace_id, layout);
           for (const pane of layout?.panes || []) {
             if (pane.kind === 'agent' && pane.session_id) {
               this.workspacesBySessionId.set(pane.session_id, layout);
@@ -398,6 +414,9 @@ export class DaemonObserver {
       case 'workspace_layout':
       case 'workspace_layout_updated':
         if (data.workspace_layout?.workspace_id) {
+          // Layouts are tracked unconditionally: for remote sessions the layout event
+          // can arrive before the session shows up in the hub's session list.
+          this.layoutsByWorkspaceId.set(data.workspace_layout.workspace_id, data.workspace_layout);
           for (const pane of data.workspace_layout.panes || []) {
             if (pane.kind === 'agent' && pane.session_id && this.sessionsById.has(pane.session_id)) {
               this.workspacesBySessionId.set(pane.session_id, data.workspace_layout);
@@ -412,11 +431,23 @@ export class DaemonObserver {
               this.workspacesBySessionId.delete(sessionId);
             }
           }
+          this.layoutsByWorkspaceId.delete(data.workspace.id);
         }
         break;
       default:
         break;
     }
+  }
+
+  #workspaceForSession(sessionId) {
+    const direct = this.workspacesBySessionId.get(sessionId);
+    if (direct) return direct;
+    for (const layout of this.layoutsByWorkspaceId.values()) {
+      if ((layout.panes || []).some((pane) => pane.kind === 'agent' && pane.session_id === sessionId)) {
+        return layout;
+      }
+    }
+    return null;
   }
 }
 
@@ -433,6 +464,7 @@ export async function readScrollback(wsUrl, runtimeId, timeoutMs = 5_000) {
     }, timeoutMs);
 
     ws.once('open', () => {
+      sendClientHello(ws);
       ws.send(JSON.stringify({ cmd: 'attach_session', id: runtimeId }));
     });
 

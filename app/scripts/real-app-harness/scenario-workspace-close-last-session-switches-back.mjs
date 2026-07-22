@@ -3,7 +3,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
@@ -17,6 +16,7 @@ import {
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -110,21 +110,29 @@ async function waitForSessionAbsentFromDaemon(observer, sessionId, description, 
   );
 }
 
-async function assertWorkspaceVisible(client, visibleSessionId, goneSessionId) {
+async function assertWorkspaceVisible(runner, client, visibleSessionId, goneSessionId) {
   const visible = await client.request('get_session_ui_state', { sessionId: visibleSessionId });
   const gone = await client.request('get_session_ui_state', { sessionId: goneSessionId });
-  if (!visible.selected) {
-    throw new Error(`Expected previous workspace session ${visibleSessionId} to be selected: ${JSON.stringify(visible, null, 2)}`);
-  }
-  if (!visible.workspace?.view?.sessionVisible) {
-    throw new Error(`Expected previous workspace ${visibleSessionId} to be visible: ${JSON.stringify(visible, null, 2)}`);
-  }
-  if (visible.workspace?.model?.panes?.length !== 1) {
-    throw new Error(`Expected previous workspace to still have one pane: ${JSON.stringify(visible.workspace?.model, null, 2)}`);
-  }
-  if (gone.exists !== false || gone.sidebarItem != null) {
-    throw new Error(`Expected closed workspace session ${goneSessionId} to be absent from sidebar: ${JSON.stringify(gone, null, 2)}`);
-  }
+  runner.assert(
+    Boolean(visible.selected),
+    `Expected previous workspace session ${visibleSessionId} to be selected: ${JSON.stringify(visible, null, 2)}`,
+    visible,
+  );
+  runner.assert(
+    Boolean(visible.workspace?.view?.sessionVisible),
+    `Expected previous workspace ${visibleSessionId} to be visible: ${JSON.stringify(visible, null, 2)}`,
+    visible,
+  );
+  runner.assert(
+    visible.workspace?.model?.panes?.length === 1,
+    `Expected previous workspace to still have one pane: ${JSON.stringify(visible.workspace?.model, null, 2)}`,
+    visible,
+  );
+  runner.assert(
+    gone.exists === false && gone.sidebarItem == null,
+    `Expected closed workspace session ${goneSessionId} to be absent from sidebar: ${JSON.stringify(gone, null, 2)}`,
+    gone,
+  );
 }
 
 async function closeWorkspacePanes(client, sessionId) {
@@ -168,53 +176,94 @@ async function main() {
     return;
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'workspace-close-last-session-switches-back');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'WORKSPACE-CLOSE-LAST-SESSION-SWITCHES-BACK',
+    tier: 'tier1-local-shell',
+    prefix: 'workspace-close-last-session-switches-back',
+    metadata: {
+      agent: 'shell',
+      focus: 'closing the last-selected workspace session switches the UI back to the previously selected workspace',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const createdSessionIds = [];
+  const note = (m, extra) => runner.log(m, extra);
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
-
-  try {
-    process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
-    await launchFreshAppAndConnect(client, observer);
-    await closeExistingSessions(client, options.sessionRootDir);
-
-    const previous = await waitForShellWorkspace(client, observer, path.join(sessionDir, 'previous'), `ws-close-prev-${runId}`);
-    createdSessionIds.push(previous.sessionId);
-    const closing = await waitForShellWorkspace(client, observer, path.join(sessionDir, 'closing'), `ws-close-target-${runId}`);
-    createdSessionIds.push(closing.sessionId);
-
-    await client.request('select_session', { sessionId: previous.sessionId });
-    await waitForActiveSession(client, previous.sessionId, 'previous workspace selected before close target');
-    await client.request('select_session', { sessionId: closing.sessionId });
-    await waitForActiveSession(client, closing.sessionId, 'target workspace selected before close shortcut');
-    await client.request('focus_pane', { sessionId: closing.sessionId, paneId: closing.pane.paneId });
-    await waitForPaneInputFocused(client, closing.sessionId, closing.pane.paneId, 'target pane focused before close shortcut');
-
-    await client.request('dispatch_shortcut', { shortcutId: 'session.close' });
-
-    await waitForSessionAbsentFromDaemon(observer, closing.sessionId, 'target session unregistered after close shortcut');
-    await waitForSessionGoneFromUi(client, closing.sessionId, 'target session gone from UI/sidebar after close shortcut');
-    await waitForActiveSession(client, previous.sessionId, 'previous workspace selected after closing target');
-    await assertWorkspaceVisible(client, previous.sessionId, closing.sessionId);
-
-    const summary = {
-      ok: true,
-      runId,
-      previousSessionId: previous.sessionId,
-      closedSessionId: closing.sessionId,
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
-    console.log('[RealAppHarness] Workspace close-last-session switchback passed.');
-    console.log(JSON.stringify(summary, null, 2));
-  } finally {
-    for (const sessionId of createdSessionIds.reverse()) {
+  // Cleanup, registered as soon as each resource exists so a signal mid-scenario
+  // still tears them down. Runner cleanups run in REVERSE registration order, so
+  // register observer/app first (they must close LAST) and the created sessions
+  // last (they must close FIRST) to reproduce the effective order below: close
+  // created session panes, quitApp, observer.close.
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
+  runner.registerCleanup('close_created_sessions', async () => {
+    for (const sessionId of [...createdSessionIds].reverse()) {
       await closeWorkspacePanes(client, sessionId).catch(() => {});
     }
-    await waitForNoSessionsUnderDir(client, sessionDir).catch(() => {});
+    await waitForNoSessionsUnderDir(client, runner.sessionDir).catch(() => {});
+  });
+
+  try {
+    await runner.step('launch_app', async () => {
+      process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
+      await launchFreshAppAndConnect(client, observer);
+      await closeExistingSessions(client, options.sessionRootDir);
+    });
+
+    let previous;
+    await runner.step('create_previous_workspace', async () => {
+      previous = await waitForShellWorkspace(client, observer, path.join(runner.sessionDir, 'previous'), `ws-close-prev-${runner.runId}`);
+      createdSessionIds.push(previous.sessionId);
+      note(`previous workspace ready`, { sessionId: previous.sessionId });
+    });
+
+    let closing;
+    await runner.step('create_closing_workspace', async () => {
+      closing = await waitForShellWorkspace(client, observer, path.join(runner.sessionDir, 'closing'), `ws-close-target-${runner.runId}`);
+      createdSessionIds.push(closing.sessionId);
+      note(`closing workspace ready`, { sessionId: closing.sessionId });
+    });
+
+    await runner.step('select_and_focus_closing', async () => {
+      await client.request('select_session', { sessionId: previous.sessionId });
+      await waitForActiveSession(client, previous.sessionId, 'previous workspace selected before close target');
+      await client.request('select_session', { sessionId: closing.sessionId });
+      await waitForActiveSession(client, closing.sessionId, 'target workspace selected before close shortcut');
+      await client.request('focus_pane', { sessionId: closing.sessionId, paneId: closing.pane.paneId });
+      await waitForPaneInputFocused(client, closing.sessionId, closing.pane.paneId, 'target pane focused before close shortcut');
+      note(`closing workspace selected and focused`, { sessionId: closing.sessionId });
+    });
+
+    await runner.step('close_via_shortcut', async () => {
+      await client.request('dispatch_shortcut', { shortcutId: 'session.close' });
+      await waitForSessionAbsentFromDaemon(observer, closing.sessionId, 'target session unregistered after close shortcut');
+      await waitForSessionGoneFromUi(client, closing.sessionId, 'target session gone from UI/sidebar after close shortcut');
+      note(`closing workspace session closed`, { sessionId: closing.sessionId });
+    });
+
+    await runner.step('verify_switchback', async () => {
+      await waitForActiveSession(client, previous.sessionId, 'previous workspace selected after closing target');
+      await assertWorkspaceVisible(runner, client, previous.sessionId, closing.sessionId);
+      note(`previous workspace selected and visible after switchback`, { sessionId: previous.sessionId });
+    });
+
+    const summary = runner.finishSuccess({
+      previousSessionId: previous.sessionId,
+      closedSessionId: closing.sessionId,
+    });
+    console.log('[RealAppHarness] Workspace close-last-session switchback passed.');
+    console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    const summary = runner.finishFailure(error, { sessionIds: createdSessionIds });
+    console.error(summary.error);
+    process.exitCode = 1;
+  } finally {
+    for (const sessionId of [...createdSessionIds].reverse()) {
+      await closeWorkspacePanes(client, sessionId).catch(() => {});
+    }
+    await waitForNoSessionsUnderDir(client, runner.sessionDir).catch(() => {});
     await client.quitApp().catch(() => {});
     await observer.close();
   }

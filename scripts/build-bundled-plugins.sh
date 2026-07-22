@@ -22,7 +22,7 @@ fix_bun_compile_codesign() {
     /cmd LC_CODE_SIGNATURE/ { found=1; next }
     found && /dataoff/ { off=$2 }
     found && /datasize/ { size=$2; print off, size; exit }
-  ')
+  ') || true
   [[ -n "${sig_offset:-}" && -n "${sig_size:-}" ]] || return 0
 
   sig_end=$((sig_offset + sig_size))
@@ -31,6 +31,7 @@ fix_bun_compile_codesign() {
     echo "  fixing bun codesign trailer on ${bin_path} (${actual_size} -> ${sig_end} bytes)"
     truncate -s "${sig_end}" "${bin_path}"
   fi
+}
 
 # bun < 1.3.14 emits --compile binaries whose embedded JS payload can overflow
 # the __BUN segment past the code-signature extent; codesign then refuses to

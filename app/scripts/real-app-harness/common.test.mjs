@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseCommonArgs } from './common.mjs';
+import { isDirectoryUnderRoot, parseCommonArgs } from './common.mjs';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -111,5 +111,45 @@ describeWithBinary('parseCommonArgs one-knob (ATTN_PROFILE)', () => {
     const options = parseCommonArgs([]);
 
     expect(options.appPath).toBe(path.join(os.homedir(), 'Applications', 'attn-agent9.app'));
+  });
+});
+
+describe('isDirectoryUnderRoot', () => {
+  it('rejects a sibling directory that merely shares the root as a string prefix', () => {
+    // The exact bug from figgyster's PR #631 review: a plain startsWith(root)
+    // check treats '.../attn-real-app-sessions-old/keep' as under
+    // '.../attn-real-app-sessions' and would sweep a session that was never
+    // part of the harness.
+    expect(isDirectoryUnderRoot('/tmp/attn-real-app-sessions-old/keep', ['/tmp/attn-real-app-sessions'])).toBe(false);
+  });
+
+  it('accepts an exact root match', () => {
+    // The session directory can be the root itself, not just a subpath.
+    expect(isDirectoryUnderRoot('/tmp/attn-real-app-sessions', ['/tmp/attn-real-app-sessions'])).toBe(true);
+  });
+
+  it('accepts a nested child directory', () => {
+    // The common case: a per-run session workspace nested under the root.
+    expect(isDirectoryUnderRoot('/tmp/attn-real-app-sessions/run-1/ws', ['/tmp/attn-real-app-sessions'])).toBe(true);
+  });
+
+  it('rejects an unrelated path', () => {
+    // Baseline negative case: nothing in common with the root at all.
+    expect(isDirectoryUnderRoot('/Users/victor/projects/other', ['/tmp/attn-real-app-sessions'])).toBe(false);
+  });
+
+  it('rejects a null or empty directory', () => {
+    // A session with no recorded directory must never match; a bare
+    // Boolean(directory) mistake could otherwise let falsy values through.
+    expect(isDirectoryUnderRoot(null, ['/tmp/attn-real-app-sessions'])).toBe(false);
+    expect(isDirectoryUnderRoot('', ['/tmp/attn-real-app-sessions'])).toBe(false);
+  });
+
+  it('matches against any of multiple root candidates (symlink realpath form)', () => {
+    // sweepStaleHarnessSessions passes both the configured root and its
+    // macOS realpath ('/var/folders/...' vs '/private/var/folders/...') so a
+    // directory recorded in either form must still be recognized.
+    const roots = ['/var/folders/xy/attn-real-app-sessions', '/private/var/folders/xy/attn-real-app-sessions'];
+    expect(isDirectoryUnderRoot('/private/var/folders/xy/attn-real-app-sessions/run-2/ws', roots)).toBe(true);
   });
 });

@@ -1069,11 +1069,14 @@ Remote hub options:
     saveJson(path.join(runDir, 'session-ui-selected.json'), selectedSession);
 
     setStep('remote-pty-interaction');
+    const existingRemotePaneIds = new Set(
+      (observer.getWorkspace(remoteSessionId)?.panes || []).map((pane) => pane.pane_id),
+    );
     const utilityPane = await client.request('split_pane', {
       sessionId: remoteSessionId,
       direction: 'vertical',
     });
-    remoteUtilityPane = await observer.waitForUtilityPane(remoteSessionId, 30_000);
+    remoteUtilityPane = await observer.waitForUtilityPane(remoteSessionId, 30_000, existingRemotePaneIds);
     saveJson(path.join(runDir, 'remote-utility-pane.json'), {
       splitResult: utilityPane,
       pane: remoteUtilityPane,

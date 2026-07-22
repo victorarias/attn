@@ -69,9 +69,12 @@ async function main() {
     });
 
     shellPaneId = await runner.step('open_shell_pane', async () => {
+      const initialPane = await waitForFirstWorkspacePane(client, sessionId, 'initial pane for scrollback split', 20_000);
+      // Baseline must be captured after the initial pane exists, or the split
+      // helper can mistake the initial pane for the new shell pane.
       const workspace = await client.request('get_workspace', { sessionId });
       const existingPaneIds = new Set((workspace.panes || []).map((pane) => pane.paneId));
-      const initialPane = await waitForFirstWorkspacePane(client, sessionId, 'initial pane for scrollback split', 20_000);
+      existingPaneIds.add(initialPane.paneId);
       await client.request('split_pane', {
         sessionId,
         targetPaneId: initialPane.paneId,
@@ -109,11 +112,23 @@ async function main() {
     });
 
     await runner.step('stream_output_without_losing_anchor', async () => {
+      // Typing snaps the viewport to the bottom, so the stream is started first
+      // (with a delay) and the viewport re-anchored before output arrives — the
+      // assertion then isolates whether STREAMING OUTPUT moves the viewport.
       await client.request('write_pane', {
         sessionId,
         paneId: shellPaneId,
-        text: `sh -c 'i=1; while [ "$i" -le 40 ]; do printf "STREAM_%03d\\n" "$i"; sleep 0.02; i=$((i+1)); done; printf "${streamEnd}\\n"'`,
+        text: `sh -c 'sleep 3; i=1; while [ "$i" -le 40 ]; do printf "STREAM_%03d\\n" "$i"; sleep 0.02; i=$((i+1)); done; printf "${streamEnd}\\n"'`,
       });
+      await scrollPaneToTop(client, sessionId, shellPaneId);
+      await waitForPaneState(
+        client,
+        sessionId,
+        shellPaneId,
+        (state) => (state?.pane?.visibleContent?.lines || []).join('\n').includes(seedAnchor),
+        'seed anchor re-anchored before stream output begins',
+        10_000,
+      );
       await waitForPaneText(
         client,
         sessionId,
