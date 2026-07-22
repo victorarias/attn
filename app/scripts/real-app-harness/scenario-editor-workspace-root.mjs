@@ -21,7 +21,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
@@ -37,6 +36,7 @@ import {
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -214,7 +214,16 @@ async function main() {
     return;
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'editor-workspace-root');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'EDITOR-WORKSPACE-ROOT',
+    tier: 'tier1-local-shell',
+    prefix: 'editor-workspace-root',
+    metadata: {
+      agent: 'shell',
+      focus: 'editor tile over an arbitrary workspace root: off-root gating + on-root positive control',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const driver = new MacOSDriver({ appPath: options.appPath });
@@ -222,58 +231,79 @@ async function main() {
   let notebookSessionId = null;
   let positiveControlPath = null;
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+  runner.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+
+  // Cleanup, registered as soon as each resource exists so a signal mid-scenario
+  // still tears them down. Runner cleanups run in REVERSE registration order, so
+  // register observer/app first (they must close LAST).
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
+  runner.registerCleanup('remove_positive_control_note', () => {
+    if (positiveControlPath) {
+      fs.rmSync(positiveControlPath, { force: true });
+    }
+  });
 
   try {
     process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
-    await launchFreshAppAndConnect(client, observer);
-    await closeExistingSessions(client, options.sessionRootDir);
+    await runner.step('launch_app', async () => {
+      await launchFreshAppAndConnect(client, observer);
+      await closeExistingSessions(client, options.sessionRootDir);
+    });
 
     // 0. Seed the off-root fixture BEFORE launch/dock: a README.md at the root
     //    plus a nested dir/note.md, so the tile's first fs_index already sees
     //    both — no race against a fs_watch debounce.
-    const tempRoot = path.join(sessionDir, 'editor-root');
-    fs.mkdirSync(path.join(tempRoot, 'dir'), { recursive: true });
-    fs.writeFileSync(path.join(tempRoot, 'README.md'), '# Editor root fixture\n\nOff-root gating probe.\n', 'utf8');
-    fs.writeFileSync(path.join(tempRoot, 'dir', 'note.md'), '# Nested note\n\nUnder dir/.\n', 'utf8');
-    console.log(`[RealAppHarness] tempRoot=${tempRoot}`);
+    const { tempRoot, notebookRoot, positiveControlBasename } = await runner.step('seed_fixtures', async () => {
+      const root = path.join(runner.sessionDir, 'editor-root');
+      fs.mkdirSync(path.join(root, 'dir'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'README.md'), '# Editor root fixture\n\nOff-root gating probe.\n', 'utf8');
+      fs.writeFileSync(path.join(root, 'dir', 'note.md'), '# Nested note\n\nUnder dir/.\n', 'utf8');
+      runner.log(`[RealAppHarness] tempRoot=${root}`);
 
-    // Seed a positive-control note directly in the Notebook root (a real note
-    // among real notes — the same convention scenario-notebook-editor-undo.mjs
-    // and scenario-notebook-link-nav.mjs use for this uncontrolled-but-known
-    // location), unique to this run so it never collides across runs.
-    const notebookRoot = defaultNotebookRootForProfile(currentHarnessProfile());
-    fs.mkdirSync(notebookRoot, { recursive: true });
-    const positiveControlBasename = `editor-root-positive-control-${runId}`;
-    positiveControlPath = path.join(notebookRoot, `${positiveControlBasename}.md`);
-    fs.writeFileSync(positiveControlPath, '# Positive control\n\nOn-root rail probe.\n', 'utf8');
-    console.log(`[RealAppHarness] notebookRoot=${notebookRoot}`);
-    console.log(`[RealAppHarness] positiveControlPath=${positiveControlPath}`);
+      // Seed a positive-control note directly in the Notebook root (a real note
+      // among real notes — the same convention scenario-notebook-editor-undo.mjs
+      // and scenario-notebook-link-nav.mjs use for this uncontrolled-but-known
+      // location), unique to this run so it never collides across runs.
+      const notebookRootDir = defaultNotebookRootForProfile(currentHarnessProfile());
+      fs.mkdirSync(notebookRootDir, { recursive: true });
+      const basename = `editor-root-positive-control-${runner.runId}`;
+      positiveControlPath = path.join(notebookRootDir, `${basename}.md`);
+      fs.writeFileSync(positiveControlPath, '# Positive control\n\nOn-root rail probe.\n', 'utf8');
+      runner.log(`[RealAppHarness] notebookRoot=${notebookRootDir}`);
+      runner.log(`[RealAppHarness] positiveControlPath=${positiveControlPath}`);
+
+      return { tempRoot: root, notebookRoot: notebookRootDir, positiveControlBasename: basename };
+    });
 
     // 1. Off-root workspace: a normal shell session whose cwd is the temp root.
     //    ⌘⌥N's default (resolveEditorTileRoot) pins a fresh editor tile to the
     //    ACTIVE workspace's directory whenever it differs from the Notebook
     //    root — so this docks a tile bound to tempRoot, not Notebook storage.
-    const off = await openWorkspaceForCwd(client, observer, tempRoot, `editor-root-off-${runId}`);
-    tempSessionId = off.sessionId;
+    const { off, offRootDocked } = await runner.step('dock_off_root_tile', async () => {
+      const result = await openWorkspaceForCwd(client, observer, tempRoot, `editor-root-off-${runner.runId}`);
+      tempSessionId = result.sessionId;
+      runner.registerCleanup('close_temp_session_panes', () => (tempSessionId ? closeWorkspacePanes(client, tempSessionId) : null));
 
-    const offRootDocked = await dockEditorTileNative(client, driver, off.workspaceId);
-    console.log(`[RealAppHarness] docked off-root editor tile=${offRootDocked.tileIds[0]}`);
+      const docked = await dockEditorTileNative(client, driver, result.workspaceId);
+      runner.log(`[RealAppHarness] docked off-root editor tile=${docked.tileIds[0]}`);
+      return { off: result, offRootDocked: docked };
+    });
 
     // 2. Open README.md via the tile's auto-opened finder, then assert:
     //    (a) tile title becomes the file basename.
-    await openNoteViaFinder(client, driver, 'README');
-    await waitForWorkspaceUi(
-      client,
-      off.workspaceId,
-      (state) => Array.isArray(state?.tileTitles) && state.tileTitles.includes('README.md'),
-      'tile title becomes the opened file\'s basename',
-      10_000,
-    );
-    await captureFrontWindowScreenshot(path.join(runDir, 'off-root-open.png'), { client }).catch((error) => {
-      console.warn(`[RealAppHarness] off-root-open screenshot failed: ${error}`);
+    await runner.step('open_off_root_note_and_assert_title', async () => {
+      await openNoteViaFinder(client, driver, 'README');
+      await waitForWorkspaceUi(
+        client,
+        off.workspaceId,
+        (state) => Array.isArray(state?.tileTitles) && state.tileTitles.includes('README.md'),
+        'tile title becomes the opened file\'s basename',
+        10_000,
+      );
+      await captureFrontWindowScreenshot(path.join(runner.runDir, 'off-root-open.png'), { client }).catch((error) => {
+        runner.log(`[RealAppHarness] off-root-open screenshot failed: ${error}`);
+      });
     });
 
     // (b) .cm-content already asserted present by openNoteViaFinder — root-
@@ -283,8 +313,10 @@ async function main() {
     // (c) THE off-root-gating assertion: no backlinks/outline rail. It must
     //     never appear at all — this tile was never handed backlinksNotebook,
     //     so there is no fetch in flight that could make it appear late.
-    await assertNeverAppears(client, RAIL_SELECTOR, 'off-root tile withholds the backlinks/outline rail');
-    console.log('[RealAppHarness] off-root tile: rail withheld as expected.');
+    await runner.step('assert_off_root_rail_withheld', async () => {
+      await assertNeverAppears(client, RAIL_SELECTOR, 'off-root tile withholds the backlinks/outline rail');
+      runner.log('[RealAppHarness] off-root tile: rail withheld as expected.');
+    });
 
     // 3. Positive control: a second workspace whose directory IS the Notebook
     //    root. resolveEditorTileRoot treats "directory === effective notebook
@@ -292,22 +324,26 @@ async function main() {
     //    (full capabilities) — the same rail should now render for a markdown
     //    note, proving step (c) isolates off-root rather than the rail being
     //    broken in general.
-    const on = await openWorkspaceForCwd(client, observer, notebookRoot, `editor-root-on-${runId}`);
-    notebookSessionId = on.sessionId;
+    const { on, onRootDocked } = await runner.step('dock_on_root_tile', async () => {
+      const result = await openWorkspaceForCwd(client, observer, notebookRoot, `editor-root-on-${runner.runId}`);
+      notebookSessionId = result.sessionId;
+      runner.registerCleanup('close_notebook_session_panes', () => (notebookSessionId ? closeWorkspacePanes(client, notebookSessionId) : null));
 
-    const onRootDocked = await dockEditorTileNative(client, driver, on.workspaceId);
-    console.log(`[RealAppHarness] docked on-root (Notebook) editor tile=${onRootDocked.tileIds[0]}`);
-
-    await openNoteViaFinder(client, driver, positiveControlBasename);
-    await waitForDomSelector(client, RAIL_SELECTOR, true, 'on-root (Notebook) tile CAN render the backlinks/outline rail', 10_000);
-    console.log('[RealAppHarness] on-root (Notebook) tile: rail rendered (positive control).');
-    await captureFrontWindowScreenshot(path.join(runDir, 'on-root-rail.png'), { client }).catch((error) => {
-      console.warn(`[RealAppHarness] on-root-rail screenshot failed: ${error}`);
+      const docked = await dockEditorTileNative(client, driver, result.workspaceId);
+      runner.log(`[RealAppHarness] docked on-root (Notebook) editor tile=${docked.tileIds[0]}`);
+      return { on: result, onRootDocked: docked };
     });
 
-    const summary = {
-      ok: true,
-      runId,
+    await runner.step('open_on_root_note_and_assert_rail', async () => {
+      await openNoteViaFinder(client, driver, positiveControlBasename);
+      await waitForDomSelector(client, RAIL_SELECTOR, true, 'on-root (Notebook) tile CAN render the backlinks/outline rail', 10_000);
+      runner.log('[RealAppHarness] on-root (Notebook) tile: rail rendered (positive control).');
+      await captureFrontWindowScreenshot(path.join(runner.runDir, 'on-root-rail.png'), { client }).catch((error) => {
+        runner.log(`[RealAppHarness] on-root-rail screenshot failed: ${error}`);
+      });
+    });
+
+    const summary = runner.finishSuccess({
       tempRoot,
       notebookRoot,
       offRoot: {
@@ -319,10 +355,13 @@ async function main() {
         workspaceId: on.workspaceId,
         tileId: onRootDocked.tileIds[0],
       },
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+    });
     console.log('[RealAppHarness] Editor tile over an arbitrary workspace root (off-root gating + positive control) passed.');
     console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    const summary = runner.finishFailure(error, { tempSessionId, notebookSessionId });
+    console.error(summary.error);
+    process.exitCode = 1;
   } finally {
     if (tempSessionId) {
       await closeWorkspacePanes(client, tempSessionId).catch(() => {});

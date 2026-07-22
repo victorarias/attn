@@ -6,11 +6,9 @@
 // -> native click on "Copy output" -> real macOS clipboard
 // -> native click on "Paste" -> clipboard text lands in the PTY.
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
@@ -26,6 +24,7 @@ import {
   waitForPaneText,
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -115,155 +114,188 @@ async function main() {
     process.env.ATTN_HARNESS_PARK_VISIBLE_PX = '800';
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'terminal-context-menu');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'TERMINAL-CONTEXT-MENU',
+    tier: 'tier1-local-shell',
+    prefix: 'terminal-context-menu',
+    metadata: {
+      shell: 'fish',
+      focus: 'native right-click DOM context menu: copy output and paste',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const driver = new MacOSDriver({ appPath: options.appPath });
   const savedClipboard = readClipboard();
   let sessionId = null;
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+  runner.log('run context', { runDir: runner.runDir, sessionDir: runner.sessionDir, wsUrl: options.wsUrl });
+
+  // Cleanup, registered as soon as each resource type exists so a signal
+  // mid-scenario still tears them down. Runner cleanups run in REVERSE
+  // registration order, so register observer/app first (they must close
+  // LAST), then the session-panes sweep, then the clipboard restore (it must
+  // close FIRST) to reproduce the effective order below: restore clipboard,
+  // close panes, quitApp, observer.close.
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
+  runner.registerCleanup('close_session_panes', async () => {
+    if (!sessionId) return;
+    const workspace = await client.request('get_workspace', { sessionId }).catch(() => null);
+    for (const pane of workspace?.panes || []) {
+      await client.request('close_pane', { sessionId, paneId: pane.paneId }).catch(() => {});
+    }
+  });
+  runner.registerCleanup('restore_clipboard', () => writeClipboard(savedClipboard));
 
   try {
-    await launchFreshAppAndConnect(client, observer);
-
-    sessionId = await createSessionAndWaitForInitialPane({
-      client,
-      observer,
-      cwd: sessionDir,
-      label: `context-menu-${runId}`,
-      agent: 'shell',
-      waitForInitialPaneVisible: false,
-      sessionWaitMs: 30_000,
-    });
-    await client.request('select_session', { sessionId });
-    const workspace = await client.request('get_workspace', { sessionId });
-    const pane = workspace?.panes?.[0];
-    if (!pane) {
-      throw new Error(`No pane in workspace: ${JSON.stringify(workspace)}`);
-    }
-    await waitForPaneVisible(client, sessionId, pane.paneId, 20_000);
-    await waitForPaneAttached(client, sessionId, pane.paneId, 20_000);
-    await waitForPaneShellReady(client, sessionId, pane.paneId, {
-      timeoutMs: 20_000,
-      description: 'shell pane ready',
+    await runner.step('launch_app', async () => {
+      await launchFreshAppAndConnect(client, observer);
     });
 
-    // The default shell may not be fish; exec fish so the PTY emits OSC 133.
-    await client.request('write_pane', { sessionId, paneId: pane.paneId, text: 'exec fish' });
-    await delay(1_500);
+    let pane;
+    await runner.step('create_session', async () => {
+      sessionId = await createSessionAndWaitForInitialPane({
+        client,
+        observer,
+        cwd: runner.sessionDir,
+        label: `context-menu-${runner.runId}`,
+        agent: 'shell',
+        waitForInitialPaneVisible: false,
+        sessionWaitMs: 30_000,
+      });
+      await client.request('select_session', { sessionId });
+      const workspace = await client.request('get_workspace', { sessionId });
+      pane = workspace?.panes?.[0];
+      runner.assert(Boolean(pane), `No pane in workspace: ${JSON.stringify(workspace)}`);
+      await waitForPaneVisible(client, sessionId, pane.paneId, 20_000);
+      await waitForPaneAttached(client, sessionId, pane.paneId, 20_000);
+      await waitForPaneShellReady(client, sessionId, pane.paneId, {
+        timeoutMs: 20_000,
+        description: 'shell pane ready',
+      });
 
-    const token = `CTXMENU_${runId}`;
-    await client.request('write_pane', { sessionId, paneId: pane.paneId, text: `echo ${token}` });
-    await waitForPaneText(
-      client,
-      sessionId,
-      pane.paneId,
-      (text) => text.split('\n').some((line) => line.trim() === token),
-      'block output row rendered',
-      20_000,
-    );
-    const read = await client.request('read_pane_text', { sessionId, paneId: pane.paneId });
-    const outputRow = read.text.split('\n').findIndex((line) => line.trim() === token);
-    if (outputRow < 0) {
-      throw new Error(`Token row disappeared. Pane text:\n${read.text}`);
-    }
-
-    const windowBounds = await client.request('get_window_bounds', {});
-    if (!windowBounds?.logicalBounds) {
-      throw new Error(`No window bounds: ${JSON.stringify(windowBounds)}`);
-    }
-    const cellRect = await client.request('get_pane_cell_rect', {
-      sessionId,
-      paneId: pane.paneId,
-      cell: { row: outputRow, col: 2 },
+      // The default shell may not be fish; exec fish so the PTY emits OSC 133.
+      await client.request('write_pane', { sessionId, paneId: pane.paneId, text: 'exec fish' });
+      await delay(1_500);
     });
 
-    // Native right-click on the block's output row.
-    await driver.activateApp();
-    const target = windowRelativePoint(
-      cellRect.centerX,
-      cellRect.centerY,
-      windowBounds,
-      cellRect.innerWidth,
-      cellRect.innerHeight,
-    );
-    await driver.rightClickWindow(target.relativeX, target.relativeY);
+    let token;
+    let outputRow;
+    let target;
+    let windowBounds;
+    await runner.step('run_command_and_locate_output', async () => {
+      token = `CTXMENU_${runner.runId}`;
+      await client.request('write_pane', { sessionId, paneId: pane.paneId, text: `echo ${token}` });
+      await waitForPaneText(
+        client,
+        sessionId,
+        pane.paneId,
+        (text) => text.split('\n').some((line) => line.trim() === token),
+        'block output row rendered',
+        20_000,
+      );
+      const read = await client.request('read_pane_text', { sessionId, paneId: pane.paneId });
+      outputRow = read.text.split('\n').findIndex((line) => line.trim() === token);
+      runner.assert(outputRow >= 0, `Token row disappeared. Pane text:\n${read.text}`);
 
-    const menu = await waitForContextMenu(client);
-    await driver.screenshot(path.join(runDir, 'context-menu-open.png'));
-    const itemById = new Map(menu.items.map((item) => [item.id, item]));
-    for (const required of ['copy', 'copy-command', 'copy-output', 'paste']) {
-      if (!itemById.has(required)) {
-        throw new Error(`Menu is missing "${required}". Items: ${JSON.stringify(menu.items)}`);
+      windowBounds = await client.request('get_window_bounds', {});
+      runner.assert(Boolean(windowBounds?.logicalBounds), `No window bounds: ${JSON.stringify(windowBounds)}`);
+      const cellRect = await client.request('get_pane_cell_rect', {
+        sessionId,
+        paneId: pane.paneId,
+        cell: { row: outputRow, col: 2 },
+      });
+
+      // Native right-click on the block's output row.
+      await driver.activateApp();
+      target = windowRelativePoint(
+        cellRect.centerX,
+        cellRect.centerY,
+        windowBounds,
+        cellRect.innerWidth,
+        cellRect.innerHeight,
+      );
+    });
+
+    let menuItemsSummary;
+    await runner.step('open_menu_and_copy_output', async () => {
+      await driver.rightClickWindow(target.relativeX, target.relativeY);
+
+      const menu = await waitForContextMenu(client);
+      await driver.screenshot(path.join(runner.runDir, 'context-menu-open.png'));
+      const itemById = new Map(menu.items.map((item) => [item.id, item]));
+      for (const required of ['copy', 'copy-command', 'copy-output', 'paste']) {
+        runner.assert(itemById.has(required), `Menu is missing "${required}". Items: ${JSON.stringify(menu.items)}`);
       }
-    }
-    for (const blockItem of ['copy-command', 'copy-output']) {
-      if (itemById.get(blockItem).disabled) {
-        throw new Error(`"${blockItem}" should be enabled on a block. Items: ${JSON.stringify(menu.items)}`);
+      for (const blockItem of ['copy-command', 'copy-output']) {
+        runner.assert(
+          !itemById.get(blockItem).disabled,
+          `"${blockItem}" should be enabled on a block. Items: ${JSON.stringify(menu.items)}`,
+        );
       }
-    }
 
-    // Copy output through the menu -> real clipboard.
-    writeClipboard('context-menu-sentinel');
-    const copyOutput = itemById.get('copy-output');
-    const copyPoint = windowRelativePoint(
-      copyOutput.centerX,
-      copyOutput.centerY,
-      windowBounds,
-      menu.innerWidth,
-      menu.innerHeight,
-    );
-    await driver.clickWindow(copyPoint.relativeX, copyPoint.relativeY);
-    await waitForClipboard(token, 'menu Copy output copies the block output');
+      // Copy output through the menu -> real clipboard.
+      writeClipboard('context-menu-sentinel');
+      const copyOutput = itemById.get('copy-output');
+      const copyPoint = windowRelativePoint(
+        copyOutput.centerX,
+        copyOutput.centerY,
+        windowBounds,
+        menu.innerWidth,
+        menu.innerHeight,
+      );
+      await driver.clickWindow(copyPoint.relativeX, copyPoint.relativeY);
+      await waitForClipboard(token, 'menu Copy output copies the block output');
+      menuItemsSummary = menu.items.map((item) => ({ id: item.id, disabled: item.disabled }));
+    });
 
-    // Paste through the menu -> clipboard text lands in the PTY (this also
-    // proves the clipboard READ permission works in the packaged app).
-    const pasteToken = `PASTEPROBE_${runId}`;
-    writeClipboard(pasteToken);
-    await driver.rightClickWindow(target.relativeX, target.relativeY);
-    const menuAgain = await waitForContextMenu(client);
-    const paste = menuAgain.items.find((item) => item.id === 'paste');
-    if (!paste || paste.disabled) {
-      throw new Error(`Paste unavailable: ${JSON.stringify(menuAgain.items)}`);
-    }
-    const pastePoint = windowRelativePoint(
-      paste.centerX,
-      paste.centerY,
-      windowBounds,
-      menuAgain.innerWidth,
-      menuAgain.innerHeight,
-    );
-    await driver.clickWindow(pastePoint.relativeX, pastePoint.relativeY);
-    await waitForPaneText(
-      client,
-      sessionId,
-      pane.paneId,
-      (text) => text.includes(pasteToken),
-      'pasted clipboard text reaches the PTY',
-      10_000,
-    );
+    let pasteToken;
+    await runner.step('open_menu_and_paste', async () => {
+      // Paste through the menu -> clipboard text lands in the PTY (this also
+      // proves the clipboard READ permission works in the packaged app).
+      pasteToken = `PASTEPROBE_${runner.runId}`;
+      writeClipboard(pasteToken);
+      await driver.rightClickWindow(target.relativeX, target.relativeY);
+      const menuAgain = await waitForContextMenu(client);
+      const paste = menuAgain.items.find((item) => item.id === 'paste');
+      runner.assert(Boolean(paste) && !paste.disabled, `Paste unavailable: ${JSON.stringify(menuAgain.items)}`);
+      const pastePoint = windowRelativePoint(
+        paste.centerX,
+        paste.centerY,
+        windowBounds,
+        menuAgain.innerWidth,
+        menuAgain.innerHeight,
+      );
+      await driver.clickWindow(pastePoint.relativeX, pastePoint.relativeY);
+      await waitForPaneText(
+        client,
+        sessionId,
+        pane.paneId,
+        (text) => text.includes(pasteToken),
+        'pasted clipboard text reaches the PTY',
+        10_000,
+      );
+    });
 
-    const summary = {
-      ok: true,
-      runId,
+    const result = runner.finishSuccess({
       sessionId,
       paneId: pane.paneId,
       token,
       pasteToken,
       outputRow,
-      menuItems: menu.items.map((item) => ({ id: item.id, disabled: item.disabled })),
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
-    console.log('[RealAppHarness] Terminal context menu passed.');
-    console.log(JSON.stringify(summary, null, 2));
+      menuItems: menuItemsSummary,
+    });
+    console.log('[verify] PASS — terminal context menu: copy output and paste both matched real macOS clipboard.');
+    console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     if (sessionId) {
-      await captureSessionArtifacts(client, runDir, 'context-menu-failure', sessionId).catch(() => {});
+      await captureSessionArtifacts(client, runner.runDir, 'context-menu-failure', sessionId).catch(() => {});
     }
-    throw error;
+    const result = runner.finishFailure(error, { sessionId });
+    console.error(result.error);
+    process.exitCode = 1;
   } finally {
     writeClipboard(savedClipboard);
     if (sessionId) {

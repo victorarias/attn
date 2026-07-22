@@ -25,7 +25,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   relaunchAppAndConnect,
@@ -40,6 +39,7 @@ import {
   waitForPaneText,
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 const SHELLS = [
   { name: 'fish', exec: 'exec fish', blocksExpected: true },
@@ -180,16 +180,25 @@ async function main() {
     if (!shellAvailable(shell.name)) throw new Error(`${shell.name} required`);
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'block-resize');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'BLOCK-RESIZE',
+    tier: 'tier1-local-shell',
+    prefix: 'block-resize',
+    metadata: {
+      shells: SHELLS.map((s) => s.name),
+      focus: 'command-block geometry across relaunch replay and pane width changes',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const sessions = [];
-  const summary = { runId, shells: {} };
+  const summary = { shells: {} };
 
-  console.log(`[verify] runDir=${runDir}`);
+  runner.log('run context', { runDir: runner.runDir, sessionDir: runner.sessionDir });
 
-  const token = (shell) => `RESIZE_${shell}_${runId}`;
-  const makeDone = (shell) => `MAKE_DONE_${shell}_${runId}`;
+  const token = (shell) => `RESIZE_${shell}_${runner.runId}`;
+  const makeDone = (shell) => `MAKE_DONE_${shell}_${runner.runId}`;
   // Short sentinels are checked as whole rows at every geometry. The runId
   // tokens and compiler paths wrap at full width and are checked as
   // contiguous tokens in the row-joined text — but ONLY at the geometry the
@@ -204,82 +213,106 @@ async function main() {
     'deep/nested/module_path/src/component_24/impl/translation_unit_24.cpp.o',
   ];
 
+  // Cleanup, registered as soon as each resource type exists so a signal
+  // mid-scenario still tears them down. Runner cleanups run in REVERSE
+  // registration order, so register observer/app first (they must close
+  // LAST) and the session-panes sweep last (it must close FIRST) to
+  // reproduce the effective order below: close panes, quitApp, observer.close.
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
+  runner.registerCleanup('close_session_panes', async () => {
+    for (const { sessionId } of sessions) {
+      const ws = await client.request('get_workspace', { sessionId }).catch(() => null);
+      for (const p of ws?.panes || []) {
+        await client.request('close_pane', { sessionId, paneId: p.paneId }).catch(() => {});
+      }
+    }
+  });
+
   try {
-    await launchFreshAppAndConnect(client, observer);
+    await runner.step('launch_app', async () => {
+      await launchFreshAppAndConnect(client, observer);
+    });
 
     // Phase A: one session per shell, each with tall output, a make-like
     // colored/wrapping/CR-progress block, and a small marker block.
-    for (const shell of SHELLS) {
-      const dir = path.join(sessionDir, shell.name);
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'make-sim.sh'), MAKE_SIM_SCRIPT);
-      const sessionId = await createSessionAndWaitForInitialPane({
-        client, observer, cwd: dir, label: `blocks-${shell.name}-${runId}`,
-        agent: 'shell', waitForInitialPaneVisible: false, sessionWaitMs: 30_000,
-      });
-      await client.request('select_session', { sessionId });
-      const workspace = await client.request('get_workspace', { sessionId });
-      const pane = workspace?.panes?.[0];
-      if (!pane) throw new Error(`No pane for ${shell.name}: ${JSON.stringify(workspace)}`);
-      const paneId = pane.paneId;
-      await waitForPaneVisible(client, sessionId, paneId, 20_000);
-      await waitForPaneAttached(client, sessionId, paneId, 20_000);
-      await waitForPaneShellReady(client, sessionId, paneId, { timeoutMs: 20_000, description: `${shell.name} shell ready` });
-      await client.request('write_pane', { sessionId, paneId, text: shell.exec });
-      await delay(1_500);
+    await runner.step('phase_a_baseline_blocks', async () => {
+      for (const shell of SHELLS) {
+        const dir = path.join(runner.sessionDir, shell.name);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'make-sim.sh'), MAKE_SIM_SCRIPT);
+        const sessionId = await createSessionAndWaitForInitialPane({
+          client, observer, cwd: dir, label: `blocks-${shell.name}-${runner.runId}`,
+          agent: 'shell', waitForInitialPaneVisible: false, sessionWaitMs: 30_000,
+        });
+        await client.request('select_session', { sessionId });
+        const workspace = await client.request('get_workspace', { sessionId });
+        const pane = workspace?.panes?.[0];
+        runner.assert(Boolean(pane), `No pane for ${shell.name}: ${JSON.stringify(workspace)}`);
+        const paneId = pane.paneId;
+        await waitForPaneVisible(client, sessionId, paneId, 20_000);
+        await waitForPaneAttached(client, sessionId, paneId, 20_000);
+        await waitForPaneShellReady(client, sessionId, paneId, { timeoutMs: 20_000, description: `${shell.name} shell ready` });
+        await client.request('write_pane', { sessionId, paneId, text: shell.exec });
+        await delay(1_500);
 
-      await runCommandAndWait(client, sessionId, paneId, `seq 1 200; echo ${token(shell.name)}`, token(shell.name));
-      await runCommandAndWait(client, sessionId, paneId, `sh make-sim.sh ${makeDone(shell.name)}`, makeDone(shell.name));
-      await runCommandAndWait(client, sessionId, paneId, 'echo smallblock', 'smallblock');
+        await runCommandAndWait(client, sessionId, paneId, `seq 1 200; echo ${token(shell.name)}`, token(shell.name));
+        await runCommandAndWait(client, sessionId, paneId, `sh make-sim.sh ${makeDone(shell.name)}`, makeDone(shell.name));
+        await runCommandAndWait(client, sessionId, paneId, 'echo smallblock', 'smallblock');
 
-      const baseline = assertBlockInvariants(
-        await client.request('get_pane_block_state', { sessionId, paneId }),
-        `${shell.name} baseline`,
-      );
-      if (shell.blocksExpected) {
-        if (!baseline.blocks.some((b) => (b.command || '').startsWith('seq 1 200'))) {
-          throw new Error(`${shell.name} baseline: tall block not tracked`);
+        const baseline = assertBlockInvariants(
+          await client.request('get_pane_block_state', { sessionId, paneId }),
+          `${shell.name} baseline`,
+        );
+        if (shell.blocksExpected) {
+          runner.assert(
+            baseline.blocks.some((b) => (b.command || '').startsWith('seq 1 200')),
+            `${shell.name} baseline: tall block not tracked`,
+          );
+          runner.assert(
+            baseline.blocks.some((b) => (b.command || '').startsWith('sh make-sim.sh')),
+            `${shell.name} baseline: make-like block not tracked`,
+          );
+        } else {
+          assertNoBlocks(baseline, `${shell.name} baseline`);
         }
-        if (!baseline.blocks.some((b) => (b.command || '').startsWith('sh make-sim.sh'))) {
-          throw new Error(`${shell.name} baseline: make-like block not tracked`);
-        }
-      } else {
-        assertNoBlocks(baseline, `${shell.name} baseline`);
+        sessions.push({ shell, sessionId, paneId });
+        summary.shells[shell.name] = { baselineBlocks: baseline.blocks.length };
       }
-      sessions.push({ shell, sessionId, paneId });
-      summary.shells[shell.name] = { baselineBlocks: baseline.blocks.length };
-    }
+    });
 
     // Phase B: one relaunch — attach replay rebuilds every model (and, for
     // fish, the block store) from raw bytes: the `make install` reinstall path.
-    await relaunchAppAndConnect(client, observer);
-    for (const { shell, sessionId, paneId } of sessions) {
-      await selectAndWaitForPane(client, sessionId, paneId);
-      await waitForPaneText(client, sessionId, paneId, (text) => {
-        const lines = text.split('\n').map((line) => line.trim());
-        const joined = text.replace(/\n/g, '');
-        return sentinelsFor(shell).every((sentinel) => lines.includes(sentinel))
-          && longTokensFor(shell).every((needle) => joined.includes(needle));
-      }, `${shell.name} replayed history after relaunch`, 30_000);
-      const read = await client.request('read_pane_text', { sessionId, paneId });
-      assertTextIntegrity(read.text, sentinelsFor(shell), longTokensFor(shell), `${shell.name} after-relaunch`);
-      const state = assertBlockInvariants(
-        await client.request('get_pane_block_state', { sessionId, paneId }),
-        `${shell.name} after-relaunch`,
-      );
-      if (shell.blocksExpected) {
-        // Blocks rebuilt from replayed markers: the small block and the
-        // make-like block (clicked via its visible done marker) must both
-        // hit-test correctly.
-        await clickAndExpectSelected(client, sessionId, paneId, 'smallblock', 'echo smallblock', `${shell.name} after-relaunch small`);
-        await clickAndExpectSelected(client, sessionId, paneId, makeDone(shell.name), 'sh make-sim.sh', `${shell.name} after-relaunch make`);
-      } else {
-        assertNoBlocks(state, `${shell.name} after-relaunch`);
-        await clickAndExpectNothing(client, sessionId, paneId, 'smallblock', `${shell.name} after-relaunch`);
+    await runner.step('phase_b_relaunch_replay', async () => {
+      await relaunchAppAndConnect(client, observer);
+      for (const { shell, sessionId, paneId } of sessions) {
+        await selectAndWaitForPane(client, sessionId, paneId);
+        await waitForPaneText(client, sessionId, paneId, (text) => {
+          const lines = text.split('\n').map((line) => line.trim());
+          const joined = text.replace(/\n/g, '');
+          return sentinelsFor(shell).every((sentinel) => lines.includes(sentinel))
+            && longTokensFor(shell).every((needle) => joined.includes(needle));
+        }, `${shell.name} replayed history after relaunch`, 30_000);
+        const read = await client.request('read_pane_text', { sessionId, paneId });
+        assertTextIntegrity(read.text, sentinelsFor(shell), longTokensFor(shell), `${shell.name} after-relaunch`);
+        const state = assertBlockInvariants(
+          await client.request('get_pane_block_state', { sessionId, paneId }),
+          `${shell.name} after-relaunch`,
+        );
+        if (shell.blocksExpected) {
+          // Blocks rebuilt from replayed markers: the small block and the
+          // make-like block (clicked via its visible done marker) must both
+          // hit-test correctly.
+          await clickAndExpectSelected(client, sessionId, paneId, 'smallblock', 'echo smallblock', `${shell.name} after-relaunch small`);
+          await clickAndExpectSelected(client, sessionId, paneId, makeDone(shell.name), 'sh make-sim.sh', `${shell.name} after-relaunch make`);
+        } else {
+          assertNoBlocks(state, `${shell.name} after-relaunch`);
+          await clickAndExpectNothing(client, sessionId, paneId, 'smallblock', `${shell.name} after-relaunch`);
+        }
+        summary.shells[shell.name].afterRelaunchBlocks = state.blocks.length;
       }
-      summary.shells[shell.name].afterRelaunchBlocks = state.blocks.length;
-    }
-    await client.request('capture_native_window_screenshot', { path: path.join(runDir, '1-after-relaunch.png') }).catch(() => {});
+      await client.request('capture_native_window_screenshot', { path: path.join(runner.runDir, '1-after-relaunch.png') }).catch(() => {});
+    });
 
     // Phase C: width changes via split + close-split, per shell. A width
     // change invalidates stored block rows (the store clears); when it lands
@@ -287,80 +320,86 @@ async function main() {
     // and rebuilds the model — history must come back intact at the new
     // width, and fish blocks must be correct-or-absent at every step;
     // bash/zsh stay block-free.
-    for (const { shell, sessionId, paneId } of sessions) {
-      await selectAndWaitForPane(client, sessionId, paneId);
-      await client.request('split_pane', { sessionId, targetPaneId: paneId, direction: 'vertical' });
-      await delay(1_500);
-      // The split focuses the new pane's session; re-select ours so bridge
-      // clicks resolve against the workspace view the DOM renders.
-      await client.request('select_session', { sessionId });
-      await delay(300);
-      // History may be restored by a debounced replay re-request after the
-      // split's geometry change — wait for it rather than sampling once.
-      // Short sentinels only: rows truncate at the narrower width (no-reflow
-      // resize), so the wrapped long tokens are not expected here.
-      await waitForPaneText(client, sessionId, paneId, (text) => {
-        const lines = text.split('\n').map((line) => line.trim());
-        return sentinelsFor(shell).every((sentinel) => lines.includes(sentinel));
-      }, `${shell.name} history restored after split`, 20_000);
-      const afterSplit = assertBlockInvariants(
-        await client.request('get_pane_block_state', { sessionId, paneId }),
-        `${shell.name} after-split`,
-      );
-      if (shell.blocksExpected) {
-        await clickAndExpectCorrectOrAbsent(client, sessionId, paneId, 'smallblock', 'echo smallblock', `${shell.name} after-split`);
-      } else {
-        assertNoBlocks(afterSplit, `${shell.name} after-split`);
-      }
-      const splitRead = await client.request('read_pane_text', { sessionId, paneId });
-      assertTextIntegrity(splitRead.text, sentinelsFor(shell), [], `${shell.name} after-split`);
-
-      await runCommandAndWait(client, sessionId, paneId, 'echo postsplit', 'postsplit');
-      if (shell.blocksExpected) {
-        await clickAndExpectSelected(client, sessionId, paneId, 'postsplit', 'echo postsplit', `${shell.name} post-split`);
-      } else {
-        await clickAndExpectNothing(client, sessionId, paneId, 'postsplit', `${shell.name} post-split`);
-      }
-
-      const ws2 = await client.request('get_workspace', { sessionId });
-      const newPane = (ws2?.panes || []).find((p) => p.paneId !== paneId);
-      if (newPane) {
-        await client.request('close_pane', { sessionId, paneId: newPane.paneId });
+    await runner.step('phase_c_width_changes', async () => {
+      for (const { shell, sessionId, paneId } of sessions) {
+        await selectAndWaitForPane(client, sessionId, paneId);
+        await client.request('split_pane', { sessionId, targetPaneId: paneId, direction: 'vertical' });
         await delay(1_500);
-      }
-      await client.request('select_session', { sessionId });
-      await delay(300);
-      assertBlockInvariants(
-        await client.request('get_pane_block_state', { sessionId, paneId }),
-        `${shell.name} after-close-split`,
-      );
-      await runCommandAndWait(client, sessionId, paneId, 'echo postclose', 'postclose');
-      if (shell.blocksExpected) {
-        await clickAndExpectSelected(client, sessionId, paneId, 'postclose', 'echo postclose', `${shell.name} post-close`);
-      } else {
-        await clickAndExpectNothing(client, sessionId, paneId, 'postclose', `${shell.name} post-close`);
-      }
-      // Widening back keeps every row, but columns truncated at the narrow
-      // width stay truncated until the next replay re-parses the raw history
-      // (no-reflow resize) — so the long tokens are not required here either.
-      await waitForPaneText(client, sessionId, paneId, (text) => {
-        const lines = text.split('\n').map((line) => line.trim());
-        return [...sentinelsFor(shell), 'postsplit'].every((sentinel) => lines.includes(sentinel));
-      }, `${shell.name} history intact after close-split`, 20_000);
-      const finalRead = await client.request('read_pane_text', { sessionId, paneId });
-      assertTextIntegrity(
-        finalRead.text,
-        [...sentinelsFor(shell), 'postsplit'],
-        [],
-        `${shell.name} final`,
-      );
-      console.log(`[verify] ${shell.name}: resize round-trip OK`);
-    }
-    await client.request('capture_native_window_screenshot', { path: path.join(runDir, '2-final.png') }).catch(() => {});
+        // The split focuses the new pane's session; re-select ours so bridge
+        // clicks resolve against the workspace view the DOM renders.
+        await client.request('select_session', { sessionId });
+        await delay(300);
+        // History may be restored by a debounced replay re-request after the
+        // split's geometry change — wait for it rather than sampling once.
+        // Short sentinels only: rows truncate at the narrower width (no-reflow
+        // resize), so the wrapped long tokens are not expected here.
+        await waitForPaneText(client, sessionId, paneId, (text) => {
+          const lines = text.split('\n').map((line) => line.trim());
+          return sentinelsFor(shell).every((sentinel) => lines.includes(sentinel));
+        }, `${shell.name} history restored after split`, 20_000);
+        const afterSplit = assertBlockInvariants(
+          await client.request('get_pane_block_state', { sessionId, paneId }),
+          `${shell.name} after-split`,
+        );
+        if (shell.blocksExpected) {
+          await clickAndExpectCorrectOrAbsent(client, sessionId, paneId, 'smallblock', 'echo smallblock', `${shell.name} after-split`);
+        } else {
+          assertNoBlocks(afterSplit, `${shell.name} after-split`);
+        }
+        const splitRead = await client.request('read_pane_text', { sessionId, paneId });
+        assertTextIntegrity(splitRead.text, sentinelsFor(shell), [], `${shell.name} after-split`);
 
-    summary.ok = true;
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+        await runCommandAndWait(client, sessionId, paneId, 'echo postsplit', 'postsplit');
+        if (shell.blocksExpected) {
+          await clickAndExpectSelected(client, sessionId, paneId, 'postsplit', 'echo postsplit', `${shell.name} post-split`);
+        } else {
+          await clickAndExpectNothing(client, sessionId, paneId, 'postsplit', `${shell.name} post-split`);
+        }
+
+        const ws2 = await client.request('get_workspace', { sessionId });
+        const newPane = (ws2?.panes || []).find((p) => p.paneId !== paneId);
+        if (newPane) {
+          await client.request('close_pane', { sessionId, paneId: newPane.paneId });
+          await delay(1_500);
+        }
+        await client.request('select_session', { sessionId });
+        await delay(300);
+        assertBlockInvariants(
+          await client.request('get_pane_block_state', { sessionId, paneId }),
+          `${shell.name} after-close-split`,
+        );
+        await runCommandAndWait(client, sessionId, paneId, 'echo postclose', 'postclose');
+        if (shell.blocksExpected) {
+          await clickAndExpectSelected(client, sessionId, paneId, 'postclose', 'echo postclose', `${shell.name} post-close`);
+        } else {
+          await clickAndExpectNothing(client, sessionId, paneId, 'postclose', `${shell.name} post-close`);
+        }
+        // Widening back keeps every row, but columns truncated at the narrow
+        // width stay truncated until the next replay re-parses the raw history
+        // (no-reflow resize) — so the long tokens are not required here either.
+        await waitForPaneText(client, sessionId, paneId, (text) => {
+          const lines = text.split('\n').map((line) => line.trim());
+          return [...sentinelsFor(shell), 'postsplit'].every((sentinel) => lines.includes(sentinel));
+        }, `${shell.name} history intact after close-split`, 20_000);
+        const finalRead = await client.request('read_pane_text', { sessionId, paneId });
+        assertTextIntegrity(
+          finalRead.text,
+          [...sentinelsFor(shell), 'postsplit'],
+          [],
+          `${shell.name} final`,
+        );
+        console.log(`[verify] ${shell.name}: resize round-trip OK`);
+      }
+      await client.request('capture_native_window_screenshot', { path: path.join(runner.runDir, '2-final.png') }).catch(() => {});
+    });
+
+    const result = runner.finishSuccess({ shells: summary.shells });
     console.log('[verify] PASS — fish/bash/zsh: replay intact, blocks correct-or-absent across resizes');
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    const result = runner.finishFailure(error, { shells: summary.shells });
+    console.error(result.error);
+    process.exitCode = 1;
   } finally {
     for (const { sessionId } of sessions) {
       const ws = await client.request('get_workspace', { sessionId }).catch(() => null);

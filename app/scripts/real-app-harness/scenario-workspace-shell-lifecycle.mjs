@@ -3,7 +3,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
@@ -19,6 +18,7 @@ import {
   waitForPaneVisible,
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -143,85 +143,130 @@ async function main() {
     return;
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'workspace-shell-lifecycle');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'WORKSPACE-SHELL-LIFECYCLE',
+    tier: 'tier1-local-shell',
+    prefix: 'workspace-shell-lifecycle',
+    metadata: {
+      agent: 'shell',
+      focus: 'splitting shell panes, writing distinct tokens, and closing one split preserves the rest',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   let sessionId = null;
+  const note = (m, extra) => runner.log(m, extra);
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+  // Cleanup, registered as soon as each resource exists so a signal mid-scenario
+  // still tears them down. Runner cleanups run in REVERSE registration order, so
+  // register observer/app first (they must close LAST) and the session last (it
+  // must close FIRST) to reproduce the effective order below: close workspace
+  // panes, quitApp, observer.close.
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
 
   try {
-    await launchFreshAppAndConnect(client, observer);
-
-    sessionId = await createSessionAndWaitForInitialPane({
-      client,
-      observer,
-      cwd: sessionDir,
-      label: `ws-life-${runId}`,
-      agent: 'shell',
-      waitForInitialPaneVisible: false,
-      sessionWaitMs: 30_000,
+    await runner.step('launch_app', async () => {
+      await launchFreshAppAndConnect(client, observer);
     });
-    let workspace = await waitForPaneCount(client, sessionId, 1, 'initial shell workspace pane');
-    await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'initial shell workspace');
-    const initialPane = workspace.panes[0];
-    await client.request('select_session', { sessionId });
-    await waitForShellPaneReady(client, sessionId, initialPane.paneId, 'initial shell pane ready');
 
-    const vertical = await splitWithShortcut(client, sessionId, 'terminal.splitVertical', 2);
-    workspace = vertical.workspace;
-    await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'vertical shell split');
-    const verticalPane = vertical.pane;
-    await waitForFreshSplitPaneAttached(client, sessionId, verticalPane.paneId);
+    let workspace;
+    let initialPane;
+    await runner.step('create_initial_session', async () => {
+      sessionId = await createSessionAndWaitForInitialPane({
+        client,
+        observer,
+        cwd: runner.sessionDir,
+        label: `ws-life-${runner.runId}`,
+        agent: 'shell',
+        waitForInitialPaneVisible: false,
+        sessionWaitMs: 30_000,
+      });
+      runner.registerCleanup('close_initial_workspace', async () => {
+        await closeWorkspacePanes(client, sessionId);
+        await waitForNoSessionsInDir(client, runner.sessionDir);
+      });
+      workspace = await waitForPaneCount(client, sessionId, 1, 'initial shell workspace pane');
+      await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'initial shell workspace');
+      initialPane = workspace.panes[0];
+      await client.request('select_session', { sessionId });
+      await waitForShellPaneReady(client, sessionId, initialPane.paneId, 'initial shell pane ready');
+      note(`initial shell session ready and selected`, { sessionId });
+    });
 
-    await client.request('focus_pane', { sessionId, paneId: verticalPane.paneId });
-    const horizontal = await splitWithShortcut(client, sessionId, 'terminal.splitHorizontal', 3);
-    workspace = horizontal.workspace;
-    await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'horizontal shell split');
-    const horizontalPane = horizontal.pane;
-    await waitForFreshSplitPaneAttached(client, sessionId, horizontalPane.paneId);
+    let verticalPane;
+    await runner.step('split_vertical', async () => {
+      const vertical = await splitWithShortcut(client, sessionId, 'terminal.splitVertical', 2);
+      workspace = vertical.workspace;
+      await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'vertical shell split');
+      verticalPane = vertical.pane;
+      await waitForFreshSplitPaneAttached(client, sessionId, verticalPane.paneId);
+      note(`vertical split pane ready`, { paneId: verticalPane.paneId });
+    });
+
+    let horizontalPane;
+    await runner.step('split_horizontal', async () => {
+      await client.request('focus_pane', { sessionId, paneId: verticalPane.paneId });
+      const horizontal = await splitWithShortcut(client, sessionId, 'terminal.splitHorizontal', 3);
+      workspace = horizontal.workspace;
+      await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'horizontal shell split');
+      horizontalPane = horizontal.pane;
+      await waitForFreshSplitPaneAttached(client, sessionId, horizontalPane.paneId);
+      note(`horizontal split pane ready`, { paneId: horizontalPane.paneId });
+    });
 
     const tokenA = `WSLIFE_A_${Date.now()}`;
     const tokenB = `WSLIFE_B_${Date.now()}`;
     const tokenC = `WSLIFE_C_${Date.now()}`;
-    await writeAndAssertToken(client, sessionId, initialPane, tokenA);
-    await writeAndAssertToken(client, sessionId, verticalPane, tokenB);
-    await writeAndAssertToken(client, sessionId, horizontalPane, tokenC);
+    await runner.step('write_tokens', async () => {
+      await writeAndAssertToken(client, sessionId, initialPane, tokenA);
+      await writeAndAssertToken(client, sessionId, verticalPane, tokenB);
+      await writeAndAssertToken(client, sessionId, horizontalPane, tokenC);
+      note(`distinct tokens written to each pane`, { tokenA, tokenB, tokenC });
+    });
 
-    await client.request('focus_pane', { sessionId, paneId: verticalPane.paneId });
-    await client.request('dispatch_shortcut', { shortcutId: 'terminal.close' });
-    workspace = await waitForPaneCount(client, sessionId, 2, 'workspace remains after closing one session pane');
-    await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'after closing one shell split');
-    if ((workspace.panes || []).some((pane) => pane.paneId === verticalPane.paneId)) {
-      throw new Error(`Closed pane ${verticalPane.paneId} is still present: ${JSON.stringify(workspace, null, 2)}`);
-    }
+    await runner.step('close_split_pane', async () => {
+      await client.request('focus_pane', { sessionId, paneId: verticalPane.paneId });
+      await client.request('dispatch_shortcut', { shortcutId: 'terminal.close' });
+      workspace = await waitForPaneCount(client, sessionId, 2, 'workspace remains after closing one session pane');
+      await assertWorkspacePaneSessionsListed(client, sessionId, workspace, 'after closing one shell split');
+      runner.assert(
+        !(workspace.panes || []).some((pane) => pane.paneId === verticalPane.paneId),
+        `Closed pane ${verticalPane.paneId} is still present: ${JSON.stringify(workspace, null, 2)}`,
+        workspace,
+      );
+      note(`vertical split pane closed`, { paneId: verticalPane.paneId });
+    });
 
-    try {
-      await waitForPaneText(client, sessionId, initialPane.paneId, (text) => text.includes(tokenA), 'initial pane token survived close', 15_000);
-      await waitForPaneText(client, sessionId, horizontalPane.paneId, (text) => text.includes(tokenC), 'remaining split token survived close', 15_000);
-    } catch (error) {
-      await captureSessionArtifacts(client, runDir, 'token-survival-failure', sessionId).catch(() => {});
-      await capturePaneTexts(client, runDir, 'token-survival-failure', sessionId, [initialPane, verticalPane, horizontalPane]).catch(() => {});
-      throw error;
-    }
+    await runner.step('verify_tokens_survived', async () => {
+      try {
+        await waitForPaneText(client, sessionId, initialPane.paneId, (text) => text.includes(tokenA), 'initial pane token survived close', 15_000);
+        await waitForPaneText(client, sessionId, horizontalPane.paneId, (text) => text.includes(tokenC), 'remaining split token survived close', 15_000);
+      } catch (error) {
+        await captureSessionArtifacts(client, runner.runDir, 'token-survival-failure', sessionId).catch(() => {});
+        await capturePaneTexts(client, runner.runDir, 'token-survival-failure', sessionId, [initialPane, verticalPane, horizontalPane]).catch(() => {});
+        throw error;
+      }
+      note(`surviving pane tokens verified after close`);
+    });
 
-    const summary = {
-      ok: true,
-      runId,
+    const summary = runner.finishSuccess({
       sessionId,
       closedPaneId: verticalPane.paneId,
       remainingPaneIds: workspace.panes.map((pane) => pane.paneId),
       tokens: [tokenA, tokenB, tokenC],
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+    });
     console.log('[RealAppHarness] Workspace shell lifecycle passed.');
     console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    const summary = runner.finishFailure(error, { sessionId });
+    console.error(summary.error);
+    process.exitCode = 1;
   } finally {
     if (sessionId) {
       await closeWorkspacePanes(client, sessionId).catch(() => {});
-      await waitForNoSessionsInDir(client, sessionDir).catch(() => {});
+      await waitForNoSessionsInDir(client, runner.sessionDir).catch(() => {});
     }
     await client.quitApp().catch(() => {});
     await observer.close();

@@ -15,7 +15,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
@@ -30,6 +29,7 @@ import {
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -117,46 +117,65 @@ async function main() {
     return;
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'notebook-tile-finder');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'NOTEBOOK-TILE-FINDER',
+    tier: 'tier1-local-shell',
+    prefix: 'notebook-tile-finder',
+    metadata: {
+      agent: 'shell',
+      focus: 'native Cmd+Opt+N dock, notebook finder auto-open, Cmd+P re-summon after Esc',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const driver = new MacOSDriver({ appPath: options.appPath });
   let sessionId = null;
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+  runner.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+
+  // Cleanup, registered as soon as each resource exists so a signal mid-scenario
+  // still tears them down. Runner cleanups run in REVERSE registration order, so
+  // register observer/app first (they must close LAST).
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
 
   try {
     process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
-    await launchFreshAppAndConnect(client, observer);
-    await closeExistingSessions(client, options.sessionRootDir);
+    await runner.step('launch_app', async () => {
+      await launchFreshAppAndConnect(client, observer);
+      await closeExistingSessions(client, options.sessionRootDir);
+    });
 
     // 1. A normal shell workspace to dock the notebook tile into.
-    const cwd = path.join(sessionDir, 'finder-ws');
-    fs.mkdirSync(cwd, { recursive: true });
-    sessionId = await createSessionAndWaitForInitialPane({
-      client,
-      observer,
-      cwd,
-      label: `notebook-finder-${runId}`,
-      agent: 'shell',
-      waitForInitialPaneVisible: false,
-      sessionWaitMs: 30_000,
-    });
-    const pane = await waitForFirstWorkspacePane(client, sessionId, 'initial workspace pane');
-    await client.request('select_session', { sessionId });
-    await waitForPaneVisible(client, sessionId, pane.paneId, 20_000);
-    await waitForPaneShellReady(client, sessionId, pane.paneId, {
-      timeoutMs: 20_000,
-      description: 'shell prompt ready',
-    });
+    const { workspaceId } = await runner.step('create_shell_session', async () => {
+      const cwd = path.join(runner.sessionDir, 'finder-ws');
+      fs.mkdirSync(cwd, { recursive: true });
+      sessionId = await createSessionAndWaitForInitialPane({
+        client,
+        observer,
+        cwd,
+        label: `notebook-finder-${runner.runId}`,
+        agent: 'shell',
+        waitForInitialPaneVisible: false,
+        sessionWaitMs: 30_000,
+      });
+      runner.registerCleanup('close_session_panes', () => (sessionId ? closeWorkspacePanes(client, sessionId) : null));
+      const pane = await waitForFirstWorkspacePane(client, sessionId, 'initial workspace pane');
+      await client.request('select_session', { sessionId });
+      await waitForPaneVisible(client, sessionId, pane.paneId, 20_000);
+      await waitForPaneShellReady(client, sessionId, pane.paneId, {
+        timeoutMs: 20_000,
+        description: 'shell prompt ready',
+      });
 
-    const workspace = await client.request('get_workspace', { sessionId });
-    const workspaceId = workspace.workspaceId;
-    if (!workspaceId) {
-      throw new Error(`Could not resolve workspace id for session ${sessionId}: ${JSON.stringify(workspace)}`);
-    }
+      const workspace = await client.request('get_workspace', { sessionId });
+      const id = workspace.workspaceId;
+      if (!id) {
+        throw new Error(`Could not resolve workspace id for session ${sessionId}: ${JSON.stringify(workspace)}`);
+      }
+      return { workspaceId: id };
+    });
 
     // 2. Dock a notebook tile via the REAL native ⌘⌥N (notebook.openTile). This is
     //    the macOS-menu → WebView shortcut path the browser e2e can't reach. Native
@@ -164,62 +183,72 @@ async function main() {
     //    Accessibility permission AND attn to be frontmost — like every native-input
     //    scenario here. Without it the keystroke is silently dropped, so surface that
     //    as a clear cause rather than a mystery "tile never appeared" timeout.
-    await driver.activateApp();
-    await driver.pressKey('n', { command: true, option: true });
+    const docked = await runner.step('dock_notebook_tile', async () => {
+      await driver.activateApp();
+      await driver.pressKey('n', { command: true, option: true });
 
-    let docked;
-    try {
-      docked = await waitForWorkspaceUi(
-        client,
-        workspaceId,
-        (state) => Array.isArray(state?.tileIds) && state.tileIds.length === 1
-          && Array.isArray(state?.tileTitles) && state.tileTitles.includes('Editor'),
-        'native Cmd+Opt+N to dock a fresh notebook tile (titled "Editor")',
-        15_000,
-      );
-    } catch (dockError) {
-      const frontmost = await driver.frontmostBundleId().catch(() => '(unknown)');
-      throw new Error(
-        `${dockError.message}\n\nThe native Cmd+Opt+N did not reach the app. This scenario `
-        + `needs native keyboard input: grant Accessibility permission to the process running it `
-        + `and keep attn frontmost. Frontmost app was "${frontmost}" (expected "${driver.bundleId}").`,
-      );
-    }
-    console.log(`[RealAppHarness] docked notebook tile=${docked.tileIds[0]}`);
+      let result;
+      try {
+        result = await waitForWorkspaceUi(
+          client,
+          workspaceId,
+          (state) => Array.isArray(state?.tileIds) && state.tileIds.length === 1
+            && Array.isArray(state?.tileTitles) && state.tileTitles.includes('Editor'),
+          'native Cmd+Opt+N to dock a fresh notebook tile (titled "Editor")',
+          15_000,
+        );
+      } catch (dockError) {
+        const frontmost = await driver.frontmostBundleId().catch(() => '(unknown)');
+        throw new Error(
+          `${dockError.message}\n\nThe native Cmd+Opt+N did not reach the app. This scenario `
+          + `needs native keyboard input: grant Accessibility permission to the process running it `
+          + `and keep attn frontmost. Frontmost app was "${frontmost}" (expected "${driver.bundleId}").`,
+        );
+      }
+      runner.log(`[RealAppHarness] docked notebook tile=${result.tileIds[0]}`);
+      return result;
+    });
 
     // 3. A fresh tile opens straight into the finder — confirm it actually rendered
     //    in the WKWebView (not just that the tile mounted).
-    await waitForFinder(client, true, 'fresh notebook tile auto-opens its finder');
-    await captureFrontWindowScreenshot(path.join(runDir, 'finder-open.png'), { client }).catch((error) => {
-      console.warn(`[RealAppHarness] finder-open screenshot failed: ${error}`);
+    await runner.step('finder_auto_opens', async () => {
+      await waitForFinder(client, true, 'fresh notebook tile auto-opens its finder');
+      await captureFrontWindowScreenshot(path.join(runner.runDir, 'finder-open.png'), { client }).catch((error) => {
+        runner.log(`[RealAppHarness] finder-open screenshot failed: ${error}`);
+      });
     });
 
     // 4. Esc must CLOSE the finder. If it doesn't, focus was not inside the tile
     //    (e.g. the terminal stole it on dock) — a real bug, surfaced here.
-    await driver.activateApp();
-    await driver.pressKeyCode(53); // Esc — InputDriver's --key map only covers printable keys
-    await waitForFinder(client, false, 'Esc dismisses the finder');
+    await runner.step('esc_closes_finder', async () => {
+      await driver.activateApp();
+      await driver.pressKeyCode(53); // Esc — InputDriver's --key map only covers printable keys
+      await waitForFinder(client, false, 'Esc dismisses the finder');
+    });
 
     // 5. Native ⌘P must RE-SUMMON it. This proves both that ⌘P reaches the WebView
     //    (no native Print item swallows it) and that closing the finder restored
     //    focus into the tile so the tile-scoped keydown still fires.
-    await driver.activateApp();
-    await driver.pressKey('p', { command: true });
-    await waitForFinder(client, true, 'native Cmd+P re-summons the finder after Esc');
-    await captureFrontWindowScreenshot(path.join(runDir, 'finder-resummoned.png'), { client }).catch((error) => {
-      console.warn(`[RealAppHarness] finder-resummoned screenshot failed: ${error}`);
+    await runner.step('cmdp_resummons_finder', async () => {
+      await driver.activateApp();
+      await driver.pressKey('p', { command: true });
+      await waitForFinder(client, true, 'native Cmd+P re-summons the finder after Esc');
+      await captureFrontWindowScreenshot(path.join(runner.runDir, 'finder-resummoned.png'), { client }).catch((error) => {
+        runner.log(`[RealAppHarness] finder-resummoned screenshot failed: ${error}`);
+      });
     });
 
-    const summary = {
-      ok: true,
-      runId,
+    const summary = runner.finishSuccess({
       workspaceId,
       tileId: docked.tileIds[0],
       tileTitles: docked.tileTitles,
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+    });
     console.log('[RealAppHarness] Notebook tile finder (native Cmd+Opt+N dock, Cmd+P re-summon) passed.');
     console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    const summary = runner.finishFailure(error, { sessionId });
+    console.error(summary.error);
+    process.exitCode = 1;
   } finally {
     if (sessionId) {
       await closeWorkspacePanes(client, sessionId).catch(() => {});

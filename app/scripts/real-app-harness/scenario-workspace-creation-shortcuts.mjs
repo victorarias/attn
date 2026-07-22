@@ -3,7 +3,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  createRunContext,
   launchFreshAppAndConnect,
   parseCommonArgs,
   printCommonHelp,
@@ -17,6 +16,7 @@ import {
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -138,106 +138,140 @@ async function main() {
     return;
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'workspace-creation-shortcuts');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'WORKSPACE-CREATION-SHORTCUTS',
+    tier: 'tier1-local-shell',
+    prefix: 'workspace-creation-shortcuts',
+    metadata: {
+      agent: 'shell',
+      focus: 'Cmd+T new workspace, Cmd+N and Cmd+Shift+N session splits join the selected workspace',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const driver = new MacOSDriver({
     appPath: options.appPath,
   });
   const createdSessionIds = [];
+  const note = (m, extra) => runner.log(m, extra);
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+  // Cleanup, registered as soon as each resource exists so a signal mid-scenario
+  // still tears them down. Runner cleanups run in REVERSE registration order, so
+  // register observer/app first (they must close LAST) and the created sessions
+  // last (they must close FIRST) to reproduce the effective order below: close
+  // created session panes, quitApp, observer.close.
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
+  runner.registerCleanup('close_created_sessions', async () => {
+    for (const sessionId of [...createdSessionIds].reverse()) {
+      await closeWorkspacePanes(client, sessionId).catch(() => {});
+    }
+    await waitForNoSessionsUnderDir(client, runner.sessionDir).catch(() => {});
+  });
 
   try {
-    process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
-    await launchFreshAppAndConnect(client, observer);
+    await runner.step('launch_app', async () => {
+      process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
+      await launchFreshAppAndConnect(client, observer);
+    });
 
-    const workspaceDir = path.join(sessionDir, 'workspace-a');
-    await driver.activateApp();
-    await driver.pressKey('t', { command: true });
-    await submitTerminalLocation({
-      client,
-      driver,
-      cwd: workspaceDir,
-      expectedTitle: 'New Workspace Location',
+    let workspaceId;
+    await runner.step('create_workspace_via_cmd_t', async () => {
+      const workspaceDir = path.join(runner.sessionDir, 'workspace-a');
+      await driver.activateApp();
+      await driver.pressKey('t', { command: true });
+      await submitTerminalLocation({
+        client,
+        driver,
+        cwd: workspaceDir,
+        expectedTitle: 'New Workspace Location',
+      });
+      const first = await waitForShellSession({
+        client,
+        observer,
+        cwd: workspaceDir,
+        description: 'Cmd+T workspace',
+      });
+      createdSessionIds.push(first.session.id);
+      workspaceId = first.session.workspace_id;
+      if (!workspaceId) {
+        throw new Error(`Created session has no workspace_id: ${JSON.stringify(first.session, null, 2)}`);
+      }
+      note(`workspace created via Cmd+T`, { workspaceId, sessionId: first.session.id });
     });
-    const first = await waitForShellSession({
-      client,
-      observer,
-      cwd: workspaceDir,
-      description: 'Cmd+T workspace',
-    });
-    createdSessionIds.push(first.session.id);
-    const workspaceId = first.session.workspace_id;
-    if (!workspaceId) {
-      throw new Error(`Created session has no workspace_id: ${JSON.stringify(first.session, null, 2)}`);
-    }
 
-    const verticalDir = path.join(sessionDir, 'session-vertical');
-    await driver.activateApp();
-    await driver.pressKey('n', { command: true });
-    await submitTerminalLocation({
-      client,
-      driver,
-      cwd: verticalDir,
-      expectedTitle: 'New Session Location',
+    await runner.step('split_vertical_via_cmd_n', async () => {
+      const verticalDir = path.join(runner.sessionDir, 'session-vertical');
+      await driver.activateApp();
+      await driver.pressKey('n', { command: true });
+      await submitTerminalLocation({
+        client,
+        driver,
+        cwd: verticalDir,
+        expectedTitle: 'New Session Location',
+      });
+      const vertical = await waitForShellSession({
+        client,
+        observer,
+        cwd: verticalDir,
+        description: 'Cmd+N session split',
+      });
+      createdSessionIds.push(vertical.session.id);
+      if (vertical.session.workspace_id !== workspaceId) {
+        throw new Error(`Cmd+N created session in wrong workspace: ${vertical.session.workspace_id} !== ${workspaceId}`);
+      }
+      await waitForWorkspaceSessionCount(client, workspaceId, 2, 'Cmd+N session to join selected workspace');
+      note(`vertical split created via Cmd+N`, { sessionId: vertical.session.id });
     });
-    const vertical = await waitForShellSession({
-      client,
-      observer,
-      cwd: verticalDir,
-      description: 'Cmd+N session split',
-    });
-    createdSessionIds.push(vertical.session.id);
-    if (vertical.session.workspace_id !== workspaceId) {
-      throw new Error(`Cmd+N created session in wrong workspace: ${vertical.session.workspace_id} !== ${workspaceId}`);
-    }
-    await waitForWorkspaceSessionCount(client, workspaceId, 2, 'Cmd+N session to join selected workspace');
 
-    const horizontalDir = path.join(sessionDir, 'session-horizontal');
-    await driver.activateApp();
-    await driver.pressKey('n', { command: true, shift: true });
-    await submitTerminalLocation({
-      client,
-      driver,
-      cwd: horizontalDir,
-      expectedTitle: 'New Session Location',
+    let workspace;
+    await runner.step('split_horizontal_via_cmd_shift_n', async () => {
+      const horizontalDir = path.join(runner.sessionDir, 'session-horizontal');
+      await driver.activateApp();
+      await driver.pressKey('n', { command: true, shift: true });
+      await submitTerminalLocation({
+        client,
+        driver,
+        cwd: horizontalDir,
+        expectedTitle: 'New Session Location',
+      });
+      const horizontal = await waitForShellSession({
+        client,
+        observer,
+        cwd: horizontalDir,
+        description: 'Cmd+Shift+N horizontal session split',
+      });
+      createdSessionIds.push(horizontal.session.id);
+      if (horizontal.session.workspace_id !== workspaceId) {
+        throw new Error(`Cmd+Shift+N created session in wrong workspace: ${horizontal.session.workspace_id} !== ${workspaceId}`);
+      }
+      workspace = await waitForSessionWorkspace(
+        client,
+        createdSessionIds[0],
+        (entry) => (entry?.panes || []).length === 3 && (entry?.workspace?.layout?.splits || []).some((split) => split.direction === 'horizontal'),
+        'Cmd+Shift+N horizontal split in selected workspace',
+        30_000,
+      );
+      note(`horizontal split created via Cmd+Shift+N`, { sessionId: horizontal.session.id });
     });
-    const horizontal = await waitForShellSession({
-      client,
-      observer,
-      cwd: horizontalDir,
-      description: 'Cmd+Shift+N horizontal session split',
-    });
-    createdSessionIds.push(horizontal.session.id);
-    if (horizontal.session.workspace_id !== workspaceId) {
-      throw new Error(`Cmd+Shift+N created session in wrong workspace: ${horizontal.session.workspace_id} !== ${workspaceId}`);
-    }
-    const workspace = await waitForSessionWorkspace(
-      client,
-      first.session.id,
-      (entry) => (entry?.panes || []).length === 3 && (entry?.workspace?.layout?.splits || []).some((split) => split.direction === 'horizontal'),
-      'Cmd+Shift+N horizontal split in selected workspace',
-      30_000,
-    );
 
-    const summary = {
-      ok: true,
-      runId,
+    const summary = runner.finishSuccess({
       workspaceId,
       sessionIds: createdSessionIds,
       paneIds: workspace.panes.map((pane) => pane.paneId),
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+    });
     console.log('[RealAppHarness] Workspace creation shortcuts passed.');
     console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    const summary = runner.finishFailure(error, { sessionIds: createdSessionIds });
+    console.error(summary.error);
+    process.exitCode = 1;
   } finally {
-    for (const sessionId of createdSessionIds.reverse()) {
+    for (const sessionId of [...createdSessionIds].reverse()) {
       await closeWorkspacePanes(client, sessionId).catch(() => {});
     }
-    await waitForNoSessionsUnderDir(client, sessionDir).catch(() => {});
+    await waitForNoSessionsUnderDir(client, runner.sessionDir).catch(() => {});
     await client.quitApp().catch(() => {});
     await observer.close();
   }

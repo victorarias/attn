@@ -8,7 +8,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  createRunContext,
   createSessionAndWaitForInitialPane,
   launchFreshAppAndConnect,
   parseCommonArgs,
@@ -22,6 +21,7 @@ import {
   waitForSessionWorkspace,
 } from './scenarioAssertions.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { createScenarioRunner } from './scenarioRunner.mjs';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -146,65 +146,96 @@ async function main() {
     return;
   }
 
-  const { runId, runDir, sessionDir } = createRunContext(options, 'autoclose-on-exit');
+  const runner = createScenarioRunner(options, {
+    scenarioId: 'AUTOCLOSE-ON-EXIT',
+    tier: 'tier1-local-shell',
+    prefix: 'autoclose-on-exit',
+    metadata: {
+      agent: 'shell',
+      focus: 'clean exit auto-closes a session; non-zero exit keeps the pane open',
+    },
+  });
+
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
   const createdSessionIds = [];
 
-  console.log(`[RealAppHarness] runDir=${runDir}`);
-  console.log(`[RealAppHarness] sessionDir=${sessionDir}`);
-  console.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+  runner.log(`[RealAppHarness] wsUrl=${options.wsUrl}`);
+
+  // Cleanup, registered as soon as each resource exists so a signal mid-scenario
+  // still tears them down. Runner cleanups run in REVERSE registration order, so
+  // register observer/app first (they must close LAST).
+  runner.registerCleanup('close_observer', () => observer.close());
+  runner.registerCleanup('quit_app', () => client.quitApp());
+  runner.registerCleanup('wait_no_sessions_under_dir', () => waitForNoSessionsUnderDir(client, runner.sessionDir).catch(() => {}));
+  runner.registerCleanup('close_created_session_panes', async () => {
+    for (const sessionId of [...createdSessionIds].reverse()) {
+      await closeWorkspacePanes(client, sessionId).catch(() => {});
+    }
+  });
 
   try {
     process.env.ATTN_HARNESS_PARK_VISIBLE_PX ??= '0';
-    await launchFreshAppAndConnect(client, observer);
-    await closeExistingSessions(client, options.sessionRootDir);
+    await runner.step('launch_app', async () => {
+      await launchFreshAppAndConnect(client, observer);
+      await closeExistingSessions(client, options.sessionRootDir);
+    });
 
     // --- Clean exit (code 0) auto-closes the session ---
-    const clean = await waitForShellWorkspace(client, observer, path.join(sessionDir, 'clean'), `autoclose-clean-${runId}`);
-    createdSessionIds.push(clean.sessionId);
-    await client.request('write_pane', { sessionId: clean.sessionId, paneId: clean.pane.paneId, text: 'exit', submit: true });
-    await waitForSessionAbsentFromDaemon(observer, clean.sessionId, 'clean-exit session unregistered from daemon');
-    await waitForSessionGoneFromUi(client, clean.sessionId, 'clean-exit session gone from UI/sidebar');
-    console.log('[RealAppHarness] Clean exit auto-closed the session.');
+    const clean = await runner.step('clean_exit_auto_closes', async () => {
+      const session = await waitForShellWorkspace(client, observer, path.join(runner.sessionDir, 'clean'), `autoclose-clean-${runner.runId}`);
+      createdSessionIds.push(session.sessionId);
+      await client.request('write_pane', { sessionId: session.sessionId, paneId: session.pane.paneId, text: 'exit', submit: true });
+      await waitForSessionAbsentFromDaemon(observer, session.sessionId, 'clean-exit session unregistered from daemon');
+      await waitForSessionGoneFromUi(client, session.sessionId, 'clean-exit session gone from UI/sidebar');
+      runner.log('[RealAppHarness] Clean exit auto-closed the session.');
+      return session;
+    });
 
     // --- Non-zero exit (code 1) keeps the session open ---
-    const failed = await waitForShellWorkspace(client, observer, path.join(sessionDir, 'failed'), `autoclose-failed-${runId}`);
-    createdSessionIds.push(failed.sessionId);
-    await client.request('write_pane', { sessionId: failed.sessionId, paneId: failed.pane.paneId, text: 'exit 1', submit: true });
-    // The frontend renders the exit banner into the pane model once the process exits.
-    await waitForPaneTextContains(
-      client,
-      failed.sessionId,
-      failed.pane.paneId,
-      '[Process exited with code 1]',
-      'failed-exit pane shows exit banner',
-    );
-    // Give any (incorrect) auto-close a chance to fire, then assert the session survived.
-    await delay(2_000);
-    if (observer.getSession(failed.sessionId) == null) {
-      throw new Error(`Non-zero exit session ${failed.sessionId} was auto-closed; failed exits must stay open`);
-    }
-    const failedUi = await client.request('get_session_ui_state', { sessionId: failed.sessionId });
-    if (failedUi.exists === false || failedUi.sidebarItem == null) {
-      throw new Error(`Non-zero exit session ${failed.sessionId} missing from UI; failed exits must stay open: ${JSON.stringify(failedUi, null, 2)}`);
-    }
-    console.log('[RealAppHarness] Non-zero exit kept the session open.');
+    const failed = await runner.step('nonzero_exit_stays_open', async () => {
+      const session = await waitForShellWorkspace(client, observer, path.join(runner.sessionDir, 'failed'), `autoclose-failed-${runner.runId}`);
+      createdSessionIds.push(session.sessionId);
+      await client.request('write_pane', { sessionId: session.sessionId, paneId: session.pane.paneId, text: 'exit 1', submit: true });
+      // The frontend renders the exit banner into the pane model once the process exits.
+      await waitForPaneTextContains(
+        client,
+        session.sessionId,
+        session.pane.paneId,
+        '[Process exited with code 1]',
+        'failed-exit pane shows exit banner',
+      );
+      // Give any (incorrect) auto-close a chance to fire, then assert the session survived.
+      await delay(2_000);
+      runner.assert(
+        observer.getSession(session.sessionId) != null,
+        `Non-zero exit session ${session.sessionId} was auto-closed; failed exits must stay open`,
+      );
+      const failedUi = await client.request('get_session_ui_state', { sessionId: session.sessionId });
+      runner.assert(
+        failedUi.exists !== false && failedUi.sidebarItem != null,
+        `Non-zero exit session ${session.sessionId} missing from UI; failed exits must stay open`,
+        failedUi,
+      );
+      runner.log('[RealAppHarness] Non-zero exit kept the session open.');
+      return session;
+    });
 
-    const summary = {
-      ok: true,
-      runId,
+    const summary = runner.finishSuccess({
       cleanSessionId: clean.sessionId,
       failedSessionId: failed.sessionId,
-    };
-    fs.writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+    });
     console.log('[RealAppHarness] Auto-close-on-exit passed.');
     console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    const summary = runner.finishFailure(error, { createdSessionIds });
+    console.error(summary.error);
+    process.exitCode = 1;
   } finally {
     for (const sessionId of createdSessionIds.reverse()) {
       await closeWorkspacePanes(client, sessionId).catch(() => {});
     }
-    await waitForNoSessionsUnderDir(client, sessionDir).catch(() => {});
+    await waitForNoSessionsUnderDir(client, runner.sessionDir).catch(() => {});
     await client.quitApp().catch(() => {});
     await observer.close();
   }
