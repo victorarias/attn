@@ -149,8 +149,6 @@ must fail explicitly.
   `internal/daemon/session_state.go`; never write state directly to the store.
 - Capture classifier observation time before async classification and pass it via
   `classifierObservation`; reject stale results.
-- Changing `ReviewComment` requires schema, `internal/store/review.go`,
-  `internal/daemon/ws_review.go`, frontend hooks, and UI updates.
 - Prefer `internal/protocol/helpers.go` pointer/value helpers (`Ptr`, `Deref`,
   `SessionsToValues`, `PRsToValues`).
 
