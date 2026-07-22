@@ -52,8 +52,14 @@ function messageOf(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-function isPresetModel(agent: AutomationAgent, model: string): boolean {
-  return LAUNCH_CATALOG[agent].models.some((candidate) => candidate.id === model);
+// modelModeFor decides which model-select option a loaded model resolves
+// to: '' (agent default) and any catalog preset both render as a selected
+// option in the dropdown itself ('preset' mode, no free-text box); only a
+// nonempty model that ISN'T a catalog preset is "custom" — free text the
+// user (or a CLI-authored definition) typed by hand.
+function modelModeFor(agent: AutomationAgent, model: string): ModelMode {
+  if (model === '') return 'preset';
+  return LAUNCH_CATALOG[agent].models.some((candidate) => candidate.id === model) ? 'preset' : 'custom';
 }
 
 // Create mode's own defaults — deliberately not the daemon's starter-YAML
@@ -182,7 +188,7 @@ export function AutomationForm({
           return;
         }
         reset(parsed);
-        setModelMode(isPresetModel(parsed.agent, parsed.model) ? 'preset' : 'custom');
+        setModelMode(modelModeFor(parsed.agent, parsed.model));
         setLoadedId(result.definition?.id ?? definitionId);
         setRevision(result.definition?.revision ?? 0);
         setEnabledState(result.definition?.enabled ?? null);
@@ -242,7 +248,7 @@ export function AutomationForm({
           return;
         }
         reset(parsed);
-        setModelMode(isPresetModel(parsed.agent, parsed.model) ? 'preset' : 'custom');
+        setModelMode(modelModeFor(parsed.agent, parsed.model));
         setRevision(result.definition?.revision ?? revision);
         setEnabledState(result.definition?.enabled ?? enabled);
         setSaveError('');
@@ -367,11 +373,21 @@ export function AutomationForm({
         setValue('effort', catalog.customDefaultEffort, { shouldDirty: true, shouldValidate: true });
         return;
       }
+      if (next === '') {
+        // Agent default: the model choice carries no opinion on effort
+        // either, so an already-empty (agent-default) effort stays as-is.
+        setModelMode('preset');
+        setValue('model', '', { shouldDirty: true, shouldValidate: true });
+        setValue('effort', '', { shouldDirty: true, shouldValidate: true });
+        return;
+      }
       setModelMode('preset');
       const preset = catalog.models.find((candidate) => candidate.id === next);
       setValue('model', next, { shouldDirty: true, shouldValidate: true });
+      const currentEffort = getValues('effort');
+      if (currentEffort === '') return; // agent-default effort carries across model changes
       const { efforts, defaultEffort } = effortOptionsFor(agent, next);
-      if (!efforts.includes(getValues('effort'))) {
+      if (!efforts.includes(currentEffort)) {
         setValue('effort', preset?.defaultEffort ?? defaultEffort, { shouldDirty: true, shouldValidate: true });
       }
     },
@@ -892,6 +908,7 @@ export function AutomationForm({
               onChange={handleModelSelectChange}
               data-testid="automation-form-model"
             >
+              <option value="">Agent default</option>
               {catalog.models.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label}
@@ -925,6 +942,7 @@ export function AutomationForm({
               onChange={(event) => setValue('effort', event.target.value, { shouldDirty: true, shouldValidate: true })}
               data-testid="automation-form-effort"
             >
+              <option value="">Agent default</option>
               {efforts.map((effort) => (
                 <option key={effort} value={effort}>
                   {effort}

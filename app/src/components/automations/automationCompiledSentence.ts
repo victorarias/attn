@@ -49,7 +49,8 @@ function agentSegments(values: AutomationFormValues): SentenceSegment[] {
   const segments: SentenceSegment[] = [{ text: AGENT_LABEL[values.agent], emphasis: 'strong' }];
   const model = values.model.trim();
   if (model !== '') {
-    segments.push({ text: ` (${model} · ${values.effort} effort)` });
+    const effort = values.effort.trim();
+    segments.push({ text: effort !== '' ? ` (${model} · ${effort} effort)` : ` (${model})` });
   }
   return segments;
 }

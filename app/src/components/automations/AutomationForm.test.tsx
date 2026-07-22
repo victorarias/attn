@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { act, render, screen, waitFor, userEvent } from '../../test/utils';
 import { AutomationForm } from './AutomationForm';
 import { AutomationDefinitionSummary } from '../../types/generated';
-import { AutomationFormValues, formValuesToSpec, specJSONString } from './automationFormModel';
+import { AUTOMATION_API_VERSION, AutomationFormValues, formValuesToSpec, specJSONString } from './automationFormModel';
 import { LAUNCH_CATALOG } from './launchCatalog';
 
 function makeDefinition(overrides: Partial<AutomationDefinitionSummary> & { id: string }): AutomationDefinitionSummary {
@@ -66,6 +66,21 @@ function githubValues(): AutomationFormValues {
 
 function githubSpecJson(): string {
   return specJSONString(githubValues());
+}
+
+// Built inline (not via formValuesToSpec) to pin the sparse launch shape a
+// CLI-authored, model/effort-omitting definition actually has on disk —
+// launch.model/effort/executable are all daemon-optional (agent default).
+function sparseLaunchSpecJson(): string {
+  return JSON.stringify({
+    api_version: AUTOMATION_API_VERSION,
+    id: 'sparse-launch',
+    name: 'Sparse launch',
+    trigger: { type: 'manual' },
+    prompt: 'Do the work',
+    launch: { driver: 'codex' },
+    location: { type: 'directory', path: '/tmp/work' },
+  });
 }
 
 function baseProps() {
@@ -160,6 +175,32 @@ describe('AutomationForm', () => {
     const [, expectedId, expectedRevision] = props.applyDefinition.mock.calls[0];
     expect(expectedId).toBe('d1');
     expect(expectedRevision).toBe(7);
+  });
+
+  // Regression pin: the daemon treats launch.model/effort as optional
+  // (absent = agent default), so a CLI-authored definition that omits them
+  // must stay editable, and a prompt-only edit must not inject model/effort
+  // keys the user never touched. Must fail if the schema re-tightens
+  // model/effort back to required.
+  it('edit: a sparse launch ({driver} only) loads to Agent default and a prompt-only save keeps launch sparse', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    props.definitionId = 'd1';
+    props.getDefinition.mockResolvedValue({
+      specJson: sparseLaunchSpecJson(),
+      definition: makeDefinition({ id: 'd1', revision: 2 }),
+    });
+    render(<AutomationForm {...props} />);
+
+    await waitFor(() => expect(props.getDefinition).toHaveBeenCalledWith('d1'));
+    expect(await screen.findByTestId('automation-form-model')).toHaveValue('');
+    expect(screen.getByTestId('automation-form-effort')).toHaveValue('');
+
+    await user.click(screen.getByTestId('automation-form-save'));
+
+    await waitFor(() => expect(props.applyDefinition).toHaveBeenCalledTimes(1));
+    const [specJson] = props.applyDefinition.mock.calls[0];
+    expect(JSON.parse(specJson).launch).toEqual({ driver: 'codex' });
   });
 
   it('blur validation: the required-prompt error appears only after blur and clears on retype', async () => {
@@ -314,6 +355,25 @@ describe('AutomationForm', () => {
     const user = userEvent.setup();
     await user.click(screen.getByTestId('automation-form-trigger-manual'));
     await waitFor(() => expect(sentence).toHaveTextContent('Run now'));
+  });
+
+  it('compiled sentence shows a bare model name (no "effort" suffix) when effort is Agent default', async () => {
+    const props = baseProps();
+    props.definitionId = 'd1';
+    props.getDefinition.mockResolvedValue({
+      specJson: sparseLaunchSpecJson(),
+      definition: makeDefinition({ id: 'd1', revision: 1 }),
+    });
+    render(<AutomationForm {...props} />);
+
+    const sentence = await screen.findByTestId('automation-form-sentence');
+    // Agent default (model '') renders no parenthetical model detail at all.
+    await waitFor(() => expect(sentence).not.toHaveTextContent('effort'));
+
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByTestId('automation-form-model'), LAUNCH_CATALOG.codex.models[0].id);
+    await waitFor(() => expect(sentence).toHaveTextContent(`(${LAUNCH_CATALOG.codex.models[0].id})`));
+    expect(sentence).not.toHaveTextContent('effort');
   });
 
   it('disables inputs while applyDefinition is pending and calls onSaved on resolve', async () => {

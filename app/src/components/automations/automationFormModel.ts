@@ -159,10 +159,11 @@ export const automationFormSchema: z.ZodType<AutomationFormValues> = baseFormSch
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['prompt'], message: 'A prompt is required.' });
   }
 
-  const model = values.model.trim();
-  if (model === '') {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['model'], message: 'A model name is required.' });
-  } else {
+  // model '' and effort '' both mean "use the agent's default" — the daemon
+  // treats launch.model/launch.effort as optional, so a CLI-authored
+  // definition that omits them (an ordinary shape) must stay editable here,
+  // not get stuck on a client-side requirement the daemon never had.
+  if (values.effort !== '') {
     const { efforts } = effortOptionsFor(values.agent, values.model);
     if (!efforts.includes(values.effort)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['effort'], message: "Effort isn't available for this model." });

@@ -205,6 +205,19 @@ describe('validation matrix', () => {
     expect(issuePaths(baseValues({ agent: 'codex', model: 'gpt-5.4-mini', effort: 'xhigh' }))).toContain('effort');
   });
 
+  it('accepts an empty model and empty effort — both mean the agent default', () => {
+    expect(issuePaths(baseValues({ model: '', effort: '' }))).not.toContain('model');
+    expect(issuePaths(baseValues({ model: '', effort: '' }))).not.toContain('effort');
+  });
+
+  it('accepts a nonempty preset model with an empty (agent-default) effort', () => {
+    expect(issuePaths(baseValues({ model: 'gpt-5.5', effort: '' }))).not.toContain('effort');
+  });
+
+  it('rejects an empty model with an effort outside the agent-default custom list', () => {
+    expect(issuePaths(baseValues({ model: '', effort: 'nonsense' }))).toContain('effort');
+  });
+
   it('accepts one fully-valid fixture per trigger', () => {
     expect(automationFormSchema.safeParse(manualFixture).success).toBe(true);
     expect(automationFormSchema.safeParse(scheduledFixture).success).toBe(true);
