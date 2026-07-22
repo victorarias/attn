@@ -24,6 +24,26 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+const FAILURE_DIGEST_MAX_ERROR_LINES = 60;
+
+// Cheap-to-inspect summary of a failed run: the failing step, the error (capped
+// so a huge stack trace doesn't dominate stdout), and where to look for more.
+// Written alongside failure.json and echoed to stdout right before the
+// ATTN_VERDICT line, so a driving agent can learn what broke without paging
+// through the full JSON summary.
+function buildFailureDigest({ scenarioId, runId, steps, error, runDir }) {
+  const failingStep = [...steps].reverse().find((step) => step.status === 'error');
+  const errorLines = normalizeError(error).split(/\r?\n/).slice(0, FAILURE_DIGEST_MAX_ERROR_LINES);
+  return [
+    `scenario: ${scenarioId}`,
+    `run: ${runId}`,
+    `failing step: ${failingStep ? failingStep.name : '(none — failed outside a step)'}`,
+    `error:`,
+    ...errorLines,
+    `artifacts: ${runDir}`,
+  ].join('\n');
+}
+
 function normalizeError(error) {
   if (error instanceof Error) {
     return error.stack || error.message;
@@ -361,6 +381,9 @@ export function createScenarioRunner(options, {
       };
       const summaryPath = path.join(runDir, 'failure.json');
       writeJson(summaryPath, finalSummary);
+      const digest = buildFailureDigest({ scenarioId, runId, steps, error, runDir });
+      fs.writeFileSync(path.join(runDir, 'failure-digest.txt'), `${digest}\n`, 'utf8');
+      process.stdout.write(`--- failure digest ---\n${digest}\n--- end digest ---\n`);
       emitVerdict({
         ok: false,
         scenarioId,

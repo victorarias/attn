@@ -124,7 +124,84 @@ export async function captureScreenshot(driver, outputPath) {
   }
 }
 
-export async function launchFreshAppAndConnect(client, observer) {
+// A harness session ROW can outlive the fresh-world process sweep: the
+// daemon persists sessions in its store, so a process-level cleanup (killing
+// pty-workers, restarting the daemon) does not remove a session a prior run
+// left behind. Any session whose cwd sits under the shared harness sessions
+// root is stale by definition at a *fresh* launch — this run has not created
+// one yet — so sweep them before scenarios start, surfacing what was found
+// rather than silently scrubbing it (a leaked session is diagnostic signal:
+// it means a prior run's own cleanup, e.g. a scenario's finally block, failed).
+//
+// Cleanup goes through the daemon's `unregister` command (via the observer),
+// not the bridge's `close_session`: handleCloseSession (App.tsx) refuses to
+// close a chief-of-staff session by design (isChiefOfStaffSession guard), and
+// a leaked stale session is very often exactly that — a scenario's chief.
+// That guard exists to protect a live user's chief from an accidental close,
+// not to protect a dead run's leftovers, so it's the wrong gate for this
+// path; `unregister` is the same underlying op the app itself uses via
+// sendUnregisterSession, minus that interactive guard.
+export async function sweepStaleHarnessSessions(observer, {
+  sessionRootDir = process.env.ATTN_REAL_APP_SESSION_ROOT || path.join(os.tmpdir(), 'attn-real-app-sessions'),
+  log = (m) => console.log(`[harness] ${m}`),
+  timeoutMs = 15_000,
+} = {}) {
+  // Ground truth is the DAEMON, via the observer's WebSocket snapshot — not
+  // the bridge's get_state. Right after launchFreshAppAndConnect's connect(),
+  // the frontend session store may not have loaded the daemon's persisted
+  // sessions yet, so a bridge get_state here can race and see zero stale
+  // sessions while the daemon still holds one. observer.sessionsById is
+  // populated as part of observer.connect() (already awaited by the caller),
+  // so it reflects the daemon's state, not the frontend's catch-up lag.
+  //
+  // The daemon store resolves symlinks in the cwd it persists (macOS
+  // `os.tmpdir()` returns `/var/folders/...`, but the daemon records the
+  // realpath `/private/var/folders/...`); the bridge's `cwd` does not. Match
+  // both the configured root and its realpath form so this filter isn't
+  // silently defeated by the symlink.
+  const rootCandidates = [...new Set([sessionRootDir, (() => {
+    try {
+      return fs.realpathSync(sessionRootDir);
+    } catch {
+      return sessionRootDir;
+    }
+  })()])];
+  const isUnderSessionRoot = (directory) => Boolean(directory) && rootCandidates.some((root) => directory.startsWith(root));
+  const stale = [...observer.sessionsById.values()].filter((session) => isUnderSessionRoot(session.directory));
+  if (stale.length === 0) {
+    return { swept: 0 };
+  }
+
+  log(`stale harness sessions=${stale.length} from a previous run — sweeping: `
+    + stale.map((session) => `${session.id} label=${session.label} state=${session.state}`).join('; '));
+
+  const staleIds = new Set(stale.map((session) => session.id));
+
+  // The daemon refuses to unregister a chief-of-staff session too — by
+  // design, at both the app and daemon layers. Demoting first is the
+  // sanctioned removal path; demoting a non-chief is a no-op, so it's safe to
+  // send for every stale id rather than figuring out which ones are chiefs.
+  // No wait between demote and unregister: both go out on the observer's
+  // single WebSocket connection, so the daemon processes them in order.
+  for (const id of staleIds) {
+    try {
+      observer.send({ cmd: 'set_chief_of_staff', session_id: id, chief_of_staff: false });
+    } catch (error) {
+      // A dead socket here still falls through to unregisterMatchingSessions,
+      // whose own error reporting will surface the failure below.
+      log(`demote (set_chief_of_staff) for ${id} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // unregisterMatchingSessions's own timeout error already names the
+  // surviving session ids and includes a full id/label/state/directory
+  // snapshot (daemonObserver.mjs describeState), so it needs no wrapping.
+  await observer.unregisterMatchingSessions((session) => staleIds.has(session.id), timeoutMs);
+
+  return { swept: stale.length };
+}
+
+export async function launchFreshAppAndConnect(client, observer, { sweepStaleSessions = true } = {}) {
   await client.launchFreshApp();
   await client.waitForManifest(20_000);
   await client.waitForReady(20_000);
@@ -133,11 +210,16 @@ export async function launchFreshAppAndConnect(client, observer) {
   // swallows native HID clicks; dismiss it so scenarios start on a clean UI.
   await client.request('dismiss_whats_new', {}).catch(() => {});
   await observer.connect();
+  if (sweepStaleSessions) {
+    await sweepStaleHarnessSessions(observer);
+  }
 }
 
 export async function relaunchAppAndConnect(client, observer) {
   await client.quitApp();
-  await launchFreshAppAndConnect(client, observer);
+  // Relaunch scenarios (e.g. tr205) depend on sessions surviving the
+  // relaunch, so the stale-session sweep must not run here.
+  await launchFreshAppAndConnect(client, observer, { sweepStaleSessions: false });
 }
 
 export async function createSessionAndWaitForInitialPane({
@@ -237,8 +319,11 @@ export async function splitAndFocusUtilityPane({
   clickX = 0.75,
   clickY = 0.5,
 }) {
+  const existingPaneIds = new Set(
+    (observer.getWorkspace(sessionId)?.panes || []).map((pane) => pane.pane_id),
+  );
   await driver.pressKey('d', { command: true });
-  const utilityPane = await observer.waitForUtilityPane(sessionId, 20_000);
+  const utilityPane = await observer.waitForUtilityPane(sessionId, 20_000, existingPaneIds);
   if (!utilityPane?.runtime_id) {
     throw new Error(`Utility pane missing runtime_id for session ${sessionId}`);
   }
