@@ -9,6 +9,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-22]
 
 ### Fixed
+- **Copilot mouse selection no longer remains stuck after releasing the
+  button.** attn now respects Copilot's configured mouse mode, guarantees that
+  a tracked press receives a matching release outside the terminal or on lost
+  focus, and correctly reports passive pointer movement without pretending the
+  left button is still held.
 - **`attn pr wait-ready` no longer returns instantly on a stale review verdict
   while a re-review is pending.** When the reviewer has been re-requested, an
   approval or changes-requested verdict that was already present when the wait
