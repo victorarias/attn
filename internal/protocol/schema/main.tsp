@@ -1587,17 +1587,14 @@ model AutomationApplyMessage {
   expected_id?: string;
   expected_revision?: int32;
 }
-model AutomationListMessage { cmd: "automation_list"; }
-model AutomationShowMessage { cmd: "automation_show"; definition_id: string; }
 model AutomationRunMessage { cmd: "automation_run"; definition_id: string; request_id: string; input_json?: string; pr_url?: string; }
-model AutomationRunListMessage { cmd: "automation_run_list"; definition_id: string; }
 
 // Dual-surface (unix-socket `attn automation validate` + WS "Validate"
 // button): runs exactly the checks automation_apply runs before persisting
 // (Daemon.validateAutomationSpec) without writing anything. Deliberately not
-// just a thinner call to ParseDefinitionYAML — see the
-// AutomationActionResultMessage doc comment below for why a validate that
-// skipped one of apply's checks would actively lie to the user.
+// just a thinner call to ParseDefinitionYAML — see AutomationValidateResultMessage
+// below for why a validate that skipped one of apply's checks would actively
+// lie to the user.
 model AutomationValidateMessage {
   cmd: "automation_validate";
   definition_yaml: string;
@@ -1616,7 +1613,7 @@ model AutomationDeleteMessage {
 
 // Same dual-surface shape as automation_delete above. Unlike delete, cleanup
 // is disk-only (worktrees only; never rows or artifacts) and repeatable —
-// see AutomationActionResultMessage's cleaned/kept_dirty/kept_active fields.
+// see AutomationCleanupResultMessage's cleaned/kept_dirty/kept_active fields.
 model AutomationCleanupMessage {
   cmd: "automation_cleanup";
   definition_id: string;
@@ -2678,8 +2675,10 @@ model WorkflowActionResultMessage {
 
 // Compact automations summaries for the WS surface. Canonical state (full
 // SpecJSON, occurrence payloads, snapshots) stays server-side in SQLite; these
-// carry only what the UI renders. AutomationDefinitionSummary's schedule/policy
-// fields are extracted daemon-side from the definition's SpecJSON.
+// carry only what the UI renders. AutomationDefinitionSummary's schedule
+// fields are extracted daemon-side from the definition's SpecJSON. last_run is
+// the definition's single most-recent run (Store.LatestAutomationRunPerDefinition),
+// embedded so the panel's list badge never needs a per-definition runs fetch.
 model AutomationDefinitionSummary {
   id: string;
   name: string;
@@ -2688,20 +2687,18 @@ model AutomationDefinitionSummary {
   trigger_type: string;
   schedule_cron?: string;
   schedule_time_zone?: string;
-  continuity?: string;
-  catch_up?: string;
   updated_at: string;
+  last_run?: AutomationRunSummary;
 }
 
 model AutomationRunSummary {
   id: string;
   definition_id: string;
-  definition_revision: int32;
   state: string;
   last_error?: string;
+  cancel_reason?: string;
   ticket_id?: string;
   session_id?: string;
-  workspace_id?: string;
   pane_id?: string;
   created_at: string;
   updated_at: string;
@@ -2709,46 +2706,103 @@ model AutomationRunSummary {
   occurrence_key?: string;
 }
 
-// Result for the WS automations surface (automation_definitions_get,
-// automation_runs_get, automation_set_enabled, automation_run). Distinct from
-// the unix-socket automation_action_result shape used by the CLI/agent path
-// (see internal/daemon/automations.go's automationActionResult and
-// internal/client's AutomationResult, which carry a generic `data` payload
-// instead of these typed fields): the two are not wire-compatible, so the
-// socket path keeps its own struct.
-model AutomationActionResultMessage {
-  event: "automation_action_result";
-  action: string;
+// Per-action result messages for the automations surface (socket + WS share
+// one command set — see the commands above). Each carries the base
+// request_id/success/error triple plus that action's own typed payload,
+// replacing the old shared AutomationActionResultMessage grab-bag and the
+// unix-socket's separate generic-`data` automationActionResult struct: both
+// transports now emit the same typed shape per action.
+
+model AutomationApplyResultMessage {
+  event: "automation_apply_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+  definition?: AutomationDefinitionSummary;
+  // spec_yaml: the canonical rendered YAML of the saved spec
+  // (automationDefinitionYAML), not an echo of the input.
+  spec_yaml?: string;
+}
+
+model AutomationValidateResultMessage {
+  event: "automation_validate_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+}
+
+model AutomationDefinitionsResultMessage {
+  event: "automation_definitions_result";
   request_id?: string;
   success: boolean;
   error?: string;
   definitions?: AutomationDefinitionSummary[];
+}
+
+// definition_id "" returns the starter template YAML (automation.StarterTemplateYAML)
+// with no definition — the client treats a missing definition as revision 0 /
+// new, so create and edit share one frontend code path.
+model AutomationDefinitionResultMessage {
+  event: "automation_definition_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+  definition?: AutomationDefinitionSummary;
+  spec_yaml?: string;
+}
+
+model AutomationRunsResultMessage {
+  event: "automation_runs_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+  definition_id: string;
   runs?: AutomationRunSummary[];
   truncated?: boolean;
-  run_id?: string;
-  ticket_id?: string;
-  session_id?: string;
-  // cleaned/kept_dirty/kept_active: automation_cleanup's three-way per-run-id
-  // partition of the terminal runs it examined — cleaned had their worktree
-  // removed; kept_dirty were skipped because the worktree had uncommitted
-  // changes; kept_active were skipped because the run's thread is still in
-  // use (its session is live, or its session id is still referenced by a
-  // continuity binding even though the session row is gone) — a bound
-  // continuity thread shares its worktree with its whole thread, so an old
-  // terminal run's worktree may still be the thread's live working
-  // directory. One bucket for both live-session and bound-thread cases,
-  // deliberately: the user-facing story is identical, "still in use, not
-  // reclaimable" — only the daemon log distinguishes them. All three omitted
-  // (not just empty) when the action isn't automation_cleanup.
+}
+
+model AutomationRunResultMessage {
+  event: "automation_run_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+  run?: AutomationRunSummary;
+}
+
+model AutomationSetEnabledResultMessage {
+  event: "automation_set_enabled_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+  definition?: AutomationDefinitionSummary;
+}
+
+model AutomationDeleteResultMessage {
+  event: "automation_delete_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+}
+
+// cleaned/kept_dirty/kept_active: automation_cleanup's three-way per-run-id
+// partition of the terminal runs it examined — cleaned had their worktree
+// removed; kept_dirty were skipped because the worktree had uncommitted
+// changes; kept_active were skipped because the run's thread is still in use
+// (its session is live, or its session id is still referenced by a
+// continuity binding even though the session row is gone) — a bound
+// continuity thread shares its worktree with its whole thread, so an old
+// terminal run's worktree may still be the thread's live working directory.
+// One bucket for both live-session and bound-thread cases, deliberately: the
+// user-facing story is identical, "still in use, not reclaimable" — only the
+// daemon log distinguishes them.
+model AutomationCleanupResultMessage {
+  event: "automation_cleanup_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
   cleaned?: string[];
   kept_dirty?: string[];
   kept_active?: string[];
-  // spec_yaml/revision: automation_definition_get's payload — the definition
-  // YAML to show in the editor and the revision it was loaded at (echoed
-  // back as automation_apply's expected_revision). revision 0 with
-  // definition_id "" means the starter template for a brand-new definition.
-  spec_yaml?: string;
-  revision?: int32;
 }
 
 // Compact change signal: canonical state lives in SQLite, so clients re-read
@@ -3507,7 +3561,15 @@ alias DaemonEvent =
   | GetRepoInfoResultMessage
   | WorkflowRunUpdatedMessage
   | WorkflowActionResultMessage
-  | AutomationActionResultMessage
+  | AutomationApplyResultMessage
+  | AutomationValidateResultMessage
+  | AutomationDefinitionsResultMessage
+  | AutomationDefinitionResultMessage
+  | AutomationRunsResultMessage
+  | AutomationRunResultMessage
+  | AutomationSetEnabledResultMessage
+  | AutomationDeleteResultMessage
+  | AutomationCleanupResultMessage
   | AutomationsChangedMessage
   | WorkspaceContextResultMessage
   | WorkspaceContextListResultMessage

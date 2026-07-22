@@ -54,7 +54,6 @@ function makeRun(
 ): AutomationRunSummary {
   return {
     definition_id: 'd1',
-    definition_revision: 1,
     state: 'delivered',
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
@@ -69,13 +68,12 @@ function baseProps() {
     fetchDefinitions: vi.fn().mockResolvedValue([]),
     fetchRuns: vi.fn().mockResolvedValue([]),
     setEnabled: vi.fn().mockResolvedValue(undefined),
-    runNow: vi.fn().mockResolvedValue({}),
-    getDefinition: vi.fn().mockResolvedValue({ specYaml: 'id: new-automation\nname: New automation\n', revision: 0 }),
+    runNow: vi.fn().mockResolvedValue(undefined),
+    getDefinition: vi.fn().mockResolvedValue({ specYaml: 'id: new-automation\nname: New automation\n' }),
     validateDefinition: vi.fn().mockResolvedValue(undefined),
     applyDefinition: vi.fn().mockResolvedValue({
       definition: makeDefinition({ id: 'd1', revision: 2 }),
       specYaml: 'id: d1\n',
-      revision: 2,
     }),
     onOpenTicket: vi.fn(),
     onSelectSession: vi.fn(),
@@ -128,12 +126,13 @@ describe('AutomationsPanel', () => {
     expect(screen.queryByTestId('automation-run-now-d2')).not.toBeInTheDocument();
   });
 
-  it('shows a failure badge and last_error when a definition latest run failed', async () => {
+  it('shows a failure badge and last_error when a definition\'s embedded last_run failed', async () => {
     const props = baseProps();
-    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
-    props.fetchRuns.mockResolvedValue([
-      makeRun({ id: 'r1', state: 'failed', created_at: '2026-01-02T00:00:00Z', last_error: 'boom' }),
-      makeRun({ id: 'r2', state: 'delivered', created_at: '2026-01-01T00:00:00Z' }),
+    props.fetchDefinitions.mockResolvedValue([
+      makeDefinition({
+        id: 'd1',
+        last_run: makeRun({ id: 'r1', state: 'failed', created_at: '2026-01-02T00:00:00Z', last_error: 'boom' }),
+      }),
     ]);
     render(<AutomationsPanel {...props} />);
 
@@ -215,10 +214,9 @@ describe('AutomationsPanel', () => {
     expect(secondCall[1]).toBe(pendingId);
   });
 
-  it('reconciles a pending run request once a fetched run for its request id reaches delivered', async () => {
+  it('reconciles a pending run request once a definition\'s embedded last_run for its request id reaches delivered', async () => {
     const props = baseProps();
     props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
-    props.fetchRuns.mockResolvedValue([]);
     useAutomationsStore.getState().reset();
     render(<AutomationsPanel {...props} />);
     await screen.findByTestId('automation-run-now-d1');
@@ -226,27 +224,38 @@ describe('AutomationsPanel', () => {
     const pendingId = useAutomationsStore.getState().ensureRunRequest('d1');
 
     // Still pending: the key survives.
-    props.fetchRuns.mockResolvedValue([
-      makeRun({ id: 'r1', occurrence_key: `manual:${pendingId}`, state: 'pending' }),
+    props.fetchDefinitions.mockResolvedValue([
+      makeDefinition({
+        id: 'd1',
+        trigger_type: 'manual',
+        last_run: makeRun({ id: 'r1', occurrence_key: `manual:${pendingId}`, state: 'pending' }),
+      }),
     ]);
     useAutomationsStore.getState().bumpChanged();
-    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalled());
+    await waitFor(() => expect(props.fetchDefinitions).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBe(pendingId));
 
     // Delivered: the key clears, so the next click mints a fresh id.
-    props.fetchRuns.mockResolvedValue([
-      makeRun({ id: 'r1', occurrence_key: `manual:${pendingId}`, state: 'delivered' }),
+    props.fetchDefinitions.mockResolvedValue([
+      makeDefinition({
+        id: 'd1',
+        trigger_type: 'manual',
+        last_run: makeRun({ id: 'r1', occurrence_key: `manual:${pendingId}`, state: 'delivered' }),
+      }),
     ]);
     useAutomationsStore.getState().bumpChanged();
     await waitFor(() => expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBeUndefined());
   });
 
-  it('adopts a pending manual run id from run history after a simulated relaunch, so Run now retries it instead of minting a fresh id', async () => {
+  it('adopts a pending manual run id from a definition\'s embedded last_run after a simulated relaunch, so Run now retries it instead of minting a fresh id', async () => {
     const user = userEvent.setup();
     const props = baseProps();
-    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
-    props.fetchRuns.mockResolvedValue([
-      makeRun({ id: 'r1', occurrence_key: 'manual:restart-key-1', state: 'pending' }),
+    props.fetchDefinitions.mockResolvedValue([
+      makeDefinition({
+        id: 'd1',
+        trigger_type: 'manual',
+        last_run: makeRun({ id: 'r1', occurrence_key: 'manual:restart-key-1', state: 'pending' }),
+      }),
     ]);
     // Simulate relaunch: the store starts empty regardless of what the
     // daemon still has pending.
@@ -263,15 +272,18 @@ describe('AutomationsPanel', () => {
   it('does not adopt a pending run whose occurrence_key is not manual-prefixed', async () => {
     const user = userEvent.setup();
     const props = baseProps();
-    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
-    props.fetchRuns.mockResolvedValue([
-      makeRun({ id: 'r1', occurrence_key: 'sched:2026-01-01T00:00:00Z', state: 'pending' }),
+    props.fetchDefinitions.mockResolvedValue([
+      makeDefinition({
+        id: 'd1',
+        trigger_type: 'manual',
+        last_run: makeRun({ id: 'r1', occurrence_key: 'sched:2026-01-01T00:00:00Z', state: 'pending' }),
+      }),
     ]);
     useAutomationsStore.getState().reset();
     render(<AutomationsPanel {...props} />);
 
     const button = await screen.findByTestId('automation-run-now-d1');
-    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalled());
+    await waitFor(() => expect(props.fetchDefinitions).toHaveBeenCalled());
     expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBeUndefined();
 
     await user.click(button);
@@ -283,16 +295,19 @@ describe('AutomationsPanel', () => {
   it('adoption never overwrites a key already stored for this session', async () => {
     const user = userEvent.setup();
     const props = baseProps();
-    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', trigger_type: 'manual' })]);
     useAutomationsStore.getState().reset();
     const storedKey = useAutomationsStore.getState().ensureRunRequest('d1');
-    props.fetchRuns.mockResolvedValue([
-      makeRun({ id: 'r1', occurrence_key: 'manual:some-other-pending-run', state: 'pending' }),
+    props.fetchDefinitions.mockResolvedValue([
+      makeDefinition({
+        id: 'd1',
+        trigger_type: 'manual',
+        last_run: makeRun({ id: 'r1', occurrence_key: 'manual:some-other-pending-run', state: 'pending' }),
+      }),
     ]);
     render(<AutomationsPanel {...props} />);
 
     const button = await screen.findByTestId('automation-run-now-d1');
-    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalled());
+    await waitFor(() => expect(props.fetchDefinitions).toHaveBeenCalled());
     expect(useAutomationsStore.getState().pendingRunRequests['d1']).toBe(storedKey);
 
     await user.click(button);
@@ -309,6 +324,27 @@ describe('AutomationsPanel', () => {
     useAutomationsStore.getState().bumpChanged();
 
     await waitFor(() => expect(props.fetchDefinitions).toHaveBeenCalledTimes(2));
+  });
+
+  it('refetches the selected definition\'s runs when changedTick bumps, so a newly delivered run appears without re-selecting', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
+    props.fetchRuns.mockResolvedValueOnce([makeRun({ id: 'r1', state: 'pending' })]);
+    render(<AutomationsPanel {...props} />);
+
+    await user.click(await screen.findByText('PR reviewer'));
+    await screen.findByTestId('automation-run-row');
+    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalledTimes(1));
+
+    props.fetchRuns.mockResolvedValueOnce([
+      makeRun({ id: 'r1', state: 'delivered' }),
+      makeRun({ id: 'r2', state: 'delivered' }),
+    ]);
+    useAutomationsStore.getState().bumpChanged();
+
+    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getAllByTestId('automation-run-row')).toHaveLength(2));
   });
 
   it('navigates to the ticket when a run has a ticket_id', async () => {
@@ -385,7 +421,7 @@ describe('AutomationsPanel', () => {
       const user = userEvent.setup();
       const props = baseProps();
       props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', name: 'PR reviewer' })]);
-      props.getDefinition.mockResolvedValue({ specYaml: 'id: d1\nname: PR reviewer\n', revision: 3 });
+      props.getDefinition.mockResolvedValue({ specYaml: 'id: d1\nname: PR reviewer\n', definition: makeDefinition({ id: 'd1', revision: 3 }) });
       render(<AutomationsPanel {...props} />);
 
       await user.click(await screen.findByTestId('automation-edit-d1'));
@@ -415,7 +451,7 @@ describe('AutomationsPanel', () => {
       const user = userEvent.setup();
       const props = baseProps();
       props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
-      props.getDefinition.mockResolvedValue({ specYaml: 'id: d1\nname: PR reviewer\n', revision: 3 });
+      props.getDefinition.mockResolvedValue({ specYaml: 'id: d1\nname: PR reviewer\n', definition: makeDefinition({ id: 'd1', revision: 3 }) });
       render(<AutomationsPanel {...props} />);
 
       await user.click(await screen.findByTestId('automation-edit-d1'));

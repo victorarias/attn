@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AutomationDefinitionSummary, AutomationRunSummary } from '../types/generated';
-import { useAutomationsStore, selectDefinitionById, selectLatestRunForDefinition } from '../store/automations';
+import { useAutomationsStore, selectDefinitionById } from '../store/automations';
 import { AutomationActionTimeoutError } from '../hooks/useDaemonSocket';
 import { AutomationEditor, automationEditorKey } from './automations/AutomationEditor';
 import './AutomationsPanel.css';
@@ -11,17 +11,16 @@ export interface AutomationsPanelProps {
   fetchDefinitions: () => Promise<AutomationDefinitionSummary[]>;
   fetchRuns: (definitionId: string) => Promise<AutomationRunSummary[]>;
   setEnabled: (definitionId: string, enabled: boolean) => Promise<void>;
-  runNow: (
+  runNow: (definitionId: string, requestId: string) => Promise<AutomationRunSummary | undefined>;
+  getDefinition: (
     definitionId: string,
-    requestId: string,
-  ) => Promise<{ runId?: string; ticketId?: string; sessionId?: string }>;
-  getDefinition: (definitionId: string) => Promise<{ specYaml: string; revision: number }>;
+  ) => Promise<{ specYaml: string; definition?: AutomationDefinitionSummary }>;
   validateDefinition: (definitionYaml: string) => Promise<void>;
   applyDefinition: (
     definitionYaml: string,
     expectedId: string,
     expectedRevision: number,
-  ) => Promise<{ definition: AutomationDefinitionSummary; specYaml: string; revision: number }>;
+  ) => Promise<{ definition: AutomationDefinitionSummary; specYaml: string }>;
   onOpenTicket: (ticketId: string) => void;
   onSelectSession: (sessionId: string) => void;
   onFocusPane: (sessionId: string, paneId: string) => void;
@@ -131,10 +130,14 @@ export function AutomationsPanel({
   // (its buffer is loaded once per mount, not derived from the store).
   const [editorTarget, setEditorTarget] = useState<EditorTarget>(null);
 
-  // Refetch on open and on every automations_changed tick. Also eagerly
-  // fetches every definition's runs (not just the selected one) — the
-  // definitions list shows a failure badge per row, so the badge data has to
-  // exist before the user expands anything.
+  // Refetch on open and on every automations_changed tick. The list badge
+  // reads each definition's embedded last_run (see the store's
+  // LatestAutomationRunPerDefinition query), so there is no per-definition
+  // runs fetch here anymore. Reconciliation of a pending run-now request
+  // still runs off that same embedded last_run — it is by construction the
+  // newest run for the definition, which is all reconcilePendingRunRequest
+  // ever needed (a still-pending durable run or a freshly delivered/failed
+  // one), so this preserves that behavior without a per-definition fetch.
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
@@ -145,16 +148,7 @@ export function AutomationsPanel({
         setDefinitionsError(null);
         setDefinitionsLoaded(true);
         fetched.forEach((definition) => {
-          fetchRuns(definition.id)
-            .then((runs) => {
-              if (cancelled) return;
-              useAutomationsStore.getState().setRuns(definition.id, runs);
-              reconcilePendingRunRequest(definition.id, runs);
-            })
-            .catch(() => {
-              // Best-effort enrichment for the list badge; the definition row
-              // still renders without it.
-            });
+          reconcilePendingRunRequest(definition.id, definition.last_run ? [definition.last_run] : []);
         });
       })
       .catch((error) => {
@@ -165,10 +159,13 @@ export function AutomationsPanel({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, changedTick, fetchDefinitions, fetchRuns]);
+  }, [isOpen, changedTick, fetchDefinitions]);
 
   // Refetch the selected definition's runs the moment it is selected, so the
   // expanded history is not stuck on whatever the eager fetch above last saw.
+  // Also refetch on every automations_changed broadcast (changedTick), so the
+  // expanded history tracks run-state transitions (create/deliver/fail)
+  // without requiring the user to re-select the definition.
   useEffect(() => {
     if (!isOpen || !selectedDefinitionId) return;
     let cancelled = false;
@@ -185,7 +182,7 @@ export function AutomationsPanel({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, selectedDefinitionId, fetchRuns]);
+  }, [isOpen, selectedDefinitionId, fetchRuns, changedTick]);
 
   if (!isOpen) return null;
 
@@ -329,7 +326,7 @@ export function AutomationsPanel({
       ) : (
         <ul className="automations-panel__list" data-testid="automations-panel-list">
           {definitions.map((definition) => {
-            const latestRun = selectLatestRunForDefinition(runsByDefinition[definition.id]);
+            const latestRun = definition.last_run;
             const failed = latestRun?.state === 'failed';
             const selected = definition.id === selectedDefinitionId;
             return (

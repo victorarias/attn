@@ -5,7 +5,9 @@
  * definition fires at its intended minute, survives a daemon restart per its
  * catch_up policy, does real merged-worktree cleanup in a visible ticket/
  * session, never touches a dirty worktree, and coalesces later occurrences
- * onto the same singleton ticket/session.
+ * onto the same singleton ticket/session. The scenario quits the profile's app
+ * first (ensureFreshWorld) because a running app would respawn the daemon during
+ * the simulated downtime and invalidate the restart-catch-up leg.
  *
  * Two definitions are applied against one isolated profile daemon:
  *   - `scheduled-cleanup-<suffix>`: cron `* * * * *`, policy.continuity
@@ -34,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { parseCommonArgs, printCommonHelp } from './common.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { currentHarnessProfile, dataDirForProfile, resolveHarnessResources } from './harnessProfile.mjs';
+import { ensureFreshWorld } from './freshWorld.mjs';
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -74,6 +77,12 @@ function runJSON(binary, args, env) {
   return JSON.parse(run(binary, args, env));
 }
 
+// `enable`/`disable` are the only way to move the enabled column post-PR5;
+// both print the updated (lowercase) definition summary.
+function disableDefinition(binary, id, env) {
+  return runJSON(binary, ['automation', 'disable', id], env);
+}
+
 async function poll(fn, description, timeoutMs = 30_000) {
   const started = Date.now();
   let last = null;
@@ -86,7 +95,7 @@ async function poll(fn, description, timeoutMs = 30_000) {
 }
 
 function sqliteRow(dbPath, sql) {
-  const out = execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim();
+  const out = execFileSync('sqlite3', ['-cmd', '.timeout 5000', dbPath, sql], { encoding: 'utf8' }).trim();
   return out.length === 0 ? null : out.split('|');
 }
 
@@ -163,11 +172,17 @@ function invocations(log) {
 
 const API_VERSION = 'attn.dev/automations/v1alpha1';
 
-function cleanupDefinitionYAML({ id, locationPath, enabled }) {
+// `enabled` is not a spec field post-PR5 (column-only; a YAML carrying
+// `enabled:` is rejected outright — errEnabledManagedOutsideSpec in
+// internal/automation/automation.go), so neither template below emits it.
+// Every apply of a brand-new id is inserted enabled regardless
+// (store.UpsertAutomationDefinition); teardown/leg-end disabling now goes
+// through `automation disable <id>` (disableDefinition above) instead of a
+// reapply with `enabled: false`.
+function cleanupDefinitionYAML({ id, locationPath }) {
   return `api_version: ${API_VERSION}
 id: ${id}
 name: Slice 5 packaged scheduled cleanup proof
-enabled: ${enabled}
 trigger:
   type: scheduled
   schedule:
@@ -187,11 +202,10 @@ location:
 `;
 }
 
-function stormGuardDefinitionYAML({ id, locationPath, enabled, executable }) {
+function stormGuardDefinitionYAML({ id, locationPath, executable }) {
   return `api_version: ${API_VERSION}
 id: ${id}
 name: Slice 5 scheduler storm-guard probe
-enabled: ${enabled}
 trigger:
   type: scheduled
   schedule:
@@ -276,13 +290,14 @@ async function main() {
     probe = createCodexProbe(runner.sessionDir);
 
     await runner.step('restart_isolated_daemon', async () => {
+      await ensureFreshWorld({ profile, appPath: resources.appPath });
       try { run(binary, ['daemon', 'stop'], daemonEnv); } catch {}
       run(binary, ['daemon', 'ensure'], daemonEnv);
       await waitForDaemonReady(binary, daemonEnv);
     });
 
     await runner.step('leg1_apply_and_anchor', async () => {
-      fs.writeFileSync(cleanupDefinitionFile, cleanupDefinitionYAML({ id: cleanupID, locationPath: fixtureRoot, enabled: true }));
+      fs.writeFileSync(cleanupDefinitionFile, cleanupDefinitionYAML({ id: cleanupID, locationPath: fixtureRoot }));
       runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
       cleanupApplied = true;
       // First observation after apply only anchors the cursor; it must not fire.
@@ -302,15 +317,15 @@ async function main() {
       }, 'restart catch-up run', RESTART_RUN_TIMEOUT_MS);
       runner.assert(rows.length === 1, 'exactly one catch-up run fires despite multiple missed instants (latest policy)', { rows });
       const runRow = rows[0];
-      cleanupTicketID = runRow.TicketID;
-      cleanupSessionID = runRow.SessionID;
+      cleanupTicketID = runRow.ticket_id;
+      cleanupSessionID = runRow.session_id;
       runner.assert(Boolean(cleanupTicketID) && Boolean(cleanupSessionID), 'catch-up run reserves a ticket and session', runRow);
 
       const occurrence = sqliteRow(
         dbPath,
-        `SELECT o.occurrence_key FROM automation_occurrences o JOIN automation_runs r ON r.occurrence_id=o.id WHERE r.id='${sqlEscape(runRow.ID)}';`,
+        `SELECT o.occurrence_key FROM automation_occurrences o JOIN automation_runs r ON r.occurrence_id=o.id WHERE r.id='${sqlEscape(runRow.id)}';`,
       );
-      runner.assert(occurrence !== null, 'catch-up run has a resolvable occurrence row', { runID: runRow.ID });
+      runner.assert(occurrence !== null, 'catch-up run has a resolvable occurrence row', { runID: runRow.id });
       const occurrenceKey = occurrence[0];
       runner.assert(
         /^scheduled:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/.test(occurrenceKey),
@@ -355,8 +370,8 @@ async function main() {
         return list.length >= 2 ? list : null;
       }, 'a second coalesced occurrence', COALESCE_TIMEOUT_MS);
       runner.assert(rows.length >= 2, 'at least a second occurrence fired while enabled', { count: rows.length });
-      const tickets = new Set(rows.map((row) => row.TicketID));
-      const sessions = new Set(rows.map((row) => row.SessionID));
+      const tickets = new Set(rows.map((row) => row.ticket_id));
+      const sessions = new Set(rows.map((row) => row.session_id));
       runner.assert(
         tickets.size === 1 && tickets.has(cleanupTicketID),
         'every occurrence for this definition coalesces onto the same singleton ticket',
@@ -375,8 +390,7 @@ async function main() {
       runner.assert(fs.existsSync(path.join(fixture.dirtyWip, 'scratch.txt')), 'dirty-wip uncommitted file is still untouched after coalescing');
       runner.assert(worktreeListShows(fixture.repo, fixture.dirtyWip), 'dirty-wip worktree is still tracked by git worktree list after coalescing');
 
-      fs.writeFileSync(cleanupDefinitionFile, cleanupDefinitionYAML({ id: cleanupID, locationPath: fixtureRoot, enabled: false }));
-      runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
+      disableDefinition(binary, cleanupID, daemonEnv);
     });
 
     // Leg 4: storm-guard re-assertion. A true skip-vs-latest discard proof needs
@@ -391,7 +405,7 @@ async function main() {
     await runner.step('leg4_storm_guard_restart', async () => {
       fs.writeFileSync(
         stormGuardDefinitionFile,
-        stormGuardDefinitionYAML({ id: stormGuardID, locationPath: fixtureRoot, enabled: true, executable: probe.executable }),
+        stormGuardDefinitionYAML({ id: stormGuardID, locationPath: fixtureRoot, executable: probe.executable }),
       );
       runJSON(binary, ['automation', 'apply', '--file', stormGuardDefinitionFile], daemonEnv);
       stormGuardApplied = true;
@@ -413,16 +427,12 @@ async function main() {
       // widen while this step keeps running.
       const rows = await poll(() => {
         const list = runJSON(binary, ['automation', 'runs', stormGuardID], daemonEnv) || [];
-        const delivered = list.filter((row) => row.State === 'delivered');
+        const delivered = list.filter((row) => row.state === 'delivered');
         return delivered.length >= 1 ? delivered : null;
       }, 'storm-guard restart catch-up run delivered', RESTART_RUN_TIMEOUT_MS);
       runner.assert(rows.length === 1, 'storm-guard: exactly one catch-up run under fresh continuity too', { rows });
 
-      fs.writeFileSync(
-        stormGuardDefinitionFile,
-        stormGuardDefinitionYAML({ id: stormGuardID, locationPath: fixtureRoot, enabled: false, executable: probe.executable }),
-      );
-      runJSON(binary, ['automation', 'apply', '--file', stormGuardDefinitionFile], daemonEnv);
+      disableDefinition(binary, stormGuardID, daemonEnv);
 
       await poll(() => (invocations(probe.log).length >= 1 ? invocations(probe.log) : null), 'storm-guard probe launch');
       runner.assert(invocations(probe.log).length === 1, 'exactly one process spawn backs the single catch-up run (no replay storm)', {
@@ -440,21 +450,8 @@ async function main() {
     // (os.Stat) on every future tick, so leaving one enabled against a deleted
     // temp root would spam schedule-observation errors on this profile forever.
     if (daemonEnv) {
-      if (cleanupApplied && fs.existsSync(fixtureRoot)) {
-        try {
-          fs.writeFileSync(cleanupDefinitionFile, cleanupDefinitionYAML({ id: cleanupID, locationPath: fixtureRoot, enabled: false }));
-          run(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
-        } catch {}
-      }
-      if (stormGuardApplied && fs.existsSync(fixtureRoot) && probe) {
-        try {
-          fs.writeFileSync(
-            stormGuardDefinitionFile,
-            stormGuardDefinitionYAML({ id: stormGuardID, locationPath: fixtureRoot, enabled: false, executable: probe.executable }),
-          );
-          run(binary, ['automation', 'apply', '--file', stormGuardDefinitionFile], daemonEnv);
-        } catch {}
-      }
+      if (cleanupApplied) { try { disableDefinition(binary, cleanupID, daemonEnv); } catch {} }
+      if (stormGuardApplied) { try { disableDefinition(binary, stormGuardID, daemonEnv); } catch {} }
     }
     try { fs.rmSync(fixtureRoot, { recursive: true, force: true }); } catch {}
     // daemonEnv never diverged from a plain profile daemon (no mock provider,

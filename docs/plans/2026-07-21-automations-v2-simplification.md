@@ -124,7 +124,7 @@ real concept and drives binding rotation.
       verbs `attn automation enable|disable`; `SetEnabledInYAML` and the
       spec-rewrite path in `SetAutomationEnabled` are deleted; the WS
       definition-YAML surface falls back to rendering YAML from spec JSON. Shipped as #629.
-- [ ] **PR2b — v2 state model + claim semantics** (consolidates former
+- [x] **PR2b — v2 state model + claim semantics** (consolidates former
       PR2b/PR3/PR4 — one migration, one live-verify matrix, one review
       round). Migration 77 recreates `automation_runs` (adds `cancel_reason`,
       `attempts`), `automation_continuity_bindings` (append-only: surrogate
@@ -141,12 +141,17 @@ real concept and drives binding rotation.
       trigger-implied per the YAML sketch above; `scheduled` absorbs
       `continuity`/`catch_up`; validation matrix and snapshot shrink. Engine
       `Store` interface lands here. Built as sequential reviewable commits on
-      one branch.
-- [ ] **PR5 — protocol unification.** One handler layer for socket + WS;
+      one branch. Shipped as #630 (live-verified on the dev profile: migration 77, policy rejection, manual run delivered, scheduled-singleton continuity across two real cron ticks).
+- [x] **PR5 — protocol unification.** One handler layer for socket + WS;
       per-action results; drop dead wire fields (`continuity`, `catch_up`,
       `workspace_id`, `definition_revision`); embed `last_run` in the
       definition summary (kills the panel's N+1); protocol version bump
-      (remember the useDaemonSocket.ts third lockstep spot).
+      (remember the useDaemonSocket.ts third lockstep spot). ProtocolVersion
+      181. Apply's `expected_id`/`expected_revision` guard is keyed on pointer
+      presence, not the zero value: the socket/CLI path always sends neither
+      (unguarded last-writer-wins, matching the old `attn automation apply`
+      behavior), the WS editor always sends both (enforced, including a
+      create-time 0 vs. a live definition).
 - [ ] **PR6 — form UI.** Replace the YAML editor and validate-without-apply UI
       with a structured create/edit form (trigger picker with per-trigger
       fields, prompt, launch via the delegation picker components, location,

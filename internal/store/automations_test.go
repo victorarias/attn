@@ -456,6 +456,61 @@ func TestListAutomationRunsWithOccurrenceKeysOrdersNewestFirstWithLimit(t *testi
 	}
 }
 
+func TestLatestAutomationRunPerDefinitionPicksNewestPerDefinitionAndOmitsZeroRunDefinitions(t *testing.T) {
+	s := New()
+	base := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	defA, err := s.UpsertAutomationDefinition("def-a", "A", `{"id":"def-a"}`, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defB, err := s.UpsertAutomationDefinition("def-b", "B", `{"id":"def-b"}`, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defEmpty, err := s.UpsertAutomationDefinition("def-empty", "Empty", `{"id":"def-empty"}`, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = defEmpty
+	seed := func(defID, requestID string, at time.Time) *AutomationRun {
+		ids := AutomationRunReservation{
+			RunID:        "run-" + defID + "-" + requestID,
+			OccurrenceID: "occ-" + defID + "-" + requestID,
+			TicketID:     "ticket-" + defID + "-" + requestID,
+			SessionID:    "session-" + defID + "-" + requestID,
+			WorkspaceID:  "workspace-" + defID + "-" + requestID,
+			PaneID:       "pane-" + defID + "-" + requestID,
+		}
+		run, created, err := s.ClaimManualAutomationRun(defID, requestID, "", `{}`, 1, `{}`, at, ids)
+		if err != nil || !created {
+			t.Fatalf("claim %s/%s created=%v err=%v", defID, requestID, created, err)
+		}
+		return run
+	}
+	seed(defA.ID, "a-1", base)
+	newestA := seed(defA.ID, "a-2", base.Add(time.Minute))
+	newestB := seed(defB.ID, "b-1", base.Add(30*time.Second))
+
+	latest, err := s.LatestAutomationRunPerDefinition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(latest) != 2 {
+		t.Fatalf("len(latest)=%d, want 2: %#v", len(latest), latest)
+	}
+	got, ok := latest[defA.ID]
+	if !ok || got.ID != newestA.ID || got.OccurrenceKey != "manual:a-2" {
+		t.Fatalf("def-a latest = %#v (ok=%v), want run %s with occurrence_key manual:a-2", got, ok, newestA.ID)
+	}
+	got, ok = latest[defB.ID]
+	if !ok || got.ID != newestB.ID || got.OccurrenceKey != "manual:b-1" {
+		t.Fatalf("def-b latest = %#v (ok=%v), want run %s with occurrence_key manual:b-1", got, ok, newestB.ID)
+	}
+	if _, ok := latest[defEmpty.ID]; ok {
+		t.Fatalf("def-empty should have no entry, got %#v", latest[defEmpty.ID])
+	}
+}
+
 func TestListPendingAutomationRunsIncludesScheduledProvider(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 7, 20, 3, 0, 0, 0, time.UTC)

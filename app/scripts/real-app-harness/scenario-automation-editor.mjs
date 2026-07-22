@@ -3,37 +3,49 @@
 /**
  * Packaged-app proof for Slice 7 PR B's self-service automation YAML editor:
  * the starter template, invalid-YAML rejection (nothing stored), a real
- * create with a hand-written comment, the create-collision refusal, D1
- * (comments survive a save/reload round-trip), the id-change refusal (D4),
- * the stale-revision refusal plus Reload recovery (D5), a comment-only edit
- * that still bumps the revision, a Save that is refused rather than
- * silently resurrecting a definition deleted elsewhere, and a panel
- * toggle-off that survives a later unrelated edit — the last three pin the
- * three multi-writer races fixed in 649a7e52 and 09cfb0b6 (spec_yaml missing
- * from the revision-bump condition; DeleteAutomationDefinition leaving
- * revision untouched; SetAutomationEnabled writing only the enabled column
- * and leaving the stored spec saying otherwise) — all driven through the
- * real rendered editor and panel via the automation_editor_* and
- * automations_* UI-automation bridge verbs, cross-checked against the
- * daemon's own state via the bundled `attn` CLI (`automation show`/`list`),
- * not just the DOM.
+ * create, the create-collision refusal, the v2 spec-canonical save/reload
+ * contract, the id-change refusal (D4), the stale-revision refusal plus
+ * Reload recovery (D5), a comment-only edit that is a no-op revision-wise
+ * (immediately followed by a real semantic edit that does bump), a Save
+ * that is refused rather than silently resurrecting a definition deleted
+ * elsewhere, and a panel toggle-off that survives a later unrelated edit —
+ * all driven through the real rendered editor and panel via the
+ * automation_editor_* and automations_* UI-automation bridge verbs,
+ * cross-checked against the daemon's own state via the bundled `attn` CLI
+ * (`automation show`/`list`), not just the DOM.
+ *
+ * v2 spec-canonical contract (PR #629, "make enabled column-only and drop
+ * spec_yaml storage"): the stored source of truth is spec_json alone: the
+ * `spec_yaml` DB column is gone. Every YAML read (`attn automation show`,
+ * the editor's Save-then-reopen) is re-derived canonically from spec_json via
+ * automation.MarshalDefinitionYAML — 4-space indent, no comments, no
+ * original formatting. This is intentional, not a bug: hand-written
+ * comments are interchange-only and do not round-trip. `enabled` and
+ * `policy` are likewise outside the spec entirely (column-only /
+ * trigger-implied) and a YAML carrying either key is rejected outright
+ * (errEnabledManagedOutsideSpec / errPolicyRemoved in
+ * internal/automation/automation.go). Revision bumps exactly when spec_json
+ * changes (store.UpsertAutomationDefinition): a comment-only edit changes
+ * only the buffer, not the canonical spec, so re-saving it is a no-op for
+ * revision purposes; a real content edit (e.g. `name:`) always bumps by
+ * exactly one.
  *
  * One definition id is reused across most legs (`automation-editor-<suffix>`)
  * so the id-change and stale-revision legs exercise the SAME live definition
- * D1 just proved comment-preservation on, rather than fresh throwaway ids —
- * matching how a real user edits one automation repeatedly in one sitting.
- * The same id carries through the comment-only-revision-bump leg and finally
- * into the delete-elsewhere leg, which ends the scenario with it soft-
- * deleted on purpose. A second id (`automation-editor-renamed-<suffix>`)
- * exists only as the (refused) target of the id-change leg; it must never
- * actually be created.
+ * leg3 just created, rather than fresh throwaway ids — matching how a real
+ * user edits one automation repeatedly in one sitting. The same id carries
+ * through the no-op/bump revision leg and finally into the delete-elsewhere
+ * leg, which ends the scenario with it soft-deleted on purpose. A second id
+ * (`automation-editor-renamed-<suffix>`) exists only as the (refused) target
+ * of the id-change leg; it must never actually be created.
  *
  * No fake-agent probe is needed: this scenario never triggers a run. Every
- * definition it applies is manual-trigger, and all but leg10's are also
- * enabled: false, so `launch.executable` is never invoked and can stay unset
- * like the starter template's. leg10 must start from an enabled definition in
- * order to disable it from the panel; being manual-trigger, it still never
- * fires, and the leg deletes it before finishing.
+ * definition it applies is manual-trigger, so `launch.executable` is never
+ * invoked and can stay unset like the starter template's, regardless of
+ * enabled state. `enabled` is column-only post-PR5/#629 (spec YAML/JSON no
+ * longer carries it at all) and every apply of a brand-new id always inserts
+ * it enabled; leg9 relies on exactly that default to get an enabled
+ * definition to disable from the panel, and deletes it before finishing.
  *
  * Run serially (packaged-app scenarios are single-tenant):
  *   ATTN_HARNESS_PROFILE=<name> node scripts/real-app-harness/scenario-automation-editor.mjs
@@ -80,6 +92,34 @@ function run(binary, args, env, options = {}) {
 
 function runJSON(binary, args, env) {
   return JSON.parse(run(binary, args, env));
+}
+
+// `attn automation show <id>` prints the canonical rendered YAML alone (no
+// JSON wrapper — see cmd/attn/automation.go), unlike the pre-unification CLI
+// which printed the raw store row (Enabled/Revision/SpecYAML/SpecJSON). Get
+// the definition summary (id/enabled/revision) from `automation list`
+// instead, filtered by id — the two together are the CLI-observable
+// replacement for the old single `show` call.
+function showSpecYAML(binary, id, env) {
+  return run(binary, ['automation', 'show', id], env);
+}
+
+function findListRow(binary, id, env) {
+  const list = runJSON(binary, ['automation', 'list'], env) || [];
+  return list.find((row) => row.id === id) || null;
+}
+
+// A soft-deleted (or never-existed) id makes `automation show` exit 1 with
+// "automation: daemon error: ..." on stderr, rather than printing anything
+// JSON-parseable — there is no more null/empty-document result to check.
+function showFailsWithDaemonError(binary, id, env) {
+  try {
+    run(binary, ['automation', 'show', id], env);
+    return false;
+  } catch (error) {
+    const stderr = typeof error.stderr === 'string' ? error.stderr : String(error.stderr || error.message || error);
+    return stderr.includes('automation: daemon error');
+  }
 }
 
 async function poll(fn, description, timeoutMs = 30_000) {
@@ -137,20 +177,20 @@ async function toggleEnabledAndWait(client, definitionId, wantEnabled) {
 
 const API_VERSION = 'attn.dev/automations/v1alpha1';
 
-// Defaults to enabled: false — this scenario never triggers a run, and
-// leaving these definitions disabled means the finally block does not need to
-// disable-before-teardown like scenario-automation-lifecycle.mjs (an enabled
-// directory-location definition re-validates its path on every future daemon
-// tick, which would spam errors once the fixture dir is gone). leg10 is the
-// one caller that opts into enabled: true, because it has to start from an
-// enabled definition to disable it from the panel; it deletes that definition
-// at the end of the leg for the same reason.
-function editorDefinitionYAML({ id, locationPath, prompt, comment, enabled = false }) {
+// `enabled` is not a spec field post-PR5 (it is the enabled COLUMN's sole
+// authority; a YAML carrying `enabled:` is rejected outright — see
+// errEnabledManagedOutsideSpec in internal/automation/automation.go), so this
+// template never emits it. Every apply of a brand-new id is inserted enabled
+// regardless (store.UpsertAutomationDefinition); that is harmless here since
+// every definition this scenario applies is manual-trigger and never fires on
+// its own. leg9 relies on that same default-enabled behavior to get a
+// definition it can disable from the panel, and deletes it at the end of the
+// leg.
+function editorDefinitionYAML({ id, locationPath, prompt, comment }) {
   const commentLine = comment ? `${comment}\n` : '';
   return `${commentLine}api_version: ${API_VERSION}
 id: ${id}
 name: Slice 7 packaged editor proof
-enabled: ${enabled ? 'true' : 'false'}
 trigger:
   type: manual
 prompt: |
@@ -165,11 +205,15 @@ location:
 
 // Deliberately missing/wrong api_version — the cheapest reliable way to fail
 // ValidateDefinition without depending on any other field's exact wording.
+// Must not carry `enabled:` — ParseDefinitionYAML probes for that key BEFORE
+// api_version validation (errEnabledManagedOutsideSpec in
+// internal/automation/automation.go), so leaving it in would make this
+// fixture fail for the wrong reason and never reach the api_version
+// complaint this leg pins.
 function invalidDefinitionYAML({ id, locationPath }) {
   return `api_version: not-a-real-api-version
 id: ${id}
 name: Slice 7 packaged editor proof (invalid)
-enabled: false
 trigger:
   type: manual
 prompt: |
@@ -292,7 +336,7 @@ async function main() {
     // guard or the editor's error surfacing regresses.
     await runner.step('leg2_invalid_rejected_nothing_stored', async () => {
       const listBefore = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
-      runner.assert(!listBefore.some((row) => row.ID === primaryID), 'sanity: primary id does not exist yet', listBefore);
+      runner.assert(!listBefore.some((row) => row.id === primaryID), 'sanity: primary id does not exist yet', listBefore);
 
       const invalidYAML = invalidDefinitionYAML({ id: primaryID, locationPath: fixturePath });
       const afterSetText = await client.request('automation_editor_set_text', { text: invalidYAML });
@@ -313,18 +357,24 @@ async function main() {
 
       const listAfter = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
       runner.assert(
-        listAfter.length === listBefore.length && !listAfter.some((row) => row.ID === primaryID),
+        listAfter.length === listBefore.length && !listAfter.some((row) => row.id === primaryID),
         'nothing is stored after the refused create',
         { listBefore, listAfter },
       );
     });
 
-    // Leg 3: a real create, with a hand-written leading comment — the
-    // fixture leg2's D1 assertion (comment survival) depends on.
+    // Leg 3: a real create, with a hand-written leading comment, then a
+    // reload through both the CLI and the real editor — pinning the v2
+    // spec-canonical contract (PR #629): the re-read YAML is a canonical
+    // rendering of the saved content (same id/name/prompt), and the
+    // hand-written comment is gone — comments are interchange-only and do
+    // not round-trip since spec_yaml storage was dropped. Also folds in what
+    // used to be a separate leg (D1, pre-#629) proving the editor's own
+    // reopen path gets the same canonical rendering, not just the CLI.
     let leg3Revision = null;
     let leg3SpecYAML = null;
     const promptV1 = 'Slice 7 packaged editor proof: initial create.';
-    await runner.step('leg3_create_with_comment', async () => {
+    await runner.step('leg3_create_then_reload_is_canonical', async () => {
       const validYAML = editorDefinitionYAML({ id: primaryID, locationPath: fixturePath, prompt: promptV1, comment: harnessMarkerComment });
       const afterSetText = await client.request('automation_editor_set_text', { text: validYAML });
       runner.assert(afterSetText.text === validYAML, 'set_text replaces the buffer with the valid YAML exactly', afterSetText);
@@ -341,12 +391,43 @@ async function main() {
       }, `created definition ${primaryID} to appear in the panel`, PANEL_TIMEOUT_MS);
       await captureEvidenceScreenshot(runner, client, 'leg3-after-save.png');
 
-      const shown = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
-      runner.assert(shown && shown.ID === primaryID, 'the CLI shows the created definition by id', shown);
-      runner.assert(shown.Revision === 1, 'a fresh create lands at revision 1', shown);
-      runner.assert(shown.SpecYAML.includes(harnessMarkerComment), 'the stored YAML includes the hand-written comment', shown);
-      leg3Revision = shown.Revision;
-      leg3SpecYAML = shown.SpecYAML;
+      const shownRow = findListRow(binary, primaryID, daemonEnv);
+      const shownYAML = showSpecYAML(binary, primaryID, daemonEnv);
+      runner.assert(shownRow && shownRow.id === primaryID, 'the CLI shows the created definition by id', shownRow);
+      runner.assert(shownRow.revision === 1, 'a fresh create lands at revision 1', shownRow);
+      runner.assert(
+        shownYAML.includes(`id: ${primaryID}`) && shownYAML.includes('name: Slice 7 packaged editor proof') && shownYAML.includes(promptV1),
+        'the re-read YAML is the canonical rendering of the saved spec — same id/name/prompt content',
+        shownYAML,
+      );
+      runner.assert(
+        !shownYAML.includes(harnessMarkerComment) && !shownYAML.includes('#'),
+        'v2: the hand-written comment does not survive the round-trip — comments are interchange-only, not stored (PR #629 dropped spec_yaml storage)',
+        shownYAML,
+      );
+      leg3Revision = shownRow.revision;
+      leg3SpecYAML = shownYAML;
+
+      // Reopen through the real editor too — same canonical-rendering
+      // guarantee on the WS load path, not just the CLI.
+      const opened = await client.request('automation_editor_open', { definitionId: primaryID });
+      runner.assert(opened.mode === 'edit', 'opening an existing definition starts in edit mode', opened);
+      runner.assert(opened.definitionId === primaryID, 'edit mode reports the definition id being edited', opened);
+      runner.assert(opened.revision === leg3Revision, "edit mode reports the definition's current revision", opened);
+      runner.assert(opened.reloadOffered === true, 'Reload is offered once a persisted definition is being edited', opened);
+      runner.assert(
+        opened.text.includes(promptV1) && !opened.text.includes(harnessMarkerComment),
+        'the editor buffer reopens with the same canonical rendering — content preserved, hand-written comment absent',
+        opened,
+      );
+
+      // Close back out before the next leg. The editor replaces the panel
+      // body entirely while open (see leg9's not-covered note), so leaving
+      // it open here would make leg4's `automation_editor_open {}` for New
+      // an undrivable flow — the New button isn't reachable while an editor
+      // is already up.
+      const afterReopenCancel = await client.request('automation_editor_click', { button: 'cancel' });
+      runner.assert(afterReopenCancel.present === false, 'Cancel closes the reopened editor back to the list', afterReopenCancel);
     });
 
     // Leg 4 (new, per team-lead): creating a SECOND definition that reuses
@@ -376,37 +457,31 @@ async function main() {
         afterSave,
       );
 
-      const afterCollision = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
+      const afterCollisionRow = findListRow(binary, primaryID, daemonEnv);
+      const afterCollisionYAML = showSpecYAML(binary, primaryID, daemonEnv);
       runner.assert(
-        afterCollision.Revision === leg3Revision && afterCollision.SpecYAML === leg3SpecYAML,
+        afterCollisionRow.revision === leg3Revision && afterCollisionYAML === leg3SpecYAML,
         "the original definition's revision and content are unchanged by the refused collision",
-        { before: { revision: leg3Revision, specYaml: leg3SpecYAML }, after: afterCollision },
+        {
+          before: { revision: leg3Revision, specYaml: leg3SpecYAML },
+          after: { revision: afterCollisionRow.revision, specYaml: afterCollisionYAML },
+        },
       );
 
       const afterCancel = await client.request('automation_editor_click', { button: 'cancel' });
       runner.assert(afterCancel.present === false, 'Cancel closes the collision attempt back to the list', afterCancel);
     });
 
-    // Leg 5 (D1, load-bearing): opening the definition leg3 created for edit
-    // shows the hand-written comment intact — a save/reload round-trip that
-    // does not preserve comments is exactly the regression this scenario
-    // exists to catch.
-    await runner.step('leg5_comments_survive_roundtrip', async () => {
-      const opened = await client.request('automation_editor_open', { definitionId: primaryID });
-      runner.assert(opened.mode === 'edit', 'opening an existing definition starts in edit mode', opened);
-      runner.assert(opened.definitionId === primaryID, 'edit mode reports the definition id being edited', opened);
-      runner.assert(opened.revision === leg3Revision, 'edit mode reports the definition\'s current revision', opened);
-      runner.assert(opened.reloadOffered === true, 'Reload is offered once a persisted definition is being edited', opened);
-      runner.assert(
-        opened.text.includes(harnessMarkerComment),
-        'D1: the hand-written comment survives the save/reload round-trip into the editor buffer',
-        opened,
-      );
-    });
-
-    // Leg 6 (D4): changing the id in the buffer and saving is refused — an id
+    // Leg 5 (D4): changing the id in the buffer and saving is refused — an id
     // change must go through a separate create, not an in-place edit.
-    await runner.step('leg6_id_change_refusal', async () => {
+    await runner.step('leg5_id_change_refusal', async () => {
+      // leg4's cancel closed the editor entirely (it left the collision
+      // attempt's create buffer, not primaryID's edit buffer) — open the
+      // shared definition for edit fresh before attempting the rename.
+      const reopened = await client.request('automation_editor_open', { definitionId: primaryID });
+      runner.assert(reopened.mode === 'edit', 'opening the shared definition for edit starts in edit mode', reopened);
+      runner.assert(reopened.revision === leg3Revision, "the editor's revision matches the definition's current revision", { reopened, leg3Revision });
+
       const renameYAML = editorDefinitionYAML({
         id: renamedID,
         locationPath: fixturePath,
@@ -427,18 +502,18 @@ async function main() {
 
       const listAfter = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
       runner.assert(
-        !listAfter.some((row) => row.ID === renamedID) && listAfter.filter((row) => row.ID === primaryID).length === 1,
+        !listAfter.some((row) => row.id === renamedID) && listAfter.filter((row) => row.id === primaryID).length === 1,
         'no definition was created under the renamed id; the original still exists exactly once',
         listAfter,
       );
     });
 
-    // Leg 7 (D5): a Save against a stale revision — the definition changed
+    // Leg 6 (D5): a Save against a stale revision — the definition changed
     // out from under the open editor via the CLI — is refused, and Reload
     // recovers by pulling the current content into the buffer, after which a
     // normal Save succeeds.
-    await runner.step('leg7_stale_revision_refusal_and_reload', async () => {
-      // Reset the buffer's id back to primaryID (leg 6 left it on renamedID)
+    await runner.step('leg6_stale_revision_refusal_and_reload', async () => {
+      // Reset the buffer's id back to primaryID (leg 5 left it on renamedID)
       // before doing anything else, so this leg's Save attempts exercise the
       // stale-revision guard rather than re-triggering the id-change guard.
       const localPromptA = 'Local buffer edit before the out-of-band mutation lands.';
@@ -448,11 +523,11 @@ async function main() {
       const outOfBandPrompt = 'Mutated out of band via the bundled CLI while the editor was open.';
       const outOfBandFile = path.join(runner.sessionDir, 'out-of-band.yml');
       fs.writeFileSync(outOfBandFile, editorDefinitionYAML({ id: primaryID, locationPath: fixturePath, prompt: outOfBandPrompt, comment: null }));
-      runJSON(binary, ['automation', 'apply', '--file', outOfBandFile], daemonEnv);
+      run(binary, ['automation', 'apply', '--file', outOfBandFile], daemonEnv);
 
-      const outOfBandShown = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
-      runner.assert(outOfBandShown.Revision > leg3Revision, 'the out-of-band CLI apply bumps the revision past what the open editor has', outOfBandShown);
-      const outOfBandRevision = outOfBandShown.Revision;
+      const outOfBandRow = findListRow(binary, primaryID, daemonEnv);
+      runner.assert(outOfBandRow.revision > leg3Revision, 'the out-of-band CLI apply bumps the revision past what the open editor has', outOfBandRow);
+      const outOfBandRevision = outOfBandRow.revision;
 
       const afterStaleSave = await client.request('automation_editor_click', { button: 'save' });
       runner.assert(afterStaleSave.present === true, 'the editor stays open after a refused stale-revision save', afterStaleSave);
@@ -474,39 +549,42 @@ async function main() {
       const afterFinalSave = await client.request('automation_editor_click', { button: 'save' });
       runner.assert(afterFinalSave.present === false, 'the recovered Save succeeds and closes the editor', afterFinalSave);
 
-      const finalShown = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
-      runner.assert(finalShown.Revision === outOfBandRevision + 1, 'the recovered save bumps the revision once more', finalShown);
-      runner.assert(finalShown.SpecYAML.includes(localPromptA), 'the recovered save persists the locally re-applied content', finalShown);
+      const finalRow = findListRow(binary, primaryID, daemonEnv);
+      const finalYAML = showSpecYAML(binary, primaryID, daemonEnv);
+      runner.assert(finalRow.revision === outOfBandRevision + 1, 'the recovered save bumps the revision once more', finalRow);
+      runner.assert(finalYAML.includes(localPromptA), 'the recovered save persists the locally re-applied content', finalYAML);
     });
 
-    // Leg 8 (defect A regression proof): a comment-only edit — the exact
-    // shape of change this editor exists to make — still bumps the
-    // revision. Before the store fix, the bump condition compared only
-    // spec_json, so a save that changed spec_yaml alone (comments live only
-    // there, never re-derived into spec_json) left revision untouched and
-    // the stale-save guard blind to it. The new buffer is built by
-    // prepending exactly ONE comment line to the exact bytes the editor
-    // loaded, so everything after that line is untouched by construction —
-    // if spec_json also moved, this leg would prove nothing.
-    await runner.step('leg8_comment_only_edit_bumps_revision', async () => {
-      const shownBefore = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
+    // Leg 7: v2 revision semantics (store.UpsertAutomationDefinition —
+    // revision bumps exactly when spec_json changes). Part A: a comment-only
+    // edit changes only the buffer's interchange formatting, not the
+    // canonical spec, so re-saving the exact same content the editor loaded
+    // (modulo a leading comment, which is dropped on every read anyway per
+    // leg3) reapplies an IDENTICAL spec_json — a no-op, revision unchanged.
+    // Part B: immediately after, a real semantic edit (changing `name:`)
+    // DOES change spec_json and bumps revision by exactly one — proving
+    // part A's unchanged revision is because nothing meaningful changed, not
+    // because saves stopped bumping revision at all.
+    await runner.step('leg7_comment_only_save_is_noop_then_semantic_edit_bumps', async () => {
+      const rowBefore = findListRow(binary, primaryID, daemonEnv);
+      const yamlBefore = showSpecYAML(binary, primaryID, daemonEnv);
 
       const opened = await client.request('automation_editor_open', { definitionId: primaryID });
       runner.assert(opened.mode === 'edit', 'opening the shared definition for edit starts in edit mode', opened);
       runner.assert(opened.definitionId === primaryID, 'edit mode reports the definition id being edited', opened);
       runner.assert(
-        opened.revision === shownBefore.Revision,
+        opened.revision === rowBefore.revision,
         "the editor's revision matches the CLI's independently-read revision",
-        { opened, shownBefore },
+        { opened, rowBefore },
       );
       runner.assert(
-        opened.text === shownBefore.SpecYAML,
-        'the editor buffer loads exactly the stored spec_yaml bytes — the baseline this leg edits from',
-        { opened, shownBefore },
+        opened.text === yamlBefore,
+        'the editor buffer loads exactly the stored (canonically-rendered) YAML — the baseline this leg edits from',
+        { opened, yamlBefore },
       );
 
-      const leg8Comment = `# harness-marker-leg8: ${suffix}`;
-      const commentOnlyYAML = `${leg8Comment}\n${opened.text}`;
+      const leg7Comment = `# harness-marker-leg7: ${suffix}`;
+      const commentOnlyYAML = `${leg7Comment}\n${opened.text}`;
       await client.request('automation_editor_set_text', { text: commentOnlyYAML });
 
       const afterValidate = await client.request('automation_editor_click', { button: 'validate' });
@@ -515,49 +593,63 @@ async function main() {
       const afterSave = await client.request('automation_editor_click', { button: 'save' });
       runner.assert(afterSave.present === false, 'the comment-only save succeeds and closes the editor', afterSave);
 
-      const shownAfter = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
+      const rowAfterCommentOnly = findListRow(binary, primaryID, daemonEnv);
+      const yamlAfterCommentOnly = showSpecYAML(binary, primaryID, daemonEnv);
       runner.assert(
-        shownAfter.Revision === shownBefore.Revision + 1,
-        'D-A: a comment-only edit still bumps the revision — the stale-save guard is no longer blind to comment-only changes',
-        { before: shownBefore.Revision, after: shownAfter.Revision },
+        rowAfterCommentOnly.revision === rowBefore.revision,
+        'v2: a comment-only save is a no-op for revision — spec_json is unchanged, and revision guards spec content only',
+        { before: rowBefore.revision, after: rowAfterCommentOnly.revision },
       );
       runner.assert(
-        shownAfter.SpecYAML === commentOnlyYAML,
-        'the stored spec_yaml is exactly the comment-prepended buffer — nothing else moved',
-        { expected: commentOnlyYAML, actual: shownAfter.SpecYAML },
+        !yamlAfterCommentOnly.includes(leg7Comment),
+        "the comment does not persist either way — it never reached spec_json, so the canonical re-render can't echo it back",
+        yamlAfterCommentOnly,
       );
-      // The assertion that actually matters for D-A: prove this was a pure
-      // comment edit by checking the CANONICAL spec, not just the YAML text.
-      // A future refactor that starts folding comments into spec_json would
-      // otherwise leave this leg passing for the wrong reason.
       runner.assert(
-        shownAfter.SpecJSON === shownBefore.SpecJSON,
-        'the canonical spec_json is byte-identical before/after — this was a pure comment edit, not a disguised content change',
-        { before: shownBefore.SpecJSON, after: shownAfter.SpecJSON },
+        yamlAfterCommentOnly === yamlBefore,
+        'the canonical rendering is byte-identical before/after the comment-only save — nothing meaningful moved',
+        { before: yamlBefore, after: yamlAfterCommentOnly },
       );
+
+      // Part B: a real semantic edit — change `name:` — must bump revision by
+      // exactly one, proving part A's unchanged revision was content-specific.
+      const reopened = await client.request('automation_editor_open', { definitionId: primaryID });
+      const semanticYAML = reopened.text.replace('name: Slice 7 packaged editor proof', 'name: Slice 7 packaged editor proof (renamed)');
+      runner.assert(semanticYAML !== reopened.text, 'sanity: the name replacement actually changed the buffer', { reopened });
+      await client.request('automation_editor_set_text', { text: semanticYAML });
+      const afterSemanticSave = await client.request('automation_editor_click', { button: 'save' });
+      runner.assert(afterSemanticSave.present === false, 'the semantic edit saves cleanly', afterSemanticSave);
+
+      const rowAfterSemantic = findListRow(binary, primaryID, daemonEnv);
+      runner.assert(
+        rowAfterSemantic.revision === rowBefore.revision + 1,
+        'v2: a real semantic edit (name change) bumps revision by exactly one — spec_json content actually changed',
+        { before: rowBefore.revision, after: rowAfterSemantic.revision },
+      );
+      runner.assert(rowAfterSemantic.name === 'Slice 7 packaged editor proof (renamed)', 'the renamed name is what got stored', rowAfterSemantic);
     });
 
-    // Leg 9 (defect B regression proof): a definition deleted out of band
+    // Leg 8 (defect B regression proof): a definition deleted out of band
     // while an editor has it open must not be resurrected by that editor's
     // Save. Before the daemon fix, DeleteAutomationDefinition left revision
     // untouched, so the stale editor's expected_revision still matched the
     // soft-deleted row, the guard passed, and the upsert cleared
-    // deleted_at — reported to the user as a successful save. Mirrors leg7's
+    // deleted_at — reported to the user as a successful save. Mirrors leg6's
     // out-of-band-mutation shape, but via `automation delete` instead of
     // `automation apply`.
-    await runner.step('leg9_delete_elsewhere_then_save_refused', async () => {
-      const shownBefore = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
+    await runner.step('leg8_delete_elsewhere_then_save_refused', async () => {
+      const rowBefore = findListRow(binary, primaryID, daemonEnv);
       runner.assert(
-        shownBefore && shownBefore.ID === primaryID,
+        rowBefore && rowBefore.id === primaryID,
         'sanity: the shared definition is still live before this leg deletes it',
-        shownBefore,
+        rowBefore,
       );
 
       const opened = await client.request('automation_editor_open', { definitionId: primaryID });
       runner.assert(opened.mode === 'edit', 'opening the shared definition for edit starts in edit mode', opened);
       runner.assert(opened.definitionId === primaryID, 'edit mode reports the definition id being edited', opened);
       runner.assert(
-        opened.revision === shownBefore.Revision,
+        opened.revision === rowBefore.revision,
         "the editor holds the definition's current revision before the out-of-band delete",
         opened,
       );
@@ -565,7 +657,7 @@ async function main() {
       run(binary, ['automation', 'delete', primaryID], daemonEnv);
       const listAfterDelete = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
       runner.assert(
-        !listAfterDelete.some((row) => row.ID === primaryID),
+        !listAfterDelete.some((row) => row.id === primaryID),
         'sanity: the out-of-band CLI delete removes the definition from the live list while the editor is still open on it',
         listAfterDelete,
       );
@@ -602,127 +694,118 @@ async function main() {
       // would be exactly the failure this leg exists to catch.
       const listAfterRefusedSave = runJSON(binary, ['automation', 'list'], daemonEnv) || [];
       runner.assert(
-        !listAfterRefusedSave.some((row) => row.ID === primaryID),
+        !listAfterRefusedSave.some((row) => row.id === primaryID),
         'the definition is still gone after the refused save — it was not resurrected',
         listAfterRefusedSave,
       );
-      const shownAfterRefusedSave = runJSON(binary, ['automation', 'show', primaryID], daemonEnv);
       runner.assert(
-        shownAfterRefusedSave === null,
-        'the CLI also reports the definition as gone (filtered like any soft-deleted row) after the refused save',
-        shownAfterRefusedSave,
+        showFailsWithDaemonError(binary, primaryID, daemonEnv),
+        'the CLI also reports the definition as gone (a daemon error, like any soft-deleted row) after the refused save',
+        primaryID,
       );
     });
 
-    // The reviewer-reported split brain: `enabled` was written by the panel
-    // toggle (column only) AND by a save (from the YAML), with nothing keeping
-    // them in step. Disable, then edit, and the stale `enabled: true` in the
-    // stored YAML came back — for a cron trigger, unattended sessions firing
-    // again after the operator turned them off, reported as a clean save.
+    // Leg 9: `enabled` has exactly one authority post-#629 — the column,
+    // set only by SetAutomationEnabled — and that function never touches
+    // spec_json or revision (TestSetAutomationEnabledNeverTouchesSpecOrRevision,
+    // internal/store/automations_test.go). This leg pins both directions of
+    // that split: (1) the panel toggle does what it says (enabled flips) and
+    // does NOT bump revision, in either direction; (2) a later spec save does
+    // not silently flip enabled back on. It also keeps pinning that neither
+    // the stored nor the buffered YAML ever carries an `enabled:` key, so a
+    // regression that reintroduces one fails loudly (a parse error on apply)
+    // rather than silently disagreeing with the column again.
     //
     // Every out-of-band step here goes through the REAL panel toggle verb
     // (automations_toggle_enabled), not a CLI shortcut, because the toggle is
-    // the surface that was writing only half the state.
-    await runner.step('leg10_panel_toggle_off_survives_a_later_edit', async () => {
-      const leg10ID = `automation-editor-toggle-${suffix}`;
-      const leg10Comment = `# harness-marker-leg10: ${suffix}`;
+    // the surface under test.
+    await runner.step('leg9_panel_toggle_off_survives_a_later_edit', async () => {
+      const leg9ID = `automation-editor-toggle-${suffix}`;
       const createYAML = editorDefinitionYAML({
-        id: leg10ID,
+        id: leg9ID,
         locationPath: fixturePath,
         prompt: 'Definition that the operator disables from the panel and then edits.',
-        comment: leg10Comment,
-        enabled: true,
+        comment: null,
       });
 
-      // leg9 deliberately ends with the editor still open on its refused save.
+      // leg8 deliberately ends with the editor still open on its refused save.
       const cleared = await client.request('automation_editor_click', { button: 'cancel' });
-      runner.assert(cleared.present === false, "leg9's editor is closed before this leg opens its own", cleared);
+      runner.assert(cleared.present === false, "leg8's editor is closed before this leg opens its own", cleared);
 
       await client.request('automation_editor_open', {});
       await client.request('automation_editor_set_text', { text: createYAML });
       const afterCreate = await client.request('automation_editor_click', { button: 'save' });
-      runner.assert(afterCreate.present === false, 'the enabled definition is created and the editor closes', afterCreate);
+      runner.assert(afterCreate.present === false, 'the definition is created and the editor closes', afterCreate);
 
-      const created = runJSON(binary, ['automation', 'show', leg10ID], daemonEnv);
-      runner.assert(created && created.Enabled === true, 'sanity: the definition starts enabled', created);
+      const createdRow = findListRow(binary, leg9ID, daemonEnv);
+      runner.assert(createdRow && createdRow.enabled === true, 'sanity: a brand-new definition starts enabled by default', createdRow);
 
-      // The panel toggle — the exact surface the reviewer named.
-      await toggleEnabledAndWait(client, leg10ID, false);
+      // The panel toggle.
+      await toggleEnabledAndWait(client, leg9ID, false);
 
-      const disabled = runJSON(binary, ['automation', 'show', leg10ID], daemonEnv);
-      runner.assert(disabled.Enabled === false, 'the panel toggle disables the definition', disabled);
+      const disabledRow = findListRow(binary, leg9ID, daemonEnv);
+      const disabledYAML = showSpecYAML(binary, leg9ID, daemonEnv);
+      runner.assert(disabledRow.enabled === false, 'the panel toggle disables the definition', disabledRow);
       runner.assert(
-        disabled.Revision === created.Revision + 1,
-        'the toggle bumps the revision — otherwise the stale-save guard cannot see it at all',
-        { before: created.Revision, after: disabled.Revision },
+        disabledRow.revision === createdRow.revision,
+        'v2: the toggle does NOT bump revision — enabled is column-only and never touches spec_json',
+        { before: createdRow.revision, after: disabledRow.revision },
       );
-      // Write-through, not a read-time overlay: the stored definition itself
-      // now says disabled, so the CLI, the editor, and the column agree.
+      // The stored YAML never carries `enabled` at all now (column-only, #629).
       runner.assert(
-        disabled.SpecYAML.includes('enabled: false') && !disabled.SpecYAML.includes('enabled: true'),
-        'the toggle wrote through into the stored YAML — no stale `enabled: true` left behind to be saved back',
-        disabled.SpecYAML,
-      );
-      runner.assert(
-        disabled.SpecYAML.includes(leg10Comment),
-        "the toggle preserved the author's comment — it rewrote one scalar, not the document",
-        disabled.SpecYAML,
-      );
-      runner.assert(
-        JSON.parse(disabled.SpecJSON).enabled === false,
-        'the canonical spec_json agrees too — one authority, not two',
-        disabled.SpecJSON,
+        !disabledYAML.includes('enabled:'),
+        'the stored YAML carries no enabled key at all',
+        disabledYAML,
       );
 
       // Now the operator opens it and makes an unrelated edit.
-      const opened = await client.request('automation_editor_open', { definitionId: leg10ID });
+      const opened = await client.request('automation_editor_open', { definitionId: leg9ID });
       runner.assert(
-        opened.text.includes('enabled: false'),
-        'the editor opens on the automation\'s REAL current state, so the operator is not editing a lie',
+        !opened.text.includes('enabled:'),
+        'the editor buffer carries no enabled key either — disabled state is not something a save can echo back wrong',
         opened,
       );
-      runner.assert(opened.revision === disabled.Revision, 'the editor holds the post-toggle revision', { opened, disabled });
+      runner.assert(opened.revision === disabledRow.revision, 'the editor holds the post-toggle revision', { opened, disabledRow });
 
       await client.request('automation_editor_set_text', { text: `# unrelated edit ${suffix}\n${opened.text}` });
       const afterEdit = await client.request('automation_editor_click', { button: 'save' });
       runner.assert(afterEdit.present === false, 'the unrelated edit saves cleanly', afterEdit);
 
       // The assertion this whole leg exists for.
-      const afterSave = runJSON(binary, ['automation', 'show', leg10ID], daemonEnv);
+      const afterSaveRow = findListRow(binary, leg9ID, daemonEnv);
       runner.assert(
-        afterSave.Enabled === false,
-        'D-F: editing a disabled automation does NOT silently re-enable it — the toggle is not reversed by a save',
-        afterSave,
+        afterSaveRow.enabled === false,
+        'editing a disabled automation does NOT silently re-enable it — a save never touches the enabled column',
+        afterSaveRow,
       );
 
       // And back on, through the panel again, so the leg proves the toggle is
-      // symmetric rather than only pinning the disable direction.
-      await toggleEnabledAndWait(client, leg10ID, true);
-      const reEnabled = runJSON(binary, ['automation', 'show', leg10ID], daemonEnv);
+      // symmetric rather than only pinning the disable direction — and that
+      // re-enabling also does not bump revision.
+      await toggleEnabledAndWait(client, leg9ID, true);
+      const reEnabledRow = findListRow(binary, leg9ID, daemonEnv);
+      const reEnabledYAML = showSpecYAML(binary, leg9ID, daemonEnv);
       runner.assert(
-        reEnabled.Enabled === true && reEnabled.SpecYAML.includes('enabled: true'),
-        'toggling back on writes through the same way — the disable direction is not a special case',
-        reEnabled,
+        reEnabledRow.enabled === true && !reEnabledYAML.includes('enabled:'),
+        'toggling back on writes through the same way — the disable direction is not a special case, and the spec still carries no enabled key',
+        reEnabledRow,
       );
       runner.assert(
-        reEnabled.SpecYAML.includes(leg10Comment),
-        "the author's comment survives a full off-and-on cycle, not just one rewrite",
-        reEnabled.SpecYAML,
+        reEnabledRow.revision === disabledRow.revision,
+        'v2: re-enabling also does not bump revision — the toggle never touches spec_json in either direction',
+        { disabled: disabledRow.revision, reEnabled: reEnabledRow.revision },
       );
 
-      // Not covered here: a toggle landing while THIS editor is open, which
-      // would exercise the stale-save guard against the toggle's revision
-      // bump. AutomationsPanel renders the editor as a full replacement of the
+      // Not covered here: a toggle landing while THIS editor is open.
+      // AutomationsPanel renders the editor as a full replacement of the
       // panel body (see its EditorTarget doc comment), so the toggle control
       // is not in the DOM at all while the editor is up — there is no way to
       // drive that race through the real UI, and faking it here would be
       // testing the harness rather than the product. The guard itself is
-      // pinned where it is reachable: the revision assertion above, plus
-      // TestSetAutomationEnabledWritesThroughToStoredSpec (store) and
-      // TestAutomationDefinitionGetWSAfterToggleShowsDisabledWithoutReenabling
-      // (daemon).
+      // pinned where it is reachable: the revision assertions above, plus
+      // TestSetAutomationEnabledNeverTouchesSpecOrRevision (store).
 
-      run(binary, ['automation', 'delete', leg10ID], daemonEnv);
+      run(binary, ['automation', 'delete', leg9ID], daemonEnv);
     });
 
     runner.finishSuccess({ profile, primaryID, renamedID, leg3Revision, appBuild, protocolVersion });

@@ -100,6 +100,12 @@ function runJSON(binary, args, env) {
   return JSON.parse(run(binary, args, env));
 }
 
+// `enable`/`disable` are the only way to move the enabled column post-PR5;
+// both print the updated (lowercase) definition summary.
+function disableDefinition(binary, id, env) {
+  return runJSON(binary, ['automation', 'disable', id], env);
+}
+
 async function poll(fn, description, timeoutMs = 30_000) {
   const started = Date.now();
   let last = null;
@@ -112,7 +118,7 @@ async function poll(fn, description, timeoutMs = 30_000) {
 }
 
 function sqliteRow(dbPath, sql) {
-  const out = execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf8' }).trim();
+  const out = execFileSync('sqlite3', ['-cmd', '.timeout 5000', dbPath, sql], { encoding: 'utf8' }).trim();
   return out.length === 0 ? null : out.split('|');
 }
 
@@ -169,6 +175,15 @@ function createCodexProbe(root) {
 
 const API_VERSION = 'attn.dev/automations/v1alpha1';
 
+// `enabled` is not a spec field post-PR5 (column-only; a YAML carrying
+// `enabled:` is rejected outright — errEnabledManagedOutsideSpec in
+// internal/automation/automation.go), so none of these templates emit it.
+// Every apply of a brand-new id is inserted enabled regardless
+// (store.UpsertAutomationDefinition), and re-applying an existing id never
+// touches its current enabled value — only `automation enable`/`disable`
+// does. Where this scenario used to reapply with `enabled: false` for
+// teardown, it now calls `automation disable <id>` directly (see
+// disableDefinition below).
 function editRebindDefinitionYAML({ id, locationPath, executable, prompt }) {
   return `api_version: ${API_VERSION}
 id: ${id}
@@ -439,32 +454,33 @@ async function main() {
     let run3 = null;
     await runner.step('leg1_edit_rebind', async () => {
       fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, executable: probe.executable, prompt: PROMPT_P1 }));
-      runJSON(binary, ['automation', 'apply', '--file', editDefinitionFile], daemonEnv);
+      const created = runJSON(binary, ['automation', 'apply', '--file', editDefinitionFile], daemonEnv);
       editApplied = true;
+      runner.assert(created && created.enabled === true, 'sanity: a brand-new definition is inserted enabled by default', created);
       await waitForScheduleAnchor(dbPath, editID);
       const anchoredRows = runJSON(binary, ['automation', 'runs', editID], daemonEnv) || [];
       runner.assert(anchoredRows.length === 0, 'no run fires on the anchor-only tick', { anchoredRows });
 
       run1 = await poll(() => {
-        const rows = (runJSON(binary, ['automation', 'runs', editID], daemonEnv) || []).filter((row) => row.State === 'delivered');
+        const rows = (runJSON(binary, ['automation', 'runs', editID], daemonEnv) || []).filter((row) => row.state === 'delivered');
         return rows.length >= 1 ? rows[0] : null;
       }, 'P1 initial delivery', SCHEDULE_RUN_TIMEOUT_MS);
-      runner.assert(Boolean(run1.TicketID) && Boolean(run1.SessionID), 'P1 delivery reserves a ticket and session', run1);
-      runner.assert(run1.LastError === '', 'P1 delivery has no error', run1);
+      runner.assert(Boolean(run1.ticket_id) && Boolean(run1.session_id), 'P1 delivery reserves a ticket and session', run1);
+      runner.assert(!run1.last_error, 'P1 delivery has no error', run1);
 
       fs.writeFileSync(editDefinitionFile, editRebindDefinitionYAML({ id: editID, locationPath: editFixture, executable: probe.executable, prompt: PROMPT_P2 }));
       runJSON(binary, ['automation', 'apply', '--file', editDefinitionFile], daemonEnv);
 
       run2 = await poll(() => {
-        const rows = (runJSON(binary, ['automation', 'runs', editID], daemonEnv) || []).filter((row) => row.State === 'delivered' && row.TicketID !== run1.TicketID);
+        const rows = (runJSON(binary, ['automation', 'runs', editID], daemonEnv) || []).filter((row) => row.state === 'delivered' && row.ticket_id !== run1.ticket_id);
         return rows.length >= 1 ? rows[0] : null;
       }, 'P2 edit delivery on a fresh thread', SCHEDULE_RUN_TIMEOUT_MS);
-      runner.assert(run2.LastError === '', 'P2 edit delivery succeeds; no "contract changed" refusal', run2);
-      runner.assert(run2.TicketID !== run1.TicketID && run2.SessionID !== run1.SessionID, 'P2 edit delivery reserves a fresh ticket and session', { run1, run2 });
+      runner.assert(!run2.last_error, 'P2 edit delivery succeeds; no "contract changed" refusal', run2);
+      runner.assert(run2.ticket_id !== run1.ticket_id && run2.session_id !== run1.session_id, 'P2 edit delivery reserves a fresh ticket and session', { run1, run2 });
 
-      const run1AfterEdit = (runJSON(binary, ['automation', 'runs', editID], daemonEnv) || []).find((row) => row.ID === run1.ID);
+      const run1AfterEdit = (runJSON(binary, ['automation', 'runs', editID], daemonEnv) || []).find((row) => row.id === run1.id);
       runner.assert(
-        run1AfterEdit && run1AfterEdit.State === run1.State && run1AfterEdit.TicketID === run1.TicketID && run1AfterEdit.SessionID === run1.SessionID,
+        run1AfterEdit && run1AfterEdit.state === run1.state && run1AfterEdit.ticket_id === run1.ticket_id && run1AfterEdit.session_id === run1.session_id,
         "P1's original run row is unchanged after the P2 edit",
         { before: run1, after: run1AfterEdit },
       );
@@ -474,18 +490,18 @@ async function main() {
 
       run3 = await poll(() => {
         const rows = (runJSON(binary, ['automation', 'runs', editID], daemonEnv) || []).filter(
-          (row) => row.State === 'delivered' && row.TicketID !== run1.TicketID && row.TicketID !== run2.TicketID,
+          (row) => row.state === 'delivered' && row.ticket_id !== run1.ticket_id && row.ticket_id !== run2.ticket_id,
         );
         return rows.length >= 1 ? rows[0] : null;
       }, 'P1 revert delivery on yet another fresh thread (the A1-fix, live)', SCHEDULE_RUN_TIMEOUT_MS);
-      runner.assert(run3.LastError === '', 'P1 revert delivery succeeds; the revert edge does not brick delivery', run3);
+      runner.assert(!run3.last_error, 'P1 revert delivery succeeds; the revert edge does not brick delivery', run3);
       runner.assert(
-        run3.TicketID !== run1.TicketID && run3.TicketID !== run2.TicketID,
+        run3.ticket_id !== run1.ticket_id && run3.ticket_id !== run2.ticket_id,
         'P1 revert delivery reserves a third distinct thread even though its contract matches run1 exactly',
         { run1, run2, run3 },
       );
 
-      runJSON(binary, ['automation', 'disable', editID], daemonEnv);
+      disableDefinition(binary, editID, daemonEnv);
     });
 
     // Leg 2: delete-resurrect. Deleting has no UI affordance yet (see the
@@ -523,7 +539,7 @@ async function main() {
 
       const runsAfterDelete = runJSON(binary, ['automation', 'runs', deleteID], daemonEnv) || [];
       runner.assert(
-        runsAfterDelete.some((row) => row.ID === deleteRunID),
+        runsAfterDelete.some((row) => row.id === deleteRunID),
         'runs remain queryable via the CLI after delete',
         runsAfterDelete,
       );
@@ -532,6 +548,8 @@ async function main() {
       const deletedRow = sqliteRow(dbPath, `SELECT id, deleted_at FROM automation_definitions WHERE id='${sqlEscape(deleteID)}';`);
       runner.assert(deletedRow && deletedRow[1] !== '' && deletedRow[1] !== undefined, 'the definition row is soft-deleted (deleted_at set) in the DB', { deletedRow });
 
+      // Resurrection always re-enables (store.UpsertAutomationDefinition), so
+      // there is no enabled param to pass here even conceptually.
       fs.writeFileSync(deleteDefinitionFile, deleteResurrectDefinitionYAML({ id: deleteID, locationPath: deleteFixture, executable: probe.executable }));
       runJSON(binary, ['automation', 'apply', '--file', deleteDefinitionFile], daemonEnv);
 
@@ -542,14 +560,14 @@ async function main() {
 
       const runsAfterResurrect = runJSON(binary, ['automation', 'runs', deleteID], daemonEnv) || [];
       runner.assert(
-        runsAfterResurrect.some((row) => row.ID === deleteRunID),
+        runsAfterResurrect.some((row) => row.id === deleteRunID),
         'old run history survives resurrection',
         runsAfterResurrect,
       );
       const resurrectedRow = sqliteRow(dbPath, `SELECT id, deleted_at FROM automation_definitions WHERE id='${sqlEscape(deleteID)}';`);
       runner.assert(resurrectedRow && (resurrectedRow[1] ?? '') === '', 'the definition row is live again (deleted_at cleared) in the DB', { resurrectedRow });
 
-      runJSON(binary, ['automation', 'disable', deleteID], daemonEnv);
+      disableDefinition(binary, deleteID, daemonEnv);
     });
 
     // Leg 3: cleanup-dirty-safe. Three independent worktrees under ONE
@@ -569,14 +587,14 @@ async function main() {
 
       await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
       const cleanRun = await poll(() => {
-        const rows = (runJSON(binary, ['automation', 'runs', cleanupID], daemonEnv) || []).filter((row) => row.State === 'delivered');
+        const rows = (runJSON(binary, ['automation', 'runs', cleanupID], daemonEnv) || []).filter((row) => row.state === 'delivered');
         return rows.length >= 1 ? rows[0] : null;
       }, 'cleanup leg first delivery', GH_DELIVERY_TIMEOUT_MS);
-      const cleanWorktree = resolveWorktree(observer, profile, cleanRun.SessionID);
+      const cleanWorktree = resolveWorktree(observer, profile, cleanRun.session_id);
       runner.assert(fs.existsSync(cleanWorktree), 'first delivery worktree exists', { cleanWorktree });
 
-      await client.request('close_session', { sessionId: cleanRun.SessionID });
-      await waitSessionGone(observer, cleanRun.SessionID, 'first cleanup-leg session to unregister');
+      await client.request('close_session', { sessionId: cleanRun.session_id });
+      await waitSessionGone(observer, cleanRun.session_id, 'first cleanup-leg session to unregister');
 
       fs.writeFileSync(cleanupDefinitionFile, cleanupLifecycleDefinitionYAML({ id: cleanupID, executable: probe.executable, repoPath: cleanupFixture.repo, prompt: CLEANUP_PROMPT_V2 }));
       runJSON(binary, ['automation', 'apply', '--file', cleanupDefinitionFile], daemonEnv);
@@ -588,15 +606,15 @@ async function main() {
 
       const dirtyRun = await poll(() => {
         const rows = (runJSON(binary, ['automation', 'runs', cleanupID], daemonEnv) || [])
-          .filter((row) => row.State === 'delivered' && row.TicketID !== cleanRun.TicketID);
+          .filter((row) => row.state === 'delivered' && row.ticket_id !== cleanRun.ticket_id);
         return rows.length >= 1 ? rows[0] : null;
       }, 'cleanup leg second delivery on a fresh thread', GH_DELIVERY_TIMEOUT_MS);
-      const dirtyWorktree = resolveWorktree(observer, profile, dirtyRun.SessionID);
+      const dirtyWorktree = resolveWorktree(observer, profile, dirtyRun.session_id);
       runner.assert(dirtyWorktree !== cleanWorktree, 'the edit-rotated second delivery gets an independent worktree', { cleanWorktree, dirtyWorktree });
       runner.assert(fs.existsSync(dirtyWorktree), 'second delivery worktree exists', { dirtyWorktree });
 
-      await client.request('close_session', { sessionId: dirtyRun.SessionID });
-      await waitSessionGone(observer, dirtyRun.SessionID, 'second cleanup-leg session to unregister');
+      await client.request('close_session', { sessionId: dirtyRun.session_id });
+      await waitSessionGone(observer, dirtyRun.session_id, 'second cleanup-leg session to unregister');
 
       fs.writeFileSync(path.join(dirtyWorktree, 'uncommitted-scratch.txt'), 'dirty for leg3 cleanup-dirty-safe\n');
 
@@ -613,10 +631,10 @@ async function main() {
 
       const activeRun = await poll(() => {
         const rows = (runJSON(binary, ['automation', 'runs', cleanupID], daemonEnv) || [])
-          .filter((row) => row.State === 'delivered' && row.TicketID !== cleanRun.TicketID && row.TicketID !== dirtyRun.TicketID);
+          .filter((row) => row.state === 'delivered' && row.ticket_id !== cleanRun.ticket_id && row.ticket_id !== dirtyRun.ticket_id);
         return rows.length >= 1 ? rows[0] : null;
       }, 'cleanup leg third delivery on the current thread', GH_DELIVERY_TIMEOUT_MS);
-      const activeWorktree = resolveWorktree(observer, profile, activeRun.SessionID);
+      const activeWorktree = resolveWorktree(observer, profile, activeRun.session_id);
       runner.assert(activeWorktree !== cleanWorktree && activeWorktree !== dirtyWorktree, 'the third delivery gets an independent worktree', { cleanWorktree, dirtyWorktree, activeWorktree });
       runner.assert(fs.existsSync(activeWorktree), 'third delivery worktree exists', { activeWorktree });
 
@@ -627,22 +645,22 @@ async function main() {
       // that surviving binding, with no live session row backing it, is
       // exactly the case that used to make cleanup silently skip the run and
       // destroy a live thread's worktree.
-      await client.request('close_session', { sessionId: activeRun.SessionID });
-      await waitSessionGone(observer, activeRun.SessionID, 'third cleanup-leg session to unregister');
+      await client.request('close_session', { sessionId: activeRun.session_id });
+      await waitSessionGone(observer, activeRun.session_id, 'third cleanup-leg session to unregister');
 
       const result = runJSON(binary, ['automation', 'cleanup', cleanupID], daemonEnv);
       runner.assert(
-        Array.isArray(result.cleaned) && result.cleaned.includes(cleanRun.ID) && !result.cleaned.includes(dirtyRun.ID) && !result.cleaned.includes(activeRun.ID),
+        Array.isArray(result.cleaned) && result.cleaned.includes(cleanRun.id) && !result.cleaned.includes(dirtyRun.id) && !result.cleaned.includes(activeRun.id),
         'cleanup reports only the clean run in cleaned',
         result,
       );
       runner.assert(
-        Array.isArray(result.kept_dirty) && result.kept_dirty.includes(dirtyRun.ID) && !result.kept_dirty.includes(cleanRun.ID) && !result.kept_dirty.includes(activeRun.ID),
+        Array.isArray(result.kept_dirty) && result.kept_dirty.includes(dirtyRun.id) && !result.kept_dirty.includes(cleanRun.id) && !result.kept_dirty.includes(activeRun.id),
         'cleanup reports only the dirty run in kept_dirty',
         result,
       );
       runner.assert(
-        Array.isArray(result.kept_active) && result.kept_active.includes(activeRun.ID) && !result.kept_active.includes(cleanRun.ID) && !result.kept_active.includes(dirtyRun.ID),
+        Array.isArray(result.kept_active) && result.kept_active.includes(activeRun.id) && !result.kept_active.includes(cleanRun.id) && !result.kept_active.includes(dirtyRun.id),
         'cleanup reports the still-bound current thread in kept_active rather than silently skipping it',
         result,
       );
@@ -657,19 +675,19 @@ async function main() {
       const rowsAfterCleanup = runJSON(binary, ['automation', 'runs', cleanupID], daemonEnv) || [];
       runner.assert(rowsAfterCleanup.length === 3, 'all three run rows still exist after cleanup', rowsAfterCleanup);
       runner.assert(
-        rowsAfterCleanup.every((row) => row.State === 'delivered'),
+        rowsAfterCleanup.every((row) => row.state === 'delivered'),
         'cleanup never mutates run state',
         rowsAfterCleanup,
       );
 
       const second = runJSON(binary, ['automation', 'cleanup', cleanupID], daemonEnv);
       runner.assert(
-        (second.cleaned || []).length === 0 && (second.kept_dirty || []).includes(dirtyRun.ID) && (second.kept_active || []).includes(activeRun.ID),
+        (second.cleaned || []).length === 0 && (second.kept_dirty || []).includes(dirtyRun.id) && (second.kept_active || []).includes(activeRun.id),
         'a second cleanup invocation is a no-op for the already-cleaned run and still reports the dirty and still-bound runs',
         second,
       );
 
-      runJSON(binary, ['automation', 'disable', cleanupID], daemonEnv);
+      disableDefinition(binary, cleanupID, daemonEnv);
     });
 
     runner.finishSuccess({ profile, editID, deleteID, cleanupID, run1, run2, run3, deleteRunID });
@@ -684,23 +702,13 @@ async function main() {
     // github_review_requested definition keeps observing the mock — leaving
     // either running against a torn-down fixture would spam errors on this
     // profile forever (same defensive ordering as
-    // scenario-automation-scheduled-cleanup.mjs's finally block).
+    // scenario-automation-scheduled-cleanup.mjs's finally block). Each leg
+    // already disables its own definition at the end of its happy path; these
+    // are a defensive backstop for the case where an assertion threw first.
     if (daemonEnv) {
-      if (editApplied && editFixture && fs.existsSync(editFixture)) {
-        try {
-          run(binary, ['automation', 'disable', editID], daemonEnv);
-        } catch {}
-      }
-      if (deleteApplied && deleteFixture && fs.existsSync(deleteFixture)) {
-        try {
-          run(binary, ['automation', 'disable', deleteID], daemonEnv);
-        } catch {}
-      }
-      if (cleanupApplied && cleanupFixture) {
-        try {
-          run(binary, ['automation', 'disable', cleanupID], daemonEnv);
-        } catch {}
-      }
+      if (editApplied) { try { disableDefinition(binary, editID, daemonEnv); } catch {} }
+      if (deleteApplied) { try { disableDefinition(binary, deleteID, daemonEnv); } catch {} }
+      if (cleanupApplied) { try { disableDefinition(binary, cleanupID, daemonEnv); } catch {} }
     }
     await client.quitApp().catch(() => {});
     await observer.close().catch(() => {});

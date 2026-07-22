@@ -173,7 +173,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '180';
+export const PROTOCOL_VERSION = '181';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2857,13 +2857,22 @@ export function useDaemonSocket({
             break;
           }
 
-          // Single generic result event for the automations WS surface
-          // (definitions_get / runs_get / set_enabled / run) — see
-          // AutomationActionResultMessage's doc comment. Correlated by
-          // request_id, not action, so concurrent calls (e.g. listing runs for
-          // two different definitions) never cross-resolve; each caller wraps
-          // its own extraction of the raw payload at registration time.
-          case 'automation_action_result': {
+          // The 9 typed automations result events (one per command — see
+          // internal/protocol/schema/main.tsp's Automation*ResultMessage
+          // family and daemon/automations_actions.go). Correlated by
+          // request_id, not action/event, so concurrent calls (e.g. listing
+          // runs for two different definitions) never cross-resolve; each
+          // caller wraps its own extraction of the typed payload at
+          // registration time (see the wrapper functions below).
+          case 'automation_apply_result':
+          case 'automation_validate_result':
+          case 'automation_definitions_result':
+          case 'automation_definition_result':
+          case 'automation_runs_result':
+          case 'automation_run_result':
+          case 'automation_set_enabled_result':
+          case 'automation_delete_result':
+          case 'automation_cleanup_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') break;
             const key = `automation:${requestId}`;
@@ -5358,7 +5367,7 @@ export function useDaemonSocket({
   }, [nextRequestID]);
 
   const runAutomationNow = useCallback(
-    (definitionId: string, requestId: string): Promise<{ runId?: string; ticketId?: string; sessionId?: string }> => {
+    (definitionId: string, requestId: string): Promise<AutomationRunSummary | undefined> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5374,8 +5383,7 @@ export function useDaemonSocket({
         // same run instead of creating a duplicate.
         const key = `automation:${requestId}`;
         pendingActionsRef.current.set(key, {
-          resolve: (result: any) =>
-            resolve({ runId: result.run_id, ticketId: result.ticket_id, sessionId: result.session_id }),
+          resolve: (result: any) => resolve(result.run as AutomationRunSummary | undefined),
           reject,
         });
         ws.send(JSON.stringify({ cmd: 'automation_run', definition_id: definitionId, request_id: requestId }));
@@ -5394,10 +5402,12 @@ export function useDaemonSocket({
   );
 
   // getAutomationDefinition backs the editor's load path. definitionId '' asks
-  // for the starter template at revision 0 (the create case, D7 in the
-  // design) — create and edit share this one call.
+  // for the starter template (the create case, D7 in the design) — create and
+  // edit share this one call. The template response carries no `definition`
+  // (revision 0, unsaved); an edit's response carries the current definition
+  // summary, whose `.revision` is what the editor tracks for Save's guard.
   const getAutomationDefinition = useCallback(
-    (definitionId: string): Promise<{ specYaml: string; revision: number }> => {
+    (definitionId: string): Promise<{ specYaml: string; definition?: AutomationDefinitionSummary }> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5407,7 +5417,8 @@ export function useDaemonSocket({
         const requestId = nextRequestID('automation_definition_get');
         const key = `automation:${requestId}`;
         pendingActionsRef.current.set(key, {
-          resolve: (result: any) => resolve({ specYaml: result.spec_yaml ?? '', revision: result.revision ?? 0 }),
+          resolve: (result: any) =>
+            resolve({ specYaml: result.spec_yaml ?? '', definition: result.definition ?? undefined }),
           reject,
         });
         ws.send(
@@ -5461,13 +5472,14 @@ export function useDaemonSocket({
   // (D4) and expected_revision (D5) so the daemon can refuse an id change or a
   // stale save. expectedId is '' when creating, expectedRevision is 0 when
   // creating — matching AutomationEditor's loadedId/revision state, which
-  // start from getAutomationDefinition('')'s template response.
+  // start from getAutomationDefinition('')'s template response. The result's
+  // revision lives on `definition.revision`, not a top-level field.
   const applyAutomationDefinition = useCallback(
     (
       definitionYaml: string,
       expectedId: string,
       expectedRevision: number,
-    ): Promise<{ definition: AutomationDefinitionSummary; specYaml: string; revision: number }> => {
+    ): Promise<{ definition: AutomationDefinitionSummary; specYaml: string }> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5479,9 +5491,8 @@ export function useDaemonSocket({
         pendingActionsRef.current.set(key, {
           resolve: (result: any) =>
             resolve({
-              definition: (result.definitions ?? [])[0],
+              definition: result.definition,
               specYaml: result.spec_yaml ?? '',
-              revision: result.revision ?? 0,
             }),
           reject,
         });
