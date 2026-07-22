@@ -294,7 +294,30 @@ export async function promptClaudeForStructuredBlock(client, sessionId, token, l
   const initialPane = await waitForFirstWorkspacePane(client, sessionId, `initial pane for Claude prompt ${sessionId}`, 20_000);
   await client.request('click_pane', { sessionId, paneId: initialPane.paneId });
   await waitForPaneInputFocus(client, sessionId, initialPane.paneId, 15_000);
-  await client.request('write_pane', { sessionId, paneId: initialPane.paneId, text: `${prompt}\r`, submit: false });
+  // Claude Code treats a rapid multi-line write_pane as a paste, so a trailing \r
+  // in the same call inserts a newline instead of submitting. Write the prompt,
+  // wait a beat, then submit with a lone \r — the same doorbell pattern Codex
+  // needs mid-turn.
+  await client.request('write_pane', { sessionId, paneId: initialPane.paneId, text: prompt, submit: false });
+  await delay(500);
+  await client.request('write_pane', { sessionId, paneId: initialPane.paneId, text: '\r', submit: false });
 
-  return { prompt, expectedLines: lines, paneId: initialPane.paneId };
+  // Wait for the reply to actually render: the input box echoes the prompt (up
+  // to lineCount occurrences of token pre-submit), so only count it submitted
+  // once the token count exceeds that — the echoed user message contributes at
+  // least one more occurrence and the reply's exact lines contribute lineCount.
+  const replyTimeoutMs = 45_000;
+  const startedAt = Date.now();
+  let lastText = '';
+  while (Date.now() - startedAt < replyTimeoutMs) {
+    const pane = await client.request('read_pane_text', { sessionId, paneId: initialPane.paneId }, { timeoutMs: 20_000 });
+    lastText = pane?.text || '';
+    const occurrences = lastText.split(token).length - 1;
+    if (occurrences >= lineCount + 1) {
+      return { prompt, expectedLines: lines, paneId: initialPane.paneId };
+    }
+    await delay(1_000);
+  }
+
+  throw new Error(`Timed out waiting for Claude structured block reply for ${token} in session ${sessionId}`);
 }

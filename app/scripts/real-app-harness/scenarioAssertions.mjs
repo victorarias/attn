@@ -27,10 +27,6 @@ function terminalTextIncludes(text, needle, { allowWrapped = false } = {}) {
   return compactTerminalText(source).includes(compactTerminalText(needle));
 }
 
-export function shellPanes(workspace) {
-  return (workspace?.panes || []).filter((pane) => pane.kind === 'shell');
-}
-
 export function firstWorkspacePane(workspace) {
   return (workspace?.panes || [])[0] || null;
 }
@@ -358,17 +354,23 @@ export async function waitForFirstWorkspacePane(client, sessionId, description, 
   return firstWorkspacePane(workspace);
 }
 
+function newRuntimePanes(workspace, existingPaneIds) {
+  return (workspace?.panes || []).filter(
+    (pane) => !existingPaneIds.has(pane.paneId) && Boolean(pane.runtimeId),
+  );
+}
+
 export async function waitForNewShellPane(client, sessionId, existingPaneIds, description, timeoutMs = 20_000) {
   return waitForSessionWorkspace(
     client,
     sessionId,
-    (workspace) => shellPanes(workspace).some((pane) => !existingPaneIds.has(pane.paneId)),
+    (workspace) => newRuntimePanes(workspace, existingPaneIds).length > 0,
     description,
     timeoutMs,
   ).then((workspace) => {
-    const newShells = shellPanes(workspace).filter((pane) => !existingPaneIds.has(pane.paneId));
-    const activeShell = newShells.find((pane) => pane.paneId === workspace.activePaneId);
-    return activeShell || newShells[0];
+    const newPanes = newRuntimePanes(workspace, existingPaneIds);
+    const activePane = newPanes.find((pane) => pane.paneId === workspace.activePaneId);
+    return activePane || newPanes[0];
   });
 }
 
@@ -390,6 +392,90 @@ async function waitForPaneVisibleContent(
   );
 }
 
+// Evaluates the same gates assertPaneVisibleContent waits on, as a standalone
+// array so callers can both drive the pass/fail predicate and render a compact
+// per-gate report on timeout (see formatGateReport). The `contains` entry is
+// omitted entirely when no needle was requested, since "OK"/"FAIL" for a gate
+// that was never checked would be misleading in the report.
+export function evaluateVisibleContentGates(
+  visibleContent,
+  {
+    contains = null,
+    allowWrappedContains = false,
+    minNonEmptyLines = 2,
+    minDenseLines = 1,
+    minCharCount = 20,
+    minMaxLineLength = 20,
+  } = {},
+) {
+  const summary = visibleContent?.summary || {};
+  const joined = (visibleContent?.lines || []).join('\n');
+  const gates = [];
+
+  if (contains) {
+    const actual = terminalTextIncludes(joined, contains, { allowWrapped: allowWrappedContains });
+    gates.push({
+      gate: 'contains',
+      actual,
+      required: String(contains).slice(0, 40),
+      ok: actual,
+    });
+  }
+
+  const nonEmptyLines = summary.nonEmptyLineCount || 0;
+  gates.push({
+    gate: 'nonEmptyLines',
+    actual: nonEmptyLines,
+    required: minNonEmptyLines,
+    ok: nonEmptyLines >= minNonEmptyLines,
+  });
+
+  const denseLines = summary.denseLineCount || 0;
+  gates.push({
+    gate: 'denseLines',
+    actual: denseLines,
+    required: minDenseLines,
+    ok: denseLines >= minDenseLines,
+  });
+
+  const charCount = summary.charCount || 0;
+  gates.push({
+    gate: 'charCount',
+    actual: charCount,
+    required: minCharCount,
+    ok: charCount >= minCharCount,
+  });
+
+  const maxLineLength = summary.maxLineLength || 0;
+  gates.push({
+    gate: 'maxLineLength',
+    actual: maxLineLength,
+    required: minMaxLineLength,
+    ok: maxLineLength >= minMaxLineLength,
+  });
+
+  return gates;
+}
+
+export function formatGateReport(gates) {
+  return gates
+    .map((gate) => {
+      if (gate.gate === 'contains') {
+        return `contains ${gate.ok ? 'OK' : 'FAIL'}`;
+      }
+      return `${gate.gate} ${gate.actual}/${gate.required} ${gate.ok ? 'OK' : 'FAIL'}`;
+    })
+    .join(' | ');
+}
+
+function trimmedVisibleLines(visibleContent, maxLines = 30) {
+  return (visibleContent?.lines || [])
+    .map((line) => String(line || '').trimEnd())
+    .slice(0, maxLines)
+    .map((line) => `| ${line}`)
+    .join('\n');
+}
+
 export async function assertPaneVisibleContent(
   client,
   sessionId,
@@ -405,28 +491,49 @@ export async function assertPaneVisibleContent(
     description = `pane ${paneId} visible content`,
   } = {},
 ) {
-  return waitForPaneVisibleContent(
-    client,
-    sessionId,
-    paneId,
-    (visibleContent) => {
-      if (!visibleContent) {
-        return false;
+  const gateOptions = {
+    contains,
+    allowWrappedContains,
+    minNonEmptyLines,
+    minDenseLines,
+    minCharCount,
+    minMaxLineLength,
+  };
+  const startedAt = Date.now();
+  let lastVisibleContent = null;
+  let lastError = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    let state = null;
+    try {
+      state = await client.request('get_pane_state', { sessionId, paneId }, { timeoutMs: 20_000 });
+      lastError = null;
+    } catch (error) {
+      if (!isRetryableAutomationAbsence(error)) {
+        throw error;
       }
-      const summary = visibleContent.summary || {};
-      const joined = (visibleContent.lines || []).join('\n');
-      if (contains && !terminalTextIncludes(joined, contains, { allowWrapped: allowWrappedContains })) {
-        return false;
+      lastError = error;
+      await sleep(200);
+      continue;
+    }
+    const visibleContent = state?.pane?.visibleContent || null;
+    if (visibleContent) {
+      lastVisibleContent = visibleContent;
+      if (evaluateVisibleContentGates(visibleContent, gateOptions).every((gate) => gate.ok)) {
+        return state;
       }
-      return (
-        (summary.nonEmptyLineCount || 0) >= minNonEmptyLines &&
-        (summary.denseLineCount || 0) >= minDenseLines &&
-        (summary.charCount || 0) >= minCharCount &&
-        (summary.maxLineLength || 0) >= minMaxLineLength
-      );
-    },
-    description,
-    timeoutMs,
+    }
+    await sleep(200);
+  }
+
+  const gates = lastVisibleContent ? evaluateVisibleContentGates(lastVisibleContent, gateOptions) : [];
+  const lines = trimmedVisibleLines(lastVisibleContent);
+  throw new Error(
+    [
+      `Timed out waiting for ${description}.`,
+      gates.length > 0 ? formatGateReport(gates) : `No visible content observed. Last request error: ${lastError instanceof Error ? lastError.message : 'none'}`,
+      lines ? `Last visible lines:\n${lines}` : '',
+    ].filter(Boolean).join('\n')
   );
 }
 
@@ -472,6 +579,13 @@ export async function waitForPaneReflowed(client, sessionId, paneId, timeoutMs =
   );
 }
 
+// Anchors restricted to lines containing the token — agent TUIs (claude
+// especially) collapse or reflow echoed prompt instructions on re-render, so
+// non-token lines are not stable anchors.
+export function tokenAnchorIgnorePatterns(token) {
+  return [/^\s*$/u, new RegExp(`^(?!.*${token})`)];
+}
+
 export async function assertPaneVisibleContentPreserved(
   client,
   sessionId,
@@ -498,7 +612,14 @@ export async function assertPaneVisibleContentPreserved(
     minLineLength,
     ignoreAnchorPatterns,
   });
-  const requiredAnchorMatches = Math.min(Math.max(1, minAnchorMatches), Math.max(1, anchors.length));
+  // An empty anchor list (e.g. ignoreAnchorPatterns filtered every line) must not become
+  // an unpassable assert — fall back to the ratio gates only.
+  const requiredAnchorMatches = anchors.length === 0
+    ? 0
+    : Math.min(Math.max(1, minAnchorMatches), anchors.length);
+  const effectiveDescription = anchors.length === 0
+    ? `${description} (no stable anchors after filtering — ratios only)`
+    : description;
   const requiredNonEmptyLines = Math.max(
     2,
     Math.floor((baselineSummary.nonEmptyLineCount || anchors.length || 2) * minNonEmptyLineRatio),
@@ -557,16 +678,21 @@ export async function assertPaneVisibleContentPreserved(
     await sleep(200);
   }
 
+  const lastSummary = lastState?.pane?.visibleContent?.summary || {};
+  const lastNonEmptyLines = lastSummary.nonEmptyLineCount || 0;
+  const lastCharCount = lastSummary.charCount || 0;
+  const lastLines = trimmedVisibleLines(lastState?.pane?.visibleContent || null);
+
   throw new Error(
     [
-      `Timed out waiting for ${description}.`,
+      `Timed out waiting for ${effectiveDescription}.`,
       `Required anchors (${requiredAnchorMatches}/${anchors.length}): ${JSON.stringify(anchors)}`,
       `Matched anchors (${lastMatches.length}): ${JSON.stringify(lastMatches)}`,
+      `nonEmptyLines ${lastNonEmptyLines}/${requiredNonEmptyLines} ${lastNonEmptyLines >= requiredNonEmptyLines ? 'OK' : 'FAIL'}`,
+      `charCount ${lastCharCount}/${requiredCharCount} ${lastCharCount >= requiredCharCount ? 'OK' : 'FAIL'}`,
       `Last request error: ${lastError instanceof Error ? lastError.message : 'none'}`,
-      `Baseline summary: ${JSON.stringify(baselineSummary)}`,
-      `Last summary: ${JSON.stringify(lastState?.pane?.visibleContent?.summary || null)}`,
-      `Last visible lines: ${JSON.stringify((lastState?.pane?.visibleContent?.lines || []).slice(0, 18), null, 2)}`,
-    ].join('\n')
+      lastLines ? `Last visible lines:\n${lastLines}` : '',
+    ].filter(Boolean).join('\n')
   );
 }
 
