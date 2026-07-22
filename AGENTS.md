@@ -34,6 +34,21 @@ Run full app builds/installs outside the sandbox: code signing needs the macOS
 keychain; sandboxed identity lookup can cause ad-hoc signing and lose persistent
 permissions.
 
+### Native VT library
+
+`internal/ghosttyvt` links `libghostty-vt` (Ghostty's VT core) via cgo on
+Darwin/arm64; every other platform compiles a pure-Go stub. The static archive
+lives under gitignored `third_party/ghostty-vt/` and is built from pinned source
+by `scripts/build-libghostty-vt.sh` (source of truth; pin in
+`ghostty-vt-native.pin`). This needs **zig 0.16.x** on `PATH`.
+
+On a fresh checkout the archive is absent, so the `build` target depends on it
+and runs the script automatically on the first `make build`/`make dev`/
+`make install*` — a one-time clone + zig build of a few minutes. It rebuilds only
+when the pin or script changes; otherwise it is a no-op. If zig 0.16.x is missing
+the script fails early with the required version. See
+[docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
+
 ## Profiles and live verification
 
 - Non-production builds, installs, launches, and restarts are pre-authorized.

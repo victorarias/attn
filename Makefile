@@ -33,7 +33,29 @@ ZIG ?= zig
 # fallback; callers may override this with a pinned identity or fingerprint.
 MACOS_CODESIGN_IDENTITY ?=
 
-build:
+# Native VT library (libghostty-vt) for the server-authoritative terminal.
+# Only Darwin/arm64 links it via cgo (internal/ghosttyvt); every other platform
+# compiles the pure-Go stub and needs nothing here. The archive lives under
+# gitignored third_party/ (scripts/build-libghostty-vt.sh is the source of
+# truth), so a fresh checkout has no archive and the first cgo link would fail.
+# `build` therefore depends on the archive target on Darwin/arm64: it runs the
+# build script — which requires zig 0.16.x and clones the pinned source — when
+# the archive is missing or the pin moved, and is a no-op once it is present.
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+NATIVE_VT_LIB := third_party/ghostty-vt/lib/libghostty-vt.a
+ifeq ($(UNAME_S)/$(UNAME_M),Darwin/arm64)
+NATIVE_VT_DEP := $(NATIVE_VT_LIB)
+else
+NATIVE_VT_DEP :=
+endif
+
+# Rebuild the native archive when its pin or build script changes (or it is
+# absent). The script installs into third_party/ghostty-vt/{lib,include}.
+$(NATIVE_VT_LIB): ghostty-vt-native.pin scripts/build-libghostty-vt.sh
+	./scripts/build-libghostty-vt.sh
+
+build: $(NATIVE_VT_DEP)
 	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
 
 build-linux-amd64:
@@ -80,8 +102,6 @@ test-e2e:
 test-harness: test test-frontend test-e2e
 
 test-all: test test-frontend
-
-UNAME_S := $(shell uname -s)
 
 # Installing the PROD bundle while ATTN_PROFILE is set is almost always
 # a mistake — it blows away the live install a developer is using. The

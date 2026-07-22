@@ -18,6 +18,7 @@ package ghosttyvt
 #cgo CFLAGS: -I${SRCDIR}/../../third_party/ghostty-vt/include
 #cgo LDFLAGS: ${SRCDIR}/../../third_party/ghostty-vt/lib/libghostty-vt.a
 #cgo LDFLAGS: -framework CoreFoundation -framework CoreText -framework CoreGraphics -framework Foundation
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ghostty/vt.h>
@@ -26,10 +27,14 @@ package ghosttyvt
 // vt_write with query-response bytes (CPR, DA1, kitty CSI ? u, DECRQM…).
 extern void goWritePty(GhosttyTerminal term, void* userdata, const uint8_t* data, size_t len);
 
-// Install the userdata pointer + write_pty callback in one shot. userdata is a
-// pointer to the Terminal's cgo.Handle field (stable for the Terminal's life).
-static GhosttyResult ghosttyvt_install(GhosttyTerminal t, void* userdata) {
-	GhosttyResult rc = ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_USERDATA, userdata);
+// Install the userdata + write_pty callback in one shot. userdata is a cgo.Handle
+// VALUE (an opaque integer), passed as uintptr_t and stored by the terminal as an
+// opaque void*. Crucially this is NOT a Go pointer: C retains the handle integer,
+// never a pointer into Go's heap, so cgo's pointer-lifetime rule is satisfied even
+// though ghostty_terminal_set keeps the value past this call. The callback casts
+// the void* back to a cgo.Handle to recover the owning object.
+static GhosttyResult ghosttyvt_install(GhosttyTerminal t, uintptr_t userdata) {
+	GhosttyResult rc = ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_USERDATA, (const void*)userdata);
 	if (rc != GHOSTTY_SUCCESS) return rc;
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_WRITE_PTY, (const void*)goWritePty);
 }
@@ -114,6 +119,17 @@ type Snapshot struct {
 	ScrollbackTruncated bool
 }
 
+// respSink accumulates bytes the terminal wants written back to the pty (query
+// responses: CPR, DA1, kitty CSI ? u, DECRQM…). It is what the cgo.Handle
+// references — deliberately NOT the Terminal — so the handle does not keep the
+// Terminal reachable, and the Terminal's finalizer can still reclaim a leaked
+// one. Its own mutex guards buf; goWritePty appends (synchronously during Write)
+// and DrainResponses reads+clears, independent of the Terminal's mutex.
+type respSink struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
 // Terminal wraps a native libghostty-vt terminal. All methods are safe for
 // concurrent use; each serializes on the Terminal's mutex.
 //
@@ -122,14 +138,10 @@ type Snapshot struct {
 type Terminal struct {
 	mu     sync.Mutex
 	term   C.GhosttyTerminal
-	handle cgo.Handle // routes write_pty callbacks back to this Terminal
+	handle cgo.Handle // opaque userdata value; routes write_pty to sink
+	sink   *respSink  // referenced by handle; holds query-response bytes
 	cols   int
 	rows   int
-
-	// respBuf accumulates bytes the terminal wants written back to the pty
-	// (query responses). Appended by goWritePty synchronously during Write,
-	// under mu. Drained by DrainResponses.
-	respBuf []byte
 
 	closed bool
 }
@@ -143,7 +155,7 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 	if maxSB <= 0 {
 		maxSB = DefaultMaxScrollback
 	}
-	t := &Terminal{cols: cols, rows: rows}
+	t := &Terminal{cols: cols, rows: rows, sink: &respSink{}}
 	copts := C.GhosttyTerminalOptions{
 		cols:           C.uint16_t(cols),
 		rows:           C.uint16_t(rows),
@@ -152,8 +164,10 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 	if rc := C.ghostty_terminal_new(nil, &t.term, copts); rc != C.GHOSTTY_SUCCESS {
 		return nil, fmt.Errorf("ghosttyvt: terminal_new failed: rc=%d", int(rc))
 	}
-	t.handle = cgo.NewHandle(t)
-	if rc := C.ghosttyvt_install(t.term, unsafe.Pointer(&t.handle)); rc != C.GHOSTTY_SUCCESS {
+	// The handle references the sink (not t), and is handed to C as an opaque
+	// integer value — never a Go pointer — so C may retain it indefinitely.
+	t.handle = cgo.NewHandle(t.sink)
+	if rc := C.ghosttyvt_install(t.term, C.uintptr_t(t.handle)); rc != C.GHOSTTY_SUCCESS {
 		C.ghostty_terminal_free(t.term)
 		t.handle.Delete()
 		return nil, fmt.Errorf("ghosttyvt: install callbacks failed: rc=%d", int(rc))
@@ -193,15 +207,17 @@ func (t *Terminal) Resize(cols, rows int) {
 }
 
 // DrainResponses returns and clears the bytes the terminal wants written back
-// to the pty (query responses accumulated since the last drain).
+// to the pty (query responses accumulated since the last drain). It reads the
+// sink under the sink's own lock, independent of the Terminal mutex.
 func (t *Terminal) DrainResponses() []byte {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if len(t.respBuf) == 0 {
+	s := t.sink
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.buf) == 0 {
 		return nil
 	}
-	out := t.respBuf
-	t.respBuf = nil
+	out := s.buf
+	s.buf = nil
 	return out
 }
 
