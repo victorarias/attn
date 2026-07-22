@@ -4253,6 +4253,10 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"headless context cap below min", "headless_context_window_cap", "1", true},
 		{"valid chief_effort_claude", "chief_effort_claude", "high", false},
 		{"empty chief_effort_claude", "chief_effort_claude", "", false},
+		{"valid default_model_claude", "default_model_claude", "opus", false},
+		{"empty default_model_claude", "default_model_claude", "", false},
+		{"valid default_effort_claude", "default_effort_claude", "high", false},
+		{"empty default_effort_claude", "default_effort_claude", "", false},
 	}
 
 	for _, tt := range tests {
@@ -4289,6 +4293,73 @@ func TestDaemon_ContextWindowCapResolutionAndGating(t *testing.T) {
 	d.store.SetSetting(SettingChiefContextWindowCap, "160000")
 	if got := d.chiefContextWindowCap(true); got != 160000 {
 		t.Fatalf("chief cap = %d, want 160000", got)
+	}
+}
+
+func TestDaemon_DefaultLaunchModelAndEffort(t *testing.T) {
+	d := &Daemon{store: store.New()}
+
+	// Unset => "" (the agent's own default), regardless of chief status.
+	if got := d.defaultLaunchModel("claude"); got != "" {
+		t.Fatalf("default model with no setting = %q, want \"\"", got)
+	}
+	if got := d.defaultLaunchEffort("claude"); got != "" {
+		t.Fatalf("default effort with no setting = %q, want \"\"", got)
+	}
+
+	d.store.SetSetting(SettingDefaultModelPrefix+"claude", "opus")
+	d.store.SetSetting(SettingDefaultEffortPrefix+"claude", "high")
+
+	// Applies to non-chief AND chief launches alike, unlike chiefLaunchModel.
+	if got := d.defaultLaunchModel("claude"); got != "opus" {
+		t.Fatalf("default model = %q, want %q", got, "opus")
+	}
+	if got := d.defaultLaunchEffort("claude"); got != "high" {
+		t.Fatalf("default effort = %q, want %q", got, "high")
+	}
+
+	// Agent name is normalized (trimmed and lowercased) before the lookup.
+	if got := d.defaultLaunchModel(" Claude "); got != "opus" {
+		t.Fatalf("default model with unnormalized agent = %q, want %q", got, "opus")
+	}
+}
+
+func TestDaemon_ResolveLaunchModelAndEffort(t *testing.T) {
+	d := &Daemon{store: store.New()}
+	d.store.SetSetting(SettingChiefModelPrefix+"claude", "opus")
+	d.store.SetSetting(SettingChiefEffortPrefix+"claude", "max")
+	d.store.SetSetting(SettingDefaultModelPrefix+"claude", "sonnet")
+	d.store.SetSetting(SettingDefaultEffortPrefix+"claude", "medium")
+
+	// 1. An explicit per-spawn pin always wins, chief or not.
+	if got := d.resolveLaunchModel("claude", false, "haiku"); got != "haiku" {
+		t.Fatalf("explicit pin (non-chief) = %q, want %q", got, "haiku")
+	}
+	if got := d.resolveLaunchModel("claude", true, "haiku"); got != "haiku" {
+		t.Fatalf("explicit pin (chief) = %q, want %q", got, "haiku")
+	}
+
+	// 2. No pin, chief launch: chief_model_<agent> wins over default_model_<agent>.
+	if got := d.resolveLaunchModel("claude", true, ""); got != "opus" {
+		t.Fatalf("chief resolve = %q, want chief override %q", got, "opus")
+	}
+	if got := d.resolveLaunchEffort("claude", true, ""); got != "max" {
+		t.Fatalf("chief resolve effort = %q, want chief override %q", got, "max")
+	}
+
+	// 3. No pin, non-chief launch: falls through to default_model_<agent> (the
+	// new configurable fallback that previously did not exist for non-chief
+	// launches).
+	if got := d.resolveLaunchModel("claude", false, ""); got != "sonnet" {
+		t.Fatalf("non-chief resolve = %q, want default %q", got, "sonnet")
+	}
+	if got := d.resolveLaunchEffort("claude", false, ""); got != "medium" {
+		t.Fatalf("non-chief resolve effort = %q, want default %q", got, "medium")
+	}
+
+	// 4. No pin, no settings at all for an agent: agent's own default (empty).
+	if got := d.resolveLaunchModel("codex", false, ""); got != "" {
+		t.Fatalf("no-setting resolve = %q, want \"\"", got)
 	}
 }
 
