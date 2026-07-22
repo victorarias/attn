@@ -34,11 +34,6 @@ import {
   tokenAnchorIgnorePatterns,
 } from './scenarioAssertions.mjs';
 import {
-  ensureClaudeInitialPanePromptReady,
-  ensureCodexInitialPanePromptReady,
-  promptClaudeForStructuredBlock,
-} from './scenarioAgents.mjs';
-import {
   buildRemoteHarnessPaths,
   cleanupRemoteHarnessProcesses,
   chooseRemoteWSPort,
@@ -68,7 +63,7 @@ function parseArgs(argv) {
     ...parseCommonArgs([]),
     sshTarget: process.env.ATTN_REMOTE_RELAUNCH_CLOSE_REDRAW_SSH_TARGET || DEFAULT_REMOTE_SSH_TARGET,
     remoteDirectory: process.env.ATTN_REMOTE_RELAUNCH_CLOSE_REDRAW_REMOTE_DIRECTORY || '',
-    remoteAgent: process.env.ATTN_REMOTE_RELAUNCH_CLOSE_REDRAW_REMOTE_AGENT || 'codex',
+    remoteAgent: process.env.ATTN_REMOTE_RELAUNCH_CLOSE_REDRAW_REMOTE_AGENT || 'probe:codex',
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -101,34 +96,16 @@ function minRecoveredWidth(previousWidth) {
   return Math.floor(previousWidth * 1.18);
 }
 
-function buildTranscriptAnchorPrompt(token, lineCount = 4) {
-  return Array.from({ length: lineCount }, (_, index) =>
-    `${token} line ${index + 1} width repaint recovery anchor payload ${index + 1} for relaunch close redraw verification`
-  ).join('\n');
-}
-
-async function seedTranscriptAnchor(client, sessionId, paneId, anchorPrompt, anchorToken) {
-  await client.request('select_session', { sessionId });
-  await client.request('write_pane', { sessionId, paneId, text: anchorPrompt });
-  await waitForPaneText(
-    client,
-    sessionId,
-    paneId,
-    (text) => text.includes(anchorToken),
-    `initial pane transcript anchor ${anchorToken}`,
-    30_000,
-  );
-}
-
 const PROBE_AGENT_PREFIX = 'probe:';
 
 // `--remote-agent probe:codex` / `probe:claude` select the deterministic
-// `attn _probe-tui` fixture instead of a live agent. Returns null for any
-// other --remote-agent value (the real-agent path is unaffected).
+// `attn _probe-tui` fixture — the only agents this scenario drives. The
+// login-dependent live-agent legs were removed (they needed credentials
+// seeded in the VM and could never run unattended); anything else is an error.
 function parseProbeStyle(remoteAgent) {
   const raw = String(remoteAgent || '');
   if (!raw.startsWith(PROBE_AGENT_PREFIX)) {
-    return null;
+    throw new Error(`--remote-agent must be probe:codex or probe:claude (got '${remoteAgent}')`);
   }
   const style = raw.slice(PROBE_AGENT_PREFIX.length).trim().toLowerCase();
   if (style !== 'codex' && style !== 'claude') {
@@ -225,11 +202,10 @@ async function waitForProbeBannerAtGrid(client, sessionId, paneId, style, timeou
   );
 }
 
-// Probe-mode counterpart to prepareRemoteAgentBaseline: the session is spawned
-// with agent 'shell' (not the probe style), so the initial pane is a plain
-// shell. Launch the probe TUI in it and wait for its readiness banner — the
-// probe reads no input, so there is no transcript-anchor prompt to seed; the
-// banner itself is the anchor for the rest of the scenario.
+// The session is spawned with agent 'shell' (not the probe style), so the
+// initial pane is a plain shell. Launch the probe TUI in it and wait for its
+// readiness banner — the probe reads no input, so there is no transcript-anchor
+// prompt to seed; the banner itself is the anchor for the rest of the scenario.
 async function prepareRemoteProbeBaseline(client, sessionId, style) {
   await client.request('select_session', { sessionId });
   const initialPane = await waitForFirstWorkspacePane(client, sessionId, `initial pane for probe session ${sessionId}`, 30_000);
@@ -254,27 +230,12 @@ async function prepareRemoteProbeBaseline(client, sessionId, style) {
     `probe TUI ready banner (style=${style}) in pane ${paneId}`,
     45_000,
   );
-  // Stable across seq and relaunch — unlike the real-agent transcript anchor,
-  // this text never scrolls out or gets collapsed by agent redraw behavior.
-  // Just the geometry row's fixed prefix: the style row can itself truncate
-  // in very narrow panes, so it must not be the anchor other assertions key
-  // off of (see probeBannerReadyMatchers / bannerStyleRow).
+  // Stable across seq and relaunch — this text never scrolls out or gets
+  // collapsed by redraw behavior. Just the geometry row's fixed prefix: the
+  // style row can itself truncate in very narrow panes, so it must not be the
+  // anchor other assertions key off of (see probeBannerReadyMatchers /
+  // bannerStyleRow).
   return { paneId, requiredVisibleText: 'ATTN-PROBE' };
-}
-
-async function prepareRemoteAgentBaseline(client, runner, sessionId, remoteAgent, transcriptAnchorToken, transcriptAnchorPrompt) {
-  const agent = String(remoteAgent || 'codex').toLowerCase();
-  if (agent === 'claude') {
-    const readiness = await ensureClaudeInitialPanePromptReady(client, sessionId, 45_000);
-    const fixture = await promptClaudeForStructuredBlock(client, sessionId, transcriptAnchorToken, 4);
-    runner.writeJson('agent-fixture.json', fixture);
-    return { paneId: fixture.paneId || readiness.paneId, requiredVisibleText: transcriptAnchorToken };
-  }
-
-  const readiness = await ensureCodexInitialPanePromptReady(client, sessionId, 45_000);
-  const paneId = readiness.paneId || (await waitForFirstWorkspacePane(client, sessionId, 'remote Codex initial pane', 30_000)).paneId;
-  await seedTranscriptAnchor(client, sessionId, paneId, transcriptAnchorPrompt, transcriptAnchorToken);
-  return { paneId, requiredVisibleText: transcriptAnchorToken };
 }
 
 // Best-effort settle: waits until two consecutive pane snapshots render the same
@@ -310,9 +271,9 @@ async function captureInitialPaneHealthyState(client, runner, sessionId, paneId,
     description: `${descriptionBase} visible content`,
   });
   if (probeStyle) {
-    // Probe mode only: verify the banner has repainted at the pane's current
-    // grid, not just that dense content is present (ground truth on top of
-    // the density heuristic above).
+    // Verify the banner has repainted at the pane's current grid, not just that
+    // dense content is present (ground truth on top of the density heuristic
+    // above).
     await waitForProbeBannerAtGrid(client, sessionId, paneId, probeStyle, 30_000);
   }
   await assertPaneCoverage(client, sessionId, paneId, {
@@ -356,17 +317,12 @@ async function closePaneAndAssertRecovery({
   sessionId,
   initialPaneId,
   paneId,
-  baselineVisibleContent,
   baselineNativeMetrics,
   previousInitialPaneWidth,
   minPaneCountAfterClose,
   label,
-  minNonEmptyLineRatio = 0.7,
-  minCharCountRatio = 0.55,
-  minAnchorMatches = 2,
   enforceNativeStability = true,
   requiredVisibleText = null,
-  preserveVisibleContent = true,
   probeStyle = null,
 }) {
   await client.request('select_session', { sessionId });
@@ -389,33 +345,12 @@ async function closePaneAndAssertRecovery({
     `${label} initial pane width recovery`,
     20_000,
   );
-  // Probe mode skips line-anchor preservation: every probe row encodes the
+  // Line-anchor preservation is skipped here: every probe row encodes the
   // current geometry/frame seq (by design), so baseline lines from a different
-  // grid can never match. The waitForProbeBannerAtGrid call below is the
-  // probe-mode replacement — it proves a fresh repaint at the recovered grid,
-  // which is strictly stronger evidence of redraw recovery than stale-line
-  // matching.
-  if (preserveVisibleContent && !probeStyle) {
-    await assertPaneVisibleContentPreserved(
-      client,
-      sessionId,
-      initialPaneId,
-      baselineVisibleContent,
-      {
-        minNonEmptyLineRatio,
-        minCharCountRatio,
-        minAnchorMatches,
-        // Anchor only on token lines (claude echo/reflow flake). Safe here because every
-        // call site in this file passes requiredVisibleText === transcriptAnchorToken, and
-        // baselineVisibleContent is always the return value of a prior
-        // captureInitialPaneHealthyState/closePaneAndAssertRecovery call that itself asserted
-        // contains: transcriptAnchorToken before its state was captured.
-        ignoreAnchorPatterns: requiredVisibleText ? tokenAnchorIgnorePatterns(requiredVisibleText) : undefined,
-        timeoutMs: 20_000,
-        description: `${label} initial pane content recovery`,
-      },
-    );
-  }
+  // grid can never match after a pane close widens the initial pane. The
+  // waitForProbeBannerAtGrid call below is the replacement — it proves a fresh
+  // repaint at the recovered grid, which is strictly stronger evidence of
+  // redraw recovery than stale-line matching.
   const anchorState = requiredVisibleText
     ? await assertPaneVisibleContent(client, sessionId, initialPaneId, {
         contains: requiredVisibleText,
@@ -429,8 +364,8 @@ async function closePaneAndAssertRecovery({
       })
     : null;
   if (probeStyle) {
-    // Probe mode only: same ground-truth grid check as
-    // captureInitialPaneHealthyState, applied at this close/recovery point.
+    // Same ground-truth grid check as captureInitialPaneHealthyState, applied
+    // at this close/recovery point.
     await waitForProbeBannerAtGrid(client, sessionId, initialPaneId, probeStyle, 20_000);
   }
   await assertPaneCoverage(client, sessionId, initialPaneId, {
@@ -493,22 +428,21 @@ async function main() {
     console.log(`Additional options:
   --ssh-target <target>          SSH target for the remote endpoint (default: attn-remote@orb — the provisioned OrbStack VM)
   --remote-directory <path>      Remote cwd for the spawned session (default: remote $HOME)
-  --remote-agent <agent>         Agent for the remote session (default: codex). Also accepts
-                                  probe:codex / probe:claude to run the deterministic
-                                  'attn _probe-tui' fixture instead of a live agent.
+  --remote-agent <agent>         Probe style for the remote session: probe:codex (default)
+                                  or probe:claude. Runs the deterministic
+                                  'attn _probe-tui' fixture on the remote.
 `);
     return;
   }
 
   const probeStyle = parseProbeStyle(options.remoteAgent);
-  const isProbeMode = probeStyle !== null;
-  // Probe mode spawns a plain shell — the scenario types the probe TUI
-  // command into it itself, rather than asking the daemon to launch an agent.
-  const spawnAgent = isProbeMode ? 'shell' : options.remoteAgent;
+  // The scenario spawns a plain shell and types the probe TUI command into it
+  // itself, rather than asking the daemon to launch an agent.
+  const spawnAgent = 'shell';
 
   const runner = createScenarioRunner(options, {
     scenarioId: 'TR-205',
-    tier: isProbeMode ? 'tier3-remote-probe' : 'tier3-remote-real-agent',
+    tier: 'tier3-remote-probe',
     prefix: 'scenario-tr205-remote-relaunch-close-redraw',
     metadata: {
       sshTarget: options.sshTarget,
@@ -543,13 +477,10 @@ async function main() {
   let initialSplitMainState = null;
   let restoredMainState = null;
   let finalMainState = null;
-  const transcriptAnchorToken = `TR205ANCHOR${Date.now()}`;
-  const transcriptAnchorPrompt = buildTranscriptAnchorPrompt(transcriptAnchorToken, 4);
   // The stable anchor text used for redraw/recovery assertions throughout the
-  // rest of the run: transcriptAnchorToken for real agents, or the probe's
-  // ready banner (set once prepareRemoteProbeBaseline/prepareRemoteAgentBaseline
-  // returns) in probe mode.
-  let anchorText = transcriptAnchorToken;
+  // rest of the run: the probe's ready banner prefix, set once
+  // prepareRemoteProbeBaseline returns.
+  let anchorText = null;
   let cleanupStarted = false;
 
   const runFinalCleanup = async () => {
@@ -629,16 +560,7 @@ async function main() {
 
     await runner.step('capture_baseline_initial_pane', async () => {
       await client.request('select_session', { sessionId });
-      const baseline = isProbeMode
-        ? await prepareRemoteProbeBaseline(client, sessionId, probeStyle)
-        : await prepareRemoteAgentBaseline(
-            client,
-            runner,
-            sessionId,
-            options.remoteAgent,
-            transcriptAnchorToken,
-            transcriptAnchorPrompt,
-          );
+      const baseline = await prepareRemoteProbeBaseline(client, sessionId, probeStyle);
       initialPaneId = baseline.paneId;
       anchorText = baseline.requiredVisibleText;
       baselineMainState = await captureInitialPaneHealthyState(
@@ -649,7 +571,7 @@ async function main() {
         '01-baseline-initial-pane',
         'baseline initial pane before relaunch-close scenario',
         anchorText,
-        isProbeMode ? probeStyle : null,
+        probeStyle,
       );
       await captureSessionArtifacts(client, runner.runDir, '01-baseline', sessionId);
     });
@@ -683,9 +605,7 @@ async function main() {
         timeoutMs: 20_000,
         description: 'initial pane transcript anchor preserved after initial split before relaunch',
       });
-      if (isProbeMode) {
-        await waitForProbeBannerAtGrid(client, sessionId, initialPaneId, probeStyle, 20_000);
-      }
+      await waitForProbeBannerAtGrid(client, sessionId, initialPaneId, probeStyle, 20_000);
       // Settle the agent TUI before capturing the baseline the post-relaunch
       // redraw is compared against — capturing mid-stream picks anchors from a
       // transient frame that legitimately no longer exists after relaunch.
@@ -698,7 +618,7 @@ async function main() {
         '02-after-initial-split-initial-pane',
         'initial pane after initial split before relaunch',
         anchorText,
-        isProbeMode ? probeStyle : null,
+        probeStyle,
       );
       await captureSessionArtifacts(client, runner.runDir, '02-after-initial-split', sessionId);
       return newPane?.paneId || null;
@@ -717,7 +637,7 @@ async function main() {
         '03-post-relaunch-initial-pane',
         'restored initial pane after relaunch',
         anchorText,
-        isProbeMode ? probeStyle : null,
+        probeStyle,
       );
       await assertPaneVisibleContentPreserved(
         client,
@@ -769,9 +689,7 @@ async function main() {
         timeoutMs: 20_000,
         description: 'initial pane transcript anchor preserved after relaunch split from initial pane',
       });
-      if (isProbeMode) {
-        await waitForProbeBannerAtGrid(client, sessionId, initialPaneId, probeStyle, 20_000);
-      }
+      await waitForProbeBannerAtGrid(client, sessionId, initialPaneId, probeStyle, 20_000);
       await captureSessionArtifacts(client, runner.runDir, '04-after-initial-pane-split', sessionId);
       return newPane?.paneId || null;
     });
@@ -807,17 +725,13 @@ async function main() {
         sessionId,
         initialPaneId,
         paneId: postRelaunchShellSplitPaneId,
-        baselineVisibleContent: restoredMainState?.state?.pane?.visibleContent || null,
         baselineNativeMetrics: null,
         previousInitialPaneWidth,
         minPaneCountAfterClose: 3,
         label: '06-after-closing-shell-split',
-        minNonEmptyLineRatio: 0.45,
-        minCharCountRatio: 0.35,
-        minAnchorMatches: 1,
         enforceNativeStability: false,
         requiredVisibleText: anchorText,
-        probeStyle: isProbeMode ? probeStyle : null,
+        probeStyle,
       });
       previousInitialPaneWidth = firstRecovered?.state?.pane?.bounds?.width ?? firstRecovered?.widthState?.pane?.bounds?.width ?? previousInitialPaneWidth;
       await captureSessionArtifacts(client, runner.runDir, '06-after-closing-shell-split', sessionId);
@@ -828,17 +742,13 @@ async function main() {
         sessionId,
         initialPaneId,
         paneId: postRelaunchMainSplitPaneId,
-        baselineVisibleContent: firstRecovered?.state?.pane?.visibleContent || restoredMainState?.state?.pane?.visibleContent || null,
         baselineNativeMetrics: firstRecovered?.nativeMetrics || restoredMainState?.nativeMetrics || null,
         previousInitialPaneWidth,
         minPaneCountAfterClose: 2,
         label: '07-after-closing-initial-pane-split',
-        minNonEmptyLineRatio: 0.7,
-        minCharCountRatio: 0.55,
-        minAnchorMatches: 2,
         enforceNativeStability: true,
         requiredVisibleText: anchorText,
-        probeStyle: isProbeMode ? probeStyle : null,
+        probeStyle,
       });
       previousInitialPaneWidth = secondRecovered?.state?.pane?.bounds?.width ?? secondRecovered?.widthState?.pane?.bounds?.width ?? previousInitialPaneWidth;
       await captureSessionArtifacts(client, runner.runDir, '07-after-closing-initial-pane-split', sessionId);
@@ -849,24 +759,13 @@ async function main() {
         sessionId,
         initialPaneId,
         paneId: initialShellPaneId,
-        baselineVisibleContent:
-          options.remoteAgent === 'claude'
-            ? (baselineMainState?.state?.pane?.visibleContent || null)
-            : (secondRecovered?.state?.pane?.visibleContent || baselineMainState?.state?.pane?.visibleContent || null),
-        baselineNativeMetrics:
-          options.remoteAgent === 'claude'
-            ? (baselineMainState?.nativeMetrics || null)
-            : (secondRecovered?.nativeMetrics || baselineMainState?.nativeMetrics || null),
+        baselineNativeMetrics: secondRecovered?.nativeMetrics || baselineMainState?.nativeMetrics || null,
         previousInitialPaneWidth,
         minPaneCountAfterClose: 1,
         label: '08-after-closing-initial-split',
-        minNonEmptyLineRatio: 0.75,
-        minCharCountRatio: 0.6,
-        minAnchorMatches: 3,
         enforceNativeStability: true,
         requiredVisibleText: anchorText,
-        preserveVisibleContent: options.remoteAgent !== 'claude',
-        probeStyle: isProbeMode ? probeStyle : null,
+        probeStyle,
       });
       await captureSessionArtifacts(client, runner.runDir, '08-after-closing-initial-split', sessionId);
     });
@@ -878,7 +777,6 @@ async function main() {
       sshTarget: options.sshTarget,
       remoteDirectory,
       remoteAgent: options.remoteAgent,
-      transcriptAnchorToken,
       anchorText,
       probeStyle,
       panes: {
@@ -918,7 +816,6 @@ async function main() {
         postRelaunchMainSplitPaneId,
         postRelaunchShellSplitPaneId,
       },
-      transcriptAnchorToken,
       widths: {
         baselineMainWidth: baselineMainState?.state?.pane?.bounds?.width ?? null,
         restoredMainWidth: restoredMainState?.state?.pane?.bounds?.width ?? null,
