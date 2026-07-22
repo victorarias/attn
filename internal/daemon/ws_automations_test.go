@@ -7,10 +7,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/automation"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -518,6 +520,14 @@ location: {type: directory, path: "%s"}
 				if applyRes.Error == nil || !strings.Contains(*applyRes.Error, tc.wantErr) {
 					t.Fatalf("apply error = %v, want to contain %q", applyRes.Error, tc.wantErr)
 				}
+				// Every refusal in this corpus is a validateAutomationSpec
+				// failure (bad parse or an agent/driver check inside it), so
+				// each must carry the "validation" error_code the WS form
+				// uses to route the failure — none of these are the
+				// identity/revision guards, which are asserted separately.
+				if applyRes.ErrorCode == nil || *applyRes.ErrorCode != "validation" {
+					t.Fatalf("apply error_code = %v, want %q", applyRes.ErrorCode, "validation")
+				}
 			}
 		})
 	}
@@ -588,6 +598,9 @@ func TestAutomationApplyWSRefusesIDMismatch(t *testing.T) {
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "does not match the definition being edited") {
 		t.Fatalf("apply result = %+v, want success=false with an id-mismatch error", res)
 	}
+	if res.ErrorCode == nil || *res.ErrorCode != "id_mismatch" {
+		t.Fatalf("apply result error_code = %v, want %q", res.ErrorCode, "id_mismatch")
+	}
 
 	// The original definition must be untouched, and no second definition
 	// created under the renamed id.
@@ -632,6 +645,9 @@ func TestAutomationApplyWSRefusesCreateOverLiveDefinition(t *testing.T) {
 	readNotebookWSEvent(t, client.send, &res)
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "already exists") {
 		t.Fatalf("apply result = %+v, want success=false with an already-exists error", res)
+	}
+	if res.ErrorCode == nil || *res.ErrorCode != "id_collision" {
+		t.Fatalf("apply result error_code = %v, want %q", res.ErrorCode, "id_collision")
 	}
 	survivor, err := s.GetAutomationDefinition(original.ID)
 	if err != nil || survivor == nil {
@@ -698,6 +714,9 @@ func TestAutomationApplyWSRefusesStaleRevision(t *testing.T) {
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "changed elsewhere") {
 		t.Fatalf("apply result = %+v, want success=false with a changed-elsewhere error", res)
 	}
+	if res.ErrorCode == nil || *res.ErrorCode != "revision_conflict" {
+		t.Fatalf("apply result error_code = %v, want %q", res.ErrorCode, "revision_conflict")
+	}
 
 	stored, err := s.GetAutomationDefinition(original.ID)
 	if err != nil || stored == nil || stored.Name != "Manual check (renamed elsewhere)" {
@@ -744,6 +763,9 @@ func TestAutomationApplyWSRefusesEditOfDeletedDefinition(t *testing.T) {
 	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "deleted") || !strings.Contains(*res.Error, "New") {
 		t.Fatalf("apply result = %+v, want success=false with an error naming the deletion and pointing at New", res)
 	}
+	if res.ErrorCode == nil || *res.ErrorCode != "deleted_elsewhere" {
+		t.Fatalf("apply result error_code = %v, want %q", res.ErrorCode, "deleted_elsewhere")
+	}
 
 	// The definition must remain deleted, not resurrected.
 	if live, err := s.GetAutomationDefinition(original.ID); err != nil || live != nil {
@@ -784,6 +806,16 @@ func TestAutomationDefinitionGetWSStarterTemplate(t *testing.T) {
 	}
 	if !strings.Contains(*res.SpecYaml, "id: my-automation") {
 		t.Fatalf("starter template spec_yaml = %q, want the StarterDefinition placeholder", *res.SpecYaml)
+	}
+	if res.SpecJson == nil {
+		t.Fatalf("starter template result spec_json = nil, want the StarterDefinition encoded as JSON")
+	}
+	var starterSpec automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(*res.SpecJson), &starterSpec); err != nil {
+		t.Fatalf("starter template spec_json = %q, want valid JSON: %v", *res.SpecJson, err)
+	}
+	if !reflect.DeepEqual(starterSpec, automation.StarterDefinition) {
+		t.Fatalf("starter template spec_json decodes to %#v, want automation.StarterDefinition %#v", starterSpec, automation.StarterDefinition)
 	}
 }
 
@@ -848,12 +880,26 @@ func TestAutomationDefinitionGetWSAfterToggleDerivesFromSpecJSON(t *testing.T) {
 	})
 	var getRes protocol.AutomationDefinitionResultMessage
 	readNotebookWSEvent(t, getClient.send, &getRes)
-	if !getRes.Success || getRes.SpecYaml == nil || getRes.Definition == nil {
-		t.Fatalf("definition_get after toggle = %+v, want success with spec_yaml and definition set", getRes)
+	if !getRes.Success || getRes.SpecYaml == nil || getRes.Definition == nil || getRes.SpecJson == nil {
+		t.Fatalf("definition_get after toggle = %+v, want success with spec_yaml, spec_json, and definition set", getRes)
 	}
 	fetched := *getRes.SpecYaml
 	if strings.Contains(fetched, "enabled:") {
 		t.Fatalf("derived spec_yaml must never carry an enabled key:\n%s", fetched)
+	}
+
+	// spec_json must be the same canonical bytes the store persisted for this
+	// definition, decoding to the spec that was applied — the app form edits
+	// this JSON directly and never parses spec_yaml.
+	var fromWire, stored automation.DefinitionSpec
+	if err := json.Unmarshal([]byte(*getRes.SpecJson), &fromWire); err != nil {
+		t.Fatalf("definition_get spec_json = %q, want valid JSON: %v", *getRes.SpecJson, err)
+	}
+	if err := json.Unmarshal([]byte(def.SpecJSON), &stored); err != nil {
+		t.Fatalf("stored spec_json = %q, want valid JSON: %v", def.SpecJSON, err)
+	}
+	if !reflect.DeepEqual(fromWire, stored) {
+		t.Fatalf("definition_get spec_json decodes to %#v, want the stored spec %#v", fromWire, stored)
 	}
 
 	applyClient := &wsClient{send: make(chan outboundMessage, 4)}

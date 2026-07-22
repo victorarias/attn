@@ -494,6 +494,7 @@ export enum AutomationApplyMessageCmd {
 export interface AutomationApplyResultMessage {
     definition?: Items;
     error?:      string;
+    error_code?: string;
     event:       AutomationApplyResultMessageEvent;
     request_id?: string;
     spec_yaml?:  string;
@@ -576,6 +577,7 @@ export interface AutomationDefinitionResultMessage {
     error?:      string;
     event:       AutomationDefinitionResultMessageEvent;
     request_id?: string;
+    spec_json?:  string;
     spec_yaml?:  string;
     success:     boolean;
     [property: string]: any;
@@ -8764,6 +8766,7 @@ const typeMap: any = {
     "AutomationApplyResultMessage": o([
         { json: "definition", js: "definition", typ: u(undefined, r("Items")) },
         { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "error_code", js: "error_code", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("AutomationApplyResultMessageEvent") },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "spec_yaml", js: "spec_yaml", typ: u(undefined, "") },
@@ -8818,6 +8821,7 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("AutomationDefinitionResultMessageEvent") },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
+        { json: "spec_json", js: "spec_json", typ: u(undefined, "") },
         { json: "spec_yaml", js: "spec_yaml", typ: u(undefined, "") },
         { json: "success", js: "success", typ: true },
     ], "any"),

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -84,8 +85,14 @@ func (d *Daemon) actionAutomationDefinitionGet(msg *protocol.AutomationDefinitio
 			result.Error = protocol.Ptr(err.Error())
 			return result
 		}
+		starterJSON, err := json.Marshal(automation.StarterDefinition)
+		if err != nil {
+			result.Error = protocol.Ptr(err.Error())
+			return result
+		}
 		result.Success = true
 		result.SpecYaml = protocol.Ptr(string(template))
+		result.SpecJson = protocol.Ptr(string(starterJSON))
 		return result
 	}
 	definition, err := d.store.GetAutomationDefinition(msg.DefinitionID)
@@ -104,6 +111,7 @@ func (d *Daemon) actionAutomationDefinitionGet(msg *protocol.AutomationDefinitio
 	}
 	result.Success = true
 	result.SpecYaml = protocol.Ptr(specYAML)
+	result.SpecJson = protocol.Ptr(definition.SpecJSON)
 	summary := d.buildAutomationDefinitionSummary(*definition, nil)
 	result.Definition = &summary
 	return result
@@ -162,6 +170,10 @@ func (d *Daemon) actionAutomationApply(ctx context.Context, msg *protocol.Automa
 	definition, err := d.automationApplyWithGuards(ctx, msg.DefinitionYaml, msg.ExpectedID, msg.ExpectedRevision)
 	if err != nil {
 		result.Error = protocol.Ptr(err.Error())
+		var refusal *automationRefusal
+		if errors.As(err, &refusal) {
+			result.ErrorCode = protocol.Ptr(refusal.Code)
+		}
 		return result
 	}
 	result.Success = true

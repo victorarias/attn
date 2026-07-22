@@ -143,6 +143,9 @@ type AutomationApplyResultMessage struct {
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
+	// ErrorCode corresponds to the JSON schema field "error_code".
+	ErrorCode *string `json:"error_code,omitempty,omitzero"`
+
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
@@ -213,6 +216,9 @@ type AutomationDefinitionResultMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// SpecJson corresponds to the JSON schema field "spec_json".
+	SpecJson *string `json:"spec_json,omitempty,omitzero"`
 
 	// SpecYaml corresponds to the JSON schema field "spec_yaml".
 	SpecYaml *string `json:"spec_yaml,omitempty,omitzero"`

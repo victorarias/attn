@@ -13,6 +13,25 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
+// automationRefusal tags an apply refusal with the machine-readable
+// error_code the WS form uses to route the failure (banner vs. field).
+// Unknown/transient errors are deliberately not tagged.
+type automationRefusal struct {
+	Code string
+	Err  error
+}
+
+func (r *automationRefusal) Error() string { return r.Err.Error() }
+func (r *automationRefusal) Unwrap() error { return r.Err }
+
+const (
+	automationErrCodeRevisionConflict = "revision_conflict"
+	automationErrCodeIDCollision      = "id_collision"
+	automationErrCodeDeletedElsewhere = "deleted_elsewhere"
+	automationErrCodeIDMismatch       = "id_mismatch"
+	automationErrCodeValidation       = "validation"
+)
+
 // defaultWSAutomationMutationTimeout is the fallback for
 // Daemon.wsAutomationMutationTimeout (see wsAutomationMutationTimeoutDuration).
 // 25s is deliberately strictly inside the frontend's 30s client timeout
@@ -106,10 +125,10 @@ func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error
 func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw string, expectedID *string, expectedRevision *int) (*store.AutomationDefinition, error) {
 	spec, canonical, err := d.validateAutomationSpec(raw)
 	if err != nil {
-		return nil, err
+		return nil, &automationRefusal{Code: automationErrCodeValidation, Err: err}
 	}
 	if expectedID != nil && *expectedID != "" && spec.ID != *expectedID {
-		return nil, fmt.Errorf("definition id %q in the YAML does not match the definition being edited (%q) — apply is keyed on the id inside the YAML, so an id change must be made as a separate create", spec.ID, *expectedID)
+		return nil, &automationRefusal{Code: automationErrCodeIDMismatch, Err: fmt.Errorf("definition id %q in the YAML does not match the definition being edited (%q) — apply is keyed on the id inside the YAML, so an id change must be made as a separate create", spec.ID, *expectedID)}
 	}
 	guard := func(existing *store.AutomationDefinition) error {
 		if expectedRevision == nil {
@@ -133,12 +152,12 @@ func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw string, expe
 			// list only shows live definitions, so the user cannot be
 			// overwriting anything they can see.
 			if existing != nil && existing.DeletedAt == nil {
-				return fmt.Errorf("an automation with id %q already exists — edit it instead of creating a second one", spec.ID)
+				return &automationRefusal{Code: automationErrCodeIDCollision, Err: fmt.Errorf("an automation with id %q already exists — edit it instead of creating a second one", spec.ID)}
 			}
 			return nil
 		}
 		if existing == nil || existing.Revision != *expectedRevision {
-			return errors.New("automation definition changed elsewhere — reload before saving")
+			return &automationRefusal{Code: automationErrCodeRevisionConflict, Err: errors.New("automation definition changed elsewhere — reload before saving")}
 		}
 		if existing.DeletedAt != nil {
 			// DeleteAutomationDefinition sets deleted_at without touching
@@ -150,7 +169,7 @@ func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw string, expe
 			// edges on the assumption it is gone, so a Save silently bringing it
 			// back live would restart an unattended cron the user deliberately
 			// deleted, with "saved successfully" as the only feedback.
-			return fmt.Errorf("automation %q was deleted elsewhere while you were editing it — your changes were not saved; close this editor and use New if you want to bring it back", spec.ID)
+			return &automationRefusal{Code: automationErrCodeDeletedElsewhere, Err: fmt.Errorf("automation %q was deleted elsewhere while you were editing it — your changes were not saved; close this editor and use New if you want to bring it back", spec.ID)}
 		}
 		return nil
 	}

@@ -2722,6 +2722,11 @@ model AutomationApplyResultMessage {
   // spec_yaml: the canonical rendered YAML of the saved spec
   // (automationDefinitionYAML), not an echo of the input.
   spec_yaml?: string;
+  // error_code: machine-readable failure class for the app form. One of
+  // "revision_conflict" | "id_collision" | "deleted_elsewhere" |
+  // "id_mismatch" | "validation"; absent on success and on failures with no
+  // specific class.
+  error_code?: string;
 }
 
 model AutomationValidateResultMessage {
@@ -2749,6 +2754,11 @@ model AutomationDefinitionResultMessage {
   error?: string;
   definition?: AutomationDefinitionSummary;
   spec_yaml?: string;
+  // spec_json: canonical JSON encoding of the definition spec (same
+  // canonical bytes family the store persists), present on success including
+  // the definition_id "" starter-template case; the app form edits
+  // structured spec and never parses spec_yaml.
+  spec_json?: string;
 }
 
 model AutomationRunsResultMessage {
