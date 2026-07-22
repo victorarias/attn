@@ -29,10 +29,12 @@ import (
 	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/present"
+	"github.com/victorarias/attn/internal/probetui"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptyworker"
 	"github.com/victorarias/attn/internal/workflowresult"
 	"github.com/victorarias/attn/internal/wrapper"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -303,6 +305,8 @@ func main() {
 		runHookState()
 	case "_hook-todo":
 		runHookTodo()
+	case "_probe-tui":
+		runProbeTUI()
 	default:
 		// Check if it's a flag (starts with -)
 		if len(os.Args[1]) > 0 && os.Args[1][0] == '-' {
@@ -3362,6 +3366,50 @@ func runHookTodo() {
 
 	if err := c.UpdateTodos(sessionID, todos); err != nil {
 		fmt.Fprintf(os.Stderr, "error updating todos: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runProbeTUI drives a deterministic agent-mimicking probe (internal/probetui)
+// on stdout, for harness scenarios that need a fake "agent" TUI without a
+// live model in the loop. Hidden command; not listed in writeHelp.
+func runProbeTUI() {
+	fs := flag.NewFlagSet("_probe-tui", flag.ExitOnError)
+	styleFlag := fs.String("style", "", "agent vocabulary to mirror: codex or claude")
+	interval := fs.Duration("interval", 500*time.Millisecond, "frame repaint interval")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		os.Exit(2)
+	}
+
+	style, err := probetui.ParseStyle(*styleFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "attn _probe-tui: %v\n", err)
+		os.Exit(2)
+	}
+
+	size := func() (int, int, error) {
+		ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
+		if err != nil {
+			return 0, 0, fmt.Errorf("get terminal size: %w", err)
+		}
+		return int(ws.Col), int(ws.Row), nil
+	}
+
+	winch := make(chan os.Signal, 1)
+	signal.Notify(winch, syscall.SIGWINCH)
+	defer signal.Stop(winch)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	term := make(chan os.Signal, 1)
+	signal.Notify(term, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-term
+		cancel()
+	}()
+	defer signal.Stop(term)
+
+	if err := probetui.Run(ctx, os.Stdout, style, size, winch, *interval); err != nil {
+		fmt.Fprintf(os.Stderr, "attn _probe-tui: %v\n", err)
 		os.Exit(1)
 	}
 }
