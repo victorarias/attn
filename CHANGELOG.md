@@ -6,6 +6,25 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-22]
+
+### Added
+- **Claude's (and Codex's) default model and reasoning effort are now
+  configurable for every session, not just chief-of-staff launches.** New
+  Settings > Agents controls ("Default model & effort") set
+  `default_model_<agent>`/`default_effort_<agent>`, applied to every launch
+  of that agent (chief or not) via `--model`/`--effort`. Previously only a
+  chief-of-staff launch could pin a model/effort
+  (`chief_model_<agent>`/`chief_effort_<agent>`); a regular session always
+  fell through to the agent's own hardcoded default with no way to change
+  it. Precedence is unchanged and additive: an explicit per-spawn pin (e.g. a
+  delegation's `--model`) still wins outright, a chief launch still prefers
+  its `chief_model_<agent>`/`chief_effort_<agent>` override, and only then
+  does the new default setting apply; leaving both blank keeps today's
+  behavior (the agent's own default).
+
+---
+
 ## [2026-07-21]
 
 ### Fixed

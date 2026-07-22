@@ -1007,6 +1007,70 @@ describe('SettingsModal chief settings', () => {
     expect(await screen.findByTestId('settings-chief-effort-codex')).toHaveValue('low');
   });
 
+  it('renders a default-model input per supported agent and commits a typed model on blur', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    // claude and codex each get a row; copilot does not (its launch ignores --model).
+    const claudeInput = await screen.findByTestId('settings-default-model-claude');
+    expect(screen.getByTestId('settings-default-model-codex')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-default-model-copilot')).toBeNull();
+
+    fireEvent.change(claudeInput, { target: { value: 'opus' } });
+    fireEvent.blur(claudeInput);
+    expect(onSetSetting).toHaveBeenCalledWith('default_model_claude', 'opus');
+  });
+
+  it('does not write when a default-model input blurs unchanged', async () => {
+    const onSetSetting = renderModal({ default_model_claude: 'opus' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const claudeInput = await screen.findByTestId('settings-default-model-claude');
+    expect(claudeInput).toHaveValue('opus');
+    fireEvent.blur(claudeInput);
+    expect(onSetSetting).not.toHaveBeenCalledWith('default_model_claude', expect.anything());
+  });
+
+  it('clears a default-model override back to the agent default', async () => {
+    const onSetSetting = renderModal({ default_model_codex: 'gpt-5.4' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const codexInput = await screen.findByTestId('settings-default-model-codex');
+    expect(codexInput).toHaveValue('gpt-5.4');
+    fireEvent.change(codexInput, { target: { value: '' } });
+    fireEvent.blur(codexInput);
+    expect(onSetSetting).toHaveBeenCalledWith('default_model_codex', '');
+  });
+
+  it('renders a default-effort select per supported agent and commits on change', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const claudeEffort = await screen.findByTestId('settings-default-effort-claude');
+    expect(screen.getByTestId('settings-default-effort-codex')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-default-effort-copilot')).toBeNull();
+
+    fireEvent.change(claudeEffort, { target: { value: 'high' } });
+    expect(onSetSetting).toHaveBeenCalledWith('default_effort_claude', 'high');
+  });
+
+  it('shows a saved default-effort override', async () => {
+    renderModal({ default_effort_codex: 'xhigh' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const codexEffort = await screen.findByTestId('settings-default-effort-codex');
+    expect(codexEffort).toHaveValue('xhigh');
+  });
+
+  it('keeps an agent visible when only its default-effort override is saved', async () => {
+    // codex is unavailable but has a saved effort override, so it should still show
+    // (mirrors the chief-effort re-inclusion rule).
+    renderModal({ codex_available: 'false', default_effort_codex: 'low' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    expect(await screen.findByTestId('settings-default-effort-codex')).toHaveValue('low');
+  });
+
   it('shows the effective context-window caps and defaults to 128000 when unset', async () => {
     renderModal({ chief_context_window_cap: '120000', headless_context_window_cap: '90000' });
     fireEvent.click(screen.getByTestId('settings-nav-agents'));

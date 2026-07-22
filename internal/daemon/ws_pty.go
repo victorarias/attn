@@ -622,16 +622,13 @@ func (d *Daemon) handleSpawnSessionWithPolicy(client *wsClient, msg *protocol.Sp
 		}
 	}()
 	isChief := d.isChiefOfStaffSession(msg.ID)
-	if spawnOpts.Model == "" {
-		// No per-spawn pin (delegation); a chief launch falls back to the
-		// chief_model_<agent> setting.
-		spawnOpts.Model = d.chiefLaunchModel(agent, isChief)
-	}
-	if spawnOpts.Effort == "" {
-		// No per-spawn pin (delegation); a chief launch falls back to the
-		// chief_effort_<agent> setting.
-		spawnOpts.Effort = d.chiefLaunchEffort(agent, isChief)
-	}
+	// Precedence: an explicit per-spawn pin (delegation) wins outright; a chief
+	// launch next falls back to chief_model_<agent>/chief_effort_<agent>; every
+	// launch (chief or not) then falls back to the operator-configured
+	// default_model_<agent>/default_effort_<agent>; otherwise the agent's own
+	// built-in default (empty, meaning no --model/--effort flag).
+	spawnOpts.Model = d.resolveLaunchModel(agent, isChief, spawnOpts.Model)
+	spawnOpts.Effort = d.resolveLaunchEffort(agent, isChief, spawnOpts.Effort)
 	if launch := policy.unattendedLaunch; !launch.IsZero() {
 		if err := launch.Validate(); err != nil {
 			d.sendSpawnFailure(client, msg.ID, err)
