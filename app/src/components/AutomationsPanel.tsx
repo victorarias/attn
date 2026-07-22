@@ -163,6 +163,9 @@ export function AutomationsPanel({
 
   // Refetch the selected definition's runs the moment it is selected, so the
   // expanded history is not stuck on whatever the eager fetch above last saw.
+  // Also refetch on every automations_changed broadcast (changedTick), so the
+  // expanded history tracks run-state transitions (create/deliver/fail)
+  // without requiring the user to re-select the definition.
   useEffect(() => {
     if (!isOpen || !selectedDefinitionId) return;
     let cancelled = false;
@@ -179,7 +182,7 @@ export function AutomationsPanel({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, selectedDefinitionId, fetchRuns]);
+  }, [isOpen, selectedDefinitionId, fetchRuns, changedTick]);
 
   if (!isOpen) return null;
 

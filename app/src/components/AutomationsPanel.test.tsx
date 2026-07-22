@@ -326,6 +326,27 @@ describe('AutomationsPanel', () => {
     await waitFor(() => expect(props.fetchDefinitions).toHaveBeenCalledTimes(2));
   });
 
+  it('refetches the selected definition\'s runs when changedTick bumps, so a newly delivered run appears without re-selecting', async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
+    props.fetchRuns.mockResolvedValueOnce([makeRun({ id: 'r1', state: 'pending' })]);
+    render(<AutomationsPanel {...props} />);
+
+    await user.click(await screen.findByText('PR reviewer'));
+    await screen.findByTestId('automation-run-row');
+    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalledTimes(1));
+
+    props.fetchRuns.mockResolvedValueOnce([
+      makeRun({ id: 'r1', state: 'delivered' }),
+      makeRun({ id: 'r2', state: 'delivered' }),
+    ]);
+    useAutomationsStore.getState().bumpChanged();
+
+    await waitFor(() => expect(props.fetchRuns).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getAllByTestId('automation-run-row')).toHaveLength(2));
+  });
+
   it('navigates to the ticket when a run has a ticket_id', async () => {
     const user = userEvent.setup();
     const props = baseProps();
