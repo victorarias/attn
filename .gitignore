@@ -27,3 +27,6 @@ app/src-tauri/*.gen.conf.json
 
 # Local env files
 **/.npmrc
+
+# Native libghostty-vt build output (source of truth: scripts/build-libghostty-vt.sh)
+/third_party/

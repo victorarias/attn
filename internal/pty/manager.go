@@ -18,6 +18,7 @@ import (
 
 	creackpty "github.com/creack/pty"
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/ghosttyvt"
 	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/launchenv"
 )
@@ -284,6 +285,13 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		cleanup:     deferCleanup,
 	}
 	session.screen = newVirtualScreen(opts.Cols, opts.Rows)
+	// Shadow-mode server-authoritative terminal (Phase 1). A construction
+	// failure must never break the session — leave it nil; every use is guarded.
+	if gt, err := ghosttyvt.New(int(opts.Cols), int(opts.Rows), ghosttyvt.Options{}); err != nil {
+		m.logf("pty spawn: ghosttyvt terminal unavailable for id=%s: %v", opts.ID, err)
+	} else {
+		session.ghostty = gt
+	}
 
 	m.mu.Lock()
 	m.sessions[opts.ID] = session

@@ -7,12 +7,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	creackpty "github.com/creack/pty"
+
+	"github.com/victorarias/attn/internal/ghosttyvt"
 )
 
 // TerminalTheme carries the frontend's resolved terminal colors as "#rrggbb"
@@ -95,6 +98,13 @@ type Session struct {
 	scrollback *RingBuffer
 	replayLog  *ReplayLog
 	screen     *virtualScreen
+	// ghostty is the server-authoritative parsed terminal (libghostty-vt). In
+	// shadow mode it is fed the same bytes as the three stores above but nothing
+	// reads it in production yet (Phase 1). It answers query responses during
+	// Write; those are drained-and-discarded here so the scan-based responder
+	// stays the sole answerer. May be nil if construction failed — shadow mode
+	// must never break a session, so every use is nil-guarded.
+	ghostty    *ghosttyvt.Terminal
 	seqCounter atomic.Uint32
 
 	// replayMu makes the attach replay payload (scrollback / replay segments /
@@ -318,6 +328,13 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				if s.screen != nil {
 					s.screen.Observe(data)
 				}
+				if s.ghostty != nil {
+					// Shadow feed. Discard query responses in Phase 1: the
+					// scan-based responder above is the only PTY answerer;
+					// double answers would corrupt child app input.
+					s.ghostty.Write(data)
+					s.ghostty.DrainResponses()
+				}
 				s.lastReplaySeq = seq
 				s.replayMu.Unlock()
 				// The daemon is the single authority for CPR (cursor position)
@@ -377,6 +394,10 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 		if s.screen != nil {
 			s.screen.Observe(carryover)
 		}
+		if s.ghostty != nil {
+			s.ghostty.Write(carryover)
+			s.ghostty.DrainResponses()
+		}
 		s.lastReplaySeq = seq
 		s.replayMu.Unlock()
 		s.fanOut(carryover, seq)
@@ -386,9 +407,89 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 	exitCode, signal := parseExitStatus(waitErr)
 	s.markExited(exitCode, signal)
 
+	s.logShadowDivergence(logf)
+
 	if onExit != nil {
 		onExit(exitCode, signal)
 	}
+}
+
+// shadowDivergenceEnv gates the Phase 1 shadow divergence metric. When set to
+// "1", session close compares the ghostty viewport against the vt10x oracle and
+// logs the first differing row. Off by default (the comparison renders both
+// screens, which is cheap but not free).
+const shadowDivergenceEnv = "ATTN_GHOSTTY_SHADOW_DIVERGENCE"
+
+// logShadowDivergence compares the ghostty-parsed viewport against the vt10x
+// oracle's visible screen and logs the first divergence, if any. This is the
+// Phase 1 risk-burn signal: it tells us where the two emulators disagree on
+// real sessions before anything reads ghostty in production. Divergences where
+// vt10x is known-weak (truecolor, wide chars, reflow) are expected; triage
+// ghostty-side surprises. Best-effort and behind a debug flag.
+func (s *Session) logShadowDivergence(logf func(string, ...any)) {
+	if logf == nil || s.ghostty == nil || s.screen == nil {
+		return
+	}
+	if os.Getenv(shadowDivergenceEnv) != "1" {
+		return
+	}
+	oracle := s.screen.renderedText()
+	if oracle == "" {
+		return
+	}
+	s.metaMu.RLock()
+	rows := int(s.rows)
+	s.metaMu.RUnlock()
+	shadow := ghosttyViewportTail(s.ghostty.PlainText(), rows)
+
+	oracleLines := strings.Split(oracle, "\n")
+	shadowLines := strings.Split(shadow, "\n")
+	row, ok := firstDivergentRow(oracleLines, shadowLines)
+	if !ok {
+		logf("ghostty shadow: session %s viewport matches vt10x (%d rows)", s.id, len(oracleLines))
+		return
+	}
+	logf("ghostty shadow DIVERGENCE session %s row %d\n  vt10x:   %q\n  ghostty: %q",
+		s.id, row, rowAt(oracleLines, row), rowAt(shadowLines, row))
+}
+
+// ghosttyViewportTail extracts the visible viewport from ghostty's full-screen
+// plain text (which includes scrollback) by taking the last `rows` lines and
+// trimming trailing blank lines, to match vt10x renderedText's shape. Assumes
+// the terminal is scrolled to the bottom, which holds for a live session.
+func ghosttyViewportTail(plain string, rows int) string {
+	lines := strings.Split(plain, "\n")
+	// Trim trailing blank rows first (viewport bottom padding + the formatter's
+	// trailing newline) so the last line is real content, then window to the
+	// bottom `rows` lines — mirroring renderedText's shape.
+	for len(lines) > 0 && strings.TrimRight(lines[len(lines)-1], " ") == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if rows > 0 && len(lines) > rows {
+		lines = lines[len(lines)-rows:]
+	}
+	// Trailing whitespace per row also differs cosmetically; normalize.
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func firstDivergentRow(a, b []string) (int, bool) {
+	n := max(len(a), len(b))
+	for i := range n {
+		if rowAt(a, i) != rowAt(b, i) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func rowAt(lines []string, i int) string {
+	if i < 0 || i >= len(lines) {
+		return ""
+	}
+	return lines[i]
 }
 
 // approvalEvalInterval throttles how often the readLoop path inspects the
@@ -684,6 +785,9 @@ func (s *Session) resize(cols, rows uint16) error {
 	if s.screen != nil {
 		s.screen.Resize(cols, rows)
 	}
+	if s.ghostty != nil {
+		s.ghostty.Resize(int(cols), int(rows))
+	}
 
 	return creackpty.Setsize(s.ptmx, &creackpty.Winsize{Cols: cols, Rows: rows})
 }
@@ -745,6 +849,9 @@ func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 
 func (s *Session) closePTY() {
 	_ = s.ptmx.Close()
+	if s.ghostty != nil {
+		s.ghostty.Close()
+	}
 }
 
 func detectTerminalQueries(data []byte) terminalQueries {
