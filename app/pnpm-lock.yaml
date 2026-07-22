@@ -86,6 +86,9 @@ importers:
       react-dom:
         specifier: ^19.1.0
         version: 19.2.1(react@19.2.1)
+      react-hook-form:
+        specifier: ^7.82.0
+        version: 7.82.0(react@19.2.1)
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.7)(react@19.2.1)
@@ -107,6 +110,9 @@ importers:
       shiki:
         specifier: ^3.23.0
         version: 3.23.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
       zustand:
         specifier: ^5.0.9
         version: 5.0.9(@types/react@19.2.7)(react@19.2.1)
@@ -1841,6 +1847,12 @@ packages:
     peerDependencies:
       react: ^19.2.1
 
+  react-hook-form@7.82.0:
+    resolution: {integrity: sha512-Zw/uFZ2dO+02GHlBn7JFGn8kZJ7LdM33B/0BXOovzFay+CMhf94JMw5BVu+F1tVkUKjNvBuaE3fz5BJhga10Tg==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      react: ^16.8.0 || ^17 || ^18 || ^19
+
   react-is@17.0.2:
     resolution: {integrity: sha512-w2GsyukL62IJnlaff/nRegPQR94C/XXamvMWmSHRJ4y7Ts/4ocGRmTHvOs8PSE6pB3dWOrD/nueuU5sduBsQ4w==}
 
@@ -2133,6 +2145,9 @@ packages:
 
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
+
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
   zustand@5.0.9:
     resolution: {integrity: sha512-ALBtUj0AfjJt3uNRQoL1tL2tMvj6Gp/6e39dnfT6uzpelGru8v1tPOGBzayOWbPJvujM8JojDk3E1LxeFisBNg==}
@@ -4268,6 +4283,10 @@ snapshots:
       react: 19.2.1
       scheduler: 0.27.0
 
+  react-hook-form@7.82.0(react@19.2.1):
+    dependencies:
+      react: 19.2.1
+
   react-is@17.0.2: {}
 
   react-markdown@10.1.0(@types/react@19.2.7)(react@19.2.1):
@@ -4597,6 +4616,8 @@ snapshots:
   ws@8.18.3: {}
 
   yallist@3.1.1: {}
+
+  zod@4.4.3: {}
 
   zustand@5.0.9(@types/react@19.2.7)(react@19.2.1):
     optionalDependencies:
