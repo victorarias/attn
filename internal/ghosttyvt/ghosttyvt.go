@@ -18,7 +18,6 @@ package ghosttyvt
 #cgo CFLAGS: -I${SRCDIR}/../../third_party/ghostty-vt/include
 #cgo LDFLAGS: ${SRCDIR}/../../third_party/ghostty-vt/lib/libghostty-vt.a
 #cgo LDFLAGS: -framework CoreFoundation -framework CoreText -framework CoreGraphics -framework Foundation
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ghostty/vt.h>
@@ -27,14 +26,13 @@ package ghosttyvt
 // vt_write with query-response bytes (CPR, DA1, kitty CSI ? u, DECRQM…).
 extern void goWritePty(GhosttyTerminal term, void* userdata, const uint8_t* data, size_t len);
 
-// Install the userdata + write_pty callback in one shot. userdata is a cgo.Handle
-// VALUE (an opaque integer), passed as uintptr_t and stored by the terminal as an
-// opaque void*. Crucially this is NOT a Go pointer: C retains the handle integer,
-// never a pointer into Go's heap, so cgo's pointer-lifetime rule is satisfied even
-// though ghostty_terminal_set keeps the value past this call. The callback casts
-// the void* back to a cgo.Handle to recover the owning object.
-static GhosttyResult ghosttyvt_install(GhosttyTerminal t, uintptr_t userdata) {
-	GhosttyResult rc = ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_USERDATA, (const void*)userdata);
+// Install the userdata pointer + write_pty callback in one shot. userdata is the
+// address of the sink's cgo.Handle field. ghostty_terminal_set retains it past
+// this call, so the caller pins that address with a runtime.Pinner (held until
+// after ghostty_terminal_free) — the supported way for C to legally retain a Go
+// pointer. The callback dereferences it back to a cgo.Handle.
+static GhosttyResult ghosttyvt_install(GhosttyTerminal t, void* userdata) {
+	GhosttyResult rc = ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_USERDATA, userdata);
 	if (rc != GHOSTTY_SUCCESS) return rc;
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_WRITE_PTY, (const void*)goWritePty);
 }
@@ -125,9 +123,12 @@ type Snapshot struct {
 // Terminal reachable, and the Terminal's finalizer can still reclaim a leaked
 // one. Its own mutex guards buf; goWritePty appends (synchronously during Write)
 // and DrainResponses reads+clears, independent of the Terminal's mutex.
+//
+// handle references this sink; C retains &handle as its userdata (see New).
 type respSink struct {
-	mu  sync.Mutex
-	buf []byte
+	mu     sync.Mutex
+	buf    []byte
+	handle cgo.Handle
 }
 
 // Terminal wraps a native libghostty-vt terminal. All methods are safe for
@@ -138,8 +139,8 @@ type respSink struct {
 type Terminal struct {
 	mu     sync.Mutex
 	term   C.GhosttyTerminal
-	handle cgo.Handle // opaque userdata value; routes write_pty to sink
-	sink   *respSink  // referenced by handle; holds query-response bytes
+	sink   *respSink      // referenced by sink.handle; holds query-response bytes
+	pinner runtime.Pinner // pins &sink.handle for C to retain as userdata
 	cols   int
 	rows   int
 
@@ -164,12 +165,17 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 	if rc := C.ghostty_terminal_new(nil, &t.term, copts); rc != C.GHOSTTY_SUCCESS {
 		return nil, fmt.Errorf("ghosttyvt: terminal_new failed: rc=%d", int(rc))
 	}
-	// The handle references the sink (not t), and is handed to C as an opaque
-	// integer value — never a Go pointer — so C may retain it indefinitely.
-	t.handle = cgo.NewHandle(t.sink)
-	if rc := C.ghosttyvt_install(t.term, C.uintptr_t(t.handle)); rc != C.GHOSTTY_SUCCESS {
+	// The handle references the sink (not t) so it does not pin the Terminal.
+	// C retains the userdata past this call, so give it the *address* of the
+	// sink's handle field and pin that address: a runtime.Pinner is the
+	// supported way for C to legally hold a Go pointer. Unpinned in Close, after
+	// ghostty_terminal_free.
+	t.sink.handle = cgo.NewHandle(t.sink)
+	t.pinner.Pin(&t.sink.handle)
+	if rc := C.ghosttyvt_install(t.term, unsafe.Pointer(&t.sink.handle)); rc != C.GHOSTTY_SUCCESS {
 		C.ghostty_terminal_free(t.term)
-		t.handle.Delete()
+		t.pinner.Unpin()
+		t.sink.handle.Delete()
 		return nil, fmt.Errorf("ghosttyvt: install callbacks failed: rc=%d", int(rc))
 	}
 	runtime.SetFinalizer(t, (*Terminal).finalize)
@@ -309,7 +315,10 @@ func (t *Terminal) Close() {
 	t.closed = true
 	C.ghostty_terminal_free(t.term)
 	t.term = nil
-	t.handle.Delete()
+	// Unpin only after the native terminal is gone (it can no longer read the
+	// userdata), then release the handle.
+	t.pinner.Unpin()
+	t.sink.handle.Delete()
 	runtime.SetFinalizer(t, nil)
 }
 
