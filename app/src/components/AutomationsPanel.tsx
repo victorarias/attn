@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { AutomationDefinitionSummary, AutomationRunSummary } from '../types/generated';
 import { useAutomationsStore, selectDefinitionById } from '../store/automations';
 import { AutomationActionTimeoutError } from '../hooks/useDaemonSocket';
-import { AutomationEditor, automationEditorKey } from './automations/AutomationEditor';
+import { AutomationForm, automationFormKey } from './automations/AutomationForm';
 import './AutomationsPanel.css';
 
 export interface AutomationsPanelProps {
@@ -14,13 +14,13 @@ export interface AutomationsPanelProps {
   runNow: (definitionId: string, requestId: string) => Promise<AutomationRunSummary | undefined>;
   getDefinition: (
     definitionId: string,
-  ) => Promise<{ specYaml: string; definition?: AutomationDefinitionSummary }>;
-  validateDefinition: (definitionYaml: string) => Promise<void>;
+  ) => Promise<{ specYaml: string; specJson: string; definition?: AutomationDefinitionSummary }>;
   applyDefinition: (
     definitionYaml: string,
     expectedId: string,
     expectedRevision: number,
   ) => Promise<{ definition: AutomationDefinitionSummary; specYaml: string }>;
+  deleteDefinition: (definitionId: string) => Promise<void>;
   onOpenTicket: (ticketId: string) => void;
   onSelectSession: (sessionId: string) => void;
   onFocusPane: (sessionId: string, paneId: string) => void;
@@ -29,8 +29,8 @@ export interface AutomationsPanelProps {
 // What the editor overlay is showing: closed, a fresh template (New
 // automation), or an existing definition (Edit). Kept as a single value
 // (rather than two booleans) so there is exactly one source of truth for
-// "which target is open" — AutomationEditor is keyed off it, so switching
-// targets always remounts a fresh editor instance (see automationEditorKey).
+// "which target is open" — AutomationForm is keyed off it, so switching
+// targets always remounts a fresh editor instance (see automationFormKey).
 type EditorTarget = { definitionId: string | null } | null;
 
 // Where a run row navigates. The wire nit applies here: ticket_id/session_id/
@@ -105,8 +105,8 @@ export function AutomationsPanel({
   setEnabled,
   runNow,
   getDefinition,
-  validateDefinition,
   applyDefinition,
+  deleteDefinition,
   onOpenTicket,
   onSelectSession,
   onFocusPane,
@@ -126,7 +126,7 @@ export function AutomationsPanel({
   // D6: this is the ONLY state that opens/closes/targets the editor. The list
   // refetch effect below never touches it, so an automations_changed broadcast
   // arriving while it's non-null cannot close the editor or swap its target —
-  // see AutomationEditor.tsx's doc comment for the other half of the guarantee
+  // see AutomationForm.tsx's doc comment for the other half of the guarantee
   // (its buffer is loaded once per mount, not derived from the store).
   const [editorTarget, setEditorTarget] = useState<EditorTarget>(null);
 
@@ -264,18 +264,20 @@ export function AutomationsPanel({
   // list — see EditorTarget's doc comment for why closing it is the only way
   // canonical list state (definitions/runsByDefinition) can affect it again.
   // Keyed on the target so switching from one Edit to another (or New) always
-  // remounts AutomationEditor, which is what makes its mount-only load correct.
+  // remounts AutomationForm, which is what makes its mount-only load correct.
   if (editorTarget) {
     return (
       <div className="automations-panel" data-testid="automations-panel">
-        <AutomationEditor
-          key={automationEditorKey(editorTarget.definitionId)}
+        <AutomationForm
+          key={automationFormKey(editorTarget.definitionId)}
           definitionId={editorTarget.definitionId}
           getDefinition={getDefinition}
-          validateDefinition={validateDefinition}
           applyDefinition={applyDefinition}
+          deleteDefinition={deleteDefinition}
+          setEnabled={setEnabled}
           onCancel={() => setEditorTarget(null)}
           onSaved={() => setEditorTarget(null)}
+          onDeleted={() => setEditorTarget(null)}
         />
       </div>
     );

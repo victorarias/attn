@@ -4,37 +4,8 @@ import { AutomationsPanel } from './AutomationsPanel';
 import { useAutomationsStore } from '../store/automations';
 import { AutomationActionTimeoutError } from '../hooks/useDaemonSocket';
 import { AutomationDefinitionSummary, AutomationRunSummary } from '../types/generated';
-
-// getByDisplayValue/findByDisplayValue apply the default TL normalizer (trim
-// + collapse whitespace) to the DOM value being matched but NOT to the
-// matcher string itself, so a multi-line YAML value with a trailing newline
-// can never match a literal expected string. Passing an identity normalizer
-// restores exact literal matching against the YAML buffer.
-const EXACT_VALUE = { normalizer: (text: string) => text };
-
-// AutomationEditor is CodeMirror-backed (via AutomationYamlEditor), which
-// cannot mount under happy-dom — same constraint as LiveMarkdownEditor (see
-// NotebookBrowser.test.tsx). The real editing surface is covered by the
-// Playwright harness; here the leaf CodeMirror component is mocked to a
-// controlled textarea so these tests can drive the panel/editor orchestration
-// (open targets, D6's no-stomp rule, save/cancel wiring) without a browser.
-vi.mock('./automations/AutomationYamlEditor', async () => {
-  const { forwardRef, useImperativeHandle } = await import('react');
-  return {
-    AutomationYamlEditor: forwardRef(function MockAutomationYamlEditor(
-      { value, onChange, ariaLabel }: { value: string; onChange: (value: string) => void; ariaLabel?: string },
-      ref: React.Ref<{ applyExternalContent: (next: string) => void; focus: () => void }>,
-    ) {
-      useImperativeHandle(ref, () => ({
-        applyExternalContent: (next: string) => onChange(next),
-        focus: () => {},
-      }), [onChange]);
-      return (
-        <textarea aria-label={ariaLabel ?? 'Automation definition'} value={value} onChange={(event) => onChange(event.target.value)} />
-      );
-    }),
-  };
-});
+import { AutomationFormValues, specJSONString } from './automations/automationFormModel';
+import { LAUNCH_CATALOG } from './automations/launchCatalog';
 
 function makeDefinition(
   overrides: Partial<AutomationDefinitionSummary> & { id: string },
@@ -61,6 +32,32 @@ function makeRun(
   } as AutomationRunSummary;
 }
 
+// A valid v1alpha1 manual spec, so AutomationForm's edit-mode load
+// (specToFormValues) succeeds without a parse error banner.
+function manualSpecJson(overrides: Partial<AutomationFormValues> = {}): string {
+  const firstModel = LAUNCH_CATALOG.codex.models[0];
+  const values: AutomationFormValues = {
+    name: 'PR reviewer',
+    id: 'd1',
+    idCustomized: true,
+    trigger: 'manual',
+    scheduleCron: '',
+    continuity: 'fresh',
+    catchUp: '',
+    repositoriesInclude: [],
+    repositoriesExclude: [],
+    agent: 'codex',
+    model: firstModel.id,
+    effort: firstModel.defaultEffort,
+    executable: '',
+    directoryPath: '/tmp/work',
+    repositoryOverrides: [],
+    prompt: 'Do the work',
+    ...overrides,
+  };
+  return specJSONString(values);
+}
+
 function baseProps() {
   return {
     isOpen: true,
@@ -69,12 +66,12 @@ function baseProps() {
     fetchRuns: vi.fn().mockResolvedValue([]),
     setEnabled: vi.fn().mockResolvedValue(undefined),
     runNow: vi.fn().mockResolvedValue(undefined),
-    getDefinition: vi.fn().mockResolvedValue({ specYaml: 'id: new-automation\nname: New automation\n' }),
-    validateDefinition: vi.fn().mockResolvedValue(undefined),
+    getDefinition: vi.fn().mockResolvedValue({ specYaml: '', specJson: manualSpecJson() }),
     applyDefinition: vi.fn().mockResolvedValue({
       definition: makeDefinition({ id: 'd1', revision: 2 }),
-      specYaml: 'id: d1\n',
+      specYaml: '',
     }),
+    deleteDefinition: vi.fn().mockResolvedValue(undefined),
     onOpenTicket: vi.fn(),
     onSelectSession: vi.fn(),
     onFocusPane: vi.fn(),
@@ -391,8 +388,12 @@ describe('AutomationsPanel', () => {
     expect(props.onSelectSession).not.toHaveBeenCalled();
   });
 
-  describe('editor', () => {
-    it('opens a fresh template via "New automation" in the header, requesting definition id ""', async () => {
+  // Form-level coverage (validation, error routing, delete flow) belongs to
+  // AutomationForm.test.tsx. These only prove the overlay opens with the
+  // right target, props are wired through, and closing restores the list —
+  // see EditorTarget's doc comment in AutomationsPanel.tsx.
+  describe('form overlay', () => {
+    it('opens a fresh form via "New automation" in the header, in create mode', async () => {
       const user = userEvent.setup();
       const props = baseProps();
       props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
@@ -400,10 +401,9 @@ describe('AutomationsPanel', () => {
 
       await user.click(await screen.findByTestId('automation-new'));
 
-      await waitFor(() => expect(props.getDefinition).toHaveBeenCalledWith(''));
-      expect(await screen.findByTestId('automation-editor')).toBeInTheDocument();
-      expect(screen.getByText('New automation')).toBeInTheDocument();
-      // The list is gone while the editor is open.
+      expect(await screen.findByTestId('automation-form')).toBeInTheDocument();
+      expect(props.getDefinition).not.toHaveBeenCalled();
+      // The list is gone while the form is open.
       expect(screen.queryByTestId('automations-panel-list')).not.toBeInTheDocument();
     });
 
@@ -413,23 +413,19 @@ describe('AutomationsPanel', () => {
       render(<AutomationsPanel {...props} />);
 
       await user.click(await screen.findByTestId('automation-new-empty'));
-      await waitFor(() => expect(props.getDefinition).toHaveBeenCalledWith(''));
-      expect(await screen.findByTestId('automation-editor')).toBeInTheDocument();
+      expect(await screen.findByTestId('automation-form')).toBeInTheDocument();
     });
 
-    it('opens an existing definition via its row\'s Edit button, requesting that id', async () => {
+    it('opens an existing definition via its row\'s Edit button, loading and showing that definition', async () => {
       const user = userEvent.setup();
       const props = baseProps();
       props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', name: 'PR reviewer' })]);
-      props.getDefinition.mockResolvedValue({ specYaml: 'id: d1\nname: PR reviewer\n', definition: makeDefinition({ id: 'd1', revision: 3 }) });
       render(<AutomationsPanel {...props} />);
 
       await user.click(await screen.findByTestId('automation-edit-d1'));
 
       await waitFor(() => expect(props.getDefinition).toHaveBeenCalledWith('d1'));
-      expect(await screen.findByTestId('automation-editor')).toBeInTheDocument();
-      expect(screen.getByText('Edit automation')).toBeInTheDocument();
-      expect(await screen.findByDisplayValue('id: d1\nname: PR reviewer\n', EXACT_VALUE)).toBeInTheDocument();
+      expect(await screen.findByTestId('automation-form-name')).toHaveValue('PR reviewer');
     });
 
     it('Cancel returns to the list without saving', async () => {
@@ -439,76 +435,64 @@ describe('AutomationsPanel', () => {
       render(<AutomationsPanel {...props} />);
 
       await user.click(await screen.findByTestId('automation-new'));
-      await screen.findByTestId('automation-editor');
-      await user.click(screen.getByTestId('automation-editor-cancel'));
+      await screen.findByTestId('automation-form');
+      await user.click(screen.getByTestId('automation-form-cancel'));
 
-      expect(screen.queryByTestId('automation-editor')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('automation-form')).not.toBeInTheDocument();
       expect(await screen.findByTestId('automations-panel-list')).toBeInTheDocument();
       expect(props.applyDefinition).not.toHaveBeenCalled();
     });
 
-    it('Save applies the buffer with expected_id/expected_revision from the loaded definition, then returns to the list', async () => {
+    it('Save applies the loaded definition\'s expected_id/expected_revision, then returns to the list', async () => {
       const user = userEvent.setup();
       const props = baseProps();
-      props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
-      props.getDefinition.mockResolvedValue({ specYaml: 'id: d1\nname: PR reviewer\n', definition: makeDefinition({ id: 'd1', revision: 3 }) });
+      props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', name: 'PR reviewer' })]);
+      props.getDefinition.mockResolvedValue({
+        specYaml: '',
+        specJson: manualSpecJson(),
+        definition: makeDefinition({ id: 'd1', revision: 3 }),
+      });
       render(<AutomationsPanel {...props} />);
 
       await user.click(await screen.findByTestId('automation-edit-d1'));
-      const textarea = await screen.findByDisplayValue('id: d1\nname: PR reviewer\n', EXACT_VALUE);
-      await user.clear(textarea);
-      await user.type(textarea, 'id: d1\nname: PR reviewer v2\n');
+      await waitFor(() => expect(screen.getByTestId('automation-form-name')).toHaveValue('PR reviewer'));
 
-      await user.click(screen.getByTestId('automation-editor-save'));
+      await user.click(screen.getByTestId('automation-form-save'));
 
-      await waitFor(() =>
-        expect(props.applyDefinition).toHaveBeenCalledWith('id: d1\nname: PR reviewer v2\n', 'd1', 3),
-      );
-      await waitFor(() => expect(screen.queryByTestId('automation-editor')).not.toBeInTheDocument());
-    });
+      await waitFor(() => expect(props.applyDefinition).toHaveBeenCalledTimes(1));
+      const [, expectedId, expectedRevision] = props.applyDefinition.mock.calls[0];
+      expect(expectedId).toBe('d1');
+      expect(expectedRevision).toBe(3);
 
-    it('a Save rejection surfaces the error prominently and keeps the editor open with the buffer intact', async () => {
-      const user = userEvent.setup();
-      const props = baseProps();
-      props.applyDefinition.mockRejectedValue(new Error('changed elsewhere — reload'));
-      render(<AutomationsPanel {...props} />);
-
-      await user.click(await screen.findByTestId('automation-new'));
-      await screen.findByTestId('automation-editor');
-      await user.click(screen.getByTestId('automation-editor-save'));
-
-      await waitFor(() =>
-        expect(screen.getByTestId('automation-editor-save-error')).toHaveTextContent('changed elsewhere — reload'),
-      );
-      expect(screen.getByTestId('automation-editor')).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByTestId('automation-form')).not.toBeInTheDocument());
+      expect(await screen.findByTestId('automations-panel-list')).toBeInTheDocument();
     });
 
     // D6: the panel refetches definitions on the automations_changed broadcast
-    // (changedTick), which can fire while the user is mid-edit. That refetch
-    // must update the list only — an open editor buffer is replaced ONLY on
-    // explicit load (opening the editor) or explicit Reload, never by the
-    // broadcast. This is the regression the design doc calls out by name.
-    it('D6: a changedTick bump while the editor is open refetches the list but does not touch the open buffer', async () => {
+    // (changedTick), which can fire while the user has the form open. That
+    // refetch must update the list only — the open form is never remounted
+    // or reset by the broadcast, only by explicit navigation (a fresh key).
+    it('D6: a changedTick bump while the form is open refetches the list but does not remount the open form', async () => {
       const user = userEvent.setup();
       const props = baseProps();
-      props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1' })]);
+      props.fetchDefinitions.mockResolvedValue([makeDefinition({ id: 'd1', name: 'PR reviewer' })]);
       render(<AutomationsPanel {...props} />);
 
-      await user.click(await screen.findByTestId('automation-new'));
-      const textarea = await screen.findByDisplayValue('id: new-automation\nname: New automation\n', EXACT_VALUE);
-      await user.clear(textarea);
-      await user.type(textarea, 'id: unsaved-work\nname: still typing\n');
-      expect(props.getDefinition).toHaveBeenCalledTimes(1);
+      await user.click(await screen.findByTestId('automation-edit-d1'));
+      await waitFor(() => expect(props.getDefinition).toHaveBeenCalledTimes(1));
+      const nameField = await screen.findByTestId('automation-form-name');
+      await user.clear(nameField);
+      await user.type(nameField, 'still typing');
 
       const fetchCallsBefore = props.fetchDefinitions.mock.calls.length;
       useAutomationsStore.getState().bumpChanged();
 
       // The list-driving fetch re-runs...
       await waitFor(() => expect(props.fetchDefinitions.mock.calls.length).toBeGreaterThan(fetchCallsBefore));
-      // ...but the editor was never reloaded and the typed text survives.
+      // ...but the form was never reloaded and the typed text survives.
       expect(props.getDefinition).toHaveBeenCalledTimes(1);
-      expect(screen.getByTestId('automation-editor')).toBeInTheDocument();
-      expect(screen.getByDisplayValue('id: unsaved-work\nname: still typing\n', EXACT_VALUE)).toBeInTheDocument();
+      expect(screen.getByTestId('automation-form')).toBeInTheDocument();
+      expect(screen.getByTestId('automation-form-name')).toHaveValue('still typing');
     });
   });
 });

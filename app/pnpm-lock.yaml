@@ -11,9 +11,6 @@ importers:
       '@codemirror/lang-markdown':
         specifier: ^6.5.0
         version: 6.5.0
-      '@codemirror/lang-yaml':
-        specifier: ^6.1.3
-        version: 6.1.3
       '@codemirror/language':
         specifier: ^6.12.3
         version: 6.12.3
