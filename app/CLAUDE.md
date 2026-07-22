@@ -19,9 +19,8 @@ pnpm run dev    # Starts tauri dev with hot reload
 - **SessionTerminalWorkspace/**: Pane lifecycle and PTY bridge wiring
 - **LocationPicker.tsx**: Path selection with filesystem suggestions
 - **NewSessionDialog/**: Session creation (PathInput, RepoOptions subcomponents)
-- **ChangesPanel.tsx**: Git changes display
-- **DiffDetailPanel.tsx**: Review/diff panel orchestration and file selection
-- **DiffView.tsx**: `@pierre/diffs` (diffs.com) wrapper — unified/split diff rendering, Shiki highlighting, inline review-comment annotations
+- **PresentRoot/**, **PresentTour/**: Present window — review/diff orchestration and guided tour (replaced the old ChangesPanel/DiffDetailPanel)
+- **DiffView.tsx**: `@pierre/diffs` (diffs.com) wrapper — unified/split diff rendering, Shiki highlighting, inline review-comment annotations (via DiffCommentThread)
 - **AttentionDrawer.tsx**: Quick view of items needing attention
 
 ### State Management
@@ -52,7 +51,7 @@ Daemon-managed PTY handling (`internal/pty` in Go):
 ```bash
 pnpm test                   # Run all tests
 pnpm test -- --watch        # Watch mode
-pnpm test DiffDetailPanel   # Run specific component tests
+pnpm test PresentRoot       # Run specific component tests
 ```
 
 **Purpose:** Catch bugs before manual testing - infinite loops, race conditions, incorrect state management.
@@ -75,7 +74,7 @@ pnpm test DiffDetailPanel   # Run specific component tests
 it('fetches diff exactly once on open', async () => {
   const mockDaemon = createMockDaemon();
   setupDefaultResponses(mockDaemon);
-  render(<DiffDetailPanel fetchDiff={mockDaemon.createFetchDiff()} {...props} />);
+  render(<MyPanel fetchDiff={mockDaemon.createFetchDiff()} {...props} />);
   await waitFor(() => screen.getByText('file.tsx'));
 
   expect(mockDaemon.getCalls('fetchDiff')).toHaveLength(1);
@@ -84,7 +83,7 @@ it('fetches diff exactly once on open', async () => {
 });
 ```
 
-Canonical example: `src/components/DiffDetailPanel.test.tsx` (including the memoized-callbacks pattern that keeps wrapper re-renders from retriggering fetch effects).
+Canonical example: `src/components/PresentRoot/PresentRoot.test.tsx`. When wrapping components, memoize callbacks passed as props so wrapper re-renders don't retrigger fetch effects.
 
 ### E2E Tests (Playwright)
 
