@@ -63,9 +63,22 @@ non-production app/daemon. Exempt only:
 - a pure isolated change fully covered by unit tests, with no daemon lifecycle,
   protocol, PTY, background-runner, timing, or UI surface. State the reason.
 
+Match the verification tier to the behavior the change exposes, not to which
+directory it lives in. The cheapest tier applies only when the change has no
+app-observable behavior at all — a self-contained CLI command that never talks to
+the app or daemon can be verified by running the built binary directly (plus its
+unit tests). Example: `attn pr wait-ready` shells out to `gh` and touches no
+daemon or app surface, so exercising the binary against a real PR is sufficient.
+
+A daemon change is not automatically daemon-tier. Most daemon work reaches the app
+— protocol, persisted state and its broadcasts, WebSocket events, PTY, PR/git
+flows — and the app's reaction is part of the behavior, so it needs integrated
+verification in the running app even though the code lives under `internal/`.
+Reserve daemon-only verification for daemon internals with no path to the app.
+
 Daemon lifecycle, protocol, PTY, background-runner, and UI changes always need
-live verification. If the environment cannot run a non-production app, stop and
-ask; do not merge on automated tests alone.
+live verification. If the environment cannot run the tier the change requires,
+stop and ask; do not merge on automated tests alone.
 
 Before live verification, run the selected profile's bundled preflight:
 

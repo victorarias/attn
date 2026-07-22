@@ -9,6 +9,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-22]
 
 ### Fixed
+- **`attn pr wait-ready` no longer returns instantly on a stale review verdict
+  while a re-review is pending.** When the reviewer has been re-requested, an
+  approval or changes-requested verdict that was already present when the wait
+  began is treated as stale context; the wait continues until the reviewer
+  submits a new review. With no re-review pending, an existing verdict still
+  returns immediately as before.
 - **Terminal panes no longer get stuck narrower than their pane after closing a
   neighboring split.** Content now grows to fill the pane again; previously it
   could stay wrapped at the old, narrower width until an unrelated layout change

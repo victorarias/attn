@@ -26,16 +26,42 @@ func (f *fakeReadinessSource) Fetch(context.Context, prWaitOptions) (*prReadines
 
 // snapshotPayload wraps GraphQL fragments in the envelope gh api graphql emits.
 func snapshotPayload(head, checks, reviews, comments string) []byte {
+	return snapshotPayloadWithRequests(head, checks, reviews, comments, "")
+}
+
+// snapshotPayloadWithRequests additionally sets the PR's requested reviewers,
+// used to prove a stale verdict is suppressed while a re-review is pending.
+func snapshotPayloadWithRequests(head, checks, reviews, comments, requests string) []byte {
 	if checks == "" {
 		checks = `{"__typename":"CheckRun","name":"CI","status":"COMPLETED","conclusion":"SUCCESS"}`
 	}
 	return fmt.Appendf(nil, `{"data":{"repository":{"pullRequest":{
       "number":404,"state":"OPEN","isDraft":false,"headRefOid":%q,
+      "reviewRequests":{"nodes":[%s]},
       "commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{
         "pageInfo":{"hasNextPage":false},"nodes":[%s]}}}}]},
       "reviews":{"nodes":[%s]},
       "comments":{"nodes":[%s]}
-    }}}}`, head, checks, reviews, comments)
+    }}}}`, head, requests, checks, reviews, comments)
+}
+
+func mustTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatalf("parse time %q: %v", value, err)
+	}
+	return parsed
+}
+
+// reReviewObservation builds a readiness carrying the review-baseline fields the
+// waiter uses to distinguish a stale verdict from a fresh one.
+func reReviewObservation(head, checks, review string, requested bool, submitted, latest time.Time) *prReadiness {
+	obs := readinessObservation("12", head, checks, review)
+	obs.ReviewerRequested = requested
+	obs.ReviewSubmittedAt = submitted
+	obs.LatestReviewAt = latest
+	return obs
 }
 
 // reviewNode builds one review. GitHub attaches every inline comment to a
@@ -348,6 +374,129 @@ func TestReportPROutcomeWritesPlainTextAndJSON(t *testing.T) {
 	}
 	if len(payload.Comments) != 0 {
 		t.Fatalf("baseline comments reported as new: %#v", payload.Comments)
+	}
+}
+
+// A re-review request marks any pre-existing verdict as stale: parse must
+// surface that the reviewer is re-requested and when their newest review landed,
+// so the waiter can tell a fresh verdict from the one it started against.
+func TestParsePRSnapshotCapturesReviewRequestAndBaseline(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	reviews := reviewNode("r1", "CHANGES_REQUESTED", "please fix", "2026-07-19T10:00:00Z", "figgyster", head, "")
+	requests := `{"requestedReviewer":{"__typename":"User","login":"figgyster"}},
+	             {"requestedReviewer":{"__typename":"Team","slug":"platform"}}`
+
+	readiness, err := parsePRSnapshot(snapshotPayloadWithRequests(head, "", reviews, "", requests), prWaitOptions{Reviewer: "figgyster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !readiness.ReviewerRequested {
+		t.Fatalf("re-requested reviewer not detected: %#v", readiness)
+	}
+	if readiness.ReviewState != "changes_requested" {
+		t.Fatalf("review state = %q", readiness.ReviewState)
+	}
+	want := mustTime(t, "2026-07-19T10:00:00Z")
+	if !readiness.ReviewSubmittedAt.Equal(want) || !readiness.LatestReviewAt.Equal(want) {
+		t.Fatalf("timings = submitted %v latest %v", readiness.ReviewSubmittedAt, readiness.LatestReviewAt)
+	}
+
+	// A request for a different reviewer must not mark ours as re-requested.
+	other := `{"requestedReviewer":{"__typename":"User","login":"someone-else"}}`
+	readiness, err = parsePRSnapshot(snapshotPayloadWithRequests(head, "", reviews, "", other), prWaitOptions{Reviewer: "figgyster"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readiness.ReviewerRequested {
+		t.Fatalf("unrelated request marked reviewer re-requested: %#v", readiness)
+	}
+}
+
+// The #633 regression: figgyster's CHANGES_REQUESTED was addressed and figgyster
+// re-requested, but wait-ready exited 3 at once on the stale verdict. With the
+// reviewer re-requested, the pre-baseline verdict must not end the wait; a review
+// submitted after the baseline does.
+func TestWaitForPRActionableIgnoresStaleVerdictWhileReReviewPending(t *testing.T) {
+	head := strings.Repeat("c", 40)
+	baselineAt := mustTime(t, "2026-07-19T10:00:00Z")
+	freshAt := mustTime(t, "2026-07-19T12:00:00Z")
+
+	stale := reReviewObservation(head, checksGreen, "changes_requested", true, baselineAt, baselineAt)
+	stillStale := reReviewObservation(head, checksGreen, "changes_requested", true, baselineAt, baselineAt)
+	// The re-review lands as an approval; GitHub clears the request as it does.
+	approved := reReviewObservation(head, checksGreen, "approved", false, freshAt, freshAt)
+	source := &fakeReadinessSource{results: []*prReadiness{stale, stillStale, approved}}
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
+
+	var output bytes.Buffer
+	got, outcome, err := waitForPRActionable(context.Background(), source, opts, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != outcomeApproved || outcome.exitCode() != prWaitExitApproved || got != approved {
+		t.Fatalf("got=%#v outcome=%s", got, outcome)
+	}
+	if source.calls != 3 {
+		t.Fatalf("returned after %d polls; the stale verdict must not end the wait", source.calls)
+	}
+	// The wait must not look stuck: the held verdict is annotated on the line and
+	// explained once, and the note fires exactly once.
+	text := output.String()
+	if !strings.Contains(text, "review=changes_requested reviewer=figgyster re-requested=true") {
+		t.Fatalf("re-request annotation missing from progress:\n%s", text)
+	}
+	if n := strings.Count(text, "predates the pending re-review request"); n != 1 {
+		t.Fatalf("stale-verdict note fired %d times, want 1:\n%s", n, text)
+	}
+}
+
+// A re-review that again requests changes is a fresh verdict and returns 3, but
+// only once it is newer than the baseline recorded at wait start.
+func TestWaitForPRActionableReturnsOnFreshChangesRequestedAfterReReview(t *testing.T) {
+	head := strings.Repeat("c", 40)
+	baselineAt := mustTime(t, "2026-07-19T10:00:00Z")
+	freshAt := mustTime(t, "2026-07-19T12:00:00Z")
+
+	stale := reReviewObservation(head, checksGreen, "changes_requested", true, baselineAt, baselineAt)
+	fresh := reReviewObservation(head, checksGreen, "changes_requested", true, freshAt, freshAt)
+	source := &fakeReadinessSource{results: []*prReadiness{stale, fresh}}
+
+	got, outcome, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != outcomeChangesRequested || outcome.exitCode() != prWaitExitChangesRequested || got != fresh {
+		t.Fatalf("got=%#v outcome=%s", got, outcome)
+	}
+	if source.calls != 2 {
+		t.Fatalf("returned after %d polls; expected the stale verdict skipped and the fresh one to return", source.calls)
+	}
+}
+
+// Not re-requested: an existing verdict is the current state and returns at once.
+// Approval is a state, not an event, so an already-approved PR still returns 0.
+func TestWaitForPRActionableReturnsImmediatelyWithoutReReview(t *testing.T) {
+	head := strings.Repeat("c", 40)
+	at := mustTime(t, "2026-07-19T10:00:00Z")
+
+	approved := reReviewObservation(head, checksGreen, "approved", false, at, at)
+	source := &fakeReadinessSource{results: []*prReadiness{approved}}
+	got, outcome, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != outcomeApproved || got != approved || source.calls != 1 {
+		t.Fatalf("approval not returned immediately: outcome=%s calls=%d", outcome, source.calls)
+	}
+
+	changes := reReviewObservation(head, checksGreen, "changes_requested", false, at, at)
+	source = &fakeReadinessSource{results: []*prReadiness{changes}}
+	got, outcome, err = waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != outcomeChangesRequested || got != changes || source.calls != 1 {
+		t.Fatalf("changes_requested not returned immediately: outcome=%s calls=%d", outcome, source.calls)
 	}
 }
 
