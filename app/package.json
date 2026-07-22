@@ -36,7 +36,7 @@
     "real-app:scenario-automation-pr-continuity": "node scripts/real-app-harness/scenario-automation-pr-continuity.mjs",
     "real-app:scenario-automation-scheduled-cleanup": "node scripts/real-app-harness/scenario-automation-scheduled-cleanup.mjs",
     "real-app:scenario-automation-lifecycle": "node scripts/real-app-harness/scenario-automation-lifecycle.mjs",
-    "real-app:scenario-automation-editor": "node scripts/real-app-harness/scenario-automation-editor.mjs",
+    "real-app:scenario-automation-form": "node scripts/real-app-harness/scenario-automation-form.mjs",
     "real-app:scenario-tr401": "node scripts/real-app-harness/scenario-tr401-local-window-resize.mjs",
     "real-app:scenario-tr401-local-codex": "node scripts/real-app-harness/scenario-tr401-local-window-resize.mjs --agent codex",
     "real-app:scenario-tr401-codex-main": "node scripts/real-app-harness/scenario-tr401-local-codex-main-window-resize.mjs",
