@@ -173,9 +173,18 @@ real concept and drives binding rotation.
       `expected_revision` guard survives. Landed 2026-07-23; live-verified on the dev profile via
       scenario-automation-form.mjs (11 legs) plus the lifecycle and surface
       scenarios.
-- [ ] **PR7 — proving matrix.** Both vision proving cases end-to-end on a
+- [x] **PR7 — proving matrix.** Both vision proving cases end-to-end on a
       fresh profile (PR pre-review with continuity + scheduled worktree
-      cleanup), daemon-restart recovery leg, changelog.
+      cleanup), daemon-restart recovery leg, changelog. Landed 2026-07-23:
+      both proving scenarios ran green on a fresh throwaway profile
+      (`pr7prove`, protocol-182 preflight all-PASS) —
+      scenario-automation-pr-continuity.mjs with a new
+      `daemon_restart_preserves_continuity` leg (post-restart re-request
+      resumes the same session/ticket via Codex resume, dirty reviewer work
+      intact) and scenario-automation-scheduled-cleanup.mjs (4 legs incl.
+      restart catch-up, real codex cleanup, storm guard). No new CHANGELOG
+      entry: PR7 adds test coverage only; all v2 user-visible behavior was
+      changelogged with PR5/PR6.
 
 ## Decisions
 
