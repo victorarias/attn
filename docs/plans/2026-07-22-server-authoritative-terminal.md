@@ -395,7 +395,14 @@ and a pre-placed locked skeleton — so every later item is pure code against an
 executable spec, safe to fan out to cheaper agents. After rails, a wrong
 implementation cannot pass the suite.
 
-- [ ] **Rails (one strong-agent pass; small — do this first):**
+- [x] **Rails (one strong-agent pass; small — do this first) — DONE
+      2026-07-23** on `feat/server-auth-terminal-phase3a`: (1) leak counter in
+      `spike_trackedref.go` + `TestTrackedRefLeakAccounting`; (2) corpus
+      `internal/pty/testdata/osc133_block_corpus.json` (15 cases) proven by
+      `app/src/utils/terminalBlocks.corpus.test.ts`; (3) skeleton
+      `internal/pty/blockfeed.go` + session/manager wiring, atomicity proven
+      by `TestBlockSnapshotAtomicity` (incl. `-race`), linux stub build green.
+      Original spec:
       1. Ref-leak accounting in `internal/ghosttyvt`: a package-level live
          counter incremented by `TrackCursor`, decremented by the first
          `Free`; `LiveTrackedRefs() int` exposed for tests. Every
