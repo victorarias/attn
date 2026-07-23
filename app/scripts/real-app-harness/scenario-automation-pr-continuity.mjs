@@ -302,6 +302,32 @@ async function main() {
       runner.assert(ticket?.status === 'working' && !ticket.archived_at, 'successful continuation reopens and unarchives the ticket', ticket);
       return row;
     });
+    await runner.step('daemon_restart_preserves_continuity', async () => {
+      // Quit the app before restarting: a running app respawns the daemon
+      // without the mock GitHub env and would invalidate the leg.
+      await client.quitApp();
+      await observer.close().catch(() => {});
+      try { run(binary, ['daemon', 'stop'], daemonEnv); } catch {}
+      run(binary, ['daemon', 'ensure'], daemonEnv);
+      await poll(() => {
+        try { runJSON(binary, ['automation', 'list'], daemonEnv); return { ready: true }; } catch { return null; }
+      }, 'restarted profile daemon');
+      await launchFreshAppAndConnect(client, observer, { sweepStaleSessions: false });
+      await client.request('close_session', { sessionId: sessionID });
+      await observer.waitFor(() => !observer.getSession(sessionID) ? true : null, 'reviewer to unregister after restart');
+      await setRequested(mock.url, false);
+      await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
+      await setRequested(mock.url, true);
+      await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
+      const row = await poll(() => {
+        const rows = runJSON(binary, ['automation', 'runs', definitionID], daemonEnv) || [];
+        return rows.length >= 3 && rows[0].state === 'delivered' ? rows[0] : null;
+      }, 'post-restart delivered continuation', 45_000);
+      runner.assert(row.session_id === sessionID && row.ticket_id === ticketID, 'post-restart continuation reuses the same session and ticket', row);
+      const calls = await poll(() => invocations(probe.log).length >= 3 ? invocations(probe.log) : null, 'post-restart Codex resume launch');
+      runner.assert(calls[2].argv.includes('resume'), 'post-restart launch resumes rather than starting fresh', { argv: calls[2].argv });
+      runner.assert(fs.readFileSync(path.join(worktree, 'review-notes.txt'), 'utf8').includes('preserve me'), 'reviewer work survives the daemon restart');
+    });
     await runner.step('assert_missing_worktree_fails_visibly', async () => {
       await client.request('close_session', { sessionId: sessionID });
       await observer.waitFor(() => !observer.getSession(sessionID) ? true : null, 'continued reviewer to unregister');
@@ -312,7 +338,7 @@ async function main() {
       await wsRequest(options.wsUrl, { cmd: 'refresh_prs' }, 'refresh_prs_result');
       const failed = await poll(() => {
         const rows = runJSON(binary, ['automation', 'runs', definitionID], daemonEnv) || [];
-        return rows.length >= 3 && rows[0].state === 'failed' ? rows[0] : null;
+        return rows.length >= 4 && rows[0].state === 'failed' ? rows[0] : null;
       }, 'visible missing-worktree failure', 30_000);
       runner.assert(String(failed.last_error).includes('worktree') && String(failed.last_error).includes('missing'), 'missing delivered worktree fails without recreation', failed);
     });
