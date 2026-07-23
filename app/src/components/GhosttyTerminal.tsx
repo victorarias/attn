@@ -41,6 +41,7 @@ import {
   TerminalBlockStore,
   type BlockRowAccess,
   type BlockViewportSpan,
+  type SeededBlock,
   type TerminalBlock,
 } from '../utils/terminalBlocks';
 import {
@@ -170,6 +171,10 @@ export interface GhosttyTerminalHandle {
     rows: number,
     options?: { historicalReplay?: boolean },
   ) => Promise<void>;
+  // Seed the command-block store from a server-authoritative restore snapshot.
+  // Enqueued on the write chain so it runs after the VT dump is applied and the
+  // restored buffer exists to compute anchor text from.
+  seedBlocks: (blocks: SeededBlock[]) => Promise<void>;
   reset: () => void;
   scrollToTop: () => boolean;
   getText: () => string;
@@ -1514,6 +1519,25 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
     }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleCoalescedRefit, scheduleSynchronizedOutputRenderFallback, selectionLineAtBufferRow]);
 
+    // Seed the command-block store from a server-authoritative restore snapshot.
+    // Enqueued on the write chain so it runs after the VT dump is applied: the
+    // dump is OSC 133-stripped, so the live parser rebuilds nothing on restore
+    // and this is the only path that carries blocks across an attach. Seed rows
+    // are absolute buffer rows of the freshly-restored terminal (== the dump's
+    // SCREEN rows), the same space live applyMarker records, so anchor text read
+    // here matches what re-anchoring later expects.
+    const seedBlocks = useCallback((blocks: SeededBlock[]) => {
+      return enqueueOperation('seedBlocks', () => {
+        const terminal = terminalRef.current;
+        if (!terminal) return;
+        blockStoreRef.current.seed(
+          blocks,
+          (row) => selectionLineAtBufferRow(row, 0, terminal.cols),
+        );
+        selectedBlockIdRef.current = null;
+      });
+    }, [enqueueOperation, selectionLineAtBufferRow]);
+
     // Reconcile the block store with the model's new geometry after a resize.
     //
     // A WIDTH change invalidates stored rows: a reflowing resize (live
@@ -1840,6 +1864,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       isInputFocused: () => document.activeElement === containerRef.current,
       write,
       resizeLocal,
+      seedBlocks,
       reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
       scrollToTop: () => {
         const terminal = terminalRef.current;
@@ -1865,7 +1890,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getVisibleStyleSummary,
       getBlockState,
       drain: () => writeChainRef.current,
-    }), [fit, getBlockState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, write]);
+    }), [fit, getBlockState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, seedBlocks, write]);
 
     useEffect(() => {
       let active = true;
@@ -2039,6 +2064,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           isInputFocused: () => document.activeElement === container,
           write,
           resizeLocal,
+          seedBlocks,
           reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; hoverGenerationRef.current += 1; renderSurface(true); return true; },
           getText,

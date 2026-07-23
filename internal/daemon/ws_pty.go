@@ -81,9 +81,12 @@ type attachReplayPayload struct {
 	// ghosttySnapshot, when non-nil, is a self-contained VT serialization of the
 	// worker's parsed terminal (server-authoritative restore). It supersedes
 	// every raw-replay field below; the client resets its model and replays it.
-	ghosttySnapshot     []byte
-	ghosttyCols         uint16
-	ghosttyRows         uint16
+	ghosttySnapshot []byte
+	ghosttyCols     uint16
+	ghosttyRows     uint16
+	// ghosttyBlocks are the worker's OSC 133 command blocks resolved atomically
+	// with ghosttySnapshot (Phase 3a). Carried only alongside a snapshot.
+	ghosttyBlocks       []pty.AttachBlockData
 	scrollback          []byte
 	replaySegments      []ptybackend.ReplaySegment
 	scrollbackTruncated bool
@@ -262,6 +265,7 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Sess
 		payload.ghosttySnapshot = info.GhosttySnapshot
 		payload.ghosttyCols = info.Cols
 		payload.ghosttyRows = info.Rows
+		payload.ghosttyBlocks = info.GhosttyBlocks
 		payload.scrollback = nil
 		payload.replaySegments = nil
 		payload.scrollbackTruncated = false
@@ -989,13 +993,44 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	}
 	if len(replay.ghosttySnapshot) > 0 {
 		result.Snapshot = &protocol.AttachSnapshot{
-			Cols:                int(replay.ghosttyCols),
-			Rows:                int(replay.ghosttyRows),
-			VtDumpB64:           base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
-			ScrollbackTruncated: replay.scrollbackTruncated,
+			Cols:      int(replay.ghosttyCols),
+			Rows:      int(replay.ghosttyRows),
+			VtDumpB64: base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
+			Blocks:    attachBlocksToProtocol(replay.ghosttyBlocks),
 		}
 	}
 	d.sendToClient(client, result)
+}
+
+// attachBlocksToProtocol converts the worker's resolved command blocks to their
+// wire form. nil in → nil out (the field is omitted when there are no blocks).
+func attachBlocksToProtocol(blocks []pty.AttachBlockData) []protocol.AttachBlock {
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]protocol.AttachBlock, len(blocks))
+	for i, b := range blocks {
+		out[i] = protocol.AttachBlock{
+			ID:             int(b.ID),
+			Pending:        b.Pending,
+			PromptRow:      int(b.PromptRow),
+			InputRow:       int32PtrToInt(b.InputRow),
+			InputCol:       int32PtrToInt(b.InputCol),
+			OutputStartRow: int32PtrToInt(b.OutputStartRow),
+			EndRow:         int32PtrToInt(b.EndRow),
+			Command:        b.Command,
+			ExitCode:       int32PtrToInt(b.ExitCode),
+		}
+	}
+	return out
+}
+
+func int32PtrToInt(v *int32) *int {
+	if v == nil {
+		return nil
+	}
+	n := int(*v)
+	return &n
 }
 
 // snapshotSeedScreen resolves the visible frame to seed an observer with,

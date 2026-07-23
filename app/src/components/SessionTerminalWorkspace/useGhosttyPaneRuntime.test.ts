@@ -36,6 +36,7 @@ function createTerminal(): GhosttyTerminalHandle {
     getVisibleContent: vi.fn() as never,
     getVisibleStyleSummary: vi.fn() as never,
     getBlockState: vi.fn() as never,
+    seedBlocks: vi.fn(() => Promise.resolve()),
     drain: vi.fn(() => Promise.resolve()),
   };
 }

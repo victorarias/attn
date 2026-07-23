@@ -105,6 +105,10 @@ type Session struct {
 	// stays the sole answerer. May be nil if construction failed — shadow mode
 	// must never break a session, so every use is nil-guarded.
 	ghostty *ghosttyvt.Terminal
+	// blockFeed owns writes into ghostty, splitting at OSC 133 markers to
+	// maintain the worker-side command-block table (Phase 3a). nil exactly
+	// when ghostty is nil; every use is nil-guarded like ghostty's.
+	blockFeed *blockFeeder
 	// attachSnapshotMode mirrors the daemon's ATTN_ATTACH_SNAPSHOT flag (read
 	// from the worker's env at spawn). When true, the read loop forwards the
 	// ghostty terminal's query responses the scan-based responder does not cover
@@ -335,10 +339,11 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				if s.screen != nil {
 					s.screen.Observe(data)
 				}
-				if s.ghostty != nil {
+				if s.blockFeed != nil {
 					// Feed the server-authoritative terminal under the same lock
-					// as the seq watermark so a snapshot stays atomic with it.
-					s.ghostty.Write(data)
+					// as the seq watermark so a snapshot stays atomic with it;
+					// the feeder splits at OSC 133 markers to pin block positions.
+					s.blockFeed.feed(data)
 				}
 				s.lastReplaySeq = seq
 				s.replayMu.Unlock()
@@ -405,8 +410,8 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 		if s.screen != nil {
 			s.screen.Observe(carryover)
 		}
-		if s.ghostty != nil {
-			s.ghostty.Write(carryover)
+		if s.blockFeed != nil {
+			s.blockFeed.feed(carryover)
 		}
 		s.lastReplaySeq = seq
 		s.replayMu.Unlock()
@@ -796,6 +801,13 @@ func (s *Session) info() AttachInfo {
 	if s.ghostty != nil {
 		ghosttySnapshot = s.ghostty.Serialize().VTDump
 	}
+	// Resolve command blocks inside the SAME hold as the dump and watermark:
+	// the attach snapshot is an atomic {dump, blocks, watermark} triple, so a
+	// block row always indexes the dump it shipped with (Phase 3a contract).
+	var ghosttyBlocks []AttachBlockData
+	if s.blockFeed != nil {
+		ghosttyBlocks = s.blockFeed.snapshotBlocks()
+	}
 	replayWatermark := s.lastReplaySeq
 	s.replayMu.Unlock()
 
@@ -831,6 +843,7 @@ func (s *Session) info() AttachInfo {
 		ScreenCursorVisible: screenCursorVisible,
 		ScreenSnapshotFresh: screenSnapshotFresh,
 		GhosttySnapshot:     ghosttySnapshot,
+		GhosttyBlocks:       ghosttyBlocks,
 	}
 }
 
@@ -978,6 +991,9 @@ func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 
 func (s *Session) closePTY() {
 	_ = s.ptmx.Close()
+	if s.blockFeed != nil {
+		s.blockFeed.close()
+	}
 	if s.ghostty != nil {
 		s.ghostty.Close()
 	}

@@ -131,6 +131,9 @@ export function useGhosttyPaneRuntime(
           { historicalReplay: event.source === 'attach_replay' },
         );
         break;
+      case 'seed_blocks':
+        void terminal.seedBlocks(event.blocks);
+        break;
       case 'replay_complete':
         void terminal.drain().then(() => {
           if (isActiveSessionRef.current) {

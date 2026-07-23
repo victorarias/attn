@@ -114,6 +114,11 @@ type AttachInfo struct {
 	// terminal (primary + alt screens, scrollback, cursor) from libghostty-vt.
 	// Snapshot geometry is Cols/Rows. nil when the ghostty terminal is absent.
 	GhosttySnapshot []byte
+	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
+	// SCREEN-space rows of GhosttySnapshot, captured under the same lock hold
+	// (atomic with the dump and LastSeq). nil/empty until the Phase 3a block
+	// table replaces the rails no-op, and always nil when ghostty is absent.
+	GhosttyBlocks []AttachBlockData
 }
 
 type ExitInfo struct {
@@ -297,6 +302,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		m.logf("pty spawn: ghosttyvt terminal unavailable for id=%s: %v", opts.ID, err)
 	} else {
 		session.ghostty = gt
+		session.blockFeed = newBlockFeeder(gt)
 	}
 
 	m.mu.Lock()

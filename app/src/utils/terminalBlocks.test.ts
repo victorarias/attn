@@ -358,3 +358,97 @@ describe('blockViewportSpanAnchored', () => {
     expect(blockViewportSpanAnchored(block, access(reflowed), 341, 53)).toBeNull();
   });
 });
+
+describe('TerminalBlockStore.seed', () => {
+  // The restore buffer the worker's SCREEN-space rows index into.
+  const RESTORED = ['prompt> make test', 'building', 'ok', '', 'prompt> ls', 'a  b'];
+  const rowTextAt = (row: number) => RESTORED[row] ?? '';
+
+  it('lands completed blocks at their rows with anchorText from the restored buffer', () => {
+    const store = new TerminalBlockStore();
+    store.seed(
+      [{ id: 5, pending: false, promptRow: 0, inputRow: 0, inputCol: 8, outputStartRow: 1, endRow: 3, command: 'make test', exitCode: 0 }],
+      rowTextAt,
+    );
+    const blocks = store.blocks();
+    expect(blocks).toHaveLength(1);
+    const block = blocks[0];
+    expect(block.id).toBe(5);
+    expect(block.promptRow).toBe(0);
+    expect(block.outputStartRow).toBe(1);
+    expect(block.endRow).toBe(3);
+    expect(block.command).toBe('make test');
+    expect(block.exitCode).toBe(0);
+    // anchorRow is the input row; anchorText comes from the restored buffer.
+    expect(block.anchorRow).toBe(0);
+    expect(block.anchorText).toBe('prompt> make test');
+    expect(block.inputStart).toEqual({ row: 0, col: 8 });
+  });
+
+  it('seeded completed blocks extract their output against the restored buffer', () => {
+    const store = new TerminalBlockStore();
+    store.seed(
+      [{ id: 1, pending: false, promptRow: 0, inputRow: 0, outputStartRow: 1, endRow: 3, command: 'make test', exitCode: 0 }],
+      rowTextAt,
+    );
+    expect(extractBlock(store.blocks()[0], access(RESTORED))).toEqual({
+      command: 'make test',
+      output: 'building\nok',
+    });
+  });
+
+  it('re-arms a pending block so the next live command-end completes it', () => {
+    const store = new TerminalBlockStore();
+    store.seed(
+      [{ id: 9, pending: true, promptRow: 4, inputRow: 4, inputCol: 8, outputStartRow: 5, command: 'ls' }],
+      rowTextAt,
+    );
+    // Nothing completed yet — the block is still open.
+    expect(store.blocks()).toHaveLength(0);
+    // The live D marker that arrives after restore closes it, keeping its id.
+    store.applyMarker({ kind: 'command-end', exitCode: 0 }, { row: 6, col: 0 }, rowTextAt);
+    const blocks = store.blocks();
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].id).toBe(9);
+    expect(blocks[0].command).toBe('ls');
+    expect(blocks[0].endRow).toBe(6);
+  });
+
+  it('continues the id counter above the max seeded id so live blocks never collide', () => {
+    const store = new TerminalBlockStore();
+    store.seed(
+      [
+        { id: 3, pending: false, promptRow: 0, inputRow: 0, outputStartRow: 1, endRow: 2, command: 'a', exitCode: 0 },
+        { id: 7, pending: false, promptRow: 2, inputRow: 2, outputStartRow: 3, endRow: 4, command: 'b', exitCode: 0 },
+      ],
+      rowTextAt,
+    );
+    // A fresh live block allocates the next id above the max seeded (7).
+    store.applyMarker({ kind: 'prompt-start' }, { row: 4, col: 0 }, rowTextAt);
+    store.applyMarker({ kind: 'pre-exec', cmdline: 'c' }, { row: 5, col: 0 }, rowTextAt);
+    store.applyMarker({ kind: 'command-end', exitCode: 0 }, { row: 6, col: 0 }, rowTextAt);
+    const live = store.blocks().find((b) => b.command === 'c');
+    expect(live?.id).toBe(8);
+  });
+
+  it('replaces existing state — a restore is authoritative', () => {
+    const store = completedBlock(ROWS);
+    expect(store.blocks()).toHaveLength(1);
+    store.seed(
+      [{ id: 2, pending: false, promptRow: 0, inputRow: 0, outputStartRow: 1, endRow: 2, command: 'seeded', exitCode: 0 }],
+      rowTextAt,
+    );
+    const blocks = store.blocks();
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].command).toBe('seeded');
+  });
+
+  it('drops a completed block missing output/end rows rather than storing a bad row', () => {
+    const store = new TerminalBlockStore();
+    store.seed(
+      [{ id: 1, pending: false, promptRow: 0, inputRow: 0, command: 'no-output' }],
+      rowTextAt,
+    );
+    expect(store.blocks()).toHaveLength(0);
+  });
+});

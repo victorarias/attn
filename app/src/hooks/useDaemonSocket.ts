@@ -29,6 +29,7 @@ import type {
   HeatState,
   AutomationDefinitionSummary,
   AutomationRunSummary,
+  AttachBlock as GeneratedAttachBlock,
 } from '../types/generated';
 import {
   emitPtyEvent,
@@ -173,7 +174,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '181';
+export const PROTOCOL_VERSION = '182';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2191,6 +2192,29 @@ export function useDaemonSocket({
                     source: 'attach_replay',
                     suppressResponses: !replayPlan.respondToTerminalQueries,
                   });
+                  // Seed OSC 133 command blocks from the snapshot: the VT dump is
+                  // marker-stripped, so the live parser rebuilds none on restore.
+                  // Enqueued after the dump write (seedBlocks runs on the write
+                  // chain) so anchor text reads the restored buffer. Wire shape
+                  // (snake_case) → client-domain SeededBlock.
+                  const snapshotBlocks = data.snapshot?.blocks;
+                  if (snapshotBlocks && snapshotBlocks.length > 0) {
+                    emitPtyEvent({
+                      event: 'seed_blocks',
+                      id: data.id,
+                      blocks: snapshotBlocks.map((b: GeneratedAttachBlock) => ({
+                        id: b.id,
+                        pending: b.pending,
+                        promptRow: b.prompt_row,
+                        inputRow: b.input_row,
+                        inputCol: b.input_col,
+                        outputStartRow: b.output_start_row,
+                        endRow: b.end_row,
+                        command: b.command,
+                        exitCode: b.exit_code,
+                      })),
+                    });
+                  }
                 } else if (attachEffects.replayAction.kind === 'screen_snapshot') {
                   emitPtyEvent({
                     event: 'data',

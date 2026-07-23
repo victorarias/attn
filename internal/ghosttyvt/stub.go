@@ -21,9 +21,8 @@ type Options struct {
 
 // Snapshot mirrors the real build's serialization result.
 type Snapshot struct {
-	Cols, Rows          int
-	VTDump              []byte
-	ScrollbackTruncated bool
+	Cols, Rows int
+	VTDump     []byte
 }
 
 // Terminal is the no-op stand-in for the native terminal off macOS/arm64.
@@ -54,3 +53,22 @@ func (t *Terminal) PlainText() string { return "" }
 func (t *Terminal) Serialize() Snapshot { return Snapshot{Cols: t.cols, Rows: t.rows} }
 
 func (t *Terminal) Close() {}
+
+// TrackedRef mirrors the real build's tracked grid reference. The stub cannot
+// pin cells, so TrackCursor always returns nil and instances never exist; the
+// type only keeps cross-platform callers compiling.
+type TrackedRef struct{}
+
+func (r *TrackedRef) ScreenPoint() (x, y int, ok bool) { return 0, 0, false }
+
+func (r *TrackedRef) Free() {}
+
+// TrackCursor always fails on the stub; callers already treat a nil ref as
+// "position unpinnable" and degrade to serving no blocks.
+func (t *Terminal) TrackCursor() *TrackedRef { return nil }
+
+// AltScreenActive is always false on the stub.
+func (t *Terminal) AltScreenActive() bool { return false }
+
+// LiveTrackedRefs mirrors the real build's leak accounting; always zero here.
+func LiveTrackedRefs() int { return 0 }
