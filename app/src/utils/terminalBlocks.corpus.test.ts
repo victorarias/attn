@@ -1,3 +1,4 @@
+// @vitest-environment node
 // Proves the shared OSC 133 block-lifecycle corpus against the EXISTING
 // client TerminalBlockStore. The corpus (internal/pty/testdata/) is the
 // executable spec the Go worker block table (Phase 3a) is written against;
@@ -9,8 +10,11 @@
 // block (or open a fresh one when none is pending), and the flushed block's
 // fields expose what the pending state must have been — including the id the
 // store allocates next, which the restore-seed contract relies on.
+// @types/node isn't a direct dependency of this package (only a transitive
+// peer of vite/vitest), matching ghosttyHyperlinks.test.ts's pattern.
+// @ts-expect-error -- see above
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
+// @ts-expect-error -- see above
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { Osc133Marker } from './terminalOsc133';
@@ -52,9 +56,8 @@ interface CorpusCase {
   };
 }
 
-const corpusPath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../../internal/pty/testdata/osc133_block_corpus.json',
+const corpusPath = fileURLToPath(
+  new URL('../../../internal/pty/testdata/osc133_block_corpus.json', import.meta.url),
 );
 const corpus = JSON.parse(readFileSync(corpusPath, 'utf8')) as { cases: CorpusCase[] };
 
@@ -121,9 +124,10 @@ describe('osc133 block corpus (executable spec for the Go worker block table)', 
       if (c.expect.completed) expect(blocks).toEqual(c.expect.completed);
       if (c.expect.completedCount !== undefined) expect(blocks).toHaveLength(c.expect.completedCount);
       if (c.expect.firstId !== undefined) expect(blocks[0]?.id).toBe(c.expect.firstId);
-      if (c.expect.lastId !== undefined) expect(blocks.at(-1)?.id).toBe(c.expect.lastId);
+      const last = blocks[blocks.length - 1];
+      if (c.expect.lastId !== undefined) expect(last?.id).toBe(c.expect.lastId);
       if (c.expect.firstCommand !== undefined) expect(blocks[0]?.command).toBe(c.expect.firstCommand);
-      if (c.expect.lastCommand !== undefined) expect(blocks.at(-1)?.command).toBe(c.expect.lastCommand);
+      if (c.expect.lastCommand !== undefined) expect(last?.command).toBe(c.expect.lastCommand);
       if (c.expect.firstPromptRow !== undefined) expect(blocks[0]?.promptRow).toBe(c.expect.firstPromptRow);
 
       // Flush verification of pending + nextId (see file comment).
