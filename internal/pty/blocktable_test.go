@@ -16,7 +16,7 @@ type fakeBlockRef struct {
 }
 
 func (r *fakeBlockRef) ScreenPoint() (int, int, bool) { return r.x, r.y, true }
-func (r *fakeBlockRef) Free()                          { *r.freed++ }
+func (r *fakeBlockRef) Free()                         { *r.freed++ }
 
 type blkStep struct {
 	Marker   string  `json:"marker"`

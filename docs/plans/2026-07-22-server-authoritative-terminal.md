@@ -574,12 +574,15 @@ items don't even depend on them):
          pending re-arm, id continuation); parity test consuming the corpus.
       3. Cross-platform: non-darwin stub build stays green (`GOOS=linux go
          build ./...`) — block-table code paths inert without ghostty.
-- [ ] Verify (throwaway profile — never dev — snapshot ON): fish session →
-      run several commands → quit app → reopen → blocks are
-      clickable/copyable with correct command text, exit codes, and regions;
-      then `real-app:scenario-terminal-block-resize` FULL pass including
-      Phase B (`phase_b_relaunch_replay`); bash/zsh legs still assert
-      blocks ABSENT. Full `make test-harness` before the phase PR.
+- [x] Verify — DONE 2026-07-23 (throwaway profile `p3ablk`, full `make
+      install`, protocol 182, snapshot flag ON end-to-end app→daemon→worker).
+      `real-app:scenario-terminal-block-resize` FULL pass including Phase B
+      (`phase_b_relaunch_replay`): fish blocks 4→4 SURVIVED the relaunch;
+      bash/zsh 0→0 (ABSENT). Proven the snapshot path, not raw replay — every
+      attach logged `replay_decision=use_ghostty_snapshot
+      replay_reason=attn_attach_snapshot_enabled ghostty_snapshot_bytes=5908
+      replay_bytes=0`. Full `make test-harness` green (e2e 193 passed/1
+      skipped). Native cgo witness posted to the phase PR.
 
 Exit gate: Phase B green with snapshot attach on ⇒ remove the Phase 3 hold.
 

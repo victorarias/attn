@@ -81,9 +81,9 @@ type attachReplayPayload struct {
 	// ghosttySnapshot, when non-nil, is a self-contained VT serialization of the
 	// worker's parsed terminal (server-authoritative restore). It supersedes
 	// every raw-replay field below; the client resets its model and replays it.
-	ghosttySnapshot     []byte
-	ghosttyCols         uint16
-	ghosttyRows         uint16
+	ghosttySnapshot []byte
+	ghosttyCols     uint16
+	ghosttyRows     uint16
 	// ghosttyBlocks are the worker's OSC 133 command blocks resolved atomically
 	// with ghosttySnapshot (Phase 3a). Carried only alongside a snapshot.
 	ghosttyBlocks       []pty.AttachBlockData
