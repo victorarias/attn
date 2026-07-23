@@ -24,21 +24,8 @@ import (
 )
 
 const (
-	// DefaultScrollbackSize bounds the eager per-session ring buffer (flat
-	// scrollback, used for snapshot derivation and legacy flat replay). It is
-	// allocated up front in every PTY worker subprocess, so it stays small.
-	DefaultScrollbackSize = 1 * 1024 * 1024
-	// DefaultReplayLogSize bounds the lazily-grown segmented replay log — the
-	// source of terminal history restored on remount/relaunch (see
-	// daemon.buildAttachReplayPayload). Unlike the ring it only costs memory
-	// proportional to what a session actually emitted, so it retains enough
-	// history for the daemon to select a recent self-sufficient replay tail or
-	// derive a current screen snapshot. Attach transport is capped separately
-	// because parsing this whole log synchronously would stall the frontend.
-	// Must stay >= daemon.maxAgentRawReplayBytes or attach replay is starved.
-	DefaultReplayLogSize = 8 * 1024 * 1024
-	defaultKillTimeout   = 10 * time.Second
-	shellEnvTimeout      = 2 * time.Second
+	defaultKillTimeout = 10 * time.Second
+	shellEnvTimeout    = 2 * time.Second
 )
 
 var ErrSessionNotFound = errors.New("session not found")
@@ -92,10 +79,6 @@ type SpawnOptions struct {
 }
 
 type AttachInfo struct {
-	Scrollback          []byte
-	ScrollbackTruncated bool
-	ReplaySegments      []ReplaySegment
-	ReplayTruncated     bool
 	LastSeq             uint32
 	Cols                uint16
 	Rows                uint16
@@ -116,9 +99,11 @@ type AttachInfo struct {
 	GhosttySnapshot []byte
 	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
 	// SCREEN-space rows of GhosttySnapshot, captured under the same lock hold
-	// (atomic with the dump and LastSeq). nil/empty until the Phase 3a block
-	// table replaces the rails no-op, and always nil when ghostty is absent.
+	// (atomic with the dump and LastSeq). nil when ghostty is absent.
 	GhosttyBlocks []AttachBlockData
+	// GhosttyScrollbackTruncated reports whether the ghostty terminal dropped
+	// scrollback lines at its cap before this snapshot was taken.
+	GhosttyScrollbackTruncated bool
 }
 
 type ExitInfo struct {
@@ -146,25 +131,20 @@ type SessionInfo struct {
 }
 
 type Manager struct {
-	mu             sync.RWMutex
-	sessions       map[string]*Session
-	scrollbackSize int
-	logf           LogFunc
-	onExit         func(ExitInfo)
-	onState        func(sessionID, state string)
+	mu       sync.RWMutex
+	sessions map[string]*Session
+	logf     LogFunc
+	onExit   func(ExitInfo)
+	onState  func(sessionID, state string)
 }
 
-func NewManager(scrollbackSize int, logf LogFunc) *Manager {
-	if scrollbackSize <= 0 {
-		scrollbackSize = DefaultScrollbackSize
-	}
+func NewManager(logf LogFunc) *Manager {
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
 	}
 	return &Manager{
-		sessions:       make(map[string]*Session),
-		scrollbackSize: scrollbackSize,
-		logf:           logf,
+		sessions: make(map[string]*Session),
+		logf:     logf,
 	}
 }
 
@@ -284,20 +264,17 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		rows:        opts.Rows,
 		ptmx:        ptmx,
 		cmd:         cmd,
-		scrollback:  NewRingBuffer(m.scrollbackSize),
-		replayLog:   NewReplayLog(DefaultReplayLogSize),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
 		startedAt:   time.Now(),
 		theme:       opts.Theme,
 		cleanup:     deferCleanup,
-
-		attachSnapshotMode: attachSnapshotEnabled(),
 	}
 	session.screen = newVirtualScreen(opts.Cols, opts.Rows)
-	// Shadow-mode server-authoritative terminal (Phase 1). A construction
-	// failure must never break the session — leave it nil; every use is guarded.
+	// Server-authoritative terminal: serialized on attach to restore the client.
+	// A construction failure must never break the session — leave it nil; every
+	// use is guarded. It is also nil on non-macOS builds (pure-Go stub).
 	if gt, err := ghosttyvt.New(int(opts.Cols), int(opts.Rows), ghosttyvt.Options{}); err != nil {
 		m.logf("pty spawn: ghosttyvt terminal unavailable for id=%s: %v", opts.ID, err)
 	} else {

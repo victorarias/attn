@@ -1,13 +1,13 @@
 package pty
 
 import (
-	"bytes"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
 
-// waitForKillReady polls the session's scrollback until it contains the
+// waitForKillReady polls the session's rendered screen until it contains the
 // readiness marker the spawned script emits right after installing its
 // signal traps. Without this, kill() could race the child's own startup and
 // send its signal before the trap is installed, which would make a shell
@@ -16,7 +16,7 @@ func waitForKillReady(t *testing.T, s *Session, marker string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if bytes.Contains(s.info().Scrollback, []byte(marker)) {
+		if strings.Contains(s.screen.renderedText(), marker) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -26,7 +26,7 @@ func waitForKillReady(t *testing.T, s *Session, marker string) {
 
 func spawnKillTestSession(t *testing.T, id, script string) *Session {
 	t.Helper()
-	m := NewManager(DefaultScrollbackSize, nil)
+	m := NewManager(nil)
 	t.Cleanup(m.Shutdown)
 
 	if err := m.Spawn(SpawnOptions{

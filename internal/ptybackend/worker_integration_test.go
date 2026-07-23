@@ -232,7 +232,7 @@ gotThemeReply:
 // upgrade and rejects the snapshot RPC. The daemon then derives the visible
 // frame from the worker's buffered output, fetched via a read-only attach that
 // must not leave a subscriber behind.
-func TestWorkerBackend_SnapshotViaReplayReadsScrollbackReadOnly(t *testing.T) {
+func TestWorkerBackend_SnapshotReadsScreenReadOnly(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping worker integration test in short mode")
 	}
@@ -275,39 +275,30 @@ func TestWorkerBackend_SnapshotViaReplayReadsScrollbackReadOnly(t *testing.T) {
 		t.Fatalf("Input() error: %v", err)
 	}
 
-	session, err := backend.getSession(sessionID)
-	if err != nil {
-		t.Fatalf("getSession() error: %v", err)
-	}
-
-	// snapshotViaReplay must fetch buffered output without a subscriber, so we
-	// can poll it repeatedly until the marker lands; if each call leaked a
+	// Snapshot must fetch the rendered screen without a subscriber, so we can
+	// poll it repeatedly until the marker lands; if each call leaked a
 	// subscriber the worker would accumulate dead ones.
 	var info AttachInfo
 	deadline := time.Now().Add(8 * time.Second)
 	for {
-		info, err = backend.snapshotViaReplay(context.Background(), session)
+		info, err = backend.Snapshot(context.Background(), sessionID)
 		if err != nil {
-			t.Fatalf("snapshotViaReplay() error: %v", err)
+			t.Fatalf("Snapshot() error: %v", err)
 		}
-		if derived, ok := pty.ScreenSnapshotFromReplay(info.Scrollback, info.Cols, info.Rows); ok &&
-			bytes.Contains(derived.Payload, []byte("__ATTN_REPLAY__")) {
-			break
-		}
-		if bytes.Contains(info.Scrollback, []byte("__ATTN_REPLAY__")) {
+		if bytes.Contains(info.ScreenSnapshot, []byte("__ATTN_REPLAY__")) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for marker in read-only replay; scrollback=%q", info.Scrollback)
+			t.Fatalf("timed out waiting for marker in read-only snapshot; screen=%q", info.ScreenSnapshot)
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
 
 	if !info.Running {
-		t.Fatalf("snapshotViaReplay running=false, expected true")
+		t.Fatalf("Snapshot running=false, expected true")
 	}
-	if len(info.Scrollback) == 0 && len(info.ReplaySegments) == 0 {
-		t.Fatal("expected replay buffer content, got none")
+	if !info.ScreenSnapshotFresh || len(info.ScreenSnapshot) == 0 {
+		t.Fatal("expected a fresh screen snapshot, got none")
 	}
 
 	// The session must stay fully usable after the read-only snapshots: a real

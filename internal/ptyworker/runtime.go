@@ -58,27 +58,6 @@ func attachBlocksToWire(blocks []pty.AttachBlockData) []AttachBlock {
 	return out
 }
 
-func replaySegmentsFromPTYAttachInfo(segments []pty.ReplaySegment) []ReplaySegment {
-	return cloneReplaySegments(segments, func(segment pty.ReplaySegment) ReplaySegment {
-		return ReplaySegment{
-			Cols: segment.Cols,
-			Rows: segment.Rows,
-			Data: append([]byte(nil), segment.Data...),
-		}
-	})
-}
-
-func cloneReplaySegments[From any, To any](segments []From, convert func(From) To) []To {
-	if len(segments) == 0 {
-		return nil
-	}
-	out := make([]To, 0, len(segments))
-	for _, segment := range segments {
-		out = append(out, convert(segment))
-	}
-	return out
-}
-
 var exitedSessionCleanupTTL = 45 * time.Second
 
 // orphanedWorkerTTL is how long a worker with a live child keeps running with
@@ -206,7 +185,7 @@ func (r *Runtime) run(ctx context.Context) error {
 		return err
 	}
 
-	r.manager = pty.NewManager(pty.DefaultScrollbackSize, r.logf)
+	r.manager = pty.NewManager(r.logf)
 	r.manager.SetStateHandler(func(_ string, state string) {
 		r.stateMu.Lock()
 		previousState := r.state
@@ -923,26 +902,23 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 		c.subID = subID
 		c.runtime.logf("worker conn attached: conn=%s sub=%s", c.connID, subID)
 		c.sendResult(req.ID, AttachResult{
-			Scrollback:          info.Scrollback,
-			ScrollbackTruncated: info.ScrollbackTruncated,
-			ReplaySegments:      replaySegmentsFromPTYAttachInfo(info.ReplaySegments),
-			ReplayTruncated:     info.ReplayTruncated,
-			LastSeq:             info.LastSeq,
-			Cols:                info.Cols,
-			Rows:                info.Rows,
-			PID:                 info.PID,
-			Running:             info.Running,
-			ExitCode:            info.ExitCode,
-			ExitSignal:          info.ExitSignal,
-			ScreenSnapshot:      info.ScreenSnapshot,
-			ScreenCols:          info.ScreenCols,
-			ScreenRows:          info.ScreenRows,
-			ScreenCursorX:       info.ScreenCursorX,
-			ScreenCursorY:       info.ScreenCursorY,
-			ScreenCursorVisible: info.ScreenCursorVisible,
-			ScreenSnapshotFresh: info.ScreenSnapshotFresh,
-			GhosttySnapshot:     info.GhosttySnapshot,
-			GhosttyBlocks:       attachBlocksToWire(info.GhosttyBlocks),
+			LastSeq:                    info.LastSeq,
+			Cols:                       info.Cols,
+			Rows:                       info.Rows,
+			PID:                        info.PID,
+			Running:                    info.Running,
+			ExitCode:                   info.ExitCode,
+			ExitSignal:                 info.ExitSignal,
+			ScreenSnapshot:             info.ScreenSnapshot,
+			ScreenCols:                 info.ScreenCols,
+			ScreenRows:                 info.ScreenRows,
+			ScreenCursorX:              info.ScreenCursorX,
+			ScreenCursorY:              info.ScreenCursorY,
+			ScreenCursorVisible:        info.ScreenCursorVisible,
+			ScreenSnapshotFresh:        info.ScreenSnapshotFresh,
+			GhosttySnapshot:            info.GhosttySnapshot,
+			GhosttyBlocks:              attachBlocksToWire(info.GhosttyBlocks),
+			GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,
 		})
 	case MethodDetach:
 		if c.subID != "" {

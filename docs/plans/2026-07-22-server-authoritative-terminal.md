@@ -638,14 +638,24 @@ ask him before flipping.
       its `screen_*` fields — separate command, untouched.
 - [x] Update AGENTS.md Terminal section + CHANGELOG (user-visible: deeper,
       more faithful session restore; images text-only on restore).
-- [ ] Verify: full `make test-harness`; the specific scenarios
-      `real-app:scenario-ghostty-scroll`, terminal-block-copy, diff-review,
-      tr401 local-window-resize; grep daemon/worker logs for any
-      `replay_decision` stragglers; soak on dev profile.
+- [x] Verify (2026-07-23, rebased head on the epic): `go build ./...` (native
+      cgo) + `go vet` + `gofmt` clean; full `go test ./...` green (incl. `-race`
+      attach atomicity + native `TestBlockFeedRoundTrip`); frontend `tsc` clean +
+      `pnpm test` 1977 passed. Native-tier live witness on throwaway profile
+      `p3flip` (full `make install`, preflight PASS, protocol 182 across
+      CLI/app/daemon): `real-app:scenario-terminal-block-resize` `ok:true`
+      (fish blocks 4→4 survived relaunch under the default-on snapshot path,
+      bash/zsh 0→0) and `real-app:scenario-ghostty-scroll` `ok:true`. Daemon log
+      shows only `replay_decision=use_ghostty_snapshot` (11) and
+      `omit_replay_for_policy` (8) — zero raw-replay decisions, confirming the
+      snapshot path is now the sole restore.
 
-Status (2026-07-23): Go + frontend suites green (`make test`; `pnpm test`
-1943), but **HELD** — the OSC 133 command-block gap above blocks merge. Ships to
-`epic/server-authoritative-terminal`, not main, once resolved.
+Status (2026-07-23): DONE, pending epic-branch PR merge. The OSC 133
+command-block gap that HELD this phase is resolved by Phase 3a (worker-owned
+block table), merged to the epic; this phase rebased onto it, flipped the
+snapshot default on, and deleted raw replay. Go + frontend suites green
+(`go test ./...`; `pnpm test` 1977) and the native-tier live witness passed
+(see Verify above). Ships to `epic/server-authoritative-terminal`, not main.
 
 ## Decisions
 

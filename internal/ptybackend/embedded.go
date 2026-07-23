@@ -14,7 +14,7 @@ type EmbeddedBackend struct {
 
 func NewEmbedded(manager *pty.Manager) *EmbeddedBackend {
 	if manager == nil {
-		manager = pty.NewManager(pty.DefaultScrollbackSize, nil)
+		manager = pty.NewManager(nil)
 	}
 	return &EmbeddedBackend{manager: manager}
 }
@@ -100,37 +100,24 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 	}
 
 	return AttachInfo{
-		Scrollback:          info.Scrollback,
-		ScrollbackTruncated: info.ScrollbackTruncated,
-		ReplaySegments:      replaySegmentsFromPTY(info.ReplaySegments),
-		ReplayTruncated:     info.ReplayTruncated,
-		LastSeq:             info.LastSeq,
-		Cols:                info.Cols,
-		Rows:                info.Rows,
-		PID:                 info.PID,
-		Running:             info.Running,
-		ExitCode:            info.ExitCode,
-		ExitSignal:          info.ExitSignal,
-		ScreenSnapshot:      info.ScreenSnapshot,
-		ScreenCols:          info.ScreenCols,
-		ScreenRows:          info.ScreenRows,
-		ScreenCursorX:       info.ScreenCursorX,
-		ScreenCursorY:       info.ScreenCursorY,
-		ScreenCursorVisible: info.ScreenCursorVisible,
-		ScreenSnapshotFresh: info.ScreenSnapshotFresh,
-		GhosttySnapshot:     info.GhosttySnapshot,
-		GhosttyBlocks:       info.GhosttyBlocks,
+		LastSeq:                    info.LastSeq,
+		Cols:                       info.Cols,
+		Rows:                       info.Rows,
+		PID:                        info.PID,
+		Running:                    info.Running,
+		ExitCode:                   info.ExitCode,
+		ExitSignal:                 info.ExitSignal,
+		ScreenSnapshot:             info.ScreenSnapshot,
+		ScreenCols:                 info.ScreenCols,
+		ScreenRows:                 info.ScreenRows,
+		ScreenCursorX:              info.ScreenCursorX,
+		ScreenCursorY:              info.ScreenCursorY,
+		ScreenCursorVisible:        info.ScreenCursorVisible,
+		ScreenSnapshotFresh:        info.ScreenSnapshotFresh,
+		GhosttySnapshot:            info.GhosttySnapshot,
+		GhosttyBlocks:              info.GhosttyBlocks,
+		GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,
 	}, stream, nil
-}
-
-func replaySegmentsFromPTY(segments []pty.ReplaySegment) []ReplaySegment {
-	return cloneReplaySegments(segments, func(segment pty.ReplaySegment) ReplaySegment {
-		return ReplaySegment{
-			Cols: segment.Cols,
-			Rows: segment.Rows,
-			Data: append([]byte(nil), segment.Data...),
-		}
-	})
 }
 
 func (b *EmbeddedBackend) Snapshot(_ context.Context, sessionID string) (AttachInfo, error) {

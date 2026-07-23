@@ -34,11 +34,10 @@ const (
 	defaultThemeCursor     = "#d4d4d4"
 )
 
-// infoSnapshotHook is a test-only seam invoked inside info() after the replay
-// payload (scrollback/replay segments) and screen snapshot are captured but
-// before the attach sequence watermark (LastSeq) is read. It is nil in
-// production. Tests set it to inject PTY writes into that window to
-// deterministically reproduce the snapshot/watermark consistency race.
+// infoSnapshotHook is a test-only seam invoked inside info() after the ghostty
+// snapshot is serialized but before the attach sequence watermark (LastSeq) is
+// read. It is nil in production. Tests set it to inject PTY writes into that
+// window to deterministically reproduce the snapshot/watermark consistency race.
 var infoSnapshotHook func()
 
 // readLoopSeqGapHook is a test-only seam invoked in the read loop after a
@@ -95,34 +94,30 @@ type Session struct {
 	// such as an isolated startup-file overlay for an interactive shell pane.
 	cleanup func()
 
-	scrollback *RingBuffer
-	replayLog  *ReplayLog
-	screen     *virtualScreen
-	// ghostty is the server-authoritative parsed terminal (libghostty-vt). In
-	// shadow mode it is fed the same bytes as the three stores above but nothing
-	// reads it in production yet (Phase 1). It answers query responses during
-	// Write; those are drained-and-discarded here so the scan-based responder
-	// stays the sole answerer. May be nil if construction failed — shadow mode
+	// screen is the vt10x-parsed visible frame. It backs approval-state
+	// detection, CPR replies, and the read-only grid/automation screen snapshot
+	// (Manager.Snapshot); it is not the attach-restore source (ghostty is).
+	screen *virtualScreen
+	// ghostty is the server-authoritative parsed terminal (libghostty-vt). It is
+	// serialized on attach to restore the client's terminal (see info()). It
+	// answers query responses during Write; the read loop forwards the responses
+	// the scan-based responder does not cover (e.g. kitty CSI ? u) so the worker
+	// is the complete query answerer and a snapshot-restored client can suppress
+	// every response. May be nil if construction failed — a construction failure
 	// must never break a session, so every use is nil-guarded.
 	ghostty *ghosttyvt.Terminal
 	// blockFeed owns writes into ghostty, splitting at OSC 133 markers to
 	// maintain the worker-side command-block table (Phase 3a). nil exactly
 	// when ghostty is nil; every use is nil-guarded like ghostty's.
-	blockFeed *blockFeeder
-	// attachSnapshotMode mirrors the daemon's ATTN_ATTACH_SNAPSHOT flag (read
-	// from the worker's env at spawn). When true, the read loop forwards the
-	// ghostty terminal's query responses the scan-based responder does not cover
-	// (e.g. kitty CSI ? u) to the PTY, making the worker the complete query
-	// answerer so a snapshot-restored client can suppress every response. When
-	// false, behavior is exactly today's: responses are drained and discarded.
-	attachSnapshotMode bool
-	seqCounter         atomic.Uint32
+	blockFeed  *blockFeeder
+	seqCounter atomic.Uint32
 
-	// replayMu makes the attach replay payload (scrollback / replay segments /
-	// screen) and its sequence watermark (lastReplaySeq) a consistent pair, so
-	// a re-attaching frontend never drops a chunk that landed between the
-	// payload snapshot and the watermark read. Held briefly around each chunk's
-	// buffer writes and around info()'s snapshot; fanOut stays outside it.
+	// replayMu makes the attach payload (the ghostty snapshot serialized in
+	// info(), and the screen snapshot in screenSnapshot()) and its sequence
+	// watermark (lastReplaySeq) a consistent pair, so a re-attaching frontend
+	// never drops a chunk that landed between the payload snapshot and the
+	// watermark read. Held briefly around each chunk's buffer writes and around
+	// info()'s snapshot; fanOut stays outside it.
 	replayMu      sync.Mutex
 	lastReplaySeq uint32
 
@@ -327,15 +322,7 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				if readLoopSeqGapHook != nil {
 					readLoopSeqGapHook()
 				}
-				s.metaMu.RLock()
-				cols := s.cols
-				rows := s.rows
-				s.metaMu.RUnlock()
 				s.replayMu.Lock()
-				s.scrollback.Write(data)
-				if s.replayLog != nil {
-					s.replayLog.Write(data, cols, rows)
-				}
 				if s.screen != nil {
 					s.screen.Observe(data)
 				}
@@ -348,10 +335,9 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				s.lastReplaySeq = seq
 				s.replayMu.Unlock()
 				// Drain ghostty's query responses AFTER the lock (the sink has
-				// its own mutex). In snapshot mode, forward the responses the
-				// scanner does not cover (kitty CSI ? u, etc.) so the worker
-				// answers every query and a restored client can suppress all of
-				// them; otherwise drain-and-discard (scanner stays sole answerer).
+				// its own mutex) and forward the responses the scanner does not
+				// cover (kitty CSI ? u, etc.) so the worker answers every query
+				// and a snapshot-restored client can suppress all of them.
 				s.drainGhosttyResponses(logf)
 				// The daemon is the single authority for CPR (cursor position)
 				// and DA1 (device attributes) replies. Answer after the chunk is
@@ -398,15 +384,7 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 	if len(carryover) > 0 {
 		seq := s.seqCounter.Add(1)
-		s.metaMu.RLock()
-		cols := s.cols
-		rows := s.rows
-		s.metaMu.RUnlock()
 		s.replayMu.Lock()
-		s.scrollback.Write(carryover)
-		if s.replayLog != nil {
-			s.replayLog.Write(carryover, cols, rows)
-		}
 		if s.screen != nil {
 			s.screen.Observe(carryover)
 		}
@@ -432,28 +410,17 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 // attachSnapshotEnv gates server-authoritative snapshot attach. When set to "1"
 // the daemon serves a ghostty-serialized snapshot on attach and the worker
-// forwards the query responses the scanner does not cover. Read from the worker
-// process env at spawn, mirroring the daemon-side flag (both processes see it).
-const attachSnapshotEnv = "ATTN_ATTACH_SNAPSHOT"
-
-// attachSnapshotEnabled reports whether server-authoritative snapshot mode is on.
-func attachSnapshotEnabled() bool {
-	return os.Getenv(attachSnapshotEnv) == "1"
-}
-
 // drainGhosttyResponses clears the ghostty terminal's accumulated query
-// responses. In snapshot mode it forwards the responses the scan-based responder
-// does not cover (kitty CSI ? u and any other non-CPR/DA1/OSC-color reports) to
-// the PTY, so the worker answers every query and a snapshot-restored client can
-// suppress all responses. Otherwise the responses are discarded (the scanner
-// stays the sole answerer, byte-identical to pre-snapshot behavior). Must be
-// called after replayMu is released; the sink has its own lock.
+// responses and forwards the responses the scan-based responder does not cover
+// (kitty CSI ? u and any other non-CPR/DA1/OSC-color reports) to the PTY, so the
+// worker answers every query and a snapshot-restored client can suppress all
+// responses. Must be called after replayMu is released; the sink has its own lock.
 func (s *Session) drainGhosttyResponses(logf func(string, ...interface{})) {
 	if s.ghostty == nil {
 		return
 	}
 	drained := s.ghostty.DrainResponses()
-	if !s.attachSnapshotMode || len(drained) == 0 {
+	if len(drained) == 0 {
 		return
 	}
 	gap := stripScannerOwnedResponses(drained)
@@ -760,46 +727,23 @@ func (s *Session) info() AttachInfo {
 		pid = s.cmd.Process.Pid
 	}
 
-	// Capture the replay payload and its sequence watermark atomically so a
-	// re-attaching frontend can dedup the live stream against LastSeq without a
-	// hole: every byte is either in this payload (seq <= LastSeq) or a live
-	// chunk it will apply (seq > LastSeq). Without this, a chunk written
-	// between the payload snapshot and the watermark read is in neither — lost.
+	// Serialize the server-authoritative ghostty terminal and read the sequence
+	// watermark atomically, so a re-attaching frontend can dedup the live stream
+	// against LastSeq without a hole: every byte in the dump has seq <= LastSeq,
+	// and a live chunk it will apply has seq > LastSeq. Without this atomicity a
+	// chunk written between the serialize and the watermark read is in neither —
+	// lost. The dump is nil when the ghostty terminal is absent (construction
+	// failed, or the pure-Go stub on non-macOS builds).
 	s.replayMu.Lock()
-	scrollback, truncated := s.scrollback.Snapshot()
-	var replaySegments []ReplaySegment
-	replayTruncated := false
-	if s.replayLog != nil {
-		replaySegments, replayTruncated = s.replayLog.Snapshot()
-	}
-	var (
-		screenSnapshot      []byte
-		screenCols          uint16
-		screenRows          uint16
-		screenCursorX       uint16
-		screenCursorY       uint16
-		screenCursorVisible bool
-		screenSnapshotFresh bool
-	)
-	if s.screen != nil {
-		if snapshot, ok := s.screen.Snapshot(); ok {
-			screenSnapshot = snapshot.payload
-			screenCols = snapshot.cols
-			screenRows = snapshot.rows
-			screenCursorX = snapshot.cursorX
-			screenCursorY = snapshot.cursorY
-			screenCursorVisible = snapshot.cursorVisible
-			screenSnapshotFresh = true
-		}
-	}
-	// Serialize the server-authoritative ghostty terminal under the same lock,
-	// so its VT dump and the watermark below form the same atomic pair as the
-	// raw-replay payload: every byte in the dump has seq <= replayWatermark.
-	// Always captured when ghostty exists (cheap, ~180µs); the daemon decides
-	// whether to serve it (ATTN_ATTACH_SNAPSHOT). nil when construction failed.
 	var ghosttySnapshot []byte
+	// libghostty-vt does not surface a scrollback-truncation flag (the vestigial
+	// ghosttyvt.Snapshot.ScrollbackTruncated was removed in Phase 3a as always
+	// false), so the signal is reported false until the native serializer exposes
+	// one. The field is still plumbed for that future and for observability.
+	var ghosttyTruncated bool
 	if s.ghostty != nil {
-		ghosttySnapshot = s.ghostty.Serialize().VTDump
+		snapshot := s.ghostty.Serialize()
+		ghosttySnapshot = snapshot.VTDump
 	}
 	// Resolve command blocks inside the SAME hold as the dump and watermark:
 	// the attach snapshot is an atomic {dump, blocks, watermark} triple, so a
@@ -819,31 +763,21 @@ func (s *Session) info() AttachInfo {
 	}
 
 	// LastSeq is the dedup boundary: it names the last chunk covered by this
-	// payload, so the frontend applies live chunks with seq > LastSeq and
+	// snapshot, so the frontend applies live chunks with seq > LastSeq and
 	// drops the rest as already-replayed. screenSnapshot() reports the same
 	// covered-chunk semantics; the two must not diverge or the first live
 	// chunk after an attach is silently lost (or double-applied).
 	return AttachInfo{
-		Scrollback:          scrollback,
-		ScrollbackTruncated: truncated,
-		ReplaySegments:      replaySegments,
-		ReplayTruncated:     replayTruncated,
-		LastSeq:             replayWatermark,
-		Cols:                cols,
-		Rows:                rows,
-		PID:                 pid,
-		Running:             running,
-		ExitCode:            exitCode,
-		ExitSignal:          exitSignal,
-		ScreenSnapshot:      screenSnapshot,
-		ScreenCols:          screenCols,
-		ScreenRows:          screenRows,
-		ScreenCursorX:       screenCursorX,
-		ScreenCursorY:       screenCursorY,
-		ScreenCursorVisible: screenCursorVisible,
-		ScreenSnapshotFresh: screenSnapshotFresh,
-		GhosttySnapshot:     ghosttySnapshot,
-		GhosttyBlocks:       ghosttyBlocks,
+		LastSeq:                    replayWatermark,
+		Cols:                       cols,
+		Rows:                       rows,
+		PID:                        pid,
+		Running:                    running,
+		ExitCode:                   exitCode,
+		ExitSignal:                 exitSignal,
+		GhosttySnapshot:            ghosttySnapshot,
+		GhosttyBlocks:              ghosttyBlocks,
+		GhosttyScrollbackTruncated: ghosttyTruncated,
 	}
 }
 

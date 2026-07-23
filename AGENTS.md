@@ -192,11 +192,29 @@ must fail explicitly.
 ### Terminal
 
 - The latest active interactive client owns PTY geometry.
-- `pty_resize` is authoritative; attach replay is provisional context.
-- Do not use replay as redraw repair or infer PTY correctness from local `fit()`.
-- Replayed terminal queries must not generate fresh PTY input.
+- `pty_resize` is authoritative; attach restore is provisional context.
+- Restore is server-authoritative: the daemon worker serializes its parsed
+  terminal (libghostty-vt) and the attach serves that VT dump as the sole
+  restore payload (`attach_result.snapshot`). The frontend resets a fresh
+  Ghostty model, resizes to the snapshot grid, and writes the dump with
+  responses suppressed. There is no raw-scrollback/screen-snapshot/segment
+  fallback — a snapshot-less attach (pure-Go stub on non-macOS, or ghostty
+  construction failure) keeps whatever the client has and dedups the live
+  stream against `last_seq`. See
+  [docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
+- OSC 133 command blocks are worker-owned state carried beside the dump as
+  structured `attach_result.snapshot.blocks` (the marker-stripped dump rebuilds
+  none); the frontend seeds `TerminalBlockStore` from them after the dump write
+  (Phase 3a).
+- Do not use restore as redraw repair or infer PTY correctness from local `fit()`.
+- Restored terminal queries must not generate fresh PTY input; the worker
+  already answered CPR/DA1/OSC and forwarded the query gap over the wire, so the
+  client always writes the dump suppressed.
 - The daemon/worker alone answers CPR, DA1, and OSC 10/11/12; frontend strips
   model replies and sends theme changes via `set_terminal_theme`.
+- Restores are text-only: sixel/kitty images render from the live stream but are
+  not preserved across a restore (accepted; image-preserving restore is a
+  follow-up).
 - Session switching must retain utility-terminal focus. `App.tsx` may fit the
   main terminal but focuses it only when utility is inactive;
   `SessionTerminalWorkspace` prefers the active `GhosttyTerminal` handle.

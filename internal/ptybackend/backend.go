@@ -107,10 +107,6 @@ func validateUnattendedSpawnOptions(opts SpawnOptions) error {
 }
 
 type AttachInfo struct {
-	Scrollback          []byte
-	ScrollbackTruncated bool
-	ReplaySegments      []ReplaySegment
-	ReplayTruncated     bool
 	LastSeq             uint32
 	Cols                uint16
 	Rows                uint16
@@ -132,12 +128,9 @@ type AttachInfo struct {
 	// SCREEN-space rows of GhosttySnapshot, captured atomically with it and
 	// LastSeq (Phase 3a). nil when absent.
 	GhosttyBlocks []pty.AttachBlockData
-}
-
-type ReplaySegment struct {
-	Cols uint16
-	Rows uint16
-	Data []byte
+	// GhosttyScrollbackTruncated reports whether the ghostty terminal dropped
+	// scrollback lines at its cap before GhosttySnapshot was serialized.
+	GhosttyScrollbackTruncated bool
 }
 
 type OutputEvent struct {
