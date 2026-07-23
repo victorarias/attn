@@ -2767,16 +2767,35 @@ model SpawnResultMessage {
   error?: string;
 }
 
+// One OSC 133 shell-integration command block resolved by the worker, carried
+// beside the VT dump so restore reconstructs clickable prompt/command/output
+// regions (the dump has rendered cells, not the marks). Rows are SCREEN-space
+// rows of vt_dump_b64, which equal client buffer rows after the dump is written
+// into a fresh same-size terminal. See Phase 3a in
+// docs/plans/2026-07-22-server-authoritative-terminal.md.
+model AttachBlock {
+  id: safeint;                   // server-assigned, monotonic per session
+  pending: boolean;              // the single open block (no command-end yet)
+  prompt_row: int32;
+  input_row?: int32;
+  input_col?: int32;
+  output_start_row?: int32;
+  end_row?: int32;               // exclusive; absent while pending
+  command?: string;
+  exit_code?: int32;
+}
+
 // Server-authoritative restore snapshot: a self-contained VT serialization of
 // the worker's parsed terminal (grid + scrollback + cursor + modes, both
 // primary and alternate screens) produced by libghostty-vt. Present only when
 // the daemon serves a snapshot-first attach (ATTN_ATTACH_SNAPSHOT); the client
-// resets its model and replays vt_dump_b64 instead of the raw replay fields.
+// resets its model and replays vt_dump_b64 instead of the raw replay fields,
+// then seeds its command-block store from blocks.
 model AttachSnapshot {
   cols: int32;
   rows: int32;
   vt_dump_b64: string;           // base64 self-contained VT stream
-  scrollback_truncated: boolean;
+  blocks?: AttachBlock[];        // OSC 133 command blocks, empty/absent if none
 }
 
 model AttachResultMessage {

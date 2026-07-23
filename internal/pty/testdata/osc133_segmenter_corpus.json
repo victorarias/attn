@@ -1,0 +1,146 @@
+{
+  "description": "Shared parity corpus for the OSC 133 segmenter. Consumed by BOTH internal/pty/osc133_test.go (the Go worker segmenter) and app/src/utils/terminalOsc133.parity.test.ts (the client parseOsc133). Each case feeds `chunks` sequentially to ONE segmenter instance (exercising split-across-chunk buffering) and asserts the ordered `markers` extracted. Marker parity is the contract: both parsers must turn the same bytes into the same markers, with the same cmdline decoding and exit-code parsing. Segment/plain-byte layout differs by design (the client writes marker bytes through to the terminal; the worker strips them), so it is NOT part of this corpus - the Go test verifies stripping separately. Control bytes are literal in the JSON: ESC=U+001B, BEL=U+0007, ST=ESC backslash. A marker's cmdline/exitCode is present only when expected non-null.",
+  "cases": [
+    {
+      "name": "full_lifecycle_bel",
+      "chunks": [
+        "\u001b]133;A\u0007$ \u001b]133;B\u0007echo hi\u001b]133;C;cmdline_url=echo%20hi\u0007hi\r\n\u001b]133;D;0\u0007"
+      ],
+      "markers": [
+        {
+          "kind": "prompt-start"
+        },
+        {
+          "kind": "input-start"
+        },
+        {
+          "kind": "pre-exec",
+          "cmdline": "echo hi"
+        },
+        {
+          "kind": "command-end",
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "name": "st_terminator",
+      "chunks": [
+        "\u001b]133;A\u001b\\"
+      ],
+      "markers": [
+        {
+          "kind": "prompt-start"
+        }
+      ]
+    },
+    {
+      "name": "split_prefix_across_chunks",
+      "chunks": [
+        "out\u001b]13",
+        "3;A\u0007done"
+      ],
+      "markers": [
+        {
+          "kind": "prompt-start"
+        }
+      ]
+    },
+    {
+      "name": "split_payload_across_chunks",
+      "chunks": [
+        "\u001b]133;C;cmdline_url=ec",
+        "ho%20hi\u0007"
+      ],
+      "markers": [
+        {
+          "kind": "pre-exec",
+          "cmdline": "echo hi"
+        }
+      ]
+    },
+    {
+      "name": "cmdline_url_keeps_plus",
+      "chunks": [
+        "\u001b]133;C;cmdline_url=a+b%20c\u0007"
+      ],
+      "markers": [
+        {
+          "kind": "pre-exec",
+          "cmdline": "a+b c"
+        }
+      ]
+    },
+    {
+      "name": "cmdline_plain_fallback",
+      "chunks": [
+        "\u001b]133;C;cmdline=make test\u0007"
+      ],
+      "markers": [
+        {
+          "kind": "pre-exec",
+          "cmdline": "make test"
+        }
+      ]
+    },
+    {
+      "name": "unknown_subtype_no_marker",
+      "chunks": [
+        "before\u001b]133;Z;stuff\u0007after"
+      ],
+      "markers": []
+    },
+    {
+      "name": "command_end_exit_missing",
+      "chunks": [
+        "\u001b]133;D\u0007"
+      ],
+      "markers": [
+        {
+          "kind": "command-end"
+        }
+      ]
+    },
+    {
+      "name": "command_end_exit_nonzero",
+      "chunks": [
+        "\u001b]133;D;130\u0007"
+      ],
+      "markers": [
+        {
+          "kind": "command-end",
+          "exitCode": 130
+        }
+      ]
+    },
+    {
+      "name": "fast_path_plain_no_escape",
+      "chunks": [
+        "hello world, no escapes here"
+      ],
+      "markers": []
+    },
+    {
+      "name": "sgr_escape_passthrough",
+      "chunks": [
+        "\u001b[31mred\u001b[0m normal text"
+      ],
+      "markers": []
+    },
+    {
+      "name": "two_markers_one_chunk",
+      "chunks": [
+        "\u001b]133;A\u0007prompt output\u001b]133;D;0\u0007"
+      ],
+      "markers": [
+        {
+          "kind": "prompt-start"
+        },
+        {
+          "kind": "command-end",
+          "exitCode": 0
+        }
+      ]
+    }
+  ]
+}

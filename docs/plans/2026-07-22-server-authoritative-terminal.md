@@ -435,11 +435,15 @@ implementation cannot pass the suite.
 Everything below is weak-agent-safe after rails (the segmenter and protocol
 items don't even depend on them):
 
-- [ ] ghosttyvt API graduation (`internal/ghosttyvt`): promote the spike files
-      (`spike_trackedref.go`, `spike_trackedref_test.go`,
-      `spike_prune_probe_test.go` — untracked in the `attn--tmux` worktree as
-      of 2026-07-23; commit them with this phase) into the real API, dropping
-      the Spike naming:
+- [x] ghosttyvt API graduation (`internal/ghosttyvt`) — DONE 2026-07-23. The
+      spike files are renamed to the real API (`trackedref.go`,
+      `trackedref_test.go`, `trackedref_prune_test.go`), Spike naming dropped,
+      header reframed as the production block-tracker primitive. The prune probe
+      graduated into a real assertion (`TestTrackedRefDropsWhenPruned`: a pinned
+      ref reports ok=false once pruned, never a stale row). Alt-screen exclusion
+      is carried by `(*Terminal).AltScreenActive() bool` (the boolean the block
+      table consumes) rather than the planned `ActiveScreen()` enum. Original
+      spec:
       - `(*Terminal).TrackCursor() *TrackedRef` — pins the cursor cell via
         `ghostty_terminal_grid_ref_track` with an ACTIVE-space point; nil on
         closed terminal or failure.
@@ -455,7 +459,13 @@ items don't even depend on them):
         `GHOSTTY_TERMINAL_SCREEN_PRIMARY|ALTERNATE`).
       The spike tests graduate too (prune probe can stay a probe). Non-darwin
       stub: `TrackCursor` returns nil; everything downstream nil-guards.
-- [ ] Go OSC 133 segmenter (new file in `internal/pty`): port
+- [x] Go OSC 133 segmenter — DONE 2026-07-23 (`internal/pty/osc133.go`,
+      `osc133_test.go`). Semantics-identical port of
+      `app/src/utils/terminalOsc133.ts`; the worker STRIPS marker bytes (client
+      keeps them) so OSC 133 stays out of the VT dump — grids stay identical.
+      Shared corpus `testdata/osc133_segmenter_corpus.json` (12 cases) proves
+      marker parity against BOTH the Go test and the new frontend
+      `terminalOsc133.parity.test.ts`. Original spec: port
       `app/src/utils/terminalOsc133.ts` (~180 lines) semantics-identical:
       scan for `ESC ] 1 3 3 ;` prefix, split-across-chunk pending buffer
       (MAX_PENDING_BYTES=4096), BEL and ST terminators, markers
@@ -467,8 +477,14 @@ items don't even depend on them):
       cases, input chunk sequences → expected markers/segments) consumed by
       BOTH the Go test and a new frontend parity test against the TS parser.
       Start by generating the corpus from the existing TS unit tests' cases.
-- [ ] Worker block table: implement the rails interface against the rails
-      corpus. Semantics (already encoded in the corpus, restated for
+- [x] Worker block table — DONE 2026-07-23 (`internal/pty/blocktable.go`,
+      `blocktable_test.go`). Implements the rails `workerBlockTable` against the
+      rails corpus: at most one pending block, self-heal on lost `133;D`, cap
+      200 oldest-first. Positions are reference-counted `sharedRef` wrappers over
+      `blockRef` (a self-heal reuses one marker's ref for two blocks, so an rc
+      frees the native ref exactly once); alt-screen-pinned blocks are excluded
+      at snapshot; `TestBlockTableCorpus` asserts `freed == created` after Close.
+      Semantics (already encoded in the corpus, restated for
       orientation): mirrors `TerminalBlockStore`
       (`app/src/utils/terminalBlocks.ts`) — at most one pending block,
       self-heal when `133;D` is lost (a new A while pending completes the
@@ -481,7 +497,13 @@ items don't even depend on them):
       (blocks are a primary-screen concept). Refs freed on every retirement
       path — guarded by the rails leak counter (`LiveTrackedRefs()==0` at
       teardown in every test).
-- [ ] Feed + serialize wiring: swap the rails no-op implementations for the
+- [x] Feed + serialize wiring — DONE 2026-07-23 (`internal/pty/blockfeed.go`
+      `newBlockFeeder` now wires `&osc133ScanSegmenter{}` + `newBlockTable()`;
+      dead `passthroughSegmenter`/`noopBlockTable` removed). Call sites, lock
+      placement, and the atomic {dump, blocks, watermark} triple were untouched.
+      Fast path preserved (no-ESC chunk → single `Write`, no alloc); pins are
+      guarded so a nil `TrackCursor` stays a nil `blockRef` interface, not a
+      typed-nil. Original text: swap the rails no-op implementations for the
       real segmenter and block table. Call sites, lock placement, and the
       atomic {dump, blocks, watermark} triple were fixed by the rails
       skeleton — do NOT move them. Behavior to preserve (rails race + fast
@@ -495,11 +517,18 @@ items don't even depend on them):
       y at serialize time IS the row index in the restored terminal — no
       offset mapping, including after pruning (SCREEN space is post-prune
       by construction).
-- [ ] `Snapshot.ScrollbackTruncated` is never set by `serializeLocked`
-      (spike discovery — dormant since Phase 2). Decide here: wire it from
-      a real prune signal if one is cheaply available, else delete the field
-      from `Snapshot` + `AttachSnapshot`. Do not leave it dormant.
-- [ ] Protocol: `AttachSnapshot` gains `blocks?: AttachBlock[]`:
+- [x] `Snapshot.ScrollbackTruncated` — DONE 2026-07-23: DELETED. It was dead
+      (only read by a spike probe log), and `AttachSnapshot.scrollback_truncated`
+      was never consumed by the frontend, so both are removed
+      (`ghosttyvt.Snapshot`, `AttachSnapshot` model). The unrelated
+      `AttachResultMessage.scrollback_truncated` (the live raw-replay-truncation
+      signal, still consumed by `attachPlanning.ts`) is untouched.
+- [x] Protocol — DONE 2026-07-23. `AttachSnapshot` gains `blocks?:
+      AttachBlock[]`; regenerated `generated.go`/`generated.ts`;
+      `ProtocolVersion` bumped to `182` in `constants.go` AND
+      `useDaemonSocket.ts`. `ws_pty.go` maps `pty.AttachBlockData` →
+      `protocol.AttachBlock` (`attachBlocksToProtocol`). Original spec:
+      `AttachSnapshot` gains `blocks?: AttachBlock[]`:
       `id` (uint64, server-assigned, monotonic per session — authoritative
       from day one so the future `block_event` stream is additive),
       `pending` (bool, at most one true), `prompt_row` (int32, dump-row
@@ -509,8 +538,15 @@ items don't even depend on them):
       TypeSpec `main.tsp` → `make generate-types` → bump `ProtocolVersion`
       in constants.go AND `useDaemonSocket.ts` (three lockstep spots,
       re-grep after any rebase; rebuild `./attn` before frontend e2e).
-- [ ] Frontend seed: on the ghostty-snapshot attach path in
-      `useDaemonSocket.ts`, after model reset + resize + dump write: call a
+- [x] Frontend seed — DONE 2026-07-23. `TerminalBlockStore.seed(blocks,
+      rowTextAt)` (`terminalBlocks.ts`) clears state, lands completed blocks
+      with locally-computed `anchorText`, re-arms the pending block, and
+      continues `nextId` above the max seeded id. `useDaemonSocket.ts` emits a
+      `seed_blocks` PTY event after the dump write; it rides the write chain
+      (`GhosttyTerminal.seedBlocks` → `enqueueOperation`) so anchor text reads
+      the restored buffer. No snapshot → no seed. Original spec: on the
+      ghostty-snapshot attach path in `useDaemonSocket.ts`, after model reset +
+      resize + dump write: call a
       new `TerminalBlockStore.seed(blocks)` — completed blocks enter with
       their server rows, `anchorText` computed locally from the restored
       buffer (same row-text source `applyMarker` uses), the pending block
@@ -518,7 +554,15 @@ items don't even depend on them):
       seeded id. The live stream then keeps appending blocks through the
       existing client `parseOsc133` path, UNCHANGED this phase. No snapshot
       → no seed → existing degradation untouched.
-- [ ] Tests:
+- [x] Tests — DONE 2026-07-23 (all green: `go test ./internal/pty/
+      ./internal/ghosttyvt/ ./internal/daemon/`, `-race` on the atomicity test,
+      linux stub build; frontend `vitest run` 1992 passed, `tsc --noEmit`
+      clean). The native round-trip against a live serialized terminal — REAL
+      segmenter + REAL block table, fish-like fixture with 133 marks →
+      serialize → each block's rows index the restored dump at the right text,
+      command text + exit codes captured at parse time, alt-screen block
+      excluded — is `TestBlockFeedRoundTrip` (`blockfeed_roundtrip_test.go`,
+      darwin/arm64). Coverage:
       1. Go: segmenter parity corpus (shared with TS); block-table
          lifecycle (pending/self-heal/cap/eviction frees refs);
          round-trip — feed a fish-like fixture with 133 marks → serialize →

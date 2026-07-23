@@ -113,8 +113,6 @@ type Snapshot struct {
 	// extras, full scrollback) that reproduces the terminal when replayed into
 	// a fresh same-size terminal. It carries no interrogative sequences.
 	VTDump []byte
-	// ScrollbackTruncated reports whether scrollback hit the cap.
-	ScrollbackTruncated bool
 }
 
 // respSink accumulates bytes the terminal wants written back to the pty (query

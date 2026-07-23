@@ -42,13 +42,6 @@ type osc133Segmenter interface {
 	Feed(chunk []byte, emit func(segment []byte, marker *osc133Marker))
 }
 
-// passthroughSegmenter is the rails no-op: no markers, whole chunk through.
-type passthroughSegmenter struct{}
-
-func (passthroughSegmenter) Feed(chunk []byte, emit func([]byte, *osc133Marker)) {
-	emit(chunk, nil)
-}
-
 // blockRef is the position pin the block table holds for each marker —
 // backed by ghosttyvt.TrackedRef in production, by fakes in pure tests. The
 // ref follows its content across scrolling, scrollback pruning, and reflow;
@@ -103,13 +96,6 @@ type workerBlockTable interface {
 	Close()
 }
 
-// noopBlockTable is the rails no-op: no state, no blocks.
-type noopBlockTable struct{}
-
-func (noopBlockTable) ApplyMarker(osc133Marker, blockRef, bool) {}
-func (noopBlockTable) SnapshotBlocks() []AttachBlockData        { return nil }
-func (noopBlockTable) Close()                                   {}
-
 // blockFeeder owns the ghostty write path for a session: it splits PTY output
 // at OSC 133 markers, writes each segment to the terminal, and pins a tracked
 // ref at each marker's cursor position for the block table. All methods are
@@ -127,13 +113,16 @@ type blockFeeder struct {
 // callers nil-guard exactly like every other ghostty use, and the attach
 // snapshot simply carries no blocks.
 //
-// Rails wiring: passthrough segmenter + no-op table (byte-for-byte today's
-// behavior). The real segmenter and table swap in HERE — nowhere else.
+// The real OSC 133 segmenter and worker block table are wired HERE — nowhere
+// else. On the non-macOS stub, TrackCursor returns nil so the table pins
+// nothing and serves no blocks; the segmenter still runs (pure Go) but its
+// markers resolve to unserializable blocks, degrading exactly like every other
+// ghostty use off macOS.
 func newBlockFeeder(term *ghosttyvt.Terminal) *blockFeeder {
 	if term == nil {
 		return nil
 	}
-	return &blockFeeder{term: term, seg: passthroughSegmenter{}, table: noopBlockTable{}}
+	return &blockFeeder{term: term, seg: &osc133ScanSegmenter{}, table: newBlockTable()}
 }
 
 // feed writes one PTY output chunk into the terminal, pinning block positions

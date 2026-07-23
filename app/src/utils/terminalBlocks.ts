@@ -204,6 +204,70 @@ export class TerminalBlockStore {
     this.completed = [];
     this.pending = null;
   }
+
+  // Seed the store from a server-authoritative restore snapshot. The worker
+  // resolved these blocks from its own OSC 133 marks and grid refs; their rows
+  // are SCREEN-space rows of the VT dump, which equal live buffer rows now that
+  // the dump has been written into a fresh same-size terminal. Completed blocks
+  // enter with a locally-computed anchorText (from the restored buffer, the same
+  // source applyMarker uses) so re-anchoring keeps working; the pending block
+  // re-arms so the live D marker that arrives next completes it. The id counter
+  // continues above the max seeded id so live blocks never collide with seeded
+  // ones. Replaces any existing state (a restore is authoritative).
+  seed(blocks: readonly SeededBlock[], rowTextAt?: (row: number) => string): void {
+    this.completed = [];
+    this.pending = null;
+    let maxId = 0;
+    for (const b of blocks) {
+      if (b.id > maxId) maxId = b.id;
+      const inputStart = b.inputRow !== undefined
+        ? { row: b.inputRow, col: b.inputCol ?? 0 }
+        : undefined;
+      if (b.pending) {
+        // At most one pending block; a later one would just overwrite, matching
+        // the store's single-pending invariant.
+        this.pending = {
+          id: b.id,
+          promptRow: b.promptRow,
+          inputStart,
+          outputStartRow: b.outputStartRow,
+          command: b.command,
+        };
+        continue;
+      }
+      // A completed block without output/end rows is not extractable; the worker
+      // should not emit such, but drop defensively rather than store a bad row.
+      if (b.outputStartRow === undefined || b.endRow === undefined) continue;
+      const anchorRow = b.inputRow ?? b.promptRow;
+      this.completed.push({
+        id: b.id,
+        promptRow: b.promptRow,
+        inputStart,
+        outputStartRow: b.outputStartRow,
+        endRow: b.endRow,
+        command: b.command ?? '',
+        exitCode: b.exitCode,
+        anchorRow,
+        anchorText: (rowTextAt?.(anchorRow) ?? '').slice(0, ANCHOR_LENGTH),
+      });
+    }
+    this.nextId = Math.max(this.nextId, maxId + 1);
+  }
+}
+
+// SeededBlock is one restore-snapshot command block in client-domain (camelCase)
+// form. It mirrors the protocol AttachBlock; the daemon-socket layer maps the
+// wire shape to this before it reaches the terminal.
+export interface SeededBlock {
+  id: number;
+  pending: boolean;
+  promptRow: number;
+  inputRow?: number;
+  inputCol?: number;
+  outputStartRow?: number;
+  endRow?: number;
+  command?: string;
+  exitCode?: number;
 }
 
 // A completed block's position relative to the current viewport, in viewport

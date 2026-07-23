@@ -21,9 +21,8 @@ type Options struct {
 
 // Snapshot mirrors the real build's serialization result.
 type Snapshot struct {
-	Cols, Rows          int
-	VTDump              []byte
-	ScrollbackTruncated bool
+	Cols, Rows int
+	VTDump     []byte
 }
 
 // Terminal is the no-op stand-in for the native terminal off macOS/arm64.

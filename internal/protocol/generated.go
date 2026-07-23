@@ -24,6 +24,35 @@ type ApprovePRMessage struct {
 	ID string `json:"id"`
 }
 
+type AttachBlock struct {
+	// Command corresponds to the JSON schema field "command".
+	Command *string `json:"command,omitempty,omitzero"`
+
+	// EndRow corresponds to the JSON schema field "end_row".
+	EndRow *int `json:"end_row,omitempty,omitzero"`
+
+	// ExitCode corresponds to the JSON schema field "exit_code".
+	ExitCode *int `json:"exit_code,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID int `json:"id"`
+
+	// InputCol corresponds to the JSON schema field "input_col".
+	InputCol *int `json:"input_col,omitempty,omitzero"`
+
+	// InputRow corresponds to the JSON schema field "input_row".
+	InputRow *int `json:"input_row,omitempty,omitzero"`
+
+	// OutputStartRow corresponds to the JSON schema field "output_start_row".
+	OutputStartRow *int `json:"output_start_row,omitempty,omitzero"`
+
+	// Pending corresponds to the JSON schema field "pending".
+	Pending bool `json:"pending"`
+
+	// PromptRow corresponds to the JSON schema field "prompt_row".
+	PromptRow int `json:"prompt_row"`
+}
+
 type AttachPolicy string
 
 const AttachPolicyFreshSpawn AttachPolicy = "fresh_spawn"
@@ -107,15 +136,14 @@ type AttachSessionMessage struct {
 }
 
 type AttachSnapshot struct {
+	// Blocks corresponds to the JSON schema field "blocks".
+	Blocks []AttachBlock `json:"blocks,omitempty,omitzero"`
+
 	// Cols corresponds to the JSON schema field "cols".
 	Cols int `json:"cols"`
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows int `json:"rows"`
-
-	// ScrollbackTruncated corresponds to the JSON schema field
-	// "scrollback_truncated".
-	ScrollbackTruncated bool `json:"scrollback_truncated"`
 
 	// VtDumpB64 corresponds to the JSON schema field "vt_dump_b64".
 	VtDumpB64 string `json:"vt_dump_b64"`

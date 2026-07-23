@@ -1,10 +1,10 @@
 //go:build darwin && arm64
 
-// Spike support for the OSC 133 block-tracker design
-// (server-authoritative terminal, Phase 3 hold): verifies that tracked grid
-// refs + SCREEN-space coordinates can carry block positions across scrolling,
-// scrollback pruning, reflow, and a serialize/restore round trip. Graduates
-// into the real worker-side block table API or gets deleted with the spike.
+// Tracked grid references for the OSC 133 block tracker (server-authoritative
+// terminal, Phase 3a). A TrackedRef pins a grid cell so its SCREEN-space
+// coordinate follows the cell across scrolling, scrollback pruning, and
+// reflow — the primitive the worker-side block table (internal/pty) uses to
+// carry block anchor rows through a serialize/restore round trip.
 package ghosttyvt
 
 /*
