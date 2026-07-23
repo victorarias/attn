@@ -696,6 +696,7 @@ func (b *WorkerBackend) Attach(ctx context.Context, sessionID, subscriberID stri
 				ScreenCursorVisible: attachResult.ScreenCursorVisible,
 				ScreenSnapshotFresh: attachResult.ScreenSnapshotFresh,
 				GhosttySnapshot:     attachResult.GhosttySnapshot,
+				GhosttyBlocks:       attachBlocksFromWire(attachResult.GhosttyBlocks),
 			}, stream, nil
 		}
 	}
@@ -711,6 +712,29 @@ func appendCappedPreEvent(events []OutputEvent, evt OutputEvent, capLimit int) [
 	copy(events, events[1:])
 	events[len(events)-1] = evt
 	return events
+}
+
+// attachBlocksFromWire converts worker-RPC command blocks back to the pty
+// representation (1:1 fields).
+func attachBlocksFromWire(blocks []ptyworker.AttachBlock) []pty.AttachBlockData {
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]pty.AttachBlockData, len(blocks))
+	for i, b := range blocks {
+		out[i] = pty.AttachBlockData{
+			ID:             b.ID,
+			Pending:        b.Pending,
+			PromptRow:      b.PromptRow,
+			InputRow:       b.InputRow,
+			InputCol:       b.InputCol,
+			OutputStartRow: b.OutputStartRow,
+			EndRow:         b.EndRow,
+			Command:        b.Command,
+			ExitCode:       b.ExitCode,
+		}
+	}
+	return out
 }
 
 func cloneReplaySegments[From any, To any](segments []From, convert func(From) To) []To {

@@ -35,6 +35,29 @@ func previewWorkerBytesForLog(data []byte) string {
 	return preview
 }
 
+// attachBlocksToWire converts the session's resolved command blocks to their
+// wire form (1:1 fields; pointers alias — both sides are read-only snapshots).
+func attachBlocksToWire(blocks []pty.AttachBlockData) []AttachBlock {
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]AttachBlock, len(blocks))
+	for i, b := range blocks {
+		out[i] = AttachBlock{
+			ID:             b.ID,
+			Pending:        b.Pending,
+			PromptRow:      b.PromptRow,
+			InputRow:       b.InputRow,
+			InputCol:       b.InputCol,
+			OutputStartRow: b.OutputStartRow,
+			EndRow:         b.EndRow,
+			Command:        b.Command,
+			ExitCode:       b.ExitCode,
+		}
+	}
+	return out
+}
+
 func replaySegmentsFromPTYAttachInfo(segments []pty.ReplaySegment) []ReplaySegment {
 	return cloneReplaySegments(segments, func(segment pty.ReplaySegment) ReplaySegment {
 		return ReplaySegment{
@@ -919,6 +942,7 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			ScreenCursorVisible: info.ScreenCursorVisible,
 			ScreenSnapshotFresh: info.ScreenSnapshotFresh,
 			GhosttySnapshot:     info.GhosttySnapshot,
+			GhosttyBlocks:       attachBlocksToWire(info.GhosttyBlocks),
 		})
 	case MethodDetach:
 		if c.subID != "" {

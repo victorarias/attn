@@ -119,6 +119,7 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 		ScreenCursorVisible: info.ScreenCursorVisible,
 		ScreenSnapshotFresh: info.ScreenSnapshotFresh,
 		GhosttySnapshot:     info.GhosttySnapshot,
+		GhosttyBlocks:       info.GhosttyBlocks,
 	}, stream, nil
 }
 

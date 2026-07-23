@@ -138,6 +138,26 @@ type AttachResult struct {
 	// GhosttySnapshot is the server-authoritative VT serialization of the whole
 	// terminal from libghostty-vt (geometry is Cols/Rows). Omitted when absent.
 	GhosttySnapshot []byte `json:"ghostty_snapshot,omitempty"`
+	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
+	// SCREEN-space rows of GhosttySnapshot, captured atomically with it and
+	// LastSeq (Phase 3a). Mirrors pty.AttachBlockData. Omitted when absent;
+	// additive and skew-safe like GhosttySnapshot.
+	GhosttyBlocks []AttachBlock `json:"ghostty_blocks,omitempty"`
+}
+
+// AttachBlock is the wire form of one resolved command block (see
+// pty.AttachBlockData for field semantics; EndRow is exclusive, Pending marks
+// the single open block).
+type AttachBlock struct {
+	ID             uint64  `json:"id"`
+	Pending        bool    `json:"pending,omitempty"`
+	PromptRow      int32   `json:"prompt_row"`
+	InputRow       *int32  `json:"input_row,omitempty"`
+	InputCol       *int32  `json:"input_col,omitempty"`
+	OutputStartRow *int32  `json:"output_start_row,omitempty"`
+	EndRow         *int32  `json:"end_row,omitempty"`
+	Command        *string `json:"command,omitempty"`
+	ExitCode       *int32  `json:"exit_code,omitempty"`
 }
 
 type ReplaySegment struct {

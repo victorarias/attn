@@ -401,8 +401,11 @@ implementation cannot pass the suite.
       `internal/pty/testdata/osc133_block_corpus.json` (15 cases) proven by
       `app/src/utils/terminalBlocks.corpus.test.ts`; (3) skeleton
       `internal/pty/blockfeed.go` + session/manager wiring, atomicity proven
-      by `TestBlockSnapshotAtomicity` (incl. `-race`), linux stub build green.
-      Original spec:
+      by `TestBlockSnapshotAtomicity` (incl. `-race`), linux stub build green;
+      (4) worker-RPC plumbing of `GhosttyBlocks` end-to-end
+      (pty → ptyworker wire `AttachBlock` → ptybackend `AttachInfo`), additive
+      + omitempty like `GhosttySnapshot`, so implementers touch no process
+      boundary. Original spec:
       1. Ref-leak accounting in `internal/ghosttyvt`: a package-level live
          counter incremented by `TrackCursor`, decremented by the first
          `Free`; `LiveTrackedRefs() int` exposed for tests. Every

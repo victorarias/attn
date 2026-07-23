@@ -128,6 +128,10 @@ type AttachInfo struct {
 	// GhosttySnapshot is the server-authoritative VT serialization of the whole
 	// terminal from libghostty-vt (geometry is Cols/Rows). nil when absent.
 	GhosttySnapshot []byte
+	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
+	// SCREEN-space rows of GhosttySnapshot, captured atomically with it and
+	// LastSeq (Phase 3a). nil when absent.
+	GhosttyBlocks []pty.AttachBlockData
 }
 
 type ReplaySegment struct {
