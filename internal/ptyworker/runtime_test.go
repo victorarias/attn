@@ -26,7 +26,7 @@ func TestConnCtx_HandleRequest_SetThemeReachesSession(t *testing.T) {
 		state: "working",
 		logf:  func(string, ...interface{}) {},
 	}
-	r.manager = pty.NewManager(pty.DefaultScrollbackSize, r.logf)
+	r.manager = pty.NewManager(r.logf)
 	t.Cleanup(r.manager.Shutdown)
 
 	if err := r.manager.Spawn(pty.SpawnOptions{

@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -79,308 +78,49 @@ func wsSubscriberID(client *wsClient, sessionID string) string {
 
 type attachReplayPayload struct {
 	// ghosttySnapshot, when non-nil, is a self-contained VT serialization of the
-	// worker's parsed terminal (server-authoritative restore). It supersedes
-	// every raw-replay field below; the client resets its model and replays it.
+	// worker's parsed terminal (server-authoritative restore). The client resets
+	// its model and replays it. Empty when the policy omits restore or no
+	// server-authoritative terminal is available (ghostty absent).
 	ghosttySnapshot []byte
 	ghosttyCols     uint16
 	ghosttyRows     uint16
 	// ghosttyBlocks are the worker's OSC 133 command blocks resolved atomically
 	// with ghosttySnapshot (Phase 3a). Carried only alongside a snapshot.
 	ghosttyBlocks       []pty.AttachBlockData
-	scrollback          []byte
-	replaySegments      []ptybackend.ReplaySegment
 	scrollbackTruncated bool
-	screenSnapshot      []byte
-	screenCols          uint16
-	screenRows          uint16
-	screenCursorX       uint16
-	screenCursorY       uint16
-	screenCursorVisible bool
-	screenSnapshotFresh bool
-	derivedSnapshot     bool
-	rawReplayDecision   string
-	rawReplayReason     string
+	decision            string
 }
 
-// maxAgentRawReplayBytes bounds how much raw terminal history one attach can
-// synchronously feed into the frontend terminal model. Workers retain a deeper
-// replay log so the daemon can select the newest self-sufficient tail, but the
-// WebKit main thread must not parse the full retained history in one message.
-const maxAgentRawReplayBytes = 64 * 1024
-
-func shouldPreferAgentRawReplay(session *protocol.Session) bool {
-	if session == nil {
-		return false
-	}
-	agent := strings.TrimSpace(strings.ToLower(string(session.Agent)))
-	return agent == string(protocol.SessionAgentCodex)
+// shouldIncludeAttachReplay reports whether an attach under this policy should
+// restore prior terminal state. A fresh spawn has nothing to restore — the live
+// stream paints the first frame and the worker answers startup queries itself —
+// so it is the only policy that omits the snapshot.
+func shouldIncludeAttachReplay(policy protocol.AttachPolicy) bool {
+	return policy != protocol.AttachPolicyFreshSpawn
 }
 
-func shouldIncludeAttachReplay(policy protocol.AttachPolicy, session *protocol.Session) bool {
-	switch policy {
-	case protocol.AttachPolicySameAppRemount:
-		// Ghostty terminal models are local to a mounted renderer. Remounting a
-		// pane creates an empty model that must be rehydrated from the daemon.
-		return true
-	case protocol.AttachPolicyFreshSpawn:
-		// Codex's TUI emits terminal capability queries (CPR, DA, kitty
-		// keyboard, OSC 10) on startup and waits for the responses before it
-		// will draw anything. Bytes emitted between PTY spawn and terminal
-		// attach are lost when replay is omitted, so Codex hangs forever
-		// waiting for query responses that the frontend never had a chance to
-		// produce. For Codex sessions we replay scrollback so the terminal processes
-		// the queries and emits the responses Codex is waiting for.
-		return shouldPreferAgentRawReplay(session)
-	default:
-		return true
+// buildAttachReplayPayload selects the server-authoritative restore for an
+// attach: the worker's serialized ghostty terminal. The client resets its model
+// and replays this stream — no mid-escape hazard, no oracle verification, no
+// replay-vs-snapshot decision tree.
+func buildAttachReplayPayload(info ptybackend.AttachInfo, policy protocol.AttachPolicy) attachReplayPayload {
+	if !shouldIncludeAttachReplay(policy) {
+		return attachReplayPayload{decision: "omit_replay_for_policy"}
 	}
-}
-
-func shouldRestoreTerminalModelHistory(policy protocol.AttachPolicy) bool {
-	return policy == protocol.AttachPolicyRelaunchRestore || policy == protocol.AttachPolicySameAppRemount
-}
-
-func limitReplayTail(data []byte, limit int) ([]byte, bool) {
-	if len(data) == 0 || limit <= 0 || len(data) <= limit {
-		return data, false
+	if len(info.GhosttySnapshot) == 0 {
+		// No server-authoritative terminal to serialize (ghostty construction
+		// failed, or a non-macOS build's pure-Go stub). Nothing to restore; the
+		// client keeps whatever it has and dedups the live stream against LastSeq.
+		return attachReplayPayload{decision: "no_snapshot"}
 	}
-	return data[len(data)-limit:], true
-}
-
-func replaySegmentsToPTY(segments []ptybackend.ReplaySegment) []pty.ReplaySegment {
-	if len(segments) == 0 {
-		return nil
+	return attachReplayPayload{
+		ghosttySnapshot:     info.GhosttySnapshot,
+		ghosttyCols:         info.Cols,
+		ghosttyRows:         info.Rows,
+		ghosttyBlocks:       info.GhosttyBlocks,
+		scrollbackTruncated: info.GhosttyScrollbackTruncated,
+		decision:            "use_ghostty_snapshot",
 	}
-	out := make([]pty.ReplaySegment, 0, len(segments))
-	for _, segment := range segments {
-		out = append(out, pty.ReplaySegment{
-			Cols: segment.Cols,
-			Rows: segment.Rows,
-			Data: append([]byte(nil), segment.Data...),
-		})
-	}
-	return out
-}
-
-func rawReplaySegmentsMatchFreshSnapshot(segments []ptybackend.ReplaySegment, info ptybackend.AttachInfo) (bool, string) {
-	if len(segments) == 0 {
-		return false, "empty_raw_segments"
-	}
-	if !info.ScreenSnapshotFresh || len(info.ScreenSnapshot) == 0 {
-		return false, "fresh_snapshot_unavailable"
-	}
-	derived, ok := pty.ScreenSnapshotFromReplaySegments(replaySegmentsToPTY(segments))
-	if !ok {
-		return false, "derived_snapshot_unavailable"
-	}
-	if derived.Cols != info.ScreenCols || derived.Rows != info.ScreenRows {
-		return false, "snapshot_geometry_mismatch"
-	}
-	if !bytes.Equal(derived.Payload, info.ScreenSnapshot) {
-		return false, "snapshot_payload_mismatch"
-	}
-	return true, ""
-}
-
-func rawReplayMatchesFreshSnapshot(rawTail []byte, info ptybackend.AttachInfo) (bool, string) {
-	if len(rawTail) == 0 {
-		return false, "empty_raw_tail"
-	}
-	if !info.ScreenSnapshotFresh || len(info.ScreenSnapshot) == 0 {
-		return false, "fresh_snapshot_unavailable"
-	}
-	if info.Cols == 0 || info.Rows == 0 {
-		return false, "pty_geometry_unavailable"
-	}
-	derived, ok := pty.ScreenSnapshotFromReplay(rawTail, info.Cols, info.Rows)
-	if !ok {
-		return false, "derived_snapshot_unavailable"
-	}
-	if derived.Cols != info.ScreenCols || derived.Rows != info.ScreenRows {
-		return false, "snapshot_geometry_mismatch"
-	}
-	if !bytes.Equal(derived.Payload, info.ScreenSnapshot) {
-		return false, "snapshot_payload_mismatch"
-	}
-	return true, ""
-}
-
-func applyScreenSnapshot(payload *attachReplayPayload, snapshot pty.ReplayScreenSnapshot, decision, reason string) {
-	payload.screenSnapshot = snapshot.Payload
-	payload.screenCols = snapshot.Cols
-	payload.screenRows = snapshot.Rows
-	payload.screenCursorX = snapshot.CursorX
-	payload.screenCursorY = snapshot.CursorY
-	payload.screenCursorVisible = snapshot.CursorVisible
-	payload.screenSnapshotFresh = true
-	payload.derivedSnapshot = true
-	payload.rawReplayDecision = decision
-	payload.rawReplayReason = reason
-}
-
-// attachSnapshotEnv gates server-authoritative snapshot attach (Phase 2). The
-// same flag is read worker-side (internal/pty) to forward the query responses
-// the scanner does not cover; both processes see the daemon's environment.
-const attachSnapshotEnv = "ATTN_ATTACH_SNAPSHOT"
-
-// attachSnapshotEnabled reports whether the daemon should serve a
-// server-authoritative ghostty snapshot on attach.
-func attachSnapshotEnabled() bool {
-	return os.Getenv(attachSnapshotEnv) == "1"
-}
-
-func buildAttachReplayPayload(info ptybackend.AttachInfo, session *protocol.Session, policy protocol.AttachPolicy) attachReplayPayload {
-	payload := attachReplayPayload{
-		scrollbackTruncated: info.ScrollbackTruncated,
-		screenSnapshot:      info.ScreenSnapshot,
-		screenCols:          info.ScreenCols,
-		screenRows:          info.ScreenRows,
-		screenCursorX:       info.ScreenCursorX,
-		screenCursorY:       info.ScreenCursorY,
-		screenCursorVisible: info.ScreenCursorVisible,
-		screenSnapshotFresh: info.ScreenSnapshotFresh,
-		rawReplayDecision:   "default",
-	}
-
-	if !shouldIncludeAttachReplay(policy, session) {
-		payload.scrollbackTruncated = false
-		payload.screenSnapshot = nil
-		payload.screenCols = 0
-		payload.screenRows = 0
-		payload.screenCursorX = 0
-		payload.screenCursorY = 0
-		payload.screenCursorVisible = false
-		payload.screenSnapshotFresh = false
-		payload.rawReplayDecision = "omit_replay_for_policy"
-		return payload
-	}
-
-	// Server-authoritative restore (Phase 2, behind ATTN_ATTACH_SNAPSHOT). The
-	// worker always includes a ghostty VT serialization; when the flag is on and
-	// one is present, it supersedes every raw-replay path. The client resets its
-	// model and replays this stream — no mid-escape hazard, no oracle
-	// verification, no replay-vs-snapshot decision tree. With the flag off this
-	// branch is skipped and behavior is exactly today's.
-	if attachSnapshotEnabled() && len(info.GhosttySnapshot) > 0 {
-		payload.ghosttySnapshot = info.GhosttySnapshot
-		payload.ghosttyCols = info.Cols
-		payload.ghosttyRows = info.Rows
-		payload.ghosttyBlocks = info.GhosttyBlocks
-		payload.scrollback = nil
-		payload.replaySegments = nil
-		payload.scrollbackTruncated = false
-		payload.screenSnapshot = nil
-		payload.screenCols = 0
-		payload.screenRows = 0
-		payload.screenCursorX = 0
-		payload.screenCursorY = 0
-		payload.screenCursorVisible = false
-		payload.screenSnapshotFresh = false
-		payload.derivedSnapshot = false
-		payload.rawReplayDecision = "use_ghostty_snapshot"
-		payload.rawReplayReason = "attn_attach_snapshot_enabled"
-		return payload
-	}
-
-	if (shouldPreferAgentRawReplay(session) || shouldRestoreTerminalModelHistory(policy)) &&
-		(len(info.Scrollback) > 0 || len(info.ReplaySegments) > 0) {
-		if len(info.ReplaySegments) > 0 {
-			// A clipped tail is still served as long as it reproduces the live
-			// screen: segments are whole boundary-safe writes, so the tail never
-			// opens mid-escape-sequence, and the snapshot match below proves the
-			// kept history is self-sufficient. Restored panes keep deep
-			// scrollback instead of degrading to a bare screen snapshot.
-			segments, clipped := pty.LimitReplaySegmentsTail(replaySegmentsToPTY(info.ReplaySegments), maxAgentRawReplayBytes)
-			backendSegments := make([]ptybackend.ReplaySegment, 0, len(segments))
-			for _, segment := range segments {
-				backendSegments = append(backendSegments, ptybackend.ReplaySegment{
-					Cols: segment.Cols,
-					Rows: segment.Rows,
-					Data: append([]byte(nil), segment.Data...),
-				})
-			}
-			if len(backendSegments) > 0 {
-				if matches, reason := rawReplaySegmentsMatchFreshSnapshot(backendSegments, info); matches {
-					payload.replaySegments = backendSegments
-					payload.scrollbackTruncated = info.ReplayTruncated || clipped
-					payload.screenSnapshot = nil
-					payload.screenCols = 0
-					payload.screenRows = 0
-					payload.screenCursorX = 0
-					payload.screenCursorY = 0
-					payload.screenCursorVisible = false
-					payload.screenSnapshotFresh = false
-					payload.rawReplayDecision = "use_segmented_raw_replay"
-					if clipped {
-						payload.rawReplayReason = "clipped_segmented_tail_matches_fresh_snapshot"
-					} else {
-						payload.rawReplayReason = "full_segmented_raw_replay_matches_fresh_snapshot"
-					}
-					return payload
-				} else {
-					payload.rawReplayDecision = "use_fresh_snapshot"
-					payload.rawReplayReason = reason
-				}
-			} else {
-				payload.rawReplayDecision = "use_fresh_snapshot"
-				payload.rawReplayReason = "segmented_raw_replay_exceeds_budget"
-			}
-		} else {
-			tail, clipped := limitReplayTail(info.Scrollback, maxAgentRawReplayBytes)
-			if !clipped {
-				if matches, reason := rawReplayMatchesFreshSnapshot(tail, info); matches {
-					payload.scrollback = tail
-					payload.scrollbackTruncated = info.ScrollbackTruncated
-					payload.screenSnapshot = nil
-					payload.screenCols = 0
-					payload.screenRows = 0
-					payload.screenCursorX = 0
-					payload.screenCursorY = 0
-					payload.screenCursorVisible = false
-					payload.screenSnapshotFresh = false
-					payload.rawReplayDecision = "use_raw_replay"
-					payload.rawReplayReason = "full_raw_replay_matches_fresh_snapshot"
-					return payload
-				} else {
-					payload.rawReplayDecision = "use_fresh_snapshot"
-					payload.rawReplayReason = reason
-				}
-			} else {
-				payload.rawReplayDecision = "use_fresh_snapshot"
-				payload.rawReplayReason = "raw_replay_exceeds_budget"
-			}
-		}
-	}
-
-	// When no live screen model is available, derive the visible frame from the
-	// buffered PTY output so attaches can restore the current screen without
-	// trusting an unverified raw replay. Prefer geometry-aware replay segments
-	// over flattened scrollback when both are available.
-	if len(payload.screenSnapshot) == 0 && len(info.ReplaySegments) > 0 {
-		if snap, ok := pty.ScreenSnapshotFromReplaySegments(replaySegmentsToPTY(info.ReplaySegments)); ok {
-			applyScreenSnapshot(&payload, snap, "use_derived_segmented_snapshot", "fresh_snapshot_missing")
-		}
-	}
-
-	// Fall back to flat replay derivation only when geometry-aware replay
-	// segments are unavailable.
-	if len(payload.screenSnapshot) == 0 && len(info.Scrollback) > 0 {
-		if snap, ok := pty.ScreenSnapshotFromReplay(info.Scrollback, info.Cols, info.Rows); ok {
-			applyScreenSnapshot(&payload, snap, "use_derived_snapshot", "fresh_snapshot_missing")
-		}
-	}
-
-	// A fresh snapshot is sufficient when verified raw history was unavailable.
-	// Rehydrating a fresh Ghostty model uses raw history above only when it is
-	// complete, bounded, and reconstructs the daemon's current visible frame.
-	if len(info.Scrollback) > 0 && !(len(payload.screenSnapshot) > 0 && payload.screenSnapshotFresh) {
-		payload.scrollback = info.Scrollback
-		if payload.rawReplayDecision == "default" {
-			payload.rawReplayDecision = "use_scrollback"
-		}
-	}
-
-	return payload
 }
 
 func (d *Daemon) detachSession(client *wsClient, sessionID string) {
@@ -922,29 +662,18 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		})
 		return
 	}
-	replay := buildAttachReplayPayload(info, d.store.Get(msg.ID), protocol.Deref(msg.AttachPolicy))
-	replayBytes := len(replay.scrollback)
-	for _, segment := range replay.replaySegments {
-		replayBytes += len(segment.Data)
-	}
+	replay := buildAttachReplayPayload(info, protocol.Deref(msg.AttachPolicy))
 	d.logf(
-		"PTY attach result: id=%s policy=%s running=%v last_seq=%d scrollback_bytes=%d replay_bytes=%d snapshot_bytes=%d ghostty_snapshot_bytes=%d snapshot_fresh=%v derived_snapshot=%v replay_decision=%s replay_reason=%s size=%dx%d screen=%dx%d",
+		"PTY attach result: id=%s policy=%s running=%v last_seq=%d ghostty_snapshot_bytes=%d scrollback_truncated=%v replay_decision=%s size=%dx%d",
 		msg.ID,
 		protocol.Deref(msg.AttachPolicy),
 		info.Running,
 		info.LastSeq,
-		len(info.Scrollback),
-		replayBytes,
-		len(replay.screenSnapshot),
 		len(replay.ghosttySnapshot),
-		replay.screenSnapshotFresh,
-		replay.derivedSnapshot,
-		replay.rawReplayDecision,
-		replay.rawReplayReason,
+		replay.scrollbackTruncated,
+		replay.decision,
 		info.Cols,
 		info.Rows,
-		replay.screenCols,
-		replay.screenRows,
 	)
 
 	client.attachMu.Lock()
@@ -957,46 +686,22 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	go d.forwardPTYStreamEvents(client, msg.ID, stream)
 
 	result := protocol.AttachResultMessage{
-		Event:               protocol.EventAttachResult,
-		ID:                  msg.ID,
-		Success:             true,
-		ScrollbackTruncated: protocol.Ptr(replay.scrollbackTruncated),
-		LastSeq:             protocol.Ptr(int(info.LastSeq)),
-		Cols:                protocol.Ptr(int(info.Cols)),
-		Rows:                protocol.Ptr(int(info.Rows)),
-		Pid:                 protocol.Ptr(info.PID),
-		Running:             protocol.Ptr(info.Running),
-	}
-	if len(replay.scrollback) > 0 {
-		encoded := base64.StdEncoding.EncodeToString(replay.scrollback)
-		result.Scrollback = protocol.Ptr(encoded)
-	}
-	if len(replay.replaySegments) > 0 {
-		result.ReplaySegments = make([]protocol.ReplaySegment, 0, len(replay.replaySegments))
-		for _, segment := range replay.replaySegments {
-			result.ReplaySegments = append(result.ReplaySegments, protocol.ReplaySegment{
-				Cols: int(segment.Cols),
-				Rows: int(segment.Rows),
-				Data: base64.StdEncoding.EncodeToString(segment.Data),
-			})
-		}
-	}
-	if len(replay.screenSnapshot) > 0 {
-		encoded := base64.StdEncoding.EncodeToString(replay.screenSnapshot)
-		result.ScreenSnapshot = protocol.Ptr(encoded)
-		result.ScreenRows = protocol.Ptr(int(replay.screenRows))
-		result.ScreenCols = protocol.Ptr(int(replay.screenCols))
-		result.ScreenCursorX = protocol.Ptr(int(replay.screenCursorX))
-		result.ScreenCursorY = protocol.Ptr(int(replay.screenCursorY))
-		result.ScreenCursorVisible = protocol.Ptr(replay.screenCursorVisible)
-		result.ScreenSnapshotFresh = protocol.Ptr(replay.screenSnapshotFresh)
+		Event:   protocol.EventAttachResult,
+		ID:      msg.ID,
+		Success: true,
+		LastSeq: protocol.Ptr(int(info.LastSeq)),
+		Cols:    protocol.Ptr(int(info.Cols)),
+		Rows:    protocol.Ptr(int(info.Rows)),
+		Pid:     protocol.Ptr(info.PID),
+		Running: protocol.Ptr(info.Running),
 	}
 	if len(replay.ghosttySnapshot) > 0 {
 		result.Snapshot = &protocol.AttachSnapshot{
-			Cols:      int(replay.ghosttyCols),
-			Rows:      int(replay.ghosttyRows),
-			VtDumpB64: base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
-			Blocks:    attachBlocksToProtocol(replay.ghosttyBlocks),
+			Cols:                int(replay.ghosttyCols),
+			Rows:                int(replay.ghosttyRows),
+			VtDumpB64:           base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
+			Blocks:              attachBlocksToProtocol(replay.ghosttyBlocks),
+			ScrollbackTruncated: replay.scrollbackTruncated,
 		}
 	}
 	d.sendToClient(client, result)
@@ -1033,13 +738,10 @@ func int32PtrToInt(v *int32) *int {
 	return &n
 }
 
-// snapshotSeedScreen resolves the visible frame to seed an observer with,
-// preferring a fresh worker-rendered screen and otherwise deriving one from the
-// session's buffered replay output. The derived path is what lets observers
-// seed sessions whose worker predates the snapshot RPC: those workers can't
-// render a screen on demand but still hand back their scrollback on attach.
-// The bool results are (derived, ok).
-func snapshotSeedScreen(info ptybackend.AttachInfo) (pty.ReplayScreenSnapshot, bool, bool) {
+// snapshotSeedScreen resolves the visible frame to seed an observer with from
+// the worker's fresh vt10x-rendered screen (Manager.Snapshot). The second
+// result is ok.
+func snapshotSeedScreen(info ptybackend.AttachInfo) (pty.ReplayScreenSnapshot, bool) {
 	if info.ScreenSnapshotFresh && len(info.ScreenSnapshot) > 0 {
 		return pty.ReplayScreenSnapshot{
 			Payload:       info.ScreenSnapshot,
@@ -1048,21 +750,9 @@ func snapshotSeedScreen(info ptybackend.AttachInfo) (pty.ReplayScreenSnapshot, b
 			CursorX:       info.ScreenCursorX,
 			CursorY:       info.ScreenCursorY,
 			CursorVisible: info.ScreenCursorVisible,
-		}, false, true
+		}, true
 	}
-	// Prefer geometry-aware replay segments over flattened scrollback when both
-	// are present, mirroring the attach replay derivation.
-	if len(info.ReplaySegments) > 0 {
-		if snap, ok := pty.ScreenSnapshotFromReplaySegments(replaySegmentsToPTY(info.ReplaySegments)); ok {
-			return snap, true, true
-		}
-	}
-	if len(info.Scrollback) > 0 {
-		if snap, ok := pty.ScreenSnapshotFromReplay(info.Scrollback, info.Cols, info.Rows); ok {
-			return snap, true, true
-		}
-	}
-	return pty.ReplayScreenSnapshot{}, false, false
+	return pty.ReplayScreenSnapshot{}, false
 }
 
 // handleGetScreenSnapshot serves a read-only snapshot of a session's current
@@ -1102,7 +792,7 @@ func (d *Daemon) handleGetScreenSnapshot(client *wsClient, msg *protocol.GetScre
 		Rows:    protocol.Ptr(int(info.Rows)),
 		Running: protocol.Ptr(info.Running),
 	}
-	screen, derived, haveScreen := snapshotSeedScreen(info)
+	screen, haveScreen := snapshotSeedScreen(info)
 	if haveScreen {
 		result.ScreenSnapshot = protocol.Ptr(base64.StdEncoding.EncodeToString(screen.Payload))
 		result.ScreenRows = protocol.Ptr(int(screen.Rows))
@@ -1110,16 +800,12 @@ func (d *Daemon) handleGetScreenSnapshot(client *wsClient, msg *protocol.GetScre
 		result.ScreenCursorX = protocol.Ptr(int(screen.CursorX))
 		result.ScreenCursorY = protocol.Ptr(int(screen.CursorY))
 		result.ScreenCursorVisible = protocol.Ptr(screen.CursorVisible)
-		// The frontend seeds only when this is set. A screen derived from buffered
-		// output is just as paintable as a worker-rendered one, so we present it as
-		// fresh — that is what lets observers seed sessions whose worker can't
-		// render a screen on demand (e.g. an old worker that survived an upgrade).
 		result.ScreenSnapshotFresh = protocol.Ptr(true)
 	}
 	d.logf(
-		"PTY screen snapshot: id=%s running=%v last_seq=%d snapshot_bytes=%d screen=%dx%d have_screen=%v derived=%v",
+		"PTY screen snapshot: id=%s running=%v last_seq=%d snapshot_bytes=%d screen=%dx%d have_screen=%v",
 		msg.ID, info.Running, info.LastSeq, len(screen.Payload),
-		screen.Cols, screen.Rows, haveScreen, derived,
+		screen.Cols, screen.Rows, haveScreen,
 	)
 	d.sendToClient(client, result)
 }

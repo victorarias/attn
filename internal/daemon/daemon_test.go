@@ -2086,17 +2086,16 @@ func TestDaemon_HandleAttachSession_ReattachClosesOldStream(t *testing.T) {
 	d.detachSession(client, "sess-1")
 }
 
-func TestDaemon_HandleAttachSession_OmitsScrollbackWhenFreshSnapshotIsAvailable(t *testing.T) {
+func TestDaemon_HandleAttachSession_ServesGhosttySnapshotWhenAvailable(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeAttachBackend{}
+	snapshot := []byte("\x1b[H\x1b[2JOpenAI Codex\r\n\r\nRun /review on my current changes")
 	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:             true,
-		Scrollback:          []byte("very large scrollback"),
-		ScrollbackTruncated: true,
-		ScreenSnapshot:      []byte("\x1b[2Jsnapshot"),
-		ScreenSnapshotFresh: true,
-		ScreenCols:          10,
-		ScreenRows:          6,
+		Running:         true,
+		LastSeq:         12,
+		Cols:            58,
+		Rows:            46,
+		GhosttySnapshot: snapshot,
 	})
 	d.ptyBackend = backend
 
@@ -2116,133 +2115,81 @@ func TestDaemon_HandleAttachSession_OmitsScrollbackWhenFreshSnapshotIsAvailable(
 		if !result.Success {
 			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
 		}
-		if result.Scrollback != nil {
-			t.Fatal("expected scrollback to be omitted when fresh screen snapshot is available")
+		if result.Snapshot == nil {
+			t.Fatal("expected a server-authoritative snapshot when ghostty is available")
 		}
-		if protocol.Deref(result.ScreenSnapshot) == "" {
-			t.Fatal("expected screen snapshot to be present")
+		if result.Snapshot.Cols != 58 || result.Snapshot.Rows != 46 {
+			t.Fatalf("snapshot geometry = %dx%d, want 58x46", result.Snapshot.Cols, result.Snapshot.Rows)
 		}
-		if !protocol.Deref(result.ScreenSnapshotFresh) {
-			t.Fatal("expected screen snapshot to be marked fresh")
+		if result.Snapshot.ScrollbackTruncated {
+			t.Fatal("expected ScrollbackTruncated=false for an untruncated snapshot")
 		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for attach_result")
-	}
-}
-
-func TestDaemon_HandleAttachSession_PrefersBoundedRawReplayForStoredAgentSession(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeAttachBackend{}
-	raw := []byte("\x1b[H\x1b[2JOpenAI Codex\r\n\r\nRun /review on my current changes\r\n\r\n  gpt-5.4 high · 100% left · ~")
-	snapshot, ok := pty.ScreenSnapshotFromReplay(raw, 58, 46)
-	if !ok {
-		t.Fatal("expected raw replay to derive a snapshot")
-	}
-	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:             true,
-		Scrollback:          raw,
-		Cols:                58,
-		Rows:                46,
-		ScreenSnapshot:      snapshot.Payload,
-		ScreenSnapshotFresh: true,
-		ScreenCols:          snapshot.Cols,
-		ScreenRows:          snapshot.Rows,
-		ScreenCursorX:       snapshot.CursorX,
-		ScreenCursorY:       snapshot.CursorY,
-		ScreenCursorVisible: snapshot.CursorVisible,
-	})
-	d.ptyBackend = backend
-	d.store.Add(&protocol.Session{
-		ID:             "sess-1",
-		Label:          "attn",
-		Agent:          protocol.SessionAgentCodex,
-		Directory:      t.TempDir(),
-		State:          protocol.SessionStateIdle,
-		StateSince:     time.Now().UTC().Format(time.RFC3339),
-		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		LastSeen:       time.Now().UTC().Format(time.RFC3339),
-	})
-
-	client := &wsClient{
-		send:            make(chan outboundMessage, 2),
-		attachedStreams: make(map[string]ptybackend.Stream),
-	}
-
-	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
-
-	select {
-	case outbound := <-client.send:
-		var result protocol.AttachResultMessage
-		if err := json.Unmarshal(outbound.payload, &result); err != nil {
-			t.Fatalf("decode attach_result: %v", err)
-		}
-		if !result.Success {
-			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
-		}
-		if result.ScreenSnapshot != nil {
-			t.Fatal("expected screen snapshot to be omitted for stored agent session replay")
-		}
-		if protocol.Deref(result.Scrollback) == "" {
-			t.Fatal("expected raw replay to be present")
-		}
-		if protocol.Deref(result.ScrollbackTruncated) {
-			t.Fatal("expected self-contained raw replay to remain untruncated")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.Scrollback))
+		decoded, err := base64.StdEncoding.DecodeString(result.Snapshot.VtDumpB64)
 		if err != nil {
-			t.Fatalf("decode scrollback replay: %v", err)
+			t.Fatalf("decode vt_dump_b64: %v", err)
 		}
-		if !bytes.Equal(decoded, raw) {
-			t.Fatal("expected raw replay to preserve the self-contained PTY history")
+		if !bytes.Equal(decoded, snapshot) {
+			t.Fatal("expected vt_dump_b64 to carry the ghostty serialization verbatim")
+		}
+		if protocol.Deref(result.LastSeq) != 12 {
+			t.Fatalf("last_seq = %d, want 12", protocol.Deref(result.LastSeq))
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for attach_result")
 	}
 }
 
-func TestDaemon_HandleAttachSession_PrefersSegmentedRawReplayForStoredAgentSession(t *testing.T) {
+func TestDaemon_HandleAttachSession_PropagatesScrollbackTruncated(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeAttachBackend{}
-	segments := []ptybackend.ReplaySegment{
-		{Cols: 118, Rows: 48, Data: []byte("\x1b[H\x1b[2JOpenAI Codex\r\n\r\nTip: wide history\r\n")},
-		{Cols: 58, Rows: 46, Data: []byte("\x1b[3;1H› segmented tail\r\n\x1b[4;1H  gpt-5.4 high · 100% left · ~")},
-	}
-	ptySegments := make([]pty.ReplaySegment, 0, len(segments))
-	for _, segment := range segments {
-		ptySegments = append(ptySegments, pty.ReplaySegment{
-			Cols: segment.Cols,
-			Rows: segment.Rows,
-			Data: append([]byte(nil), segment.Data...),
-		})
-	}
-	snapshot, ok := pty.ScreenSnapshotFromReplaySegments(ptySegments)
-	if !ok {
-		t.Fatal("expected segmented replay to derive a snapshot")
-	}
 	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:             true,
-		ReplaySegments:      segments,
-		Cols:                58,
-		Rows:                46,
-		ScreenSnapshot:      snapshot.Payload,
-		ScreenSnapshotFresh: true,
-		ScreenCols:          snapshot.Cols,
-		ScreenRows:          snapshot.Rows,
-		ScreenCursorX:       snapshot.CursorX,
-		ScreenCursorY:       snapshot.CursorY,
-		ScreenCursorVisible: snapshot.CursorVisible,
+		Running:                    true,
+		Cols:                       80,
+		Rows:                       24,
+		GhosttySnapshot:            []byte("\x1b[2Jscrolled-history"),
+		GhosttyScrollbackTruncated: true,
 	})
 	d.ptyBackend = backend
-	d.store.Add(&protocol.Session{
-		ID:             "sess-1",
-		Label:          "attn",
-		Agent:          protocol.SessionAgentCodex,
-		Directory:      t.TempDir(),
-		State:          protocol.SessionStateIdle,
-		StateSince:     time.Now().UTC().Format(time.RFC3339),
-		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		LastSeen:       time.Now().UTC().Format(time.RFC3339),
+
+	client := &wsClient{
+		send:            make(chan outboundMessage, 2),
+		attachedStreams: make(map[string]ptybackend.Stream),
+	}
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
+
+	select {
+	case outbound := <-client.send:
+		var result protocol.AttachResultMessage
+		if err := json.Unmarshal(outbound.payload, &result); err != nil {
+			t.Fatalf("decode attach_result: %v", err)
+		}
+		if result.Snapshot == nil {
+			t.Fatal("expected a snapshot")
+		}
+		if !result.Snapshot.ScrollbackTruncated {
+			t.Fatal("expected ScrollbackTruncated=true to propagate from the worker")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for attach_result")
+	}
+}
+
+// TestDaemon_HandleAttachSession_OmitsSnapshotWhenGhosttyAbsent covers the
+// pure-Go stub path (non-macOS builds, or ghostty construction failure): the
+// worker reports no VT serialization, so the daemon serves a snapshot-less
+// attach. The client keeps whatever it has and dedups the live stream against
+// last_seq; success and geometry still come through.
+func TestDaemon_HandleAttachSession_OmitsSnapshotWhenGhosttyAbsent(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeAttachBackend{}
+	backend.SetAttachInfo(ptybackend.AttachInfo{
+		Running: true,
+		LastSeq: 3,
+		Cols:    80,
+		Rows:    24,
 	})
+	d.ptyBackend = backend
 
 	client := &wsClient{
 		send:            make(chan outboundMessage, 2),
@@ -2260,464 +2207,31 @@ func TestDaemon_HandleAttachSession_PrefersSegmentedRawReplayForStoredAgentSessi
 		if !result.Success {
 			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
 		}
-		if result.Scrollback != nil {
-			t.Fatal("expected flat scrollback to be omitted when segmented replay is selected")
+		if result.Snapshot != nil {
+			t.Fatal("expected no snapshot when ghostty serialization is unavailable")
 		}
-		if result.ScreenSnapshot != nil {
-			t.Fatal("expected screen snapshot to be omitted when segmented replay is selected")
+		if protocol.Deref(result.LastSeq) != 3 {
+			t.Fatalf("last_seq = %d, want 3", protocol.Deref(result.LastSeq))
 		}
-		if len(result.ReplaySegments) != 2 {
-			t.Fatalf("replay_segments = %d, want 2", len(result.ReplaySegments))
-		}
-		decoded, err := base64.StdEncoding.DecodeString(result.ReplaySegments[0].Data)
-		if err != nil {
-			t.Fatalf("decode replay segment: %v", err)
-		}
-		if !bytes.Equal(decoded, segments[0].Data) {
-			t.Fatal("expected replay segment to preserve the original bytes")
+		if protocol.Deref(result.Cols) != 80 || protocol.Deref(result.Rows) != 24 {
+			t.Fatalf("geometry = %dx%d, want 80x24", protocol.Deref(result.Cols), protocol.Deref(result.Rows))
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for attach_result")
 	}
 }
 
-func TestDaemon_HandleAttachSession_OverfilledReplayLogRestoresWholeBoundarySafeSegments(t *testing.T) {
-	// Regression for the review finding on #301: ReplayLog used to slice its
-	// oldest retained segment at an arbitrary byte offset when overfilled, so
-	// raw restore could open mid-escape-sequence even though the attach-side
-	// budget pass kept whole segments. Overfill a real log with escape-framed
-	// writes and prove everything served through attach is a whole write.
-	writes := [][]byte{
-		[]byte("\x1b[H\x1b[2J\x1b[31mframe-one: oldest, will be evicted\x1b[0m\r\n"),
-		[]byte("\x1b[H\x1b[2J\x1b[32mframe-two: also history\x1b[0m\r\n"),
-		[]byte("\x1b[H\x1b[2J\x1b[33mframe-three: newest repaint\x1b[0m\r\n"),
-	}
-	logSize := len(writes[1]) + len(writes[2]) + 4 // forces eviction of writes[0]
-	replayLog := pty.NewReplayLog(logSize)
-	for _, w := range writes {
-		replayLog.Write(w, 58, 46)
-	}
-	logSegments, truncated := replayLog.Snapshot()
-	if !truncated {
-		t.Fatal("expected overfilled replay log to report truncation")
-	}
-	for i, segment := range logSegments {
-		if segment.Data[0] != 0x1b {
-			t.Fatalf("retained segment[%d] = %q does not start at a write boundary", i, segment.Data)
-		}
-	}
-
-	segments := make([]ptybackend.ReplaySegment, 0, len(logSegments))
-	for _, segment := range logSegments {
-		segments = append(segments, ptybackend.ReplaySegment{
-			Cols: segment.Cols,
-			Rows: segment.Rows,
-			Data: append([]byte(nil), segment.Data...),
-		})
-	}
-	snapshot, ok := pty.ScreenSnapshotFromReplaySegments(logSegments)
-	if !ok {
-		t.Fatal("expected retained segments to derive a snapshot")
-	}
-
+// TestDaemon_HandleAttachSession_OmitsSnapshotForFreshSpawnPolicy verifies the
+// fresh-spawn attach policy suppresses restore even when the worker has a
+// serialization available: a freshly spawned session must render from scratch.
+func TestDaemon_HandleAttachSession_OmitsSnapshotForFreshSpawnPolicy(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeAttachBackend{}
 	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:             true,
-		ReplaySegments:      segments,
-		ReplayTruncated:     truncated,
-		Cols:                58,
-		Rows:                46,
-		ScreenSnapshot:      snapshot.Payload,
-		ScreenSnapshotFresh: true,
-		ScreenCols:          snapshot.Cols,
-		ScreenRows:          snapshot.Rows,
-		ScreenCursorX:       snapshot.CursorX,
-		ScreenCursorY:       snapshot.CursorY,
-		ScreenCursorVisible: snapshot.CursorVisible,
-	})
-	d.ptyBackend = backend
-	d.store.Add(&protocol.Session{
-		ID:             "sess-1",
-		Label:          "attn",
-		Agent:          protocol.SessionAgentCodex,
-		Directory:      t.TempDir(),
-		State:          protocol.SessionStateIdle,
-		StateSince:     time.Now().UTC().Format(time.RFC3339),
-		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		LastSeen:       time.Now().UTC().Format(time.RFC3339),
-	})
-
-	client := &wsClient{
-		send:            make(chan outboundMessage, 2),
-		attachedStreams: make(map[string]ptybackend.Stream),
-	}
-	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
-
-	select {
-	case outbound := <-client.send:
-		var result protocol.AttachResultMessage
-		if err := json.Unmarshal(outbound.payload, &result); err != nil {
-			t.Fatalf("decode attach_result: %v", err)
-		}
-		if !result.Success {
-			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
-		}
-		if len(result.ReplaySegments) != len(writes)-1 {
-			t.Fatalf("replay_segments = %d, want %d", len(result.ReplaySegments), len(writes)-1)
-		}
-		for i, segment := range result.ReplaySegments {
-			decoded, err := base64.StdEncoding.DecodeString(segment.Data)
-			if err != nil {
-				t.Fatalf("decode replay segment %d: %v", i, err)
-			}
-			if !bytes.Equal(decoded, writes[i+1]) {
-				t.Fatalf("served segment[%d] = %q is not the whole original write %q", i, decoded, writes[i+1])
-			}
-		}
-		if !protocol.Deref(result.ScrollbackTruncated) {
-			t.Fatal("expected truncated replay log to surface scrollback_truncated")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for attach_result")
-	}
-}
-
-func TestDaemon_HandleAttachSession_ServesVerifiedClippedSegmentedCodexReplay(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeAttachBackend{}
-
-	segments := []ptybackend.ReplaySegment{
-		{
-			Cols: 118,
-			Rows: 48,
-			Data: bytes.Repeat([]byte("wide-history-"), (maxAgentRawReplayBytes/len("wide-history-"))+2048),
-		},
-		{
-			Cols: 58,
-			Rows: 46,
-			Data: []byte("\x1b[H\x1b[2JOpenAI Codex\r\n\r\nTip: stable header\r\n\r\n› bounded segmented tail\r\n\r\n  gpt-5.4 high · 100% left · ~"),
-		},
-	}
-	ptySegments := make([]pty.ReplaySegment, 0, len(segments))
-	for _, segment := range segments {
-		ptySegments = append(ptySegments, pty.ReplaySegment{
-			Cols: segment.Cols,
-			Rows: segment.Rows,
-			Data: append([]byte(nil), segment.Data...),
-		})
-	}
-	snapshot, ok := pty.ScreenSnapshotFromReplaySegments(ptySegments)
-	if !ok {
-		t.Fatal("expected segmented replay to derive a snapshot")
-	}
-	info := ptybackend.AttachInfo{
-		Running:             true,
-		ReplaySegments:      segments,
-		Cols:                58,
-		Rows:                46,
-		ScreenSnapshot:      snapshot.Payload,
-		ScreenSnapshotFresh: true,
-		ScreenCols:          snapshot.Cols,
-		ScreenRows:          snapshot.Rows,
-		ScreenCursorX:       snapshot.CursorX,
-		ScreenCursorY:       snapshot.CursorY,
-		ScreenCursorVisible: snapshot.CursorVisible,
-	}
-	bounded, clipped := pty.LimitReplaySegmentsTail(ptySegments, maxAgentRawReplayBytes)
-	if !clipped {
-		t.Fatal("expected segmented replay to exceed the transport budget")
-	}
-	if len(bounded) != 1 || !bytes.Equal(bounded[0].Data, segments[1].Data) {
-		t.Fatalf("expected whole-segment tail to keep only the newest segment, got %d segments", len(bounded))
-	}
-
-	backend.SetAttachInfo(info)
-	d.ptyBackend = backend
-	d.store.Add(&protocol.Session{
-		ID:             "sess-1",
-		Label:          "attn",
-		Agent:          protocol.SessionAgentCodex,
-		Directory:      t.TempDir(),
-		State:          protocol.SessionStateIdle,
-		StateSince:     time.Now().UTC().Format(time.RFC3339),
-		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		LastSeen:       time.Now().UTC().Format(time.RFC3339),
-	})
-
-	client := &wsClient{
-		send:            make(chan outboundMessage, 2),
-		attachedStreams: make(map[string]ptybackend.Stream),
-	}
-
-	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
-
-	select {
-	case outbound := <-client.send:
-		var result protocol.AttachResultMessage
-		if err := json.Unmarshal(outbound.payload, &result); err != nil {
-			t.Fatalf("decode attach_result: %v", err)
-		}
-		if !result.Success {
-			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
-		}
-		// The clipped tail reproduces the live screen (Codex repaints in full
-		// frames), so it must be served as deep scrollback instead of
-		// degrading the restore to a bare screen snapshot.
-		if len(result.ReplaySegments) != 1 {
-			t.Fatalf("replay_segments = %d, want 1", len(result.ReplaySegments))
-		}
-		decoded, err := base64.StdEncoding.DecodeString(result.ReplaySegments[0].Data)
-		if err != nil {
-			t.Fatalf("decode replay segment: %v", err)
-		}
-		if !bytes.Equal(decoded, segments[1].Data) {
-			t.Fatal("expected the clipped tail to preserve the newest segment bytes")
-		}
-		if result.ScreenSnapshot != nil {
-			t.Fatal("expected screen snapshot to be omitted when the clipped tail is served")
-		}
-		if !protocol.Deref(result.ScrollbackTruncated) {
-			t.Fatal("expected clipped replay to be marked truncated")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for attach_result")
-	}
-}
-
-func TestDaemon_HandleAttachSession_DerivesSegmentedSnapshotWhenFreshSnapshotMissing(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeAttachBackend{}
-	segments := []ptybackend.ReplaySegment{
-		{Cols: 118, Rows: 48, Data: []byte("\x1b[H\x1b[2JOpenAI Codex\r\n\r\nTip: wide history\r\n")},
-		{Cols: 58, Rows: 46, Data: []byte("\x1b[3;1H› segmented restore\r\n\x1b[4;1H  gpt-5.4 high · 100% left · ~")},
-	}
-	ptySegments := make([]pty.ReplaySegment, 0, len(segments))
-	for _, segment := range segments {
-		ptySegments = append(ptySegments, pty.ReplaySegment{
-			Cols: segment.Cols,
-			Rows: segment.Rows,
-			Data: append([]byte(nil), segment.Data...),
-		})
-	}
-	snapshot, ok := pty.ScreenSnapshotFromReplaySegments(ptySegments)
-	if !ok {
-		t.Fatal("expected segmented replay to derive a snapshot")
-	}
-	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:        true,
-		ReplaySegments: segments,
-		Cols:           58,
-		Rows:           46,
-	})
-	d.ptyBackend = backend
-	d.store.Add(&protocol.Session{
-		ID:             "sess-1",
-		Label:          "attn",
-		Agent:          protocol.SessionAgentCodex,
-		Directory:      t.TempDir(),
-		State:          protocol.SessionStateIdle,
-		StateSince:     time.Now().UTC().Format(time.RFC3339),
-		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		LastSeen:       time.Now().UTC().Format(time.RFC3339),
-	})
-
-	client := &wsClient{
-		send:            make(chan outboundMessage, 2),
-		attachedStreams: make(map[string]ptybackend.Stream),
-	}
-
-	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
-
-	select {
-	case outbound := <-client.send:
-		var result protocol.AttachResultMessage
-		if err := json.Unmarshal(outbound.payload, &result); err != nil {
-			t.Fatalf("decode attach_result: %v", err)
-		}
-		if !result.Success {
-			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
-		}
-		if len(result.ReplaySegments) != 0 {
-			t.Fatalf("replay_segments = %d, want 0", len(result.ReplaySegments))
-		}
-		if result.Scrollback != nil {
-			t.Fatal("expected missing-fresh-snapshot Codex attach to keep a derived snapshot instead of raw replay")
-		}
-		if protocol.Deref(result.ScreenSnapshot) == "" {
-			t.Fatal("expected derived screen snapshot to be present")
-		}
-		if !protocol.Deref(result.ScreenSnapshotFresh) {
-			t.Fatal("expected derived screen snapshot to be marked fresh")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.ScreenSnapshot))
-		if err != nil {
-			t.Fatalf("decode screen snapshot: %v", err)
-		}
-		if !bytes.Equal(decoded, snapshot.Payload) {
-			t.Fatal("expected attach_result to derive the snapshot from segmented replay")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for attach_result")
-	}
-}
-
-func TestDaemon_HandleAttachSession_FallsBackToFreshSnapshotWhenStoredCodexRawReplayDiverges(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeAttachBackend{}
-
-	liveFrame := []byte("\x1b[H\x1b[2JOpenAI Codex\r\n\r\nTip: stable header\r\n\r\n› Run /review on my current changes\r\n\r\n  gpt-5.4 high · 100% left · ~")
-	liveSnapshot, ok := pty.ScreenSnapshotFromReplay(liveFrame, 58, 46)
-	if !ok {
-		t.Fatal("expected live frame to derive a snapshot")
-	}
-
-	raw := append(
-		bytes.Repeat([]byte("codex-replay-chunk-"), (maxAgentRawReplayBytes/18)+32),
-		append(
-			liveFrame,
-			[]byte("\x1b[1;1H\x1b[J \r\n› Run /review on my current changes\r\n \r\n  gpt-5.4 high · 100% left · ~")...,
-		)...,
-	)
-	boundedTail, _ := limitReplayTail(raw, maxAgentRawReplayBytes)
-	derivedFromRaw, ok := pty.ScreenSnapshotFromReplay(boundedTail, 58, 46)
-	if !ok {
-		t.Fatal("expected divergent bounded raw replay tail to derive a snapshot")
-	}
-	if bytes.Equal(derivedFromRaw.Payload, liveSnapshot.Payload) {
-		t.Fatal("expected bounded raw replay tail to diverge from the fresh live snapshot")
-	}
-
-	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:             true,
-		Scrollback:          raw,
-		Cols:                58,
-		Rows:                46,
-		ScreenSnapshot:      liveSnapshot.Payload,
-		ScreenSnapshotFresh: true,
-		ScreenCols:          liveSnapshot.Cols,
-		ScreenRows:          liveSnapshot.Rows,
-		ScreenCursorX:       liveSnapshot.CursorX,
-		ScreenCursorY:       liveSnapshot.CursorY,
-		ScreenCursorVisible: liveSnapshot.CursorVisible,
-	})
-	d.ptyBackend = backend
-	d.store.Add(&protocol.Session{
-		ID:             "sess-1",
-		Label:          "attn",
-		Agent:          protocol.SessionAgentCodex,
-		Directory:      t.TempDir(),
-		State:          protocol.SessionStateIdle,
-		StateSince:     time.Now().UTC().Format(time.RFC3339),
-		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		LastSeen:       time.Now().UTC().Format(time.RFC3339),
-	})
-
-	client := &wsClient{
-		send:            make(chan outboundMessage, 2),
-		attachedStreams: make(map[string]ptybackend.Stream),
-	}
-
-	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
-
-	select {
-	case outbound := <-client.send:
-		var result protocol.AttachResultMessage
-		if err := json.Unmarshal(outbound.payload, &result); err != nil {
-			t.Fatalf("decode attach_result: %v", err)
-		}
-		if !result.Success {
-			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
-		}
-		if result.Scrollback != nil {
-			t.Fatal("expected divergent Codex raw replay to be omitted")
-		}
-		if protocol.Deref(result.ScreenSnapshot) == "" {
-			t.Fatal("expected fresh screen snapshot to be present when raw replay diverges")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.ScreenSnapshot))
-		if err != nil {
-			t.Fatalf("decode screen snapshot: %v", err)
-		}
-		if !bytes.Equal(decoded, liveSnapshot.Payload) {
-			t.Fatal("expected attach_result to keep the fresh live snapshot")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for attach_result")
-	}
-}
-
-func TestDaemon_HandleAttachSession_PrefersFreshScreenSnapshotForStoredClaudeSession(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeAttachBackend{}
-	raw := bytes.Repeat([]byte("claude-replay-chunk-"), 64)
-	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:             true,
-		Scrollback:          raw,
-		ScreenSnapshot:      []byte("\x1b[2Jclaude snapshot"),
-		ScreenSnapshotFresh: true,
-		ScreenCols:          58,
-		ScreenRows:          46,
-	})
-	d.ptyBackend = backend
-	d.store.Add(&protocol.Session{
-		ID:             "sess-1",
-		Label:          "attn",
-		Agent:          protocol.SessionAgentClaude,
-		Directory:      t.TempDir(),
-		State:          protocol.SessionStateIdle,
-		StateSince:     time.Now().UTC().Format(time.RFC3339),
-		StateUpdatedAt: time.Now().UTC().Format(time.RFC3339),
-		LastSeen:       time.Now().UTC().Format(time.RFC3339),
-	})
-
-	client := &wsClient{
-		send:            make(chan outboundMessage, 2),
-		attachedStreams: make(map[string]ptybackend.Stream),
-	}
-
-	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
-
-	select {
-	case outbound := <-client.send:
-		var result protocol.AttachResultMessage
-		if err := json.Unmarshal(outbound.payload, &result); err != nil {
-			t.Fatalf("decode attach_result: %v", err)
-		}
-		if !result.Success {
-			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
-		}
-		if result.Scrollback != nil {
-			t.Fatal("expected Claude relaunch attach to omit raw replay when a fresh screen snapshot is available")
-		}
-		if protocol.Deref(result.ScreenSnapshot) == "" {
-			t.Fatal("expected Claude relaunch attach to keep the fresh screen snapshot")
-		}
-		if !protocol.Deref(result.ScreenSnapshotFresh) {
-			t.Fatal("expected Claude relaunch attach screen snapshot to be marked fresh")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for attach_result")
-	}
-}
-
-func TestDaemon_HandleAttachSession_ReplaysVerifiedHistoryForSameAppRemountPolicy(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeAttachBackend{}
-	raw := []byte("\x1b[H\x1b[2Jhello from replay\r\nsecond line")
-	snapshot, ok := pty.ScreenSnapshotFromReplay(raw, 58, 46)
-	if !ok {
-		t.Fatal("expected raw replay to derive a snapshot")
-	}
-	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:             true,
-		Scrollback:          raw,
-		Cols:                58,
-		Rows:                46,
-		ScreenSnapshot:      snapshot.Payload,
-		ScreenSnapshotFresh: true,
-		ScreenCols:          snapshot.Cols,
-		ScreenRows:          snapshot.Rows,
+		Running:         true,
+		Cols:            80,
+		Rows:            24,
+		GhosttySnapshot: []byte("\x1b[2Jshould-not-be-served"),
 	})
 	d.ptyBackend = backend
 
@@ -2728,7 +2242,7 @@ func TestDaemon_HandleAttachSession_ReplaysVerifiedHistoryForSameAppRemountPolic
 
 	d.handleAttachSession(client, &protocol.AttachSessionMessage{
 		ID:           "sess-1",
-		AttachPolicy: protocol.Ptr(protocol.AttachPolicySameAppRemount),
+		AttachPolicy: protocol.Ptr(protocol.AttachPolicyFreshSpawn),
 	})
 
 	select {
@@ -2740,112 +2254,8 @@ func TestDaemon_HandleAttachSession_ReplaysVerifiedHistoryForSameAppRemountPolic
 		if !result.Success {
 			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
 		}
-		if protocol.Deref(result.Scrollback) == "" {
-			t.Fatal("expected same-app remount attach to replay verified history")
-		}
-		if result.ScreenSnapshot != nil {
-			t.Fatal("expected verified history to replace the screen snapshot replay")
-		}
-		if protocol.Deref(result.ScrollbackTruncated) {
-			t.Fatal("expected complete verified history not to be truncated")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for attach_result")
-	}
-}
-
-func TestDaemon_HandleAttachSession_ReplaysVerifiedHistoryForRelaunchRestoreWithoutStoredSession(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeAttachBackend{}
-	raw := []byte("\x1b[H\x1b[2Jformatted utility output\r\nprompt")
-	snapshot, ok := pty.ScreenSnapshotFromReplay(raw, 58, 46)
-	if !ok {
-		t.Fatal("expected raw replay to derive a snapshot")
-	}
-	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:             true,
-		Scrollback:          raw,
-		Cols:                58,
-		Rows:                46,
-		ScreenSnapshot:      snapshot.Payload,
-		ScreenSnapshotFresh: true,
-		ScreenCols:          snapshot.Cols,
-		ScreenRows:          snapshot.Rows,
-	})
-	d.ptyBackend = backend
-
-	client := &wsClient{
-		send:            make(chan outboundMessage, 2),
-		attachedStreams: make(map[string]ptybackend.Stream),
-	}
-
-	d.handleAttachSession(client, &protocol.AttachSessionMessage{
-		ID:           "runtime-shell-1",
-		AttachPolicy: protocol.Ptr(protocol.AttachPolicyRelaunchRestore),
-	})
-
-	select {
-	case outbound := <-client.send:
-		var result protocol.AttachResultMessage
-		if err := json.Unmarshal(outbound.payload, &result); err != nil {
-			t.Fatalf("decode attach_result: %v", err)
-		}
-		if !result.Success {
-			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
-		}
-		if protocol.Deref(result.Scrollback) == "" {
-			t.Fatal("expected relaunch restore to replay verified history for an untracked shell runtime")
-		}
-		if result.ScreenSnapshot != nil {
-			t.Fatal("expected verified relaunch history to replace the screen snapshot replay")
-		}
-	case <-time.After(1 * time.Second):
-		t.Fatal("timed out waiting for attach_result")
-	}
-}
-
-func TestDaemon_HandleAttachSession_DerivesScreenSnapshotWhenLiveSnapshotMissing(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeAttachBackend{}
-	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:    true,
-		Scrollback: []byte("hello\r\nworld"),
-		Cols:       20,
-		Rows:       6,
-	})
-	d.ptyBackend = backend
-
-	client := &wsClient{
-		send:            make(chan outboundMessage, 2),
-		attachedStreams: make(map[string]ptybackend.Stream),
-	}
-
-	d.handleAttachSession(client, &protocol.AttachSessionMessage{ID: "sess-1"})
-
-	select {
-	case outbound := <-client.send:
-		var result protocol.AttachResultMessage
-		if err := json.Unmarshal(outbound.payload, &result); err != nil {
-			t.Fatalf("decode attach_result: %v", err)
-		}
-		if !result.Success {
-			t.Fatalf("attach_result success=false error=%q", protocol.Deref(result.Error))
-		}
-		if result.Scrollback != nil {
-			t.Fatal("expected scrollback to be omitted when snapshot can be derived from replay")
-		}
-		if protocol.Deref(result.ScreenSnapshot) == "" {
-			t.Fatal("expected derived screen snapshot to be present")
-		}
-		if !protocol.Deref(result.ScreenSnapshotFresh) {
-			t.Fatal("expected derived screen snapshot to be marked fresh")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(protocol.Deref(result.ScreenSnapshot))
-		if err != nil {
-			t.Fatalf("decode derived screen snapshot: %v", err)
-		}
-		if !strings.Contains(string(decoded), "hello") {
-			t.Fatalf("expected derived screen snapshot payload to contain hello, got %q", decoded)
+		if result.Snapshot != nil {
+			t.Fatal("expected no snapshot under the fresh-spawn policy")
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for attach_result")

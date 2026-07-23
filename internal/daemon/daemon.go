@@ -593,7 +593,7 @@ func New(socketPath string) *Daemon {
 	// Derive paths from socket path directory.
 	dataRoot := filepath.Dir(socketPath)
 	pidPath := filepath.Join(dataRoot, "attn.pid")
-	manager := pty.NewManager(pty.DefaultScrollbackSize, logger.Infof)
+	manager := pty.NewManager(logger.Infof)
 
 	d := &Daemon{
 		socketPath:          socketPath,
@@ -637,7 +637,7 @@ func New(socketPath string) *Daemon {
 func NewForTesting(socketPath string) *Daemon {
 	dataRoot := filepath.Dir(socketPath)
 	pidPath := filepath.Join(dataRoot, "attn.pid")
-	manager := pty.NewManager(pty.DefaultScrollbackSize, nil)
+	manager := pty.NewManager(nil)
 	return &Daemon{
 		socketPath:         socketPath,
 		pidPath:            pidPath,
@@ -681,7 +681,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 	if client, ok := ghClient.(*github.Client); ok {
 		registry.Register(client.Host(), client)
 	}
-	manager := pty.NewManager(pty.DefaultScrollbackSize, nil)
+	manager := pty.NewManager(nil)
 	return &Daemon{
 		socketPath:         socketPath,
 		pidPath:            pidPath,
@@ -741,7 +741,7 @@ func (d *Daemon) Start() error {
 		d.forcedStop = make(map[string]time.Time)
 	}
 	if d.ptyBackend == nil {
-		d.ptyBackend = ptybackend.NewEmbedded(pty.NewManager(pty.DefaultScrollbackSize, d.logf))
+		d.ptyBackend = ptybackend.NewEmbedded(pty.NewManager(d.logf))
 	}
 	if d.tailscale == nil {
 		d.tailscale = newTailscaleRuntime()

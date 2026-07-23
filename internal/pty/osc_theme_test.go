@@ -31,8 +31,6 @@ func newOSCTestSession(t *testing.T) (s *Session, peer *os.File) {
 		rows:        rows,
 		ptmx:        ptmx,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
-		scrollback:  NewRingBuffer(1 << 20),
-		replayLog:   NewReplayLog(1 << 20),
 		screen:      newVirtualScreen(cols, rows),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
@@ -100,8 +98,6 @@ func TestOSCColorQuerySeededAtSpawnAnswersWithoutSetTheme(t *testing.T) {
 		rows:        rows,
 		ptmx:        ptmx,
 		cmd:         &exec.Cmd{},
-		scrollback:  NewRingBuffer(1 << 20),
-		replayLog:   NewReplayLog(1 << 20),
 		screen:      newVirtualScreen(cols, rows),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,

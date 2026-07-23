@@ -533,11 +533,6 @@ model WorkspaceLayout {
   updated_at?: string;
 }
 
-model ReplaySegment {
-  cols: int32;
-  rows: int32;
-  data: string; // base64 bytes
-}
 
 model EndpointCapabilities {
   protocol_version: string;
@@ -2787,34 +2782,25 @@ model AttachBlock {
 
 // Server-authoritative restore snapshot: a self-contained VT serialization of
 // the worker's parsed terminal (grid + scrollback + cursor + modes, both
-// primary and alternate screens) produced by libghostty-vt. Present only when
-// the daemon serves a snapshot-first attach (ATTN_ATTACH_SNAPSHOT); the client
-// resets its model and replays vt_dump_b64 instead of the raw replay fields,
-// then seeds its command-block store from blocks.
+// primary and alternate screens) produced by libghostty-vt. Present on every
+// restore attach; the client resets its model and replays vt_dump_b64, then
+// seeds its command-block store from blocks.
 model AttachSnapshot {
   cols: int32;
   rows: int32;
   vt_dump_b64: string;           // base64 self-contained VT stream
   blocks?: AttachBlock[];        // OSC 133 command blocks, empty/absent if none
+  scrollback_truncated: boolean; // ghostty dropped scrollback at its cap
 }
 
 model AttachResultMessage {
   event: "attach_result";
   id: string;
   success: boolean;
-  // Present when the daemon serves a server-authoritative snapshot attach. When
-  // set, the raw replay fields below are empty and the client restores from it.
+  // The server-authoritative restore. Present whenever the attach restores prior
+  // terminal state; the client resets its model and replays snapshot.vt_dump_b64.
+  // Absent on a fresh spawn or when no parsed terminal is available.
   snapshot?: AttachSnapshot;
-  scrollback?: string;           // base64 bytes
-  scrollback_truncated?: boolean;
-  replay_segments?: ReplaySegment[];
-  screen_snapshot?: string;      // base64 ANSI replay of visible frame
-  screen_rows?: int32;
-  screen_cols?: int32;
-  screen_cursor_x?: int32;       // 0-based
-  screen_cursor_y?: int32;       // 0-based
-  screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
   last_seq?: int32;
   cols?: int32;
   rows?: int32;

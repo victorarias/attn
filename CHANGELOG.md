@@ -6,6 +6,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-23]
+
+### Changed
+- **Session restore is now deeper and more faithful.** Reopening or reconnecting
+  to a running agent rebuilds the terminal from a full server-side snapshot of
+  the session's screen and scrollback — truecolor, soft-wrapped lines, and
+  alt-screen state included — instead of replaying a best-effort byte history.
+  Restores are text-only: inline images (sixel/kitty) still render live but are
+  not preserved across a restore.
+
 ## [2026-07-22]
 
 ### Fixed
