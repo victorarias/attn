@@ -108,8 +108,9 @@ export function classifyAttachReplay(
   );
   // The daemon only serves a Ghostty snapshot when it decides the attach should
   // restore, and the snapshot carries its own authoritative geometry, so it is
-  // always allowed and never skipped on a geometry mismatch. A snapshot-less
-  // reattach still resets to dedup against last_seq under restore policies.
+  // always allowed and never skipped on a geometry mismatch. Restore policies
+  // are also allowed without a snapshot, but a snapshot-less attach never resets
+  // the model — it keeps the client's rendered state (see planAttachResultEffects).
   const replayAllowedByPolicy = hasGhosttySnapshot
     || context?.policy === 'relaunch_restore'
     || context?.policy === 'same_app_remount';
@@ -197,12 +198,14 @@ export function planAttachResultEffects({
   previousSeq?: number;
   queuedOutputs?: PendingAttachOutputChunk[];
 }) {
-  const shouldReset = replayPlan.replayAllowedByPolicy && (
-    replayPlan.replayApplied || typeof previousSeq === 'number'
-  );
-  const resetReason = shouldReset
-    ? (replayPlan.hasGhosttySnapshot && replayPlan.replayApplied ? 'snapshot_restore' : 'reattach')
-    : null;
+  // Reset is only safe when a snapshot redraws the whole grid. Without one the
+  // server has no serialized state to hand us, so the client's existing model is
+  // the ONLY rendered terminal: resetting it (e.g. a same_app_remount after a
+  // ghostty construction failure) clears the screen with nothing to repaint it,
+  // leaving an idle shell blank until it next prints. Per AGENTS.md a
+  // snapshot-less attach keeps whatever the client already has.
+  const shouldReset = replayPlan.replayApplied && replayPlan.hasGhosttySnapshot;
+  const resetReason = shouldReset ? 'snapshot_restore' : null;
   const replayAction = replayPlan.replayApplied && replayPlan.hasGhosttySnapshot && attachResult.snapshot?.vt_dump_b64
     ? {
         kind: 'ghostty_snapshot' as const,
@@ -214,12 +217,18 @@ export function planAttachResultEffects({
         replayKind: replayPlan.replayKind,
       };
 
-  // last_seq names the last chunk covered by the replay payload (see
-  // Session.info in internal/pty/session.go). A queued chunk with
-  // seq <= last_seq is already inside the replay; emitting it again would
-  // double-apply those bytes. Live chunks resume at last_seq + 1, which
+  // The dedup baseline is the highest seq the client has already rendered.
+  // With a snapshot the dump covers everything through the server's last_seq
+  // (see Session.info in internal/pty/session.go), so that is the baseline and a
+  // queued chunk with seq <= last_seq is already inside the dump. Without a
+  // snapshot nothing was repainted for the client, so the baseline is the
+  // client's OWN watermark (previousSeq): advancing to the server's last_seq
+  // would silently drop queued chunks between previousSeq and last_seq that the
+  // client never rendered. Live chunks resume just past the baseline, which
   // planLivePtyOutput's `incomingSeq <= lastSeq` stale rule lets through.
-  let nextSeq = typeof attachResult.last_seq === 'number' ? attachResult.last_seq : 0;
+  let nextSeq = replayPlan.replayApplied
+    ? (typeof attachResult.last_seq === 'number' ? attachResult.last_seq : 0)
+    : (typeof previousSeq === 'number' ? previousSeq : 0);
   const queuedOutputsToEmit: PendingAttachOutputChunk[] = [];
   for (const chunk of queuedOutputs || []) {
     if (typeof chunk.seq === 'number' && chunk.seq <= nextSeq) {

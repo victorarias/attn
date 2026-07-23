@@ -106,9 +106,12 @@ describe('attachPlanning', () => {
   });
 
   describe('snapshot-less reattach', () => {
-    it('allows a reset for restore policies so live output dedups against last_seq', () => {
-      // No snapshot (stub build / no serialization): there is no replay payload,
-      // but a restore-policy reattach still resets and resumes at last_seq.
+    it('keeps client state and its own watermark on a snapshot-less restore reattach', () => {
+      // No snapshot (stub build / ghostty construction failure): there is no
+      // replay payload. Per AGENTS.md the client keeps whatever it has rendered
+      // and dedups the live stream against its OWN last_seq. It must not reset
+      // the model (nothing would repaint it) nor jump the watermark to the
+      // server's last_seq, which would drop the unrendered chunk between them.
       const plan = classifyAttachReplay({
         cols: 80,
         rows: 24,
@@ -122,12 +125,53 @@ describe('attachPlanning', () => {
         attachResult: { last_seq: 12 },
         replayPlan: plan,
         previousSeq: 11,
+        queuedOutputs: [{ data: 'live-12', seq: 12 }],
       });
 
-      expect(effects.shouldReset).toBe(true);
-      expect(effects.resetReason).toBe('reattach');
+      expect(effects.shouldReset).toBe(false);
+      expect(effects.resetReason).toBe(null);
       expect(effects.replayAction.kind).toBe('none');
+      // Baseline is the client watermark (11), so seq 12 flows through instead
+      // of being dropped as "already in the dump" — there is no dump.
+      expect(effects.queuedOutputsToEmit).toEqual([{ data: 'live-12', seq: 12 }]);
       expect(effects.nextSeq).toBe(12);
+    });
+
+    it('does not reset or drop queued output on a snapshot-less same-app remount', () => {
+      // Regression (PR #642 review): ghostty construction failed on the worker,
+      // so the attach carries no snapshot. The client's existing model is the
+      // ONLY rendered terminal and the queued chunks (emitted while briefly
+      // detached) were never painted into it. Resetting would blank the idle
+      // shell forever; advancing the watermark to the server's last_seq would
+      // silently discard those queued chunks. Neither may happen.
+      const plan = classifyAttachReplay({
+        cols: 80,
+        rows: 24,
+      }, createAttachRequestContext({ cols: 80, rows: 24 }, 'same_app_remount'));
+
+      expect(plan.hasReplayPayload).toBe(false);
+      expect(plan.replayApplied).toBe(false);
+
+      const effects = planAttachResultEffects({
+        attachResult: { last_seq: 20 },
+        replayPlan: plan,
+        previousSeq: 15,
+        queuedOutputs: [
+          { data: 'queued-16', seq: 16 },
+          { data: 'queued-20', seq: 20 },
+        ],
+      });
+
+      expect(effects.shouldReset).toBe(false);
+      expect(effects.resetReason).toBe(null);
+      expect(effects.replayAction.kind).toBe('none');
+      // Dedup against the client's own watermark (15), NOT the server's
+      // last_seq (20): both queued chunks are past what the client rendered.
+      expect(effects.queuedOutputsToEmit).toEqual([
+        { data: 'queued-16', seq: 16 },
+        { data: 'queued-20', seq: 20 },
+      ]);
+      expect(effects.nextSeq).toBe(20);
     });
 
     it('does not restore a fresh spawn with no snapshot', () => {
