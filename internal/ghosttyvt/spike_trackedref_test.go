@@ -28,6 +28,37 @@ func feedLines(t *Terminal, from, to int) {
 	t.Write([]byte(b.String()))
 }
 
+// TestTrackedRefLeakAccounting verifies the live-ref counter that block-table
+// tests use to prove every retirement path frees its native refs: increments
+// on successful pins, decrements exactly once per ref no matter how many times
+// Free is called.
+func TestTrackedRefLeakAccounting(t *testing.T) {
+	base := LiveTrackedRefs()
+	term, err := New(80, 10, Options{MaxScrollback: 50})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer term.Close()
+
+	r1 := term.TrackCursor()
+	r2 := term.TrackCursor()
+	if r1 == nil || r2 == nil {
+		t.Fatal("TrackCursor returned nil")
+	}
+	if got := LiveTrackedRefs(); got != base+2 {
+		t.Fatalf("after 2 pins: live=%d want %d", got, base+2)
+	}
+	r1.Free()
+	r1.Free() // idempotent: must not double-decrement
+	if got := LiveTrackedRefs(); got != base+1 {
+		t.Fatalf("after freeing one ref (twice): live=%d want %d", got, base+1)
+	}
+	r2.Free()
+	if got := LiveTrackedRefs(); got != base {
+		t.Fatalf("after freeing all: live=%d want %d", got, base)
+	}
+}
+
 // TestSpikeTrackedRefFollowsScrollPruneReflow verifies the core primitive the
 // worker-side block tracker would rely on: a ref pinned at the cursor keeps
 // resolving to the same content row while the terminal scrolls, prunes

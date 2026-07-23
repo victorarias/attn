@@ -301,6 +301,18 @@ func (t *Terminal) cursorXYLocked() (x, y int) {
 		int(C.ghosttyvt_get_u16(t.term, C.GHOSTTY_TERMINAL_DATA_CURSOR_Y))
 }
 
+// AltScreenActive reports whether the alternate screen (DEC 1049/1047/47) is
+// currently active. Blocks are a primary-screen concept: the block table
+// records this at pin time and excludes alt-pinned blocks at serialize.
+func (t *Terminal) AltScreenActive() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return false
+	}
+	return C.ghosttyvt_active_screen(t.term) == C.int(C.GHOSTTY_TERMINAL_SCREEN_ALTERNATE)
+}
+
 // format runs the upstream formatter and returns freshly-allocated Go bytes.
 // Caller must hold t.mu and must not call it after Close.
 func (t *Terminal) format(emit C.GhosttyFormatterFormat) []byte {

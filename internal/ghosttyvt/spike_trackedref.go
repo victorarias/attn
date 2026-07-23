@@ -22,6 +22,17 @@ static GhosttyPoint ghosttyvt_point(GhosttyPointTag tag, uint16_t x, uint32_t y)
 */
 import "C"
 
+import "sync/atomic"
+
+// liveTrackedRefs counts allocated-but-not-yet-freed TrackedRefs across the
+// process. Block-table tests assert it returns to its baseline at teardown, so
+// a missed Free on any block retirement path (cap eviction, alt-drop,
+// self-heal replacement, session close) is a red test, not a native leak.
+var liveTrackedRefs atomic.Int64
+
+// LiveTrackedRefs returns the number of TrackedRefs not yet freed.
+func LiveTrackedRefs() int { return int(liveTrackedRefs.Load()) }
+
 // TrackedRef pins a grid cell that follows its content across scrolling,
 // scrollback pruning, and resize/reflow. It is owned by the Terminal that
 // created it; resolve and free while that Terminal is alive (or after — the
@@ -44,6 +55,7 @@ func (t *Terminal) TrackCursor() *TrackedRef {
 	if rc := C.ghostty_terminal_grid_ref_track(t.term, p, &ref); rc != C.GHOSTTY_SUCCESS {
 		return nil
 	}
+	liveTrackedRefs.Add(1)
 	return &TrackedRef{ref: ref}
 }
 
@@ -69,4 +81,5 @@ func (r *TrackedRef) Free() {
 	}
 	C.ghostty_tracked_grid_ref_free(r.ref)
 	r.ref = nil
+	liveTrackedRefs.Add(-1)
 }
