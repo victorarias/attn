@@ -15,7 +15,7 @@ export interface AttachGhosttySnapshot {
   scrollback_truncated?: boolean;
 }
 
-export interface AttachReplayData {
+export interface AttachRestoreData {
   cols?: number;
   rows?: number;
   // Server-authoritative terminal snapshot: the sole restore payload. A raw VT
@@ -28,7 +28,7 @@ export interface AttachReplayData {
   snapshot?: AttachGhosttySnapshot;
 }
 
-export type AttachResultData = AttachReplayData & {
+export type AttachResultData = AttachRestoreData & {
   last_seq?: number;
 };
 
@@ -83,86 +83,58 @@ function normalizeAttachAgent(agent?: string | null, shell?: boolean): string | 
   return normalized.length > 0 ? normalized : null;
 }
 
-export function classifyAttachReplay(
-  data: AttachReplayData,
+// classifyAttachRestore resolves an attach result to the single restore
+// decision that remains: does the daemon hand us a Ghostty snapshot to
+// reconstruct from, and at what grid? There is exactly one restore payload
+// (the VT dump) or none — the raw-replay-vs-snapshot decision tree is gone.
+export function classifyAttachRestore(
+  data: AttachRestoreData,
   context?: AttachRequestContext,
 ) {
   const ghosttySnapshot = data.snapshot && data.snapshot.vt_dump_b64 ? data.snapshot : null;
-  const hasGhosttySnapshot = ghosttySnapshot !== null;
-  const hasReplayPayload = hasGhosttySnapshot;
-  const replayKind: 'ghostty_snapshot' | 'none' = hasGhosttySnapshot ? 'ghostty_snapshot' : 'none';
+  const hasSnapshot = ghosttySnapshot !== null;
   const attachedCols = typeof data.cols === 'number' ? data.cols : null;
   const attachedRows = typeof data.rows === 'number' ? data.rows : null;
   // A Ghostty snapshot carries its own authoritative grid (we resize the fresh
   // model to it before writing the dump). With no snapshot, geometry falls back
   // to the daemon's reported PTY size.
-  const replayCols = hasGhosttySnapshot ? ghosttySnapshot.cols : attachedCols;
-  const replayRows = hasGhosttySnapshot ? ghosttySnapshot.rows : attachedRows;
-  const requestedCols = context?.requestedCols ?? null;
-  const requestedRows = context?.requestedRows ?? null;
-  const attachedGeometryMismatch = requestedCols !== null && requestedRows !== null && (
-    attachedCols !== requestedCols || attachedRows !== requestedRows
-  );
-  const replayGeometryMismatch = requestedCols !== null && requestedRows !== null && hasReplayPayload && (
-    replayCols !== requestedCols || replayRows !== requestedRows
-  );
-  // The daemon only serves a Ghostty snapshot when it decides the attach should
-  // restore, and the snapshot carries its own authoritative geometry, so it is
-  // always allowed and never skipped on a geometry mismatch. Restore policies
-  // are also allowed without a snapshot, but a snapshot-less attach never resets
-  // the model — it keeps the client's rendered state (see planAttachResultEffects).
-  const replayAllowedByPolicy = hasGhosttySnapshot
-    || context?.policy === 'relaunch_restore'
-    || context?.policy === 'same_app_remount';
-  const replayApplied = hasReplayPayload;
+  const restoreCols = hasSnapshot ? ghosttySnapshot.cols : attachedCols;
+  const restoreRows = hasSnapshot ? ghosttySnapshot.rows : attachedRows;
 
   return {
-    shell: context?.shell ?? false,
     agent: context?.agent ?? null,
-    hasGhosttySnapshot,
-    hasReplayPayload,
-    replayKind,
-    attachedCols,
-    attachedRows,
-    replayCols,
-    replayRows,
-    requestedCols,
-    requestedRows,
-    attachedGeometryMismatch,
-    replayGeometryMismatch,
-    replayAllowedByPolicy,
-    replayApplied,
-    replaySkipped: false,
+    hasSnapshot,
+    restoreCols,
+    restoreRows,
   };
 }
 
 export function planAttachedRuntimeGeometry(
   args: AttachRuntimeRequest,
-  attachResult: AttachReplayData,
+  attachResult: AttachRestoreData,
   options: {
     attachPolicy: PtyAttachPolicy;
     attachContext?: AttachRequestContext;
     requestedGeometryAuthoritative?: boolean;
   },
 ) {
-  const replayPlan = classifyAttachReplay(attachResult, options.attachContext);
+  const restorePlan = classifyAttachRestore(attachResult, options.attachContext);
   const requestedCols = args.cols;
   const requestedRows = args.rows;
   const attachedCols = typeof attachResult.cols === 'number' ? attachResult.cols : null;
   const attachedRows = typeof attachResult.rows === 'number' ? attachResult.rows : null;
-  const hasGhosttySnapshotReplay = replayPlan.replayApplied && replayPlan.hasGhosttySnapshot;
-  const replayCols = replayPlan.replayCols;
-  const replayRows = replayPlan.replayRows;
+  const restoreCols = restorePlan.restoreCols;
+  const restoreRows = restorePlan.restoreRows;
   const ptyGeometryMatches = attachedCols === requestedCols && attachedRows === requestedRows;
-  // A Ghostty snapshot carries its own authoritative grid (replayCols/Rows).
-  const replayGeometryMatches = hasGhosttySnapshotReplay
-    ? replayCols === requestedCols && replayRows === requestedRows
+  // A Ghostty snapshot carries its own authoritative grid (restoreCols/Rows).
+  const restoreGeometryMatches = restorePlan.hasSnapshot
+    ? restoreCols === requestedCols && restoreRows === requestedRows
     : false;
   // requestedGeometryAuthoritative === false means the client size is
   // provisional (never measured against a visible container): it must not
   // claim PTY geometry authority. Forcing the live PTY to a construction
   // default SIGWINCH-churns the shell and bounces every attached model's
-  // width, invalidating a freshly replayed grid. The daemon's geometry stays
+  // width, invalidating a freshly restored grid. The daemon's geometry stays
   // authoritative until a real fit produces an interactive resize.
   const preserveAttachedGeometry = options.attachPolicy === 'relaunch_restore'
     || options.requestedGeometryAuthoritative === false;
@@ -173,14 +145,12 @@ export function planAttachedRuntimeGeometry(
     requestedRows,
     attachedCols,
     attachedRows,
-    replayCols,
-    replayRows,
+    restoreCols,
+    restoreRows,
     ptyGeometryMatches,
-    replayGeometryMatches,
-    hasGhosttySnapshotReplay,
-    replayKind: replayPlan.replayKind,
-    replayApplied: replayPlan.replayApplied,
-    agent: replayPlan.agent,
+    restoreGeometryMatches,
+    hasSnapshot: restorePlan.hasSnapshot,
+    agent: restorePlan.agent,
     resizeRequired,
     strategy: resizeRequired ? 'resize' : preserveAttachedGeometry && !ptyGeometryMatches ? 'preserve_attached' : 'none',
     attachPolicy: options.attachPolicy,
@@ -189,12 +159,12 @@ export function planAttachedRuntimeGeometry(
 
 export function planAttachResultEffects({
   attachResult,
-  replayPlan,
+  restorePlan,
   previousSeq,
   queuedOutputs,
 }: {
   attachResult: AttachResultData;
-  replayPlan: ReturnType<typeof classifyAttachReplay>;
+  restorePlan: ReturnType<typeof classifyAttachRestore>;
   previousSeq?: number;
   queuedOutputs?: PendingAttachOutputChunk[];
 }) {
@@ -204,17 +174,15 @@ export function planAttachResultEffects({
   // ghostty construction failure) clears the screen with nothing to repaint it,
   // leaving an idle shell blank until it next prints. Per AGENTS.md a
   // snapshot-less attach keeps whatever the client already has.
-  const shouldReset = replayPlan.replayApplied && replayPlan.hasGhosttySnapshot;
+  const shouldReset = restorePlan.hasSnapshot;
   const resetReason = shouldReset ? 'snapshot_restore' : null;
-  const replayAction = replayPlan.replayApplied && replayPlan.hasGhosttySnapshot && attachResult.snapshot?.vt_dump_b64
+  const restoreAction = restorePlan.hasSnapshot && attachResult.snapshot?.vt_dump_b64
     ? {
         kind: 'ghostty_snapshot' as const,
-        replayKind: 'ghostty_snapshot' as const,
         data: attachResult.snapshot.vt_dump_b64,
       }
     : {
         kind: 'none' as const,
-        replayKind: replayPlan.replayKind,
       };
 
   // The dedup baseline is the highest seq the client has already rendered.
@@ -226,7 +194,7 @@ export function planAttachResultEffects({
   // would silently drop queued chunks between previousSeq and last_seq that the
   // client never rendered. Live chunks resume just past the baseline, which
   // planLivePtyOutput's `incomingSeq <= lastSeq` stale rule lets through.
-  let nextSeq = replayPlan.replayApplied
+  let nextSeq = restorePlan.hasSnapshot
     ? (typeof attachResult.last_seq === 'number' ? attachResult.last_seq : 0)
     : (typeof previousSeq === 'number' ? previousSeq : 0);
   const queuedOutputsToEmit: PendingAttachOutputChunk[] = [];
@@ -243,7 +211,7 @@ export function planAttachResultEffects({
   return {
     shouldReset,
     resetReason,
-    replayAction,
+    restoreAction,
     nextSeq,
     queuedOutputsToEmit,
   };

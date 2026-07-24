@@ -39,7 +39,7 @@ import {
   type PtySpawnArgs,
 } from '../pty/bridge';
 import {
-  classifyAttachReplay,
+  classifyAttachRestore,
   createAttachRequestContext,
   enqueuePendingAttachOutput,
   planAttachResultEffects,
@@ -2093,7 +2093,7 @@ export function useDaemonSocket({
                 break;
               }
               const attachContext = ptyTransportRef.current.getAttachContext(data.id);
-              const replayPlan = classifyAttachReplay(data, attachContext);
+              const restorePlan = classifyAttachRestore(data, attachContext);
               if (pending) {
                 pendingActionsRef.current.delete(key);
                 if (data.success) {
@@ -2120,18 +2120,17 @@ export function useDaemonSocket({
               if (data.success) {
                 const attachEffects = planAttachResultEffects({
                   attachResult: data,
-                  replayPlan,
+                  restorePlan,
                   previousSeq: ptyTransportRef.current.getLastSeq(data.id),
                   queuedOutputs: ptyTransportRef.current.getQueuedAttachOutputs(data.id),
                 });
                 // A Ghostty snapshot is a raw VT dump authored at the daemon
                 // worker's exact grid; the fresh model must be resized to that
                 // grid before the dump is written or its line-wrapping desyncs.
-                const snapshotGeometry = replayPlan.replayApplied
-                  && replayPlan.hasGhosttySnapshot
-                  && typeof replayPlan.replayCols === 'number'
-                  && typeof replayPlan.replayRows === 'number'
-                  ? { cols: replayPlan.replayCols, rows: replayPlan.replayRows }
+                const snapshotGeometry = restorePlan.hasSnapshot
+                  && typeof restorePlan.restoreCols === 'number'
+                  && typeof restorePlan.restoreRows === 'number'
+                  ? { cols: restorePlan.restoreCols, rows: restorePlan.restoreRows }
                   : null;
                 // A snapshot-less relaunch_restore still reconstructs at the
                 // daemon's reported PTY grid so a resumed agent redraws cleanly.
@@ -2140,13 +2139,13 @@ export function useDaemonSocket({
                   && typeof data.rows === 'number'
                   ? { cols: data.cols, rows: data.rows }
                   : null;
-                const replayGeometry = snapshotGeometry || relaunchFallbackGeometry;
-                if (replayGeometry) {
+                const restoreGeometry = snapshotGeometry || relaunchFallbackGeometry;
+                if (restoreGeometry) {
                   emitPtyEvent({
                     event: 'local_resize',
                     id: data.id,
-                    cols: replayGeometry.cols,
-                    rows: replayGeometry.rows,
+                    cols: restoreGeometry.cols,
+                    rows: restoreGeometry.rows,
                     source: 'attach_replay',
                   });
                 }
@@ -2161,12 +2160,12 @@ export function useDaemonSocket({
                 // The daemon worker already answered CPR/DA1/OSC during live
                 // parsing and forwarded the query gap over the wire, so the
                 // frontend must never re-answer queries embedded in the dump.
-                const replayWasEmitted = attachEffects.replayAction.kind === 'ghostty_snapshot';
-                if (attachEffects.replayAction.kind === 'ghostty_snapshot') {
+                const restoreWasEmitted = attachEffects.restoreAction.kind === 'ghostty_snapshot';
+                if (attachEffects.restoreAction.kind === 'ghostty_snapshot') {
                   emitPtyEvent({
                     event: 'data',
                     id: data.id,
-                    data: attachEffects.replayAction.data,
+                    data: attachEffects.restoreAction.data,
                     source: 'attach_replay',
                     suppressResponses: true,
                   });
@@ -2200,7 +2199,7 @@ export function useDaemonSocket({
                     emitPtyEvent({ event: 'data', id: data.id, data: chunk.data, seq: chunk.seq });
                   }
                 }
-                if (replayWasEmitted) {
+                if (restoreWasEmitted) {
                   emitPtyEvent({
                     event: 'replay_complete',
                     id: data.id,
