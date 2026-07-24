@@ -245,7 +245,7 @@ func (t *Terminal) Size() (cols, rows int) {
 }
 
 // PlainText renders the terminal (viewport + scrollback) as plain UTF-8 text,
-// no escape sequences. Primarily for tests and shadow-mode divergence checks.
+// no escape sequences. Primarily for tests and block round-trip assertions.
 func (t *Terminal) PlainText() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()

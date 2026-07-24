@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  classifyAttachReplay,
+  classifyAttachRestore,
   createAttachRequestContext,
   enqueuePendingAttachOutput,
   planAttachResultEffects,
@@ -11,55 +11,45 @@ import {
 describe('attachPlanning', () => {
   describe('server-authoritative Ghostty snapshot', () => {
     it('classifies a Ghostty snapshot as the authoritative restore payload', () => {
-      const plan = classifyAttachReplay({
+      const plan = classifyAttachRestore({
         cols: 80,
         rows: 24,
         snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
       }, createAttachRequestContext({ cols: 80, rows: 24 }, 'relaunch_restore'));
 
-      expect(plan.hasGhosttySnapshot).toBe(true);
-      expect(plan.replayKind).toBe('ghostty_snapshot');
-      expect(plan.hasReplayPayload).toBe(true);
-      expect(plan.replayApplied).toBe(true);
-      expect(plan.replaySkipped).toBe(false);
-      expect(plan.replayAllowedByPolicy).toBe(true);
-      expect(plan.replayCols).toBe(80);
-      expect(plan.replayRows).toBe(24);
+      expect(plan.hasSnapshot).toBe(true);
+      expect(plan.restoreCols).toBe(80);
+      expect(plan.restoreRows).toBe(24);
     });
 
-    it('applies the Ghostty snapshot even when its grid differs from the requested geometry', () => {
-      // A geometry mismatch never skips it: the consumer resizes to the
-      // snapshot grid before writing the dump.
-      const plan = classifyAttachReplay({
+    it('restores at the snapshot grid even when it differs from the requested geometry', () => {
+      // A geometry mismatch never skips the snapshot: the consumer resizes to
+      // the snapshot grid before writing the dump.
+      const plan = classifyAttachRestore({
         cols: 100,
         rows: 40,
         snapshot: { cols: 100, rows: 40, vt_dump_b64: 'ZHVtcA==' },
       }, createAttachRequestContext({ cols: 58, rows: 46 }, 'same_app_remount'));
 
-      expect(plan.replayApplied).toBe(true);
-      expect(plan.replaySkipped).toBe(false);
-      expect(plan.replayGeometryMismatch).toBe(true);
-      expect(plan.replayCols).toBe(100);
-      expect(plan.replayRows).toBe(40);
+      expect(plan.hasSnapshot).toBe(true);
+      expect(plan.restoreCols).toBe(100);
+      expect(plan.restoreRows).toBe(40);
     });
 
     it('treats an empty Ghostty snapshot as no restore payload', () => {
       // The pure-Go stub (non-macOS) and a ghostty construction failure both
       // surface as an empty vt dump: nothing to restore.
-      const plan = classifyAttachReplay({
+      const plan = classifyAttachRestore({
         cols: 80,
         rows: 24,
         snapshot: { cols: 80, rows: 24, vt_dump_b64: '' },
       }, createAttachRequestContext({ cols: 80, rows: 24 }, 'relaunch_restore'));
 
-      expect(plan.hasGhosttySnapshot).toBe(false);
-      expect(plan.hasReplayPayload).toBe(false);
-      expect(plan.replayKind).toBe('none');
-      expect(plan.replayApplied).toBe(false);
+      expect(plan.hasSnapshot).toBe(false);
     });
 
-    it('plans a snapshot_restore reset and emits the vt dump as the replay action', () => {
-      const replayPlan = classifyAttachReplay({
+    it('plans a snapshot_restore reset and emits the vt dump as the restore action', () => {
+      const restorePlan = classifyAttachRestore({
         cols: 80,
         rows: 24,
         snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
@@ -70,21 +60,20 @@ describe('attachPlanning', () => {
           last_seq: 7,
           snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
         },
-        replayPlan,
+        restorePlan,
         previousSeq: 6,
       });
 
       expect(effects.shouldReset).toBe(true);
       expect(effects.resetReason).toBe('snapshot_restore');
-      expect(effects.replayAction).toEqual({
+      expect(effects.restoreAction).toEqual({
         kind: 'ghostty_snapshot',
-        replayKind: 'ghostty_snapshot',
         data: 'ZHVtcA==',
       });
       expect(effects.nextSeq).toBe(7);
     });
 
-    it('reports the snapshot grid as the authoritative replay geometry', () => {
+    it('reports the snapshot grid as the authoritative restore geometry', () => {
       const attachContext = createAttachRequestContext({ cols: 80, rows: 24 }, 'same_app_remount');
       const plan = planAttachedRuntimeGeometry({
         cols: 80,
@@ -98,39 +87,35 @@ describe('attachPlanning', () => {
         attachContext,
       });
 
-      expect(plan.hasGhosttySnapshotReplay).toBe(true);
-      expect(plan.replayApplied).toBe(true);
-      expect(plan.replayGeometryMatches).toBe(true);
-      expect(plan.replayKind).toBe('ghostty_snapshot');
+      expect(plan.hasSnapshot).toBe(true);
+      expect(plan.restoreGeometryMatches).toBe(true);
     });
   });
 
   describe('snapshot-less reattach', () => {
     it('keeps client state and its own watermark on a snapshot-less restore reattach', () => {
       // No snapshot (stub build / ghostty construction failure): there is no
-      // replay payload. Per AGENTS.md the client keeps whatever it has rendered
+      // restore payload. Per AGENTS.md the client keeps whatever it has rendered
       // and dedups the live stream against its OWN last_seq. It must not reset
       // the model (nothing would repaint it) nor jump the watermark to the
       // server's last_seq, which would drop the unrendered chunk between them.
-      const plan = classifyAttachReplay({
+      const plan = classifyAttachRestore({
         cols: 80,
         rows: 24,
       }, createAttachRequestContext({ cols: 80, rows: 24 }, 'relaunch_restore'));
 
-      expect(plan.hasReplayPayload).toBe(false);
-      expect(plan.replayApplied).toBe(false);
-      expect(plan.replayAllowedByPolicy).toBe(true);
+      expect(plan.hasSnapshot).toBe(false);
 
       const effects = planAttachResultEffects({
         attachResult: { last_seq: 12 },
-        replayPlan: plan,
+        restorePlan: plan,
         previousSeq: 11,
         queuedOutputs: [{ data: 'live-12', seq: 12 }],
       });
 
       expect(effects.shouldReset).toBe(false);
       expect(effects.resetReason).toBe(null);
-      expect(effects.replayAction.kind).toBe('none');
+      expect(effects.restoreAction.kind).toBe('none');
       // Baseline is the client watermark (11), so seq 12 flows through instead
       // of being dropped as "already in the dump" — there is no dump.
       expect(effects.queuedOutputsToEmit).toEqual([{ data: 'live-12', seq: 12 }]);
@@ -144,17 +129,16 @@ describe('attachPlanning', () => {
       // detached) were never painted into it. Resetting would blank the idle
       // shell forever; advancing the watermark to the server's last_seq would
       // silently discard those queued chunks. Neither may happen.
-      const plan = classifyAttachReplay({
+      const plan = classifyAttachRestore({
         cols: 80,
         rows: 24,
       }, createAttachRequestContext({ cols: 80, rows: 24 }, 'same_app_remount'));
 
-      expect(plan.hasReplayPayload).toBe(false);
-      expect(plan.replayApplied).toBe(false);
+      expect(plan.hasSnapshot).toBe(false);
 
       const effects = planAttachResultEffects({
         attachResult: { last_seq: 20 },
-        replayPlan: plan,
+        restorePlan: plan,
         previousSeq: 15,
         queuedOutputs: [
           { data: 'queued-16', seq: 16 },
@@ -164,7 +148,7 @@ describe('attachPlanning', () => {
 
       expect(effects.shouldReset).toBe(false);
       expect(effects.resetReason).toBe(null);
-      expect(effects.replayAction.kind).toBe('none');
+      expect(effects.restoreAction.kind).toBe('none');
       // Dedup against the client's own watermark (15), NOT the server's
       // last_seq (20): both queued chunks are past what the client rendered.
       expect(effects.queuedOutputsToEmit).toEqual([
@@ -172,17 +156,6 @@ describe('attachPlanning', () => {
         { data: 'queued-20', seq: 20 },
       ]);
       expect(effects.nextSeq).toBe(20);
-    });
-
-    it('does not restore a fresh spawn with no snapshot', () => {
-      const plan = classifyAttachReplay({
-        cols: 68,
-        rows: 35,
-      }, createAttachRequestContext({ cols: 68, rows: 35, agent: 'codex' }, 'fresh_spawn'));
-
-      expect(plan.hasReplayPayload).toBe(false);
-      expect(plan.replayApplied).toBe(false);
-      expect(plan.replayAllowedByPolicy).toBe(false);
     });
   });
 
@@ -206,7 +179,7 @@ describe('attachPlanning', () => {
     // A pane mounted while its session is inactive attaches with the model's
     // construction default (e.g. 80x24). Forcing the live PTY to that size
     // SIGWINCH-churns the shell and width-bounces every attached model,
-    // invalidating a freshly replayed grid.
+    // invalidating a freshly restored grid.
     it('preserves daemon geometry when same-app requested geometry was not measured', () => {
       const plan = planAttachedRuntimeGeometry({
         cols: 80,
@@ -262,16 +235,16 @@ describe('attachPlanning', () => {
       expect(plan.resizeRequired).toBe(false);
       expect(plan.strategy).toBe('preserve_attached');
       expect(plan.ptyGeometryMatches).toBe(false);
-      expect(plan.replayGeometryMatches).toBe(false);
+      expect(plan.restoreGeometryMatches).toBe(false);
     });
   });
 
   describe('sequence dedup', () => {
-    it('filters queued output already covered by the attach replay payload', () => {
-      // last_seq names the LAST chunk inside the replay payload, so a queued
-      // chunk with seq == last_seq is a duplicate of replayed bytes and must be
+    it('filters queued output already covered by the attach restore payload', () => {
+      // last_seq names the LAST chunk inside the restore payload, so a queued
+      // chunk with seq == last_seq is a duplicate of restored bytes and must be
       // skipped; the first genuinely-live chunk is last_seq + 1.
-      const replayPlan = classifyAttachReplay({
+      const restorePlan = classifyAttachRestore({
         cols: 58,
         rows: 46,
         snapshot: { cols: 58, rows: 46, vt_dump_b64: 'ZHVtcA==' },
@@ -282,7 +255,7 @@ describe('attachPlanning', () => {
           last_seq: 10,
           snapshot: { cols: 58, rows: 46, vt_dump_b64: 'ZHVtcA==' },
         },
-        replayPlan,
+        restorePlan,
         queuedOutputs: [
           { data: 'old', seq: 9 },
           { data: 'equal', seq: 10 },
@@ -291,7 +264,7 @@ describe('attachPlanning', () => {
         ],
       });
 
-      expect(effects.replayAction.kind).toBe('ghostty_snapshot');
+      expect(effects.restoreAction.kind).toBe('ghostty_snapshot');
       expect(effects.queuedOutputsToEmit).toEqual([
         { data: 'new', seq: 11 },
         { data: 'noseq' },

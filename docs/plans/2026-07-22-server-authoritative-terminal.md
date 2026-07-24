@@ -303,6 +303,10 @@ divergence logging. App behavior is identical; this phase is pure risk burn.
       `ATTN_GHOSTTY_SHADOW_DIVERGENCE=1`, compares ghostty viewport vs vt10x
       `renderedText()` and logs the first differing row to the worker log.
       Pure helpers unit-tested (`shadow_divergence_test.go`).
+      REMOVED 2026-07-24: finished rollout scaffolding deleted once ghostty
+      became the authoritative restore emulator (raw replay gone). The vt10x
+      screen itself stays — it backs the approval-state classifier and the
+      `get_screen_snapshot` grid/automation path.
 - [x] Verify — DONE 2026-07-22. Full `go test ./...` green. Live: throwaway
       `vtshadow` profile, full `make install`, preflight PASS (protocol 180).
       `real-app:scenario-ghostty-scroll` PASS (both anchor assertions) —
