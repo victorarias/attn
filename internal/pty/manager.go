@@ -143,6 +143,11 @@ type Manager struct {
 	logf           LogFunc
 	onExit         func(ExitInfo)
 	onState        func(sessionID, state string)
+
+	// testHookAfterSpawnReserve, when non-nil, runs after Spawn reserves its
+	// session ID and releases the mutex. Test-only seam for deterministic
+	// overlap; never set in production.
+	testHookAfterSpawnReserve func()
 }
 
 func NewManager(scrollbackSize int, logf LogFunc) *Manager {
@@ -220,6 +225,9 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		delete(m.pendingSpawns, opts.ID)
 		m.mu.Unlock()
 	}()
+	if m.testHookAfterSpawnReserve != nil {
+		m.testHookAfterSpawnReserve()
+	}
 
 	loginShell := GetUserLoginShell()
 	shellCandidates := preferredShellCandidates(loginShell)
