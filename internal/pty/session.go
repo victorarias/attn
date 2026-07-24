@@ -93,12 +93,12 @@ type Session struct {
 	// such as an isolated startup-file overlay for an interactive shell pane.
 	cleanup func()
 
-	// screen is the vt10x-parsed visible frame. It backs approval-state
-	// detection, CPR replies, and the read-only grid/automation screen snapshot
-	// (Manager.Snapshot); it is not the attach-restore source (ghostty is).
+	// screen is the vt10x-parsed visible frame. It stays fed as a fallback
+	// implementation while ghostty backs terminal readers and attach restore.
 	screen *virtualScreen
-	// ghostty is the server-authoritative parsed terminal (libghostty-vt). It is
-	// serialized on attach to restore the client's terminal (see info()). It
+	// ghostty is the server-authoritative parsed terminal (libghostty-vt). It
+	// backs approval-state detection, CPR replies, the grid/automation screen
+	// snapshot (Manager.Snapshot), and attach restore (see info()). It
 	// answers query responses during Write; the read loop forwards the responses
 	// the scan-based responder does not cover (e.g. kitty CSI ? u) so the worker
 	// is the complete query answerer and a snapshot-restored client can suppress
@@ -508,14 +508,14 @@ func isOSCColorReport(seq []byte) bool {
 // staying well below approvalClearDebounce.
 const approvalEvalInterval = 100 * time.Millisecond
 
-// evaluateApproval samples the rendered screen and applies any approval-state
+// evaluateApproval samples the rendered terminal and applies any approval-state
 // transition the resolver reports. It runs on two paths: the readLoop output path
 // (throttle=true, so high-frequency frames don't re-render constantly) and a
 // scheduled recheck (throttle=false). The scheduled recheck is what lets the
 // pending_approval->working clear complete even when the approved command goes
 // quiet and emits no further PTY output.
 func (s *Session) evaluateApproval(now time.Time, throttle bool) {
-	if s.approvalResolver == nil || s.onState == nil || s.screen == nil {
+	if s.approvalResolver == nil || s.onState == nil || s.ghostty == nil {
 		return
 	}
 	// Never emit a transition for a session that has already exited; a late
@@ -533,7 +533,7 @@ func (s *Session) evaluateApproval(now time.Time, throttle bool) {
 		return
 	}
 	s.lastApprovalEval = now
-	signal := s.approvalResolver.observe(s.screen.renderedText(), now)
+	signal := s.approvalResolver.observe(s.ghostty.ViewportText(), now)
 	switch signal {
 	case approvalClearStarted:
 		s.scheduleApprovalRecheckLocked()
@@ -700,12 +700,13 @@ func (s *Session) info() AttachInfo {
 	}
 }
 
-// screenSnapshot is a lean, read-only view of the current rendered screen plus
-// the sequence watermark. Unlike info() it omits scrollback and replay history,
-// so it is cheap enough to call for many sessions at once (e.g. seeding every
-// grid tile). It registers no subscriber and claims no geometry.
+// screenSnapshot is a lean, read-only ghostty viewport serialization plus the
+// sequence watermark. Its styled VT stream replays into a fresh Ghostty model;
+// unlike info() it omits scrollback and replay history, so it is cheap enough to
+// call for many sessions at once (e.g. seeding every grid tile). It registers no
+// subscriber and claims no geometry.
 //
-// The screen and its watermark are captured atomically under replayMu — the
+// The viewport and its watermark are captured atomically under replayMu — the
 // same critical section the read loop uses to apply a chunk and advance
 // lastReplaySeq — so LastSeq names exactly the last chunk baked into this
 // snapshot, matching info()/Attach semantics (the two must not diverge).
@@ -735,14 +736,16 @@ func (s *Session) screenSnapshot() AttachInfo {
 		Running: running,
 	}
 	s.replayMu.Lock()
-	if s.screen != nil {
-		if snapshot, ok := s.screen.Snapshot(); ok {
-			info.ScreenSnapshot = snapshot.payload
-			info.ScreenCols = snapshot.cols
-			info.ScreenRows = snapshot.rows
-			info.ScreenCursorX = snapshot.cursorX
-			info.ScreenCursorY = snapshot.cursorY
-			info.ScreenCursorVisible = snapshot.cursorVisible
+	if s.ghostty != nil {
+		snapshot := s.ghostty.SerializeViewport()
+		if snapshot.VTDump != nil {
+			info.ScreenSnapshot = snapshot.VTDump
+			info.ScreenCols = uint16(snapshot.Cols)
+			info.ScreenRows = uint16(snapshot.Rows)
+			x, y := s.ghostty.CursorPos()
+			info.ScreenCursorX = uint16(x)
+			info.ScreenCursorY = uint16(y)
+			info.ScreenCursorVisible = s.ghostty.CursorVisible()
 			info.ScreenSnapshotFresh = true
 		}
 	}
@@ -960,11 +963,9 @@ func isValidHexColor(value string) bool {
 // is no double-reply to confuse the shell.
 func (s *Session) writeCursorPositionResponse(logf func(string, ...any)) {
 	row, col := 1, 1
-	if s.screen != nil {
-		if snapshot, ok := s.screen.Snapshot(); ok {
-			row = int(snapshot.cursorY) + 1
-			col = int(snapshot.cursorX) + 1
-		}
+	if s.ghostty != nil {
+		x, y := s.ghostty.CursorPos()
+		row, col = y+1, x+1
 	}
 	s.writeMu.Lock()
 	_, _ = fmt.Fprintf(s.ptmx, "\x1b[%d;%dR", row, col)

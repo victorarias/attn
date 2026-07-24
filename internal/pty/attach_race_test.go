@@ -42,6 +42,7 @@ func TestAttachSnapshotSeqConsistency(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = w.Close(); _ = r.Close() })
 
+	gt := newTestGhostty(t, cols, rows)
 	s := &Session{
 		id:          "race",
 		cols:        cols,
@@ -49,6 +50,8 @@ func TestAttachSnapshotSeqConsistency(t *testing.T) {
 		ptmx:        r,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
 		screen:      newVirtualScreen(cols, rows),
+		ghostty:     gt,
+		blockFeed:   newBlockFeeder(gt),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
@@ -178,6 +181,7 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = w.Close(); _ = r.Close() })
 
+	gt := newTestGhostty(t, cols, rows)
 	s := &Session{
 		id:          "snapshot-race",
 		cols:        cols,
@@ -185,6 +189,8 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 		ptmx:        r,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
 		screen:      newVirtualScreen(cols, rows),
+		ghostty:     gt,
+		blockFeed:   newBlockFeeder(gt),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),

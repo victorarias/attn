@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/hinshun/vt10x"
+
+	"github.com/victorarias/attn/internal/ghosttyvt"
 )
 
 func TestVirtualScreenSnapshot_RoundTrip(t *testing.T) {
@@ -141,15 +143,17 @@ func TestVirtualScreenSnapshot_PreservesTrueColorBackground(t *testing.T) {
 }
 
 func TestScreenSnapshot_IncludesScreenSnapshotWhenAvailable(t *testing.T) {
+	gt := newTestGhostty(t, 12, 4)
 	session := &Session{
 		id:      "codex-1",
 		agent:   "codex",
 		cols:    12,
 		rows:    4,
 		screen:  newVirtualScreen(12, 4),
+		ghostty: gt,
 		running: true,
 	}
-	session.screen.Observe([]byte("snapshot"))
+	gt.Write([]byte("snapshot"))
 
 	info := session.screenSnapshot()
 	if len(info.ScreenSnapshot) == 0 {
@@ -161,18 +165,39 @@ func TestScreenSnapshot_IncludesScreenSnapshotWhenAvailable(t *testing.T) {
 	if info.ScreenCols != 12 || info.ScreenRows != 4 {
 		t.Fatalf("screen size = %dx%d, want 12x4", info.ScreenCols, info.ScreenRows)
 	}
+	assertScreenSnapshotReplays(t, gt, info)
+}
+
+func assertScreenSnapshotReplays(t *testing.T, source *ghosttyvt.Terminal, info AttachInfo) {
+	t.Helper()
+	restored, err := ghosttyvt.New(int(info.ScreenCols), int(info.ScreenRows), ghosttyvt.Options{})
+	if err != nil {
+		t.Fatalf("new restored ghostty terminal: %v", err)
+	}
+	t.Cleanup(restored.Close)
+	restored.Write(info.ScreenSnapshot)
+	if got, want := restored.ViewportText(), source.ViewportText(); got != want {
+		t.Fatalf("replayed viewport text = %q, want %q", got, want)
+	}
+	gotX, gotY := restored.CursorPos()
+	wantX, wantY := source.CursorPos()
+	if gotX != wantX || gotY != wantY {
+		t.Fatalf("replayed cursor = (%d,%d), want (%d,%d)", gotX, gotY, wantX, wantY)
+	}
 }
 
 func TestScreenSnapshot_IncludesScreenSnapshotForShellSessions(t *testing.T) {
+	gt := newTestGhostty(t, 12, 4)
 	session := &Session{
 		id:      "shell-1",
 		agent:   "shell",
 		cols:    12,
 		rows:    4,
 		screen:  newVirtualScreen(12, 4),
+		ghostty: gt,
 		running: true,
 	}
-	session.screen.Observe([]byte("prompt"))
+	gt.Write([]byte("prompt"))
 
 	info := session.screenSnapshot()
 	if len(info.ScreenSnapshot) == 0 {
@@ -184,12 +209,14 @@ func TestScreenSnapshot_IncludesScreenSnapshotForShellSessions(t *testing.T) {
 }
 
 func TestScreenSnapshot_ReadOnlyAndLean(t *testing.T) {
+	gt := newTestGhostty(t, 12, 4)
 	session := &Session{
 		id:          "codex-1",
 		agent:       "codex",
 		cols:        12,
 		rows:        4,
 		screen:      newVirtualScreen(12, 4),
+		ghostty:     gt,
 		running:     true,
 		subscribers: make(map[string]*sessionSubscriber),
 	}
