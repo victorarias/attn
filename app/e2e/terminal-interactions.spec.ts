@@ -550,6 +550,49 @@ test.describe('Ghostty terminal interactions', () => {
     await expectOpenedUrl(page, url);
   });
 
+  test('releases a mouse-tracking TUI outside the terminal and on window blur', async ({ page, daemon }) => {
+    const sessionId = 's-tracked-release-outside';
+    const terminal = await openTerminalSession(page, daemon, sessionId);
+    await writeTerminalOutput(
+      page,
+      sessionId,
+      '\u001b[2J\u001b[H\u001b[?1000h\u001b[?1002h\u001b[?1003h\u001b[?1006htracked mouse',
+    );
+
+    const bounds = await terminal.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.mouse.move(bounds!.x + 40, bounds!.y + 8);
+    await page.mouse.down();
+    await page.mouse.move(Math.max(1, bounds!.x - 60), bounds!.y + 8);
+    await page.mouse.up();
+
+    let reports = await page.evaluate((id) => (
+      window.__TEST_GET_SESSION_INPUT_EVENTS?.(id) ?? []
+    ).flatMap((event) => event.event === 'send_to_pty' && event.data ? [event.data] : []), sessionId);
+    expect(reports.filter((data) => /^\u001b\[<0;\d+;\d+M$/.test(data))).toHaveLength(1);
+    expect(reports.filter((data) => /^\u001b\[<3;\d+;\d+m$/.test(data))).toHaveLength(1);
+
+    const reportCountAfterRelease = reports.length;
+    await page.mouse.move(bounds!.x + 70, bounds!.y + 16);
+    reports = await page.evaluate((id) => (
+      window.__TEST_GET_SESSION_INPUT_EVENTS?.(id) ?? []
+    ).flatMap((event) => event.event === 'send_to_pty' && event.data ? [event.data] : []), sessionId);
+    const passiveMotionReports = reports.slice(reportCountAfterRelease);
+    expect(passiveMotionReports.some((data) => /^\u001b\[<35;\d+;\d+M$/.test(data))).toBe(true);
+    expect(passiveMotionReports.some((data) => /^\u001b\[<32;\d+;\d+M$/.test(data))).toBe(false);
+
+    await page.mouse.move(bounds!.x + 40, bounds!.y + 8);
+    await page.mouse.down();
+    await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+    await page.mouse.up();
+
+    reports = await page.evaluate((id) => (
+      window.__TEST_GET_SESSION_INPUT_EVENTS?.(id) ?? []
+    ).flatMap((event) => event.event === 'send_to_pty' && event.data ? [event.data] : []), sessionId);
+    expect(reports.filter((data) => /^\u001b\[<0;\d+;\d+M$/.test(data))).toHaveLength(2);
+    expect(reports.filter((data) => /^\u001b\[<3;\d+;\d+m$/.test(data))).toHaveLength(2);
+  });
+
   test('forwards screenshot paste triggers from ctrl+v and command paste', async ({ page, daemon }) => {
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'platform', { value: 'MacIntel', configurable: true });

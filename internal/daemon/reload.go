@@ -3,7 +3,9 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -13,6 +15,7 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
@@ -48,39 +51,6 @@ func (d *Daemon) clearReloading(sessionID string) {
 	d.reloadingMu.Lock()
 	defer d.reloadingMu.Unlock()
 	delete(d.reloadingSessions, sessionID)
-}
-
-// reloadKillMarkTTL bounds how long a reload-kill mark stays consumable. The
-// backend's Kill returns only after the child exits, so the exit event lands
-// within moments of the mark; the TTL only exists so a mark whose exit never
-// arrived cannot suppress the crash seam for an unrelated death much later.
-const reloadKillMarkTTL = 15 * time.Second
-
-// markReloadKill records that sessionID's next exit is the kill half of a
-// client-initiated reload (kill_session with reload:true). Must be called
-// before the backend Kill so the mark beats the async exit event.
-func (d *Daemon) markReloadKill(sessionID string) {
-	d.reloadingMu.Lock()
-	defer d.reloadingMu.Unlock()
-	if d.reloadKills == nil {
-		d.reloadKills = make(map[string]time.Time)
-	}
-	d.reloadKills[sessionID] = time.Now()
-}
-
-// consumeReloadKill atomically reports whether sessionID's exit was caused by a
-// client reload and clears the mark. One-shot: exactly the reload-killed
-// worker's exit skips the ticket seam; any later exit of the respawned session
-// is judged normally.
-func (d *Daemon) consumeReloadKill(sessionID string) bool {
-	d.reloadingMu.Lock()
-	defer d.reloadingMu.Unlock()
-	markedAt, ok := d.reloadKills[sessionID]
-	if !ok {
-		return false
-	}
-	delete(d.reloadKills, sessionID)
-	return time.Since(markedAt) <= reloadKillMarkTTL
 }
 
 // reloadLockFor returns the per-session mutex that serializes reloadSessionAgent's
@@ -194,6 +164,66 @@ func (d *Daemon) reloadSessionAgent(sessionID string) {
 	}
 }
 
+// reloadSessionForClient is the daemon-owned Reload: kill and respawn a live
+// session in place, or relaunch a dead one from its stored launch intent.
+// Returns nil when the session is running again.
+func (d *Daemon) reloadSessionForClient(sessionID string, cols, rows int) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("session not found")
+	}
+	session := d.store.Get(sessionID)
+	if session == nil {
+		return errors.New("session not found")
+	}
+
+	lock := d.reloadLockFor(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if d.sessionHasLiveWorker(sessionID) {
+		opts, err := d.buildReloadSpawnOptions(session)
+		if err != nil {
+			return err
+		}
+		pluginReload, err := d.preparePluginReload(session, &opts, d.isChiefOfStaffSession(sessionID))
+		if err != nil {
+			return err
+		}
+		return d.executePreparedSessionReload(sessionID, opts, pluginReload)
+	}
+
+	if cols <= 0 || rows <= 0 {
+		return errors.New("reload requires pty geometry when no live worker exists")
+	}
+	intent, ok := d.store.LaunchIntent(sessionID)
+	if !ok {
+		return errors.New("no stored launch intent")
+	}
+	spawnMsg, policy := buildStoredIntentSpawn(session, intent, cols, rows)
+	if rejection := d.runSpawnPipeline(spawnMsg, policy); rejection != nil {
+		return rejection.err
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventRuntimeRespawned,
+		ID:    protocol.Ptr(sessionID),
+	})
+	return nil
+}
+
+func (d *Daemon) handleReloadSession(client *wsClient, msg *protocol.ReloadSessionMessage) {
+	err := d.reloadSessionForClient(msg.ID, msg.Cols, msg.Rows)
+	result := protocol.ReloadSessionResultMessage{
+		Event:   protocol.EventReloadSessionResult,
+		ID:      msg.ID,
+		Success: err == nil,
+	}
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, result)
+}
+
 func (d *Daemon) executePreparedSessionReload(sessionID string, opts ptybackend.SpawnOptions, pluginReload *preparedPluginReload) error {
 	if pluginReload != nil {
 		defer pluginReload.abort()
@@ -247,24 +277,47 @@ func (d *Daemon) executePreparedSessionReload(sessionID string, opts ptybackend.
 }
 
 // buildReloadSpawnOptions reconstructs the SpawnOptions for an in-place re-spawn of
-// an existing session. Geometry comes from the live worker (SessionInfoProvider);
-// the launch flags the daemon does not persist (yolo, executable) come from the
-// worker registry (SessionLaunchParamsProvider). Returns an error — and the caller
-// aborts — when those params cannot be trusted.
+// an existing session. Geometry comes from the live worker (SessionInfoProvider).
+// The worker registry is preferred for live reloading; a durable launch intent
+// supplies the same user-selected values when that registry is unavailable.
 func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.SpawnOptions, error) {
 	sessionID := session.ID
 	paramsProvider, ok := d.ptyBackend.(ptybackend.SessionLaunchParamsProvider)
 	if !ok {
-		return ptybackend.SpawnOptions{}, fmt.Errorf("backend does not record launch params")
+		return d.buildReloadSpawnOptionsFromStoredIntent(session, fmt.Errorf("backend does not record launch params"))
 	}
 	params, err := paramsProvider.SessionLaunchParams(context.Background(), sessionID)
 	if err != nil {
-		return ptybackend.SpawnOptions{}, fmt.Errorf("read launch params: %w", err)
+		registryErr := fmt.Errorf("read launch params: %w", err)
+		if errors.Is(err, pty.ErrSessionNotFound) || errors.Is(err, os.ErrNotExist) {
+			return d.buildReloadSpawnOptionsFromStoredIntent(session, registryErr)
+		}
+		return ptybackend.SpawnOptions{}, registryErr
 	}
 	if !params.Recorded {
-		return ptybackend.SpawnOptions{}, fmt.Errorf("launch params not recorded (pre-reload worker)")
+		return d.buildReloadSpawnOptionsFromStoredIntent(session, fmt.Errorf("launch params not recorded (pre-reload worker)"))
 	}
+	return d.buildReloadSpawnOptionsFromLaunchParams(session, params)
+}
 
+func (d *Daemon) buildReloadSpawnOptionsFromStoredIntent(session *protocol.Session, registryErr error) (ptybackend.SpawnOptions, error) {
+	intent, ok := d.store.LaunchIntent(session.ID)
+	if !ok {
+		return ptybackend.SpawnOptions{}, fmt.Errorf("%w; no stored launch intent exists either", registryErr)
+	}
+	d.logf("reload: using stored launch intent for %s (worker registry unavailable)", session.ID)
+	return d.buildReloadSpawnOptionsFromLaunchParams(session, ptybackend.SessionLaunchParams{
+		Recorded:         true,
+		YoloMode:         intent.YoloMode,
+		Executable:       intent.Executable,
+		Model:            intent.Model,
+		Effort:           intent.Effort,
+		UnattendedLaunch: intent.UnattendedLaunch,
+	})
+}
+
+func (d *Daemon) buildReloadSpawnOptionsFromLaunchParams(session *protocol.Session, params ptybackend.SessionLaunchParams) (ptybackend.SpawnOptions, error) {
+	sessionID := session.ID
 	cols, rows := uint16(80), uint16(24)
 	if infoProvider, ok := d.ptyBackend.(ptybackend.SessionInfoProvider); ok {
 		if info, err := infoProvider.SessionInfo(context.Background(), sessionID); err == nil {

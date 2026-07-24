@@ -80,6 +80,7 @@ export function Dashboard({
   const workingSessions = sessions.filter((s) => s.state === 'working');
   const scheduledSessions = sessions.filter((s) => s.state === 'scheduled');
   const idleSessions = sessions.filter((s) => s.state === 'idle');
+  const recoverableSessions = sessions.filter((s) => s.state === 'recoverable');
   const unknownSessions = sessions.filter((s) => s.state === 'unknown');
   const chiefSession = sessions.find((session) => session.chiefOfStaff);
 
@@ -367,6 +368,25 @@ export function Dashboard({
                         onClick={() => onSelectSession(s.id)}
                       >
                         <StateIndicator state="idle" size="sm" seed={s.id} />
+                        <span className="session-name">{s.label}</span>
+                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
+                        {renderEndpointBadge(s)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {recoverableSessions.length > 0 && (
+                  <div className="session-group" data-testid="session-group-recoverable">
+                    <div className="group-label">Recoverable</div>
+                    {recoverableSessions.map((s) => (
+                      <div
+                        key={s.id}
+                        className="session-row clickable"
+                        data-testid={`session-${s.id}`}
+                        data-state={s.state}
+                        onClick={() => onSelectSession(s.id)}
+                      >
+                        <StateIndicator state="recoverable" size="sm" seed={s.id} />
                         <span className="session-name">{s.label}</span>
                         {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
                         {renderEndpointBadge(s)}

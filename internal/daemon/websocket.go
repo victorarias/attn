@@ -968,7 +968,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		go d.handleFsUnwatch(client, protocol.Deref(fsUnwatch.RequestID), protocol.Deref(fsUnwatch.Root))
 	case protocol.CmdFsIndex:
 		fsIndex := msg.(*protocol.FsIndexMessage)
-		go d.handleFsIndex(client, protocol.Deref(fsIndex.RequestID), protocol.Deref(fsIndex.Root))
+		go d.handleFsIndex(client, protocol.Deref(fsIndex.RequestID), protocol.Deref(fsIndex.Root), fsIndex.Extensions)
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:
@@ -1037,6 +1037,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleUnregisterWS(client, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdGetRecentLocations:
 		d.handleGetRecentLocationsWS(client, msg.(*protocol.GetRecentLocationsMessage))
+	case protocol.CmdRecentFiles:
+		d.handleRecentFilesWS(client, msg.(*protocol.RecentFilesMessage))
 	case protocol.CmdBrowseDirectory:
 		d.handleBrowseDirectoryWS(client, msg.(*protocol.BrowseDirectoryMessage))
 	case protocol.CmdInspectPath:
@@ -1107,6 +1109,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handlePtyResize(client, msg.(*protocol.PtyResizeMessage))
 	case protocol.CmdKillSession:
 		d.handleKillSession(client, msg.(*protocol.KillSessionMessage))
+	case protocol.CmdReloadSession:
+		d.handleReloadSession(client, msg.(*protocol.ReloadSessionMessage))
 	case protocol.CmdSetTerminalTheme:
 		d.handleSetTerminalTheme(client, msg.(*protocol.SetTerminalThemeMessage))
 	case protocol.CmdWorkspaceLayoutGet:
@@ -1444,6 +1448,10 @@ func remoteCommandPTYTargetID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdKillSession:
 		if typed, ok := msg.(*protocol.KillSessionMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdReloadSession:
+		if typed, ok := msg.(*protocol.ReloadSessionMessage); ok {
 			return typed.ID
 		}
 	}

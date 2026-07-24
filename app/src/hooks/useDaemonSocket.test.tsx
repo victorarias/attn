@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { ptyAttach, ptyDetach, ptyKill, ptySpawn } from '../pty/bridge';
+import { ptyAttach, ptyDetach, ptyKill, ptyReload, ptySpawn } from '../pty/bridge';
 import { AutomationActionTimeoutError, PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
 import { useAutomationsStore } from '../store/automations';
@@ -140,6 +140,40 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     ws.emit({ event: 'session_exited', id: 'reload-race', exit_code: 0 });
     await killPromise;
     expect(resolved).toBe(true);
+
+    unmount();
+  });
+
+  it('resolves or rejects ptyReload from its daemon result', async () => {
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const successfulReload = ptyReload({ id: 'reload-success', cols: 120, rows: 40 });
+    expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+      cmd: 'reload_session',
+      id: 'reload-success',
+      cols: 120,
+      rows: 40,
+    });
+    act(() => {
+      ws.emit({ event: 'reload_session_result', id: 'reload-success', success: true });
+    });
+    await expect(successfulReload).resolves.toBeUndefined();
+
+    const failedReload = ptyReload({ id: 'reload-failure', cols: 80, rows: 24 });
+    act(() => {
+      ws.emit({ event: 'reload_session_result', id: 'reload-failure', success: false, error: 'reload denied' });
+    });
+    await expect(failedReload).rejects.toThrow('reload denied');
 
     unmount();
   });
@@ -673,7 +707,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('resolves automation definitions from a correlated automation_action_result, ignoring a mismatched request_id', async () => {
+  it('resolves automation definitions from a correlated automation_definitions_result, ignoring a mismatched request_id', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
@@ -699,8 +733,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     act(() => {
       ws.emit({
-        event: 'automation_action_result',
-        action: 'definitions_get',
+        event: 'automation_definitions_result',
         request_id: 'mismatched-request-id',
         success: true,
         definitions: [{ id: 'wrong' }],
@@ -719,8 +752,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     };
     act(() => {
       ws.emit({
-        event: 'automation_action_result',
-        action: 'definitions_get',
+        event: 'automation_definitions_result',
         request_id: command.request_id,
         success: true,
         definitions: [definition],
@@ -752,8 +784,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     act(() => {
       ws.emit({
-        event: 'automation_action_result',
-        action: 'set_enabled',
+        event: 'automation_set_enabled_result',
         request_id: command.request_id,
         success: false,
         error: 'automation definition is disabled elsewhere',
@@ -764,7 +795,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('resolves runAutomationNow with run/ticket/session ids', async () => {
+  it('resolves runAutomationNow with the run summary', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
@@ -783,19 +814,25 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       .find((entry) => entry.cmd === 'automation_run');
     expect(command).toMatchObject({ definition_id: 'd1', request_id: 'req-1' });
 
+    const run = {
+      id: 'run-1',
+      definition_id: 'd1',
+      state: 'delivered',
+      ticket_id: 'ticket-1',
+      session_id: 'session-1',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
     act(() => {
       ws.emit({
-        event: 'automation_action_result',
-        action: 'run',
+        event: 'automation_run_result',
         request_id: command.request_id,
         success: true,
-        run_id: 'run-1',
-        ticket_id: 'ticket-1',
-        session_id: 'session-1',
+        run,
       });
     });
 
-    await expect(request).resolves.toEqual({ runId: 'run-1', ticketId: 'ticket-1', sessionId: 'session-1' });
+    await expect(request).resolves.toEqual(run);
     unmount();
   });
 
@@ -1015,7 +1052,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     expect(waits).toEqual([25]);
   });
 
-  it('attaches daemon-known workspace runtimes before attempting to spawn them', async () => {
+  it('spawns daemon-known workspace runtimes before freshly attaching them', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const onPRsUpdate = vi.fn();
@@ -1080,11 +1117,20 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'relaunch_restore' });
+      expect(sent).toContainEqual(expect.objectContaining({
+        cmd: 'spawn_session',
+        id: 'runtime-shell-1',
+      }));
     });
 
-    const sent = ws.sent.map((entry) => JSON.parse(entry));
-    expect(sent.find((entry) => entry.cmd === 'spawn_session' && entry.id === 'runtime-shell-1')).toBeUndefined();
+    act(() => {
+      ws.emit({ event: 'spawn_result', id: 'runtime-shell-1', success: true });
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'fresh_spawn' });
+    });
 
     act(() => {
       ws.emit({
@@ -1173,39 +1219,28 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('preserves daemon geometry while relaunch restores before workspace layout settles', async () => {
-    const onSessionsUpdate = vi.fn();
-    const onWorkspacesUpdate = vi.fn();
-    const onPRsUpdate = vi.fn();
-    const onReposUpdate = vi.fn();
-    const onAuthorsUpdate = vi.fn();
+  it('sends measured geometry only with a revive attach policy', async () => {
     const { unmount } = renderHook(() =>
       useDaemonSocket({
-        onSessionsUpdate,
-        onWorkspacesUpdate,
-        onPRsUpdate,
-        onReposUpdate,
-        onAuthorsUpdate,
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
         wsUrl: 'ws://localhost:9999/ws',
       }),
     );
-
     const ws = await waitForOpenSocket();
-
     act(() => {
       ws.emit({
         event: 'initial_state',
         protocol_version: PROTOCOL_VERSION,
         sessions: [{
-          id: 'sess-existing',
-          label: 'attn',
-          agent: 'codex',
+          id: 'sess-recoverable',
+          label: 'Recoverable',
+          agent: 'claude',
           directory: '/tmp/repo',
-          workspace_id: 'workspace-sess-existing',
-          state: 'idle',
-          state_since: '2026-04-08T00:00:00Z',
-          state_updated_at: '2026-04-08T00:00:00Z',
-          last_seen: '2026-04-08T00:00:00Z',
+          state: 'recoverable',
         }],
         workspaces: [],
         prs: [],
@@ -1215,47 +1250,36 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       });
     });
 
-    const spawnPromise = ptySpawn({
+    const attachPromise = ptyAttach({
       args: {
-        id: 'sess-existing',
-        cwd: '/tmp/repo',
-        workspace_id: 'workspace-sess-existing',
-        agent: 'codex',
-        cols: 58,
-        rows: 46,
+        id: 'sess-recoverable',
+        cols: 113,
+        rows: 37,
+        agent: 'claude',
+        policy: 'revive',
       },
     });
-
     await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
+      expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+        cmd: 'attach_session',
+        id: 'sess-recoverable',
+        attach_policy: 'revive',
+        cols: 113,
+        rows: 37,
+      });
     });
-
     act(() => {
       ws.emit({
         event: 'attach_result',
-        id: 'sess-existing',
+        id: 'sess-recoverable',
         success: true,
-        cols: 80,
-        rows: 24,
-        screen_cols: 80,
-        screen_rows: 24,
+        cols: 113,
+        rows: 37,
         running: true,
+        revived: true,
       });
     });
-
-    await expect(spawnPromise).resolves.toBeUndefined();
-
-    const sent = ws.sent.map((entry) => JSON.parse(entry));
-    expect(sent).not.toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
-    expect((window as Window & { __TEST_PTY_EVENTS?: unknown[] }).__TEST_PTY_EVENTS).toContainEqual({
-      event: 'local_resize',
-      id: 'sess-existing',
-      cols: 80,
-      rows: 24,
-      source: 'attach_replay',
-    });
-
+    await expect(attachPromise).resolves.toBeUndefined();
     unmount();
   });
 
@@ -2115,88 +2139,6 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     expect(snapshotIndex).toBeGreaterThanOrEqual(0);
     expect(queuedLiveIndex).toBeGreaterThan(snapshotIndex);
     expect(replayCompleteIndex).toBeGreaterThan(queuedLiveIndex);
-    unmount();
-  });
-
-  it('does not respawn a workspace runtime that is missing session state', async () => {
-    const onSessionsUpdate = vi.fn();
-    const onWorkspacesUpdate = vi.fn();
-    const onPRsUpdate = vi.fn();
-    const onReposUpdate = vi.fn();
-    const onAuthorsUpdate = vi.fn();
-    const { unmount } = renderHook(() =>
-      useDaemonSocket({
-        onSessionsUpdate,
-        onWorkspacesUpdate,
-        onPRsUpdate,
-        onReposUpdate,
-        onAuthorsUpdate,
-        wsUrl: 'ws://localhost:9999/ws',
-      }),
-    );
-
-    const ws = await waitForOpenSocket();
-
-    act(() => {
-      ws.emit({
-        event: 'initial_state',
-        protocol_version: PROTOCOL_VERSION,
-        sessions: [],
-        workspaces: [{
-          id: 'workspace-sess-remote',
-          title: 'Remote',
-          directory: '/tmp/repo',
-          status: 'idle',
-          muted: false,
-          layout: {
-            workspace_id: 'workspace-sess-remote',
-            active_pane_id: 'pane-session',
-            layout_json: '',
-            panes: [{
-              workspace_id: 'workspace-sess-remote',
-              pane_id: 'pane-shell-1',
-              kind: 'agent',
-              runtime_id: 'runtime-shell-1',
-              title: 'Shell 1',
-            }],
-          },
-        }],
-        prs: [],
-        repos: [],
-        authors: [],
-        settings: {},
-      });
-    });
-
-    const spawnPromise = ptySpawn({
-      args: {
-        id: 'runtime-shell-1',
-        cwd: '/tmp/repo',
-        workspace_id: 'workspace-sess-remote',
-        endpoint_id: 'ep-remote',
-        cols: 80,
-        rows: 24,
-        shell: true,
-      },
-    });
-
-    await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'relaunch_restore' });
-    });
-
-    act(() => {
-      ws.emit({
-        event: 'attach_result',
-        id: 'runtime-shell-1',
-        success: false,
-        error: 'session not found',
-      });
-    });
-
-    await expect(spawnPromise).rejects.toThrow('No live PTY found for this session.');
-    const sent = ws.sent.map((entry) => JSON.parse(entry));
-    expect(sent.some((entry) => entry.cmd === 'spawn_session' && entry.id === 'runtime-shell-1')).toBe(false);
     unmount();
   });
 

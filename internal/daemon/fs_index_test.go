@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -12,21 +13,23 @@ import (
 )
 
 // fsIndex drives handleFsIndex directly and returns the decoded result event.
-func fsIndex(t *testing.T, d *Daemon, client *wsClient, requestID, root string) protocol.FsIndexResultMessage {
+func fsIndex(t *testing.T, d *Daemon, client *wsClient, requestID, root string, extensions ...string) protocol.FsIndexResultMessage {
 	t.Helper()
-	d.handleFsIndex(client, requestID, root)
+	d.handleFsIndex(client, requestID, root, extensions)
 	var res protocol.FsIndexResultMessage
 	readNotebookWSEvent(t, client.send, &res)
 	return res
 }
 
 // fs_index over a real tree returns every regular file's root-relative slash
-// path, sorted, while excluding: a dot-dir's contents (not just the dir
-// itself), a node_modules dir's contents, dot-files, symlinked files, and a
-// FIFO (a non-regular-file entry that would otherwise be advertised as an
-// openable file when fs_read rejects anything that isn't a regular file).
-// truncated must be false since nothing hits the cap.
-func TestFsIndexListsFilesExcludingDotDirsNodeModulesAndSymlinks(t *testing.T) {
+// path, sorted. Dot-files and dot-directory contents are real documents and are
+// included — path mode lists them, so hiding them here would make the same file
+// reachable one way and invisible the other. Excluded: .git's contents, a
+// node_modules dir's contents, symlinked files, and a FIFO (a non-regular-file
+// entry that would otherwise be advertised as an openable file when fs_read
+// rejects anything that isn't a regular file). truncated must be false since
+// nothing hits the cap.
+func TestFsIndexListsDotFilesButNotGitOrNodeModules(t *testing.T) {
 	d := newFsDaemon(t)
 	root := t.TempDir()
 
@@ -44,9 +47,10 @@ func TestFsIndexListsFilesExcludingDotDirsNodeModulesAndSymlinks(t *testing.T) {
 	mustWrite("top.md")
 	mustWrite("nested/dir/deep.md")
 	mustWrite("nested/dir/deep2.txt")
-	mustWrite(".hidden-dir/inside.md")     // whole dot-dir excluded
+	mustWrite(".hidden-dir/inside.md")     // dot-dirs hold real documents: included
+	mustWrite(".dotfile")                  // ...as do dot-files
 	mustWrite("node_modules/pkg/index.js") // whole node_modules dir excluded
-	mustWrite(".dotfile")                  // dot-file excluded
+	mustWrite(".git/objects/ab/cdef.md")   // git's own metadata is never listed
 
 	// A symlinked file must be excluded (listed as an entry but skipped, not
 	// followed).
@@ -75,7 +79,7 @@ func TestFsIndexListsFilesExcludingDotDirsNodeModulesAndSymlinks(t *testing.T) {
 	if res.Truncated {
 		t.Fatalf("fs_index.truncated = true, want false")
 	}
-	want := []string{"nested/dir/deep.md", "nested/dir/deep2.txt", "top.md"}
+	want := []string{".dotfile", ".hidden-dir/inside.md", "nested/dir/deep.md", "nested/dir/deep2.txt", "top.md"}
 	if !equalStrings(res.Files, want) {
 		t.Fatalf("fs_index.files = %v, want %v", res.Files, want)
 	}
@@ -109,7 +113,7 @@ func TestIndexRootTruncatesAtInjectedCap(t *testing.T) {
 		}
 	}
 
-	files, truncated, err := indexRoot(root, cap)
+	files, truncated, err := indexRoot(root, cap, nil)
 	if err != nil {
 		t.Fatalf("indexRoot: %v", err)
 	}
@@ -181,4 +185,95 @@ func TestFsIndexWithExplicitRootDeniedForUntrustedClient(t *testing.T) {
 	if !omittedRes.Success {
 		t.Fatalf("fs_index(omitted root, untrusted client) = %+v, want success", omittedRes)
 	}
+}
+
+// The extension filter is applied server-side, and the cap counts only files
+// that survive it. Capping before the filter is what makes a large repository
+// truncate on files nobody asked for, hiding markdown that sorts late.
+func TestIndexRootAppliesCapAfterExtensionFilter(t *testing.T) {
+	root := t.TempDir()
+	for i := range 40 {
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("noise%02d.txt", i)), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"zz-late.md", "aa-early.MD"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, truncated, err := indexRoot(root, 5, []string{".MD"})
+	if err != nil {
+		t.Fatalf("indexRoot: %v", err)
+	}
+	if truncated {
+		t.Fatalf("truncated = true, want false: only 2 markdown files exist")
+	}
+	// Extension matching is case-insensitive on both sides, and a leading dot
+	// in the request is optional.
+	if want := []string{"aa-early.MD", "zz-late.md"}; !slicesEqual(files, want) {
+		t.Fatalf("files = %v, want %v", files, want)
+	}
+}
+
+// Inside a git repository the enumeration comes from git, so .gitignore is
+// honored — build output and vendored trees cost nothing — while
+// untracked-but-not-ignored files still show up immediately.
+func TestIndexRootUsesGitAndHonorsGitignore(t *testing.T) {
+	root := t.TempDir()
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite(".gitignore", "build/\n")
+	mustWrite("tracked.md", "x")
+	mustWrite("untracked.md", "x")
+	mustWrite("build/generated.md", "x")
+	// A dot-directory git tracks holds real documents, and path mode lists it,
+	// so fuzzy mode returns it too.
+	mustWrite(".claude/notes.md", "x")
+
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+		{"add", "tracked.md", ".claude/notes.md"},
+		{"commit", "-m", "seed"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	files, truncated, err := indexRoot(root, maxFsIndexEntries, []string{"md"})
+	if err != nil {
+		t.Fatalf("indexRoot: %v", err)
+	}
+	if truncated {
+		t.Fatal("truncated = true, want false")
+	}
+	if want := []string{".claude/notes.md", "tracked.md", "untracked.md"}; !slicesEqual(files, want) {
+		t.Fatalf("files = %v, want %v (gitignored paths excluded, dot-dirs kept)", files, want)
+	}
+}
+
+func slicesEqual(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

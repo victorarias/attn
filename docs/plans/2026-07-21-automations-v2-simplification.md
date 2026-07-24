@@ -124,7 +124,7 @@ real concept and drives binding rotation.
       verbs `attn automation enable|disable`; `SetEnabledInYAML` and the
       spec-rewrite path in `SetAutomationEnabled` are deleted; the WS
       definition-YAML surface falls back to rendering YAML from spec JSON. Shipped as #629.
-- [ ] **PR2b — v2 state model + claim semantics** (consolidates former
+- [x] **PR2b — v2 state model + claim semantics** (consolidates former
       PR2b/PR3/PR4 — one migration, one live-verify matrix, one review
       round). Migration 77 recreates `automation_runs` (adds `cancel_reason`,
       `attempts`), `automation_continuity_bindings` (append-only: surrogate
@@ -141,20 +141,50 @@ real concept and drives binding rotation.
       trigger-implied per the YAML sketch above; `scheduled` absorbs
       `continuity`/`catch_up`; validation matrix and snapshot shrink. Engine
       `Store` interface lands here. Built as sequential reviewable commits on
-      one branch.
-- [ ] **PR5 — protocol unification.** One handler layer for socket + WS;
+      one branch. Shipped as #630 (live-verified on the dev profile: migration 77, policy rejection, manual run delivered, scheduled-singleton continuity across two real cron ticks).
+- [x] **PR5 — protocol unification.** One handler layer for socket + WS;
       per-action results; drop dead wire fields (`continuity`, `catch_up`,
       `workspace_id`, `definition_revision`); embed `last_run` in the
       definition summary (kills the panel's N+1); protocol version bump
-      (remember the useDaemonSocket.ts third lockstep spot).
-- [ ] **PR6 — form UI.** Replace the YAML editor and validate-without-apply UI
-      with a structured create/edit form (trigger picker with per-trigger
-      fields, prompt, launch via the delegation picker components, location,
-      enabled, delete affordance). Typed save errors (revision conflict is
-      distinguishable); `expected_revision` guard survives.
-- [ ] **PR7 — proving matrix.** Both vision proving cases end-to-end on a
+      (remember the useDaemonSocket.ts third lockstep spot). ProtocolVersion
+      181. Apply's `expected_id`/`expected_revision` guard is keyed on pointer
+      presence, not the zero value: the socket/CLI path always sends neither
+      (unguarded last-writer-wins, matching the old `attn automation apply`
+      behavior), the WS editor always sends both (enforced, including a
+      create-time 0 vs. a live definition).
+- [x] **PR6 — form UI.** Replace the YAML editor and validate-without-apply UI
+      with a structured create/edit form. Design settled 2026-07-22 (HTML
+      prototype reviewed): the trigger picker drives the form shape (location
+      type is trigger-implied, never independently chosen); implied policy is
+      shown as read-only facts; a live compiled sentence renders the
+      definition as prose; ID is a slug derived live from the name with a
+      customize escape, fixed after creation; schedules always use the
+      machine's local time zone (no field); model/effort come from a
+      per-agent catalog module (effort options hang off the model, with a
+      Custom model escape); the unattended-approval invariant is displayed,
+      not configurable. Save sends JSON.stringify(spec) through the existing
+      definition_yaml field (JSON is valid YAML — no new command, no client
+      YAML dependency). Protocol addendum, version 182: `error_code` on
+      automation_apply_result (revision_conflict | id_collision |
+      deleted_elsewhere | id_mismatch | validation) and `spec_json` on
+      automation_definition_result. Form built on react-hook-form + zod
+      (onBlur), with the zod schema mirroring `ValidateDefinition`. Typed
+      save errors (revision conflict is distinguishable);
+      `expected_revision` guard survives. Landed 2026-07-23; live-verified on the dev profile via
+      scenario-automation-form.mjs (11 legs) plus the lifecycle and surface
+      scenarios.
+- [x] **PR7 — proving matrix.** Both vision proving cases end-to-end on a
       fresh profile (PR pre-review with continuity + scheduled worktree
-      cleanup), daemon-restart recovery leg, changelog.
+      cleanup), daemon-restart recovery leg, changelog. Landed 2026-07-23:
+      both proving scenarios ran green on a fresh throwaway profile
+      (`pr7prove`, protocol-182 preflight all-PASS) —
+      scenario-automation-pr-continuity.mjs with a new
+      `daemon_restart_preserves_continuity` leg (post-restart re-request
+      resumes the same session/ticket via Codex resume, dirty reviewer work
+      intact) and scenario-automation-scheduled-cleanup.mjs (4 legs incl.
+      restart catch-up, real codex cleanup, storm guard). No new CHANGELOG
+      entry: PR7 adds test coverage only; all v2 user-visible behavior was
+      changelogged with PR5/PR6.
 
 ## Decisions
 
@@ -188,6 +218,11 @@ real concept and drives binding rotation.
 - Active binding whose ticket no longer exists self-heals at delivery time
   (release with `ticket_swept`, log, deliver fresh) rather than hard-failing:
   one well-defined transition, not inference.
+- The form treats an empty model/effort as "Agent default" (explicit option)
+  rather than requiring a choice: the daemon has always treated
+  launch.model/effort as optional, and live verification showed a
+  prompt-only edit of a CLI-authored, model-less definition must not be
+  blocked or forced to add launch keys.
 
 ## Open Questions
 

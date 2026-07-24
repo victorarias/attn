@@ -339,9 +339,7 @@ export function LocationPicker({
     inputValue,
     selectedEndpointId,
     onBrowseDirectory,
-    homePath,
-    handleHomePathChange,
-    isOpen,
+    { homePath, onHomePathChange: handleHomePathChange, enabled: isOpen },
   );
 
   const orderedAgentList = useMemo(() => {

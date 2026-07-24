@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
@@ -446,6 +447,14 @@ func (d *Daemon) openMarkdownTile(path, sessionID string) (workspaceID, tileID s
 		return "", "", fmt.Errorf("path must be absolute: %s", path)
 	}
 	path = filepath.Clean(path)
+	// Refuse to dock a tile for a file that is gone, and forget it: a stale
+	// recent-files entry then costs one failed open rather than a permanent
+	// slot in the opener. This is the only place recents are pruned — the
+	// opener never stats its list on summon.
+	if _, statErr := os.Stat(path); statErr != nil {
+		d.store.DeleteFileActivity(path)
+		return "", "", fmt.Errorf("file not found: %s", path)
+	}
 	if sessionID == "" {
 		return "", "", fmt.Errorf("no session selected; open a session in attn or pass --session")
 	}
@@ -485,6 +494,10 @@ func (d *Daemon) openMarkdownTile(path, sessionID string) (workspaceID, tileID s
 		return "", "", err
 	}
 	d.broadcastTileContentNow(workspaceID, tileID)
+	// Every route into a markdown tile — ⌘+click, `attn open`, the opener
+	// itself — passes through here, so recents need no client bookkeeping and
+	// no origin flag.
+	d.store.RecordFileActivity(path, store.FileActivitySourceOpened, sessionID)
 	return workspaceID, tileID, nil
 }
 

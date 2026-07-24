@@ -38,6 +38,11 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-tile-only-workspace-select'],
   },
   {
+    id: 'markdown-opener',
+    label: 'Global Cmd+P markdown opener (git-enumerated fuzzy search + recents)',
+    command: ['pnpm', 'run', 'real-app:scenario-markdown-opener'],
+  },
+  {
     id: 'notebook-tile-finder',
     label: 'Notebook tile finder (native Cmd+Opt+N dock, Cmd+P re-summon)',
     command: ['pnpm', 'run', 'real-app:scenario-notebook-tile-finder'],
@@ -183,6 +188,12 @@ export const scenarioCatalog = [
     id: 'codex-resume',
     label: 'Codex native resume id mapping',
     command: ['pnpm', 'run', 'real-app:scenario-codex-resume'],
+  },
+  {
+    id: 'recoverable-auto-revive',
+    label: 'Recoverable Claude session auto-revives after daemon restart',
+    command: ['pnpm', 'run', 'real-app:scenario-recoverable-auto-revive'],
+    timeoutMs: 360_000,
   },
   {
     id: 'ghostty-scroll',

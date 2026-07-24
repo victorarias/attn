@@ -143,11 +143,17 @@ type SessionInfo struct {
 }
 
 type Manager struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session
-	logf     LogFunc
-	onExit   func(ExitInfo)
-	onState  func(sessionID, state string)
+	mu            sync.RWMutex
+	sessions      map[string]*Session
+	pendingSpawns map[string]struct{}
+	logf          LogFunc
+	onExit        func(ExitInfo)
+	onState       func(sessionID, state string)
+
+	// testHookAfterSpawnReserve, when non-nil, runs after Spawn reserves its
+	// session ID and releases the mutex. Test-only seam for deterministic
+	// overlap; never set in production.
+	testHookAfterSpawnReserve func()
 }
 
 func NewManager(logf LogFunc) *Manager {
@@ -155,8 +161,9 @@ func NewManager(logf LogFunc) *Manager {
 		logf = func(string, ...interface{}) {}
 	}
 	return &Manager{
-		sessions: make(map[string]*Session),
-		logf:     logf,
+		sessions:      make(map[string]*Session),
+		pendingSpawns: make(map[string]struct{}),
+		logf:          logf,
 	}
 }
 
@@ -209,7 +216,20 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		m.mu.Unlock()
 		return fmt.Errorf("session %s already exists", opts.ID)
 	}
+	if _, pending := m.pendingSpawns[opts.ID]; pending {
+		m.mu.Unlock()
+		return fmt.Errorf("session %s spawn already in progress", opts.ID)
+	}
+	m.pendingSpawns[opts.ID] = struct{}{}
 	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.pendingSpawns, opts.ID)
+		m.mu.Unlock()
+	}()
+	if m.testHookAfterSpawnReserve != nil {
+		m.testHookAfterSpawnReserve()
+	}
 
 	loginShell := GetUserLoginShell()
 	shellCandidates := preferredShellCandidates(loginShell)

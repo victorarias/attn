@@ -68,6 +68,7 @@ const STATE_COLORS: Record<UISessionState, Rgb> = {
   working: { r: 34, g: 197, b: 94 },
   waiting_input: { r: 245, g: 158, b: 11 },
   idle: { r: 107, g: 114, b: 128 },
+  recoverable: { r: 107, g: 114, b: 128 },
   pending_approval: { r: 234, g: 179, b: 8 },
   // sky blue — calm and distinct from launching's periwinkle, the royal-blue
   // PR/focus accent, and the unknown purple.
@@ -500,6 +501,7 @@ export class UnifiedGridRenderer implements GridRenderer {
   private stateBackgroundAlpha(state: UISessionState): number {
     switch (state) {
       case 'idle':
+      case 'recoverable':
         return 0.055;
       case 'working':
         return 0.07;

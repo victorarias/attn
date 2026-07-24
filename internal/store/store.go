@@ -15,6 +15,7 @@ import (
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/git"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -54,6 +55,22 @@ type ActiveAgentDriverRun struct {
 	Metadata  string
 }
 
+// LaunchIntent captures the per-spawn parameters the daemon needs to
+// relaunch a session without a client. Geometry is deliberately absent:
+// the attaching client owns it.
+type LaunchIntent struct {
+	YoloMode     bool   `json:"yolo_mode,omitempty"`
+	Executable   string `json:"executable,omitempty"`
+	Model        string `json:"model,omitempty"`
+	Effort       string `json:"effort,omitempty"`
+	ChiefOfStaff bool   `json:"chief_of_staff,omitempty"`
+	// UnattendedLaunch is the complete launch contract for sessions launched
+	// unattended (delegation/automations). Persisting the whole contract makes
+	// the store a sufficient authority to relaunch such a session when the
+	// worker registry is gone (machine restart); zero value = attended.
+	UnattendedLaunch launchcontract.UnattendedLaunchSpec `json:"unattended_launch,omitzero"`
+}
+
 // New creates a new in-memory store (backed by SQLite :memory:)
 func New() *Store {
 	db, err := OpenDB(":memory:")
@@ -87,10 +104,6 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 	}
 	if session.MainRepo != nil {
 		cloned.MainRepo = protocol.Ptr(protocol.Deref(session.MainRepo))
-	}
-	if session.Recoverable != nil {
-		value := protocol.Deref(session.Recoverable)
-		cloned.Recoverable = protocol.Ptr(value)
 	}
 	if session.Todos != nil {
 		cloned.Todos = append([]string(nil), session.Todos...)
@@ -170,8 +183,8 @@ func (s *Store) AddChecked(session *protocol.Session) error {
 	session.Agent = protocol.SessionAgent(normalizedAgent)
 	_, err = s.db.Exec(`
 		INSERT INTO sessions
-		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, recoverable)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			label = excluded.label,
 			agent = excluded.agent,
@@ -185,8 +198,7 @@ func (s *Store) AddChecked(session *protocol.Session) error {
 			state_since = excluded.state_since,
 			state_updated_at = excluded.state_updated_at,
 			todos = excluded.todos,
-			last_seen = excluded.last_seen,
-			recoverable = excluded.recoverable`,
+			last_seen = excluded.last_seen`,
 		session.ID,
 		session.Label,
 		session.Agent,
@@ -201,7 +213,6 @@ func (s *Store) AddChecked(session *protocol.Session) error {
 		session.StateUpdatedAt,
 		string(todosJSON),
 		session.LastSeen,
-		boolToInt(protocol.Deref(session.Recoverable)),
 	)
 	if err != nil {
 		return fmt.Errorf("insert session %s: %w", session.ID, err)
@@ -221,11 +232,11 @@ func (s *Store) Get(id string) *protocol.Session {
 	var session protocol.Session
 	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
-	var isWorktree, recoverable int
+	var isWorktree int
 	var endpointID, workspaceID, branch, mainRepo sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, recoverable
+		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
@@ -241,7 +252,6 @@ func (s *Store) Get(id string) *protocol.Session {
 		&stateUpdatedAt,
 		&todosJSON,
 		&lastSeen,
-		&recoverable,
 	)
 	if err != nil {
 		return nil
@@ -265,9 +275,6 @@ func (s *Store) Get(id string) *protocol.Session {
 	session.StateSince = stateSince
 	session.StateUpdatedAt = stateUpdatedAt
 	session.LastSeen = lastSeen
-	if recoverable == 1 {
-		session.Recoverable = protocol.Ptr(true)
-	}
 	if todosJSON != "" && todosJSON != "null" {
 		if err := json.Unmarshal([]byte(todosJSON), &session.Todos); err != nil {
 			log.Printf("[store] Get: failed to unmarshal todos for session %s: %v", id, err)
@@ -348,11 +355,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, recoverable
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen
 			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen, recoverable
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen
 			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -365,7 +372,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var session protocol.Session
 		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
-		var isWorktree, recoverable int
+		var isWorktree int
 		var endpointID, workspaceID, branch, mainRepo sql.NullString
 
 		err := rows.Scan(
@@ -383,7 +390,6 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&stateUpdatedAt,
 			&todosJSON,
 			&lastSeen,
-			&recoverable,
 		)
 		if err != nil {
 			continue
@@ -407,9 +413,6 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		session.StateSince = stateSince
 		session.StateUpdatedAt = stateUpdatedAt
 		session.LastSeen = lastSeen
-		if recoverable == 1 {
-			session.Recoverable = protocol.Ptr(true)
-		}
 		if todosJSON != "" && todosJSON != "null" {
 			if err := json.Unmarshal([]byte(todosJSON), &session.Todos); err != nil {
 				log.Printf("[store] List: failed to unmarshal todos for session %s: %v", session.ID, err)
@@ -633,24 +636,6 @@ func (s *Store) Touch(id string) {
 	}
 }
 
-// SetRecoverable marks a session as recoverable (can be resumed after daemon restart)
-func (s *Store) SetRecoverable(id string, recoverable bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.db == nil {
-		if session := s.sessions[id]; session != nil {
-			session.Recoverable = protocol.Ptr(recoverable)
-		}
-		return
-	}
-
-	_, err := s.db.Exec("UPDATE sessions SET recoverable = ? WHERE id = ?", boolToInt(recoverable), id)
-	if err != nil {
-		log.Printf("[store] SetRecoverable: failed for session %s: %v", id, err)
-	}
-}
-
 // SetResumeSessionID stores the agent-native resume session id for an attn session.
 // This allows recovery to use the real agent conversation id when it differs
 // from the attn session id (for example, when using an agent resume picker).
@@ -682,6 +667,62 @@ func (s *Store) GetResumeSessionID(id string) string {
 		return ""
 	}
 	return strings.TrimSpace(resumeSessionID)
+}
+
+func (s *Store) SetLaunchIntent(id string, intent LaunchIntent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+
+	intentJSON, err := json.Marshal(intent)
+	if err != nil {
+		log.Printf("[store] SetLaunchIntent: failed to marshal launch intent for session %s: %v", id, err)
+		return
+	}
+	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = ? WHERE id = ?", string(intentJSON), id); err != nil {
+		log.Printf("[store] SetLaunchIntent: failed for session %s: %v", id, err)
+	}
+}
+
+// ClearLaunchIntent removes any stored launch intent for the session, leaving
+// the row as if no launch contract had ever been persisted.
+func (s *Store) ClearLaunchIntent(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = '' WHERE id = ?", id); err != nil {
+		log.Printf("[store] ClearLaunchIntent: failed for session %s: %v", id, err)
+	}
+}
+
+func (s *Store) LaunchIntent(id string) (LaunchIntent, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return LaunchIntent{}, false
+	}
+
+	var intentJSON string
+	if err := s.db.QueryRow("SELECT launch_intent FROM sessions WHERE id = ?", id).Scan(&intentJSON); err != nil {
+		return LaunchIntent{}, false
+	}
+	if strings.TrimSpace(intentJSON) == "" {
+		return LaunchIntent{}, false
+	}
+
+	var intent LaunchIntent
+	if err := json.Unmarshal([]byte(intentJSON), &intent); err != nil {
+		log.Printf("[store] LaunchIntent: failed to unmarshal launch intent for session %s: %v", id, err)
+		return LaunchIntent{}, false
+	}
+	return intent, true
 }
 
 // MarkSessionIntentionalClose durably records that this session's process is

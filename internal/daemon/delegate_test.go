@@ -54,6 +54,30 @@ func setupDelegationSourceAt(t *testing.T, d *Daemon, backend *fakeSpawnBackend,
 	return workspaceID, sessionID, cwd
 }
 
+func TestActiveSessionInLinkedWorktree_IgnoresRecoverableSession(t *testing.T) {
+	root := t.TempDir()
+	repo := initDelegationRepo(t, root, "repo")
+	worktree := filepath.Join(root, "repo--recoverable")
+	runGitDaemon(t, repo, "worktree", "add", "-b", "recoverable", worktree)
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             "recoverable",
+		Label:          "recoverable",
+		Agent:          protocol.SessionAgentClaude,
+		Directory:      worktree,
+		State:          protocol.SessionStateRecoverable,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	if _, active := d.activeSessionInLinkedWorktree(worktree); active {
+		t.Fatal("recoverable session must not block delegation into its linked worktree")
+	}
+}
+
 func consumeDelegatedPrompt(t *testing.T, backend *fakeSpawnBackend) {
 	t.Helper()
 	backend.onSpawn = func(opts ptybackend.SpawnOptions) {

@@ -2,9 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { BrowseDirectoryResult } from './useDaemonSocket';
 import { toDisplayPath } from '../utils/locationPickerPaths';
 
-interface FilesystemSuggestion {
+export interface FilesystemSuggestion {
   name: string;
+  /** Display form (`~`-shortened) — what the picker shows and types back. */
   path: string;
+  /** The path as the daemon resolved it, for callers that must open it. */
+  absPath: string;
+  isDir: boolean;
 }
 
 interface UseFilesystemSuggestionsResult {
@@ -12,23 +16,40 @@ interface UseFilesystemSuggestionsResult {
   loading: boolean;
   error: string | null;
   currentDir: string;
+  /** Home directory of the machine that answered, once one has. */
+  homePath: string;
+}
+
+export interface UseFilesystemSuggestionsOptions {
+  homePath?: string;
+  onHomePathChange?: (nextHomePath: string) => void;
+  enabled?: boolean;
+  /**
+   * Dotless extensions (e.g. ['md']). Omitted, the listing is directories only —
+   * the session picker's behavior. Supplied, matching files join the listing,
+   * which is what the markdown opener's path mode needs.
+   */
+  extensions?: string[];
 }
 
 export function useFilesystemSuggestions(
   inputPath: string,
   endpointId: string | undefined,
-  browseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>,
-  homePath?: string,
-  onHomePathChange?: (nextHomePath: string) => void,
-  enabled = true,
+  browseDirectory?: (inputPath: string, endpointId?: string, extensions?: string[]) => Promise<BrowseDirectoryResult>,
+  options: UseFilesystemSuggestionsOptions = {},
 ): UseFilesystemSuggestionsResult {
+  const { homePath, onHomePathChange, enabled = true, extensions } = options;
   const [suggestions, setSuggestions] = useState<FilesystemSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentDir, setCurrentDir] = useState('');
+  const [resolvedHomePath, setResolvedHomePath] = useState(homePath || '');
   const debounceRef = useRef<number | null>(null);
   const requestIdRef = useRef(0);
   const previousEndpointIdRef = useRef<string | undefined>(endpointId);
+  // Identity-stable list so a caller can pass an inline array literal without
+  // re-running the effect on every render.
+  const extensionsKey = (extensions || []).join(',');
 
   const fetchSuggestions = useCallback(async (path: string, targetEndpointId?: string) => {
     if (!enabled || !browseDirectory || !path || path.length < 1) {
@@ -44,7 +65,8 @@ export function useFilesystemSuggestions(
     setError(null);
 
     try {
-      const result = await browseDirectory(path, targetEndpointId);
+      const requested = extensionsKey ? extensionsKey.split(',') : undefined;
+      const result = await browseDirectory(path, targetEndpointId, requested);
       if (requestIdRef.current !== requestId) {
         return;
       }
@@ -52,11 +74,14 @@ export function useFilesystemSuggestions(
       const nextHomePath = result.home_path || homePath || '';
       if (nextHomePath) {
         onHomePathChange?.(nextHomePath);
+        setResolvedHomePath(nextHomePath);
       }
       setCurrentDir(toDisplayPath(result.directory, nextHomePath));
       setSuggestions((result.entries || []).map((entry) => ({
         name: entry.name,
         path: toDisplayPath(entry.path, nextHomePath),
+        absPath: entry.path,
+        isDir: entry.is_dir,
       })));
     } catch (e) {
       if (requestIdRef.current !== requestId) {
@@ -71,7 +96,7 @@ export function useFilesystemSuggestions(
         setLoading(false);
       }
     }
-  }, [browseDirectory, enabled, homePath, onHomePathChange]);
+  }, [browseDirectory, enabled, extensionsKey, homePath, onHomePathChange]);
 
   useEffect(() => {
     if (debounceRef.current) {
@@ -111,5 +136,5 @@ export function useFilesystemSuggestions(
     };
   }, [enabled, endpointId, fetchSuggestions, inputPath]);
 
-  return { suggestions, loading, error, currentDir };
+  return { suggestions, loading, error, currentDir, homePath: resolvedHomePath };
 }

@@ -197,7 +197,7 @@ func (d *Daemon) activeSessionInLinkedWorktree(directory string) (string, bool) 
 	}
 	worktreeRoot = git.CanonicalizePath(worktreeRoot)
 	for _, session := range d.store.List("") {
-		if session.State == protocol.SessionStateIdle {
+		if session.State == protocol.SessionStateIdle || session.State == protocol.SessionStateRecoverable {
 			continue
 		}
 		sessionRoot, err := git.GetRepoRoot(session.Directory)

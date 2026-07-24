@@ -1,9 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import {
-  useAutomationsStore,
-  selectDefinitionById,
-  selectLatestRunForDefinition,
-} from './automations';
+import { useAutomationsStore, selectDefinitionById } from './automations';
 import { AutomationDefinitionSummary, AutomationRunSummary } from '../types/generated';
 
 function makeDefinition(
@@ -165,21 +161,5 @@ describe('selectDefinitionById', () => {
   it('returns the matching definition', () => {
     const definitions = [makeDefinition({ id: 'd1' }), makeDefinition({ id: 'd2', name: 'Second' })];
     expect(selectDefinitionById(definitions, 'd2')?.name).toBe('Second');
-  });
-});
-
-describe('selectLatestRunForDefinition', () => {
-  it('returns null when runs is undefined or empty', () => {
-    expect(selectLatestRunForDefinition(undefined)).toBeNull();
-    expect(selectLatestRunForDefinition([])).toBeNull();
-  });
-
-  it('picks the most recently created run', () => {
-    const runs = [
-      makeRun({ id: 'r1', created_at: '2026-01-01T00:00:00Z' }),
-      makeRun({ id: 'r2', created_at: '2026-01-03T00:00:00Z' }),
-      makeRun({ id: 'r3', created_at: '2026-01-02T00:00:00Z' }),
-    ];
-    expect(selectLatestRunForDefinition(runs)?.id).toBe('r2');
   });
 });

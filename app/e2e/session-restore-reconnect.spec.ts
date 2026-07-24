@@ -75,9 +75,10 @@ test.describe('Session restore and reconnect harness', () => {
 
     await daemon.restart();
 
-    // Session remains tracked, but should be downgraded from running to idle.
+    // Session remains tracked and is marked recoverable (claude sessions with a
+    // missing worker can be revived from their stored launch intent).
     await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(1, { timeout: 15000 });
-    await expect(page.locator('[data-testid="session-reconnect-s1"][data-state="idle"]')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('[data-testid="session-reconnect-s1"][data-state="recoverable"]')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('.warning-banner')).toContainText(/can be recovered/i, { timeout: 10000 });
 
     await daemon.injectSession({

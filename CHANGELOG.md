@@ -6,7 +6,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
-## [2026-07-23]
+## [2026-07-25]
 
 ### Changed
 - **Session restore is now deeper and more faithful.** Reopening or reconnecting
@@ -16,9 +16,52 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   Restores are text-only: inline images (sixel/kitty) still render live but are
   not preserved across a restore.
 
+## [2026-07-24]
+
+### Added
+- **⌘P opens a markdown file from anywhere in the app.** The palette starts on
+  the files you opened most recently and, as you type, fuzzy-searches the
+  markdown under the selected session's folder — no native file dialog, no file
+  tree. Picking a file docks it as a reader tile bound to that session, exactly
+  as ⌘+clicking a link does. A focused Editor tile keeps its own in-tile ⌘P.
+  The search covers what git tracks plus untracked files, so ignored build
+  output never crowds out your documents.
+- **Type a path in ⌘P to browse the filesystem.** A query that starts with `/`,
+  `~/`, or `./` lists that folder one level at a time — Enter on a folder goes
+  into it, Enter on a file opens it — so documents outside the session's folder,
+  or ones `.gitignore` hides from the search, are still a few keystrokes away.
+  Ordinary queries like `docs/plan` keep searching as before.
+
+### Changed
+- **Dot-folders like `.claude` are now searchable in ⌘P.** Documents kept in
+  dot-prefixed folders were listed when browsing by path but invisible to the
+  search; both now show them. Git's own `.git` folder stays hidden.
+
+### Fixed
+- **Sessions interrupted by a daemon or machine restart now recover when their terminal pane opens.** attn preserves the session's launch settings, restarts the recoverable session using the pane's current terminal size, and reconnects it automatically instead of leaving a "Failed to attach PTY" message. Sessions that cannot safely be revived still show the normal attach error.
+
+## [2026-07-23]
+
+### Changed
+- **Automations are now edited in a structured form instead of a YAML
+  editor.** Pick a trigger (manual, scheduled, or PR review requested) and the
+  form shows only the choices that matter for it, with a plain-words summary
+  of what the automation will do. The ID is derived from the name as you type
+  (customizable until the first save), schedules always use your machine's
+  local time zone, and the model and effort pickers offer what each agent
+  actually supports — including an "Agent default" choice. Mistakes are
+  caught as you edit, a save that conflicts with a change made elsewhere
+  offers a one-click Reload, and automations can now be deleted or
+  enabled/disabled from the editor too.
+
 ## [2026-07-22]
 
 ### Fixed
+- **Copilot mouse selection no longer remains stuck after releasing the
+  button.** attn now respects Copilot's configured mouse mode, guarantees that
+  a tracked press receives a matching release outside the terminal or on lost
+  focus, and correctly reports passive pointer movement without pretending the
+  left button is still held.
 - **`attn pr wait-ready` no longer returns instantly on a stale review verdict
   while a re-review is pending.** When the reviewer has been re-requested, an
   approval or changes-requested verdict that was already present when the wait
@@ -30,6 +73,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   could stay wrapped at the old, narrower width until an unrelated layout change
   triggered a redraw.
 - Closing a shell pane now hangs the shell up promptly instead of stalling ~10 seconds and force-killing it; remote pane/session close reliably confirms worker teardown instead of timing out mid-kill.
+
+### Changed
+- **The automations CLI's `attn automation show` now prints the definition's
+  YAML directly to stdout** instead of a JSON-wrapped blob, and `delete`,
+  `validate`, and `cleanup` print small purpose-built summaries instead of raw
+  store rows. The Automations panel's list badge (which run failed, and when)
+  now loads with the rest of the list in one request instead of a separate
+  fetch per definition, so opening the panel with many automations feels
+  noticeably snappier.
 
 ## [2026-07-21]
 

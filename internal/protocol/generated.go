@@ -57,6 +57,7 @@ type AttachPolicy string
 
 const AttachPolicyFreshSpawn AttachPolicy = "fresh_spawn"
 const AttachPolicyRelaunchRestore AttachPolicy = "relaunch_restore"
+const AttachPolicyRevive AttachPolicy = "revive"
 const AttachPolicySameAppRemount AttachPolicy = "same_app_remount"
 
 type AttachResultMessage struct {
@@ -78,6 +79,9 @@ type AttachResultMessage struct {
 	// Pid corresponds to the JSON schema field "pid".
 	Pid *int `json:"pid,omitempty,omitzero"`
 
+	// Revived corresponds to the JSON schema field "revived".
+	Revived *bool `json:"revived,omitempty,omitzero"`
+
 	// Rows corresponds to the JSON schema field "rows".
 	Rows *int `json:"rows,omitempty,omitzero"`
 
@@ -98,8 +102,14 @@ type AttachSessionMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// Cols corresponds to the JSON schema field "cols".
+	Cols *int `json:"cols,omitempty,omitzero"`
+
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows *int `json:"rows,omitempty,omitzero"`
 }
 
 type AttachSnapshot struct {
@@ -136,56 +146,6 @@ type AuthorsUpdatedMessage struct {
 	Event string `json:"event"`
 }
 
-type AutomationActionResultMessage struct {
-	// Action corresponds to the JSON schema field "action".
-	Action string `json:"action"`
-
-	// Cleaned corresponds to the JSON schema field "cleaned".
-	Cleaned []string `json:"cleaned,omitempty,omitzero"`
-
-	// Definitions corresponds to the JSON schema field "definitions".
-	Definitions []AutomationDefinitionSummary `json:"definitions,omitempty,omitzero"`
-
-	// Error corresponds to the JSON schema field "error".
-	Error *string `json:"error,omitempty,omitzero"`
-
-	// Event corresponds to the JSON schema field "event".
-	Event string `json:"event"`
-
-	// KeptActive corresponds to the JSON schema field "kept_active".
-	KeptActive []string `json:"kept_active,omitempty,omitzero"`
-
-	// KeptDirty corresponds to the JSON schema field "kept_dirty".
-	KeptDirty []string `json:"kept_dirty,omitempty,omitzero"`
-
-	// RequestID corresponds to the JSON schema field "request_id".
-	RequestID *string `json:"request_id,omitempty,omitzero"`
-
-	// Revision corresponds to the JSON schema field "revision".
-	Revision *int `json:"revision,omitempty,omitzero"`
-
-	// RunID corresponds to the JSON schema field "run_id".
-	RunID *string `json:"run_id,omitempty,omitzero"`
-
-	// Runs corresponds to the JSON schema field "runs".
-	Runs []AutomationRunSummary `json:"runs,omitempty,omitzero"`
-
-	// SessionID corresponds to the JSON schema field "session_id".
-	SessionID *string `json:"session_id,omitempty,omitzero"`
-
-	// SpecYaml corresponds to the JSON schema field "spec_yaml".
-	SpecYaml *string `json:"spec_yaml,omitempty,omitzero"`
-
-	// Success corresponds to the JSON schema field "success".
-	Success bool `json:"success"`
-
-	// TicketID corresponds to the JSON schema field "ticket_id".
-	TicketID *string `json:"ticket_id,omitempty,omitzero"`
-
-	// Truncated corresponds to the JSON schema field "truncated".
-	Truncated *bool `json:"truncated,omitempty,omitzero"`
-}
-
 type AutomationApplyMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -203,6 +163,29 @@ type AutomationApplyMessage struct {
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 }
 
+type AutomationApplyResultMessage struct {
+	// Definition corresponds to the JSON schema field "definition".
+	Definition *AutomationDefinitionSummary `json:"definition,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// ErrorCode corresponds to the JSON schema field "error_code".
+	ErrorCode *string `json:"error_code,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// SpecYaml corresponds to the JSON schema field "spec_yaml".
+	SpecYaml *string `json:"spec_yaml,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type AutomationCleanupMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -212,6 +195,29 @@ type AutomationCleanupMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type AutomationCleanupResultMessage struct {
+	// Cleaned corresponds to the JSON schema field "cleaned".
+	Cleaned []string `json:"cleaned,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// KeptActive corresponds to the JSON schema field "kept_active".
+	KeptActive []string `json:"kept_active,omitempty,omitzero"`
+
+	// KeptDirty corresponds to the JSON schema field "kept_dirty".
+	KeptDirty []string `json:"kept_dirty,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type AutomationDefinitionGetMessage struct {
@@ -225,18 +231,38 @@ type AutomationDefinitionGetMessage struct {
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 }
 
+type AutomationDefinitionResultMessage struct {
+	// Definition corresponds to the JSON schema field "definition".
+	Definition *AutomationDefinitionSummary `json:"definition,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// SpecJson corresponds to the JSON schema field "spec_json".
+	SpecJson *string `json:"spec_json,omitempty,omitzero"`
+
+	// SpecYaml corresponds to the JSON schema field "spec_yaml".
+	SpecYaml *string `json:"spec_yaml,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type AutomationDefinitionSummary struct {
-	// CatchUp corresponds to the JSON schema field "catch_up".
-	CatchUp *string `json:"catch_up,omitempty,omitzero"`
-
-	// Continuity corresponds to the JSON schema field "continuity".
-	Continuity *string `json:"continuity,omitempty,omitzero"`
-
 	// Enabled corresponds to the JSON schema field "enabled".
 	Enabled bool `json:"enabled"`
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+
+	// LastRun corresponds to the JSON schema field "last_run".
+	LastRun *AutomationRunSummary `json:"last_run,omitempty,omitzero"`
 
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
@@ -265,6 +291,23 @@ type AutomationDefinitionsGetMessage struct {
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 }
 
+type AutomationDefinitionsResultMessage struct {
+	// Definitions corresponds to the JSON schema field "definitions".
+	Definitions []AutomationDefinitionSummary `json:"definitions,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type AutomationDeleteMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -276,17 +319,18 @@ type AutomationDeleteMessage struct {
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 }
 
-type AutomationListMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-}
+type AutomationDeleteResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
 
-type AutomationRunListMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
 
-	// DefinitionID corresponds to the JSON schema field "definition_id".
-	DefinitionID string `json:"definition_id"`
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type AutomationRunMessage struct {
@@ -306,15 +350,32 @@ type AutomationRunMessage struct {
 	RequestID string `json:"request_id"`
 }
 
+type AutomationRunResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Run corresponds to the JSON schema field "run".
+	Run *AutomationRunSummary `json:"run,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type AutomationRunSummary struct {
+	// CancelReason corresponds to the JSON schema field "cancel_reason".
+	CancelReason *string `json:"cancel_reason,omitempty,omitzero"`
+
 	// CreatedAt corresponds to the JSON schema field "created_at".
 	CreatedAt string `json:"created_at"`
 
 	// DefinitionID corresponds to the JSON schema field "definition_id".
 	DefinitionID string `json:"definition_id"`
-
-	// DefinitionRevision corresponds to the JSON schema field "definition_revision".
-	DefinitionRevision int `json:"definition_revision"`
 
 	// DeliveredAt corresponds to the JSON schema field "delivered_at".
 	DeliveredAt *string `json:"delivered_at,omitempty,omitzero"`
@@ -342,9 +403,6 @@ type AutomationRunSummary struct {
 
 	// UpdatedAt corresponds to the JSON schema field "updated_at".
 	UpdatedAt string `json:"updated_at"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type AutomationRunsGetMessage struct {
@@ -356,6 +414,29 @@ type AutomationRunsGetMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type AutomationRunsResultMessage struct {
+	// DefinitionID corresponds to the JSON schema field "definition_id".
+	DefinitionID string `json:"definition_id"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Runs corresponds to the JSON schema field "runs".
+	Runs []AutomationRunSummary `json:"runs,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Truncated corresponds to the JSON schema field "truncated".
+	Truncated *bool `json:"truncated,omitempty,omitzero"`
 }
 
 type AutomationSetEnabledMessage struct {
@@ -372,12 +453,21 @@ type AutomationSetEnabledMessage struct {
 	RequestID *string `json:"request_id,omitempty,omitzero"`
 }
 
-type AutomationShowMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
+type AutomationSetEnabledResultMessage struct {
+	// Definition corresponds to the JSON schema field "definition".
+	Definition *AutomationDefinitionSummary `json:"definition,omitempty,omitzero"`
 
-	// DefinitionID corresponds to the JSON schema field "definition_id".
-	DefinitionID string `json:"definition_id"`
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type AutomationValidateMessage struct {
@@ -389,6 +479,20 @@ type AutomationValidateMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type AutomationValidateResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type AutomationsChangedMessage struct {
@@ -449,6 +553,9 @@ type BrowseDirectoryMessage struct {
 
 	// EndpointID corresponds to the JSON schema field "endpoint_id".
 	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
+
+	// Extensions corresponds to the JSON schema field "extensions".
+	Extensions []string `json:"extensions,omitempty,omitzero"`
 
 	// InputPath corresponds to the JSON schema field "input_path".
 	InputPath string `json:"input_path"`
@@ -908,6 +1015,9 @@ type DetachSessionMessage struct {
 }
 
 type DirectoryEntry struct {
+	// IsDir corresponds to the JSON schema field "is_dir".
+	IsDir bool `json:"is_dir"`
+
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
 
@@ -1103,6 +1213,23 @@ type FetchRemotesResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type FileActivity struct {
+	// Count corresponds to the JSON schema field "count".
+	Count int `json:"count"`
+
+	// LastAt corresponds to the JSON schema field "last_at".
+	LastAt string `json:"last_at"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Source corresponds to the JSON schema field "source".
+	Source string `json:"source"`
+}
+
 type FileDiffResultMessage struct {
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
@@ -1238,6 +1365,9 @@ type FsExistsResultMessage struct {
 type FsIndexMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
+
+	// Extensions corresponds to the JSON schema field "extensions".
+	Extensions []string `json:"extensions,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
@@ -1996,9 +2126,6 @@ type KillSessionMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
-
-	// Reload corresponds to the JSON schema field "reload".
-	Reload *bool `json:"reload,omitempty,omitzero"`
 
 	// Signal corresponds to the JSON schema field "signal".
 	Signal *string `json:"signal,omitempty,omitzero"`
@@ -3337,6 +3464,34 @@ type RateLimitedMessage struct {
 	RateLimitResource string `json:"rate_limit_resource"`
 }
 
+type RecentFilesMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Limit corresponds to the JSON schema field "limit".
+	Limit *int `json:"limit,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type RecentFilesResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Files corresponds to the JSON schema field "files".
+	Files []FileActivity `json:"files"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type RecentLocation struct {
 	// LastSeen corresponds to the JSON schema field "last_seen".
 	LastSeen string `json:"last_seen"`
@@ -3424,6 +3579,34 @@ type RegisterWorkspaceMessage struct {
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
+}
+
+type ReloadSessionMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
+}
+
+type ReloadSessionResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type RemoveEndpointMessage struct {
@@ -3718,9 +3901,6 @@ type Session struct {
 	// NudgeFiresAt corresponds to the JSON schema field "nudge_fires_at".
 	NudgeFiresAt *string `json:"nudge_fires_at,omitempty,omitzero"`
 
-	// Recoverable corresponds to the JSON schema field "recoverable".
-	Recoverable *bool `json:"recoverable,omitempty,omitzero"`
-
 	// State corresponds to the JSON schema field "state".
 	State SessionState `json:"state"`
 
@@ -3821,6 +4001,7 @@ type SessionStateChangedMessage struct {
 const SessionStateIdle SessionState = "idle"
 const SessionStateLaunching SessionState = "launching"
 const SessionStatePendingApproval SessionState = "pending_approval"
+const SessionStateRecoverable SessionState = "recoverable"
 const SessionStateScheduled SessionState = "scheduled"
 const SessionStateUnknown SessionState = "unknown"
 const SessionStateWaitingInput SessionState = "waiting_input"

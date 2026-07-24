@@ -31,6 +31,9 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { ShortcutEditorModal } from './components/ShortcutEditorModal';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { ActionMenu, type ActionMenuItem } from './components/ActionMenu';
+import { MarkdownOpener, OPENER_EXTENSIONS } from './components/palette/MarkdownOpener';
+import { resolveMarkdownOpenerTarget } from './components/palette/openerTarget';
+import { claimPaletteFocus } from './components/palette/paletteClaim';
 import { WorkspaceContextNavigator, type WorkspaceContextView } from './components/WorkspaceContextNavigator';
 import { NotebookBrowser } from './components/NotebookBrowser';
 import { NotificationsPanel } from './components/NotificationsPanel';
@@ -624,6 +627,7 @@ function App() {
     sendFsWatch,
     sendFsUnwatch,
     sendFsIndex,
+    sendRecentFiles,
     sendTaskList,
     sendTaskRetry,
     sendNotificationList,
@@ -666,8 +670,8 @@ function App() {
     setAutomationEnabled,
     runAutomationNow,
     getAutomationDefinition,
-    validateAutomationDefinition,
     applyAutomationDefinition,
+    deleteAutomationDefinition,
     fetchTicket,
     sendTicketChangeStatus,
     sendTicketAddComment,
@@ -838,6 +842,7 @@ function App() {
         sendFsWatch={sendFsWatch}
         sendFsUnwatch={sendFsUnwatch}
         sendFsIndex={sendFsIndex}
+        sendRecentFiles={sendRecentFiles}
         sendTaskList={sendTaskList}
         sendTaskRetry={sendTaskRetry}
         sendNotificationList={sendNotificationList}
@@ -884,8 +889,8 @@ function App() {
         setAutomationEnabled={setAutomationEnabled}
         runAutomationNow={runAutomationNow}
         getAutomationDefinition={getAutomationDefinition}
-        validateAutomationDefinition={validateAutomationDefinition}
         applyAutomationDefinition={applyAutomationDefinition}
+        deleteAutomationDefinition={deleteAutomationDefinition}
         fetchTicket={fetchTicket}
         sendTicketChangeStatus={sendTicketChangeStatus}
         sendTicketAddComment={sendTicketAddComment}
@@ -963,6 +968,7 @@ interface AppContentProps {
   sendFsWatch: ReturnType<typeof useDaemonSocket>['sendFsWatch'];
   sendFsUnwatch: ReturnType<typeof useDaemonSocket>['sendFsUnwatch'];
   sendFsIndex: ReturnType<typeof useDaemonSocket>['sendFsIndex'];
+  sendRecentFiles: ReturnType<typeof useDaemonSocket>['sendRecentFiles'];
   sendTaskList: ReturnType<typeof useDaemonSocket>['sendTaskList'];
   sendTaskRetry: ReturnType<typeof useDaemonSocket>['sendTaskRetry'];
   sendNotificationList: ReturnType<typeof useDaemonSocket>['sendNotificationList'];
@@ -1009,8 +1015,8 @@ interface AppContentProps {
   setAutomationEnabled: ReturnType<typeof useDaemonSocket>['setAutomationEnabled'];
   runAutomationNow: ReturnType<typeof useDaemonSocket>['runAutomationNow'];
   getAutomationDefinition: ReturnType<typeof useDaemonSocket>['getAutomationDefinition'];
-  validateAutomationDefinition: ReturnType<typeof useDaemonSocket>['validateAutomationDefinition'];
   applyAutomationDefinition: ReturnType<typeof useDaemonSocket>['applyAutomationDefinition'];
+  deleteAutomationDefinition: ReturnType<typeof useDaemonSocket>['deleteAutomationDefinition'];
   fetchTicket: ReturnType<typeof useDaemonSocket>['fetchTicket'];
   sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
   sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
@@ -1082,6 +1088,7 @@ function AppContent({
   sendFsWatch,
   sendFsUnwatch,
   sendFsIndex,
+  sendRecentFiles,
   sendTaskList,
   sendTaskRetry,
   sendNotificationList,
@@ -1128,8 +1135,8 @@ sendFetchPRDetails,
   setAutomationEnabled,
   runAutomationNow,
   getAutomationDefinition,
-  validateAutomationDefinition,
   applyAutomationDefinition,
+  deleteAutomationDefinition,
   fetchTicket,
   sendTicketChangeStatus,
   sendTicketAddComment,
@@ -1476,7 +1483,6 @@ sendFetchPRDetails,
       endpointStatus: endpoint?.status,
       branch: daemonSession?.branch ?? s.branch,
       isWorktree: daemonSession?.is_worktree ?? s.isWorktree,
-      recoverable: daemonSession?.recoverable ?? false,
       chiefOfStaff: daemonSession?.chief_of_staff ?? false,
       delegatedFromChief: daemonSession?.delegated_from_chief ?? false,
       ticketUnread: daemonSession?.ticket_unread ?? false,
@@ -2034,6 +2040,36 @@ sendFetchPRDetails,
   // (rootless tileParams) when the workspace has no directory, the directory
   // belongs to a remote endpoint (see localWorkspaceDirectory), or the directory
   // already matches the notebook root — see resolveEditorTileRoot.
+  // --- Markdown file opener (Cmd+P) ---
+  const [markdownOpenerOpen, setMarkdownOpenerOpen] = useState(false);
+  // A focused notebook tile owns Cmd+P for its own in-tile finder; the global
+  // dispatcher gets the keystroke first (capture phase), so hand it back here
+  // rather than letting two bindings race.
+  const handleOpenMarkdownFile = useCallback(() => {
+    if (claimPaletteFocus()) return;
+    setMarkdownOpenerOpen(true);
+  }, []);
+  // Fuzzy mode searches the selected session's working directory; with no
+  // session selected there is no project context, so it falls back to the
+  // notebook root. Neither known = recents only. A remote session's cwd names a
+  // path on another machine and never enters this route — see
+  // resolveMarkdownOpenerTarget.
+  const markdownOpenerTarget = useMemo(
+    () => resolveMarkdownOpenerTarget(
+      sessions.find((session) => session.id === activeSessionId),
+      settings['notebook.root.effective'],
+    ),
+    [sessions, activeSessionId, settings],
+  );
+  const loadOpenerRecents = useCallback(
+    () => sendRecentFiles(50).then((files) => files.map((file) => ({ path: file.path, lastAt: file.lastAt }))),
+    [sendRecentFiles],
+  );
+  const loadOpenerIndex = useCallback(
+    (root: string) => sendFsIndex(root, OPENER_EXTENSIONS),
+    [sendFsIndex],
+  );
+
   const handleOpenNotebookTile = useCallback(() => {
     const workspaceId = activeWorkspaceIdRef.current;
     if (!workspaceId) return;
@@ -2059,6 +2095,15 @@ sendFetchPRDetails,
   }, [sendWorkspaceDockTile, settings]);
 
   const actionMenuItems = useMemo<ActionMenuItem[]>(() => [
+    {
+      id: 'open-markdown-file',
+      title: 'Open a markdown file',
+      description: 'Recently opened documents, then a fuzzy search of this session\u2019s folder',
+      keywords: ['open', 'file', 'markdown', 'md', 'recent', 'doc', 'find'],
+      icon: <ContextActionIcon />,
+      shortcut: [shortcutTokens('file.open')],
+      run: () => setMarkdownOpenerOpen(true),
+    },
     {
       id: 'notebook-tile',
       title: 'Open Editor tile',
@@ -3476,6 +3521,7 @@ sendFetchPRDetails,
     onIncreaseFontSize: increaseScale,
     onDecreaseFontSize: decreaseScale,
     onResetFontSize: resetScale,
+    onOpenFile: handleOpenMarkdownFile,
     onOpenNotebookTile: handleOpenNotebookTile,
     onOpenNotebookFullscreen: openNotebookBrowser,
     onOpenBoard: openBoardSurface,
@@ -3483,6 +3529,7 @@ sendFetchPRDetails,
     enabled: !locationPickerOpen
       && !whatsNew.isOpen
       && !actionMenuOpen
+      && !markdownOpenerOpen
       && !shortcutEditorOpen
       && !workspaceContextsOpen
       && !notebookOpen
@@ -3879,8 +3926,8 @@ sendFetchPRDetails,
                   setEnabled={setAutomationEnabled}
                   runNow={runAutomationNow}
                   getDefinition={getAutomationDefinition}
-                  validateDefinition={validateAutomationDefinition}
                   applyDefinition={applyAutomationDefinition}
+                  deleteDefinition={deleteAutomationDefinition}
                   onOpenTicket={handleOpenTicketDetail}
                   onSelectSession={handleSelectSession}
                   onFocusPane={(sessionId, paneId) => focusSessionPane(sessionId, paneId, 40)}
@@ -4010,6 +4057,36 @@ sendFetchPRDetails,
         retryTask={sendTaskRetry}
         changeSignal={notificationsChangeSignal}
       />
+      {markdownOpenerOpen && (
+        <MarkdownOpener
+          root={markdownOpenerTarget.root}
+          loadRecents={loadOpenerRecents}
+          loadIndex={loadOpenerIndex}
+          browseDirectory={sendBrowseDirectory}
+          onClose={() => setMarkdownOpenerOpen(false)}
+          onPick={(path) => {
+            setMarkdownOpenerOpen(false);
+            const bindTo = markdownOpenerTarget.sessionId;
+            if (bindTo === null) {
+              // The selected session lives on another machine; docking a tile
+              // for this local file would bind it there. Open it locally.
+              void openPath(path).catch((openError) => {
+                console.error('[MarkdownOpener] OS open failed:', openError);
+              });
+              return;
+            }
+            void sendOpenMarkdown(path, bindTo).catch((error) => {
+              // Same fallback as a cmd+click on a link: if the daemon can't dock
+              // a tile (no local workspace, socket dropped), open the file in the
+              // OS default app rather than doing nothing.
+              console.error('[MarkdownOpener] in-app open failed, falling back to OS open:', error);
+              void openPath(path).catch((openError) => {
+                console.error('[MarkdownOpener] OS open fallback failed:', openError);
+              });
+            });
+          }}
+        />
+      )}
       <ActionMenu
         isOpen={actionMenuOpen}
         actions={actionMenuItems}

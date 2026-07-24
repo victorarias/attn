@@ -86,6 +86,8 @@ export type DaemonWorkspaceContext = GeneratedWorkspaceContext;
 export interface DirectoryEntry {
   name: string;
   path: string;
+  /** Directories are always listed; files only when the request asked for extensions. */
+  is_dir: boolean;
 }
 export interface PathInspection {
   input_path: string;
@@ -167,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '183';
+export const PROTOCOL_VERSION = '187';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -179,6 +181,19 @@ const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // handler — can tell "no outcome yet, retry is safe" apart from "the daemon
 // definitively said no, don't retry blindly".
 export class AutomationActionTimeoutError extends Error {}
+
+// AutomationActionError carries the daemon's typed error_code (protocol 182:
+// revision_conflict | id_collision | deleted_elsewhere | id_mismatch |
+// validation, or '' for untyped failures) so callers can route recovery UI
+// without string-matching messages.
+export class AutomationActionError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'AutomationActionError';
+    this.code = code;
+  }
+}
 
 interface PRActionResult {
   success: boolean;
@@ -456,6 +471,17 @@ export interface FsIndexResult {
   root: string;
   files: string[];
   truncated: boolean;
+}
+
+// One remembered file, ranked by frecency. Mirrors the daemon's
+// protocol.FileActivity: source is what happened to it ("opened" today), count
+// is how many times, lastAt when it last happened.
+export interface RecentFile {
+  path: string;
+  source: string;
+  lastAt: string;
+  count: number;
+  sessionId?: string;
 }
 
 interface UseDaemonSocketOptions {
@@ -1744,6 +1770,31 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'recent_files_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `recent_files:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve((data.files || []).map((file: Record<string, unknown>) => ({
+                path: file.path as string,
+                source: file.source as string,
+                lastAt: file.last_at as string,
+                count: (file.count as number) ?? 0,
+                sessionId: file.session_id as string | undefined,
+              })));
+            } else {
+              pending.reject(new Error(data.error || 'Recent files failed'));
+            }
+            break;
+          }
+
           case 'fs_index_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') {
@@ -2057,6 +2108,22 @@ export function useDaemonSocket({
                 pending.resolve({ success: true, endpoint_id: data.endpoint_id });
               } else {
                 pending.reject(new Error(data.error || 'Endpoint action failed'));
+              }
+            }
+            break;
+          }
+
+          case 'reload_session_result': {
+            if (data.id) {
+              const key = `reload_session:${data.id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve({ success: true });
+                } else {
+                  pending.reject(new Error(data.error ?? 'Reload failed'));
+                }
               }
             }
             break;
@@ -2820,13 +2887,22 @@ export function useDaemonSocket({
             break;
           }
 
-          // Single generic result event for the automations WS surface
-          // (definitions_get / runs_get / set_enabled / run) — see
-          // AutomationActionResultMessage's doc comment. Correlated by
-          // request_id, not action, so concurrent calls (e.g. listing runs for
-          // two different definitions) never cross-resolve; each caller wraps
-          // its own extraction of the raw payload at registration time.
-          case 'automation_action_result': {
+          // The 9 typed automations result events (one per command — see
+          // internal/protocol/schema/main.tsp's Automation*ResultMessage
+          // family and daemon/automations_actions.go). Correlated by
+          // request_id, not action/event, so concurrent calls (e.g. listing
+          // runs for two different definitions) never cross-resolve; each
+          // caller wraps its own extraction of the typed payload at
+          // registration time (see the wrapper functions below).
+          case 'automation_apply_result':
+          case 'automation_validate_result':
+          case 'automation_definitions_result':
+          case 'automation_definition_result':
+          case 'automation_runs_result':
+          case 'automation_run_result':
+          case 'automation_set_enabled_result':
+          case 'automation_delete_result':
+          case 'automation_cleanup_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') break;
             const key = `automation:${requestId}`;
@@ -2836,7 +2912,13 @@ export function useDaemonSocket({
             if ((data as any).success) {
               pending.resolve(data);
             } else {
-              pending.reject(new Error((data as any).error || 'Automation action failed'));
+              const errorCode = (data as any).error_code;
+              pending.reject(
+                new AutomationActionError(
+                  (data as any).error || 'Automation action failed',
+                  typeof errorCode === 'string' ? errorCode : '',
+                ),
+              );
             }
             break;
           }
@@ -2974,6 +3056,27 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const sendReloadSession = useCallback((id: string, cols: number, rows: number): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `reload_session:${id}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'reload_session', id, cols, rows }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Reload session timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
   const sendAttachSessionNow = useCallback((id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -2994,6 +3097,9 @@ export function useDaemonSocket({
         cmd: 'attach_session',
         id,
         ...(context?.policy ? { attach_policy: context.policy } : {}),
+        ...(context?.policy === 'revive'
+          ? { cols: context.requestedCols, rows: context.requestedRows }
+          : {}),
       }));
 
       setTimeout(() => {
@@ -3112,7 +3218,7 @@ export function useDaemonSocket({
   const attachExistingRuntime = useCallback(async (
     args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'agent' | 'reason'>,
     options: {
-      policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount'>;
+      policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount' | 'revive'>;
       forceResizeBeforeAttach?: boolean;
     },
   ): Promise<void> => {
@@ -3137,7 +3243,7 @@ export function useDaemonSocket({
     });
   }, [reconcileAttachedRuntimeGeometry, sendAttachSessionWithRetry, sendPtyResize]);
 
-  const sendKillSession = useCallback((id: string, signal?: string, options?: { reload?: boolean }): Promise<void> => {
+  const sendKillSession = useCallback((id: string, signal?: string): Promise<void> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -3155,9 +3261,6 @@ export function useDaemonSocket({
         cmd: 'kill_session',
         id,
         ...(signal && { signal }),
-        // Tells the daemon this kill is the first half of a reload (the same id
-        // respawns right after), so the exit is not treated as a crash.
-        ...(options?.reload && { reload: true }),
       }));
 
       // Wait for session_exited to avoid kill/spawn races during reload.
@@ -3487,13 +3590,11 @@ export function useDaemonSocket({
         await spawnPtyRuntime(
           args,
           {
-            existingSession,
             runtimeKnownToDaemon: Boolean(existingSession)
               || workspacesIncludeRuntimeID(workspacesRef.current, args.id),
             alreadyAttached: ptyTransportRef.current.hasAttachedRuntime(args.id),
           },
           {
-            attachExistingRuntime,
             attachFreshRuntime: async (spawnArgs: PtySpawnArgs) => {
               await sendAttachSessionWithRetry(spawnArgs.id, {
                 ...createAttachRequestContext(spawnArgs, 'fresh_spawn'),
@@ -3501,14 +3602,6 @@ export function useDaemonSocket({
             },
             spawnRuntime: sendSpawnSession,
             resizeRuntime: sendPtyResize,
-            logResumeRecovery: ({ id, agent, recoverable }) => {
-              console.log(
-                '[DaemonSocket] Recovering session %s (%s) via resume (recoverable=%s)',
-                id,
-                agent ?? 'unknown',
-                String(recoverable),
-              );
-            },
           },
         );
       },
@@ -3529,16 +3622,19 @@ export function useDaemonSocket({
       detach: async (id: string) => {
         sendDetachSession(id);
       },
-      kill: async (id: string, options?: { reload?: boolean }) => {
+      kill: async (id: string) => {
         sendDetachSession(id);
-        await sendKillSession(id, undefined, options);
+        await sendKillSession(id);
+      },
+      reload: async (id: string, cols: number, rows: number) => {
+        await sendReloadSession(id, cols, rows);
       },
     });
 
     return () => {
       setPtyBackend(null);
     };
-  }, [attachExistingRuntime, sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendSpawnSession]);
+  }, [attachExistingRuntime, sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendReloadSession, sendSpawnSession]);
 
   const sendPRAction = useCallback((
     action: 'approve' | 'merge',
@@ -4889,7 +4985,9 @@ export function useDaemonSocket({
   // Bounded recursive file index of root (undefined/empty = the notebook
   // root), for the ⌘P finder. No client-controlled limit — the daemon caps
   // entries server-side and reports truncated=true if the walk was cut short.
-  const sendFsIndex = useCallback((root?: string): Promise<FsIndexResult> => {
+  // extensions (dotless, case-insensitive) filter server-side, before the cap,
+  // so asking for markdown cannot be truncated away by files nobody wanted.
+  const sendFsIndex = useCallback((root?: string, extensions?: string[]): Promise<FsIndexResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4899,7 +4997,12 @@ export function useDaemonSocket({
       const requestId = nextRequestID('fs_index');
       const key = `fs_index:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_index', request_id: requestId, ...(root ? { root } : {}) }));
+      ws.send(JSON.stringify({
+        cmd: 'fs_index',
+        request_id: requestId,
+        ...(root ? { root } : {}),
+        ...(extensions && extensions.length > 0 ? { extensions } : {}),
+      }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -4910,6 +5013,28 @@ export function useDaemonSocket({
   }, [nextRequestID]);
 
   // Get recent locations from daemon
+  // Files recently opened as reader tiles, frecency-ranked. Recorded daemon-side
+  // for every route into a markdown tile, so this list needs no client bookkeeping.
+  const sendRecentFiles = useCallback((limit?: number): Promise<RecentFile[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('recent_files');
+      const key = `recent_files:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'recent_files', request_id: requestId, ...(limit ? { limit } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Recent files timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -4939,7 +5064,10 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
-  const sendBrowseDirectory = useCallback((inputPath: string, endpointId?: string): Promise<BrowseDirectoryResult> => {
+  // extensions (dotless, e.g. ['md']) widens the listing from directories-only
+  // to directories plus matching files. The daemon gates that variant on this
+  // client's app identity, since file names are documents rather than tree shape.
+  const sendBrowseDirectory = useCallback((inputPath: string, endpointId?: string, extensions?: string[]): Promise<BrowseDirectoryResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4954,6 +5082,7 @@ export function useDaemonSocket({
       ws.send(JSON.stringify({
         cmd: 'browse_directory',
         input_path: inputPath,
+        ...(extensions && extensions.length > 0 ? { extensions } : {}),
         ...(endpointId && { endpoint_id: endpointId }),
         request_id: requestId,
       }));
@@ -5321,7 +5450,7 @@ export function useDaemonSocket({
   }, [nextRequestID]);
 
   const runAutomationNow = useCallback(
-    (definitionId: string, requestId: string): Promise<{ runId?: string; ticketId?: string; sessionId?: string }> => {
+    (definitionId: string, requestId: string): Promise<AutomationRunSummary | undefined> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5337,8 +5466,7 @@ export function useDaemonSocket({
         // same run instead of creating a duplicate.
         const key = `automation:${requestId}`;
         pendingActionsRef.current.set(key, {
-          resolve: (result: any) =>
-            resolve({ runId: result.run_id, ticketId: result.ticket_id, sessionId: result.session_id }),
+          resolve: (result: any) => resolve(result.run as AutomationRunSummary | undefined),
           reject,
         });
         ws.send(JSON.stringify({ cmd: 'automation_run', definition_id: definitionId, request_id: requestId }));
@@ -5357,10 +5485,14 @@ export function useDaemonSocket({
   );
 
   // getAutomationDefinition backs the editor's load path. definitionId '' asks
-  // for the starter template at revision 0 (the create case, D7 in the
-  // design) — create and edit share this one call.
+  // for the starter template (the create case, D7 in the design) — create and
+  // edit share this one call. The template response carries no `definition`
+  // (revision 0, unsaved); an edit's response carries the current definition
+  // summary, whose `.revision` is what the editor tracks for Save's guard.
   const getAutomationDefinition = useCallback(
-    (definitionId: string): Promise<{ specYaml: string; revision: number }> => {
+    (
+      definitionId: string,
+    ): Promise<{ specYaml: string; specJson: string; definition?: AutomationDefinitionSummary }> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5370,7 +5502,12 @@ export function useDaemonSocket({
         const requestId = nextRequestID('automation_definition_get');
         const key = `automation:${requestId}`;
         pendingActionsRef.current.set(key, {
-          resolve: (result: any) => resolve({ specYaml: result.spec_yaml ?? '', revision: result.revision ?? 0 }),
+          resolve: (result: any) =>
+            resolve({
+              specYaml: result.spec_yaml ?? '',
+              specJson: result.spec_json ?? '',
+              definition: result.definition ?? undefined,
+            }),
           reject,
         });
         ws.send(
@@ -5392,45 +5529,18 @@ export function useDaemonSocket({
     [nextRequestID],
   );
 
-  // validateAutomationSpec runs the daemon's shared validation seam
-  // (validateAutomationSpec, D3 in the design) without persisting anything, so
-  // the editor can show an error before Save.
-  const validateAutomationDefinition = useCallback(
-    (definitionYaml: string): Promise<void> => {
-      return new Promise((resolve, reject) => {
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          reject(new Error('WebSocket not connected'));
-          return;
-        }
-        const requestId = nextRequestID('automation_validate');
-        const key = `automation:${requestId}`;
-        pendingActionsRef.current.set(key, { resolve: () => resolve(undefined), reject });
-        ws.send(
-          JSON.stringify({ cmd: 'automation_validate', definition_yaml: definitionYaml, request_id: requestId }),
-        );
-        setTimeout(() => {
-          if (pendingActionsRef.current.has(key)) {
-            pendingActionsRef.current.delete(key);
-            reject(new AutomationActionTimeoutError('Validate automation timed out'));
-          }
-        }, 30000);
-      });
-    },
-    [nextRequestID],
-  );
-
   // applyAutomationDefinition is validate-then-persist, carrying expected_id
   // (D4) and expected_revision (D5) so the daemon can refuse an id change or a
   // stale save. expectedId is '' when creating, expectedRevision is 0 when
   // creating — matching AutomationEditor's loadedId/revision state, which
-  // start from getAutomationDefinition('')'s template response.
+  // start from getAutomationDefinition('')'s template response. The result's
+  // revision lives on `definition.revision`, not a top-level field.
   const applyAutomationDefinition = useCallback(
     (
       definitionYaml: string,
       expectedId: string,
       expectedRevision: number,
-    ): Promise<{ definition: AutomationDefinitionSummary; specYaml: string; revision: number }> => {
+    ): Promise<{ definition: AutomationDefinitionSummary; specYaml: string }> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5442,9 +5552,8 @@ export function useDaemonSocket({
         pendingActionsRef.current.set(key, {
           resolve: (result: any) =>
             resolve({
-              definition: (result.definitions ?? [])[0],
+              definition: result.definition,
               specYaml: result.spec_yaml ?? '',
-              revision: result.revision ?? 0,
             }),
           reject,
         });
@@ -5464,6 +5573,36 @@ export function useDaemonSocket({
           if (pendingActionsRef.current.has(key)) {
             pendingActionsRef.current.delete(key);
             reject(new AutomationActionTimeoutError('Apply automation timed out'));
+          }
+        }, 30000);
+      });
+    },
+    [nextRequestID],
+  );
+
+  // deleteAutomationDefinition removes a persisted definition. Mirrors
+  // applyAutomationDefinition's mutation-serialization comment: mutations can
+  // serialize behind an in-flight automation delivery (daemon holds
+  // automationMu across full run delivery); 30s matches the repo's
+  // async-action convention.
+  const deleteAutomationDefinition = useCallback(
+    (definitionId: string): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        const requestId = nextRequestID('automation_delete');
+        const key = `automation:${requestId}`;
+        pendingActionsRef.current.set(key, { resolve: () => resolve(undefined), reject });
+        ws.send(
+          JSON.stringify({ cmd: 'automation_delete', definition_id: definitionId, request_id: requestId }),
+        );
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new AutomationActionTimeoutError('Delete automation timed out'));
           }
         }, 30000);
       });
@@ -5670,6 +5809,7 @@ export function useDaemonSocket({
     sendFsWatch,
     sendFsUnwatch,
     sendFsIndex,
+    sendRecentFiles,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,
@@ -5710,8 +5850,8 @@ export function useDaemonSocket({
     setAutomationEnabled,
     runAutomationNow,
     getAutomationDefinition,
-    validateAutomationDefinition,
     applyAutomationDefinition,
+    deleteAutomationDefinition,
     getPresentations,
     getPresentationRound,
     submitPresentationRound,

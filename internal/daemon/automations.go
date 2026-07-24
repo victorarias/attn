@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -15,23 +14,6 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
-
-type automationActionResult struct {
-	Event   string          `json:"event"`
-	Action  string          `json:"action"`
-	Success bool            `json:"success"`
-	Error   *string         `json:"error,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
-}
-
-// automationCleanupResult is automation_cleanup's socket/CLI data payload —
-// mirrors AutomationActionResultMessage's cleaned/kept_dirty/kept_active WS
-// fields.
-type automationCleanupResult struct {
-	Cleaned    []string `json:"cleaned"`
-	KeptDirty  []string `json:"kept_dirty"`
-	KeptActive []string `json:"kept_active"`
-}
 
 func (d *Daemon) automationRun(ctx context.Context, definitionID, requestID, input string) (*store.AutomationRun, error) {
 	if strings.TrimSpace(requestID) == "" {
@@ -118,62 +100,36 @@ func (d *Daemon) automationObservationLock(definitionID, subjectKey string, cycl
 	}
 	return lock
 }
+
+// handleAutomationCommand is the unix-socket transport for the automations
+// surface: one command set shared with WS (see ws_automations.go), each
+// dispatched to the same action function in automations_actions.go that WS
+// uses, so the two transports can never drift in what a given action returns.
+// The socket is synchronous, so a context.Background()-derived ctx is fine —
+// there is no client-side timeout race to bound here the way WS's
+// wsAutomationMutationTimeoutDuration does.
 func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
-	var data any
-	var err error
+	ctx := context.Background()
+	var result any
 	switch cmd {
 	case protocol.CmdAutomationApply:
-		m := msg.(*protocol.AutomationApplyMessage)
-		data, err = d.automationApply(m.DefinitionYaml)
+		result = d.actionAutomationApply(ctx, msg.(*protocol.AutomationApplyMessage))
 	case protocol.CmdAutomationValidate:
-		m := msg.(*protocol.AutomationValidateMessage)
-		_, _, err = d.validateAutomationSpec(m.DefinitionYaml)
-	case protocol.CmdAutomationList:
-		data, err = d.store.ListAutomationDefinitions()
-	case protocol.CmdAutomationShow:
-		m := msg.(*protocol.AutomationShowMessage)
-		data, err = d.store.GetAutomationDefinition(m.DefinitionID)
+		result = d.actionAutomationValidate(msg.(*protocol.AutomationValidateMessage))
+	case protocol.CmdAutomationDefinitionsGet:
+		result = d.actionAutomationDefinitionsGet(msg.(*protocol.AutomationDefinitionsGetMessage))
+	case protocol.CmdAutomationDefinitionGet:
+		result = d.actionAutomationDefinitionGet(msg.(*protocol.AutomationDefinitionGetMessage))
 	case protocol.CmdAutomationRun:
-		m := msg.(*protocol.AutomationRunMessage)
-		if strings.TrimSpace(protocol.Deref(m.PRURL)) != "" && strings.TrimSpace(protocol.Deref(m.InputJson)) != "" {
-			err = errors.New("pr_url and input_json are mutually exclusive")
-			break
-		}
-		if strings.TrimSpace(protocol.Deref(m.PRURL)) != "" {
-			data, err = d.automationRunPullRequest(context.Background(), m.DefinitionID, m.RequestID, protocol.Deref(m.PRURL))
-		} else {
-			data, err = d.automationRun(context.Background(), m.DefinitionID, m.RequestID, protocol.Deref(m.InputJson))
-		}
-	case protocol.CmdAutomationRunList:
-		m := msg.(*protocol.AutomationRunListMessage)
-		data, err = d.store.ListAutomationRuns(m.DefinitionID)
+		result = d.actionAutomationRun(ctx, msg.(*protocol.AutomationRunMessage))
+	case protocol.CmdAutomationRunsGet:
+		result = d.actionAutomationRunsGet(msg.(*protocol.AutomationRunsGetMessage))
 	case protocol.CmdAutomationSetEnabled:
-		m := msg.(*protocol.AutomationSetEnabledMessage)
-		data, err = d.automationSetEnabled(context.Background(), m.DefinitionID, m.Enabled)
+		result = d.actionAutomationSetEnabled(ctx, msg.(*protocol.AutomationSetEnabledMessage))
 	case protocol.CmdAutomationDelete:
-		m := msg.(*protocol.AutomationDeleteMessage)
-		err = d.automationDelete(context.Background(), m.DefinitionID)
+		result = d.actionAutomationDelete(ctx, msg.(*protocol.AutomationDeleteMessage))
 	case protocol.CmdAutomationCleanup:
-		m := msg.(*protocol.AutomationCleanupMessage)
-		var cleaned, keptDirty, keptActive []string
-		cleaned, keptDirty, keptActive, err = d.automationCleanup(context.Background(), m.DefinitionID)
-		if err == nil {
-			data = automationCleanupResult{Cleaned: cleaned, KeptDirty: keptDirty, KeptActive: keptActive}
-		}
-	}
-	result := automationActionResult{Event: protocol.EventAutomationActionResult, Action: cmd, Success: err == nil}
-	if err != nil {
-		result.Error = protocol.Ptr(err.Error())
-	} else if data != nil {
-		// Guarded on nil rather than marshalling unconditionally: an action with
-		// no payload (validate) leaves data as a nil `any`, and json.Marshal of
-		// that yields the 4-byte literal `null`, not an empty slice — so
-		// `json:"data,omitempty"` would not drop the field and the wire would
-		// carry "data":null. json.RawMessage implements Unmarshaler and is
-		// invoked even for JSON null, so the client would decode a non-nil
-		// 4-byte Data and every "did I get a payload?" check downstream would
-		// answer yes. Leaving Data nil here is what lets omitempty do its job.
-		result.Data, _ = json.Marshal(data)
+		result = d.actionAutomationCleanup(ctx, msg.(*protocol.AutomationCleanupMessage))
 	}
 	_ = json.NewEncoder(conn).Encode(result)
 }

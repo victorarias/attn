@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "183"
+const ProtocolVersion = "187"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -141,6 +141,7 @@ const (
 	CmdInjectTestPR                          = "inject_test_pr"
 	CmdInjectTestSession                     = "inject_test_session"
 	CmdGetRecentLocations                    = "get_recent_locations"
+	CmdRecentFiles                           = "recent_files"
 	CmdBrowseDirectory                       = "browse_directory"
 	CmdInspectPath                           = "inspect_path"
 	CmdListBranches                          = "list_branches"
@@ -159,10 +160,7 @@ const (
 	CmdWorkflowRunList                       = "workflow_run_list"
 	CmdWorkflowRunCancel                     = "workflow_run_cancel"
 	CmdAutomationApply                       = "automation_apply"
-	CmdAutomationList                        = "automation_list"
-	CmdAutomationShow                        = "automation_show"
 	CmdAutomationRun                         = "automation_run"
-	CmdAutomationRunList                     = "automation_run_list"
 	CmdAutomationDefinitionsGet              = "automation_definitions_get"
 	CmdAutomationDefinitionGet               = "automation_definition_get"
 	CmdAutomationRunsGet                     = "automation_runs_get"
@@ -177,6 +175,7 @@ const (
 	CmdPtyInput                              = "pty_input"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
+	CmdReloadSession                         = "reload_session"
 	CmdSetTerminalTheme                      = "set_terminal_theme"
 	CmdWorkspaceLayoutGet                    = "workspace_layout_get"
 	CmdWorkspaceLayoutAddSessionPane         = "workspace_layout_add_session_pane"
@@ -207,7 +206,19 @@ const (
 	CmdSetChiefOfStaff                       = "set_chief_of_staff"
 )
 
-const EventAutomationActionResult = "automation_action_result"
+// Per-action automations result events (socket + WS share one command set;
+// see the Cmd constants above and internal/daemon/automations_actions.go).
+const (
+	EventAutomationApplyResult       = "automation_apply_result"
+	EventAutomationValidateResult    = "automation_validate_result"
+	EventAutomationDefinitionsResult = "automation_definitions_result"
+	EventAutomationDefinitionResult  = "automation_definition_result"
+	EventAutomationRunsResult        = "automation_runs_result"
+	EventAutomationRunResult         = "automation_run_result"
+	EventAutomationSetEnabledResult  = "automation_set_enabled_result"
+	EventAutomationDeleteResult      = "automation_delete_result"
+	EventAutomationCleanupResult     = "automation_cleanup_result"
+)
 
 // EventAutomationsChanged is the id-only automations broadcast: canonical state
 // stays in SQLite, so clients re-read via automation_definitions_get /
@@ -289,6 +300,7 @@ const (
 	EventPluginActionResult              = "plugin_action_result"
 	EventRateLimited                     = "rate_limited"
 	EventRecentLocationsResult           = "recent_locations_result"
+	EventRecentFilesResult               = "recent_files_result"
 	EventBrowseDirectoryResult           = "browse_directory_result"
 	EventInspectPathResult               = "inspect_path_result"
 	EventBranchesResult                  = "branches_result"
@@ -303,6 +315,7 @@ const (
 	EventWorkflowActionResult            = "workflow_action_result"
 	EventPtyOutput                       = "pty_output"
 	EventSpawnResult                     = "spawn_result"
+	EventReloadSessionResult             = "reload_session_result"
 	EventAttachResult                    = "attach_result"
 	EventGetScreenSnapshotResult         = "get_screen_snapshot_result"
 	EventSessionExited                   = "session_exited"
@@ -423,26 +436,8 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 			return "", nil, err
 		}
 		return peek.Cmd, &msg, nil
-	case CmdAutomationList:
-		var msg AutomationListMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-	case CmdAutomationShow:
-		var msg AutomationShowMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
 	case CmdAutomationRun:
 		var msg AutomationRunMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-	case CmdAutomationRunList:
-		var msg AutomationRunListMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
@@ -1183,6 +1178,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
+	case CmdRecentFiles:
+		var msg RecentFilesMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
 	case CmdBrowseDirectory:
 		var msg BrowseDirectoryMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -1348,6 +1350,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg KillSessionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal kill_session: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdReloadSession:
+		var msg ReloadSessionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal reload_session: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

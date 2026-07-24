@@ -15,6 +15,7 @@ import (
 
 	"github.com/victorarias/attn/internal/hub"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
@@ -743,5 +744,61 @@ func TestCollectChangedMarkdownTilesTracksMultipleTiles(t *testing.T) {
 	changed = d.collectChangedMarkdownTiles()
 	if len(changed) != 1 || changed[0].path != second || changed[0].tileID != markdownTileIDForPath(second) {
 		t.Fatalf("after edit = %+v, want only the edited tile", changed)
+	}
+}
+
+// Every route into a markdown tile passes through openMarkdownTile, so recents
+// are recorded there rather than by each caller.
+func TestOpenMarkdownRecordsRecentFile(t *testing.T) {
+	d, _, _ := setupMarkdownWorkspace(t)
+	file := filepath.Join(t.TempDir(), "notes.md")
+	if err := os.WriteFile(file, []byte("# Notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		if _, _, err := d.openMarkdownTile(file, "session-1"); err != nil {
+			t.Fatalf("openMarkdownTile: %v", err)
+		}
+	}
+
+	files := d.store.GetRecentFiles(10)
+	if len(files) != 1 {
+		t.Fatalf("recent files = %+v, want one entry", files)
+	}
+	if files[0].Path != file || files[0].Count != 2 {
+		t.Fatalf("recent file = %+v, want %s opened twice", files[0], file)
+	}
+	if files[0].Source != store.FileActivitySourceOpened {
+		t.Fatalf("source = %q, want %q", files[0].Source, store.FileActivitySourceOpened)
+	}
+}
+
+// A remembered file that has since been deleted must not dock a broken tile,
+// and must drop out of recents — the opener never stats its list on summon, so
+// this failed open is where a dead entry gets cleaned up.
+func TestOpenMarkdownForgetsMissingFile(t *testing.T) {
+	d, _, workspaceID := setupMarkdownWorkspace(t)
+	file := filepath.Join(t.TempDir(), "notes.md")
+	if err := os.WriteFile(file, []byte("# Notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.openMarkdownTile(file, "session-1"); err != nil {
+		t.Fatalf("openMarkdownTile: %v", err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := d.openMarkdownTile(file, "session-1"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("openMarkdownTile(deleted) error = %v, want not-found", err)
+	}
+	if files := d.store.GetRecentFiles(10); len(files) != 0 {
+		t.Fatalf("recent files = %+v, want the deleted file forgotten", files)
+	}
+	// The already-docked tile stays put: only the recents entry is pruned.
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if leaves := workspacelayout.TileLeaves(snapshot.Layout); len(leaves) != 1 {
+		t.Fatalf("tile leaves = %+v, want the existing tile untouched", leaves)
 	}
 }

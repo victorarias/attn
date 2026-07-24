@@ -1,11 +1,20 @@
-// Fuzzy file finder scoring for the in-tile Notebook finder. A pure, headless-
-// testable model of the ActionMenu scorer, widened from substring terms to a
-// Cmd+P-style subsequence match over a note's path and title — so "kbidx" finds
-// "knowledge/index.md". No React, no daemon: feed it the file index + query.
-import type { NotebookEntry } from '../../hooks/useDaemonSocket';
+// Fuzzy file-path scoring for palette finders. A pure, headless-testable model of
+// the ActionMenu scorer, widened from substring terms to a Cmd+P-style subsequence
+// match over a file's path and title — so "kbidx" finds "knowledge/index.md".
+// No React, no daemon: feed it a candidate list + a query.
 
-// The last path segment (filename) of a notebook path. Pure string op; the index
-// paths are always forward-slashed (daemon-normalized), so no platform handling.
+// The minimum a file needs to be rankable. Deliberately narrower than any one
+// caller's type: NotebookEntry (and any future file-index shape) satisfies it
+// structurally, so the scorer stays independent of what the files mean.
+export interface FileCandidate {
+  path: string;
+  title?: string;
+  // ISO timestamp, used only to break score ties (most recent first).
+  updated?: string;
+}
+
+// The last path segment (filename) of a path. Pure string op; index paths are
+// always forward-slashed (daemon-normalized), so no platform handling.
 export function finderBasename(path: string): string {
   const slash = path.lastIndexOf('/');
   return slash === -1 ? path : path.slice(slash + 1);
@@ -52,10 +61,10 @@ function subsequenceScore(text: string, query: string): number {
   return score;
 }
 
-// Score one notebook entry against a query: the best of its path and its title,
-// with the basename weighted a touch higher (finders are filename-first). Returns
-// 0 when neither the path nor the title contains the query as a subsequence.
-export function scoreNotebookFile(entry: NotebookEntry, query: string): number {
+// Score one candidate against a query: the best of its path and its title, with
+// the basename weighted a touch higher (finders are filename-first). Returns 0
+// when neither the path nor the title contains the query as a subsequence.
+export function scoreFile(entry: FileCandidate, query: string): number {
   const q = query.toLowerCase().trim();
   if (q === '') return 1;
   const path = entry.path.toLowerCase();
@@ -69,25 +78,26 @@ export function scoreNotebookFile(entry: NotebookEntry, query: string): number {
   return Math.max(pathScore, baseScore * 1.5, titleScore * 0.9);
 }
 
-// Order two entries when their scores tie: most-recently-updated first (the live
-// notes you're likely reaching for), then by path for a stable, predictable list.
-function tieBreak(a: NotebookEntry, b: NotebookEntry): number {
+// Order two candidates when their scores tie: most-recently-updated first (the
+// live files you're likely reaching for), then by path for a stable, predictable
+// list.
+function tieBreak(a: FileCandidate, b: FileCandidate): number {
   const au = a.updated ?? '';
   const bu = b.updated ?? '';
   if (au !== bu) return au < bu ? 1 : -1; // updated desc (ISO strings sort lexically)
   return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
 }
 
-// Rank the file index for `query`: drop non-matches, sort best-first (ties broken
-// by recency then path), and cap at `limit` so a huge vault can't flood the list.
+// Rank a file index for `query`: drop non-matches, sort best-first (ties broken
+// by recency then path), and cap at `limit` so a huge tree can't flood the list.
 // An empty query lists everything (recency-ordered), capped the same way.
-export function rankNotebookFiles(
-  files: NotebookEntry[],
+export function rankFiles<T extends FileCandidate>(
+  files: T[],
   query: string,
   limit = 50,
-): NotebookEntry[] {
+): T[] {
   return files
-    .map((entry) => ({ entry, score: scoreNotebookFile(entry, query) }))
+    .map((entry) => ({ entry, score: scoreFile(entry, query) }))
     .filter(({ score }) => score > 0)
     .sort((left, right) => (right.score - left.score) || tieBreak(left.entry, right.entry))
     .slice(0, limit)

@@ -18,7 +18,7 @@ function sessionlessWorkspace(): WorkspaceWithSessions<TestSession> {
 interface TestSession {
   id: string;
   label: string;
-  state: 'working' | 'waiting_input' | 'idle';
+  state: 'working' | 'waiting_input' | 'idle' | 'recoverable';
   agent?: string;
   branch?: string;
   isWorktree?: boolean;
@@ -26,7 +26,6 @@ interface TestSession {
   endpointId?: string;
   endpointName?: string;
   endpointStatus?: string;
-  recoverable?: boolean;
   chiefOfStaff?: boolean;
   delegatedFromChief?: boolean;
 }

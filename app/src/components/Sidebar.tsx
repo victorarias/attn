@@ -26,7 +26,6 @@ interface LocalSession {
   endpointId?: string;
   endpointName?: string;
   endpointStatus?: string;
-  recoverable?: boolean;
   chiefOfStaff?: boolean;
   delegatedFromChief?: boolean;
   ticketUnread?: boolean;
@@ -1002,7 +1001,7 @@ export function Sidebar({
                 return (
                   <div
                     key={session.id}
-                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.recoverable ? 'recoverable' : ''} ${draggable ? 'session-item--draggable' : ''} ${draggingSessionId === session.id ? 'session-item--dragging' : ''}`.trim().replace(/\s+/g, ' ')}
+                    className={`session-item grouped ${selectedId === session.id ? 'selected' : ''} ${session.state === 'recoverable' ? 'recoverable' : ''} ${draggable ? 'session-item--draggable' : ''} ${draggingSessionId === session.id ? 'session-item--dragging' : ''}`.trim().replace(/\s+/g, ' ')}
                     data-testid={`sidebar-session-${session.id}`}
                     data-state={session.state}
                     onClick={() => onSelectSession(session.id)}
@@ -1010,7 +1009,7 @@ export function Sidebar({
                     onPointerDown={draggable && paneId
                       ? (event) => handleSessionPointerDown(workspace, paneId, session.id, session.label, event)
                       : undefined}
-                    title={session.recoverable ? 'Session will be recovered when opened' : undefined}
+                    title={session.state === 'recoverable' ? 'Session will be recovered when opened' : undefined}
                   >
                     <StateIndicator state={session.state} size="md" seed={session.id} />
                     <span className="session-label">{session.label}</span>
@@ -1019,7 +1018,7 @@ export function Sidebar({
                         {session.endpointName}
                       </span>
                     )}
-                    {session.recoverable && (
+                    {session.state === 'recoverable' && (
                       <span className="session-recoverable">recoverable</span>
                     )}
                     {session.chiefOfStaff && <ChiefOfStaffBadge />}

@@ -1,0 +1,473 @@
+.automation-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+}
+
+.automation-form__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+}
+
+.automation-form__title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.automation-form__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  padding: 4px;
+}
+
+.automation-form__close:hover {
+  color: var(--color-text-primary);
+}
+
+.automation-form__status,
+.automation-form__load-error {
+  color: var(--color-text-tertiary);
+  padding: 16px 0;
+}
+
+.automation-form__load-error {
+  color: var(--color-error);
+}
+
+.automation-form__enabled {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.automation-form__enabled--on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.automation-form__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  border: none;
+  margin: 0;
+  padding: 0 2px;
+}
+
+.automation-form__body:disabled {
+  opacity: 0.75;
+}
+
+.automation-form__hint {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.automation-form__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.automation-form__section:last-child {
+  border-bottom: none;
+}
+
+.automation-form__section-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.automation-form__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.automation-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.automation-form__input,
+.automation-form__textarea {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  padding: 6px 8px;
+}
+
+.automation-form__input:focus,
+.automation-form__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.automation-form__input--invalid,
+.automation-form__textarea--invalid {
+  border-color: var(--color-error);
+}
+
+.automation-form__textarea {
+  min-height: 120px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.automation-form__field-error {
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.automation-form__id-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.automation-form__id-row .automation-form__input {
+  flex: 1 1 auto;
+}
+
+.automation-form__id-static {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.automation-form__id-customize,
+.automation-form__advanced button,
+.automation-form__overrides button {
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.automation-form__trigger-cards {
+  display: flex;
+  gap: 8px;
+}
+
+.automation-form__trigger-card {
+  flex: 1 1 0;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.automation-form__trigger-card--selected {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--color-text-primary);
+}
+
+.automation-form__trigger-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.automation-form__fact-chip {
+  display: inline-flex;
+  align-self: flex-start;
+  background: var(--color-bg-elevated);
+  border-radius: 20px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  padding: 4px 12px;
+}
+
+.automation-form__invariant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-bg-elevated);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  margin: 0;
+  padding: 8px 12px;
+}
+
+.automation-form__invariant::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.automation-form__segmented {
+  display: inline-flex;
+}
+
+.automation-form__segment {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 5px 12px;
+}
+
+.automation-form__segment:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.automation-form__segment:last-child {
+  border-radius: 0 6px 6px 0;
+  border-left: none;
+}
+
+.automation-form__segment--selected {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.automation-form__cron-phrase {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.automation-form__chip-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.automation-form__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-bg-button);
+  border-radius: 20px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  padding: 3px 6px 3px 10px;
+}
+
+.automation-form__chip button {
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  line-height: 1;
+  padding: 2px;
+}
+
+.automation-form__chip button:hover {
+  color: var(--color-text-primary);
+}
+
+.automation-form__chip-input-field {
+  flex: 1 1 80px;
+  min-width: 80px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.automation-form__chip-input-field:focus {
+  outline: none;
+}
+
+.automation-form__advanced {
+  font-size: var(--font-size-xs);
+}
+
+.automation-form__advanced summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+
+.automation-form__overrides {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.automation-form__override-row {
+  display: flex;
+  gap: 8px;
+}
+
+.automation-form__override-row .automation-form__input {
+  flex: 1 1 auto;
+}
+
+.automation-form__sentence {
+  margin: 0;
+  padding: 13px 14px;
+  border-top: 1px solid var(--color-border-subtle);
+  background: linear-gradient(to right, var(--accent-glow), transparent 60%);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.automation-form__sentence-accent {
+  color: var(--accent);
+}
+
+.automation-form__sentence-strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.automation-form__sentence-mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.automation-form__banner {
+  margin: 0;
+  border-radius: 6px;
+  font-size: var(--font-size-xs);
+  padding: 8px 12px;
+}
+
+.automation-form__banner--stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: #fbbf24;
+}
+
+.automation-form__banner--stale p {
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.automation-form__banner--stale button {
+  background: var(--color-bg-button);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.automation-form__banner--error {
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
+  color: var(--color-error);
+}
+
+.automation-form__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.automation-form__delete {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.automation-form__delete-button {
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-error);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 5px 12px;
+}
+
+.automation-form__delete-button--armed {
+  background: var(--color-error);
+  border-color: var(--color-error);
+  color: var(--color-bg-elevated);
+}
+
+.automation-form__delete-note {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.automation-form__actions-primary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.automation-form__cancel,
+.automation-form__save {
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+
+.automation-form__cancel:hover:not(:disabled),
+.automation-form__save:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.automation-form__save {
+  border-color: var(--accent);
+}
+
+.automation-form__save:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
