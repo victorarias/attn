@@ -278,16 +278,14 @@ func (d *Daemon) buildReloadSpawnOptionsFromStoredIntent(session *protocol.Sessi
 	if !ok {
 		return ptybackend.SpawnOptions{}, fmt.Errorf("%w; no stored launch intent exists either", registryErr)
 	}
-	if intent.Unattended {
-		return ptybackend.SpawnOptions{}, fmt.Errorf("relaunching an unattended session requires its live worker registry contract")
-	}
 	d.logf("reload: using stored launch intent for %s (worker registry unavailable)", session.ID)
 	return d.buildReloadSpawnOptionsFromLaunchParams(session, ptybackend.SessionLaunchParams{
-		Recorded:   true,
-		YoloMode:   intent.YoloMode,
-		Executable: intent.Executable,
-		Model:      intent.Model,
-		Effort:     intent.Effort,
+		Recorded:         true,
+		YoloMode:         intent.YoloMode,
+		Executable:       intent.Executable,
+		Model:            intent.Model,
+		Effort:           intent.Effort,
+		UnattendedLaunch: intent.UnattendedLaunch,
 	})
 }
 

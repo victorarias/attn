@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -143,9 +144,18 @@ func TestLaunchIntentReloadStoreFallback(t *testing.T) {
 	}
 
 	d.ptyBackend = &fakeSpawnBackend{}
-	d.store.SetLaunchIntent(session.ID, store.LaunchIntent{Unattended: true})
-	if _, err := d.buildReloadSpawnOptions(session); err == nil {
-		t.Fatal("buildReloadSpawnOptions() for unattended stored intent = nil, want error")
+	unattended := launchcontract.UnattendedLaunchSpec{
+		Agent: "claude", Model: "sonnet", Effort: "high", Executable: "/opt/claude",
+		ApprovalProductMode: launchcontract.ApprovalAuto, ApprovalDriverMode: launchcontract.ApprovalAuto,
+		DirectoryTrust: launchcontract.TrustConfiguredDirectory, Recovery: launchcontract.RecoveryAdoptOrRestartFresh,
+	}
+	d.store.SetLaunchIntent(session.ID, store.LaunchIntent{UnattendedLaunch: unattended})
+	opts, err = d.buildReloadSpawnOptions(session)
+	if err != nil {
+		t.Fatalf("buildReloadSpawnOptions() for unattended stored intent error = %v", err)
+	}
+	if opts.UnattendedLaunch != unattended || opts.YoloMode || opts.Model != "" || opts.Effort != "" || opts.Executable != "" || opts.AutoApprove {
+		t.Fatalf("unattended reload options = %+v, want contract as the only launch policy", opts)
 	}
 
 	noIntent := *session

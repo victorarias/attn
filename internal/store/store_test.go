@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -631,19 +632,30 @@ func TestStore_SQLitePersistence(t *testing.T) {
 }
 
 func TestStore_LaunchIntentRoundTrip(t *testing.T) {
-	s := New()
-	defer s.Close()
+	dbPath := filepath.Join(t.TempDir(), "attn.db")
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewWithDB() error = %v", err)
+	}
 	s.Add(&protocol.Session{ID: "launch-intent", Label: "launch-intent"})
 	want := LaunchIntent{
-		YoloMode:     true,
-		Executable:   "/opt/claude",
-		Model:        "claude-opus",
-		Effort:       "high",
 		ChiefOfStaff: true,
-		Unattended:   true,
+		UnattendedLaunch: launchcontract.UnattendedLaunchSpec{
+			Agent: "claude", Model: "sonnet", Effort: "high", Executable: "/opt/claude",
+			ApprovalProductMode: launchcontract.ApprovalAuto, ApprovalDriverMode: launchcontract.ApprovalAuto,
+			DirectoryTrust: launchcontract.TrustConfiguredDirectory, Recovery: launchcontract.RecoveryAdoptOrRestartFresh,
+		},
 	}
 
 	s.SetLaunchIntent("launch-intent", want)
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	s, err = NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("reopen NewWithDB() error = %v", err)
+	}
+	defer s.Close()
 	got, ok := s.LaunchIntent("launch-intent")
 	if !ok {
 		t.Fatal("LaunchIntent() = ok false, want true")

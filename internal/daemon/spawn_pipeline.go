@@ -382,12 +382,12 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 		return &spawnOutcome{err: cursorErr}
 	}
 	d.store.SetLaunchIntent(session.ID, store.LaunchIntent{
-		YoloMode:     plan.spawnOpts.YoloMode,
-		Executable:   plan.spawnOpts.Executable,
-		Model:        plan.spawnOpts.Model,
-		Effort:       plan.spawnOpts.Effort,
-		ChiefOfStaff: d.isChiefOfStaffSession(session.ID),
-		Unattended:   !plan.spawnOpts.UnattendedLaunch.IsZero(),
+		YoloMode:         plan.spawnOpts.YoloMode,
+		Executable:       plan.spawnOpts.Executable,
+		Model:            plan.spawnOpts.Model,
+		Effort:           plan.spawnOpts.Effort,
+		ChiefOfStaff:     d.isChiefOfStaffSession(session.ID),
+		UnattendedLaunch: plan.spawnOpts.UnattendedLaunch,
 	})
 	if persistResumeID := agentdriver.SpawnResumeSessionID(req.driver, session.ID, req.resumeSessionID, protocol.Deref(msg.ResumePicker)); persistResumeID != "" {
 		d.persistResumeSessionID(session.ID, persistResumeID)

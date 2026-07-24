@@ -15,6 +15,7 @@ import (
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/git"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -63,11 +64,11 @@ type LaunchIntent struct {
 	Model        string `json:"model,omitempty"`
 	Effort       string `json:"effort,omitempty"`
 	ChiefOfStaff bool   `json:"chief_of_staff,omitempty"`
-	// Unattended marks sessions launched under an unattended-launch contract
-	// (delegation). The contract itself lives in the worker registry only; a
-	// store-fallback relaunch must refuse these sessions rather than relaunch
-	// without the contract's restrictions.
-	Unattended bool `json:"unattended,omitempty"`
+	// UnattendedLaunch is the complete launch contract for sessions launched
+	// unattended (delegation/automations). Persisting the whole contract makes
+	// the store a sufficient authority to relaunch such a session when the
+	// worker registry is gone (machine restart); zero value = attended.
+	UnattendedLaunch launchcontract.UnattendedLaunchSpec `json:"unattended_launch,omitzero"`
 }
 
 // New creates a new in-memory store (backed by SQLite :memory:)

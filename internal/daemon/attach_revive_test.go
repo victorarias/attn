@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -141,8 +142,13 @@ func TestAttachReviveRequiresGeometry(t *testing.T) {
 	assertAttachReviveDidNotSpawn(t, backend)
 }
 
-func TestAttachReviveRefusesUnattendedSession(t *testing.T) {
-	d, backend, client, _ := newAttachReviveTestDaemon(t, protocol.SessionStateRecoverable, &store.LaunchIntent{Unattended: true})
+func TestAttachReviveRespawnsUnattendedSessionWithContract(t *testing.T) {
+	spec := launchcontract.UnattendedLaunchSpec{
+		Agent: "claude", Model: "sonnet", Effort: "high", Executable: "/opt/claude",
+		ApprovalProductMode: launchcontract.ApprovalAuto, ApprovalDriverMode: launchcontract.ApprovalAuto,
+		DirectoryTrust: launchcontract.TrustConfiguredDirectory, Recovery: launchcontract.RecoveryAdoptOrRestartFresh,
+	}
+	d, backend, client, _ := newAttachReviveTestDaemon(t, protocol.SessionStateRecoverable, &store.LaunchIntent{UnattendedLaunch: spec})
 	d.handleAttachSession(client, &protocol.AttachSessionMessage{
 		Cmd:          protocol.CmdAttachSession,
 		ID:           "recoverable",
@@ -152,8 +158,18 @@ func TestAttachReviveRefusesUnattendedSession(t *testing.T) {
 	})
 
 	result := readAttachReviveResult(t, client)
-	if result.Success || result.Error == nil || !strings.Contains(*result.Error, "unattended session cannot be revived from store") {
-		t.Fatalf("attach result = %+v, want unattended failure", result)
+	if !result.Success || !protocol.Deref(result.Revived) {
+		t.Fatalf("attach result = %+v, want success with revived=true", result)
 	}
-	assertAttachReviveDidNotSpawn(t, backend)
+	opts, spawned := backend.LastSpawn()
+	if !spawned {
+		t.Fatal("backend Spawn not called")
+	}
+	if opts.UnattendedLaunch != spec || opts.YoloMode || opts.Model != "" || opts.Effort != "" || opts.Executable != "" || opts.AutoApprove {
+		t.Fatalf("unattended revive options = %+v, want contract as the only launch policy", opts)
+	}
+	intent, ok := d.store.LaunchIntent("recoverable")
+	if !ok || intent.UnattendedLaunch != spec {
+		t.Fatalf("persisted launch intent = %+v, %v; want unattended contract %+v", intent, ok, spec)
+	}
 }
