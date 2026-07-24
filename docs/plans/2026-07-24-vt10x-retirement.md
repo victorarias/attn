@@ -137,13 +137,23 @@ viewport-only as a follow-up.
 - Documented the single parsed-terminal contract and spawn-fatal Ghostty
   construction on supported platforms.
 
-### Phase 4 — post-retirement cleanup (candidates, confirm scope at the time)
+### Phase 4 — post-retirement cleanup (completed 2026-07-24, PR #660)
 
-- Protocol slimming: `get_screen_snapshot_result` carries cursor/geometry fields
-  the self-contained dump makes redundant; possible convergence with the attach
-  snapshot message family. ProtocolVersion bump + three-file lockstep.
-- `AttachInfo` carries two snapshot families (`ScreenSnapshot*` and `Ghostty*`);
-  collapse to one.
+Both candidates turned out to be one coherent change and shipped together
+(ProtocolVersion 183):
+
+- Split the payload families per method: `Snapshot` returns `SnapshotInfo` with
+  a nullable `ViewportSnapshot` (payload/cols/rows), `AttachInfo` keeps only
+  the Ghostty attach family, and the worker RPC gained a dedicated lean
+  `SnapshotResult` (absent payload still means "observer stays unseeded").
+- Slimmed the wire: deleted `screen_cursor_x/y`, `screen_cursor_visible`, and
+  `screen_snapshot_fresh` from `get_screen_snapshot_result` and
+  `WebSocketEvent`, plus the vestigial raw-replay `scrollback` string field.
+  The styled VT dump is self-contained: cursor state rides inside it, and
+  freshness is payload presence.
+
+**The retirement plan is complete.** All four phases are merged to
+`epic/server-authoritative-terminal`: #650, #652, #655, #660.
 
 ## Risks and mitigations
 
