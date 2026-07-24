@@ -84,6 +84,11 @@ stage_plugin() {
   rm -rf "${stage_dir}"
   mkdir -p "${stage_dir}/bin"
   bun build "${source_dir}/src/index.ts" --compile --minify --outfile "${stage_dir}/bin/${name}"
+  # `bun build --compile` writes to a `*.bun-build` temp next to the outfile and
+  # renames it into place on success, but occasionally leaves the temp behind
+  # (a complete, signed Mach-O that only clutters the output dir). Sweep any
+  # orphans so they don't linger next to the real binary and confuse people.
+  find "${stage_dir}/bin" -maxdepth 1 -name '*.bun-build' -delete
   # Bun emits a linker-signed Mach-O. Some dependency graphs leave bytes after
   # the declared signature, which prevents macOS codesign from replacing it.
   # Normalize the generated executable before Tauri copies and signs the bundle.
