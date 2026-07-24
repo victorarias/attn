@@ -49,7 +49,6 @@ func TestAttachSnapshotSeqConsistency(t *testing.T) {
 		rows:        rows,
 		ptmx:        r,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
-		screen:      newVirtualScreen(cols, rows),
 		ghostty:     gt,
 		blockFeed:   newBlockFeeder(gt),
 		subscribers: make(map[string]*sessionSubscriber),
@@ -188,7 +187,6 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 		rows:        rows,
 		ptmx:        r,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
-		screen:      newVirtualScreen(cols, rows),
 		ghostty:     gt,
 		blockFeed:   newBlockFeeder(gt),
 		subscribers: make(map[string]*sessionSubscriber),

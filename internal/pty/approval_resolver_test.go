@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Rendered-screen text as it appears (vt10x-resolved) while each agent shows an
+// Rendered-screen text as it appears while each agent shows an
 // approval prompt. Captured from real Claude/Codex sessions.
 const (
 	claudeApprovalScreen = `Bash command
@@ -171,7 +171,6 @@ func TestSession_ApprovalClearsWithoutFurtherOutput(t *testing.T) {
 	gt := newTestGhostty(t, 80, 24)
 	s := &Session{
 		approvalResolver: &approvalResolver{},
-		screen:           newVirtualScreen(80, 24),
 		ghostty:          gt,
 		onState:          func(state string) { states <- state },
 	}

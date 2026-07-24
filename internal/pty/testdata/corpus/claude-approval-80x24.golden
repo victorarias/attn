@@ -1,0 +1,24 @@
+Permission allow rule (../../../.claude/settings.json): Write(~/**) is not match
+ed by file permission checks — only Edit(path) rules are. Use Edit(~/**) instead
+ (Edit rules cover all file-editing tools).
+
+Resume this session with:
+claude --resume 2c496f62-fb76-41fc-922e-3345844af05c
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

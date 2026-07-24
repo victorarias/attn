@@ -16,7 +16,7 @@ func waitForKillReady(t *testing.T, s *Session, marker string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(s.screen.renderedText(), marker) {
+		if strings.Contains(s.ghostty.ViewportText(), marker) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

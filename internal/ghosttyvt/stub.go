@@ -1,14 +1,11 @@
-//go:build !((darwin && arm64) || (linux && amd64) || (linux && arm64))
+//go:build !cgo || !((darwin && arm64) || (linux && amd64) || (linux && arm64))
 
-// Package ghosttyvt's non-macOS-arm64 build is a portable no-op. The real
-// implementation links a native libghostty-vt static library that only exists
-// for aarch64-macos (see scripts/build-libghostty-vt.sh). attn is a macOS-only
-// product, but its Go code stays buildable on Linux for CI (vet + unit tests),
-// so this stub provides the same API surface with inert behavior.
+// Package ghosttyvt provides a buildability shim for unsupported GOOS/GOARCH
+// combinations and cgo-disabled cross-builds. attn supports darwin/arm64,
+// linux/amd64, and linux/arm64; product builds for those platforms link the
+// native libghostty-vt archive. This stub is never a product path.
 //
-// A stub Terminal serializes to nothing and renders nothing; callers already
-// treat the terminal as best-effort (every use in internal/pty is nil-safe and
-// tolerant of empty output), so nothing observes the difference off macOS.
+// A stub Terminal serializes to nothing and renders nothing.
 package ghosttyvt
 
 // DefaultMaxScrollback mirrors the real build's constant.

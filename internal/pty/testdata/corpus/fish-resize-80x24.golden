@@ -1,0 +1,24 @@
+
+╭─ ~/p/v/attn--tmux  chore/terminal-restore-dead-code$
+╰─$  echo hello from fish && ls
+hello from fish
+ AGENTS.md            examples                  review-loop-completed.png
+ app                  ghostty-vt-native.patch   review-loop-live.png
+󰡯 attn                 ghostty-vt-native.pin     scripts
+ Casks                go.mod                    sdk
+ CHANGELOG.md         go.sum                    TASKS.md
+ CLAUDE.md            internal                  test
+ cmd                  LICENSE                   third_party
+ CODE_OF_CONDUCT.md   Makefile                  tools
+ CONTRIBUTING.md      plugins
+ docs                󰂺 README.md
+
+╭─ ~/p/v/attn--tmux  chore/terminal-restore-dead-code$
+╰─$  pwd
+/Users/victor/projects/victor/attn--tmux
+
+╭─ ~/p/v/attn--tmux  chore/terminal-restore-dead-code$
+╰─$  exit
+
+
+

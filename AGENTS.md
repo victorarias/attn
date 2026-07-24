@@ -219,14 +219,16 @@ must fail explicitly.
 
 - The latest active interactive client owns PTY geometry.
 - `pty_resize` is authoritative; attach restore is provisional context.
-- Restore is server-authoritative: the daemon worker serializes its parsed
-  terminal (libghostty-vt) and the attach serves that VT dump as the sole
-  restore payload (`attach_result.snapshot`). The frontend resets a fresh
-  Ghostty model, resizes to the snapshot grid, and writes the dump with
-  responses suppressed. There is no raw-scrollback/screen-snapshot/segment
-  fallback — a snapshot-less attach (pure-Go stub on non-macOS, or ghostty
-  construction failure) keeps whatever the client has and dedups the live
-  stream against `last_seq`. See
+- The daemon worker's single parsed terminal (libghostty-vt) backs approval
+  classification, CPR replies, grid/automation snapshots, and attach restore.
+  Ghostty construction failure is spawn-fatal on supported platforms.
+- Restore is server-authoritative: the daemon worker serializes that terminal
+  and the attach serves its VT dump as the sole restore payload
+  (`attach_result.snapshot`). The frontend resets a fresh Ghostty model, resizes
+  to the snapshot grid, and writes the dump with responses suppressed. There is
+  no raw-scrollback/screen-snapshot/segment fallback — a snapshot-less attach
+  keeps whatever the client has and dedups the live stream against `last_seq`.
+  See
   [docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
 - OSC 133 command blocks are worker-owned state carried beside the dump as
   structured `attach_result.snapshot.blocks` (the marker-stripped dump rebuilds

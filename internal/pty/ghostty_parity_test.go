@@ -1,6 +1,7 @@
 package pty
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,40 +13,35 @@ import (
 	"github.com/victorarias/attn/internal/ghosttyvt"
 )
 
-var corpusSizeSuffix = regexp.MustCompile(`-(\d+)x(\d+)\.bytes$`)
+var (
+	corpusSizeSuffix = regexp.MustCompile(`-(\d+)x(\d+)\.bytes$`)
+	updateGoldens    = flag.Bool("update", false, "update Ghostty terminal corpus golden files")
+)
 
-type parityCorpusFixture struct {
+type ghosttyCorpusFixture struct {
 	name                         string
-	knownVT10xDivergence         string
 	goldenCursorX, goldenCursorY int
 }
 
-func TestGhosttyVT10xParityCorpus(t *testing.T) {
+func TestGhosttyCorpusGoldens(t *testing.T) {
 	probe, err := ghosttyvt.New(80, 24, ghosttyvt.Options{})
 	if err != nil {
-		t.Skipf("ghosttyvt unavailable; skipping parity corpus: %v", err)
+		t.Skipf("ghosttyvt unavailable; skipping corpus goldens: %v", err)
 	}
 	probeSnapshot := probe.Serialize()
 	probe.Close()
 	if probeSnapshot.VTDump == nil {
-		t.Skip("ghosttyvt returned a nil VT dump; skipping parity corpus on the non-native stub")
+		t.Skip("ghosttyvt returned a nil VT dump; skipping corpus goldens on the non-native stub")
 	}
 
-	fixtures := []parityCorpusFixture{
-		{name: "claude-approval-80x24.bytes"},
-		{
-			name: "codex-approval-80x24.bytes",
-			// A real tmux replay at 80x24 matches Ghostty, including cursor (0,17).
-			// vt10x mishandles this Codex TUI's CSI r scroll-region and CSI S scroll-up traffic.
-			knownVT10xDivergence: "vt10x mishandles Codex scroll-region and scroll-up traffic; golden was verified against a real 80x24 tmux replay",
-			goldenCursorX:        0,
-			goldenCursorY:        17,
-		},
-		{name: "fish-resize-80x24.bytes"},
-		{name: "sgr-heavy-80x24.bytes"},
-		{name: "sgr-heavy-120x40.bytes"},
-		{name: "vim-altscreen-80x24.bytes"},
-		{name: "vim-altscreen-120x40.bytes"},
+	fixtures := []ghosttyCorpusFixture{
+		{name: "claude-approval-80x24.bytes", goldenCursorX: 0, goldenCursorY: 6},
+		{name: "codex-approval-80x24.bytes", goldenCursorX: 0, goldenCursorY: 17},
+		{name: "fish-resize-80x24.bytes", goldenCursorX: 0, goldenCursorY: 21},
+		{name: "sgr-heavy-80x24.bytes", goldenCursorX: 0, goldenCursorY: 23},
+		{name: "sgr-heavy-120x40.bytes", goldenCursorX: 0, goldenCursorY: 39},
+		{name: "vim-altscreen-80x24.bytes", goldenCursorX: 0, goldenCursorY: 0},
+		{name: "vim-altscreen-120x40.bytes", goldenCursorX: 0, goldenCursorY: 0},
 	}
 
 	for _, fixture := range fixtures {
@@ -58,44 +54,27 @@ func TestGhosttyVT10xParityCorpus(t *testing.T) {
 
 			for _, chunkSize := range []int{4096, 1024} {
 				t.Run(fmt.Sprintf("chunk-%d", chunkSize), func(t *testing.T) {
-					screen := newVirtualScreen(uint16(cols), uint16(rows))
 					term, err := ghosttyvt.New(cols, rows, ghosttyvt.Options{})
 					if err != nil {
 						t.Fatalf("ghosttyvt.New(%d, %d): %v", cols, rows, err)
 					}
 					defer term.Close()
 
-					// script(1) records no tmux resize event. In particular, the fish
-					// fixture is replayed at its filename's fixed 80x24 grid by both
-					// emulators, so this asserts parity over the same byte stream.
 					for start := 0; start < len(data); start += chunkSize {
 						end := min(start+chunkSize, len(data))
-						chunk := data[start:end]
-						screen.Observe(chunk)
-						term.Write(chunk)
+						term.Write(data[start:end])
 					}
 
-					ghosttyText := term.ViewportText()
-					if fixture.knownVT10xDivergence != "" {
+					got := term.ViewportText()
+					if *updateGoldens {
+						writeCorpusGolden(t, fixture.name, got)
+					} else {
 						golden := readCorpusGolden(t, fixture.name)
-						assertCorpusViewportEqual(t, "ghostty", "golden", ghosttyText, golden)
-						if screen.renderedText() == ghosttyText {
-							t.Fatalf("vt10x unexpectedly matches Ghostty for known divergence (%s); promote this fixture back to direct parity", fixture.knownVT10xDivergence)
-						}
+						assertCorpusViewportEqual(t, "ghostty", "golden", got, golden)
 						gotX, gotY := term.CursorPos()
 						if gotX != fixture.goldenCursorX || gotY != fixture.goldenCursorY {
 							t.Errorf("golden cursor mismatch: ghostty=(%d,%d), golden=(%d,%d)",
 								gotX, gotY, fixture.goldenCursorX, fixture.goldenCursorY)
-						}
-						return
-					}
-
-					assertCorpusViewportEqual(t, "ghostty", "vt10x", ghosttyText, screen.renderedText())
-					if snapshot, ok := screen.Snapshot(); ok {
-						gotX, gotY := term.CursorPos()
-						if gotX != int(snapshot.cursorX) || gotY != int(snapshot.cursorY) {
-							t.Errorf("cursor mismatch: ghostty=(%d,%d), vt10x=(%d,%d)",
-								gotX, gotY, snapshot.cursorX, snapshot.cursorY)
 						}
 					}
 				})
@@ -121,14 +100,26 @@ func corpusFixtureSize(t *testing.T, fixture string) (int, int) {
 	return cols, rows
 }
 
+func corpusGoldenPath(fixture string) string {
+	return filepath.Join("testdata", "corpus", strings.TrimSuffix(fixture, ".bytes")+".golden")
+}
+
 func readCorpusGolden(t *testing.T, fixture string) string {
 	t.Helper()
-	goldenPath := filepath.Join("testdata", "corpus", strings.TrimSuffix(fixture, ".bytes")+".golden")
+	goldenPath := corpusGoldenPath(fixture)
 	golden, err := os.ReadFile(goldenPath)
 	if err != nil {
 		t.Fatalf("read corpus golden %q: %v", goldenPath, err)
 	}
 	return string(golden)
+}
+
+func writeCorpusGolden(t *testing.T, fixture, content string) {
+	t.Helper()
+	goldenPath := corpusGoldenPath(fixture)
+	if err := os.WriteFile(goldenPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write corpus golden %q: %v", goldenPath, err)
+	}
 }
 
 func assertCorpusViewportEqual(t *testing.T, gotName, wantName, got, want string) {

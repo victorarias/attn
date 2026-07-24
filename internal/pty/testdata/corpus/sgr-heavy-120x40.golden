@@ -1,0 +1,40 @@
+| * 5b6d9f4d test(blocks): shared OSC 133 block-lifecycle corpus + TS prover (Phase 3a rails)
+| * bd3ea60b feat(ghosttyvt): tracked-ref leak accounting + AltScreenActive (Phase 3a rails)
+| * d8477d93 docs(terminal): Phase 3a plan + restore-fidelity design + spike artifacts
+|/
+*   da57ff91 Merge pull request #641 from victorarias/feat/server-auth-terminal-phase2
+|\
+| * f107126b (origin/feat/server-auth-terminal-phase2) fix(build): strip trailing whitespace from ghostty-vt-native.patc
+h
+| * ebd8c5ac feat(terminal): snapshot-first attach behind ATTN_ATTACH_SNAPSHOT (Phase 2)
+|/
+*   7e8e1865 Merge pull request #639 from victorarias/feat/ghosttyvt-shadow-mode
+|\
+| * 1c935e1c (origin/feat/ghosttyvt-shadow-mode) fix(ghosttyvt): retain handle via runtime.Pinner, not integer→void* cas
+t
+| * 4e726d15 fix(ghosttyvt): pass cgo.Handle by value; wire native-lib build
+| * 1b5fc648 feat(pty): server-authoritative terminal, Phase 0+1 (shadow mode)
+* | f7cbb434 ci: run CI on epic/** branches and PRs targeting them
+|/
+*   62005610 (tmux, fix/recovery) Merge pull request #636 from victorarias/docs/refresh-agent-guidance
+|\
+| * c05583ba (origin/docs/refresh-agent-guidance, docs/refresh-agent-guidance) docs(agents): remove stale #498 reference
+s from agent guidance
+* |   33a1932a Merge pull request #635 from victorarias/chore/remove-tr205-login-legs
+|\ \
+| * | b6cd0a15 (origin/chore/remove-tr205-login-legs) chore(harness): drop dead live-agent path from tr205 scenario
+| * | 658a459f chore(harness): remove login-dependent tr205 real-agent legs
+* | |   af9b16f5 Merge pull request #634 from victorarias/fix/pr-wait-ready-review-baseline
+|\ \ \
+| |/ /
+|/| |
+bold red underline green italic 256-orange truecolor reverse trailing-spaces:
+AGENTS.md                 CONTRIBUTING.md           internal                  sdk
+app                       docs                      LICENSE                   TASKS.md
+attn                      examples                  Makefile                  test
+Casks                     ghostty-vt-native.lock    plugins                   third_party
+CHANGELOG.md              ghostty-vt-native.patch   README.md                 tools
+CLAUDE.md                 ghostty-vt-native.pin     review-loop-completed.png
+cmd                       go.mod                    review-loop-live.png
+CODE_OF_CONDUCT.md        go.sum                    scripts
+

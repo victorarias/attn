@@ -1,0 +1,24 @@
+ocs(agents): remove stale #498 references from agent guidance
+* |   33a1932a Merge pull request #635 from victorarias/chore/remove-tr205-login
+-legs
+|\ \
+| * | b6cd0a15 (origin/chore/remove-tr205-login-legs) chore(harness): drop dead
+live-agent path from tr205 scenario
+| * | 658a459f chore(harness): remove login-dependent tr205 real-agent legs
+* | |   af9b16f5 Merge pull request #634 from victorarias/fix/pr-wait-ready-revi
+ew-baseline
+|\ \ \
+| |/ /
+|/| |
+bold red underline green italic 256-orange truecolor reverse trailing-spaces:
+AGENTS.md                 examples                  README.md
+app                       ghostty-vt-native.lock    review-loop-completed.png
+attn                      ghostty-vt-native.patch   review-loop-live.png
+Casks                     ghostty-vt-native.pin     scripts
+CHANGELOG.md              go.mod                    sdk
+CLAUDE.md                 go.sum                    TASKS.md
+cmd                       internal                  test
+CODE_OF_CONDUCT.md        LICENSE                   third_party
+CONTRIBUTING.md           Makefile                  tools
+docs                      plugins
+
