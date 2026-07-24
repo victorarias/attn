@@ -16,6 +16,7 @@ enum SessionState {
   idle,
   pending_approval,
   scheduled,
+  recoverable,
   state_unknown: "unknown",
 }
 
@@ -80,6 +81,7 @@ enum AttachPolicy {
   fresh_spawn,
   relaunch_restore,
   same_app_remount,
+  revive,
 }
 
 enum WorkspaceContextMaintenanceAction {
@@ -130,7 +132,6 @@ model Session {
   state_since: string;          // ISO timestamp, always set
   state_updated_at: string;     // ISO timestamp, always set
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
-  recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
   ticket_unread?: boolean;      // True when this session has unread ticket events (drives the incoming-nudge indicator)
@@ -1678,6 +1679,9 @@ model AttachSessionMessage {
   cmd: "attach_session";
   id: string;
   attach_policy?: AttachPolicy;
+  // PTY geometry for revive; required when attach_policy is "revive"
+  cols?: int32;
+  rows?: int32;
 }
 
 model DetachSessionMessage {
@@ -1720,11 +1724,17 @@ model KillSessionMessage {
   cmd: "kill_session";
   id: string;
   signal?: string; // "SIGTERM", "SIGINT", ...
-  // True when this kill is the first half of a user-initiated reload (the client
-  // respawns the same session id right after). The daemon then treats the
-  // resulting process exit as a lifecycle transition, not a death: bound tickets
-  // are not crash-stamped and no reconcile is enqueued.
-  reload?: boolean;
+}
+
+// reload_session: kill and re-spawn a session's agent in place, daemon-owned.
+// The daemon rebuilds launch flags from the worker registry or the stored
+// launch intent; the client contributes only geometry (used when no live
+// worker exists to read geometry from).
+model ReloadSessionMessage {
+  cmd: "reload_session";
+  id: string;
+  cols: int32;
+  rows: int32;
 }
 
 model WorkspaceLayoutGetMessage {
@@ -2831,6 +2841,13 @@ model SpawnResultMessage {
   error?: string;
 }
 
+model ReloadSessionResultMessage {
+  event: "reload_session_result";
+  id: string;
+  success: boolean;
+  error?: string;
+}
+
 model AttachResultMessage {
   event: "attach_result";
   id: string;
@@ -2850,6 +2867,8 @@ model AttachResultMessage {
   rows?: int32;
   pid?: int32;
   running?: boolean;
+  // session was respawned by this attach (revive policy)
+  revived?: boolean;
   error?: string;
 }
 
@@ -3606,6 +3625,7 @@ alias DaemonEvent =
   | NotificationMarkReadResultMessage
   | NotificationsUpdatedMessage
   | SpawnResultMessage
+  | ReloadSessionResultMessage
   | AttachResultMessage
   | GetScreenSnapshotResultMessage
   | PtyOutputMessage

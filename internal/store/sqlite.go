@@ -772,6 +772,8 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 	{75, "persist the applied automation definition YAML", ""},
 	{76, "automations v2: definitions clean slate", ""},
 	{77, "automations v2: explicit run and binding state", ""},
+	{78, "add launch_intent to sessions", ""},
+	{79, "convert recoverable flag to session state", ""},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1017,6 +1019,16 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 77 {
 			if err := applyMigration77(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 78 {
+			if err := applyMigration78(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 79 {
+			if err := applyMigration79(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -1578,6 +1590,35 @@ func applyMigration77(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// applyMigration78 adds launch_intent to sessions. The column guard keeps
+// migration fixtures that replay migrations against a head schema idempotent.
+func applyMigration78(tx *sql.Tx) error {
+	hasLaunchIntent, err := columnExists(tx, "sessions", "launch_intent")
+	if err != nil {
+		return err
+	}
+	if hasLaunchIntent {
+		return nil
+	}
+	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN launch_intent TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
+func applyMigration79(tx *sql.Tx) error {
+	hasRecoverable, err := columnExists(tx, "sessions", "recoverable")
+	if err != nil {
+		return err
+	}
+	if !hasRecoverable {
+		return nil
+	}
+	if _, err := tx.Exec("UPDATE sessions SET state = 'recoverable' WHERE recoverable = 1"); err != nil {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE sessions DROP COLUMN recoverable")
+	return err
 }
 
 // applyMigration53 adds the closed_state column to chief_of_staff_dispatches,

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "182"
+const ProtocolVersion = "184"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -174,6 +174,7 @@ const (
 	CmdPtyInput                              = "pty_input"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
+	CmdReloadSession                         = "reload_session"
 	CmdSetTerminalTheme                      = "set_terminal_theme"
 	CmdWorkspaceLayoutGet                    = "workspace_layout_get"
 	CmdWorkspaceLayoutAddSessionPane         = "workspace_layout_add_session_pane"
@@ -312,6 +313,7 @@ const (
 	EventWorkflowActionResult            = "workflow_action_result"
 	EventPtyOutput                       = "pty_output"
 	EventSpawnResult                     = "spawn_result"
+	EventReloadSessionResult             = "reload_session_result"
 	EventAttachResult                    = "attach_result"
 	EventGetScreenSnapshotResult         = "get_screen_snapshot_result"
 	EventSessionExited                   = "session_exited"
@@ -1339,6 +1341,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg KillSessionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal kill_session: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdReloadSession:
+		var msg ReloadSessionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal reload_session: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

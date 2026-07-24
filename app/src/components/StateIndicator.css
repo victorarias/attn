@@ -53,7 +53,8 @@
   background-color: #22c55e; /* green */
 }
 
-.state-indicator--session.state-indicator--idle {
+.state-indicator--session.state-indicator--idle,
+.state-indicator--session.state-indicator--recoverable {
   background-color: #6b7280; /* gray */
 }
 

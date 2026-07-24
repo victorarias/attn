@@ -451,8 +451,8 @@ func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
 	}
 }
 
-// Startup recovery rewrites session states directly in the store (prune flips a
-// recoverable session to idle) without going through the per-session broadcast
+// Startup recovery rewrites session states directly in the store (prune marks a
+// recoverable session) without going through the per-session broadcast
 // that normally refreshes the workspace rollup. reseedWorkspaceStatuses, run at
 // the end of recovery, must repair the cached rollup so the first InitialState
 // snapshot shows a workspace dot consistent with its recovered sessions.
@@ -487,11 +487,11 @@ func TestDaemon_ReseedWorkspaceStatusesAfterRecovery(t *testing.T) {
 		t.Fatalf("precondition: seeded rollup = %q, want working", ws.Status)
 	}
 
-	// Recovery flips the missing-PTY session to idle in the store, but does NOT
+	// Recovery marks the missing-PTY session recoverable in the store, but does NOT
 	// recompute the rollup — so the cached status is now stale.
 	d.pruneSessionsWithoutPTY()
-	if got := d.store.Get(sessionID); got == nil || got.State != protocol.SessionStateIdle {
-		t.Fatalf("prune should keep recoverable session and mark it idle, got %+v", got)
+	if got := d.store.Get(sessionID); got == nil || got.State != protocol.SessionStateRecoverable {
+		t.Fatalf("prune should keep session and mark it recoverable, got %+v", got)
 	}
 	if ws, _ := d.workspaces.snapshot(workspaceID); ws.Status != protocol.WorkspaceStatusWorking {
 		t.Fatalf("rollup should still be stale-working before reseed, got %q", ws.Status)
@@ -730,11 +730,10 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 		Label:          "existing",
 		Agent:          protocol.SessionAgentCodex,
 		Directory:      "/tmp/existing",
-		State:          protocol.SessionStateWaitingInput,
+		State:          protocol.SessionStateRecoverable,
 		StateSince:     now,
 		StateUpdatedAt: now,
 		LastSeen:       now,
-		Recoverable:    protocol.Ptr(true),
 	})
 	d.store.Add(&protocol.Session{
 		ID:             "missing-running",
@@ -832,9 +831,6 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	if existing.State != protocol.SessionStateLaunching {
 		t.Fatalf("live-existing state = %s, want launching for recovery default", existing.State)
 	}
-	if protocol.Deref(existing.Recoverable) {
-		t.Fatal("live-existing recoverable flag should be cleared once worker is live")
-	}
 
 	liveNew := d.store.Get("live-new")
 	if liveNew == nil {
@@ -899,7 +895,6 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_PreservesScheduled(t *testing
 		StateSince:     now,
 		StateUpdatedAt: now,
 		LastSeen:       now,
-		Recoverable:    protocol.Ptr(true),
 	})
 	d.ptyBackend = &fakeWorkerReconcileBackend{
 		liveIDs: []string{"live-scheduled"},
@@ -1061,21 +1056,18 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_ClaudeSessionsRecoverable(t *
 		t.Fatalf("reaped = %d, want 2", report.Reaped)
 	}
 
-	// Claude session should be idle + recoverable
+	// Claude session should be recoverable.
 	claudeSession := d.store.Get("claude-stale")
 	if claudeSession == nil {
 		t.Fatal("claude-stale session should not be reaped")
 	}
-	if claudeSession.State != protocol.SessionStateIdle {
-		t.Fatalf("claude-stale state = %s, want idle", claudeSession.State)
-	}
-	if !protocol.Deref(claudeSession.Recoverable) {
-		t.Fatal("claude-stale should be marked recoverable")
+	if claudeSession.State != protocol.SessionStateRecoverable {
+		t.Fatalf("claude-stale state = %s, want recoverable", claudeSession.State)
 	}
 	for _, id := range []string{"plugin-metadata-stale", "plugin-capability-stale", "plugin-owned-stale"} {
 		session := d.store.Get(id)
-		if session == nil || session.State != protocol.SessionStateIdle || !protocol.Deref(session.Recoverable) {
-			t.Fatalf("%s session = %+v, want idle recoverable plugin session", id, session)
+		if session == nil || session.State != protocol.SessionStateRecoverable {
+			t.Fatalf("%s session = %+v, want recoverable plugin session", id, session)
 		}
 	}
 
@@ -1085,6 +1077,11 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_ClaudeSessionsRecoverable(t *
 	}
 	if d.store.Get("copilot-stale") != nil {
 		t.Fatal("copilot-stale session should be reaped")
+	}
+
+	secondReport := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+	if secondReport.MarkedRecoverable != 0 {
+		t.Fatalf("second marked_recoverable = %d, want 0", secondReport.MarkedRecoverable)
 	}
 }
 
@@ -1100,7 +1097,6 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_PreservesLivePluginReportedSt
 		StateSince:     now,
 		StateUpdatedAt: now,
 		LastSeen:       now,
-		Recoverable:    protocol.Ptr(true),
 	})
 	if !d.store.BeginAgentDriverRun("plugin-live", "snipe-plugin", "run-live") {
 		t.Fatal("BeginAgentDriverRun(plugin-live) failed")
@@ -1129,9 +1125,6 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_PreservesLivePluginReportedSt
 	if session == nil || session.State != protocol.SessionStateWaitingInput {
 		t.Fatalf("plugin-live session = %+v, want waiting_input retained from plugin report", session)
 	}
-	if protocol.Deref(session.Recoverable) {
-		t.Fatal("plugin-live recoverable flag should clear after PTY recovery")
-	}
 }
 
 func TestDaemon_PruneSessionsWithoutPTY_PreservesPluginMetadataForResume(t *testing.T) {
@@ -1158,8 +1151,8 @@ func TestDaemon_PruneSessionsWithoutPTY_PreservesPluginMetadataForResume(t *test
 		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 0", removed)
 	}
 	session := d.store.Get("plugin-resume")
-	if session == nil || session.State != protocol.SessionStateIdle || !protocol.Deref(session.Recoverable) {
-		t.Fatalf("plugin-resume session = %+v, want idle recoverable plugin session", session)
+	if session == nil || session.State != protocol.SessionStateRecoverable {
+		t.Fatalf("plugin-resume session = %+v, want recoverable plugin session", session)
 	}
 	if got := d.store.GetAgentMetadata("plugin-resume"); got != `{"native_id":"resume-me"}` {
 		t.Fatalf("metadata = %q, want persisted resume metadata", got)
@@ -1767,11 +1760,10 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForRecoverableClaude
 		Label:          "attn-session",
 		Agent:          protocol.SessionAgentClaude,
 		Directory:      t.TempDir(),
-		State:          protocol.SessionStateIdle,
+		State:          protocol.SessionStateRecoverable,
 		StateSince:     now,
 		StateUpdatedAt: now,
 		LastSeen:       now,
-		Recoverable:    protocol.Ptr(true),
 	})
 	d.store.SetResumeSessionID("attn-session", "claude-session")
 	addTestWorkspace(d, "workspace-attn-session", t.TempDir())
@@ -1830,7 +1822,6 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDEvenWhenNotRecoverab
 		StateSince:     now,
 		StateUpdatedAt: now,
 		LastSeen:       now,
-		Recoverable:    protocol.Ptr(false),
 	})
 	d.store.SetResumeSessionID("attn-session", "claude-session")
 	addTestWorkspace(d, "workspace-attn-session", t.TempDir())

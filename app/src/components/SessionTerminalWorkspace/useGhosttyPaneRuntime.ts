@@ -24,6 +24,8 @@ export interface PaneRuntimeSpec {
   agent?: string;
   sessionId?: string;
   testSessionId?: string;
+  // Recoverable panes request daemon-owned revival on their mount attach.
+  state?: string;
 }
 
 function decodePtyBytes(payload: string | Uint8Array): Uint8Array {
@@ -233,9 +235,11 @@ export function useGhosttyPaneRuntime(
     }
     const size = terminal.getSize();
     if (!size || !terminalIsCurrent()) return;
-    const attachPolicy = readyRuntimesRef.current.has(pane.runtimeId)
-      ? 'same_app_remount'
-      : 'fresh_spawn';
+    const attachPolicy = pane.state === 'recoverable'
+      ? 'revive'
+      : readyRuntimesRef.current.has(pane.runtimeId)
+        ? 'same_app_remount'
+        : 'fresh_spawn';
     if (import.meta.env.DEV && pane.testSessionId) {
       const testWindow = window as Window & {
         __TEST_SESSION_INPUT_EVENTS?: Array<{ sessionId: string; event: 'connect_terminal' | 'send_to_pty'; data?: string }>;

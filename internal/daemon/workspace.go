@@ -286,7 +286,7 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 
 // rollupWorkspaceStatus returns the workspace status that summarizes the
 // supplied session states. Higher-priority states win:
-// working > waiting_input > pending_approval > unknown > scheduled > idle > launching.
+// working > waiting_input > pending_approval > unknown > scheduled > idle > recoverable > launching.
 // `unknown` sits just below the explicit attention states: a session whose
 // state could not be determined still wants a look, so it must out-prioritize
 // the quiet `scheduled`/`idle` peers and surface at the workspace level (at the
@@ -295,19 +295,22 @@ func snapshotEntry(e *workspaceEntry) protocol.Workspace {
 // `unknown` would otherwise show an `idle` dot that disagrees with its session).
 // `scheduled` sits above `idle` because a parked-on-schedule session will
 // auto-resume — more informative than a settled idle peer — but below the
-// attention states since it needs no steering. `launching` sits below `idle`
-// on purpose — it carries less information than any settled state, so as soon
+// attention states since it needs no steering. `recoverable` is quiet like
+// `idle` (revive is automatic on open) but less informative than a settled idle
+// peer. `launching` sits below `recoverable` on purpose — it carries less
+// information than any settled state, so as soon
 // as one session reports a real state, that one wins over a peer that's still
 // booting. Only a truly empty slice (no member sessions) falls through to the
 // `idle` default.
 func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.WorkspaceStatus {
 	priority := map[protocol.SessionState]int{
-		protocol.SessionStateWorking:         7,
-		protocol.SessionStateWaitingInput:    6,
-		protocol.SessionStatePendingApproval: 5,
-		protocol.SessionStateUnknown:         4,
-		protocol.SessionStateScheduled:       3,
-		protocol.SessionStateIdle:            2,
+		protocol.SessionStateWorking:         8,
+		protocol.SessionStateWaitingInput:    7,
+		protocol.SessionStatePendingApproval: 6,
+		protocol.SessionStateUnknown:         5,
+		protocol.SessionStateScheduled:       4,
+		protocol.SessionStateIdle:            3,
+		protocol.SessionStateRecoverable:     2,
 		protocol.SessionStateLaunching:       1,
 	}
 	statusFor := map[protocol.SessionState]protocol.WorkspaceStatus{
@@ -318,6 +321,7 @@ func rollupWorkspaceStatus(sessionStates []protocol.SessionState) protocol.Works
 		protocol.SessionStateUnknown:         protocol.WorkspaceStatusUnknown,
 		protocol.SessionStateScheduled:       protocol.WorkspaceStatusScheduled,
 		protocol.SessionStateIdle:            protocol.WorkspaceStatusIdle,
+		protocol.SessionStateRecoverable:     protocol.WorkspaceStatusIdle,
 	}
 	bestPriority := 0
 	best := protocol.WorkspaceStatusIdle

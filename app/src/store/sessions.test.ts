@@ -2,9 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSessionStore, isSessionReloading } from './sessions';
 import { WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceStatus } from '../types/generated';
 
-const { mockPtySpawn, mockPtyKill } = vi.hoisted(() => ({
-  mockPtySpawn: vi.fn(),
-  mockPtyKill: vi.fn(),
+const { mockPtyReload } = vi.hoisted(() => ({
+  mockPtyReload: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -19,15 +18,13 @@ vi.mock('../pty/bridge', async () => {
   const actual = await vi.importActual<typeof import('../pty/bridge')>('../pty/bridge');
   return {
     ...actual,
-    ptySpawn: mockPtySpawn,
-    ptyKill: mockPtyKill,
+    ptyReload: mockPtyReload,
   };
 });
 
 describe('sessions store', () => {
   beforeEach(() => {
-    mockPtySpawn.mockReset();
-    mockPtyKill.mockReset();
+    mockPtyReload.mockReset();
     useSessionStore.setState({
       sessions: [],
       activeSessionId: null,
@@ -520,52 +517,36 @@ describe('sessions store', () => {
     expect(session?.daemonActivePaneId).toBe('pane-session');
   });
 
-  it('reloadSession preserves endpoint routing for remote sessions', async () => {
+  it('reloadSession asks the daemon to reload with clamped geometry', async () => {
     await useSessionStore.getState().createSession('Remote', '/srv/repo', 'sess-remote', 'codex', 'ep-remote', true, 'workspace-sess-remote');
 
-    await useSessionStore.getState().reloadSession('sess-remote', { cols: 120, rows: 40 });
+    await useSessionStore.getState().reloadSession('sess-remote', { cols: 12, rows: 40 });
 
-    // reload:true is the daemon's signal that this kill is a lifecycle
-    // transition, not a crash — bound tickets must stay put.
-    expect(mockPtyKill).toHaveBeenCalledWith({ id: 'sess-remote', reload: true });
-    expect(mockPtySpawn).toHaveBeenCalledWith({
-      args: expect.objectContaining({
-        id: 'sess-remote',
-        cwd: '/srv/repo',
-        endpoint_id: 'ep-remote',
-        reload: true,
-        cols: 120,
-        rows: 40,
-        yolo_mode: true,
-      }),
-    });
+    expect(mockPtyReload).toHaveBeenCalledWith({ id: 'sess-remote', cols: 80, rows: 24 });
   });
 
-  it('marks the session as reloading for the whole kill→respawn window', async () => {
+  it('marks the session as reloading while the daemon reload is pending', async () => {
     await useSessionStore.getState().createSession('Local', '/srv/repo', 'sess-reload', 'codex', undefined, false, 'workspace-sess-reload');
 
-    // The reload kill surfaces a session_exited that can look like a clean
-    // voluntary quit; the guard must be up while ptyKill resolves so the
-    // auto-close-on-clean-exit handler leaves the pane alone.
-    let duringKill = false;
-    mockPtyKill.mockImplementation(async () => {
-      duringKill = isSessionReloading('sess-reload');
+    let duringReload = false;
+    mockPtyReload.mockImplementation(async () => {
+      duringReload = isSessionReloading('sess-reload');
     });
 
     expect(isSessionReloading('sess-reload')).toBe(false);
     await useSessionStore.getState().reloadSession('sess-reload', { cols: 120, rows: 40 });
 
-    expect(duringKill).toBe(true);
+    expect(duringReload).toBe(true);
     expect(isSessionReloading('sess-reload')).toBe(false);
   });
 
-  it('clears the reloading mark even when the respawn fails', async () => {
+  it('clears the reloading mark when the daemon reload fails', async () => {
     await useSessionStore.getState().createSession('Local', '/srv/repo', 'sess-reload-fail', 'codex', undefined, false, 'workspace-sess-reload-fail');
-    mockPtySpawn.mockRejectedValueOnce(new Error('spawn failed'));
+    mockPtyReload.mockRejectedValueOnce(new Error('reload failed'));
 
     await expect(
       useSessionStore.getState().reloadSession('sess-reload-fail', { cols: 120, rows: 40 }),
-    ).rejects.toThrow('spawn failed');
+    ).rejects.toThrow('reload failed');
 
     expect(isSessionReloading('sess-reload-fail')).toBe(false);
   });

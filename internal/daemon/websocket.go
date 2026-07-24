@@ -1107,6 +1107,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handlePtyResize(client, msg.(*protocol.PtyResizeMessage))
 	case protocol.CmdKillSession:
 		d.handleKillSession(client, msg.(*protocol.KillSessionMessage))
+	case protocol.CmdReloadSession:
+		d.handleReloadSession(client, msg.(*protocol.ReloadSessionMessage))
 	case protocol.CmdSetTerminalTheme:
 		d.handleSetTerminalTheme(client, msg.(*protocol.SetTerminalThemeMessage))
 	case protocol.CmdWorkspaceLayoutGet:
@@ -1444,6 +1446,10 @@ func remoteCommandPTYTargetID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdKillSession:
 		if typed, ok := msg.(*protocol.KillSessionMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdReloadSession:
+		if typed, ok := msg.(*protocol.ReloadSessionMessage); ok {
 			return typed.ID
 		}
 	}

@@ -1331,7 +1331,6 @@ func sessionsMatch(left, right protocol.Session) bool {
 		protocol.Deref(left.NeedsReviewAfterLongRun) == protocol.Deref(right.NeedsReviewAfterLongRun) &&
 		protocol.Deref(left.TicketUnread) == protocol.Deref(right.TicketUnread) &&
 		protocol.Deref(left.NudgeFiresAt) == protocol.Deref(right.NudgeFiresAt) &&
-		protocol.Deref(left.Recoverable) == protocol.Deref(right.Recoverable) &&
 		strings.Join(left.Todos, "\x00") == strings.Join(right.Todos, "\x00") &&
 		left.LastSeen == right.LastSeen
 }

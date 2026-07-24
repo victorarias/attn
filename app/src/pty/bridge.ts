@@ -6,8 +6,7 @@ export interface PtySpawnArgs {
   cwd: string;
   workspace_id: string;
   endpoint_id?: string;
-  intent?: 'create' | 'reload';
-  reload?: boolean;
+  intent?: 'create';
   cols: number;
   rows: number;
   shell?: boolean;
@@ -36,7 +35,8 @@ export interface PtyAttachArgs {
 export type PtyAttachPolicy =
   | 'fresh_spawn'
   | 'relaunch_restore'
-  | 'same_app_remount';
+  | 'same_app_remount'
+  | 'revive';
 
 export type PtyDataEventSource =
   | 'attach_replay';
@@ -67,7 +67,8 @@ export interface PtyBackend {
   write: (id: string, data: string, source?: string) => Promise<void>;
   resize: (id: string, cols: number, rows: number, reason?: string) => Promise<void>;
   detach: (id: string) => Promise<void>;
-  kill: (id: string, options?: { reload?: boolean }) => Promise<void>;
+  kill: (id: string) => Promise<void>;
+  reload: (id: string, cols: number, rows: number) => Promise<void>;
 }
 
 const listeners = new Set<PtyEventHandler>();
@@ -203,7 +204,7 @@ export async function ptyDetach(request: { id: string }) {
   await backend.detach(request.id);
 }
 
-export async function ptyKill(request: { id: string; reload?: boolean }) {
+export async function ptyKill(request: { id: string }) {
   if (mockEnabled()) {
     if (!mockSessions.has(request.id)) {
       return;
@@ -215,5 +216,20 @@ export async function ptyKill(request: { id: string; reload?: boolean }) {
   if (!backend) {
     throw new Error('PTY backend is not configured');
   }
-  await backend.kill(request.id, request.reload ? { reload: true } : undefined);
+  await backend.kill(request.id);
+}
+
+export async function ptyReload(request: { id: string; cols: number; rows: number }) {
+  if (mockEnabled()) {
+    if (!mockSessions.has(request.id)) {
+      return;
+    }
+    mockSessions.delete(request.id);
+    emitPtyEvent({ event: 'exit', id: request.id, code: 0 });
+    return;
+  }
+  if (!backend) {
+    throw new Error('PTY backend is not configured');
+  }
+  await backend.reload(request.id, request.cols, request.rows);
 }

@@ -71,6 +71,7 @@
     "real-app:scenario-terminal-block-resize": "node scripts/real-app-harness/scenario-terminal-block-resize.mjs",
     "real-app:scenario-offset-soak": "node scripts/real-app-harness/scenario-offset-soak.mjs",
     "real-app:scenario-webgl-recovery": "node scripts/real-app-harness/scenario-webgl-recovery.mjs",
+    "real-app:scenario-recoverable-auto-revive": "node scripts/real-app-harness/scenario-recoverable-auto-revive.mjs",
     "real-app:scenario-reveal-overflow": "node scripts/real-app-harness/scenario-reveal-overflow.mjs",
     "real-app:scenario-present-submit-closes-window": "node scripts/real-app-harness/scenario-present-submit-closes-window.mjs",
     "real-app:serial-matrix": "node scripts/real-app-harness/run-serial-matrix.mjs",

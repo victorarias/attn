@@ -173,7 +173,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '182';
+export const PROTOCOL_VERSION = '184';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2084,6 +2084,22 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'reload_session_result': {
+            if (data.id) {
+              const key = `reload_session:${data.id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve({ success: true });
+                } else {
+                  pending.reject(new Error(data.error ?? 'Reload failed'));
+                }
+              }
+            }
+            break;
+          }
+
           case 'spawn_result': {
             if (data.id) {
               const key = `pty_spawn_${data.id}`;
@@ -3039,6 +3055,27 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const sendReloadSession = useCallback((id: string, cols: number, rows: number): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `reload_session:${id}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'reload_session', id, cols, rows }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Reload session timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
   const sendAttachSessionNow = useCallback((id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -3059,6 +3096,9 @@ export function useDaemonSocket({
         cmd: 'attach_session',
         id,
         ...(context?.policy ? { attach_policy: context.policy } : {}),
+        ...(context?.policy === 'revive'
+          ? { cols: context.requestedCols, rows: context.requestedRows }
+          : {}),
       }));
 
       setTimeout(() => {
@@ -3177,7 +3217,7 @@ export function useDaemonSocket({
   const attachExistingRuntime = useCallback(async (
     args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'agent' | 'reason'>,
     options: {
-      policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount'>;
+      policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount' | 'revive'>;
       forceResizeBeforeAttach?: boolean;
     },
   ): Promise<void> => {
@@ -3202,7 +3242,7 @@ export function useDaemonSocket({
     });
   }, [reconcileAttachedRuntimeGeometry, sendAttachSessionWithRetry, sendPtyResize]);
 
-  const sendKillSession = useCallback((id: string, signal?: string, options?: { reload?: boolean }): Promise<void> => {
+  const sendKillSession = useCallback((id: string, signal?: string): Promise<void> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -3220,9 +3260,6 @@ export function useDaemonSocket({
         cmd: 'kill_session',
         id,
         ...(signal && { signal }),
-        // Tells the daemon this kill is the first half of a reload (the same id
-        // respawns right after), so the exit is not treated as a crash.
-        ...(options?.reload && { reload: true }),
       }));
 
       // Wait for session_exited to avoid kill/spawn races during reload.
@@ -3552,13 +3589,11 @@ export function useDaemonSocket({
         await spawnPtyRuntime(
           args,
           {
-            existingSession,
             runtimeKnownToDaemon: Boolean(existingSession)
               || workspacesIncludeRuntimeID(workspacesRef.current, args.id),
             alreadyAttached: ptyTransportRef.current.hasAttachedRuntime(args.id),
           },
           {
-            attachExistingRuntime,
             attachFreshRuntime: async (spawnArgs: PtySpawnArgs) => {
               await sendAttachSessionWithRetry(spawnArgs.id, {
                 ...createAttachRequestContext(spawnArgs, 'fresh_spawn'),
@@ -3566,14 +3601,6 @@ export function useDaemonSocket({
             },
             spawnRuntime: sendSpawnSession,
             resizeRuntime: sendPtyResize,
-            logResumeRecovery: ({ id, agent, recoverable }) => {
-              console.log(
-                '[DaemonSocket] Recovering session %s (%s) via resume (recoverable=%s)',
-                id,
-                agent ?? 'unknown',
-                String(recoverable),
-              );
-            },
           },
         );
       },
@@ -3594,16 +3621,19 @@ export function useDaemonSocket({
       detach: async (id: string) => {
         sendDetachSession(id);
       },
-      kill: async (id: string, options?: { reload?: boolean }) => {
+      kill: async (id: string) => {
         sendDetachSession(id);
-        await sendKillSession(id, undefined, options);
+        await sendKillSession(id);
+      },
+      reload: async (id: string, cols: number, rows: number) => {
+        await sendReloadSession(id, cols, rows);
       },
     });
 
     return () => {
       setPtyBackend(null);
     };
-  }, [attachExistingRuntime, sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendSpawnSession]);
+  }, [attachExistingRuntime, sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendReloadSession, sendSpawnSession]);
 
   const sendPRAction = useCallback((
     action: 'approve' | 'merge',

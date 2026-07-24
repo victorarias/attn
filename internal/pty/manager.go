@@ -138,10 +138,16 @@ type SessionInfo struct {
 type Manager struct {
 	mu             sync.RWMutex
 	sessions       map[string]*Session
+	pendingSpawns  map[string]struct{}
 	scrollbackSize int
 	logf           LogFunc
 	onExit         func(ExitInfo)
 	onState        func(sessionID, state string)
+
+	// testHookAfterSpawnReserve, when non-nil, runs after Spawn reserves its
+	// session ID and releases the mutex. Test-only seam for deterministic
+	// overlap; never set in production.
+	testHookAfterSpawnReserve func()
 }
 
 func NewManager(scrollbackSize int, logf LogFunc) *Manager {
@@ -153,6 +159,7 @@ func NewManager(scrollbackSize int, logf LogFunc) *Manager {
 	}
 	return &Manager{
 		sessions:       make(map[string]*Session),
+		pendingSpawns:  make(map[string]struct{}),
 		scrollbackSize: scrollbackSize,
 		logf:           logf,
 	}
@@ -207,7 +214,20 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		m.mu.Unlock()
 		return fmt.Errorf("session %s already exists", opts.ID)
 	}
+	if _, pending := m.pendingSpawns[opts.ID]; pending {
+		m.mu.Unlock()
+		return fmt.Errorf("session %s spawn already in progress", opts.ID)
+	}
+	m.pendingSpawns[opts.ID] = struct{}{}
 	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.pendingSpawns, opts.ID)
+		m.mu.Unlock()
+	}()
+	if m.testHookAfterSpawnReserve != nil {
+		m.testHookAfterSpawnReserve()
+	}
 
 	loginShell := GetUserLoginShell()
 	shellCandidates := preferredShellCandidates(loginShell)

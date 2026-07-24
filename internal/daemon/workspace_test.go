@@ -74,6 +74,21 @@ func TestRollupWorkspaceStatus_PriorityOrdering(t *testing.T) {
 			want:   protocol.WorkspaceStatusIdle,
 		},
 		{
+			name:   "recoverable yields idle",
+			states: []protocol.SessionState{protocol.SessionStateRecoverable},
+			want:   protocol.WorkspaceStatusIdle,
+		},
+		{
+			name:   "idle beats recoverable",
+			states: []protocol.SessionState{protocol.SessionStateRecoverable, protocol.SessionStateIdle},
+			want:   protocol.WorkspaceStatusIdle,
+		},
+		{
+			name:   "recoverable beats launching",
+			states: []protocol.SessionState{protocol.SessionStateLaunching, protocol.SessionStateRecoverable},
+			want:   protocol.WorkspaceStatusIdle,
+		},
+		{
 			name:   "unknown beats launching",
 			states: []protocol.SessionState{protocol.SessionStateUnknown, protocol.SessionStateLaunching},
 			want:   protocol.WorkspaceStatusUnknown,
