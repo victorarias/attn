@@ -35,6 +35,101 @@ func styledCorpus() []byte {
 	return b.Bytes()
 }
 
+func TestCursorPos(t *testing.T) {
+	term := newT(t, 12, 3)
+	term.Write([]byte("\x1b[2;7H"))
+	if x, y := term.CursorPos(); x != 6 || y != 1 {
+		t.Fatalf("CursorPos after CUP = (%d,%d), want (6,1)", x, y)
+	}
+
+	for i := 0; i < 8; i++ {
+		term.Write([]byte(fmt.Sprintf("line-%d\r\n", i)))
+	}
+	if x, y := term.CursorPos(); x != 0 || y != 2 {
+		t.Fatalf("CursorPos after scrollback = (%d,%d), want viewport-relative (0,2)", x, y)
+	}
+}
+
+func TestCursorVisible(t *testing.T) {
+	term := newT(t, 12, 3)
+	if !term.CursorVisible() {
+		t.Fatal("fresh cursor is not visible")
+	}
+	term.Write([]byte("\x1b[?25l"))
+	if term.CursorVisible() {
+		t.Fatal("cursor remained visible after DECTCEM reset")
+	}
+	term.Write([]byte("\x1b[?25h"))
+	if !term.CursorVisible() {
+		t.Fatal("cursor did not become visible after DECTCEM set")
+	}
+}
+
+func TestViewportText(t *testing.T) {
+	term := newT(t, 16, 3)
+	term.Write([]byte("scrolled-off-1\r\nscrolled-off-2\r\nvisible-one   \r\nvisible-two\r\nvisible-three"))
+
+	const want = "visible-one\nvisible-two\nvisible-three\n"
+	if got := term.ViewportText(); got != want {
+		t.Fatalf("ViewportText = %q, want %q", got, want)
+	}
+}
+
+func TestViewportTextBlankScreenShape(t *testing.T) {
+	const rows = 3
+	want := strings.Repeat("\n", rows)
+	term := newT(t, 10, rows)
+
+	if got := term.ViewportText(); got != want {
+		t.Fatalf("fresh ViewportText = %q, want %q", got, want)
+	}
+
+	term.Write([]byte("nonblank\x1b[2J\x1b[H"))
+	if got := term.ViewportText(); got != want {
+		t.Fatalf("cleared ViewportText = %q, want %q", got, want)
+	}
+}
+
+func TestSerializeViewportRoundTrip(t *testing.T) {
+	for _, cursorVisible := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cursor_visible_%t", cursorVisible), func(t *testing.T) {
+			src := newT(t, 20, 4)
+			src.Write([]byte("history-1\r\nhistory-2\r\nhistory-3\r\n\x1b[1;31mBOLD-RED\x1b[0m\r\nvisible-two\r\nvisible-three"))
+			src.Write([]byte("\x1b[3;9H"))
+			if !cursorVisible {
+				src.Write([]byte("\x1b[?25l"))
+			}
+
+			snap := src.SerializeViewport()
+			if len(snap.VTDump) == 0 {
+				t.Fatal("SerializeViewport returned an empty VT dump")
+			}
+			if !bytes.Contains(snap.VTDump, []byte("\x1b[1m\x1b[38;5;1mBOLD-RED")) {
+				t.Fatalf("SerializeViewport lost the bold-red SGR run: %q", snap.VTDump)
+			}
+			restored := newT(t, snap.Cols, snap.Rows)
+			restored.Write(snap.VTDump)
+
+			if got, want := restored.ViewportText(), src.ViewportText(); got != want {
+				t.Fatalf("viewport text mismatch after restore\n got: %q\nwant: %q", got, want)
+			}
+			if gotX, gotY := restored.CursorPos(); gotX != 8 || gotY != 2 {
+				t.Fatalf("restored cursor = (%d,%d), want (8,2)", gotX, gotY)
+			}
+			if got := restored.CursorVisible(); got != cursorVisible {
+				t.Fatalf("restored cursor visibility = %t, want %t", got, cursorVisible)
+			}
+			plain := restored.PlainText()
+			if lines := strings.Split(strings.TrimSuffix(plain, "\n"), "\n"); len(lines) != snap.Rows {
+				t.Fatalf("restored PlainText has %d rows, want viewport-only %d: %q", len(lines), snap.Rows, plain)
+			}
+			if got, want := normalizedPlainText(plain, snap.Rows), restored.ViewportText(); got != want {
+				t.Fatalf("restored scrollback leaked into PlainText\n got: %q\nwant: %q", got, want)
+			}
+		})
+	}
+}
+
 // TestRoundTripPlainText is the core correctness invariant: feed terminal A,
 // serialize it, replay the dump into a fresh terminal B, and assert A and B
 // render identical plain text (viewport + scrollback).
@@ -246,6 +341,23 @@ func (t *Terminal) cursorXY() (x, y int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.cursorXYLocked()
+}
+
+func normalizedPlainText(s string, rows int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	var out strings.Builder
+	for row := 0; row < rows; row++ {
+		line := ""
+		if row < len(lines) {
+			line = strings.TrimRight(lines[row], " ")
+		}
+		out.WriteString(line)
+		out.WriteByte('\n')
+	}
+	return out.String()
 }
 
 func firstN(s string, n int) string {

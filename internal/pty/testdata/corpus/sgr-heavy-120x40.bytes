@@ -1,0 +1,67 @@
+*   [33m62e24280[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeat/ghosttyvt-viewport-api[m[33m, [m[1;31morigin/epic/server-authoritative-terminal[m[33m)[m Merge pull request #649 from victorarias/fix/ticket-overlay-test-flake
+[31m|[m[32m\[m  
+[31m|[m * [33m41689dd8[m[33m ([m[1;31morigin/fix/ticket-overlay-test-flake[m[33m, [m[1;32mfix/ticket-overlay-test-flake[m[33m)[m test(tickets): wait for status select before firing change in overlay test
+* [32m|[m   [33m3b0fb060[m Merge pull request #647 from victorarias/chore/terminal-restore-dead-code
+[32m|[m[34m\[m [32m\[m  
+[32m|[m [34m|[m[32m/[m  
+[32m|[m[32m/[m[34m|[m   
+[32m|[m * [33m814c5b5b[m[33m ([m[1;31morigin/chore/terminal-restore-dead-code[m[33m, [m[1;32mchore/terminal-restore-dead-code[m[33m)[m refactor(terminal): collapse attach restore-planning to snapshot vocabulary
+[32m|[m * [33m18c4b9d8[m refactor(pty): remove finished shadow-divergence scaffolding
+* [34m|[m   [33md0190e83[m Merge pull request #648 from victorarias/feat/ghosttyvt-linux
+[35m|[m[36m\[m [34m\[m  
+[35m|[m * [34m|[m [33mffe7be89[m[33m ([m[1;31morigin/feat/ghosttyvt-linux[m[33m, [m[1;32mfeat/ghosttyvt-linux[m[33m)[m feat(ghosttyvt): build + run the native VT library on Linux (daemon-only)
+[35m|[m[35m/[m [34m/[m  
+* [34m|[m   [33m1f13ca0a[m[33m ([m[1;32mepic/server-authoritative-terminal[m[33m)[m Merge pull request #646 from victorarias/feat/libghostty-prebuilt-download
+[34m|[m[1;32m\[m [34m\[m  
+[34m|[m [1;32m|[m[34m/[m  
+[34m|[m[34m/[m[1;32m|[m   
+[34m|[m * [33m0b5b3740[m[33m ([m[1;31morigin/feat/libghostty-prebuilt-download[m[33m)[m build(ghostty-vt): download prebuilt libghostty-vt by default
+[34m|[m[34m/[m  
+*   [33m0ccb467f[m Merge pull request #642 from victorarias/feat/server-auth-terminal-phase3
+[1;33m|[m[1;34m\[m  
+[1;33m|[m * [33m4cf3d8a1[m[33m ([m[1;31morigin/feat/server-auth-terminal-phase3[m[33m, [m[1;32mfeat/server-auth-terminal-phase3[m[33m)[m fix(pty): keep client state on snapshot-less attach (Phase 3)
+[1;33m|[m * [33md8ce9b1d[m feat(pty): flip snapshot restore on, delete raw replay (Phase 3)
+[1;33m|[m[1;33m/[m  
+*   [33m07e855d2[m Merge pull request #644 from victorarias/feat/server-auth-terminal-phase3a
+[1;35m|[m[1;36m\[m  
+[1;35m|[m * [33m8da296f6[m[33m ([m[1;31morigin/feat/server-auth-terminal-phase3a[m[33m, [m[1;32mfeat/server-auth-terminal-phase3a[m[33m)[m fix(fmt): gofmt block table + ws_pty; mark Phase 3a Verify done
+[1;35m|[m * [33m3b472e55[m feat(pty): worker-owned OSC 133 block table + snapshot seed (Phase 3a)
+[1;35m|[m * [33m9af6d18b[m fix(test): corpus prover conforms to app tsc gate (node env pragma, no node:path, ES2020)
+[1;35m|[m * [33mb487cc0d[m feat(ptyworker,ptybackend): plumb GhosttyBlocks over the worker RPC (Phase 3a rails)
+[1;35m|[m * [33maaede737[m feat(pty): OSC 133 block-tracking rails — locked skeleton + atomicity proof (Phase 3a)
+[1;35m|[m * [33m5b6d9f4d[m test(blocks): shared OSC 133 block-lifecycle corpus + TS prover (Phase 3a rails)
+[1;35m|[m * [33mbd3ea60b[m feat(ghosttyvt): tracked-ref leak accounting + AltScreenActive (Phase 3a rails)
+[1;35m|[m * [33md8477d93[m docs(terminal): Phase 3a plan + restore-fidelity design + spike artifacts
+[1;35m|[m[1;35m/[m  
+*   [33mda57ff91[m Merge pull request #641 from victorarias/feat/server-auth-terminal-phase2
+[31m|[m[32m\[m  
+[31m|[m * [33mf107126b[m[33m ([m[1;31morigin/feat/server-auth-terminal-phase2[m[33m)[m fix(build): strip trailing whitespace from ghostty-vt-native.patch
+[31m|[m * [33mebd8c5ac[m feat(terminal): snapshot-first attach behind ATTN_ATTACH_SNAPSHOT (Phase 2)
+[31m|[m[31m/[m  
+*   [33m7e8e1865[m Merge pull request #639 from victorarias/feat/ghosttyvt-shadow-mode
+[33m|[m[34m\[m  
+[33m|[m * [33m1c935e1c[m[33m ([m[1;31morigin/feat/ghosttyvt-shadow-mode[m[33m)[m fix(ghosttyvt): retain handle via runtime.Pinner, not integer→void* cast
+[33m|[m * [33m4e726d15[m fix(ghosttyvt): pass cgo.Handle by value; wire native-lib build
+[33m|[m * [33m1b5fc648[m feat(pty): server-authoritative terminal, Phase 0+1 (shadow mode)
+* [34m|[m [33mf7cbb434[m ci: run CI on epic/** branches and PRs targeting them
+[34m|[m[34m/[m  
+*   [33m62005610[m[33m ([m[1;32mtmux[m[33m, [m[1;32mfix/recovery[m[33m)[m Merge pull request #636 from victorarias/docs/refresh-agent-guidance
+[35m|[m[36m\[m  
+[35m|[m * [33mc05583ba[m[33m ([m[1;31morigin/docs/refresh-agent-guidance[m[33m, [m[1;32mdocs/refresh-agent-guidance[m[33m)[m docs(agents): remove stale #498 references from agent guidance
+* [36m|[m   [33m33a1932a[m Merge pull request #635 from victorarias/chore/remove-tr205-login-legs
+[1;31m|[m[1;32m\[m [36m\[m  
+[1;31m|[m * [36m|[m [33mb6cd0a15[m[33m ([m[1;31morigin/chore/remove-tr205-login-legs[m[33m)[m chore(harness): drop dead live-agent path from tr205 scenario
+[1;31m|[m * [36m|[m [33m658a459f[m chore(harness): remove login-dependent tr205 real-agent legs
+* [1;32m|[m [36m|[m   [33maf9b16f5[m Merge pull request #634 from victorarias/fix/pr-wait-ready-review-baseline
+[1;32m|[m[1;34m\[m [1;32m\[m [36m\[m  
+[1;32m|[m [1;34m|[m[1;32m/[m [36m/[m  
+[1;32m|[m[1;32m/[m[1;34m|[m [36m|[m   
+[1;31mbold red[0m [4;32munderline green[0m [3;38;5;208mitalic 256-orange[0m [38;2;18;52;86mtruecolor[0m [7mreverse[0m trailing-spaces:   
+AGENTS.md                 CONTRIBUTING.md           [34minternal[39;49m[0m                  [34msdk[39;49m[0m
+[34mapp[39;49m[0m                       [34mdocs[39;49m[0m                      LICENSE                   TASKS.md
+[31mattn[39;49m[0m                      [34mexamples[39;49m[0m                  Makefile                  [34mtest[39;49m[0m
+[34mCasks[39;49m[0m                     ghostty-vt-native.lock    [34mplugins[39;49m[0m                   [34mthird_party[39;49m[0m
+CHANGELOG.md              ghostty-vt-native.patch   README.md                 [34mtools[39;49m[0m
+CLAUDE.md                 ghostty-vt-native.pin     review-loop-completed.png
+[34mcmd[39;49m[0m                       go.mod                    review-loop-live.png
+CODE_OF_CONDUCT.md        go.sum                    [34mscripts[39;49m[0m

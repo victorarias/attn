@@ -88,6 +88,54 @@ static int ghosttyvt_active_screen(GhosttyTerminal t) {
 	ghostty_terminal_get(t, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &s);
 	return (int)s;
 }
+
+static bool ghosttyvt_cursor_visible(GhosttyTerminal t) {
+	bool visible = false;
+	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_CURSOR_VISIBLE, &visible) != GHOSTTY_SUCCESS) return false;
+	return visible;
+}
+
+static GhosttyPoint ghosttyvt_viewport_point(uint16_t x, uint32_t y) {
+	GhosttyPoint p;
+	memset(&p, 0, sizeof(p));
+	p.tag = GHOSTTY_POINT_TAG_VIEWPORT;
+	p.value.coordinate.x = x;
+	p.value.coordinate.y = y;
+	return p;
+}
+
+static GhosttyResult ghosttyvt_format_viewport(
+	GhosttyTerminal t,
+	uint16_t cols,
+	uint16_t rows,
+	GhosttyFormatterFormat emit,
+	uint8_t** out_ptr,
+	size_t* out_len
+) {
+	GhosttyGridRef start;
+	GhosttyGridRef end;
+	GhosttySelection selection;
+	GhosttyFormatter formatter;
+	GhosttyFormatterTerminalOptions opts;
+	GhosttyResult rc;
+
+	if (cols == 0 || rows == 0) return GHOSTTY_INVALID_VALUE;
+	if ((rc = ghostty_terminal_grid_ref(t, ghosttyvt_viewport_point(0, 0), &start)) != GHOSTTY_SUCCESS) return rc;
+	if ((rc = ghostty_terminal_grid_ref(t, ghosttyvt_viewport_point(cols - 1, rows - 1), &end)) != GHOSTTY_SUCCESS) return rc;
+
+	memset(&selection, 0, sizeof(selection));
+	selection.size = sizeof(selection);
+	selection.start = start;
+	selection.end = end;
+	selection.rectangle = false;
+
+	opts = ghosttyvt_make_opts(emit);
+	opts.selection = &selection;
+	if ((rc = ghostty_formatter_terminal_new(NULL, &formatter, t, opts)) != GHOSTTY_SUCCESS) return rc;
+	rc = ghostty_formatter_format_alloc(formatter, NULL, out_ptr, out_len);
+	ghostty_formatter_free(formatter);
+	return rc;
+}
 */
 import "C"
 
@@ -95,6 +143,7 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/cgo"
+	"strings"
 	"sync"
 	"unsafe"
 )
@@ -117,8 +166,9 @@ type Options struct {
 	MaxScrollback int
 }
 
-// Snapshot is a self-contained serialization of a Terminal's full state,
-// suitable for reconstructing an identical terminal on a client.
+// Snapshot is a self-contained serialization of terminal state suitable for
+// reconstructing a terminal on a client. Serialize carries full state;
+// SerializeViewport carries only the visible viewport.
 type Snapshot struct {
 	Cols, Rows int
 	// VTDump is one self-contained VT stream (FORMAT_VT, unwrap=false, all
@@ -255,6 +305,65 @@ func (t *Terminal) PlainText() string {
 	return string(t.format(C.GHOSTTY_FORMATTER_FORMAT_PLAIN))
 }
 
+// CursorPos returns the active-screen cursor position in 0-indexed viewport
+// coordinates.
+func (t *Terminal) CursorPos() (x, y int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return 0, 0
+	}
+	return t.cursorXYLocked()
+}
+
+// CursorVisible reports whether the cursor is visible (DECTCEM, DEC private
+// mode 25).
+func (t *Terminal) CursorVisible() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !t.closed && bool(C.ghosttyvt_cursor_visible(t.term))
+}
+
+// ViewportText returns the visible screen as plain text: one line per viewport
+// row, trailing blanks trimmed per row, every row terminated with \n. Returns
+// "" only if formatting fails.
+func (t *Terminal) ViewportText() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return ""
+	}
+	return t.viewportTextLocked()
+}
+
+// SerializeViewport returns a self-contained styled VT stream of the visible
+// screen only (no scrollback). Replaying it into a fresh terminal of Snapshot.
+// Cols x Snapshot.Rows reproduces the viewport content, styles, cursor
+// position, and cursor visibility.
+func (t *Terminal) SerializeViewport() Snapshot {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return Snapshot{Cols: t.cols, Rows: t.rows}
+	}
+
+	dump, ok := t.formatViewport(C.GHOSTTY_FORMATTER_FORMAT_VT)
+	if !ok {
+		return Snapshot{Cols: t.cols, Rows: t.rows}
+	}
+
+	// The formatter emits its cursor CUP before tabstop resets, so restore the
+	// true position after all formatter state (0-indexed native coords → 1-based CUP).
+	cx, cy := t.cursorXYLocked()
+	dump = fmt.Appendf(dump, "\x1b[%d;%dH", cy+1, cx+1)
+	if C.ghosttyvt_cursor_visible(t.term) {
+		dump = append(dump, "\x1b[?25h"...)
+	} else {
+		dump = append(dump, "\x1b[?25l"...)
+	}
+	return Snapshot{Cols: t.cols, Rows: t.rows, VTDump: dump}
+}
+
 // Serialize produces a Snapshot: one self-contained VT stream that reproduces
 // the terminal state (grid + scrollback + modes + cursor) when replayed into a
 // fresh same-size terminal.
@@ -344,6 +453,46 @@ func (t *Terminal) format(emit C.GhosttyFormatterFormat) []byte {
 		return nil
 	}
 	return C.GoBytes(unsafe.Pointer(ptr), C.int(n))
+}
+
+// formatViewport runs the formatter against the active screen's visible
+// viewport only. ok is false only when formatting fails; a successful blank
+// viewport returns a non-nil empty slice. Caller holds t.mu and must not call
+// after Close.
+func (t *Terminal) formatViewport(emit C.GhosttyFormatterFormat) ([]byte, bool) {
+	var ptr *C.uint8_t
+	var n C.size_t
+	if rc := C.ghosttyvt_format_viewport(t.term, C.uint16_t(t.cols), C.uint16_t(t.rows), emit, &ptr, &n); rc != C.GHOSTTY_SUCCESS {
+		return nil, false
+	}
+	defer C.ghostty_free(nil, ptr, n)
+	if n == 0 {
+		return []byte{}, true
+	}
+	return C.GoBytes(unsafe.Pointer(ptr), C.int(n)), true
+}
+
+// viewportTextLocked normalizes the selection formatter's text into a stable
+// row shape for classifier consumers. Caller holds t.mu.
+func (t *Terminal) viewportTextLocked() string {
+	raw, ok := t.formatViewport(C.GHOSTTY_FORMATTER_FORMAT_PLAIN)
+	if !ok {
+		return ""
+	}
+	lines := strings.Split(string(raw), "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	var out strings.Builder
+	for row := 0; row < t.rows; row++ {
+		line := ""
+		if row < len(lines) {
+			line = strings.TrimRight(lines[row], " ")
+		}
+		out.WriteString(line)
+		out.WriteByte('\n')
+	}
+	return out.String()
 }
 
 // Close frees the native terminal and releases the cgo.Handle. Idempotent.

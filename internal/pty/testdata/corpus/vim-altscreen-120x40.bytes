@@ -1,0 +1,39 @@
+[?1049h[?1h=[1;40r[27m[24m[23m[0m[H[J[?25l[40;1H"~/projects/victor/attn--linux-ghostty/AGENTS.md" 281 lines, 14260 bytes[1;1H# attn agent guide
+
+macOS only for the **app** (the Tauri UI). Do not add Linux or Windows app
+compatibility unless requested. The **headless daemon**, however, is supported on
+Linux (amd64/arm64) —[5;23Hthe hub cross-compiles and runs it on Linux remotes —[5;77Hso
+daemon-side code (`cmd/attn`, `internal/**`) must build and run on Linux too. See
+"Native VT library" below.
+
+## Commands
+
+```bash
+# isolated non-production install (pre-authorized)
+make dev[20C# build/install/open attn-dev.app; ensure dev daemon
+make install-daemon-dev     # replace/re-sign daemon sidecar only
+make install PROFILE=<name> # build/install named isolated profile
+
+# production (Victor's explicit approval required)
+make[24C# build/install/open ~/Applications/attn.app
+make install
+make install-daemon
+
+# build and test
+make build-app
+make test
+make test-frontend
+make test-e2e
+make test-harness[11C# Go + frontend + e2e
+make test-all[15C# Go + frontend
+go test ./internal/store -run TestList
+
+# frontend-only loop
+pnpm --dir app run dev
+pnpm --dir app test
+pnpm --dir app run e2e
+```
+
+Run full app builds/installs outside the sandbox: code signing needs the macOS
+keychain; sandboxed identity lookup can cause ad-hoc signing and lose persistent
+permissions.[1;1H[34h[?25h[16;1H[?25l[40;1H[K[40;1H:q[40;1H[K[40;1H[?1l>[?1049l[34h[?25h

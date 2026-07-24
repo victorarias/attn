@@ -1,0 +1,22 @@
+[?u[>0q]11;?\[?1049hP+q696e646e\P+q71756572792d6f732d6e616d65\[?1049l[0c]7;file://Victors-MacBook-Air.local/Users/victor/projects/victor/attn--tmux[m]11;?\[6n[0c[?1004h[?2004h[>4;1m=[K]133;A;click_events=1\[J
+[K╭─ [1;34m~/p/v/attn--tmux[0m  [1;35mchore/terminal-restore-dead-code[0m[31m$[0m
+╰─[1;32m$[0m  ]133;B[K[5Cecho [10Chello [16Cfrom [21Cfish [26C&[27C&[28C [29C[?1004l[?2004l[>4;0m>ls[31C[26D[36mecho[39m hello from fish [36m&&[39m [36mls[39m[31C
+[m]133;C;cmdline_url=echo%20hello%20from%20fish%20%26%26%20ls[mhello from fish
+ AGENTS.md           [34m [1mexamples[0m                 [35m review-loop-completed.png[0m
+[34m [1mapp[0m                  ghostty-vt-native.patch  [35m review-loop-live.png[0m
+[32m󰡯 [1mattn[0m                 ghostty-vt-native.pin    [34m [1mscripts[0m
+[34m [1mCasks[0m                go.mod                   [34m [1msdk[0m
+ CHANGELOG.md         go.sum                    TASKS.md
+ CLAUDE.md           [34m [1minternal[0m                 [34m [1mtest[0m
+[34m [1mcmd[0m                  LICENSE                  [34m [1mthird_party[0m
+ CODE_OF_CONDUCT.md  [33m [1;4mMakefile[0m                 [34m [1mtools[0m
+ CONTRIBUTING.md     [34m [1mplugins[0m
+[34m [1mdocs[0m                [33m󰂺 [1;4mREADME.md[0m
+]133;D;0[?25h[2m⏎[m                                                                               ⏎ [K]7;file://Victors-MacBook-Air.local/Users/victor/projects/victor/attn--tmux[m]11;?\[6n[0c[?1004h[?2004h[>4;1m=[K]133;A;click_events=1[J
+[K╭─ [1;34m~/p/v/attn--tmux[0m  [1;35mchore/terminal-restore-dead-code[0m[31m$[0m
+╰─[1;32m$[0m  ]133;B[K[5C[?1004l[?2004l[>4;0m>pwd[8C
+[m]133;C;cmdline_url=pwd[m/Users/victor/projects/victor/attn--tmux
+]133;D;0[?25h[2m⏎[m                                                                               ⏎ [K]7;file://Victors-MacBook-Air.local/Users/victor/projects/victor/attn--tmux[m]11;?\[6n[0c[?1004h[?2004h[>4;1m=[K]133;A;click_events=1[J
+[K╭─ [1;34m~/p/v/attn--tmux[0m  [1;35mchore/terminal-restore-dead-code[0m[31m$[0m
+╰─[1;32m$[0m  ]133;B[K[5C[?1004l[?2004l[>4;0m>exit[9C
+[m]133;C;cmdline_url=exit[m]133;D;0[?25h[m
