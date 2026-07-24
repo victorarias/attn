@@ -34,20 +34,33 @@ ZIG ?= zig
 MACOS_CODESIGN_IDENTITY ?=
 
 # Native VT library (libghostty-vt) for the server-authoritative terminal.
-# Only Darwin/arm64 links it via cgo (internal/ghosttyvt); every other platform
-# compiles the pure-Go stub and needs nothing here. The archive lives under
-# gitignored third_party/ (scripts/build-libghostty-vt.sh is the source of
-# truth), so a fresh checkout has no archive and the first cgo link would fail.
-# `build` therefore depends on the archive target on Darwin/arm64: it runs the
-# build script — which requires zig 0.16.x and clones the pinned source — when
-# the archive is missing or the pin moved, and is a no-op once it is present.
-UNAME_S := $(shell uname -s)
-UNAME_M := $(shell uname -m)
-NATIVE_VT_LIB := third_party/ghostty-vt/lib/libghostty-vt.a
-ifeq ($(UNAME_S)/$(UNAME_M),Darwin/arm64)
-NATIVE_VT_DEP := $(NATIVE_VT_LIB)
-else
+# It links via cgo (internal/ghosttyvt) on darwin/arm64 AND the two Linux tuples
+# — the daemon runs headless on Linux, so the worker's restore path serializes
+# there too; every other target compiles the pure-Go stub and needs nothing
+# here. The per-platform archive lives under gitignored
+# third_party/ghostty-vt/<goos>_<goarch>/ (scripts/build-libghostty-vt.sh is the
+# source of truth), so a fresh checkout has no archive and the first cgo link
+# would fail. `build` therefore depends on the archive target for the platform it
+# is building for: the download-first script fetches a prebuilt (or, when the
+# pin/patch was edited locally, builds from source with zig 0.16.x), and is a
+# no-op once present.
+#
+# The target platform honors GOOS/GOARCH however they arrive — environment
+# (`GOOS=linux GOARCH=amd64 make build`) or make override (`make build
+# GOOS=linux`) — so a cross build resolves the Linux archive. `$(GOOS)` is
+# populated by make from either origin; `go env` supplies the host default when
+# neither is set. (A bare `$(shell go env GOOS)` would miss the make-override
+# form, since go env only reads the environment.)
+VT_GOOS := $(or $(GOOS),$(shell go env GOOS))
+VT_GOARCH := $(or $(GOARCH),$(shell go env GOARCH))
+VT_PLATFORM := $(VT_GOOS)_$(VT_GOARCH)
+NATIVE_VT_LIB := third_party/ghostty-vt/$(VT_PLATFORM)/lib/libghostty-vt.a
+# Only the tuples that link the real cgo library need the archive; kept in
+# lockstep with the //go:build constraint in internal/ghosttyvt.
+ifeq ($(filter $(VT_PLATFORM),darwin_arm64 linux_amd64 linux_arm64),)
 NATIVE_VT_DEP :=
+else
+NATIVE_VT_DEP := $(NATIVE_VT_LIB)
 endif
 
 # Rebuild the native archive when its pin, build script, or carried patch
@@ -57,40 +70,50 @@ endif
 # script is download-first: it fetches a prebuilt asset keyed by pin+patch and
 # verified against ghostty-vt-native.lock, and only builds from source (zig) when
 # the pin/patch was edited locally. The lock is a prerequisite so a republished
-# asset (new sha) forces everyone to re-fetch. It installs into
-# third_party/ghostty-vt/{lib,include}.
+# asset (new sha) forces everyone to re-fetch. GHOSTTY_VT_GOOS/GOARCH pin the
+# script to the same target the archive path resolves, so it installs into
+# third_party/ghostty-vt/$(VT_PLATFORM)/.
 $(NATIVE_VT_LIB): ghostty-vt-native.pin scripts/build-libghostty-vt.sh scripts/lib/libghostty-vt.sh $(wildcard ghostty-vt-native.patch) $(wildcard ghostty-vt-native.lock)
-	./scripts/build-libghostty-vt.sh
+	GHOSTTY_VT_GOOS=$(VT_GOOS) GHOSTTY_VT_GOARCH=$(VT_GOARCH) ./scripts/build-libghostty-vt.sh
 
-# Rebuild the native archive from source and publish it as a prebuilt asset.
-# Run after changing ghostty-vt-native.pin or ghostty-vt-native.patch; needs zig
-# 0.16.x and an authenticated gh. Commit the regenerated ghostty-vt-native.lock.
+# Rebuild the native archives for EVERY supported target from source and publish
+# them as prebuilt assets. Run after changing ghostty-vt-native.pin or
+# ghostty-vt-native.patch; needs zig 0.16.x (cross-compiles all targets from one
+# host) and an authenticated gh. Commit the regenerated ghostty-vt-native.lock.
 publish-native-vt:
 	./scripts/publish-libghostty-vt.sh
 
 build: $(NATIVE_VT_DEP)
 	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
 
+# Cross-compile the headless Linux daemon from macOS. Recurse into `build` with
+# the target GOOS/GOARCH + zig as the cgo cross-compiler: passing them on the
+# sub-make command line exports them, so the sub-make's `go env` resolves the
+# Linux archive dependency (download-first) before the cross cgo link.
 build-linux-amd64:
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 CC='$(ZIG) cc -target x86_64-linux-gnu' CXX='$(ZIG) c++ -target x86_64-linux-gnu' go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
+	$(MAKE) build GOOS=linux GOARCH=amd64 CGO_ENABLED=1 \
+		CC='$(ZIG) cc -target x86_64-linux-gnu' \
+		CXX='$(ZIG) c++ -target x86_64-linux-gnu'
 
 build-linux-arm64:
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC='$(ZIG) cc -target aarch64-linux-gnu' CXX='$(ZIG) c++ -target aarch64-linux-gnu' go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
+	$(MAKE) build GOOS=linux GOARCH=arm64 CGO_ENABLED=1 \
+		CC='$(ZIG) cc -target aarch64-linux-gnu' \
+		CXX='$(ZIG) c++ -target aarch64-linux-gnu'
 
 GOTESTSUM=$(HOME)/go/bin/gotestsum
 
 $(GOTESTSUM):
 	go install gotest.tools/gotestsum@latest
 
-test:
+test: $(NATIVE_VT_DEP)
 	./scripts/test-go.sh
 
 # Verbose test output (shows all test names as they run)
-test-v:
+test-v: $(NATIVE_VT_DEP)
 	./scripts/test-go.sh -v
 
 # Quick test (compact package output)
-test-quick:
+test-quick: $(NATIVE_VT_DEP)
 	./scripts/test-go.sh
 
 # Watch mode - re-runs tests on file changes

@@ -61,6 +61,11 @@ jobs:
         with:
           go-version: '1.22'
 
+      # internal/ghosttyvt links libghostty-vt via cgo on Linux; fetch the
+      # prebuilt native archive (download-first, no zig) so vet/build/test link.
+      - name: Ensure native VT library
+        run: ./scripts/build-libghostty-vt.sh
+
       - name: Check formatting
         run: |
           if [ -n "$(gofmt -l .)" ]; then
@@ -145,6 +150,7 @@ jobs:
       - name: Build attn binary
         run: |
           cd ..
+          ./scripts/build-libghostty-vt.sh
           go build -o /tmp/attn ./cmd/attn
 
       - name: Get Playwright version
@@ -221,6 +227,7 @@ jobs:
       - name: Build attn binary
         run: |
           cd ../..
+          ./scripts/build-libghostty-vt.sh
           go build -o /tmp/attn ./cmd/attn
           target_triple="$(rustc -vV | awk '/host:/ {print $2}')"
           mkdir -p app/src-tauri/binaries

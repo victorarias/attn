@@ -1,4 +1,4 @@
-//go:build darwin && arm64
+//go:build (darwin && arm64) || (linux && amd64) || (linux && arm64)
 
 // Package ghosttyvt is the worker-side owner of an authoritative parsed
 // terminal, backed by libghostty-vt (Ghostty's VT core) via cgo.
@@ -9,15 +9,27 @@
 // stream. Live output keeps streaming as raw bytes; only the attach/restore
 // path uses this package.
 //
-// The static library and headers under third_party/ghostty-vt/ are produced by
-// scripts/build-libghostty-vt.sh (source of truth; gitignored output). See
-// docs/plans/2026-07-22-server-authoritative-terminal.md.
+// It links on darwin/arm64 (the app host) AND the two Linux tuples: the daemon
+// runs headless on Linux, so the worker's restore path must serialize there
+// too. Every other target compiles the pure-Go stub (stub.go). The static
+// library + headers under third_party/ghostty-vt/<goos>_<goarch>/ are produced
+// per platform by scripts/build-libghostty-vt.sh (source of truth; gitignored
+// output). See docs/plans/2026-07-22-server-authoritative-terminal.md.
 package ghosttyvt
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../third_party/ghostty-vt/include
-#cgo LDFLAGS: ${SRCDIR}/../../third_party/ghostty-vt/lib/libghostty-vt.a
-#cgo LDFLAGS: -framework CoreFoundation -framework CoreText -framework CoreGraphics -framework Foundation
+// Per-platform archive + headers (download-first; see the build script). The
+// four macOS frameworks are darwin-only over-linking Ghostty's build pulls in;
+// the Linux targets link only the self-contained .a (its C/C++ runtime deps
+// from simdutf/highway are statically baked in) plus libc/libm/libpthread.
+#cgo darwin,arm64 CFLAGS: -I${SRCDIR}/../../third_party/ghostty-vt/darwin_arm64/include
+#cgo darwin,arm64 LDFLAGS: ${SRCDIR}/../../third_party/ghostty-vt/darwin_arm64/lib/libghostty-vt.a
+#cgo darwin,arm64 LDFLAGS: -framework CoreFoundation -framework CoreText -framework CoreGraphics -framework Foundation
+#cgo linux,amd64 CFLAGS: -I${SRCDIR}/../../third_party/ghostty-vt/linux_amd64/include
+#cgo linux,amd64 LDFLAGS: ${SRCDIR}/../../third_party/ghostty-vt/linux_amd64/lib/libghostty-vt.a
+#cgo linux,arm64 CFLAGS: -I${SRCDIR}/../../third_party/ghostty-vt/linux_arm64/include
+#cgo linux,arm64 LDFLAGS: ${SRCDIR}/../../third_party/ghostty-vt/linux_arm64/lib/libghostty-vt.a
+#cgo linux LDFLAGS: -lm -lpthread
 #include <stdlib.h>
 #include <string.h>
 #include <ghostty/vt.h>
