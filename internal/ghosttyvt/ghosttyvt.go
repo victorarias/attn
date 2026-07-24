@@ -347,7 +347,10 @@ func (t *Terminal) SerializeViewport() Snapshot {
 		return Snapshot{Cols: t.cols, Rows: t.rows}
 	}
 
-	dump := t.formatViewport(C.GHOSTTY_FORMATTER_FORMAT_VT)
+	dump, ok := t.formatViewport(C.GHOSTTY_FORMATTER_FORMAT_VT)
+	if !ok {
+		return Snapshot{Cols: t.cols, Rows: t.rows}
+	}
 
 	// The formatter emits its cursor CUP before tabstop resets, so restore the
 	// true position after all formatter state (0-indexed native coords → 1-based CUP).
@@ -453,25 +456,27 @@ func (t *Terminal) format(emit C.GhosttyFormatterFormat) []byte {
 }
 
 // formatViewport runs the formatter against the active screen's visible
-// viewport only. Caller holds t.mu and must not call after Close.
-func (t *Terminal) formatViewport(emit C.GhosttyFormatterFormat) []byte {
+// viewport only. ok is false only when formatting fails; a successful blank
+// viewport returns a non-nil empty slice. Caller holds t.mu and must not call
+// after Close.
+func (t *Terminal) formatViewport(emit C.GhosttyFormatterFormat) ([]byte, bool) {
 	var ptr *C.uint8_t
 	var n C.size_t
 	if rc := C.ghosttyvt_format_viewport(t.term, C.uint16_t(t.cols), C.uint16_t(t.rows), emit, &ptr, &n); rc != C.GHOSTTY_SUCCESS {
-		return nil
+		return nil, false
 	}
 	defer C.ghostty_free(nil, ptr, n)
 	if n == 0 {
-		return nil
+		return []byte{}, true
 	}
-	return C.GoBytes(unsafe.Pointer(ptr), C.int(n))
+	return C.GoBytes(unsafe.Pointer(ptr), C.int(n)), true
 }
 
 // viewportTextLocked normalizes the selection formatter's text into a stable
 // row shape for classifier consumers. Caller holds t.mu.
 func (t *Terminal) viewportTextLocked() string {
-	raw := t.formatViewport(C.GHOSTTY_FORMATTER_FORMAT_PLAIN)
-	if raw == nil {
+	raw, ok := t.formatViewport(C.GHOSTTY_FORMATTER_FORMAT_PLAIN)
+	if !ok {
 		return ""
 	}
 	lines := strings.Split(string(raw), "\n")

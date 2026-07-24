@@ -75,6 +75,21 @@ func TestViewportText(t *testing.T) {
 	}
 }
 
+func TestViewportTextBlankScreenShape(t *testing.T) {
+	const rows = 3
+	want := strings.Repeat("\n", rows)
+	term := newT(t, 10, rows)
+
+	if got := term.ViewportText(); got != want {
+		t.Fatalf("fresh ViewportText = %q, want %q", got, want)
+	}
+
+	term.Write([]byte("nonblank\x1b[2J\x1b[H"))
+	if got := term.ViewportText(); got != want {
+		t.Fatalf("cleared ViewportText = %q, want %q", got, want)
+	}
+}
+
 func TestSerializeViewportRoundTrip(t *testing.T) {
 	for _, cursorVisible := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cursor_visible_%t", cursorVisible), func(t *testing.T) {
