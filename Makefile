@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -54,9 +54,19 @@ endif
 # changes (or it is absent). The patch is listed via $(wildcard) so a fresh
 # checkout without it still resolves the rule; once present, editing it forces a
 # rebuild (the script applies it, so a stale archive would miss the change). The
-# script installs into third_party/ghostty-vt/{lib,include}.
-$(NATIVE_VT_LIB): ghostty-vt-native.pin scripts/build-libghostty-vt.sh $(wildcard ghostty-vt-native.patch)
+# script is download-first: it fetches a prebuilt asset keyed by pin+patch and
+# verified against ghostty-vt-native.lock, and only builds from source (zig) when
+# the pin/patch was edited locally. The lock is a prerequisite so a republished
+# asset (new sha) forces everyone to re-fetch. It installs into
+# third_party/ghostty-vt/{lib,include}.
+$(NATIVE_VT_LIB): ghostty-vt-native.pin scripts/build-libghostty-vt.sh scripts/lib/libghostty-vt.sh $(wildcard ghostty-vt-native.patch) $(wildcard ghostty-vt-native.lock)
 	./scripts/build-libghostty-vt.sh
+
+# Rebuild the native archive from source and publish it as a prebuilt asset.
+# Run after changing ghostty-vt-native.pin or ghostty-vt-native.patch; needs zig
+# 0.16.x and an authenticated gh. Commit the regenerated ghostty-vt-native.lock.
+publish-native-vt:
+	./scripts/publish-libghostty-vt.sh
 
 build: $(NATIVE_VT_DEP)
 	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
