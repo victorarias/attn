@@ -5307,7 +5307,7 @@ func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
 		os.Remove(sockPath)
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
@@ -5391,7 +5391,7 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 		os.Remove(sockPath)
 	}()
 
-	waitForSocket(t, sockPath, 2*time.Second)
+	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
 
