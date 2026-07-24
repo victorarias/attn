@@ -69,6 +69,7 @@ export interface PtyBackend {
   resize: (id: string, cols: number, rows: number, reason?: string) => Promise<void>;
   detach: (id: string) => Promise<void>;
   kill: (id: string, options?: { reload?: boolean }) => Promise<void>;
+  reload: (id: string, cols: number, rows: number) => Promise<void>;
 }
 
 const listeners = new Set<PtyEventHandler>();
@@ -217,4 +218,19 @@ export async function ptyKill(request: { id: string; reload?: boolean }) {
     throw new Error('PTY backend is not configured');
   }
   await backend.kill(request.id, request.reload ? { reload: true } : undefined);
+}
+
+export async function ptyReload(request: { id: string; cols: number; rows: number }) {
+  if (mockEnabled()) {
+    if (!mockSessions.has(request.id)) {
+      return;
+    }
+    mockSessions.delete(request.id);
+    emitPtyEvent({ event: 'exit', id: request.id, code: 0 });
+    return;
+  }
+  if (!backend) {
+    throw new Error('PTY backend is not configured');
+  }
+  await backend.reload(request.id, request.cols, request.rows);
 }

@@ -4,7 +4,7 @@ import { normalizeSessionState } from '../types/sessionState';
 import type { SessionAgent } from '../types/sessionAgent';
 import { normalizeSessionAgent } from '../types/sessionAgent';
 import type { DaemonWorkspace } from '../hooks/useDaemonSocket';
-import { listenPtyEvents, ptyKill, ptySpawn, type PtySpawnArgs } from '../pty/bridge';
+import { listenPtyEvents, ptyReload, type PtySpawnArgs } from '../pty/bridge';
 import {
   createDefaultWorkspaceState,
   workspaceSnapshotFromDaemonWorkspace,
@@ -13,11 +13,11 @@ import {
 
 export type { TerminalWorkspaceState };
 
-// Sessions whose runtime is being reloaded in place (kill → respawn of the same
-// id). The kill's exit event can look like a clean voluntary quit (code 0, no
-// signal), which would trip the auto-close-on-clean-exit path in App.tsx and
-// tear down the pane/workspace out from under the pending respawn. Consumers
-// (the session-exit handler) check this before treating an exit as end-of-life.
+// Sessions whose runtime is being reloaded in place. The reload's exit event
+// can look like a clean voluntary quit (code 0, no signal), which would trip
+// the auto-close-on-clean-exit path in App.tsx and tear down the pane/workspace
+// while the daemon restores the runtime. Consumers (the session-exit handler)
+// check this before treating an exit as end-of-life.
 const reloadingSessionIds = new Set<string>();
 
 export function isSessionReloading(id: string): boolean {
@@ -298,7 +298,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   reloadSession: async (id: string, size?: { cols: number; rows: number }) => {
-    const { sessions, launcherConfig } = get();
+    const { sessions } = get();
     const session = sessions.find((s) => s.id === id);
     if (!session) return;
     let cols = size?.cols && size.cols > 0 ? size.cols : 80;
@@ -307,47 +307,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       cols = 80;
       rows = 24;
     }
-
     reloadingSessionIds.add(id);
     try {
-      // reload:true tells the daemon this kill is a lifecycle transition (the
-      // same id respawns just below), not a crash — bound tickets stay put.
-      await ptyKill({ id, reload: true });
-    } catch (e) {
-      console.warn('[Session] Reload kill failed, continuing to respawn:', e);
-    }
-
-    try {
-      const selectedExecutable = launcherConfig.executables[session.agent] || '';
-      await ptySpawn({
-        args: {
-          id,
-          cwd: session.cwd,
-          workspace_id: session.workspaceId,
-          ...(session.endpointId ? { endpoint_id: session.endpointId } : {}),
-          intent: 'reload',
-          reload: true,
-          label: session.label,
-          cols,
-          rows,
-          shell: false,
-          agent: session.agent,
-          yolo_mode: session.yoloMode ?? null,
-          ...(selectedExecutable ? { executable: selectedExecutable } : {}),
-          ...(session.agent === 'claude' && selectedExecutable
-            ? { claude_executable: selectedExecutable }
-            : {}),
-          ...(session.agent === 'codex' && selectedExecutable
-            ? { codex_executable: selectedExecutable }
-            : {}),
-          ...(session.agent === 'copilot' && selectedExecutable
-            ? { copilot_executable: selectedExecutable }
-            : {}),
-        },
-      });
-    } catch (e) {
-      console.error('[Session] Reload spawn failed:', e);
-      throw e;
+      await ptyReload({ id, cols, rows });
     } finally {
       reloadingSessionIds.delete(id);
     }

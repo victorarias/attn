@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { ptyAttach, ptyDetach, ptyKill, ptySpawn } from '../pty/bridge';
+import { ptyAttach, ptyDetach, ptyKill, ptyReload, ptySpawn } from '../pty/bridge';
 import { AutomationActionTimeoutError, PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
 import { useAutomationsStore } from '../store/automations';
@@ -140,6 +140,40 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     ws.emit({ event: 'session_exited', id: 'reload-race', exit_code: 0 });
     await killPromise;
     expect(resolved).toBe(true);
+
+    unmount();
+  });
+
+  it('resolves or rejects ptyReload from its daemon result', async () => {
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    const successfulReload = ptyReload({ id: 'reload-success', cols: 120, rows: 40 });
+    expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+      cmd: 'reload_session',
+      id: 'reload-success',
+      cols: 120,
+      rows: 40,
+    });
+    act(() => {
+      ws.emit({ event: 'reload_session_result', id: 'reload-success', success: true });
+    });
+    await expect(successfulReload).resolves.toBeUndefined();
+
+    const failedReload = ptyReload({ id: 'reload-failure', cols: 80, rows: 24 });
+    act(() => {
+      ws.emit({ event: 'reload_session_result', id: 'reload-failure', success: false, error: 'reload denied' });
+    });
+    await expect(failedReload).rejects.toThrow('reload denied');
 
     unmount();
   });

@@ -2071,6 +2071,22 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'reload_session_result': {
+            if (data.id) {
+              const key = `reload_session:${data.id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve({ success: true });
+                } else {
+                  pending.reject(new Error(data.error ?? 'Reload failed'));
+                }
+              }
+            }
+            break;
+          }
+
           case 'spawn_result': {
             if (data.id) {
               const key = `pty_spawn_${data.id}`;
@@ -3011,6 +3027,27 @@ export function useDaemonSocket({
     });
   }, []);
 
+  const sendReloadSession = useCallback((id: string, cols: number, rows: number): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+
+      const key = `reload_session:${id}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'reload_session', id, cols, rows }));
+
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Reload session timed out'));
+        }
+      }, 30000);
+    });
+  }, []);
+
   const sendAttachSessionNow = useCallback((id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -3573,12 +3610,15 @@ export function useDaemonSocket({
         sendDetachSession(id);
         await sendKillSession(id, undefined, options);
       },
+      reload: async (id: string, cols: number, rows: number) => {
+        await sendReloadSession(id, cols, rows);
+      },
     });
 
     return () => {
       setPtyBackend(null);
     };
-  }, [attachExistingRuntime, sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendSpawnSession]);
+  }, [attachExistingRuntime, sendAttachSessionWithRetry, sendDetachSession, sendKillSession, sendPtyInput, sendPtyResize, sendReloadSession, sendSpawnSession]);
 
   const sendPRAction = useCallback((
     action: 'approve' | 'merge',
