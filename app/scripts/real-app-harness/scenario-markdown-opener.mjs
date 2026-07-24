@@ -7,7 +7,9 @@
 //   -> picking docks a markdown tile bound to the session
 //   -> a gitignored file stays invisible to fuzzy mode
 //   -> re-summoning with an empty query now lists the opened files as recents,
-//      most recent first, and picking one reuses its tile.
+//      most recent first, and picking one reuses its tile
+//   -> typing an absolute path switches to path mode: directories descend, and
+//      the gitignored file fuzzy mode could not see opens from there.
 //
 // Everything here is out of reach of the browser e2e: the native keystroke, the
 // real daemon's file-activity table, and git enumeration over a real repository.
@@ -90,13 +92,13 @@ async function closeWorkspacePanes(client, sessionId) {
 // A real git repository: fuzzy mode enumerates through `git ls-files`, so the
 // scenario must exercise that path (and its .gitignore behavior), not the
 // WalkDir fallback.
-function seedRepo(cwd, alpha, beta) {
+function seedRepo(cwd, alpha, beta, ignored) {
   fs.mkdirSync(path.join(cwd, 'docs'), { recursive: true });
   fs.mkdirSync(path.join(cwd, 'build'), { recursive: true });
   fs.writeFileSync(path.join(cwd, '.gitignore'), 'build/\n', 'utf8');
   fs.writeFileSync(path.join(cwd, 'docs', alpha), '# Alpha plan\n', 'utf8');
   fs.writeFileSync(path.join(cwd, 'docs', beta), '# Beta notes\n', 'utf8');
-  fs.writeFileSync(path.join(cwd, 'build', 'ignored-generated.md'), '# Generated\n', 'utf8');
+  fs.writeFileSync(path.join(cwd, 'build', ignored), '# Generated\n', 'utf8');
   const git = (...args) => execFileSync('git', args, { cwd, stdio: 'pipe' });
   git('init');
   git('config', 'user.email', 'harness@example.com');
@@ -119,7 +121,7 @@ async function main() {
     prefix: 'markdown-opener',
     metadata: {
       agent: 'shell',
-      focus: 'native Cmd+P opener: fuzzy over git-enumerated markdown, then recents',
+      focus: 'native Cmd+P opener: fuzzy over git-enumerated markdown, recents, then path mode',
     },
   });
 
@@ -142,11 +144,14 @@ async function main() {
     // recents table persists) still proves THIS run's opens landed in recents.
     const alpha = `alpha-plan-${runner.runId}.md`;
     const beta = `beta-notes-${runner.runId}.md`;
+    // Gitignored, and named per run for the same reason: a previous run opened
+    // its own copy through path mode, so that one legitimately lives in recents.
+    const ignored = `ignored-generated-${runner.runId}.md`;
 
     const { workspaceId, cwd } = await runner.step('create_shell_session', async () => {
       const sessionCwd = path.join(runner.sessionDir, 'opener-ws');
       fs.mkdirSync(sessionCwd, { recursive: true });
-      seedRepo(sessionCwd, alpha, beta);
+      seedRepo(sessionCwd, alpha, beta, ignored);
       sessionId = await createSessionAndWaitForInitialPane({
         client,
         observer,
@@ -218,10 +223,13 @@ async function main() {
 
     await runner.step('gitignored_file_is_invisible', async () => {
       // build/ is gitignored, so git enumeration never reports it.
-      await typeQuery('ignored-generated');
+      await typeQuery('ignoredgenerated');
       const state = await openerState(client);
+      // Earlier runs opened their own copy through path mode, so their
+      // (absolute-path) rows may match this query; only this run's file proves
+      // anything about the index.
       runner.assert(
-        state.rows.length === 0,
+        !state.rows.some((row) => row.path.endsWith(ignored)),
         `A gitignored markdown file must not appear in fuzzy mode: ${JSON.stringify(state.rows)}`,
       );
     });
@@ -308,8 +316,47 @@ async function main() {
       );
     });
 
+    await runner.step('path_mode_reaches_gitignored_file', async () => {
+      await summon('re-summon for path mode');
+      // A query that starts with a slash switches modes: one directory at a
+      // time, straight from the filesystem, so a file .gitignore hides from the
+      // fuzzy index is still reachable.
+      await typeQuery(`${cwd}/`);
+      const listing = await waitForOpener(
+        client,
+        (current) => current.rows.some((row) => row.path.endsWith('/build')),
+        'path mode lists the session directory',
+      );
+      runner.assert(
+        listing.rows.some((row) => row.title === 'docs/'),
+        `Path mode must mark directories with a trailing slash: ${JSON.stringify(listing.rows)}`,
+      );
+
+      // Picking a directory descends instead of opening anything.
+      await pickRow(listing, '/build');
+      const descended = await waitForOpener(
+        client,
+        (current) => current.open && current.rows.some((row) => row.path.endsWith(ignored)),
+        'picking a directory descends into it',
+      );
+      runner.assert(
+        descended.query.endsWith('/build/'),
+        `Descending must rewrite the query to the directory: ${JSON.stringify(descended.query)}`,
+      );
+      await captureFrontWindowScreenshot(path.join(runner.runDir, 'opener-path-mode.png'), { client }).catch(() => {});
+
+      await pickRow(descended, ignored);
+      await waitForOpener(client, (current) => !current.open, 'picking a file in path mode closes the opener');
+      await waitForWorkspaceUi(
+        client,
+        workspaceId,
+        (state) => markdownTileIds(state).length === 3,
+        'the gitignored file opens as a third markdown tile',
+      );
+    });
+
     const result = runner.finishSuccess({ sessionId, workspaceId, cwd });
-    console.log('[verify] PASS — markdown opener: fuzzy (git-enumerated, gitignore-respecting) and recents both worked.');
+    console.log('[verify] PASS — markdown opener: fuzzy (git-enumerated, gitignore-respecting), recents, and path mode all worked.');
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     await captureFrontWindowScreenshot(path.join(runner.runDir, 'failure.png'), { client }).catch(() => {});

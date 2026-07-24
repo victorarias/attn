@@ -50,7 +50,6 @@ navigation; the ⌘P registry entry and its tile-focus precedence rule.
 
 ### Deferred
 
-- Path-navigation mode (`/`, `~/`, `./`) — second PR, on the same overlay.
 - Agent-edited files as a ranking signal — schema is ready, feature is not built.
 - Non-markdown file types; creating a file that does not exist.
 - Multi-root workspaces (a workspace whose sessions span several repos).
@@ -121,7 +120,7 @@ root is not a notebook. Introduce a minimal `FileCandidate { path, title?, updat
 move the scorer beside the palette, and let `NotebookEntry` structurally satisfy it.
 Pure move, no behavior change.
 
-### R3 — One path-navigation backend (with path mode, PR2)
+### R3 — One path-navigation backend (with path mode, PR3) — DONE
 
 Two directory-listing surfaces exist:
 
@@ -156,10 +155,10 @@ change how the hook config is generated.
 
 ### Daemon fixes to fold in
 
-Both landed with the opener PR, except the dot-directory harmonization: fuzzy
-mode still hides dot-prefixed paths (git enumeration applies the same rule the
-walk always did), while `listDirectoryEntries` still shows them. Path mode is
-where that inconsistency becomes visible, so it is folded into PR2 (R3).
+Both landed: the extension filter with the opener (PR2), the dot-directory
+harmonization with path mode (PR3). The rule chosen: dot-prefixed files and
+directories are visible on both surfaces — they hold real documents, and path
+mode always listed them — while `.git` is listed by neither.
 
 
 - `fs_index`'s 25k cap counts every file, before any markdown filter, and truncation
@@ -181,7 +180,17 @@ where that inconsistency becomes visible, so it is folded into PR2 (R3).
   ⌘P palette with recents, unified ranking, and an async index load; the
   `paletteClaim` hand-off that keeps a focused Editor tile's own ⌘P. Verified
   live by `real-app:scenario-markdown-opener`.
-- Next: path mode (R3).
+- PR3 (this PR): path mode plus R3. `browse_directory` takes an optional
+  extension filter and returns `is_dir`, so one backend serves both the session
+  picker (directories only) and the opener (directories plus markdown); asking
+  for files is gated on the authenticated app client, closing the gap the plan
+  flagged. `useFilesystemSuggestions` is shared rather than reimplemented, with
+  its trailing positional arguments folded into an options object. Relative
+  queries expand against the opener root before they reach the daemon, which
+  would otherwise resolve them against its own cwd. Protocol 186.
+- Next: nothing queued. Remaining deferred items are unchanged (agent-edited
+  files as a ranking signal, non-markdown types, multi-root workspaces, remote
+  endpoints, daemon-side index caching).
 
 ### Order
 

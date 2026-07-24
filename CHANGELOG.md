@@ -16,6 +16,16 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   as ⌘+clicking a link does. A focused Editor tile keeps its own in-tile ⌘P.
   The search covers what git tracks plus untracked files, so ignored build
   output never crowds out your documents.
+- **Type a path in ⌘P to browse the filesystem.** A query that starts with `/`,
+  `~/`, or `./` lists that folder one level at a time — Enter on a folder goes
+  into it, Enter on a file opens it — so documents outside the session's folder,
+  or ones `.gitignore` hides from the search, are still a few keystrokes away.
+  Ordinary queries like `docs/plan` keep searching as before.
+
+### Changed
+- **Dot-folders like `.claude` are now searchable in ⌘P.** Documents kept in
+  dot-prefixed folders were listed when browsing by path but invisible to the
+  search; both now show them. Git's own `.git` folder stays hidden.
 
 ### Fixed
 - **Sessions interrupted by a daemon or machine restart now recover when their terminal pane opens.** attn preserves the session's launch settings, restarts the recoverable session using the pane's current terminal size, and reconnects it automatically instead of leaving a "Failed to attach PTY" message. Sessions that cannot safely be revived still show the normal attach error.

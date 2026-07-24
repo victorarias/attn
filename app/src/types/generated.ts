@@ -867,6 +867,7 @@ export enum BranchesResultMessageEvent {
 export interface BrowseDirectoryMessage {
     cmd:          BrowseDirectoryMessageCmd;
     endpoint_id?: string;
+    extensions?:  string[];
     input_path:   string;
     request_id?:  string;
     [property: string]: any;
@@ -890,8 +891,9 @@ export interface BrowseDirectoryResultMessage {
 }
 
 export interface EntryElement {
-    name: string;
-    path: string;
+    is_dir: boolean;
+    name:   string;
+    path:   string;
     [property: string]: any;
 }
 
@@ -1246,8 +1248,9 @@ export enum DetachSessionMessageCmd {
 }
 
 export interface DirectoryEntry {
-    name: string;
-    path: string;
+    is_dir: boolean;
+    name:   string;
+    path:   string;
     [property: string]: any;
 }
 
@@ -9106,6 +9109,7 @@ const typeMap: any = {
     "BrowseDirectoryMessage": o([
         { json: "cmd", js: "cmd", typ: r("BrowseDirectoryMessageCmd") },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
+        { json: "extensions", js: "extensions", typ: u(undefined, a("")) },
         { json: "input_path", js: "input_path", typ: "" },
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
     ], "any"),
@@ -9121,6 +9125,7 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "EntryElement": o([
+        { json: "is_dir", js: "is_dir", typ: true },
         { json: "name", js: "name", typ: "" },
         { json: "path", js: "path", typ: "" },
     ], "any"),
@@ -9323,6 +9328,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
     ], "any"),
     "DirectoryEntry": o([
+        { json: "is_dir", js: "is_dir", typ: true },
         { json: "name", js: "name", typ: "" },
         { json: "path", js: "path", typ: "" },
     ], "any"),

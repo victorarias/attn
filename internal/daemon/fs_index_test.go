@@ -22,12 +22,14 @@ func fsIndex(t *testing.T, d *Daemon, client *wsClient, requestID, root string, 
 }
 
 // fs_index over a real tree returns every regular file's root-relative slash
-// path, sorted, while excluding: a dot-dir's contents (not just the dir
-// itself), a node_modules dir's contents, dot-files, symlinked files, and a
-// FIFO (a non-regular-file entry that would otherwise be advertised as an
-// openable file when fs_read rejects anything that isn't a regular file).
-// truncated must be false since nothing hits the cap.
-func TestFsIndexListsFilesExcludingDotDirsNodeModulesAndSymlinks(t *testing.T) {
+// path, sorted. Dot-files and dot-directory contents are real documents and are
+// included — path mode lists them, so hiding them here would make the same file
+// reachable one way and invisible the other. Excluded: .git's contents, a
+// node_modules dir's contents, symlinked files, and a FIFO (a non-regular-file
+// entry that would otherwise be advertised as an openable file when fs_read
+// rejects anything that isn't a regular file). truncated must be false since
+// nothing hits the cap.
+func TestFsIndexListsDotFilesButNotGitOrNodeModules(t *testing.T) {
 	d := newFsDaemon(t)
 	root := t.TempDir()
 
@@ -45,9 +47,10 @@ func TestFsIndexListsFilesExcludingDotDirsNodeModulesAndSymlinks(t *testing.T) {
 	mustWrite("top.md")
 	mustWrite("nested/dir/deep.md")
 	mustWrite("nested/dir/deep2.txt")
-	mustWrite(".hidden-dir/inside.md")     // whole dot-dir excluded
+	mustWrite(".hidden-dir/inside.md")     // dot-dirs hold real documents: included
+	mustWrite(".dotfile")                  // ...as do dot-files
 	mustWrite("node_modules/pkg/index.js") // whole node_modules dir excluded
-	mustWrite(".dotfile")                  // dot-file excluded
+	mustWrite(".git/objects/ab/cdef.md")   // git's own metadata is never listed
 
 	// A symlinked file must be excluded (listed as an entry but skipped, not
 	// followed).
@@ -76,7 +79,7 @@ func TestFsIndexListsFilesExcludingDotDirsNodeModulesAndSymlinks(t *testing.T) {
 	if res.Truncated {
 		t.Fatalf("fs_index.truncated = true, want false")
 	}
-	want := []string{"nested/dir/deep.md", "nested/dir/deep2.txt", "top.md"}
+	want := []string{".dotfile", ".hidden-dir/inside.md", "nested/dir/deep.md", "nested/dir/deep2.txt", "top.md"}
 	if !equalStrings(res.Files, want) {
 		t.Fatalf("fs_index.files = %v, want %v", res.Files, want)
 	}
@@ -233,8 +236,8 @@ func TestIndexRootUsesGitAndHonorsGitignore(t *testing.T) {
 	mustWrite("tracked.md", "x")
 	mustWrite("untracked.md", "x")
 	mustWrite("build/generated.md", "x")
-	// A dot-directory git happily tracks stays hidden, so both enumerations
-	// return the same set.
+	// A dot-directory git tracks holds real documents, and path mode lists it,
+	// so fuzzy mode returns it too.
 	mustWrite(".claude/notes.md", "x")
 
 	for _, args := range [][]string{
@@ -258,8 +261,8 @@ func TestIndexRootUsesGitAndHonorsGitignore(t *testing.T) {
 	if truncated {
 		t.Fatal("truncated = true, want false")
 	}
-	if want := []string{"tracked.md", "untracked.md"}; !slicesEqual(files, want) {
-		t.Fatalf("files = %v, want %v (gitignored and dot-dir paths excluded)", files, want)
+	if want := []string{".claude/notes.md", "tracked.md", "untracked.md"}; !slicesEqual(files, want) {
+		t.Fatalf("files = %v, want %v (gitignored paths excluded, dot-dirs kept)", files, want)
 	}
 }
 
