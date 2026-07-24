@@ -79,7 +79,8 @@
     "real-app:soak": "node scripts/real-app-harness/run-soak.mjs",
     "e2e": "playwright test",
     "e2e:settings-visual": "playwright test e2e/settings-visual.spec.ts",
-    "e2e:headed": "playwright test --headed"
+    "e2e:headed": "playwright test --headed",
+    "doctor": "npx react-doctor@latest"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",
