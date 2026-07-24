@@ -145,7 +145,7 @@ describe('SessionTerminalWorkspace ticket overlay', () => {
   it('routes a status change through onChangeStatus (wiring proof)', async () => {
     const { getByTestId, onChangeStatus } = renderWorkspace({ ticket: makeTicket() });
     fireEvent.click(getByTestId('ticket-chip-sess-1'));
-    await waitFor(() => getByTestId('ticket-detail-panel'));
+    await waitFor(() => getByTestId('ticket-status-select'));
 
     fireEvent.change(getByTestId('ticket-status-select'), { target: { value: 'done' } });
 
