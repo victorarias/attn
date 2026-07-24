@@ -207,10 +207,10 @@ Decided: recoverable is a lifecycle state, not a flag riding beside `idle`.
   (`relaunch_restore`, resume-after-attach-failure); candidates for the same
   daemon-owned treatment as revive.
 - Live-verification footgun (2026-07-24): in a non-fish shell, a failed
-  `profile-env` selection left `make install PROFILE=x` targeting production
-  twice (bundle overwritten; daemon untouched). The Makefile guard only fires
-  when `ATTN_PROFILE` is set. Consider requiring an explicit opt-in (e.g.
-  `PROD=1`) for prod-targeting installs. Discuss with Victor.
+  `profile-env` selection left `make install PROFILE=` (empty expansion)
+  targeting production twice (bundle overwritten; daemon untouched). Resolved:
+  the Makefile now rejects an explicitly-passed empty `PROFILE=` at parse time
+  for every goal; bare prod installs are unchanged.
 - `LaunchIntent` gained an `Unattended bool` field beyond the approved surface:
   a store-fallback relaunch must refuse unattended sessions rather than relaunch
   them without their worker-registry launch contract. Flagged to Victor.

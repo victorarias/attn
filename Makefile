@@ -17,6 +17,14 @@ APP_BINARY=$(APP_BUNDLE)/Contents/MacOS/attn
 # com.attn.manager.agent7 with its own data dir + port. `make dev` ==
 # `make install PROFILE=dev`. See docs/profiles.md.
 PROFILE ?=
+# An explicitly empty command-line PROFILE indicates failed shell profile selection.
+# Fail during parsing before any target can silently fall back to the prod bundle.
+ifeq ($(origin PROFILE),command line)
+ifeq (,$(strip $(PROFILE)))
+$(error empty PROFILE= passed on the command line — profile selection failed (e.g. an unset shell variable expanded to nothing), and proceeding would target the PROD bundle. Fix the profile selection (eval "$$(./attn profile-env <name>)") or pass PROFILE=<name> explicitly)
+endif
+endif
+
 # Routing env that must NOT leak from a parent attn terminal into an isolated
 # profile daemon we (re)start. Shared by every non-default profile install.
 PROFILE_DAEMON_UNSET = -u ATTN_SOCKET_PATH -u ATTN_DB_PATH -u ATTN_CONFIG_PATH -u ATTN_WS_PORT -u ATTN_WRAPPER_PATH -u ATTN_INSIDE_APP -u ATTN_DAEMON_MANAGED -u ATTN_PTY_WORKER -u ATTN_SESSION_ID -u ATTN_AGENT
