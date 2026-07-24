@@ -220,16 +220,13 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 	}
 	plan.chiefAssigned = d.maybeAssignChiefOnSpawn(msg.ID, req.agent, requestedChief, req.existingSession)
 	plan.isChief = d.isChiefOfStaffSession(msg.ID)
-	if plan.spawnOpts.Model == "" {
-		// No per-spawn pin (delegation); a chief launch falls back to the
-		// chief_model_<agent> setting.
-		plan.spawnOpts.Model = d.chiefLaunchModel(req.agent, plan.isChief)
-	}
-	if plan.spawnOpts.Effort == "" {
-		// No per-spawn pin (delegation); a chief launch falls back to the
-		// chief_effort_<agent> setting.
-		plan.spawnOpts.Effort = d.chiefLaunchEffort(req.agent, plan.isChief)
-	}
+	// Precedence: an explicit per-spawn pin (delegation) wins outright; a chief
+	// launch next falls back to chief_model_<agent>/chief_effort_<agent>; every
+	// launch (chief or not) then falls back to the operator-configured
+	// default_model_<agent>/default_effort_<agent>; otherwise the agent's own
+	// built-in default (empty, meaning no --model/--effort flag).
+	plan.spawnOpts.Model = d.resolveLaunchModel(req.agent, plan.isChief, plan.spawnOpts.Model)
+	plan.spawnOpts.Effort = d.resolveLaunchEffort(req.agent, plan.isChief, plan.spawnOpts.Effort)
 	if launch := req.policy.unattendedLaunch; !launch.IsZero() {
 		if err := launch.Validate(); err != nil {
 			plan.rollback(d, msg.ID)

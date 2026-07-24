@@ -257,16 +257,17 @@ type SpawnOpts struct {
 
 	// Model, when set, pins the interactive agent's model via --model (an alias
 	// like "opus"/"sonnet" or a full model id). Empty means the agent's own
-	// default. Sourced from the daemon's chief_model_<agent> setting for chief
-	// launches or a delegation's --model flag, and threaded into the worker via
-	// ATTN_MODEL.
+	// default. Sourced from a delegation's --model flag, or else the daemon's
+	// chief_model_<agent> setting (chief launches only) or default_model_<agent>
+	// setting (every launch), and threaded into the worker via ATTN_MODEL.
 	Model string
 
 	// Effort, when set, pins the interactive agent's reasoning effort using the
 	// agent's native mechanism (Claude --effort, Codex model_reasoning_effort).
 	// Empty means the agent's own default. Sourced from a delegation's --effort
-	// flag and threaded into the worker via ATTN_EFFORT. Only meaningful for
-	// drivers with HasEffortPin.
+	// flag, or else the daemon's chief_effort_<agent> setting (chief launches
+	// only) or default_effort_<agent> setting (every launch), and threaded into
+	// the worker via ATTN_EFFORT. Only meaningful for drivers with HasEffortPin.
 	Effort string
 
 	// AutoCompactWindow, when > 0, caps this launch's effective context window so
