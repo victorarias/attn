@@ -762,7 +762,7 @@ func TestOpenMarkdownRecordsRecentFile(t *testing.T) {
 		}
 	}
 
-	files := d.store.GetRecentFiles(10)
+	files := d.store.GetRecentFiles(10, "")
 	if len(files) != 1 {
 		t.Fatalf("recent files = %+v, want one entry", files)
 	}
@@ -793,7 +793,7 @@ func TestOpenMarkdownForgetsMissingFile(t *testing.T) {
 	if _, _, err := d.openMarkdownTile(file, "session-1"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("openMarkdownTile(deleted) error = %v, want not-found", err)
 	}
-	if files := d.store.GetRecentFiles(10); len(files) != 0 {
+	if files := d.store.GetRecentFiles(10, ""); len(files) != 0 {
 		t.Fatalf("recent files = %+v, want the deleted file forgotten", files)
 	}
 	// The already-docked tile stays put: only the recents entry is pruned.

@@ -2061,9 +2061,12 @@ sendFetchPRDetails,
     ),
     [sessions, activeSessionId, settings],
   );
+  // The root goes to the daemon so files in the workspace you are looking at
+  // outrank equally-scored files from another one.
   const loadOpenerRecents = useCallback(
-    () => sendRecentFiles(50).then((files) => files.map((file) => ({ path: file.path, lastAt: file.lastAt }))),
-    [sendRecentFiles],
+    () => sendRecentFiles(50, markdownOpenerTarget.root || undefined)
+      .then((files) => files.map((file) => ({ path: file.path, lastAt: file.lastAt }))),
+    [sendRecentFiles, markdownOpenerTarget.root],
   );
   const loadOpenerIndex = useCallback(
     (root: string) => sendFsIndex(root, OPENER_EXTENSIONS),

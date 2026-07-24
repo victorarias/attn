@@ -302,6 +302,18 @@ func (c *Client) UpdateTodos(id string, todos []string) error {
 	return err
 }
 
+// RecordFilesEdited reports markdown files an agent just wrote, so the ⌘P
+// opener can surface them without the user having opened them first.
+func (c *Client) RecordFilesEdited(id string, paths []string) error {
+	msg := protocol.FilesEditedMessage{
+		Cmd:   protocol.CmdFilesEdited,
+		ID:    id,
+		Paths: paths,
+	}
+	_, err := c.send(msg)
+	return err
+}
+
 type DelegateOptions struct {
 	RequestID          string
 	Agent              string

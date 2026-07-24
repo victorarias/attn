@@ -89,7 +89,7 @@ func (d *Daemon) handleRecentFilesWS(client *wsClient, msg *protocol.RecentFiles
 	}
 	d.sendToClient(client, &protocol.RecentFilesResultMessage{
 		Event:     protocol.EventRecentFilesResult,
-		Files:     d.store.GetRecentFiles(limit),
+		Files:     d.store.GetRecentFiles(limit, strings.TrimSpace(protocol.Deref(msg.Root))),
 		RequestID: strings.TrimSpace(protocol.Deref(msg.RequestID)),
 		Success:   true,
 	})

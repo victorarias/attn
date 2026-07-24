@@ -8,6 +8,8 @@
 //   -> a gitignored file stays invisible to fuzzy mode
 //   -> re-summoning with an empty query now lists the opened files as recents,
 //      most recent first, and picking one reuses its tile
+//   -> a file an agent wrote, reported by the tool-use hook, appears in recents
+//      without ever having been opened
 //   -> typing an absolute path switches to path mode: directories descend, and
 //      the gitignored file fuzzy mode could not see opens from there.
 //
@@ -31,6 +33,7 @@ import {
   waitForPaneShellReady,
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
+import { profileForAppPath, socketPathForProfile } from './harnessProfile.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 
@@ -121,7 +124,7 @@ async function main() {
     prefix: 'markdown-opener',
     metadata: {
       agent: 'shell',
-      focus: 'native Cmd+P opener: fuzzy over git-enumerated markdown, recents, then path mode',
+      focus: 'native Cmd+P opener: fuzzy over git-enumerated markdown, recents, agent edits, then path mode',
     },
   });
 
@@ -147,6 +150,10 @@ async function main() {
     // Gitignored, and named per run for the same reason: a previous run opened
     // its own copy through path mode, so that one legitimately lives in recents.
     const ignored = `ignored-generated-${runner.runId}.md`;
+    // Written by the tool-use hook rather than opened. Also gitignored, so the
+    // fuzzy index cannot be what surfaces them.
+    const claudeEdited = `claude-wrote-${runner.runId}.md`;
+    const codexEdited = `codex-wrote-${runner.runId}.md`;
 
     const { workspaceId, cwd } = await runner.step('create_shell_session', async () => {
       const sessionCwd = path.join(runner.sessionDir, 'opener-ws');
@@ -316,6 +323,65 @@ async function main() {
       );
     });
 
+    await runner.step('agent_edits_surface_without_being_opened', async () => {
+      // The tool-use hook is what an agent runs after every tool call. Driving
+      // the packaged CLI with real captured payloads (Claude 2.x and codex-cli
+      // 0.145.0) exercises the whole chain the agent would: hook parsing, the
+      // socket command, the daemon's filter, and the file-activity table.
+      // The daemon refuses (and forgets) a file that is not on disk, so the
+      // agent's writes have to be real writes.
+      fs.writeFileSync(path.join(cwd, 'build', claudeEdited), '# Claude wrote this\n', 'utf8');
+      fs.writeFileSync(path.join(cwd, 'build', codexEdited), '# Codex wrote this\n', 'utf8');
+      const hookBin = path.join(options.appPath, 'Contents', 'MacOS', 'attn');
+      // The hook routes by env, exactly as an agent's generated hook command
+      // does. Pin it at the profile under test so a run can never reach another
+      // world's daemon.
+      const socketPath = socketPathForProfile(profileForAppPath(options.appPath));
+      const runHook = (payload) => {
+        execFileSync(hookBin, ['_hook-tool-use', sessionId], {
+          input: JSON.stringify({ ...payload, cwd }),
+          env: { ...process.env, ATTN_SOCKET_PATH: socketPath },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      };
+      runHook({
+        tool_name: 'Write',
+        tool_input: { file_path: path.join(cwd, 'build', claudeEdited), content: '# Claude wrote this\n' },
+      });
+      runHook({
+        tool_name: 'apply_patch',
+        tool_input: {
+          command: `*** Begin Patch\n*** Add File: ${path.join(cwd, 'build', codexEdited)}\n+# Codex wrote this\n*** End Patch`,
+        },
+      });
+      // A source file an agent touched must not reach a markdown opener.
+      runHook({ tool_name: 'Edit', tool_input: { file_path: path.join(cwd, 'main.go') } });
+
+      await summon('re-summon after the agent edits');
+      // Both files are gitignored, so fuzzy mode cannot see them and the empty
+      // query lists recents only: appearing here can only be the edit signal.
+      const state = await waitForOpener(
+        client,
+        (current) => current.rows.some((row) => row.path.endsWith(claudeEdited))
+          && current.rows.some((row) => row.path.endsWith(codexEdited)),
+        'files an agent wrote appear in recents without ever being opened',
+      );
+      runner.assert(
+        !state.rows.some((row) => row.path.endsWith('main.go')),
+        `A non-markdown edit must not enter the opener: ${JSON.stringify(state.rows)}`,
+      );
+      await captureFrontWindowScreenshot(path.join(runner.runDir, 'opener-agent-edits.png'), { client }).catch(() => {});
+
+      await pickRow(state, claudeEdited);
+      await waitForOpener(client, (current) => !current.open, 'picking an agent-written file closes the opener');
+      await waitForWorkspaceUi(
+        client,
+        workspaceId,
+        (ui) => markdownTileIds(ui).length === 3,
+        'the agent-written file opens as a third markdown tile',
+      );
+    });
+
     await runner.step('path_mode_reaches_gitignored_file', async () => {
       await summon('re-summon for path mode');
       // A query that starts with a slash switches modes: one directory at a
@@ -350,8 +416,8 @@ async function main() {
       await waitForWorkspaceUi(
         client,
         workspaceId,
-        (state) => markdownTileIds(state).length === 3,
-        'the gitignored file opens as a third markdown tile',
+        (state) => markdownTileIds(state).length === 4,
+        'the gitignored file opens as a fourth markdown tile',
       );
     });
 

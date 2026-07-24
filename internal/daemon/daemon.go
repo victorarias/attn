@@ -2174,6 +2174,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos:
 		d.handleTodos(conn, msg.(*protocol.TodosMessage))
+	case protocol.CmdFilesEdited:
+		d.handleFilesEdited(conn, msg.(*protocol.FilesEditedMessage))
 	case protocol.CmdWorkflowRunUpsert:
 		d.handleWorkflowRunUpsert(conn, msg.(*protocol.WorkflowRunUpsertMessage))
 	case protocol.CmdWorkflowCallUpsert:
@@ -3016,6 +3018,27 @@ func (d *Daemon) broadcastRateLimited(resource string, resetAt time.Time) {
 		RateLimitResource: protocol.Ptr(resource),
 		RateLimitResetAt:  protocol.Ptr(resetAtStr),
 	})
+}
+
+// handleFilesEdited records markdown an agent wrote, so the ⌘P opener can
+// offer a file the user has never opened. The hook already filters, but the
+// socket is a public surface and the store is the daemon's to keep honest, so
+// anything that is not an absolute markdown path is dropped here rather than
+// trusted.
+func (d *Daemon) handleFilesEdited(conn net.Conn, msg *protocol.FilesEditedMessage) {
+	for _, path := range msg.Paths {
+		path = strings.TrimSpace(path)
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".md", ".markdown":
+		default:
+			continue
+		}
+		d.store.RecordFileActivity(path, store.FileActivitySourceEdited, msg.ID)
+	}
+	d.sendOK(conn)
 }
 
 func (d *Daemon) handleTodos(conn net.Conn, msg *protocol.TodosMessage) {

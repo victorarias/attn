@@ -41,7 +41,9 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceC
 	userPromptSubmit := command("_hook-state", "working")
 	permissionRequest := command("_hook-state", "pending_approval")
 	preToolUse := command("_hook-state", "working")
-	postToolUse := command("_hook-state", "working")
+	// Sets "working" like the other state hooks, and records markdown the tool
+	// call wrote from the same payload — one spawn per tool call, not two.
+	postToolUse := command("_hook-tool-use")
 	stop := command("_hook-stop")
 
 	overrides := []string{
