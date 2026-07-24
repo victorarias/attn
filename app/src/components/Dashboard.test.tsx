@@ -68,6 +68,26 @@ describe('Dashboard sessions', () => {
     expect(scheduled).toHaveAttribute('data-state', 'scheduled');
   });
 
+  it('renders recoverable sessions in their own section', () => {
+    render(
+      <Dashboard
+        sessions={[
+          { id: 's1', label: 'restartable-bot', state: 'recoverable', cwd: '/repo/a' },
+        ]}
+        prs={[]}
+        isLoading={false}
+        onSelectSession={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />
+    );
+
+    expect(screen.getByTestId('session-group-recoverable')).toBeInTheDocument();
+    const recoverable = screen.getByTestId('session-s1');
+    expect(recoverable).toBeVisible();
+    expect(recoverable).toHaveAttribute('data-state', 'recoverable');
+  });
+
   it('renders endpoint badges for remote sessions', () => {
     render(
       <Dashboard
