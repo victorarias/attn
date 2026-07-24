@@ -21,4 +21,3 @@ cmd                       internal                  test
 CODE_OF_CONDUCT.md        LICENSE                   third_party
 CONTRIBUTING.md           Makefile                  tools
 docs                      plugins
-

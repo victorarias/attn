@@ -37,4 +37,3 @@ CHANGELOG.md              ghostty-vt-native.patch   README.md                 to
 CLAUDE.md                 ghostty-vt-native.pin     review-loop-completed.png
 cmd                       go.mod                    review-loop-live.png
 CODE_OF_CONDUCT.md        go.sum                    scripts
-

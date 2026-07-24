@@ -4,21 +4,3 @@ ed by file permission checks — only Edit(path) rules are. Use Edit(~/**) inste
 
 Resume this session with:
 claude --resume 2c496f62-fb76-41fc-922e-3345844af05c
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

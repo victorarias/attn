@@ -65,7 +65,7 @@ func TestGhosttyCorpusGoldens(t *testing.T) {
 						term.Write(data[start:end])
 					}
 
-					got := term.ViewportText()
+					got := normalizeCorpusViewport(term.ViewportText())
 					if *updateGoldens {
 						writeCorpusGolden(t, fixture.name, got)
 					} else {
@@ -114,10 +114,21 @@ func readCorpusGolden(t *testing.T, fixture string) string {
 	return string(golden)
 }
 
+// normalizeCorpusViewport collapses the viewport's trailing empty rows to a
+// single final newline so goldens carry no blank lines at EOF; the fixed grid
+// implies the empty rows.
+func normalizeCorpusViewport(text string) string {
+	trimmed := strings.TrimRight(text, "\n")
+	if trimmed == "" {
+		return ""
+	}
+	return trimmed + "\n"
+}
+
 func writeCorpusGolden(t *testing.T, fixture, content string) {
 	t.Helper()
 	goldenPath := corpusGoldenPath(fixture)
-	if err := os.WriteFile(goldenPath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(goldenPath, []byte(normalizeCorpusViewport(content)), 0o644); err != nil {
 		t.Fatalf("write corpus golden %q: %v", goldenPath, err)
 	}
 }
