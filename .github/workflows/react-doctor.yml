@@ -34,7 +34,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: millionco/react-doctor@v2
+      # Pinned to the commit the v2 tag pointed at on 2026-07-24. The tag is
+      # mutable and this action runs on every PR with write access to comments,
+      # issues, and statuses, so the exact code is frozen here. Bump the SHA
+      # (and the comment) deliberately to take a new version.
+      - uses: millionco/react-doctor@01820bb4fd4d0a4aebcd8df2b2a143a098649cb2 # v2
         with:
           # The React app is the `app/` workspace; there is no package.json at
           # the repo root for the default "." to find.
