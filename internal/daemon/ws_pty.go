@@ -738,23 +738,6 @@ func int32PtrToInt(v *int32) *int {
 	return &n
 }
 
-// snapshotSeedScreen resolves the visible frame from the worker's fresh
-// Ghostty snapshot (Manager.Snapshot) to seed an observer. The second result is
-// ok.
-func snapshotSeedScreen(info ptybackend.AttachInfo) (pty.ReplayScreenSnapshot, bool) {
-	if info.ScreenSnapshotFresh && len(info.ScreenSnapshot) > 0 {
-		return pty.ReplayScreenSnapshot{
-			Payload:       info.ScreenSnapshot,
-			Cols:          info.ScreenCols,
-			Rows:          info.ScreenRows,
-			CursorX:       info.ScreenCursorX,
-			CursorY:       info.ScreenCursorY,
-			CursorVisible: info.ScreenCursorVisible,
-		}, true
-	}
-	return pty.ReplayScreenSnapshot{}, false
-}
-
 // handleGetScreenSnapshot serves a read-only snapshot of a session's current
 // screen. It registers no subscriber and starts no stream — purely a seed for
 // observers (grid tiles) that then dedup the live firehose against last_seq.
@@ -792,20 +775,21 @@ func (d *Daemon) handleGetScreenSnapshot(client *wsClient, msg *protocol.GetScre
 		Rows:    protocol.Ptr(int(info.Rows)),
 		Running: protocol.Ptr(info.Running),
 	}
-	screen, haveScreen := snapshotSeedScreen(info)
-	if haveScreen {
-		result.ScreenSnapshot = protocol.Ptr(base64.StdEncoding.EncodeToString(screen.Payload))
-		result.ScreenRows = protocol.Ptr(int(screen.Rows))
-		result.ScreenCols = protocol.Ptr(int(screen.Cols))
-		result.ScreenCursorX = protocol.Ptr(int(screen.CursorX))
-		result.ScreenCursorY = protocol.Ptr(int(screen.CursorY))
-		result.ScreenCursorVisible = protocol.Ptr(screen.CursorVisible)
-		result.ScreenSnapshotFresh = protocol.Ptr(true)
+	snapshotBytes := 0
+	screenCols := 0
+	screenRows := 0
+	if info.Screen != nil {
+		snapshotBytes = len(info.Screen.Payload)
+		screenCols = int(info.Screen.Cols)
+		screenRows = int(info.Screen.Rows)
+		result.ScreenSnapshot = protocol.Ptr(base64.StdEncoding.EncodeToString(info.Screen.Payload))
+		result.ScreenRows = protocol.Ptr(screenRows)
+		result.ScreenCols = protocol.Ptr(screenCols)
 	}
 	d.logf(
 		"PTY screen snapshot: id=%s running=%v last_seq=%d snapshot_bytes=%d screen=%dx%d have_screen=%v",
-		msg.ID, info.Running, info.LastSeq, len(screen.Payload),
-		screen.Cols, screen.Rows, haveScreen,
+		msg.ID, info.Running, info.LastSeq, snapshotBytes,
+		screenCols, screenRows, info.Screen != nil,
 	)
 	d.sendToClient(client, result)
 }

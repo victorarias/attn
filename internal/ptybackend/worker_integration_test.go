@@ -157,14 +157,14 @@ gotOutput:
 	if !snap.Running {
 		t.Fatalf("snapshot running=false, expected true")
 	}
-	if len(snap.ScreenSnapshot) == 0 || !snap.ScreenSnapshotFresh {
-		t.Fatalf("expected a fresh screen snapshot, got %d bytes fresh=%v", len(snap.ScreenSnapshot), snap.ScreenSnapshotFresh)
+	if snap.Screen == nil || len(snap.Screen.Payload) == 0 {
+		t.Fatal("expected a viewport snapshot")
 	}
-	if !bytes.Contains(snap.ScreenSnapshot, []byte("__ATTN_WORKER__")) {
-		t.Fatalf("snapshot missing printed marker; got %q", snap.ScreenSnapshot)
+	if !bytes.Contains(snap.Screen.Payload, []byte("__ATTN_WORKER__")) {
+		t.Fatalf("snapshot missing printed marker; got %q", snap.Screen.Payload)
 	}
-	if snap.ScreenCols == 0 || snap.ScreenRows == 0 {
-		t.Fatalf("snapshot geometry = %dx%d, want non-zero", snap.ScreenCols, snap.ScreenRows)
+	if snap.Screen.Cols == 0 || snap.Screen.Rows == 0 {
+		t.Fatalf("snapshot geometry = %dx%d, want non-zero", snap.Screen.Cols, snap.Screen.Rows)
 	}
 
 	// SetTheme round-trips over the worker RPC surface and takes effect on the
@@ -278,18 +278,18 @@ func TestWorkerBackend_SnapshotReadsScreenReadOnly(t *testing.T) {
 	// Snapshot must fetch the rendered screen without a subscriber, so we can
 	// poll it repeatedly until the marker lands; if each call leaked a
 	// subscriber the worker would accumulate dead ones.
-	var info AttachInfo
+	var info pty.SnapshotInfo
 	deadline := time.Now().Add(8 * time.Second)
 	for {
 		info, err = backend.Snapshot(context.Background(), sessionID)
 		if err != nil {
 			t.Fatalf("Snapshot() error: %v", err)
 		}
-		if bytes.Contains(info.ScreenSnapshot, []byte("__ATTN_REPLAY__")) {
+		if bytes.Contains(info.Screen.Payload, []byte("__ATTN_REPLAY__")) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for marker in read-only snapshot; screen=%q", info.ScreenSnapshot)
+			t.Fatalf("timed out waiting for marker in read-only snapshot; screen=%q", info.Screen.Payload)
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
@@ -297,8 +297,8 @@ func TestWorkerBackend_SnapshotReadsScreenReadOnly(t *testing.T) {
 	if !info.Running {
 		t.Fatalf("Snapshot running=false, expected true")
 	}
-	if !info.ScreenSnapshotFresh || len(info.ScreenSnapshot) == 0 {
-		t.Fatal("expected a fresh screen snapshot, got none")
+	if info.Screen == nil || len(info.Screen.Payload) == 0 {
+		t.Fatal("expected a viewport snapshot")
 	}
 
 	// The session must stay fully usable after the read-only snapshots: a real

@@ -123,14 +123,6 @@ type AttachResult struct {
 	ExitCode   *int    `json:"exit_code,omitempty"`
 	ExitSignal *string `json:"exit_signal,omitempty"`
 
-	ScreenSnapshot      []byte `json:"screen_snapshot,omitempty"`
-	ScreenCols          uint16 `json:"screen_cols,omitempty"`
-	ScreenRows          uint16 `json:"screen_rows,omitempty"`
-	ScreenCursorX       uint16 `json:"screen_cursor_x,omitempty"`
-	ScreenCursorY       uint16 `json:"screen_cursor_y,omitempty"`
-	ScreenCursorVisible bool   `json:"screen_cursor_visible,omitempty"`
-	ScreenSnapshotFresh bool   `json:"screen_snapshot_fresh,omitempty"`
-
 	// GhosttySnapshot is the server-authoritative VT serialization of the whole
 	// terminal from libghostty-vt (geometry is Cols/Rows). Omitted when absent.
 	GhosttySnapshot []byte `json:"ghostty_snapshot,omitempty"`
@@ -142,6 +134,19 @@ type AttachResult struct {
 	// GhosttyScrollbackTruncated reports whether the ghostty terminal dropped
 	// scrollback lines at its cap before GhosttySnapshot was serialized.
 	GhosttyScrollbackTruncated bool `json:"ghostty_scrollback_truncated,omitempty"`
+}
+
+// SnapshotResult is the lean read-only viewport seed returned by MethodSnapshot.
+// An absent ScreenSnapshot leaves observers unseeded for graceful worker-version
+// skew and sessions that have not yet produced a frame.
+type SnapshotResult struct {
+	LastSeq        uint32 `json:"last_seq"`
+	Cols           uint16 `json:"cols"`
+	Rows           uint16 `json:"rows"`
+	Running        bool   `json:"running"`
+	ScreenSnapshot []byte `json:"screen_snapshot,omitempty"`
+	ScreenCols     uint16 `json:"screen_cols,omitempty"`
+	ScreenRows     uint16 `json:"screen_rows,omitempty"`
 }
 
 // AttachBlock is the wire form of one resolved command block (see

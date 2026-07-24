@@ -2236,11 +2236,7 @@
         }
 
         const fallbackPayload = {
-          scrollback: message.scrollback || "",
-          screenSnapshot:
-            message.screen_snapshot && message.screen_snapshot_fresh !== false
-              ? message.screen_snapshot
-              : "",
+          screenSnapshot: message.screen_snapshot || "",
         };
         const queuedOutputs = filteredQueuedAttachOutputs(message.id);
         state.attachQueue = [];

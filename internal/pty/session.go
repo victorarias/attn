@@ -702,7 +702,7 @@ func (s *Session) info() AttachInfo {
 // the chunk, so a snapshot landing in that gap would claim to cover bytes the
 // screen does not contain, and an observer deduping the live stream against
 // LastSeq would silently drop the chunk carrying them.
-func (s *Session) screenSnapshot() AttachInfo {
+func (s *Session) screenSnapshot() SnapshotInfo {
 	s.metaMu.RLock()
 	cols := s.cols
 	rows := s.rows
@@ -712,29 +712,20 @@ func (s *Session) screenSnapshot() AttachInfo {
 	running := s.running
 	s.exitMu.RUnlock()
 
-	pid := 0
-	if s.cmd != nil && s.cmd.Process != nil {
-		pid = s.cmd.Process.Pid
-	}
-
-	info := AttachInfo{
+	info := SnapshotInfo{
 		Cols:    cols,
 		Rows:    rows,
-		PID:     pid,
 		Running: running,
 	}
 	s.replayMu.Lock()
 	if s.ghostty != nil {
 		snapshot := s.ghostty.SerializeViewport()
 		if snapshot.VTDump != nil {
-			info.ScreenSnapshot = snapshot.VTDump
-			info.ScreenCols = uint16(snapshot.Cols)
-			info.ScreenRows = uint16(snapshot.Rows)
-			x, y := s.ghostty.CursorPos()
-			info.ScreenCursorX = uint16(x)
-			info.ScreenCursorY = uint16(y)
-			info.ScreenCursorVisible = s.ghostty.CursorVisible()
-			info.ScreenSnapshotFresh = true
+			info.Screen = &ViewportSnapshot{
+				Payload: snapshot.VTDump,
+				Cols:    uint16(snapshot.Cols),
+				Rows:    uint16(snapshot.Rows),
+			}
 		}
 	}
 	info.LastSeq = s.lastReplaySeq

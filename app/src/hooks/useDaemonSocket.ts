@@ -118,10 +118,6 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   screen_snapshot?: string;
   screen_rows?: number;
   screen_cols?: number;
-  screen_cursor_x?: number;
-  screen_cursor_y?: number;
-  screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
   last_seq?: number;
   cols?: number;
   rows?: number;
@@ -171,7 +167,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '182';
+export const PROTOCOL_VERSION = '183';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2219,7 +2215,7 @@ export function useDaemonSocket({
                 pendingActionsRef.current.delete(key);
                 if (data.success) {
                   const result: ScreenSnapshotResult = {
-                    screenSnapshot: data.screen_snapshot_fresh ? data.screen_snapshot : undefined,
+                    screenSnapshot: data.screen_snapshot ?? undefined,
                     screenCols: data.screen_cols,
                     screenRows: data.screen_rows,
                     lastSeq: typeof data.last_seq === 'number' ? data.last_seq : 0,

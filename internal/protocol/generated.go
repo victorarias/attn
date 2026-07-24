@@ -1706,25 +1706,11 @@ type GetScreenSnapshotResultMessage struct {
 	// ScreenCols corresponds to the JSON schema field "screen_cols".
 	ScreenCols *int `json:"screen_cols,omitempty,omitzero"`
 
-	// ScreenCursorVisible corresponds to the JSON schema field
-	// "screen_cursor_visible".
-	ScreenCursorVisible *bool `json:"screen_cursor_visible,omitempty,omitzero"`
-
-	// ScreenCursorX corresponds to the JSON schema field "screen_cursor_x".
-	ScreenCursorX *int `json:"screen_cursor_x,omitempty,omitzero"`
-
-	// ScreenCursorY corresponds to the JSON schema field "screen_cursor_y".
-	ScreenCursorY *int `json:"screen_cursor_y,omitempty,omitzero"`
-
 	// ScreenRows corresponds to the JSON schema field "screen_rows".
 	ScreenRows *int `json:"screen_rows,omitempty,omitzero"`
 
 	// ScreenSnapshot corresponds to the JSON schema field "screen_snapshot".
 	ScreenSnapshot *string `json:"screen_snapshot,omitempty,omitzero"`
-
-	// ScreenSnapshotFresh corresponds to the JSON schema field
-	// "screen_snapshot_fresh".
-	ScreenSnapshotFresh *bool `json:"screen_snapshot_fresh,omitempty,omitzero"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -4957,28 +4943,11 @@ type WebSocketEvent struct {
 	// ScreenCols corresponds to the JSON schema field "screen_cols".
 	ScreenCols *int `json:"screen_cols,omitempty,omitzero"`
 
-	// ScreenCursorVisible corresponds to the JSON schema field
-	// "screen_cursor_visible".
-	ScreenCursorVisible *bool `json:"screen_cursor_visible,omitempty,omitzero"`
-
-	// ScreenCursorX corresponds to the JSON schema field "screen_cursor_x".
-	ScreenCursorX *int `json:"screen_cursor_x,omitempty,omitzero"`
-
-	// ScreenCursorY corresponds to the JSON schema field "screen_cursor_y".
-	ScreenCursorY *int `json:"screen_cursor_y,omitempty,omitzero"`
-
 	// ScreenRows corresponds to the JSON schema field "screen_rows".
 	ScreenRows *int `json:"screen_rows,omitempty,omitzero"`
 
 	// ScreenSnapshot corresponds to the JSON schema field "screen_snapshot".
 	ScreenSnapshot *string `json:"screen_snapshot,omitempty,omitzero"`
-
-	// ScreenSnapshotFresh corresponds to the JSON schema field
-	// "screen_snapshot_fresh".
-	ScreenSnapshotFresh *bool `json:"screen_snapshot_fresh,omitempty,omitzero"`
-
-	// Scrollback corresponds to the JSON schema field "scrollback".
-	Scrollback *string `json:"scrollback,omitempty,omitzero"`
 
 	// ScrollbackTruncated corresponds to the JSON schema field
 	// "scrollback_truncated".
