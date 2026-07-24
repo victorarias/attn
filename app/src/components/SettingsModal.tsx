@@ -2086,10 +2086,10 @@ export function SettingsModal({
           <div className="settings-kicker">Agents</div>
           <h3>Default model &amp; effort</h3>
           <p className="settings-description">
-            Pins the model and reasoning effort EVERY session of an agent launches
-            with, chief or not. Leave blank to use the agent's own default. A
-            chief-of-staff override above, or a per-session --model/--effort pin,
-            still takes priority over this.
+            The model and reasoning effort every session of this agent starts
+            with. Leave blank to use whatever the agent picks on its own. A
+            chief-of-staff override above, or a model pinned when a session is
+            launched, still wins over this.
           </p>
         </div>
         <div className="settings-block-body">
