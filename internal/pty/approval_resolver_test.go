@@ -101,25 +101,30 @@ func TestApprovalResolver_ClearsAfterPromptGoneAndDebounce(t *testing.T) {
 	}
 }
 
-// renderedText must resolve absolute-cursor-addressed output (how TUIs actually
+// ViewportText must resolve absolute-cursor-addressed output (how TUIs actually
 // paint the prompt) into linear text, where the raw byte tail would not.
-func TestRenderedText_ResolvesCursorAddressedPrompt(t *testing.T) {
-	screen := newVirtualScreen(80, 24)
-	// Clear + home, then paint the prompt out of order via absolute moves.
-	screen.Observe([]byte("\x1b[2J\x1b[H"))
-	screen.Observe([]byte("\x1b[7;3H2. No"))
-	screen.Observe([]byte("\x1b[5;1HDo you want to proceed?"))
-	screen.Observe([]byte("\x1b[6;1H❯ 1. Yes"))
+func TestViewportText_ResolvesCursorAddressedPrompt(t *testing.T) {
+	term := newTestGhostty(t, 80, 24)
+	write := func(data string) {
+		t.Helper()
+		term.Write([]byte(data))
+	}
 
-	text := screen.renderedText()
+	// Clear + home, then paint the prompt out of order via absolute moves.
+	write("\x1b[2J\x1b[H")
+	write("\x1b[7;3H2. No")
+	write("\x1b[5;1HDo you want to proceed?")
+	write("\x1b[6;1H❯ 1. Yes")
+
+	text := term.ViewportText()
 	if !isPendingApproval(text) {
 		t.Fatalf("rendered prompt should be detected as pending approval; got:\n%s", text)
 	}
 
 	// After approval the area is repainted with the result; prompt is gone.
-	screen.Observe([]byte("\x1b[2J\x1b[H\x1b[5;1H⏺ Done"))
-	if isPendingApproval(screen.renderedText()) {
-		t.Fatalf("repainted screen should no longer look pending; got:\n%s", screen.renderedText())
+	write("\x1b[2J\x1b[H\x1b[5;1H⏺ Done")
+	if isPendingApproval(term.ViewportText()) {
+		t.Fatalf("repainted screen should no longer look pending; got:\n%s", term.ViewportText())
 	}
 }
 
@@ -163,9 +168,11 @@ func TestApprovalResolver_PromptReappearsResetsDebounce(t *testing.T) {
 // the timer.
 func TestSession_ApprovalClearsWithoutFurtherOutput(t *testing.T) {
 	states := make(chan string, 8)
+	gt := newTestGhostty(t, 80, 24)
 	s := &Session{
 		approvalResolver: &approvalResolver{},
 		screen:           newVirtualScreen(80, 24),
+		ghostty:          gt,
 		onState:          func(state string) { states <- state },
 	}
 	s.running = true
@@ -173,8 +180,8 @@ func TestSession_ApprovalClearsWithoutFurtherOutput(t *testing.T) {
 	paint := func(screen string) {
 		// Clear+home, then paint the screen with CRLF line breaks so each row
 		// starts at column 0 (matching how a TUI repaints).
-		s.screen.Observe([]byte("\x1b[2J\x1b[H"))
-		s.screen.Observe([]byte(strings.ReplaceAll(screen, "\n", "\r\n")))
+		s.ghostty.Write([]byte("\x1b[2J\x1b[H"))
+		s.ghostty.Write([]byte(strings.ReplaceAll(screen, "\n", "\r\n")))
 	}
 
 	// Approval prompt appears -> pending emitted immediately (readLoop path).

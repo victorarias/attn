@@ -33,6 +33,7 @@ func TestDaemonAnswersCPRAndDA1FromReadLoop(t *testing.T) {
 	peer := os.NewFile(uintptr(fds[1]), "peer")
 	t.Cleanup(func() { _ = ptmx.Close(); _ = peer.Close() })
 
+	gt := newTestGhostty(t, cols, rows)
 	s := &Session{
 		id:          "cpr",
 		cols:        cols,
@@ -40,6 +41,8 @@ func TestDaemonAnswersCPRAndDA1FromReadLoop(t *testing.T) {
 		ptmx:        ptmx,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
 		screen:      newVirtualScreen(cols, rows),
+		ghostty:     gt,
+		blockFeed:   newBlockFeeder(gt),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
@@ -92,6 +95,7 @@ func TestTerminalQueryRepliesPreserveChunkOrder(t *testing.T) {
 	peer := os.NewFile(uintptr(fds[1]), "peer")
 	t.Cleanup(func() { _ = ptmx.Close(); _ = peer.Close() })
 
+	gt := newTestGhostty(t, cols, rows)
 	s := &Session{
 		id:          "query-order",
 		cols:        cols,
@@ -99,6 +103,8 @@ func TestTerminalQueryRepliesPreserveChunkOrder(t *testing.T) {
 		ptmx:        ptmx,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
 		screen:      newVirtualScreen(cols, rows),
+		ghostty:     gt,
+		blockFeed:   newBlockFeeder(gt),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
