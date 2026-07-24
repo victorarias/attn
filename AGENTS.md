@@ -38,15 +38,26 @@ permissions.
 
 `internal/ghosttyvt` links `libghostty-vt` (Ghostty's VT core) via cgo on
 Darwin/arm64; every other platform compiles a pure-Go stub. The static archive
-lives under gitignored `third_party/ghostty-vt/` and is built from pinned source
-by `scripts/build-libghostty-vt.sh` (source of truth; pin in
-`ghostty-vt-native.pin`). This needs **zig 0.16.x** on `PATH`.
+lives under gitignored `third_party/ghostty-vt/`. On a fresh checkout it is
+absent, so the `build` target depends on it and `scripts/build-libghostty-vt.sh`
+runs automatically on the first `make build`/`make dev`/`make install*`.
 
-On a fresh checkout the archive is absent, so the `build` target depends on it
-and runs the script automatically on the first `make build`/`make dev`/
-`make install*` — a one-time clone + zig build of a few minutes. It rebuilds only
-when the pin or script changes; otherwise it is a no-op. If zig 0.16.x is missing
-the script fails early with the required version. See
+**Download-first (no zig for most contributors).** The script fetches a prebuilt
+archive — keyed by the ghostty pin (`ghostty-vt-native.pin`) plus the carried
+`ghostty-vt-native.patch` — from the rolling `native-vt-prebuilts` GitHub release
+and verifies it against `ghostty-vt-native.lock` (sha256, fail-closed). The repo
+is public, so this needs only network access. A **source build (zig 0.16.x)**
+happens only when you have edited the pin/patch (no published asset for the new
+key yet), when the download/verify fails, or when `ATTN_VT_FROM_SOURCE=1` forces
+it.
+
+**Changing the VT source.** After editing `ghostty-vt-native.pin` or
+`ghostty-vt-native.patch`, run `make publish-native-vt`
+(`scripts/publish-libghostty-vt.sh`): it builds from source (needs zig 0.16.x and
+an authenticated `gh`), uploads the keyed asset, and rewrites
+`ghostty-vt-native.lock`. **Commit the regenerated lock** — the Makefile depends
+on it, so committing it is what makes every other checkout re-fetch. Shared logic
+lives in `scripts/lib/libghostty-vt.sh`. See
 [docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
 
 ## Profiles and live verification
