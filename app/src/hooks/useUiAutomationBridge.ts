@@ -10,9 +10,9 @@ import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId, type Combo, isChord, resolveBinding } from '../shortcuts';
 import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid/gridAutomation';
 import {
-  getAutomationEditorAutomationHandle,
-  INACTIVE_AUTOMATION_EDITOR_STATE,
-} from '../components/automations/automationEditorAutomation';
+  getAutomationFormAutomationHandle,
+  type AutomationFormAutomationState,
+} from '../components/automations/automationFormAutomation';
 import {
   getMarkdownAnnotationsAutomationHandle,
   INACTIVE_MARKDOWN_ANNOTATIONS_STATE,
@@ -1306,11 +1306,46 @@ function collectAutomationsUiState() {
   };
 }
 
-// Unlike collectAutomationsUiState above, the editor's buffer text can't be
-// scraped from the DOM (CodeMirror virtualizes long documents), so this reads
-// through the registered handle instead — see automationEditorAutomation.ts.
-function collectAutomationEditorUiState() {
-  return getAutomationEditorAutomationHandle()?.getState() ?? INACTIVE_AUTOMATION_EDITOR_STATE;
+// The form's RHF field/error state lives in component state, not the DOM, so
+// there is nothing to scrape here the way collectAutomationsUiState scrapes
+// the list panel — this reads through the registered handle instead, same as
+// automationFormAutomation.ts's own doc comment describes.
+const INACTIVE_AUTOMATION_FORM_STATE: AutomationFormAutomationState = {
+  present: false,
+  mode: 'create',
+  definitionId: null,
+  revision: 0,
+  status: 'ready',
+  loadError: '',
+  values: {
+    name: '',
+    id: '',
+    idCustomized: false,
+    trigger: 'manual',
+    scheduleCron: '',
+    continuity: 'fresh',
+    catchUp: '',
+    repositoriesInclude: [],
+    repositoriesExclude: [],
+    agent: 'codex',
+    model: '',
+    effort: '',
+    executable: '',
+    directoryPath: '',
+    repositoryOverrides: [],
+    prompt: '',
+  },
+  errors: {},
+  saving: false,
+  saveError: '',
+  saveErrorCode: '',
+  enabled: null,
+  compiledSentence: '',
+  deleteArmed: false,
+};
+
+function collectAutomationFormUiState() {
+  return getAutomationFormAutomationHandle()?.getState() ?? INACTIVE_AUTOMATION_FORM_STATE;
 }
 
 function getLocationPickerRoot() {
@@ -2707,51 +2742,60 @@ export function useUiAutomationBridge({
         await settleUi(3);
         return collectAutomationsUiState();
       }
-      // Automation editor (self-service YAML buffer). getState reads live
-      // component state through the registered handle rather than scraping
-      // the DOM — see collectAutomationEditorUiState above for why.
-      case 'automation_editor_open': {
+      // Structured automation form. getState reads live component state
+      // through the registered handle rather than scraping the DOM — see
+      // collectAutomationFormUiState above for why.
+      case 'automation_form_open': {
         const definitionId = typeof payload.definitionId === 'string' ? payload.definitionId : '';
         clickTestId(definitionId ? `automation-edit-${definitionId}` : 'automation-new');
         await settleUi(3);
-        return collectAutomationEditorUiState();
+        return collectAutomationFormUiState();
       }
-      case 'automation_editor_get_state':
-        return collectAutomationEditorUiState();
-      case 'automation_editor_set_text': {
-        const text = typeof payload.text === 'string' ? payload.text : null;
-        if (text === null) throw new Error('automation_editor_set_text requires text');
-        const handle = getAutomationEditorAutomationHandle();
-        if (!handle) throw new Error('automation editor is not mounted');
-        handle.setText(text);
+      case 'automation_form_get_state':
+        return collectAutomationFormUiState();
+      case 'automation_form_set_values': {
+        const values = payload.values;
+        if (!values || typeof values !== 'object') {
+          throw new Error('automation_form_set_values requires values');
+        }
+        const handle = getAutomationFormAutomationHandle();
+        if (!handle) throw new Error('automation form is not mounted');
+        handle.setValues(values as Partial<AutomationFormAutomationState['values']>);
         await settleUi(2);
-        return collectAutomationEditorUiState();
+        return collectAutomationFormUiState();
       }
-      case 'automation_editor_click': {
+      case 'automation_form_submit': {
+        const handle = getAutomationFormAutomationHandle();
+        if (!handle) throw new Error('automation form is not mounted');
+        handle.submit();
+        await settleUi(3);
+        return collectAutomationFormUiState();
+      }
+      case 'automation_form_click': {
         const button = typeof payload.button === 'string' ? payload.button : '';
         let testid: string;
         switch (button) {
-          case 'validate':
-            testid = 'automation-editor-validate';
-            break;
           case 'save':
-            testid = 'automation-editor-save';
+            testid = 'automation-form-save';
             break;
           case 'cancel':
-            testid = 'automation-editor-cancel';
-            break;
-          case 'reload':
-            testid = 'automation-editor-reload';
+            testid = 'automation-form-cancel';
             break;
           case 'close':
-            testid = 'automation-editor-close';
+            testid = 'automation-form-close';
+            break;
+          case 'reload':
+            testid = 'automation-form-reload';
+            break;
+          case 'delete':
+            testid = 'automation-form-delete';
             break;
           default:
-            throw new Error(`automation_editor_click: unknown button "${button}"`);
+            throw new Error(`automation_form_click: unknown button "${button}"`);
         }
         clickTestId(testid);
         await settleUi(3);
-        return collectAutomationEditorUiState();
+        return collectAutomationFormUiState();
       }
       case 'click_nudge_trigger': {
         // The "deliver now" trigger renders only in NudgeIndicator's paused mode

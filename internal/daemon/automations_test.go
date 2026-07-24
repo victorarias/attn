@@ -1647,3 +1647,117 @@ func TestAutomationSetEnabledNoOpDoesNotBroadcast(t *testing.T) {
 		t.Fatalf("no-op automationSetEnabled broadcast = %v, want none", ids)
 	}
 }
+
+// TestAutomationDefinitionsGetReachesRealSocketDispatchWithLastRun drives
+// automation_definitions_get through handleConnection (not the action
+// function directly) to guard against the PR2a class of bug where a command
+// is wired into the schema/constants but never reaches the dispatch switch —
+// and pins that the summary's last_run is populated from the store's
+// per-definition latest-run query, not left for the frontend to backfill.
+func TestAutomationDefinitionsGetReachesRealSocketDispatchWithLastRun(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	raw := fmt.Sprintf(manualAutomationYAML, t.TempDir())
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	run, _, err := s.ClaimManualAutomationRun(def.ID, "request-1", "", `{}`, def.Revision, `{}`, now, store.AutomationRunReservation{
+		RunID: "run-1", OccurrenceID: "occ-1", TicketID: "ticket-1", SessionID: "session-1", WorkspaceID: "workspace-1", PaneID: "pane-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkAutomationRunDelivered(run.ID, "{}", now); err != nil {
+		t.Fatal(err)
+	}
+
+	server, client := net.Pipe()
+	defer client.Close()
+	go d.handleConnection(server)
+	if err := json.NewEncoder(client).Encode(protocol.AutomationDefinitionsGetMessage{
+		Cmd: protocol.CmdAutomationDefinitionsGet,
+	}); err != nil {
+		t.Fatalf("encode automation_definitions_get: %v", err)
+	}
+
+	var result protocol.AutomationDefinitionsResultMessage
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := json.NewDecoder(client).Decode(&result); err != nil {
+		t.Fatalf("decode automation_definitions_get response: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("automation_definitions_get over the real socket dispatch failed: success=%v error=%v", result.Success, result.Error)
+	}
+	var got *protocol.AutomationDefinitionSummary
+	for i := range result.Definitions {
+		if result.Definitions[i].ID == def.ID {
+			got = &result.Definitions[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("definitions = %#v, want an entry for %s", result.Definitions, def.ID)
+	}
+	if got.LastRun == nil || got.LastRun.ID != run.ID {
+		t.Fatalf("definition.last_run = %#v, want run %s embedded", got.LastRun, run.ID)
+	}
+}
+
+// TestAutomationApplySocketPathIsUnguardedButWSPathEnforcesStaleRevision pins
+// the pointer-presence contract on automationApplyWithGuards's
+// expectedID/expectedRevision: the socket/CLI path (automationApply, wrapping
+// automationApplyWithGuards with nil, nil) always overwrites last-writer-wins,
+// while the WS/editor path (always sending non-nil expected_revision) refuses
+// a stale save.
+func TestAutomationApplySocketPathIsUnguardedButWSPathEnforcesStaleRevision(t *testing.T) {
+	s := store.New()
+	d := &Daemon{store: s, wsHub: newWSHub()}
+	dir := t.TempDir()
+	raw := fmt.Sprintf(manualAutomationYAML, dir)
+
+	def, err := d.automationApply(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def.Revision != 1 {
+		t.Fatalf("fixture revision = %d, want 1", def.Revision)
+	}
+
+	// Unguarded socket/CLI path: re-applying the same id with no expected
+	// revision at all overwrites unconditionally, even though a WS-style
+	// caller would by now be holding a stale revision (1) once a concurrent
+	// edit bumps it to 2 below.
+	edited := strings.Replace(fmt.Sprintf(manualAutomationYAML, dir), "Check locally.", "Check locally, edited by someone else.", 1)
+	if _, err := d.automationApply(edited); err != nil {
+		t.Fatalf("automationApply (unguarded socket path) on existing id: %v", err)
+	}
+	afterConcurrentEdit, err := s.GetAutomationDefinition(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterConcurrentEdit.Revision != 2 {
+		t.Fatalf("revision after unguarded concurrent apply = %d, want 2", afterConcurrentEdit.Revision)
+	}
+
+	// WS/editor path: expectedRevision is a non-nil pointer holding the stale
+	// value (1) the editor loaded before the concurrent edit above landed —
+	// must refuse rather than overwrite.
+	staleRevision := 1
+	expectedID := def.ID
+	_, err = d.automationApplyWithGuards(context.Background(), raw, &expectedID, &staleRevision)
+	if err == nil || !strings.Contains(err.Error(), "changed elsewhere") {
+		t.Fatalf("automationApplyWithGuards with stale expected_revision err=%v, want a stale-revision refusal", err)
+	}
+	var refusal *automationRefusal
+	if !errors.As(err, &refusal) || refusal.Code != automationErrCodeRevisionConflict {
+		t.Fatalf("automationApplyWithGuards stale-revision error = %v, want an automationRefusal tagged %q", err, automationErrCodeRevisionConflict)
+	}
+	stillAfterConcurrentEdit, err := s.GetAutomationDefinition(def.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillAfterConcurrentEdit.Revision != 2 {
+		t.Fatalf("revision after refused guarded apply = %d, want unchanged at 2", stillAfterConcurrentEdit.Revision)
+	}
+}

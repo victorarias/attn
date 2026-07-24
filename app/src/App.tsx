@@ -666,8 +666,8 @@ function App() {
     setAutomationEnabled,
     runAutomationNow,
     getAutomationDefinition,
-    validateAutomationDefinition,
     applyAutomationDefinition,
+    deleteAutomationDefinition,
     fetchTicket,
     sendTicketChangeStatus,
     sendTicketAddComment,
@@ -884,8 +884,8 @@ function App() {
         setAutomationEnabled={setAutomationEnabled}
         runAutomationNow={runAutomationNow}
         getAutomationDefinition={getAutomationDefinition}
-        validateAutomationDefinition={validateAutomationDefinition}
         applyAutomationDefinition={applyAutomationDefinition}
+        deleteAutomationDefinition={deleteAutomationDefinition}
         fetchTicket={fetchTicket}
         sendTicketChangeStatus={sendTicketChangeStatus}
         sendTicketAddComment={sendTicketAddComment}
@@ -1009,8 +1009,8 @@ interface AppContentProps {
   setAutomationEnabled: ReturnType<typeof useDaemonSocket>['setAutomationEnabled'];
   runAutomationNow: ReturnType<typeof useDaemonSocket>['runAutomationNow'];
   getAutomationDefinition: ReturnType<typeof useDaemonSocket>['getAutomationDefinition'];
-  validateAutomationDefinition: ReturnType<typeof useDaemonSocket>['validateAutomationDefinition'];
   applyAutomationDefinition: ReturnType<typeof useDaemonSocket>['applyAutomationDefinition'];
+  deleteAutomationDefinition: ReturnType<typeof useDaemonSocket>['deleteAutomationDefinition'];
   fetchTicket: ReturnType<typeof useDaemonSocket>['fetchTicket'];
   sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
   sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
@@ -1128,8 +1128,8 @@ sendFetchPRDetails,
   setAutomationEnabled,
   runAutomationNow,
   getAutomationDefinition,
-  validateAutomationDefinition,
   applyAutomationDefinition,
+  deleteAutomationDefinition,
   fetchTicket,
   sendTicketChangeStatus,
   sendTicketAddComment,
@@ -3878,8 +3878,8 @@ sendFetchPRDetails,
                   setEnabled={setAutomationEnabled}
                   runNow={runAutomationNow}
                   getDefinition={getAutomationDefinition}
-                  validateDefinition={validateAutomationDefinition}
                   applyDefinition={applyAutomationDefinition}
+                  deleteDefinition={deleteAutomationDefinition}
                   onOpenTicket={handleOpenTicketDetail}
                   onSelectSession={handleSelectSession}
                   onFocusPane={(sessionId, paneId) => focusSessionPane(sessionId, paneId, 40)}

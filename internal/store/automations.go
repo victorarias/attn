@@ -1201,6 +1201,49 @@ func (s *Store) ListAutomationRunsWithOccurrenceKeys(definitionID string, limit 
 	return out, rows.Err()
 }
 
+// LatestAutomationRunPerDefinition returns, for every definition that has at
+// least one run, its single most-recent run (by created_at, ties broken by
+// id) paired with its occurrence's occurrence_key — one query, used to embed
+// last_run in the definitions listing instead of the panel issuing one
+// automation_runs_get per definition. A definition with zero runs has no
+// entry in the returned map.
+func (s *Store) LatestAutomationRunPerDefinition() (map[string]AutomationRunWithOccurrenceKey, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT ` + automationRunColumnsQualified + `,o.occurrence_key
+		FROM automation_runs r
+		JOIN automation_occurrences o ON o.id=r.occurrence_id
+		WHERE r.id IN (
+			SELECT id FROM (
+				SELECT id, definition_id,
+					ROW_NUMBER() OVER (PARTITION BY definition_id ORDER BY created_at DESC, id DESC) AS rn
+				FROM automation_runs
+			) WHERE rn = 1
+		)
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]AutomationRunWithOccurrenceKey)
+	for rows.Next() {
+		var r AutomationRun
+		var created, updated, delivered, occurrenceKey string
+		if err := rows.Scan(&r.ID, &r.DefinitionID, &r.OccurrenceID, &r.DefinitionRevision, &r.SnapshotJSON, &r.State, &r.CancelReason, &r.Attempts, &r.LastError, &r.TicketID, &r.SessionID, &r.WorkspaceID, &r.PaneID, &r.ResolvedLocationJSON, &created, &updated, &delivered, &occurrenceKey); err != nil {
+			return nil, err
+		}
+		r.CreatedAt = parseTicketTime(created)
+		r.UpdatedAt = parseTicketTime(updated)
+		r.DeliveredAt = parseOptionalAutomationTime(delivered)
+		out[r.DefinitionID] = AutomationRunWithOccurrenceKey{AutomationRun: r, OccurrenceKey: occurrenceKey}
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListPendingAutomationRuns() ([]AutomationRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

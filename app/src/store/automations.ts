@@ -99,19 +99,3 @@ export function selectDefinitionById(
   if (!definitionId) return null;
   return definitions.find((definition) => definition.id === definitionId) ?? null;
 }
-
-// selectLatestRunForDefinition returns the most recently created run in
-// `runs`, or null when there are none. created_at is an ISO-8601 string so a
-// lexicographic max is a correct chronological max. Used for the definitions
-// list's failure badge, which reflects each definition's latest run without
-// requiring the user to expand it.
-export function selectLatestRunForDefinition(
-  runs: AutomationRunSummary[] | undefined,
-): AutomationRunSummary | null {
-  if (!runs || runs.length === 0) return null;
-  let latest: AutomationRunSummary | null = null;
-  for (const run of runs) {
-    if (!latest || run.created_at > latest.created_at) latest = run;
-  }
-  return latest;
-}

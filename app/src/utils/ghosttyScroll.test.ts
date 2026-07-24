@@ -29,6 +29,7 @@ describe('applicationMouseInput', () => {
   it('encodes SGR mouse presses, drags and releases', () => {
     expect(applicationMouseInput('press', 0, 7, 9, true)).toBe('\x1b[<0;7;9M');
     expect(applicationMouseInput('move', 0, 8, 9, true)).toBe('\x1b[<32;8;9M');
+    expect(applicationMouseInput('move', 3, 8, 9, true)).toBe('\x1b[<35;8;9M');
     expect(applicationMouseInput('release', 0, 8, 9, true)).toBe('\x1b[<3;8;9m');
   });
 

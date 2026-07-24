@@ -80,6 +80,42 @@ location: {type: directory, path: "` + t.TempDir() + `"}
 	}
 }
 
+// TestParseDefinitionYAMLAcceptsJSONEncoding documents the WS automations
+// form's save path: the form edits automation_definition_get's spec_json
+// directly and never touches spec_yaml, then sends that JSON straight back
+// through automation_apply's definition_yaml field. That only works because
+// every DefinitionSpec field carries identical `yaml:`/`json:` tags, so
+// json.Marshal's output is itself valid YAML that ParseDefinitionYAML accepts
+// and decodes to an equal spec — this test is the guarantee that the two
+// encodings can never drift apart on the daemon side.
+func TestParseDefinitionYAMLAcceptsJSONEncoding(t *testing.T) {
+	raw := `api_version: attn.dev/automations/v1alpha1
+id: json-save-path
+name: JSON save path
+trigger: {type: manual}
+prompt: Do the thing.
+launch: {driver: codex, model: gpt-5, effort: high}
+location: {type: directory, path: "` + t.TempDir() + `"}
+`
+	spec, _, err := ParseDefinitionYAML([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseDefinitionYAML() error = %v", err)
+	}
+
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("json.Marshal(spec) error = %v", err)
+	}
+
+	fromJSON, _, err := ParseDefinitionYAML(specJSON)
+	if err != nil {
+		t.Fatalf("ParseDefinitionYAML(json.Marshal(spec)) error = %v, json:\n%s", err, specJSON)
+	}
+	if !reflect.DeepEqual(fromJSON, spec) {
+		t.Fatalf("ParseDefinitionYAML(json.Marshal(spec)) = %#v, want %#v", fromJSON, spec)
+	}
+}
+
 // TestStarterTemplateYAMLIsWellFormedYAML pins automation_definition_get's
 // id: "" starter-template contract: the rendered document must at least be
 // syntactically parseable YAML matching StarterDefinition field-for-field

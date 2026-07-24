@@ -186,6 +186,19 @@ const MAX_PENDING_ATTACH_OUTPUTS = 512;
 // definitively said no, don't retry blindly".
 export class AutomationActionTimeoutError extends Error {}
 
+// AutomationActionError carries the daemon's typed error_code (protocol 182:
+// revision_conflict | id_collision | deleted_elsewhere | id_mismatch |
+// validation, or '' for untyped failures) so callers can route recovery UI
+// without string-matching messages.
+export class AutomationActionError extends Error {
+  readonly code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = 'AutomationActionError';
+    this.code = code;
+  }
+}
+
 interface PRActionResult {
   success: boolean;
   error?: string;
@@ -2873,13 +2886,22 @@ export function useDaemonSocket({
             break;
           }
 
-          // Single generic result event for the automations WS surface
-          // (definitions_get / runs_get / set_enabled / run) — see
-          // AutomationActionResultMessage's doc comment. Correlated by
-          // request_id, not action, so concurrent calls (e.g. listing runs for
-          // two different definitions) never cross-resolve; each caller wraps
-          // its own extraction of the raw payload at registration time.
-          case 'automation_action_result': {
+          // The 9 typed automations result events (one per command — see
+          // internal/protocol/schema/main.tsp's Automation*ResultMessage
+          // family and daemon/automations_actions.go). Correlated by
+          // request_id, not action/event, so concurrent calls (e.g. listing
+          // runs for two different definitions) never cross-resolve; each
+          // caller wraps its own extraction of the typed payload at
+          // registration time (see the wrapper functions below).
+          case 'automation_apply_result':
+          case 'automation_validate_result':
+          case 'automation_definitions_result':
+          case 'automation_definition_result':
+          case 'automation_runs_result':
+          case 'automation_run_result':
+          case 'automation_set_enabled_result':
+          case 'automation_delete_result':
+          case 'automation_cleanup_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') break;
             const key = `automation:${requestId}`;
@@ -2889,7 +2911,13 @@ export function useDaemonSocket({
             if ((data as any).success) {
               pending.resolve(data);
             } else {
-              pending.reject(new Error((data as any).error || 'Automation action failed'));
+              const errorCode = (data as any).error_code;
+              pending.reject(
+                new AutomationActionError(
+                  (data as any).error || 'Automation action failed',
+                  typeof errorCode === 'string' ? errorCode : '',
+                ),
+              );
             }
             break;
           }
@@ -5388,7 +5416,7 @@ export function useDaemonSocket({
   }, [nextRequestID]);
 
   const runAutomationNow = useCallback(
-    (definitionId: string, requestId: string): Promise<{ runId?: string; ticketId?: string; sessionId?: string }> => {
+    (definitionId: string, requestId: string): Promise<AutomationRunSummary | undefined> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5404,8 +5432,7 @@ export function useDaemonSocket({
         // same run instead of creating a duplicate.
         const key = `automation:${requestId}`;
         pendingActionsRef.current.set(key, {
-          resolve: (result: any) =>
-            resolve({ runId: result.run_id, ticketId: result.ticket_id, sessionId: result.session_id }),
+          resolve: (result: any) => resolve(result.run as AutomationRunSummary | undefined),
           reject,
         });
         ws.send(JSON.stringify({ cmd: 'automation_run', definition_id: definitionId, request_id: requestId }));
@@ -5424,10 +5451,14 @@ export function useDaemonSocket({
   );
 
   // getAutomationDefinition backs the editor's load path. definitionId '' asks
-  // for the starter template at revision 0 (the create case, D7 in the
-  // design) — create and edit share this one call.
+  // for the starter template (the create case, D7 in the design) — create and
+  // edit share this one call. The template response carries no `definition`
+  // (revision 0, unsaved); an edit's response carries the current definition
+  // summary, whose `.revision` is what the editor tracks for Save's guard.
   const getAutomationDefinition = useCallback(
-    (definitionId: string): Promise<{ specYaml: string; revision: number }> => {
+    (
+      definitionId: string,
+    ): Promise<{ specYaml: string; specJson: string; definition?: AutomationDefinitionSummary }> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5437,7 +5468,12 @@ export function useDaemonSocket({
         const requestId = nextRequestID('automation_definition_get');
         const key = `automation:${requestId}`;
         pendingActionsRef.current.set(key, {
-          resolve: (result: any) => resolve({ specYaml: result.spec_yaml ?? '', revision: result.revision ?? 0 }),
+          resolve: (result: any) =>
+            resolve({
+              specYaml: result.spec_yaml ?? '',
+              specJson: result.spec_json ?? '',
+              definition: result.definition ?? undefined,
+            }),
           reject,
         });
         ws.send(
@@ -5459,45 +5495,18 @@ export function useDaemonSocket({
     [nextRequestID],
   );
 
-  // validateAutomationSpec runs the daemon's shared validation seam
-  // (validateAutomationSpec, D3 in the design) without persisting anything, so
-  // the editor can show an error before Save.
-  const validateAutomationDefinition = useCallback(
-    (definitionYaml: string): Promise<void> => {
-      return new Promise((resolve, reject) => {
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          reject(new Error('WebSocket not connected'));
-          return;
-        }
-        const requestId = nextRequestID('automation_validate');
-        const key = `automation:${requestId}`;
-        pendingActionsRef.current.set(key, { resolve: () => resolve(undefined), reject });
-        ws.send(
-          JSON.stringify({ cmd: 'automation_validate', definition_yaml: definitionYaml, request_id: requestId }),
-        );
-        setTimeout(() => {
-          if (pendingActionsRef.current.has(key)) {
-            pendingActionsRef.current.delete(key);
-            reject(new AutomationActionTimeoutError('Validate automation timed out'));
-          }
-        }, 30000);
-      });
-    },
-    [nextRequestID],
-  );
-
   // applyAutomationDefinition is validate-then-persist, carrying expected_id
   // (D4) and expected_revision (D5) so the daemon can refuse an id change or a
   // stale save. expectedId is '' when creating, expectedRevision is 0 when
   // creating — matching AutomationEditor's loadedId/revision state, which
-  // start from getAutomationDefinition('')'s template response.
+  // start from getAutomationDefinition('')'s template response. The result's
+  // revision lives on `definition.revision`, not a top-level field.
   const applyAutomationDefinition = useCallback(
     (
       definitionYaml: string,
       expectedId: string,
       expectedRevision: number,
-    ): Promise<{ definition: AutomationDefinitionSummary; specYaml: string; revision: number }> => {
+    ): Promise<{ definition: AutomationDefinitionSummary; specYaml: string }> => {
       return new Promise((resolve, reject) => {
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5509,9 +5518,8 @@ export function useDaemonSocket({
         pendingActionsRef.current.set(key, {
           resolve: (result: any) =>
             resolve({
-              definition: (result.definitions ?? [])[0],
+              definition: result.definition,
               specYaml: result.spec_yaml ?? '',
-              revision: result.revision ?? 0,
             }),
           reject,
         });
@@ -5531,6 +5539,36 @@ export function useDaemonSocket({
           if (pendingActionsRef.current.has(key)) {
             pendingActionsRef.current.delete(key);
             reject(new AutomationActionTimeoutError('Apply automation timed out'));
+          }
+        }, 30000);
+      });
+    },
+    [nextRequestID],
+  );
+
+  // deleteAutomationDefinition removes a persisted definition. Mirrors
+  // applyAutomationDefinition's mutation-serialization comment: mutations can
+  // serialize behind an in-flight automation delivery (daemon holds
+  // automationMu across full run delivery); 30s matches the repo's
+  // async-action convention.
+  const deleteAutomationDefinition = useCallback(
+    (definitionId: string): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        const requestId = nextRequestID('automation_delete');
+        const key = `automation:${requestId}`;
+        pendingActionsRef.current.set(key, { resolve: () => resolve(undefined), reject });
+        ws.send(
+          JSON.stringify({ cmd: 'automation_delete', definition_id: definitionId, request_id: requestId }),
+        );
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new AutomationActionTimeoutError('Delete automation timed out'));
           }
         }, 30000);
       });
@@ -5777,8 +5815,8 @@ export function useDaemonSocket({
     setAutomationEnabled,
     runAutomationNow,
     getAutomationDefinition,
-    validateAutomationDefinition,
     applyAutomationDefinition,
+    deleteAutomationDefinition,
     getPresentations,
     getPresentationRound,
     submitPresentationRound,

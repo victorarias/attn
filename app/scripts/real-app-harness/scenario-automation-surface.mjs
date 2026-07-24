@@ -72,6 +72,12 @@ function runJSON(binary, args, env) {
   return JSON.parse(run(binary, args, env));
 }
 
+// `enable`/`disable` are the only way to move the enabled column post-PR5;
+// both print the updated (lowercase) definition summary.
+function disableDefinition(binary, id, env) {
+  return runJSON(binary, ['automation', 'disable', id], env);
+}
+
 async function poll(fn, description, timeoutMs = 30_000) {
   const started = Date.now();
   let last = null;
@@ -121,11 +127,17 @@ function createCodexProbe(root) {
 
 const API_VERSION = 'attn.dev/automations/v1alpha1';
 
-function manualDefinitionYAML({ id, locationPath, enabled, executable }) {
+// `enabled` is not a spec field post-PR5 (column-only; a YAML carrying
+// `enabled:` is rejected outright — errEnabledManagedOutsideSpec in
+// internal/automation/automation.go), so neither template below emits it.
+// Every apply of a brand-new id is inserted enabled regardless
+// (store.UpsertAutomationDefinition); teardown disabling goes through
+// `automation disable <id>` (disableDefinition above) instead of a reapply
+// with `enabled: false`.
+function manualDefinitionYAML({ id, locationPath, executable }) {
   return `api_version: ${API_VERSION}
 id: ${id}
 name: Slice 6 packaged automations-panel proof (manual)
-enabled: ${enabled}
 trigger:
   type: manual
 prompt: |
@@ -141,11 +153,10 @@ location:
 `;
 }
 
-function scheduledDefinitionYAML({ id, locationPath, enabled, executable }) {
+function scheduledDefinitionYAML({ id, locationPath, executable }) {
   return `api_version: ${API_VERSION}
 id: ${id}
 name: Slice 6 packaged automations-panel proof (non-manual)
-enabled: ${enabled}
 trigger:
   type: scheduled
   schedule:
@@ -260,7 +271,7 @@ async function main() {
     await runner.step('leg1_apply_manual_and_panel_shows_it', async () => {
       fs.writeFileSync(
         manualDefinitionFile,
-        manualDefinitionYAML({ id: manualID, locationPath: fixturePath, enabled: true, executable: probe.executable }),
+        manualDefinitionYAML({ id: manualID, locationPath: fixturePath, executable: probe.executable }),
       );
       runJSON(binary, ['automation', 'apply', '--file', manualDefinitionFile], daemonEnv);
       manualApplied = true;
@@ -308,7 +319,7 @@ async function main() {
     await runner.step('leg3_failure_shown_not_hidden', async () => {
       fs.writeFileSync(
         scheduledDefinitionFile,
-        scheduledDefinitionYAML({ id: scheduledID, locationPath: fixturePath, enabled: true, executable: probe.executable }),
+        scheduledDefinitionYAML({ id: scheduledID, locationPath: fixturePath, executable: probe.executable }),
       );
       runJSON(binary, ['automation', 'apply', '--file', scheduledDefinitionFile], daemonEnv);
       scheduledApplied = true;
@@ -390,25 +401,9 @@ async function main() {
     // future observation, so leaving one enabled against a deleted temp root
     // would spam errors on this profile forever (same defensive ordering as
     // scenario-automation-scheduled-cleanup.mjs's finally block).
-    if (daemonEnv && fixturePath && fs.existsSync(fixturePath)) {
-      if (manualApplied) {
-        try {
-          fs.writeFileSync(
-            manualDefinitionFile,
-            manualDefinitionYAML({ id: manualID, locationPath: fixturePath, enabled: false, executable: probe.executable }),
-          );
-          run(binary, ['automation', 'apply', '--file', manualDefinitionFile], daemonEnv);
-        } catch {}
-      }
-      if (scheduledApplied) {
-        try {
-          fs.writeFileSync(
-            scheduledDefinitionFile,
-            scheduledDefinitionYAML({ id: scheduledID, locationPath: fixturePath, enabled: false, executable: probe.executable }),
-          );
-          run(binary, ['automation', 'apply', '--file', scheduledDefinitionFile], daemonEnv);
-        } catch {}
-      }
+    if (daemonEnv) {
+      if (manualApplied) { try { disableDefinition(binary, manualID, daemonEnv); } catch {} }
+      if (scheduledApplied) { try { disableDefinition(binary, scheduledID, daemonEnv); } catch {} }
     }
     if (fixturePath) {
       try { fs.rmSync(fixturePath, { recursive: true, force: true }); } catch {}

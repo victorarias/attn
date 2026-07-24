@@ -13,6 +13,25 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
+// automationRefusal tags an apply refusal with the machine-readable
+// error_code the WS form uses to route the failure (banner vs. field).
+// Unknown/transient errors are deliberately not tagged.
+type automationRefusal struct {
+	Code string
+	Err  error
+}
+
+func (r *automationRefusal) Error() string { return r.Err.Error() }
+func (r *automationRefusal) Unwrap() error { return r.Err }
+
+const (
+	automationErrCodeRevisionConflict = "revision_conflict"
+	automationErrCodeIDCollision      = "id_collision"
+	automationErrCodeDeletedElsewhere = "deleted_elsewhere"
+	automationErrCodeIDMismatch       = "id_mismatch"
+	automationErrCodeValidation       = "validation"
+)
+
 // defaultWSAutomationMutationTimeout is the fallback for
 // Daemon.wsAutomationMutationTimeout (see wsAutomationMutationTimeoutDuration).
 // 25s is deliberately strictly inside the frontend's 30s client timeout
@@ -66,38 +85,57 @@ func (d *Daemon) validateAutomationSpec(raw string) (automation.DefinitionSpec, 
 }
 
 // automationApply applies definition YAML unconditionally: parse, validate,
-// upsert. This is the unix-socket/CLI/agent surface (attn automation apply)
-// — "last writer wins," unguarded, exactly as before this PR. The WS
-// editor's Save goes through automationApplyWithGuards instead.
+// upsert. This is the unguarded shape used by test fixtures and — via
+// actionAutomationApply passing nil/nil for expectedID/expectedRevision — the
+// unix-socket/CLI/agent surface (attn automation apply): "last writer wins."
+// Thin wrapper over automationApplyWithGuards with both guards off; kept
+// separate only because so many tests use it as fixture setup.
 func (d *Daemon) automationApply(raw string) (*store.AutomationDefinition, error) {
-	spec, canonical, err := d.validateAutomationSpec(raw)
-	if err != nil {
-		return nil, err
-	}
-	return d.automationApplyLocked(context.Background(), spec, canonical, nil)
+	return d.automationApplyWithGuards(context.Background(), raw, nil, nil)
 }
 
-// automationApplyWithGuards is automationApply's WS counterpart, used by the
-// app editor's Save. expectedID and expectedRevision implement D4/D5 from
-// the design: apply is an upsert keyed on the id *inside* the YAML, so an
-// edited id would silently fork the definition and leave the original
-// enabled and running (D4) — expectedID ("" when creating) refuses a
-// mismatch. And a stale expectedRevision (0 when creating) would silently
-// clobber a concurrent apply from the CLI or another app window (D5) — the
-// caller sees "changed elsewhere — reload" instead. Both guards run inside
-// automationApplyLocked's automationMu, atomically with the pre-upsert
-// existing-row read they depend on, so there is no window between the check
-// and the write where a concurrent apply could slip through.
-func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw, expectedID string, expectedRevision int) (*store.AutomationDefinition, error) {
+// automationApplyWithGuards is the one apply path shared by both transports
+// (see actionAutomationApply). expectedID and expectedRevision implement
+// D4/D5 from the design: apply is an upsert keyed on the id *inside* the
+// YAML, so an edited id would silently fork the definition and leave the
+// original enabled and running (D4) — a non-nil expectedID that mismatches
+// refuses. And a stale expectedRevision would silently clobber a concurrent
+// apply from the CLI or another app window (D5) — the caller sees "changed
+// elsewhere — reload" instead.
+//
+// Both guards are keyed on POINTER PRESENCE, not on the zero value: nil means
+// "this caller does not want this guard enforced at all" — the socket/CLI
+// path (attn automation apply) never sets either field, so it gets true
+// last-writer-wins, unguarded, exactly as the old unconditional automationApply
+// did. The WS editor's Save always sends both fields (zero-valued for a
+// create — expectedID "" / expectedRevision 0, matching AutomationEditor's
+// loadedId/revision state before a first save), so its guards apply exactly
+// as before this unification: expectedRevision 0 means "creating" (refuse a
+// collision with a live definition) and a non-zero expectedRevision must
+// match the stored one. Using the dereferenced zero value here instead of
+// pointer presence would force EVERY caller — including the CLI's unguarded
+// edits of existing definitions — through the "0 means creating" branch,
+// wrongly rejecting a CLI apply of an existing definition as "already
+// exists".
+//
+// Both guards run inside automationApplyLocked's automationMu, atomically
+// with the pre-upsert existing-row read they depend on, so there is no
+// window between the check and the write where a concurrent apply could
+// slip through.
+func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw string, expectedID *string, expectedRevision *int) (*store.AutomationDefinition, error) {
 	spec, canonical, err := d.validateAutomationSpec(raw)
 	if err != nil {
-		return nil, err
+		return nil, &automationRefusal{Code: automationErrCodeValidation, Err: err}
 	}
-	if expectedID != "" && spec.ID != expectedID {
-		return nil, fmt.Errorf("definition id %q in the YAML does not match the definition being edited (%q) — apply is keyed on the id inside the YAML, so an id change must be made as a separate create", spec.ID, expectedID)
+	if expectedID != nil && *expectedID != "" && spec.ID != *expectedID {
+		return nil, &automationRefusal{Code: automationErrCodeIDMismatch, Err: fmt.Errorf("definition id %q in the YAML does not match the definition being edited (%q) — apply is keyed on the id inside the YAML, so an id change must be made as a separate create", spec.ID, *expectedID)}
 	}
 	guard := func(existing *store.AutomationDefinition) error {
-		if expectedRevision == 0 {
+		if expectedRevision == nil {
+			// No revision guard requested at all (the unguarded socket/CLI path).
+			return nil
+		}
+		if *expectedRevision == 0 {
 			// Create. Revisions start at 1 (see UpsertAutomationDefinition), so
 			// this is unambiguous — it is never an edit of a revision-0 row.
 			//
@@ -114,12 +152,12 @@ func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw, expectedID 
 			// list only shows live definitions, so the user cannot be
 			// overwriting anything they can see.
 			if existing != nil && existing.DeletedAt == nil {
-				return fmt.Errorf("an automation with id %q already exists — edit it instead of creating a second one", spec.ID)
+				return &automationRefusal{Code: automationErrCodeIDCollision, Err: fmt.Errorf("an automation with id %q already exists — edit it instead of creating a second one", spec.ID)}
 			}
 			return nil
 		}
-		if existing == nil || existing.Revision != expectedRevision {
-			return errors.New("automation definition changed elsewhere — reload before saving")
+		if existing == nil || existing.Revision != *expectedRevision {
+			return &automationRefusal{Code: automationErrCodeRevisionConflict, Err: errors.New("automation definition changed elsewhere — reload before saving")}
 		}
 		if existing.DeletedAt != nil {
 			// DeleteAutomationDefinition sets deleted_at without touching
@@ -131,7 +169,7 @@ func (d *Daemon) automationApplyWithGuards(ctx context.Context, raw, expectedID 
 			// edges on the assumption it is gone, so a Save silently bringing it
 			// back live would restart an unattended cron the user deliberately
 			// deleted, with "saved successfully" as the only feedback.
-			return fmt.Errorf("automation %q was deleted elsewhere while you were editing it — your changes were not saved; close this editor and use New if you want to bring it back", spec.ID)
+			return &automationRefusal{Code: automationErrCodeDeletedElsewhere, Err: fmt.Errorf("automation %q was deleted elsewhere while you were editing it — your changes were not saved; close this editor and use New if you want to bring it back", spec.ID)}
 		}
 		return nil
 	}

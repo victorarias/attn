@@ -707,7 +707,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('resolves automation definitions from a correlated automation_action_result, ignoring a mismatched request_id', async () => {
+  it('resolves automation definitions from a correlated automation_definitions_result, ignoring a mismatched request_id', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
@@ -733,8 +733,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     act(() => {
       ws.emit({
-        event: 'automation_action_result',
-        action: 'definitions_get',
+        event: 'automation_definitions_result',
         request_id: 'mismatched-request-id',
         success: true,
         definitions: [{ id: 'wrong' }],
@@ -753,8 +752,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     };
     act(() => {
       ws.emit({
-        event: 'automation_action_result',
-        action: 'definitions_get',
+        event: 'automation_definitions_result',
         request_id: command.request_id,
         success: true,
         definitions: [definition],
@@ -786,8 +784,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     act(() => {
       ws.emit({
-        event: 'automation_action_result',
-        action: 'set_enabled',
+        event: 'automation_set_enabled_result',
         request_id: command.request_id,
         success: false,
         error: 'automation definition is disabled elsewhere',
@@ -798,7 +795,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('resolves runAutomationNow with run/ticket/session ids', async () => {
+  it('resolves runAutomationNow with the run summary', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({
         onSessionsUpdate: vi.fn(),
@@ -817,19 +814,25 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       .find((entry) => entry.cmd === 'automation_run');
     expect(command).toMatchObject({ definition_id: 'd1', request_id: 'req-1' });
 
+    const run = {
+      id: 'run-1',
+      definition_id: 'd1',
+      state: 'delivered',
+      ticket_id: 'ticket-1',
+      session_id: 'session-1',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
     act(() => {
       ws.emit({
-        event: 'automation_action_result',
-        action: 'run',
+        event: 'automation_run_result',
         request_id: command.request_id,
         success: true,
-        run_id: 'run-1',
-        ticket_id: 'ticket-1',
-        session_id: 'session-1',
+        run,
       });
     });
 
-    await expect(request).resolves.toEqual({ runId: 'run-1', ticketId: 'ticket-1', sessionId: 'session-1' });
+    await expect(request).resolves.toEqual(run);
     unmount();
   });
 

@@ -25,38 +25,50 @@ type Client struct {
 	socketPath string
 }
 
-type AutomationResult struct {
-	Event   string          `json:"event"`
-	Action  string          `json:"action"`
-	Success bool            `json:"success"`
-	Error   *string         `json:"error,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
+// automationResult is the minimal shape every per-action automations result
+// message shares (event/success/error) — enough to decide success/failure
+// generically in sendAutomation before the caller decodes the full typed
+// result (which also carries this shape) a second time for its payload.
+type automationResult struct {
+	Success bool    `json:"success"`
+	Error   *string `json:"error,omitempty"`
 }
 
-func (c *Client) sendAutomation(msg any) (*AutomationResult, error) {
+// sendAutomation sends msg over a fresh unix-socket connection and decodes
+// the raw response into out, a pointer to one of the typed
+// protocol.Automation*ResultMessage structs — every automations command
+// (socket/CLI and WS) now returns its own typed result directly, not a
+// generic wrapper with a `data` payload. A success=false result becomes a Go
+// error carrying the daemon's error text, exactly as before.
+func (c *Client) sendAutomation(msg any, out any) error {
 	conn, err := net.Dial("unix", c.socketPath)
 	if err != nil {
-		return nil, explainConnectError(c.socketPath, err)
+		return explainConnectError(c.socketPath, err)
 	}
 	defer conn.Close()
 	if err := json.NewEncoder(conn).Encode(msg); err != nil {
-		return nil, err
+		return err
 	}
-	var result AutomationResult
-	if err := json.NewDecoder(conn).Decode(&result); err != nil {
-		return nil, err
+	var raw json.RawMessage
+	if err := json.NewDecoder(conn).Decode(&raw); err != nil {
+		return err
 	}
-	if !result.Success {
-		return nil, fmt.Errorf("daemon error: %s", protocol.Deref(result.Error))
+	var probe automationResult
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return err
+	}
+	if !probe.Success {
+		return fmt.Errorf("daemon error: %s", protocol.Deref(probe.Error))
+	}
+	return json.Unmarshal(raw, out)
+}
+
+func (c *Client) AutomationApply(raw string) (*protocol.AutomationApplyResultMessage, error) {
+	var result protocol.AutomationApplyResultMessage
+	if err := c.sendAutomation(protocol.AutomationApplyMessage{Cmd: protocol.CmdAutomationApply, DefinitionYaml: raw}, &result); err != nil {
+		return nil, err
 	}
 	return &result, nil
-}
-func (c *Client) AutomationApply(raw string) (json.RawMessage, error) {
-	r, e := c.sendAutomation(protocol.AutomationApplyMessage{Cmd: protocol.CmdAutomationApply, DefinitionYaml: raw})
-	if e != nil {
-		return nil, e
-	}
-	return r.Data, nil
 }
 
 // AutomationValidate runs the same validateAutomationSpec seam automation
@@ -64,69 +76,72 @@ func (c *Client) AutomationApply(raw string) (json.RawMessage, error) {
 // Daemon.validateAutomationSpec's doc comment for why the two share one
 // function. A non-nil error is the validation failure message itself, not a
 // transport error.
-func (c *Client) AutomationValidate(raw string) (json.RawMessage, error) {
-	r, e := c.sendAutomation(protocol.AutomationValidateMessage{Cmd: protocol.CmdAutomationValidate, DefinitionYaml: raw})
-	if e != nil {
-		return nil, e
-	}
-	return r.Data, nil
-}
-func (c *Client) AutomationList() (json.RawMessage, error) {
-	r, e := c.sendAutomation(protocol.AutomationListMessage{Cmd: protocol.CmdAutomationList})
-	if e != nil {
-		return nil, e
-	}
-	return r.Data, nil
-}
-func (c *Client) AutomationShow(id string) (json.RawMessage, error) {
-	r, e := c.sendAutomation(protocol.AutomationShowMessage{Cmd: protocol.CmdAutomationShow, DefinitionID: id})
-	if e != nil {
-		return nil, e
-	}
-	return r.Data, nil
-}
-func (c *Client) AutomationRun(id, requestID, input string) (json.RawMessage, error) {
-	r, e := c.sendAutomation(protocol.AutomationRunMessage{Cmd: protocol.CmdAutomationRun, DefinitionID: id, RequestID: requestID, InputJson: protocol.Ptr(input)})
-	if e != nil {
-		return nil, e
-	}
-	return r.Data, nil
+func (c *Client) AutomationValidate(raw string) error {
+	var result protocol.AutomationValidateResultMessage
+	return c.sendAutomation(protocol.AutomationValidateMessage{Cmd: protocol.CmdAutomationValidate, DefinitionYaml: raw}, &result)
 }
 
-func (c *Client) AutomationRunPullRequest(id, requestID, prURL string) (json.RawMessage, error) {
-	r, e := c.sendAutomation(protocol.AutomationRunMessage{Cmd: protocol.CmdAutomationRun, DefinitionID: id, RequestID: requestID, PRURL: protocol.Ptr(prURL)})
-	if e != nil {
-		return nil, e
+func (c *Client) AutomationDefinitions() (*protocol.AutomationDefinitionsResultMessage, error) {
+	var result protocol.AutomationDefinitionsResultMessage
+	if err := c.sendAutomation(protocol.AutomationDefinitionsGetMessage{Cmd: protocol.CmdAutomationDefinitionsGet}, &result); err != nil {
+		return nil, err
 	}
-	return r.Data, nil
+	return &result, nil
 }
-func (c *Client) AutomationRuns(id string) (json.RawMessage, error) {
-	r, e := c.sendAutomation(protocol.AutomationRunListMessage{Cmd: protocol.CmdAutomationRunList, DefinitionID: id})
-	if e != nil {
-		return nil, e
+
+func (c *Client) AutomationDefinition(id string) (*protocol.AutomationDefinitionResultMessage, error) {
+	var result protocol.AutomationDefinitionResultMessage
+	if err := c.sendAutomation(protocol.AutomationDefinitionGetMessage{Cmd: protocol.CmdAutomationDefinitionGet, DefinitionID: id}, &result); err != nil {
+		return nil, err
 	}
-	return r.Data, nil
+	return &result, nil
+}
+
+func (c *Client) AutomationRun(id, requestID, input string) (*protocol.AutomationRunResultMessage, error) {
+	var result protocol.AutomationRunResultMessage
+	if err := c.sendAutomation(protocol.AutomationRunMessage{Cmd: protocol.CmdAutomationRun, DefinitionID: id, RequestID: requestID, InputJson: protocol.Ptr(input)}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) AutomationRunPullRequest(id, requestID, prURL string) (*protocol.AutomationRunResultMessage, error) {
+	var result protocol.AutomationRunResultMessage
+	if err := c.sendAutomation(protocol.AutomationRunMessage{Cmd: protocol.CmdAutomationRun, DefinitionID: id, RequestID: requestID, PRURL: protocol.Ptr(prURL)}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) AutomationRuns(id string) (*protocol.AutomationRunsResultMessage, error) {
+	var result protocol.AutomationRunsResultMessage
+	if err := c.sendAutomation(protocol.AutomationRunsGetMessage{Cmd: protocol.CmdAutomationRunsGet, DefinitionID: id}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // AutomationSetEnabled toggles a definition's enabled flag over the same
 // automation_set_enabled command the WS panel's toggle uses.
-func (c *Client) AutomationSetEnabled(id string, enabled bool) (json.RawMessage, error) {
-	r, e := c.sendAutomation(protocol.AutomationSetEnabledMessage{Cmd: protocol.CmdAutomationSetEnabled, DefinitionID: id, Enabled: enabled})
-	if e != nil {
-		return nil, e
+func (c *Client) AutomationSetEnabled(id string, enabled bool) (*protocol.AutomationSetEnabledResultMessage, error) {
+	var result protocol.AutomationSetEnabledResultMessage
+	if err := c.sendAutomation(protocol.AutomationSetEnabledMessage{Cmd: protocol.CmdAutomationSetEnabled, DefinitionID: id, Enabled: enabled}, &result); err != nil {
+		return nil, err
 	}
-	return r.Data, nil
+	return &result, nil
 }
+
 func (c *Client) AutomationDelete(id string) error {
-	_, e := c.sendAutomation(protocol.AutomationDeleteMessage{Cmd: protocol.CmdAutomationDelete, DefinitionID: id})
-	return e
+	var result protocol.AutomationDeleteResultMessage
+	return c.sendAutomation(protocol.AutomationDeleteMessage{Cmd: protocol.CmdAutomationDelete, DefinitionID: id}, &result)
 }
-func (c *Client) AutomationCleanup(id string) (json.RawMessage, error) {
-	r, e := c.sendAutomation(protocol.AutomationCleanupMessage{Cmd: protocol.CmdAutomationCleanup, DefinitionID: id})
-	if e != nil {
-		return nil, e
+
+func (c *Client) AutomationCleanup(id string) (*protocol.AutomationCleanupResultMessage, error) {
+	var result protocol.AutomationCleanupResultMessage
+	if err := c.sendAutomation(protocol.AutomationCleanupMessage{Cmd: protocol.CmdAutomationCleanup, DefinitionID: id}, &result); err != nil {
+		return nil, err
 	}
-	return r.Data, nil
+	return &result, nil
 }
 
 type ListResult struct {
