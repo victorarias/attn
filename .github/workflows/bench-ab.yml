@@ -46,10 +46,25 @@ jobs:
       - name: Install benchstat
         run: go install golang.org/x/perf/cmd/benchstat@latest
 
+      # internal/daemon links libghostty-vt via cgo on Linux; without the
+      # prebuilt archive its test binary does not link and its benchmarks are
+      # silently skipped. Guarded because the PR base may predate the script,
+      # and non-fatal so a fetch failure degrades the delta with a warning
+      # rather than turning this non-gating job red.
+      - name: Ensure native VT library (head)
+        run: |
+          if [ -x ./scripts/build-libghostty-vt.sh ]; then
+            ./scripts/build-libghostty-vt.sh || echo "::warning::could not obtain libghostty-vt for HEAD; cgo-linked packages will not build"
+          fi
+
       - name: Bench PR head
         run: |
           echo "Running: $BENCH_CMD"
-          eval "$BENCH_CMD" 2>&1 | tee head.txt || true
+          # stdout only into head.txt: a build failure's stderr (gcc/ld lines)
+          # parses as benchstat config lines and splits the comparison into two
+          # one-column tables, destroying the delta this job exists to publish.
+          eval "$BENCH_CMD" > head.txt || echo "::warning::the benchmark run on HEAD exited non-zero; the delta may cover fewer packages than intended"
+          cat head.txt
           if [ ! -s head.txt ]; then
             echo "::warning::head.txt is empty; the benchmark run on HEAD produced no output"
           fi
@@ -67,13 +82,38 @@ jobs:
             git checkout origin/main
           fi
 
+      # Re-run against the base checkout: the pin/patch may differ there, and
+      # the archive is keyed by that source identity.
+      - name: Ensure native VT library (base)
+        run: |
+          if [ -x ./scripts/build-libghostty-vt.sh ]; then
+            ./scripts/build-libghostty-vt.sh || echo "::warning::could not obtain libghostty-vt for BASE; cgo-linked packages will not build"
+          fi
+
       - name: Bench PR base
         run: |
           echo "Running: $BENCH_CMD"
-          eval "$BENCH_CMD" 2>&1 | tee base.txt || true
+          eval "$BENCH_CMD" > base.txt || echo "::warning::the benchmark run on BASE exited non-zero; the delta may cover fewer packages than intended"
+          cat base.txt
           if [ ! -s base.txt ]; then
             echo "::warning::base.txt is empty; the benchmark run on BASE produced no output"
           fi
+
+      # A package that fails to build produces no benchmark output, and the
+      # delta table for the packages that did run looks perfectly healthy. Name
+      # the gap explicitly instead of letting coverage shrink unnoticed.
+      - name: Check benchmark coverage
+        if: always()
+        run: |
+          for pkg in $(printf '%s' "$BENCH_CMD" | tr ' ' '\n' | grep '^\./internal/'); do
+            name="${pkg#./}"
+            name="${name%/}"
+            for f in base.txt head.txt; do
+              if ! grep -q "^pkg: .*/${name}$" "$f" 2>/dev/null; then
+                echo "::warning::$f has no benchmark output for $name — that package is missing from the delta"
+              fi
+            done
+          done
 
       - name: Compute benchstat delta
         if: always()
