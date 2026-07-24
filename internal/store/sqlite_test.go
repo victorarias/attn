@@ -1002,7 +1002,7 @@ func TestMigration79_ConvertsRecoverableFlagToState(t *testing.T) {
 		VALUES ('recoverable-session', 'Recoverable', '/tmp/recoverable', 'idle', '2026-07-24T00:00:00Z', '2026-07-24T00:00:00Z', '2026-07-24T00:00:00Z');
 		ALTER TABLE sessions ADD COLUMN recoverable INTEGER NOT NULL DEFAULT 0;
 		UPDATE sessions SET recoverable = 1 WHERE id = 'recoverable-session';
-		DELETE FROM schema_migrations WHERE version = 79;
+		DELETE FROM schema_migrations WHERE version >= 79;
 	`); err != nil {
 		t.Fatalf("seed pre-79 database: %v", err)
 	}
@@ -1026,7 +1026,10 @@ func TestMigration79_ConvertsRecoverableFlagToState(t *testing.T) {
 	if _, err := migrated.Exec(`SELECT recoverable FROM sessions LIMIT 1`); err == nil {
 		t.Fatal("recoverable column still exists after migration")
 	}
-	if _, err := migrated.Exec(`DELETE FROM schema_migrations WHERE version = 79`); err != nil {
+	// Rewind past 79: the runner resumes from MAX(version), so deleting only
+	// row 79 would leave a later migration's row holding the watermark and
+	// migration 79 would never re-run.
+	if _, err := migrated.Exec(`DELETE FROM schema_migrations WHERE version >= 79`); err != nil {
 		t.Fatalf("rewind migration 79 after column drop: %v", err)
 	}
 	if err := migrated.Close(); err != nil {

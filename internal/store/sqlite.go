@@ -774,6 +774,18 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 	{77, "automations v2: explicit run and binding state", ""},
 	{78, "add launch_intent to sessions", ""},
 	{79, "convert recoverable flag to session state", ""},
+	// File activity is a log of what happened to a file, keyed by (path, source),
+	// so a future source ("edited" by an agent) accumulates alongside "opened"
+	// instead of overwriting it.
+	{80, "create file_activity table", `CREATE TABLE IF NOT EXISTS file_activity (
+		path TEXT NOT NULL,
+		source TEXT NOT NULL,
+		session_id TEXT,
+		last_at TEXT NOT NULL,
+		count INTEGER NOT NULL DEFAULT 1,
+		PRIMARY KEY(path, source)
+	);
+	CREATE INDEX IF NOT EXISTS idx_file_activity_last_at ON file_activity(last_at DESC);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

@@ -968,7 +968,7 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		go d.handleFsUnwatch(client, protocol.Deref(fsUnwatch.RequestID), protocol.Deref(fsUnwatch.Root))
 	case protocol.CmdFsIndex:
 		fsIndex := msg.(*protocol.FsIndexMessage)
-		go d.handleFsIndex(client, protocol.Deref(fsIndex.RequestID), protocol.Deref(fsIndex.Root))
+		go d.handleFsIndex(client, protocol.Deref(fsIndex.RequestID), protocol.Deref(fsIndex.Root), fsIndex.Extensions)
 	case protocol.CmdApprovePR:
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
 	case protocol.CmdMergePR:
@@ -1037,6 +1037,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleUnregisterWS(client, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdGetRecentLocations:
 		d.handleGetRecentLocationsWS(client, msg.(*protocol.GetRecentLocationsMessage))
+	case protocol.CmdRecentFiles:
+		d.handleRecentFilesWS(client, msg.(*protocol.RecentFilesMessage))
 	case protocol.CmdBrowseDirectory:
 		d.handleBrowseDirectoryWS(client, msg.(*protocol.BrowseDirectoryMessage))
 	case protocol.CmdInspectPath:
