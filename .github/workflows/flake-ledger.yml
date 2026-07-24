@@ -1,0 +1,101 @@
+# Keeps a single tracking issue in sync with what CI history actually shows
+# about flaky tests. The report distinguishes a flake (the same commit is known
+# to pass) from real breakage, and marks an entry dormant once enough runs have
+# gone by without a recurrence, so a landed fix is visible rather than assumed.
+name: Flake ledger
+
+on:
+  schedule:
+    # Daily, after the overnight runs have settled.
+    - cron: '0 13 * * *'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'How many recent CI runs to scan'
+        required: false
+        default: '400'
+
+permissions:
+  actions: read
+  issues: write
+
+concurrency:
+  group: flake-ledger
+  cancel-in-progress: false
+
+jobs:
+  ledger:
+    name: Update flake ledger
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Job logs and finished attempts are immutable, so the report's on-disk
+      # cache carries across days and only new runs cost API calls.
+      - name: Restore flake-report cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/attn-ci-flakes
+          key: flake-ledger-${{ github.run_id }}
+          restore-keys: flake-ledger-
+
+      - name: Generate ledger
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTN_FLAKE_CACHE: ~/.cache/attn-ci-flakes
+        run: |
+          ./scripts/ci-flake-report.sh \
+            --repo "$GITHUB_REPOSITORY" \
+            --limit "${{ github.event.inputs.limit || '400' }}" \
+            --format markdown > ledger.md
+          echo "--- ledger preview ---"
+          head -20 ledger.md
+
+      - name: Publish to the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="CI flake ledger"
+
+          # One issue, found by title, reused forever. Creating it on first run
+          # keeps the workflow self-installing.
+          number="$(gh issue list --state open --limit 100 \
+            --search "$title in:title" \
+            --json number,title \
+            --jq "[.[] | select(.title == \"$title\")] | first | .number // empty")"
+
+          if [ -z "$number" ]; then
+            number="$(gh issue create --title "$title" --body-file ledger.md \
+              | grep -oE '[0-9]+$')"
+            echo "created tracking issue #$number"
+            exit 0
+          fi
+
+          # Compare the active set against what the issue already shows, so a
+          # newly-appearing flake gets an actual notification instead of quietly
+          # landing in an edited issue body nobody re-reads.
+          gh issue view "$number" --json body --jq .body > previous.md || : > previous.md
+          active_tests() {
+            awk '/^## Active/ { on = 1; next } /^## /  { on = 0 } on && /^\| [0-9]/ {
+              n = split($0, cells, /\|/); gsub(/^ +| +$/, "", cells[n - 1]); print cells[n - 1]
+            }' "$1" | sort -u
+          }
+          active_tests ledger.md > active-now.txt
+          active_tests previous.md > active-before.txt
+          comm -23 active-now.txt active-before.txt > newly-active.txt
+
+          gh issue edit "$number" --body-file ledger.md
+          echo "updated tracking issue #$number"
+
+          if [ -s newly-active.txt ]; then
+            {
+              echo "New flaky test(s) detected in the latest scan:"
+              echo
+              sed 's/^/- `/; s/$/`/' newly-active.txt
+              echo
+              echo "A failure is counted as a flake only when the same commit is known to pass, so these are not ordinary red builds."
+            } > comment.md
+            gh issue comment "$number" --body-file comment.md
+            echo "commented with $(wc -l < newly-active.txt) new entries"
+          fi
