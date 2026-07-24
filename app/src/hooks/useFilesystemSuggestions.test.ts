@@ -17,19 +17,12 @@ describe('useFilesystemSuggestions', () => {
       success: true,
       input_path: '~/projects/',
       directory: '/Users/victor/projects',
-      entries: [{ name: 'attn', path: '/Users/victor/projects/attn' }],
+      entries: [{ name: 'attn', path: '/Users/victor/projects/attn', is_dir: true }],
       home_path: '/Users/victor',
     }));
 
     const { result, rerender } = renderHook(
-      ({ inputPath, enabled }) => useFilesystemSuggestions(
-        inputPath,
-        undefined,
-        browseDirectory,
-        undefined,
-        undefined,
-        enabled,
-      ),
+      ({ inputPath, enabled }) => useFilesystemSuggestions(inputPath, undefined, browseDirectory, { enabled }),
       { initialProps: { inputPath: '~/projects/', enabled: true } },
     );
 
@@ -68,7 +61,7 @@ describe('useFilesystemSuggestions', () => {
         success: true,
         input_path: '~/projects/',
         directory: '/Users/victor/projects',
-        entries: [{ name: 'local-repo', path: '/Users/victor/projects/local-repo' }],
+        entries: [{ name: 'local-repo', path: '/Users/victor/projects/local-repo', is_dir: true }],
         home_path: '/Users/victor',
       };
     });
@@ -99,13 +92,13 @@ describe('useFilesystemSuggestions', () => {
         success: true,
         input_path: '~/projects/',
         directory: '/home/remote/projects',
-        entries: [{ name: 'remote-repo', path: '/home/remote/projects/remote-repo' }],
+        entries: [{ name: 'remote-repo', path: '/home/remote/projects/remote-repo', is_dir: true }],
         home_path: '/home/remote',
       });
       await Promise.resolve();
     });
 
-    expect(browseDirectory).toHaveBeenCalledWith('~/projects/', 'ep-1');
+    expect(browseDirectory).toHaveBeenCalledWith('~/projects/', 'ep-1', undefined);
     expect(result.current.currentDir).toBe('~/projects');
     expect(result.current.suggestions.map((entry) => entry.name)).toEqual(['remote-repo']);
   });
@@ -150,6 +143,6 @@ describe('useFilesystemSuggestions', () => {
     });
 
     expect(browseDirectory).toHaveBeenCalledTimes(2);
-    expect(browseDirectory).toHaveBeenLastCalledWith('~/projects/attn', undefined);
+    expect(browseDirectory).toHaveBeenLastCalledWith('~/projects/attn', undefined, undefined);
   });
 });

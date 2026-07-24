@@ -124,7 +124,7 @@ describe('LocationPicker', () => {
     expect(useFilesystemSuggestionsMock).toHaveBeenCalled();
     const calls = useFilesystemSuggestionsMock.mock.calls;
     const lastCall = calls[calls.length - 1];
-    expect(lastCall?.[5]).toBe(false);
+    expect(lastCall?.[3]?.enabled).toBe(false);
   });
 
   it('spawns a remote session with an agent advertised only by that endpoint', async () => {

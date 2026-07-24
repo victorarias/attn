@@ -4062,6 +4062,7 @@ sendFetchPRDetails,
           root={markdownOpenerTarget.root}
           loadRecents={loadOpenerRecents}
           loadIndex={loadOpenerIndex}
+          browseDirectory={sendBrowseDirectory}
           onClose={() => setMarkdownOpenerOpen(false)}
           onPick={(path) => {
             setMarkdownOpenerOpen(false);

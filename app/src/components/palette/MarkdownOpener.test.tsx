@@ -7,11 +7,23 @@ const RECENTS = [
   { path: '/other/journal.md', lastAt: '2026-07-23T10:00:00Z' },
 ];
 
+const BROWSE = {
+  success: true,
+  input_path: '~/notes/',
+  directory: '/home/victor/notes',
+  home_path: '/home/victor',
+  entries: [
+    { name: 'archive', path: '/home/victor/notes/archive', is_dir: true },
+    { name: 'ideas.md', path: '/home/victor/notes/ideas.md', is_dir: false },
+  ],
+};
+
 function renderOpener(overrides: Partial<React.ComponentProps<typeof MarkdownOpener>> = {}) {
   const props = {
     root: '/repo',
     loadRecents: vi.fn().mockResolvedValue(RECENTS),
     loadIndex: vi.fn().mockResolvedValue({ files: ['docs/design.md', 'README.md'], truncated: false }),
+    browseDirectory: vi.fn().mockResolvedValue(BROWSE),
     onPick: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
@@ -78,5 +90,65 @@ describe('MarkdownOpener', () => {
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'zzzz' } });
     await waitFor(() => expect(screen.getByText(/index is capped/)).toBeTruthy());
+  });
+
+  describe('path mode', () => {
+    const type = (value: string) => fireEvent.change(screen.getByRole('combobox'), { target: { value } });
+
+    it('lists the typed directory instead of fuzzy-matching', async () => {
+      const { browseDirectory } = renderOpener();
+      await waitFor(() => expect(rows()).toHaveLength(2));
+
+      type('~/notes/');
+      await waitFor(() => expect(rows()).toHaveLength(2));
+      // Directories are marked with a trailing slash; files are not.
+      expect(rows()[0]).toContain('archive/');
+      expect(rows()[1]).toContain('ideas.md');
+      // Markdown-only, so the daemon's listing carries the same filter as the index.
+      await waitFor(() => expect(browseDirectory).toHaveBeenCalledWith('~/notes/', undefined, ['md']));
+    });
+
+    it('opens a file in path mode by its absolute path', async () => {
+      const { onPick } = renderOpener();
+      await waitFor(() => expect(rows()).toHaveLength(2));
+
+      type('~/notes/');
+      await waitFor(() => expect(rows()[1]).toContain('ideas.md'));
+      fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' });
+      fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' });
+
+      expect(onPick).toHaveBeenCalledWith('/home/victor/notes/ideas.md');
+    });
+
+    it('descends into a directory instead of opening it', async () => {
+      const { onPick } = renderOpener();
+      await waitFor(() => expect(rows()).toHaveLength(2));
+
+      type('~/notes/');
+      await waitFor(() => expect(rows()[0]).toContain('archive/'));
+      fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' });
+
+      // The palette stays open on the deeper directory rather than picking it,
+      // and keeps the ~-shortened spelling the user was reading.
+      expect(onPick).not.toHaveBeenCalled();
+      expect(screen.getByRole('combobox')).toHaveValue('~/notes/archive/');
+    });
+
+    it('resolves a relative query against the fuzzy root, not the daemon cwd', async () => {
+      const { browseDirectory } = renderOpener();
+      await waitFor(() => expect(rows()).toHaveLength(2));
+
+      type('./docs/');
+      await waitFor(() => expect(browseDirectory).toHaveBeenCalledWith('/repo/docs/', undefined, ['md']));
+    });
+
+    it('does not browse for a query that merely contains a slash', async () => {
+      const { browseDirectory } = renderOpener();
+      await waitFor(() => expect(rows()).toHaveLength(2));
+
+      type('docs/plan');
+      await waitFor(() => expect(rows()[0]).toContain('docs/plan.md'));
+      expect(browseDirectory).not.toHaveBeenCalled();
+    });
   });
 });

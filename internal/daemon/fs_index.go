@@ -79,17 +79,26 @@ func matchesExtension(name string, extensions []string) bool {
 	return false
 }
 
-// hiddenPath reports whether any component of a root-relative slash path is
-// dot-prefixed. fs_index has always hidden dot files and never descended
-// dot-directories; git enumeration lists them, so it applies the same rule to
-// keep both enumerations returning the same set.
-func hiddenPath(rel string) bool {
+// skippedPath reports whether a root-relative slash path lives inside a
+// directory no file surface should ever offer. Only git's own metadata
+// qualifies: dot-prefixed documents like .claude/notes.md are real files a user
+// can open, and path mode (listDirectoryEntries) lists them, so fuzzy mode
+// hiding them would make the same file reachable one way and invisible the
+// other. See skippedDirName for the shared rule.
+func skippedPath(rel string) bool {
 	for _, segment := range strings.Split(rel, "/") {
-		if strings.HasPrefix(segment, ".") {
+		if skippedDirName(segment) {
 			return true
 		}
 	}
 	return false
+}
+
+// skippedDirName is the one rule both file surfaces apply: .git holds git's
+// object database, not documents, and listing it is noise at best. Everything
+// else — including dot-directories — stays visible.
+func skippedDirName(name string) bool {
+	return name == ".git"
 }
 
 // indexRoot enumerates the files under root, returning their root-relative
@@ -145,7 +154,7 @@ func indexRootViaGit(root string, cap int, extensions []string) (files []string,
 
 	seen := make(map[string]struct{})
 	for _, rel := range strings.Split(string(out), "\x00") {
-		if rel == "" || hiddenPath(rel) || !matchesExtension(rel, extensions) {
+		if rel == "" || skippedPath(rel) || !matchesExtension(rel, extensions) {
 			continue
 		}
 		if _, dup := seen[rel]; dup {
@@ -169,9 +178,9 @@ func indexRootViaGit(root string, cap int, extensions []string) (files []string,
 	return files, truncated, true
 }
 
-// indexRootViaWalk walks root recursively. It skips any directory whose name
-// starts with "." or is named "node_modules" (not descended at all),
-// dot-prefixed files, and any non-regular-file entry — symlinks, FIFOs,
+// indexRootViaWalk walks root recursively. It skips .git (see skippedDirName)
+// and node_modules — not descended at all, since a dependency tree's documents
+// are not the user's — plus any non-regular-file entry — symlinks, FIFOs,
 // sockets, device nodes — via DirEntry.Type().IsRegular(), a no-syscall
 // type-bits check (a symlinked dir is also never descended by WalkDir). This
 // matters beyond symlinks: a FIFO or socket that slipped into the list would be
@@ -195,12 +204,9 @@ func indexRootViaWalk(root string, cap int, extensions []string) ([]string, bool
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if strings.HasPrefix(name, ".") || name == "node_modules" {
+			if skippedDirName(name) || name == "node_modules" {
 				return fs.SkipDir
 			}
-			return nil
-		}
-		if strings.HasPrefix(name, ".") {
 			return nil
 		}
 		if !d.Type().IsRegular() {

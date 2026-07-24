@@ -501,6 +501,7 @@ model FileActivity {
 model DirectoryEntry {
   name: string;
   path: string;
+  is_dir: boolean;
 }
 
 model PathInspection {
@@ -1500,9 +1501,14 @@ model RecentFilesMessage {
   request_id?: string;
 }
 
+// Lists one directory. Directories are always returned; extensions adds regular
+// files with those extensions (no dots, e.g. ["md"]) to the listing. Asking for
+// files exposes document names rather than just tree shape, so that variant is
+// restricted to the authenticated app client.
 model BrowseDirectoryMessage {
   cmd: "browse_directory";
   input_path: string;
+  extensions?: string[];
   endpoint_id?: string;
   request_id?: string;
 }

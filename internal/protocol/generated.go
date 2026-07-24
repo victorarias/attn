@@ -537,6 +537,9 @@ type BrowseDirectoryMessage struct {
 	// EndpointID corresponds to the JSON schema field "endpoint_id".
 	EndpointID *string `json:"endpoint_id,omitempty,omitzero"`
 
+	// Extensions corresponds to the JSON schema field "extensions".
+	Extensions []string `json:"extensions,omitempty,omitzero"`
+
 	// InputPath corresponds to the JSON schema field "input_path".
 	InputPath string `json:"input_path"`
 
@@ -995,6 +998,9 @@ type DetachSessionMessage struct {
 }
 
 type DirectoryEntry struct {
+	// IsDir corresponds to the JSON schema field "is_dir".
+	IsDir bool `json:"is_dir"`
+
 	// Name corresponds to the JSON schema field "name".
 	Name string `json:"name"`
 

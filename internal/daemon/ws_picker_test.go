@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 func sameDirectory(left string, right string) bool {
@@ -179,5 +181,149 @@ func TestInspectPickerPathCanonicalizesSymlinkedRepoRoots(t *testing.T) {
 	}
 	if inspection.RepoRoot == nil || !sameDirectory(*inspection.RepoRoot, realRepoDir) {
 		t.Fatalf("repo root = %v, want same directory as %q", inspection.RepoRoot, realRepoDir)
+	}
+}
+
+// seedBrowseTree lays out one directory holding a mix of things path mode must
+// distinguish: subdirectories, markdown files, an unrelated file type, git's
+// metadata, and a symlink.
+func seedBrowseTree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, dir := range []string{"docs", ".claude", ".git"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{"plan.md", "notes.txt", ".git/COMMIT_EDITMSG"} {
+		if err := os.WriteFile(filepath.Join(root, file), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "plan.md"), filepath.Join(root, "linked.md")); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func entryNames(entries []protocol.DirectoryEntry) []string {
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name)
+	}
+	return names
+}
+
+// Without an extension filter the listing is directories only — the session
+// picker's long-standing behavior, which path mode must not change.
+func TestListDirectoryEntriesWithoutExtensionsListsDirectoriesOnly(t *testing.T) {
+	root := seedBrowseTree(t)
+
+	entries, err := listDirectoryEntries(root, "", nil)
+	if err != nil {
+		t.Fatalf("listDirectoryEntries: %v", err)
+	}
+	if want := []string{".claude", "docs"}; !slicesEqual(entryNames(entries), want) {
+		t.Fatalf("entries = %v, want %v", entryNames(entries), want)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir {
+			t.Fatalf("entry %q reported is_dir = false", entry.Name)
+		}
+	}
+}
+
+// With an extension filter the listing gains matching regular files — and only
+// those: another file type, a symlink (fs_read serves regular files only), and
+// .git stay out, while dot-directories remain visible so a document under
+// ~/.claude is reachable.
+func TestListDirectoryEntriesWithExtensionsAddsMatchingFiles(t *testing.T) {
+	root := seedBrowseTree(t)
+
+	entries, err := listDirectoryEntries(root, "", []string{"md"})
+	if err != nil {
+		t.Fatalf("listDirectoryEntries: %v", err)
+	}
+	// Directories first, then files: "where you can go, then what you can open".
+	if want := []string{".claude", "docs", "plan.md"}; !slicesEqual(entryNames(entries), want) {
+		t.Fatalf("entries = %v, want %v", entryNames(entries), want)
+	}
+	if entries[2].IsDir {
+		t.Fatalf("plan.md reported is_dir = true")
+	}
+	if entries[2].Path != filepath.Join(root, "plan.md") {
+		t.Fatalf("plan.md path = %q, want absolute path under root", entries[2].Path)
+	}
+}
+
+// The typed last segment filters both groups, and a leading dot reaches a
+// dot-directory rather than being swallowed as a hidden-file rule.
+func TestListDirectoryEntriesFiltersByPrefixAcrossKinds(t *testing.T) {
+	root := seedBrowseTree(t)
+
+	entries, err := listDirectoryEntries(root, ".cla", []string{"md"})
+	if err != nil {
+		t.Fatalf("listDirectoryEntries: %v", err)
+	}
+	if want := []string{".claude"}; !slicesEqual(entryNames(entries), want) {
+		t.Fatalf("entries = %v, want %v", entryNames(entries), want)
+	}
+
+	entries, err = listDirectoryEntries(root, "pla", []string{"md"})
+	if err != nil {
+		t.Fatalf("listDirectoryEntries: %v", err)
+	}
+	if want := []string{"plan.md"}; !slicesEqual(entryNames(entries), want) {
+		t.Fatalf("entries = %v, want %v", entryNames(entries), want)
+	}
+}
+
+// Asking for files is gated on the authenticated app client: directory names
+// leak tree shape, file names leak the user's documents. An untrusted client
+// gets an error, not a listing.
+func TestBrowseDirectoryFileListingRequiresTrustedClient(t *testing.T) {
+	d := newFsDaemon(t)
+	root := seedBrowseTree(t)
+
+	untrusted := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleBrowseDirectoryWS(untrusted, &protocol.BrowseDirectoryMessage{
+		Cmd:        protocol.CmdBrowseDirectory,
+		InputPath:  root + "/",
+		Extensions: []string{"md"},
+	})
+	var denied protocol.BrowseDirectoryResultMessage
+	readNotebookWSEvent(t, untrusted.send, &denied)
+	if denied.Success {
+		t.Fatalf("untrusted file listing succeeded: %+v", denied.Entries)
+	}
+
+	// The same client may still browse directories: that surface is unchanged.
+	d.handleBrowseDirectoryWS(untrusted, &protocol.BrowseDirectoryMessage{
+		Cmd:       protocol.CmdBrowseDirectory,
+		InputPath: root + "/",
+	})
+	var allowed protocol.BrowseDirectoryResultMessage
+	readNotebookWSEvent(t, untrusted.send, &allowed)
+	if !allowed.Success {
+		t.Fatalf("untrusted directory listing failed: %v", protocol.Deref(allowed.Error))
+	}
+	if want := []string{".claude", "docs"}; !slicesEqual(entryNames(allowed.Entries), want) {
+		t.Fatalf("entries = %v, want %v", entryNames(allowed.Entries), want)
+	}
+
+	// The app client gets the files.
+	trusted := trustedFsClient(4)
+	d.handleBrowseDirectoryWS(trusted, &protocol.BrowseDirectoryMessage{
+		Cmd:        protocol.CmdBrowseDirectory,
+		InputPath:  root + "/",
+		Extensions: []string{"md"},
+	})
+	var granted protocol.BrowseDirectoryResultMessage
+	readNotebookWSEvent(t, trusted.send, &granted)
+	if !granted.Success {
+		t.Fatalf("trusted file listing failed: %v", protocol.Deref(granted.Error))
+	}
+	if want := []string{".claude", "docs", "plan.md"}; !slicesEqual(entryNames(granted.Entries), want) {
+		t.Fatalf("entries = %v, want %v", entryNames(granted.Entries), want)
 	}
 }

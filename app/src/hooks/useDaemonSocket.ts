@@ -85,6 +85,8 @@ export type DaemonWorkspaceContext = GeneratedWorkspaceContext;
 export interface DirectoryEntry {
   name: string;
   path: string;
+  /** Directories are always listed; files only when the request asked for extensions. */
+  is_dir: boolean;
 }
 export interface PathInspection {
   input_path: string;
@@ -173,7 +175,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '185';
+export const PROTOCOL_VERSION = '186';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -5099,7 +5101,10 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
-  const sendBrowseDirectory = useCallback((inputPath: string, endpointId?: string): Promise<BrowseDirectoryResult> => {
+  // extensions (dotless, e.g. ['md']) widens the listing from directories-only
+  // to directories plus matching files. The daemon gates that variant on this
+  // client's app identity, since file names are documents rather than tree shape.
+  const sendBrowseDirectory = useCallback((inputPath: string, endpointId?: string, extensions?: string[]): Promise<BrowseDirectoryResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5114,6 +5119,7 @@ export function useDaemonSocket({
       ws.send(JSON.stringify({
         cmd: 'browse_directory',
         input_path: inputPath,
+        ...(extensions && extensions.length > 0 ? { extensions } : {}),
         ...(endpointId && { endpoint_id: endpointId }),
         request_id: requestId,
       }));
