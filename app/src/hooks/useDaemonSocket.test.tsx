@@ -1049,7 +1049,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     expect(waits).toEqual([25]);
   });
 
-  it('attaches daemon-known workspace runtimes before attempting to spawn them', async () => {
+  it('spawns daemon-known workspace runtimes before freshly attaching them', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();
     const onPRsUpdate = vi.fn();
@@ -1114,11 +1114,20 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'relaunch_restore' });
+      expect(sent).toContainEqual(expect.objectContaining({
+        cmd: 'spawn_session',
+        id: 'runtime-shell-1',
+      }));
     });
 
-    const sent = ws.sent.map((entry) => JSON.parse(entry));
-    expect(sent.find((entry) => entry.cmd === 'spawn_session' && entry.id === 'runtime-shell-1')).toBeUndefined();
+    act(() => {
+      ws.emit({ event: 'spawn_result', id: 'runtime-shell-1', success: true });
+    });
+
+    await waitFor(() => {
+      const sent = ws.sent.map((entry) => JSON.parse(entry));
+      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'fresh_spawn' });
+    });
 
     act(() => {
       ws.emit({
@@ -1268,92 +1277,6 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       });
     });
     await expect(attachPromise).resolves.toBeUndefined();
-    unmount();
-  });
-
-  it('preserves daemon geometry while relaunch restores before workspace layout settles', async () => {
-    const onSessionsUpdate = vi.fn();
-    const onWorkspacesUpdate = vi.fn();
-    const onPRsUpdate = vi.fn();
-    const onReposUpdate = vi.fn();
-    const onAuthorsUpdate = vi.fn();
-    const { unmount } = renderHook(() =>
-      useDaemonSocket({
-        onSessionsUpdate,
-        onWorkspacesUpdate,
-        onPRsUpdate,
-        onReposUpdate,
-        onAuthorsUpdate,
-        wsUrl: 'ws://localhost:9999/ws',
-      }),
-    );
-
-    const ws = await waitForOpenSocket();
-
-    act(() => {
-      ws.emit({
-        event: 'initial_state',
-        protocol_version: PROTOCOL_VERSION,
-        sessions: [{
-          id: 'sess-existing',
-          label: 'attn',
-          agent: 'codex',
-          directory: '/tmp/repo',
-          workspace_id: 'workspace-sess-existing',
-          state: 'idle',
-          state_since: '2026-04-08T00:00:00Z',
-          state_updated_at: '2026-04-08T00:00:00Z',
-          last_seen: '2026-04-08T00:00:00Z',
-        }],
-        workspaces: [],
-        prs: [],
-        repos: [],
-        authors: [],
-        settings: {},
-      });
-    });
-
-    const spawnPromise = ptySpawn({
-      args: {
-        id: 'sess-existing',
-        cwd: '/tmp/repo',
-        workspace_id: 'workspace-sess-existing',
-        agent: 'codex',
-        cols: 58,
-        rows: 46,
-      },
-    });
-
-    await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
-    });
-
-    act(() => {
-      ws.emit({
-        event: 'attach_result',
-        id: 'sess-existing',
-        success: true,
-        cols: 80,
-        rows: 24,
-        screen_cols: 80,
-        screen_rows: 24,
-        running: true,
-      });
-    });
-
-    await expect(spawnPromise).resolves.toBeUndefined();
-
-    const sent = ws.sent.map((entry) => JSON.parse(entry));
-    expect(sent).not.toContainEqual({ cmd: 'pty_resize', id: 'sess-existing', cols: 58, rows: 46 });
-    expect((window as Window & { __TEST_PTY_EVENTS?: unknown[] }).__TEST_PTY_EVENTS).toContainEqual({
-      event: 'local_resize',
-      id: 'sess-existing',
-      cols: 80,
-      rows: 24,
-      source: 'attach_replay',
-    });
-
     unmount();
   });
 
@@ -2215,12 +2138,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
-  it('replays geometry-aware segmented raw history for relaunching a daemon-known Codex session', async () => {
-    const onSessionsUpdate = vi.fn();
-    const onWorkspacesUpdate = vi.fn();
-    const onPRsUpdate = vi.fn();
-    const onReposUpdate = vi.fn();
-    const onAuthorsUpdate = vi.fn();
+  it('replays geometry-aware segmented history through relaunch restoration attach', async () => {
     (window as Window & {
       __TEST_PTY_EVENTS?: Array<{
         event: string;
@@ -2234,17 +2152,16 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     }).__TEST_PTY_EVENTS = [];
     const { unmount } = renderHook(() =>
       useDaemonSocket({
-        onSessionsUpdate,
-        onWorkspacesUpdate,
-        onPRsUpdate,
-        onReposUpdate,
-        onAuthorsUpdate,
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
         wsUrl: 'ws://localhost:9999/ws',
       }),
     );
 
     const ws = await waitForOpenSocket();
-
     act(() => {
       ws.emit({
         event: 'initial_state',
@@ -2268,20 +2185,24 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       });
     });
 
-    const spawnPromise = ptySpawn({
+    const attachPromise = ptyAttach({
       args: {
         id: 'sess-existing',
-        cwd: '/tmp/repo',
-        workspace_id: 'workspace-sess-existing',
-        agent: 'codex',
         cols: 58,
         rows: 46,
+        shell: false,
+        agent: 'codex',
+        policy: 'relaunch_restore',
       },
     });
 
     await waitFor(() => {
       const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
+      expect(sent).toContainEqual({
+        cmd: 'attach_session',
+        id: 'sess-existing',
+        attach_policy: 'relaunch_restore',
+      });
     });
 
     act(() => {
@@ -2310,7 +2231,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       });
     });
 
-    await expect(spawnPromise).resolves.toBeUndefined();
+    await expect(attachPromise).resolves.toBeUndefined();
 
     const ptyEvents = (window as Window & {
       __TEST_PTY_EVENTS?: Array<{
@@ -2340,7 +2261,13 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       suppressResponses: true,
     });
     expect(ptyEvents).toContainEqual({ event: 'local_resize', id: 'sess-existing', cols: 58, rows: 46, source: 'attach_replay' });
-    expect(ptyEvents).toContainEqual({ event: 'data', id: 'sess-existing', data: 'bmFycm93LXRhaWw=', source: 'attach_replay', suppressResponses: true });
+    expect(ptyEvents).toContainEqual({
+      event: 'data',
+      id: 'sess-existing',
+      data: 'bmFycm93LXRhaWw=',
+      source: 'attach_replay',
+      suppressResponses: true,
+    });
     expect(ptyEvents).toContainEqual({ event: 'replay_complete', id: 'sess-existing' });
     expect(ptyEvents.filter((event) => (
       event.event === 'local_resize'
@@ -2348,183 +2275,8 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       && event.cols === 118
       && event.rows === 48
     ))).toHaveLength(1);
-    expect(ptyEvents.some((event) => event.event === 'data' && event.id === 'sess-existing' && event.data === 'c25hcHNob3Qtd2lucw==')).toBe(false);
+    expect(ws.sent.map((entry) => JSON.parse(entry)).some((entry) => entry.cmd === 'pty_input')).toBe(false);
 
-    unmount();
-  });
-
-  it('applies raw scrollback replay when attaching a daemon-known session pane', async () => {
-    const onSessionsUpdate = vi.fn();
-    const onWorkspacesUpdate = vi.fn();
-    const onPRsUpdate = vi.fn();
-    const onReposUpdate = vi.fn();
-    const onAuthorsUpdate = vi.fn();
-    (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string }> }).__TEST_PTY_EVENTS = [];
-    const { unmount } = renderHook(() =>
-      useDaemonSocket({
-        onSessionsUpdate,
-        onWorkspacesUpdate,
-        onPRsUpdate,
-        onReposUpdate,
-        onAuthorsUpdate,
-        wsUrl: 'ws://localhost:9999/ws',
-      }),
-    );
-
-    const ws = await waitForOpenSocket();
-
-    act(() => {
-      ws.emit({
-        event: 'initial_state',
-        protocol_version: PROTOCOL_VERSION,
-        sessions: [{
-          id: 'sess-existing',
-          label: 'attn',
-          agent: 'codex',
-          directory: '/tmp/repo',
-          workspace_id: 'workspace-sess-existing',
-          state: 'idle',
-          state_since: '2026-04-08T00:00:00Z',
-          state_updated_at: '2026-04-08T00:00:00Z',
-          last_seen: '2026-04-08T00:00:00Z',
-        }],
-        workspaces: [],
-        prs: [],
-        repos: [],
-        authors: [],
-        settings: {},
-      });
-    });
-
-    const spawnPromise = ptySpawn({
-      args: {
-        id: 'sess-existing',
-        cwd: '/tmp/repo',
-        workspace_id: 'workspace-sess-existing',
-        agent: 'codex',
-        cols: 58,
-        rows: 46,
-      },
-    });
-
-    await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'sess-existing', attach_policy: 'relaunch_restore' });
-    });
-
-    act(() => {
-      ws.emit({
-        event: 'attach_result',
-        id: 'sess-existing',
-        success: true,
-        cols: 58,
-        rows: 46,
-        scrollback: btoa('raw \x1b]8;;https://example.com\x07label\x1b]8;;\x07 replay'),
-        scrollback_truncated: true,
-        running: true,
-      });
-    });
-
-    await expect(spawnPromise).resolves.toBeUndefined();
-
-    const ptyEvents = (window as Window & { __TEST_PTY_EVENTS?: Array<{ event: string; id: string; data?: string; source?: string }> }).__TEST_PTY_EVENTS || [];
-    expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
-    expect(ptyEvents).toContainEqual({
-      event: 'data',
-      id: 'sess-existing',
-      data: btoa('raw \x1b]8;;https://example.com\x07label\x1b]8;;\x07 replay'),
-      source: 'attach_replay',
-      suppressResponses: true,
-    });
-    expect(ptyEvents).toContainEqual({ event: 'replay_complete', id: 'sess-existing' });
-
-    const resizes = ws.sent
-      .map((entry) => JSON.parse(entry))
-      .filter((entry) => entry.cmd === 'pty_resize' && entry.id === 'sess-existing');
-    expect(resizes).toEqual([]);
-
-    unmount();
-  });
-
-  it('does not respawn a workspace runtime that is missing session state', async () => {
-    const onSessionsUpdate = vi.fn();
-    const onWorkspacesUpdate = vi.fn();
-    const onPRsUpdate = vi.fn();
-    const onReposUpdate = vi.fn();
-    const onAuthorsUpdate = vi.fn();
-    const { unmount } = renderHook(() =>
-      useDaemonSocket({
-        onSessionsUpdate,
-        onWorkspacesUpdate,
-        onPRsUpdate,
-        onReposUpdate,
-        onAuthorsUpdate,
-        wsUrl: 'ws://localhost:9999/ws',
-      }),
-    );
-
-    const ws = await waitForOpenSocket();
-
-    act(() => {
-      ws.emit({
-        event: 'initial_state',
-        protocol_version: PROTOCOL_VERSION,
-        sessions: [],
-        workspaces: [{
-          id: 'workspace-sess-remote',
-          title: 'Remote',
-          directory: '/tmp/repo',
-          status: 'idle',
-          muted: false,
-          layout: {
-            workspace_id: 'workspace-sess-remote',
-            active_pane_id: 'pane-session',
-            layout_json: '',
-            panes: [{
-              workspace_id: 'workspace-sess-remote',
-              pane_id: 'pane-shell-1',
-              kind: 'agent',
-              runtime_id: 'runtime-shell-1',
-              title: 'Shell 1',
-            }],
-          },
-        }],
-        prs: [],
-        repos: [],
-        authors: [],
-        settings: {},
-      });
-    });
-
-    const spawnPromise = ptySpawn({
-      args: {
-        id: 'runtime-shell-1',
-        cwd: '/tmp/repo',
-        workspace_id: 'workspace-sess-remote',
-        endpoint_id: 'ep-remote',
-        cols: 80,
-        rows: 24,
-        shell: true,
-      },
-    });
-
-    await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({ cmd: 'attach_session', id: 'runtime-shell-1', attach_policy: 'relaunch_restore' });
-    });
-
-    act(() => {
-      ws.emit({
-        event: 'attach_result',
-        id: 'runtime-shell-1',
-        success: false,
-        error: 'session not found',
-      });
-    });
-
-    await expect(spawnPromise).rejects.toThrow('No live PTY found for this session.');
-    const sent = ws.sent.map((entry) => JSON.parse(entry));
-    expect(sent.some((entry) => entry.cmd === 'spawn_session' && entry.id === 'runtime-shell-1')).toBe(false);
     unmount();
   });
 

@@ -6,8 +6,7 @@ export interface PtySpawnArgs {
   cwd: string;
   workspace_id: string;
   endpoint_id?: string;
-  intent?: 'create' | 'reload';
-  reload?: boolean;
+  intent?: 'create';
   cols: number;
   rows: number;
   shell?: boolean;
@@ -68,7 +67,7 @@ export interface PtyBackend {
   write: (id: string, data: string, source?: string) => Promise<void>;
   resize: (id: string, cols: number, rows: number, reason?: string) => Promise<void>;
   detach: (id: string) => Promise<void>;
-  kill: (id: string, options?: { reload?: boolean }) => Promise<void>;
+  kill: (id: string) => Promise<void>;
   reload: (id: string, cols: number, rows: number) => Promise<void>;
 }
 
@@ -205,7 +204,7 @@ export async function ptyDetach(request: { id: string }) {
   await backend.detach(request.id);
 }
 
-export async function ptyKill(request: { id: string; reload?: boolean }) {
+export async function ptyKill(request: { id: string }) {
   if (mockEnabled()) {
     if (!mockSessions.has(request.id)) {
       return;
@@ -217,7 +216,7 @@ export async function ptyKill(request: { id: string; reload?: boolean }) {
   if (!backend) {
     throw new Error('PTY backend is not configured');
   }
-  await backend.kill(request.id, request.reload ? { reload: true } : undefined);
+  await backend.kill(request.id);
 }
 
 export async function ptyReload(request: { id: string; cols: number; rows: number }) {

@@ -173,7 +173,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '183';
+export const PROTOCOL_VERSION = '184';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -3214,7 +3214,7 @@ export function useDaemonSocket({
     });
   }, [reconcileAttachedRuntimeGeometry, sendAttachSessionWithRetry, sendPtyResize]);
 
-  const sendKillSession = useCallback((id: string, signal?: string, options?: { reload?: boolean }): Promise<void> => {
+  const sendKillSession = useCallback((id: string, signal?: string): Promise<void> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -3232,9 +3232,6 @@ export function useDaemonSocket({
         cmd: 'kill_session',
         id,
         ...(signal && { signal }),
-        // Tells the daemon this kill is the first half of a reload (the same id
-        // respawns right after), so the exit is not treated as a crash.
-        ...(options?.reload && { reload: true }),
       }));
 
       // Wait for session_exited to avoid kill/spawn races during reload.
@@ -3564,13 +3561,11 @@ export function useDaemonSocket({
         await spawnPtyRuntime(
           args,
           {
-            existingSession,
             runtimeKnownToDaemon: Boolean(existingSession)
               || workspacesIncludeRuntimeID(workspacesRef.current, args.id),
             alreadyAttached: ptyTransportRef.current.hasAttachedRuntime(args.id),
           },
           {
-            attachExistingRuntime,
             attachFreshRuntime: async (spawnArgs: PtySpawnArgs) => {
               await sendAttachSessionWithRetry(spawnArgs.id, {
                 ...createAttachRequestContext(spawnArgs, 'fresh_spawn'),
@@ -3578,14 +3573,6 @@ export function useDaemonSocket({
             },
             spawnRuntime: sendSpawnSession,
             resizeRuntime: sendPtyResize,
-            logResumeRecovery: ({ id, agent, state }) => {
-              console.log(
-                '[DaemonSocket] Recovering session %s (%s) via resume (state=%s)',
-                id,
-                agent ?? 'unknown',
-                state ?? 'unknown',
-              );
-            },
           },
         );
       },
@@ -3606,9 +3593,9 @@ export function useDaemonSocket({
       detach: async (id: string) => {
         sendDetachSession(id);
       },
-      kill: async (id: string, options?: { reload?: boolean }) => {
+      kill: async (id: string) => {
         sendDetachSession(id);
-        await sendKillSession(id, undefined, options);
+        await sendKillSession(id);
       },
       reload: async (id: string, cols: number, rows: number) => {
         await sendReloadSession(id, cols, rows);
