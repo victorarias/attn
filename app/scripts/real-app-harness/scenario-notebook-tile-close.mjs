@@ -42,13 +42,24 @@ function parseArgs(argv) {
   };
 }
 
-const FINDER_SELECTOR = '.notebook-finder';
+// Scoped to the ACTIVE workspace's wrapper, like every other finder scenario: a
+// notebook tile docked in some other (inactive) workspace is still mounted in the
+// DOM, and a bare `.notebook-finder` would match its finder forever — so the
+// "Esc closed the finder" wait could never observe absence on a profile carrying
+// any leftover tile.
+const FINDER_SELECTOR = '.terminal-wrapper.active .notebook-finder';
 
+// Presence via the screenshot bridge: only "not found" proves absence. Any other
+// error (html-to-image chokes inside CodeMirror subtrees) still proves the element
+// is there — treating those as absent would let a finder that never closed pass as
+// closed.
 async function finderPresent(client) {
-  return client
-    .request('capture_screenshot_data', { selector: FINDER_SELECTOR })
-    .then(() => true)
-    .catch(() => false);
+  try {
+    await client.request('capture_screenshot_data', { selector: FINDER_SELECTOR });
+    return true;
+  } catch (error) {
+    return !String(error).includes('Screenshot selector not found in DOM');
+  }
 }
 
 async function waitForFinder(client, present, description, timeoutMs = 10_000) {

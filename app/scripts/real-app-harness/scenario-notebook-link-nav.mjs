@@ -19,7 +19,6 @@
 // step for a bridge verb.
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   createRunContext,
@@ -29,7 +28,6 @@ import {
   printCommonHelp,
 } from './common.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
-import { currentHarnessProfile } from './harnessProfile.mjs';
 import {
   waitForFirstWorkspacePane,
   waitForPaneShellReady,
@@ -58,14 +56,6 @@ function parseArgs(argv) {
     options: parseCommonArgs(args),
     help: args.includes('--help') || args.includes('-h'),
   };
-}
-
-// Mirrors internal/notebook/layout.go DefaultRoot: ~/attn-notebook, or
-// ~/attn-notebook-<profile> for any non-default profile.
-function defaultNotebookRootForProfile(profile) {
-  const normalized = (profile || '').trim().toLowerCase();
-  const base = path.join(os.homedir(), 'attn-notebook');
-  return normalized === '' || normalized === 'default' ? base : `${base}-${normalized}`;
 }
 
 // Selector presence via the screenshot bridge: "not found" error == absent;
@@ -165,14 +155,19 @@ async function main() {
     // 0. Seed three probe notes on disk before anything mounts. Names are
     // chosen so each finder query fuzzy-matches exactly one note: "qnav" is
     // not a subsequence of qbar/qanchor's names and vice versa.
-    const notebookRoot = defaultNotebookRootForProfile(currentHarnessProfile());
-    fs.mkdirSync(notebookRoot, { recursive: true });
+    //
+    // They live in the workspace directory, not the Notebook root: ⌘⌥N roots a
+    // docked editor tile at the active workspace's directory (App.tsx
+    // resolveEditorTileRoot), so that tree is what its finder indexes. Seeding
+    // per run also keeps the shared Notebook root free of run debris.
+    const noteRoot = path.join(sessionDir, 'linknav-ws');
+    fs.mkdirSync(noteRoot, { recursive: true });
     const NAV = `${runId}qnav`;
     const BAR = `${runId}qbar`;
     const ANCHOR = `${runId}qanchor`;
-    const navPath = path.join(notebookRoot, `${NAV}.md`);
-    const barPath = path.join(notebookRoot, `${BAR}.md`);
-    const anchorPath = path.join(notebookRoot, `${ANCHOR}.md`);
+    const navPath = path.join(noteRoot, `${NAV}.md`);
+    const barPath = path.join(noteRoot, `${BAR}.md`);
+    const anchorPath = path.join(noteRoot, `${ANCHOR}.md`);
     const filler = Array.from({ length: 80 }, (_, i) => `Filler line ${i + 1}.`).join('\n\n');
     fs.writeFileSync(navPath, `# nav probe\n\n[bar](${BAR}.md)\n`, 'utf8');
     fs.writeFileSync(barPath, `# bar\n\nSibling of nav probe.\n\n[anchor](${ANCHOR}.md)\n`, 'utf8');
@@ -188,8 +183,8 @@ async function main() {
     const IMG = `${runId}qimg`;
     const imgDirName = `${runId}-imgdir`;
     const assetsDirName = `${runId}-assets`;
-    const imgDir = path.join(notebookRoot, imgDirName);
-    const assetsDir = path.join(notebookRoot, assetsDirName);
+    const imgDir = path.join(noteRoot, imgDirName);
+    const assetsDir = path.join(noteRoot, assetsDirName);
     fs.mkdirSync(imgDir, { recursive: true });
     fs.mkdirSync(assetsDir, { recursive: true });
     const imgNotePath = path.join(imgDir, `${IMG}.md`);
@@ -213,11 +208,11 @@ async function main() {
       `[image probe](${imgLinkHref})`,
       '',
     ].join('\n'), 'utf8');
-    console.log(`[RealAppHarness] notebookRoot=${notebookRoot} nav=${NAV}.md bar=${BAR}.md anchor=${ANCHOR}.md`);
+    console.log(`[RealAppHarness] noteRoot=${noteRoot} nav=${NAV}.md bar=${BAR}.md anchor=${ANCHOR}.md`);
 
-    // 1. A normal shell workspace to dock the notebook tile into.
-    const cwd = path.join(sessionDir, 'linknav-ws');
-    fs.mkdirSync(cwd, { recursive: true });
+    // 1. A normal shell workspace, rooted at the seeded tree, to dock the
+    // notebook tile into.
+    const cwd = noteRoot;
     sessionId = await createSessionAndWaitForInitialPane({
       client,
       observer,
@@ -247,9 +242,12 @@ async function main() {
     const docked = await waitForWorkspaceUi(
       client,
       workspaceId,
+      // A notebook tile with no note open is titled "Editor" (the title becomes
+      // the note's basename once one is open), so "Editor" is what a freshly
+      // docked tile looks like.
       (state) => Array.isArray(state?.tileIds) && state.tileIds.length === 1
-        && Array.isArray(state?.tileTitles) && state.tileTitles.includes('Notebook'),
-      'notebook.openTile docks a fresh notebook tile (titled "Notebook")',
+        && Array.isArray(state?.tileTitles) && state.tileTitles.includes('Editor'),
+      'notebook.openTile docks a fresh notebook tile (titled "Editor")',
       15_000,
     );
     console.log(`[RealAppHarness] docked notebook tile=${docked.tileIds[0]}`);
