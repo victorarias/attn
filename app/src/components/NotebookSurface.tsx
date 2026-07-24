@@ -1108,6 +1108,18 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     </div>
   );
 
+  // One finder instance shared by both variants below: the tile and the modal
+  // mount identical overlays, and the tile-vs-modal difference is the shell
+  // around it, not the finder.
+  const finderOverlay = finderOpen ? (
+    <NotebookFinder
+      files={finderFiles}
+      loading={finderLoading}
+      onPick={(path) => { void loadFile(path); setFinderOpen(false); }}
+      onClose={() => setFinderOpen(false)}
+    />
+  ) : null;
+
   const floatingChief = chiefSel && sendToChief ? (
     <button
       type="button"
@@ -1134,14 +1146,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
       >
         {body}
         {floatingChief}
-        {finderOpen && (
-          <NotebookFinder
-            files={finderFiles}
-            loading={finderLoading}
-            onPick={(path) => { void loadFile(path); setFinderOpen(false); }}
-            onClose={() => setFinderOpen(false)}
-          />
-        )}
+        {finderOverlay}
       </div>
     );
   }
@@ -1176,14 +1181,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
           </header>
           {body}
           {floatingChief}
-          {finderOpen && (
-            <NotebookFinder
-              files={finderFiles}
-              loading={finderLoading}
-              onPick={(path) => { void loadFile(path); setFinderOpen(false); }}
-              onClose={() => setFinderOpen(false)}
-            />
-          )}
+          {finderOverlay}
         </div>
       </FocusTrap>
     </div>
