@@ -32,6 +32,7 @@ import { ShortcutEditorModal } from './components/ShortcutEditorModal';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { ActionMenu, type ActionMenuItem } from './components/ActionMenu';
 import { MarkdownOpener, OPENER_EXTENSIONS } from './components/palette/MarkdownOpener';
+import { resolveMarkdownOpenerTarget } from './components/palette/openerTarget';
 import { claimPaletteFocus } from './components/palette/paletteClaim';
 import { WorkspaceContextNavigator, type WorkspaceContextView } from './components/WorkspaceContextNavigator';
 import { NotebookBrowser } from './components/NotebookBrowser';
@@ -2050,11 +2051,16 @@ sendFetchPRDetails,
   }, []);
   // Fuzzy mode searches the selected session's working directory; with no
   // session selected there is no project context, so it falls back to the
-  // notebook root. Neither known = recents only.
-  const markdownOpenerRoot = useMemo(() => {
-    const activeSession = sessions.find((session) => session.id === activeSessionId);
-    return activeSession?.cwd || settings['notebook.root.effective'] || null;
-  }, [sessions, activeSessionId, settings]);
+  // notebook root. Neither known = recents only. A remote session's cwd names a
+  // path on another machine and never enters this route — see
+  // resolveMarkdownOpenerTarget.
+  const markdownOpenerTarget = useMemo(
+    () => resolveMarkdownOpenerTarget(
+      sessions.find((session) => session.id === activeSessionId),
+      settings['notebook.root.effective'],
+    ),
+    [sessions, activeSessionId, settings],
+  );
   const loadOpenerRecents = useCallback(
     () => sendRecentFiles(50).then((files) => files.map((file) => ({ path: file.path, lastAt: file.lastAt }))),
     [sendRecentFiles],
@@ -4053,13 +4059,22 @@ sendFetchPRDetails,
       />
       {markdownOpenerOpen && (
         <MarkdownOpener
-          root={markdownOpenerRoot}
+          root={markdownOpenerTarget.root}
           loadRecents={loadOpenerRecents}
           loadIndex={loadOpenerIndex}
           onClose={() => setMarkdownOpenerOpen(false)}
           onPick={(path) => {
             setMarkdownOpenerOpen(false);
-            void sendOpenMarkdown(path, activeSessionId ?? '').catch((error) => {
+            const bindTo = markdownOpenerTarget.sessionId;
+            if (bindTo === null) {
+              // The selected session lives on another machine; docking a tile
+              // for this local file would bind it there. Open it locally.
+              void openPath(path).catch((openError) => {
+                console.error('[MarkdownOpener] OS open failed:', openError);
+              });
+              return;
+            }
+            void sendOpenMarkdown(path, bindTo).catch((error) => {
               // Same fallback as a cmd+click on a link: if the daemon can't dock
               // a tile (no local workspace, socket dropped), open the file in the
               // OS default app rather than doing nothing.
