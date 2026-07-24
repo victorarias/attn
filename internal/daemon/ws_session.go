@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"syscall"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -75,6 +76,22 @@ func (d *Daemon) handleGetRecentLocationsWS(client *wsClient, msg *protocol.GetR
 		RequestID:       msg.RequestID,
 		HomePath:        protocol.Ptr(homePath),
 		Success:         true,
+	})
+}
+
+// handleRecentFilesWS answers the file opener's request for recently touched
+// files, frecency-ranked. Local filesystem only: the opener does not browse
+// remote endpoints, so there is no endpoint routing here.
+func (d *Daemon) handleRecentFilesWS(client *wsClient, msg *protocol.RecentFilesMessage) {
+	limit := 20
+	if msg.Limit != nil {
+		limit = int(*msg.Limit)
+	}
+	d.sendToClient(client, &protocol.RecentFilesResultMessage{
+		Event:     protocol.EventRecentFilesResult,
+		Files:     d.store.GetRecentFiles(limit),
+		RequestID: strings.TrimSpace(protocol.Deref(msg.RequestID)),
+		Success:   true,
 	})
 }
 

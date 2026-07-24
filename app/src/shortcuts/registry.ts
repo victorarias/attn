@@ -110,6 +110,12 @@ export const SHORTCUTS = {
   'notebook.openTile': { key: 'n', code: 'KeyN', meta: true, alt: true },
   'notebook.openFullscreen': { key: 'n', code: 'KeyN', meta: true, alt: true, shift: true },
 
+  // Markdown file opener: a ⌘P-style palette listing recently opened markdown
+  // files, then fuzzy-filtering the selected session's tree as you type. A
+  // focused notebook tile keeps its own in-tile ⌘P (see paletteClaim.ts); this
+  // is what ⌘P does everywhere else.
+  'file.open': { key: 'p', meta: true },
+
   // Tickets board (fullscreen surface). meta+shift+T parallels meta+T = new workspace.
   'board.open': { key: 't', meta: true, shift: true },
 

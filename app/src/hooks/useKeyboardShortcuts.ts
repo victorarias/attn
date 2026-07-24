@@ -23,6 +23,7 @@ interface KeyboardShortcutsConfig {
   onIncreaseFontSize?: () => void;
   onDecreaseFontSize?: () => void;
   onResetFontSize?: () => void;
+  onOpenFile?: () => void;
   onOpenNotebookTile?: () => void;
   onOpenNotebookFullscreen?: () => void;
   onOpenBoard?: () => void;
@@ -50,6 +51,7 @@ export function useKeyboardShortcuts({
   onIncreaseFontSize,
   onDecreaseFontSize,
   onResetFontSize,
+  onOpenFile,
   onOpenNotebookTile,
   onOpenNotebookFullscreen,
   onOpenBoard,
@@ -94,6 +96,10 @@ export function useKeyboardShortcuts({
   useShortcut('ui.increaseFontSize', onIncreaseFontSize ?? (() => {}), !!onIncreaseFontSize);
   useShortcut('ui.decreaseFontSize', onDecreaseFontSize ?? (() => {}), !!onDecreaseFontSize);
   useShortcut('ui.resetFontSize', onResetFontSize ?? (() => {}), !!onResetFontSize);
+
+  // Markdown file opener (⌘P). Enabled like other surface shortcuts; a focused
+  // notebook tile gets the keystroke handed back to it by the handler itself.
+  useShortcut('file.open', onOpenFile ?? (() => {}), enabled && !!onOpenFile);
 
   // Notebook: dock a tile into the active workspace, or open the fullscreen modal.
   useShortcut('notebook.openTile', onOpenNotebookTile ?? (() => {}), enabled && !!onOpenNotebookTile);

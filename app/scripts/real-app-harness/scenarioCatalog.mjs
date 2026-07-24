@@ -38,6 +38,11 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-tile-only-workspace-select'],
   },
   {
+    id: 'markdown-opener',
+    label: 'Global Cmd+P markdown opener (git-enumerated fuzzy search + recents)',
+    command: ['pnpm', 'run', 'real-app:scenario-markdown-opener'],
+  },
+  {
     id: 'notebook-tile-finder',
     label: 'Notebook tile finder (native Cmd+Opt+N dock, Cmd+P re-summon)',
     command: ['pnpm', 'run', 'real-app:scenario-notebook-tile-finder'],
