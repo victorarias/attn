@@ -93,17 +93,13 @@ type Session struct {
 	// such as an isolated startup-file overlay for an interactive shell pane.
 	cleanup func()
 
-	// screen is the vt10x-parsed visible frame. It stays fed as a fallback
-	// implementation while ghostty backs terminal readers and attach restore.
-	screen *virtualScreen
 	// ghostty is the server-authoritative parsed terminal (libghostty-vt). It
 	// backs approval-state detection, CPR replies, the grid/automation screen
-	// snapshot (Manager.Snapshot), and attach restore (see info()). It
-	// answers query responses during Write; the read loop forwards the responses
-	// the scan-based responder does not cover (e.g. kitty CSI ? u) so the worker
-	// is the complete query answerer and a snapshot-restored client can suppress
-	// every response. May be nil if construction failed — a construction failure
-	// must never break a session, so every use is nil-guarded.
+	// snapshot (Manager.Snapshot), and attach restore (see info()). It answers
+	// query responses during Write; the read loop forwards the responses the
+	// scan-based responder does not cover (e.g. kitty CSI ? u) so the worker is
+	// the complete query answerer and a snapshot-restored client can suppress
+	// every response.
 	ghostty *ghosttyvt.Terminal
 	// blockFeed owns writes into ghostty, splitting at OSC 133 markers to
 	// maintain the worker-side command-block table (Phase 3a). nil exactly
@@ -111,12 +107,10 @@ type Session struct {
 	blockFeed  *blockFeeder
 	seqCounter atomic.Uint32
 
-	// replayMu makes the attach payload (the ghostty snapshot serialized in
-	// info(), and the screen snapshot in screenSnapshot()) and its sequence
-	// watermark (lastReplaySeq) a consistent pair, so a re-attaching frontend
-	// never drops a chunk that landed between the payload snapshot and the
-	// watermark read. Held briefly around each chunk's buffer writes and around
-	// info()'s snapshot; fanOut stays outside it.
+	// replayMu makes Ghostty feeds and lastReplaySeq atomic for snapshots, so a
+	// re-attaching frontend never drops a chunk that landed between the payload
+	// snapshot and the watermark read. Held briefly around each feed and around
+	// snapshot serialization; fanOut stays outside it.
 	replayMu      sync.Mutex
 	lastReplaySeq uint32
 
@@ -322,9 +316,6 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 					readLoopSeqGapHook()
 				}
 				s.replayMu.Lock()
-				if s.screen != nil {
-					s.screen.Observe(data)
-				}
 				if s.blockFeed != nil {
 					// Feed the server-authoritative terminal under the same lock
 					// as the seq watermark so a snapshot stays atomic with it;
@@ -384,9 +375,6 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 	if len(carryover) > 0 {
 		seq := s.seqCounter.Add(1)
 		s.replayMu.Lock()
-		if s.screen != nil {
-			s.screen.Observe(carryover)
-		}
 		if s.blockFeed != nil {
 			s.blockFeed.feed(carryover)
 		}
@@ -651,8 +639,8 @@ func (s *Session) info() AttachInfo {
 	// against LastSeq without a hole: every byte in the dump has seq <= LastSeq,
 	// and a live chunk it will apply has seq > LastSeq. Without this atomicity a
 	// chunk written between the serialize and the watermark read is in neither —
-	// lost. The dump is nil when the ghostty terminal is absent (construction
-	// failed, or the pure-Go stub on non-macOS builds).
+	// lost. Supported-platform sessions always have a Ghostty terminal; the
+	// unsupported-platform buildability stub serializes no dump.
 	s.replayMu.Lock()
 	var ghosttySnapshot []byte
 	// libghostty-vt does not surface a scrollback-truncation flag (the vestigial
@@ -780,9 +768,6 @@ func (s *Session) resize(cols, rows uint16) error {
 	s.cols = cols
 	s.rows = rows
 	s.metaMu.Unlock()
-	if s.screen != nil {
-		s.screen.Resize(cols, rows)
-	}
 	if s.ghostty != nil {
 		s.ghostty.Resize(int(cols), int(rows))
 	}

@@ -121,19 +121,21 @@ viewport-only as a follow-up.
 - Live verification: real approval flow (claude + codex) on a throwaway profile,
   fish resize (CPR consumer), grid view tiles, `needs_review` flows.
 
-### Phase 3 — delete vt10x
+### Phase 3 — delete vt10x (completed 2026-07-24)
 
-- Delete `virtualScreen`, `renderVisibleFrame`, style/color encoding machinery,
-  `ReplayScreenSnapshot`, the dual feed in the read loop, and the vt10x
-  `go.mod`/`go.sum` entries.
-- Corpus test converts from vt10x-as-oracle to golden fixtures (same inputs,
-  ghostty output snapshotted) so classifier-shape regressions stay caught.
-- `snapshot_test.go` round-trip tests move to ghosttyvt level (replay
-  `SerializeViewport` into fresh ghostty).
-- Simplify locking: read loop feeds only `blockFeed`; document the reduced
-  `replayMu` invariant.
-- Docs: AGENTS.md terminal section, server-authoritative-terminal plan doc,
-  memory notes.
+- Deleted `virtualScreen`, `renderVisibleFrame`, style/color encoding machinery,
+  the dual feed in the read loop, and the vt10x `go.mod`/`go.sum` entries.
+  `ReplayScreenSnapshot` remains as the observer-seed transport type in
+  `manager.go`.
+- Converted the corpus from vt10x-as-oracle to Ghostty golden fixtures (same
+  inputs, Ghostty viewport output snapshotted) so classifier-shape regressions
+  stay caught.
+- Kept `snapshot_test.go` coverage at the Ghostty viewport-serialization level:
+  it replays `SerializeViewport` into fresh Ghostty terminals.
+- Simplified locking: the read loop feeds only `blockFeed`; `replayMu` now makes
+  Ghostty feeds and `lastReplaySeq` atomic for snapshots.
+- Documented the single parsed-terminal contract and spawn-fatal Ghostty
+  construction on supported platforms.
 
 ### Phase 4 — post-retirement cleanup (candidates, confirm scope at the time)
 

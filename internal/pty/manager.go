@@ -78,6 +78,17 @@ type SpawnOptions struct {
 	Theme TerminalTheme
 }
 
+// ReplayScreenSnapshot is the observer seed serialized from the
+// server-authoritative terminal.
+type ReplayScreenSnapshot struct {
+	Payload       []byte
+	Cols          uint16
+	Rows          uint16
+	CursorX       uint16
+	CursorY       uint16
+	CursorVisible bool
+}
+
 type AttachInfo struct {
 	LastSeq             uint32
 	Cols                uint16
@@ -271,16 +282,24 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		theme:       opts.Theme,
 		cleanup:     deferCleanup,
 	}
-	session.screen = newVirtualScreen(opts.Cols, opts.Rows)
-	// Server-authoritative terminal: serialized on attach to restore the client.
-	// A construction failure must never break the session — leave it nil; every
-	// use is guarded. It is also nil on non-macOS builds (pure-Go stub).
-	if gt, err := ghosttyvt.New(int(opts.Cols), int(opts.Rows), ghosttyvt.Options{}); err != nil {
-		m.logf("pty spawn: ghosttyvt terminal unavailable for id=%s: %v", opts.ID, err)
-	} else {
-		session.ghostty = gt
-		session.blockFeed = newBlockFeeder(gt)
+	// The Ghostty terminal backs the classifier, CPR, tiles, and attach restore;
+	// a session without it is not viable.
+	gt, err := ghosttyvt.New(int(opts.Cols), int(opts.Rows), ghosttyvt.Options{})
+	if err != nil {
+		if ptmx != nil {
+			_ = ptmx.Close()
+		}
+		if cmd != nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+		if deferCleanup != nil {
+			deferCleanup()
+		}
+		return fmt.Errorf("ghostty terminal construction failed: %w", err)
 	}
+	session.ghostty = gt
+	session.blockFeed = newBlockFeeder(gt)
 
 	m.mu.Lock()
 	m.sessions[opts.ID] = session

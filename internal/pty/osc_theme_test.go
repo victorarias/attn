@@ -31,7 +31,6 @@ func newOSCTestSession(t *testing.T) (s *Session, peer *os.File) {
 		rows:        rows,
 		ptmx:        ptmx,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
-		screen:      newVirtualScreen(cols, rows),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
@@ -98,7 +97,6 @@ func TestOSCColorQuerySeededAtSpawnAnswersWithoutSetTheme(t *testing.T) {
 		rows:        rows,
 		ptmx:        ptmx,
 		cmd:         &exec.Cmd{},
-		screen:      newVirtualScreen(cols, rows),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),

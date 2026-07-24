@@ -738,9 +738,9 @@ func int32PtrToInt(v *int32) *int {
 	return &n
 }
 
-// snapshotSeedScreen resolves the visible frame to seed an observer with from
-// the worker's fresh vt10x-rendered screen (Manager.Snapshot). The second
-// result is ok.
+// snapshotSeedScreen resolves the visible frame from the worker's fresh
+// Ghostty snapshot (Manager.Snapshot) to seed an observer. The second result is
+// ok.
 func snapshotSeedScreen(info ptybackend.AttachInfo) (pty.ReplayScreenSnapshot, bool) {
 	if info.ScreenSnapshotFresh && len(info.ScreenSnapshot) > 0 {
 		return pty.ReplayScreenSnapshot{
