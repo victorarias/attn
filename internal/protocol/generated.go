@@ -1190,6 +1190,23 @@ type FetchRemotesResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type FileActivity struct {
+	// Count corresponds to the JSON schema field "count".
+	Count int `json:"count"`
+
+	// LastAt corresponds to the JSON schema field "last_at".
+	LastAt string `json:"last_at"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Source corresponds to the JSON schema field "source".
+	Source string `json:"source"`
+}
+
 type FileDiffResultMessage struct {
 	// Directory corresponds to the JSON schema field "directory".
 	Directory string `json:"directory"`
@@ -1325,6 +1342,9 @@ type FsExistsResultMessage struct {
 type FsIndexMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
+
+	// Extensions corresponds to the JSON schema field "extensions".
+	Extensions []string `json:"extensions,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
@@ -3433,6 +3453,34 @@ type RateLimitedMessage struct {
 
 	// RateLimitResource corresponds to the JSON schema field "rate_limit_resource".
 	RateLimitResource string `json:"rate_limit_resource"`
+}
+
+type RecentFilesMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Limit corresponds to the JSON schema field "limit".
+	Limit *int `json:"limit,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type RecentFilesResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Files corresponds to the JSON schema field "files".
+	Files []FileActivity `json:"files"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
 }
 
 type RecentLocation struct {

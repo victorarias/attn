@@ -8,6 +8,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-24]
 
+### Added
+- **⌘P opens a markdown file from anywhere in the app.** The palette starts on
+  the files you opened most recently and, as you type, fuzzy-searches the
+  markdown under the selected session's folder — no native file dialog, no file
+  tree. Picking a file docks it as a reader tile bound to that session, exactly
+  as ⌘+clicking a link does. A focused Editor tile keeps its own in-tile ⌘P.
+  The search covers what git tracks plus untracked files, so ignored build
+  output never crowds out your documents.
+
 ### Fixed
 - **Sessions interrupted by a daemon or machine restart now recover when their terminal pane opens.** attn preserves the session's launch settings, restarts the recoverable session using the pane's current terminal size, and reconnects it automatically instead of leaving a "Failed to attach PTY" message. Sessions that cannot safely be revived still show the normal attach error.
 

@@ -173,7 +173,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '184';
+export const PROTOCOL_VERSION = '185';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -478,6 +478,17 @@ export interface FsIndexResult {
   root: string;
   files: string[];
   truncated: boolean;
+}
+
+// One remembered file, ranked by frecency. Mirrors the daemon's
+// protocol.FileActivity: source is what happened to it ("opened" today), count
+// is how many times, lastAt when it last happened.
+export interface RecentFile {
+  path: string;
+  source: string;
+  lastAt: string;
+  count: number;
+  sessionId?: string;
 }
 
 interface UseDaemonSocketOptions {
@@ -1762,6 +1773,31 @@ export function useDaemonSocket({
               pending.resolve({ root: data.root });
             } else {
               pending.reject(new Error(data.error || 'Filesystem watch action failed'));
+            }
+            break;
+          }
+
+          case 'recent_files_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `recent_files:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success) {
+              pending.resolve((data.files || []).map((file: Record<string, unknown>) => ({
+                path: file.path as string,
+                source: file.source as string,
+                lastAt: file.last_at as string,
+                count: (file.count as number) ?? 0,
+                sessionId: file.session_id as string | undefined,
+              })));
+            } else {
+              pending.reject(new Error(data.error || 'Recent files failed'));
             }
             break;
           }
@@ -4984,7 +5020,9 @@ export function useDaemonSocket({
   // Bounded recursive file index of root (undefined/empty = the notebook
   // root), for the ⌘P finder. No client-controlled limit — the daemon caps
   // entries server-side and reports truncated=true if the walk was cut short.
-  const sendFsIndex = useCallback((root?: string): Promise<FsIndexResult> => {
+  // extensions (dotless, case-insensitive) filter server-side, before the cap,
+  // so asking for markdown cannot be truncated away by files nobody wanted.
+  const sendFsIndex = useCallback((root?: string, extensions?: string[]): Promise<FsIndexResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -4994,7 +5032,12 @@ export function useDaemonSocket({
       const requestId = nextRequestID('fs_index');
       const key = `fs_index:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_index', request_id: requestId, ...(root ? { root } : {}) }));
+      ws.send(JSON.stringify({
+        cmd: 'fs_index',
+        request_id: requestId,
+        ...(root ? { root } : {}),
+        ...(extensions && extensions.length > 0 ? { extensions } : {}),
+      }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);
@@ -5005,6 +5048,28 @@ export function useDaemonSocket({
   }, [nextRequestID]);
 
   // Get recent locations from daemon
+  // Files recently opened as reader tiles, frecency-ranked. Recorded daemon-side
+  // for every route into a markdown tile, so this list needs no client bookkeeping.
+  const sendRecentFiles = useCallback((limit?: number): Promise<RecentFile[]> => {
+    return new Promise((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID('recent_files');
+      const key = `recent_files:${requestId}`;
+      pendingActionsRef.current.set(key, { resolve, reject });
+      ws.send(JSON.stringify({ cmd: 'recent_files', request_id: requestId, ...(limit ? { limit } : {}) }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error('Recent files timed out'));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
@@ -5775,6 +5840,7 @@ export function useDaemonSocket({
     sendFsWatch,
     sendFsUnwatch,
     sendFsIndex,
+    sendRecentFiles,
     sendGetRecentLocations,
     sendBrowseDirectory,
     sendInspectPath,

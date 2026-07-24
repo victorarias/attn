@@ -139,7 +139,7 @@ Attached finding: `fs_index` and `fs_list` gate arbitrary roots on the authentic
 client via `resolveFsRoot`; `browse_directory` has no equivalent gate. That is tolerable
 while it leaks only directory names. Making it list files is the moment to close it.
 
-### R4 — File-activity store placement (with the opener)
+### R4 — File-activity store placement (with the opener) — DONE
 
 `recent_locations` lives inline in `store.go` with its own frecency scorer, pruning, and
 delete-on-missing. Put file activity in its own `internal/store/file_activity.go`
@@ -156,6 +156,12 @@ change how the hook config is generated.
 
 ### Daemon fixes to fold in
 
+Both landed with the opener PR, except the dot-directory harmonization: fuzzy
+mode still hides dot-prefixed paths (git enumeration applies the same rule the
+walk always did), while `listDirectoryEntries` still shows them. Path mode is
+where that inconsistency becomes visible, so it is folded into PR2 (R3).
+
+
 - `fs_index`'s 25k cap counts every file, before any markdown filter, and truncation
   follows `WalkDir` lexicographic order — so in a large repo, documents under
   late-alphabet directories silently vanish from fuzzy mode. An optional server-side
@@ -163,6 +169,19 @@ change how the hook config is generated.
 - Dot-directory rule is inconsistent: `fs_index` skips dot-directories entirely,
   `listDirectoryEntries` does not. So `~/.claude/` is reachable in path mode but invisible
   in fuzzy mode. Pick one rule and apply it to both.
+
+### Shipped so far
+
+- PR1 (merged): R1 + R2 — the shared palette shell and the scorer's move off
+  `NotebookEntry`.
+- PR2 (this PR): the opener itself. `file_activity` table (migration 80) plus
+  `internal/store/file_activity.go`; recording in `openMarkdownTile`, which also
+  now refuses a deleted file and forgets it; protocol 185 with `recent_files`
+  and an `extensions` filter on `fs_index`; git-backed enumeration; the global
+  ⌘P palette with recents, unified ranking, and an async index load; the
+  `paletteClaim` hand-off that keeps a focused Editor tile's own ⌘P. Verified
+  live by `real-app:scenario-markdown-opener`.
+- Next: path mode (R3).
 
 ### Order
 

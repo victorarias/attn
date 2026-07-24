@@ -486,6 +486,18 @@ model RecentLocation {
   use_count: int32;
 }
 
+// One file the user has touched, as recorded in the daemon's file-activity log.
+// `source` says how it was touched: "opened" is the only value today (every
+// open_markdown, whatever route it came from). It exists so a later signal —
+// files an agent edited — becomes another source value rather than a migration.
+model FileActivity {
+  path: string;         // absolute
+  source: string;       // "opened"
+  last_at: string;      // ISO timestamp
+  count: int32;
+  session_id?: string;  // the session in play at the time, when known
+}
+
 model DirectoryEntry {
   name: string;
   path: string;
@@ -1237,6 +1249,11 @@ model FsUnwatchMessage {
 model FsIndexMessage {
   cmd: "fs_index";
   root?: string; // Absolute directory to operate under; omitted/empty = the notebook root.
+  // Restrict the index to these file extensions, without leading dots and
+  // case-insensitive (e.g. ["md", "markdown"]). Omitted/empty indexes every
+  // file. The entry cap applies AFTER filtering, so a markdown-only index
+  // cannot be truncated by unrelated files.
+  extensions?: string[];
   request_id?: string; // set by the WS frontend to correlate the result event
 }
 
@@ -1470,6 +1487,16 @@ model GetRecentLocationsMessage {
   cmd: "get_recent_locations";
   limit?: int32;  // Default 20
   endpoint_id?: string;
+  request_id?: string;
+}
+
+// Recently touched files, frecency-ranked (frequency weighted by recency, the
+// same model as get_recent_locations). Feeds the ⌘P markdown opener's list on
+// an empty query. Entries whose file no longer exists are pruned rather than
+// returned.
+model RecentFilesMessage {
+  cmd: "recent_files";
+  limit?: int32;  // Default 20
   request_id?: string;
 }
 
@@ -3392,6 +3419,15 @@ model FsUnwatchResultMessage {
   root?: string;
 }
 
+// Result of recent_files. files are absolute paths, best-first by frecency.
+model RecentFilesResultMessage {
+  event: "recent_files_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  files: FileActivity[];
+}
+
 // Result of fs_index. root is the resolved absolute root (echoed for
 // correlation with the request). files are root-relative slash paths, files
 // only (no directories), sorted lexicographically. truncated is true when the
@@ -3617,6 +3653,7 @@ alias DaemonEvent =
   | FsWatchResultMessage
   | FsUnwatchResultMessage
   | FsIndexResultMessage
+  | RecentFilesResultMessage
   | FsChangedMessage
   | TaskListResultMessage
   | TaskRetryResultMessage

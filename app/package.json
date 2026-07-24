@@ -54,6 +54,7 @@
     "real-app:scenario-workspace-close-last-session-switches-back": "node scripts/real-app-harness/scenario-workspace-close-last-session-switches-back.mjs",
     "real-app:scenario-workspace-close-one-session-keeps-selection": "node scripts/real-app-harness/scenario-workspace-close-one-session-keeps-selection.mjs",
     "real-app:scenario-tile-only-workspace-select": "node scripts/real-app-harness/scenario-tile-only-workspace-select.mjs",
+    "real-app:scenario-markdown-opener": "node scripts/real-app-harness/scenario-markdown-opener.mjs",
     "real-app:scenario-notebook-tile-finder": "node scripts/real-app-harness/scenario-notebook-tile-finder.mjs",
     "real-app:scenario-notebook-tile-close": "node scripts/real-app-harness/scenario-notebook-tile-close.mjs",
     "real-app:scenario-notebook-editor-undo": "node scripts/real-app-harness/scenario-notebook-editor-undo.mjs",

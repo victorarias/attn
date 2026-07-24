@@ -11,6 +11,7 @@ import { parseFrontmatter } from './notebook/frontmatter';
 import { headingSlug, noteDir, resolveNotebookLink } from './notebook/linkResolver';
 import { LiveMarkdownEditor, type LiveMarkdownEditorHandle, type LiveSelection } from './notebook/LiveMarkdownEditor';
 import { NotebookFinder } from './notebook/NotebookFinder';
+import { registerPaletteClaim } from './palette/paletteClaim';
 import { parseOutline } from './notebook/outline';
 import './NotebookBrowser.css';
 
@@ -202,11 +203,18 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     finderReturnFocusRef.current = document.activeElement as HTMLElement | null;
     setFinderOpen(true);
   }, []);
-  // Summon the finder with Cmd+P from inside the surface. Scoped to this container's
-  // keydown so a tile only responds when focus is in THIS tile (two tiles don't fight
-  // over one global binding), and the modal responds only while it's the focused
-  // surface; preventDefault stops the WebView's print dialog. Shift is excluded —
-  // Cmd+Shift+P is the global attention dock.
+  // Claim ⌘P while focus is inside this surface, so the global markdown opener
+  // hands the keystroke back to THIS tile's finder (two tiles never fight over
+  // one binding, and the app-wide opener stays out of a focused notebook).
+  useEffect(() => {
+    if (!finderEnabled) return;
+    return registerPaletteClaim({ container: () => dialogRef.current, open: openFinder });
+  }, [finderEnabled, openFinder]);
+  // The same summon from this container's own keydown. In the app the global
+  // dispatcher (capture phase) gets there first and routes through the claim
+  // above; this path is what makes the surface work standalone, outside an App
+  // that registers the shortcut. preventDefault stops the WebView's print
+  // dialog. Shift is excluded — Cmd+Shift+P is the global attention dock.
   const handleSurfaceKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.metaKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p') {
       event.preventDefault();

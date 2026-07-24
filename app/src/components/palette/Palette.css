@@ -93,3 +93,10 @@
 @keyframes palette-reveal {
   from { opacity: 0; transform: scale(0.995); }
 }
+
+/* The global markdown opener is app-level, not scoped to a tile, so it covers
+   the window. z-index matches the action menu (the other app-wide palette). */
+.markdown-opener {
+  position: fixed;
+  z-index: 420;
+}

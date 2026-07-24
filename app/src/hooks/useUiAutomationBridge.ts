@@ -1358,6 +1358,27 @@ function getLocationPickerOverlay() {
   return overlay instanceof HTMLElement ? overlay : null;
 }
 
+// The global markdown opener's rendered state, for harness assertions: what the
+// palette is actually showing, in order, without guessing from screenshots.
+function collectMarkdownOpenerUiState() {
+  const root = document.querySelector('.markdown-opener');
+  if (!root) {
+    return { open: false, query: '', rows: [], emptyText: '' };
+  }
+  const input = root.querySelector('.markdown-opener-input');
+  const rows = Array.from(root.querySelectorAll('.markdown-opener-option')).map((row) => ({
+    title: row.querySelector('.markdown-opener-option-title')?.textContent?.trim() || '',
+    path: row.querySelector('.markdown-opener-option-path')?.textContent?.trim() || '',
+    selected: row.getAttribute('aria-selected') === 'true',
+  }));
+  return {
+    open: true,
+    query: input instanceof HTMLInputElement ? input.value : '',
+    rows,
+    emptyText: root.querySelector('.markdown-opener-empty')?.textContent?.trim() || '',
+  };
+}
+
 function collectLocationPickerUiState() {
   const root = getLocationPickerRoot();
   if (!root) {
@@ -2075,6 +2096,8 @@ export function useUiAutomationBridge({
         return {
           label: await invoke<string | null>('browser_host_focus_state'),
         };
+      case 'markdown_opener_get_state':
+        return collectMarkdownOpenerUiState();
       case 'location_picker_get_state':
         return collectLocationPickerUiState();
       case 'location_picker_open': {
