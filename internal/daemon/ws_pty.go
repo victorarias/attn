@@ -446,6 +446,13 @@ func buildSpawnSessionRecord(msg *protocol.SpawnSessionMessage, agent, cwd, labe
 		state, stateSince, stateUpdatedAt = protocol.SessionStateWorking, nowStr, nowStr
 	}
 	session := &protocol.Session{ID: msg.ID, Label: label, Agent: protocol.SessionAgent(agent), Directory: cwd, State: state, StateSince: stateSince, StateUpdatedAt: stateUpdatedAt, LastSeen: nowStr, WorkspaceID: msg.WorkspaceID}
+	// Endpoint binding: prefer the spawn message's explicit endpoint; a respawn
+	// with no endpoint in the message keeps the stored binding.
+	if id := strings.TrimSpace(protocol.Deref(msg.EndpointID)); id != "" {
+		session.EndpointID = protocol.Ptr(id)
+	} else if existing != nil {
+		session.EndpointID = existing.EndpointID
+	}
 	if branchInfo, _ := git.GetBranchInfo(cwd); branchInfo != nil {
 		if branchInfo.Branch != "" {
 			session.Branch = protocol.Ptr(branchInfo.Branch)

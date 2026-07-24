@@ -333,6 +333,14 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 
 func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 	msg, session := req.msg, plan.launchSession
+	// A state transition can land between executeSpawn's persist and this commit
+	// (the wrapper reports working as soon as the PTY boots). The commit upsert
+	// must not rewind it to the pre-spawn snapshot.
+	if current := d.store.Get(session.ID); current != nil {
+		session.State = current.State
+		session.StateSince = current.StateSince
+		session.StateUpdatedAt = current.StateUpdatedAt
+	}
 	d.clearLongRunTracking(msg.ID)
 	if err := d.store.AddChecked(session); err != nil {
 		if req.hasPluginDriver {
