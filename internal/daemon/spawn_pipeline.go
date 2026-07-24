@@ -77,6 +77,17 @@ func (plan *spawnPlan) rollback(d *Daemon, sessionID string) {
 	}
 }
 
+// restoreLaunchIntent undoes the pre-spawn SetLaunchIntent for a session whose
+// row survives the failure (existing-session paths). Fresh sessions need no
+// restore: their row, intent included, is removed outright.
+func (plan *spawnPlan) restoreLaunchIntent(d *Daemon, sessionID string) {
+	if plan.hadPriorIntent {
+		d.store.SetLaunchIntent(sessionID, plan.priorIntent)
+		return
+	}
+	d.store.ClearLaunchIntent(sessionID)
+}
+
 func (plan *spawnPlan) commit() {
 	plan.chiefAssignmentCommitted = true
 	plan.instructionsCommitted = true
@@ -328,8 +339,8 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 		} else if restoreErr := d.store.AddChecked(req.existingSession); restoreErr != nil {
 			err = errors.Join(err, fmt.Errorf("restore prior session after spawn failure: %w", restoreErr))
 		}
-		if req.existingSession != nil && plan.hadPriorIntent {
-			d.store.SetLaunchIntent(msg.ID, plan.priorIntent)
+		if req.existingSession != nil {
+			plan.restoreLaunchIntent(d, msg.ID)
 		}
 		if req.hasPluginDriver {
 			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
@@ -376,8 +387,8 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 		if removeErr != nil {
 			persistErr = fmt.Errorf("%w; remove spawned runtime: %v", persistErr, removeErr)
 		}
-		if req.existingSession != nil && plan.hadPriorIntent {
-			d.store.SetLaunchIntent(msg.ID, plan.priorIntent)
+		if req.existingSession != nil {
+			plan.restoreLaunchIntent(d, msg.ID)
 		}
 		plan.rollback(d, msg.ID)
 		return &spawnOutcome{err: persistErr}
@@ -391,8 +402,8 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 		removeErr := d.ptyBackend.Remove(context.Background(), msg.ID)
 		if req.existingSession == nil {
 			d.store.Remove(session.ID)
-		} else if plan.hadPriorIntent {
-			d.store.SetLaunchIntent(session.ID, plan.priorIntent)
+		} else {
+			plan.restoreLaunchIntent(d, msg.ID)
 		}
 		cursorErr := fmt.Errorf("initialize plugin driver run cursor")
 		if killErr != nil {

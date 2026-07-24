@@ -687,6 +687,20 @@ func (s *Store) SetLaunchIntent(id string, intent LaunchIntent) {
 	}
 }
 
+// ClearLaunchIntent removes any stored launch intent for the session, leaving
+// the row as if no launch contract had ever been persisted.
+func (s *Store) ClearLaunchIntent(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return
+	}
+	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = '' WHERE id = ?", id); err != nil {
+		log.Printf("[store] ClearLaunchIntent: failed for session %s: %v", id, err)
+	}
+}
+
 func (s *Store) LaunchIntent(id string) (LaunchIntent, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -665,6 +665,18 @@ func TestStore_LaunchIntentRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStore_ClearLaunchIntent(t *testing.T) {
+	s := New()
+	defer s.Close()
+	s.Add(&protocol.Session{ID: "clear-launch-intent", Label: "clear-launch-intent"})
+	s.SetLaunchIntent("clear-launch-intent", LaunchIntent{Model: "sonnet"})
+
+	s.ClearLaunchIntent("clear-launch-intent")
+	if _, ok := s.LaunchIntent("clear-launch-intent"); ok {
+		t.Fatal("LaunchIntent() after ClearLaunchIntent() = ok true, want false")
+	}
+}
+
 func TestStore_LaunchIntentMissingOrEmpty(t *testing.T) {
 	s := New()
 	defer s.Close()

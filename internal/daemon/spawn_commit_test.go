@@ -131,6 +131,34 @@ func TestSpawnFailureRestoresPriorLaunchIntent(t *testing.T) {
 	}
 }
 
+func TestSpawnFailureClearsIntentWhenNoPrior(t *testing.T) {
+	d, _, cwd := newSpawnCommitTestDaemon(t)
+	d.ptyBackend = &failingLaunchIntentBackend{}
+	msg := spawnCommitMessage("clear-no-prior-intent", cwd)
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             msg.ID,
+		Label:          msg.ID,
+		Agent:          protocol.SessionAgentShell,
+		Directory:      cwd,
+		WorkspaceID:    msg.WorkspaceID,
+		State:          protocol.SessionStateIdle,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	if rejection := d.runSpawnPipeline(msg, internalSpawnPolicy{}); rejection == nil {
+		t.Fatal("runSpawnPipeline() rejection = nil, want spawn failure")
+	}
+	if _, ok := d.store.LaunchIntent(msg.ID); ok {
+		t.Fatal("LaunchIntent() = ok true, want false after failed spawn")
+	}
+	if session := d.store.Get(msg.ID); session == nil {
+		t.Fatal("stored session = nil, want existing session restored")
+	}
+}
+
 func TestSpawnFailureFreshSessionLeavesNoLaunchIntent(t *testing.T) {
 	d, _, cwd := newSpawnCommitTestDaemon(t)
 	d.ptyBackend = &failingLaunchIntentBackend{}
