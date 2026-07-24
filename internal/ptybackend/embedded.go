@@ -107,38 +107,14 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 		Running:                    info.Running,
 		ExitCode:                   info.ExitCode,
 		ExitSignal:                 info.ExitSignal,
-		ScreenSnapshot:             info.ScreenSnapshot,
-		ScreenCols:                 info.ScreenCols,
-		ScreenRows:                 info.ScreenRows,
-		ScreenCursorX:              info.ScreenCursorX,
-		ScreenCursorY:              info.ScreenCursorY,
-		ScreenCursorVisible:        info.ScreenCursorVisible,
-		ScreenSnapshotFresh:        info.ScreenSnapshotFresh,
 		GhosttySnapshot:            info.GhosttySnapshot,
 		GhosttyBlocks:              info.GhosttyBlocks,
 		GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,
 	}, stream, nil
 }
 
-func (b *EmbeddedBackend) Snapshot(_ context.Context, sessionID string) (AttachInfo, error) {
-	info, err := b.manager.Snapshot(sessionID)
-	if err != nil {
-		return AttachInfo{}, err
-	}
-	return AttachInfo{
-		LastSeq:             info.LastSeq,
-		Cols:                info.Cols,
-		Rows:                info.Rows,
-		PID:                 info.PID,
-		Running:             info.Running,
-		ScreenSnapshot:      info.ScreenSnapshot,
-		ScreenCols:          info.ScreenCols,
-		ScreenRows:          info.ScreenRows,
-		ScreenCursorX:       info.ScreenCursorX,
-		ScreenCursorY:       info.ScreenCursorY,
-		ScreenCursorVisible: info.ScreenCursorVisible,
-		ScreenSnapshotFresh: info.ScreenSnapshotFresh,
-	}, nil
+func (b *EmbeddedBackend) Snapshot(_ context.Context, sessionID string) (pty.SnapshotInfo, error) {
+	return b.manager.Snapshot(sessionID)
 }
 
 func (b *EmbeddedBackend) Input(_ context.Context, sessionID string, data []byte) error {

@@ -21,7 +21,7 @@ import (
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -44,12 +44,13 @@ func writeCodexRolloutFixture(t *testing.T, resumeID string) {
 	}
 }
 
-func (b *automationResumeBackend) Snapshot(context.Context, string) (ptybackend.AttachInfo, error) {
+func (b *automationResumeBackend) Snapshot(context.Context, string) (pty.SnapshotInfo, error) {
 	b.snapshotCalls++
+	payload := []byte("reviewer ready")
 	if b.snapshotCalls == 1 {
-		return ptybackend.AttachInfo{ScreenSnapshot: []byte(codexDirectoryTrustPrompt)}, nil
+		payload = []byte(codexDirectoryTrustPrompt)
 	}
-	return ptybackend.AttachInfo{ScreenSnapshot: []byte("reviewer ready")}, nil
+	return pty.SnapshotInfo{Screen: &pty.ViewportSnapshot{Payload: payload}}, nil
 }
 
 func TestStripANSIForPromptMatch_PreservesStyledSplitPrompt(t *testing.T) {

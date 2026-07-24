@@ -225,7 +225,7 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 	// not yet reached the screen, take the observer snapshot inside the gap.
 	var (
 		once    sync.Once
-		gapInfo AttachInfo
+		gapInfo SnapshotInfo
 		gapSeq  uint32
 	)
 	readLoopSeqGapHook = func() {
@@ -240,7 +240,7 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 	if gapSeq == 0 {
 		t.Fatal("readLoopSeqGapHook never fired")
 	}
-	if bytes.Contains(gapInfo.ScreenSnapshot, []byte("MARKER")) {
+	if bytes.Contains(gapInfo.Screen.Payload, []byte("MARKER")) {
 		t.Fatal("gap snapshot already contains the in-flight chunk; the seam fired too late to exercise the race")
 	}
 	// The core invariant: a snapshot whose screen lacks the chunk's bytes must
@@ -256,8 +256,8 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 	if settled.LastSeq != gapSeq {
 		t.Fatalf("settled snapshot LastSeq = %d, want %d (the applied marker chunk)", settled.LastSeq, gapSeq)
 	}
-	if !bytes.Contains(settled.ScreenSnapshot, []byte("MARKER")) {
-		t.Fatalf("settled snapshot screen should contain the applied marker chunk; got %q", settled.ScreenSnapshot)
+	if !bytes.Contains(settled.Screen.Payload, []byte("MARKER")) {
+		t.Fatalf("settled snapshot screen should contain the applied marker chunk; got %q", settled.Screen.Payload)
 	}
 }
 

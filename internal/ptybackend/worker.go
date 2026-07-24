@@ -684,13 +684,6 @@ func (b *WorkerBackend) Attach(ctx context.Context, sessionID, subscriberID stri
 				Running:                    attachResult.Running,
 				ExitCode:                   attachResult.ExitCode,
 				ExitSignal:                 attachResult.ExitSignal,
-				ScreenSnapshot:             attachResult.ScreenSnapshot,
-				ScreenCols:                 attachResult.ScreenCols,
-				ScreenRows:                 attachResult.ScreenRows,
-				ScreenCursorX:              attachResult.ScreenCursorX,
-				ScreenCursorY:              attachResult.ScreenCursorY,
-				ScreenCursorVisible:        attachResult.ScreenCursorVisible,
-				ScreenSnapshotFresh:        attachResult.ScreenSnapshotFresh,
 				GhosttySnapshot:            attachResult.GhosttySnapshot,
 				GhosttyBlocks:              attachBlocksFromWire(attachResult.GhosttyBlocks),
 				GhosttyScrollbackTruncated: attachResult.GhosttyScrollbackTruncated,
@@ -1065,35 +1058,29 @@ func (b *WorkerBackend) SessionLaunchParams(ctx context.Context, sessionID strin
 	}, nil
 }
 
-func (b *WorkerBackend) Snapshot(ctx context.Context, sessionID string) (AttachInfo, error) {
+func (b *WorkerBackend) Snapshot(ctx context.Context, sessionID string) (pty.SnapshotInfo, error) {
 	session, err := b.getSession(sessionID)
 	if err != nil {
-		return AttachInfo{}, err
+		return pty.SnapshotInfo{}, err
 	}
 	res, err := b.callSnapshot(ctx, session)
 	if err != nil {
-		return AttachInfo{}, err
+		return pty.SnapshotInfo{}, err
 	}
-	return attachInfoFromAttachResult(res), nil
-}
-
-func attachInfoFromAttachResult(res ptyworker.AttachResult) AttachInfo {
-	return AttachInfo{
-		LastSeq:             res.LastSeq,
-		Cols:                res.Cols,
-		Rows:                res.Rows,
-		PID:                 res.PID,
-		Running:             res.Running,
-		ExitCode:            res.ExitCode,
-		ExitSignal:          res.ExitSignal,
-		ScreenSnapshot:      res.ScreenSnapshot,
-		ScreenCols:          res.ScreenCols,
-		ScreenRows:          res.ScreenRows,
-		ScreenCursorX:       res.ScreenCursorX,
-		ScreenCursorY:       res.ScreenCursorY,
-		ScreenCursorVisible: res.ScreenCursorVisible,
-		ScreenSnapshotFresh: res.ScreenSnapshotFresh,
+	info := pty.SnapshotInfo{
+		LastSeq: res.LastSeq,
+		Cols:    res.Cols,
+		Rows:    res.Rows,
+		Running: res.Running,
 	}
+	if len(res.ScreenSnapshot) > 0 {
+		info.Screen = &pty.ViewportSnapshot{
+			Payload: res.ScreenSnapshot,
+			Cols:    res.ScreenCols,
+			Rows:    res.ScreenRows,
+		}
+	}
+	return info, nil
 }
 
 func (b *WorkerBackend) SessionLikelyAlive(ctx context.Context, sessionID string) (bool, error) {
@@ -1464,36 +1451,36 @@ func (b *WorkerBackend) callInfo(ctx context.Context, session *workerSession) (p
 	}
 }
 
-func (b *WorkerBackend) callSnapshot(ctx context.Context, session *workerSession) (ptyworker.AttachResult, error) {
+func (b *WorkerBackend) callSnapshot(ctx context.Context, session *workerSession) (ptyworker.SnapshotResult, error) {
 	rpcCtx, cancel := withDefaultRPCTimeout(ctx)
 	defer cancel()
 	conn, enc, dec, err := b.connectAuthed(rpcCtx, session)
 	if err != nil {
-		return ptyworker.AttachResult{}, err
+		return ptyworker.SnapshotResult{}, err
 	}
 	defer conn.Close()
 	if err := applyConnDeadline(conn, rpcCtx); err != nil {
-		return ptyworker.AttachResult{}, err
+		return ptyworker.SnapshotResult{}, err
 	}
 
 	reqID := b.nextReqID("snapshot")
 	if err := writeRequest(enc, reqID, ptyworker.MethodSnapshot, map[string]any{}); err != nil {
-		return ptyworker.AttachResult{}, err
+		return ptyworker.SnapshotResult{}, err
 	}
 	for {
 		frameType, res, _, err := readFrame(dec)
 		if err != nil {
-			return ptyworker.AttachResult{}, err
+			return ptyworker.SnapshotResult{}, err
 		}
 		if frameType != "res" || res.ID != reqID {
 			continue
 		}
 		if !res.OK {
-			return ptyworker.AttachResult{}, b.rpcError(session.SessionID, res.Error)
+			return ptyworker.SnapshotResult{}, b.rpcError(session.SessionID, res.Error)
 		}
-		var result ptyworker.AttachResult
+		var result ptyworker.SnapshotResult
 		if err := json.Unmarshal(res.Result, &result); err != nil {
-			return ptyworker.AttachResult{}, err
+			return ptyworker.SnapshotResult{}, err
 		}
 		return result, nil
 	}

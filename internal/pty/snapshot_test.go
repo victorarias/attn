@@ -19,26 +19,23 @@ func TestScreenSnapshot_IncludesScreenSnapshotWhenAvailable(t *testing.T) {
 	gt.Write([]byte("snapshot"))
 
 	info := session.screenSnapshot()
-	if len(info.ScreenSnapshot) == 0 {
-		t.Fatal("expected non-empty screen snapshot")
+	if info.Screen == nil || len(info.Screen.Payload) == 0 {
+		t.Fatal("expected non-empty viewport snapshot")
 	}
-	if !info.ScreenSnapshotFresh {
-		t.Fatal("expected screen snapshot to be marked fresh")
-	}
-	if info.ScreenCols != 12 || info.ScreenRows != 4 {
-		t.Fatalf("screen size = %dx%d, want 12x4", info.ScreenCols, info.ScreenRows)
+	if info.Screen.Cols != 12 || info.Screen.Rows != 4 {
+		t.Fatalf("screen size = %dx%d, want 12x4", info.Screen.Cols, info.Screen.Rows)
 	}
 	assertScreenSnapshotReplays(t, gt, info)
 }
 
-func assertScreenSnapshotReplays(t *testing.T, source *ghosttyvt.Terminal, info AttachInfo) {
+func assertScreenSnapshotReplays(t *testing.T, source *ghosttyvt.Terminal, info SnapshotInfo) {
 	t.Helper()
-	restored, err := ghosttyvt.New(int(info.ScreenCols), int(info.ScreenRows), ghosttyvt.Options{})
+	restored, err := ghosttyvt.New(int(info.Screen.Cols), int(info.Screen.Rows), ghosttyvt.Options{})
 	if err != nil {
 		t.Fatalf("new restored ghostty terminal: %v", err)
 	}
 	t.Cleanup(restored.Close)
-	restored.Write(info.ScreenSnapshot)
+	restored.Write(info.Screen.Payload)
 	if got, want := restored.ViewportText(), source.ViewportText(); got != want {
 		t.Fatalf("replayed viewport text = %q, want %q", got, want)
 	}
@@ -62,11 +59,8 @@ func TestScreenSnapshot_IncludesScreenSnapshotForShellSessions(t *testing.T) {
 	gt.Write([]byte("prompt"))
 
 	info := session.screenSnapshot()
-	if len(info.ScreenSnapshot) == 0 {
-		t.Fatal("expected non-empty screen snapshot for shell session")
-	}
-	if !info.ScreenSnapshotFresh {
-		t.Fatal("expected ScreenSnapshotFresh=true for shell session")
+	if info.Screen == nil || len(info.Screen.Payload) == 0 {
+		t.Fatal("expected non-empty viewport snapshot for shell session")
 	}
 }
 
@@ -91,11 +85,11 @@ func TestScreenSnapshot_ReadOnlyAndLean(t *testing.T) {
 
 	info := session.screenSnapshot()
 
-	if len(info.ScreenSnapshot) == 0 || !info.ScreenSnapshotFresh {
-		t.Fatal("expected a fresh screen snapshot")
+	if info.Screen == nil || len(info.Screen.Payload) == 0 {
+		t.Fatal("expected a viewport snapshot")
 	}
-	if info.ScreenCols != 12 || info.ScreenRows != 4 {
-		t.Fatalf("screen size = %dx%d, want 12x4", info.ScreenCols, info.ScreenRows)
+	if info.Screen.Cols != 12 || info.Screen.Rows != 4 {
+		t.Fatalf("screen size = %dx%d, want 12x4", info.Screen.Cols, info.Screen.Rows)
 	}
 	if info.LastSeq != 7 {
 		t.Fatalf("LastSeq = %d, want 7", info.LastSeq)

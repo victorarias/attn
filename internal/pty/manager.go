@@ -78,32 +78,33 @@ type SpawnOptions struct {
 	Theme TerminalTheme
 }
 
-// ReplayScreenSnapshot is the observer seed serialized from the
-// server-authoritative terminal.
-type ReplayScreenSnapshot struct {
-	Payload       []byte
-	Cols          uint16
-	Rows          uint16
-	CursorX       uint16
-	CursorY       uint16
-	CursorVisible bool
+// ViewportSnapshot is the styled VT serialization of the visible frame. It is
+// self-contained (including cursor state in the payload) and seeds observers
+// (grid tiles) and the automations gate.
+type ViewportSnapshot struct {
+	Payload []byte
+	Cols    uint16
+	Rows    uint16
+}
+
+// SnapshotInfo is the read-only rendered state used to seed observers without
+// attaching or claiming PTY geometry.
+type SnapshotInfo struct {
+	LastSeq uint32
+	Cols    uint16
+	Rows    uint16
+	Running bool
+	Screen  *ViewportSnapshot // nil when the terminal has produced no frame
 }
 
 type AttachInfo struct {
-	LastSeq             uint32
-	Cols                uint16
-	Rows                uint16
-	PID                 int
-	Running             bool
-	ExitCode            *int
-	ExitSignal          *string
-	ScreenSnapshot      []byte
-	ScreenCols          uint16
-	ScreenRows          uint16
-	ScreenCursorX       uint16
-	ScreenCursorY       uint16
-	ScreenCursorVisible bool
-	ScreenSnapshotFresh bool
+	LastSeq    uint32
+	Cols       uint16
+	Rows       uint16
+	PID        int
+	Running    bool
+	ExitCode   *int
+	ExitSignal *string
 	// GhosttySnapshot is the server-authoritative VT serialization of the whole
 	// terminal (primary + alt screens, scrollback, cursor) from libghostty-vt.
 	// Snapshot geometry is Cols/Rows. nil when the ghostty terminal is absent.
@@ -368,10 +369,10 @@ func (m *Manager) SetTheme(sessionID string, theme TerminalTheme) error {
 // session WITHOUT registering a subscriber or claiming geometry. It is the
 // read-only seed for observers (e.g. grid tiles) that then dedup the live
 // firehose against LastSeq.
-func (m *Manager) Snapshot(sessionID string) (AttachInfo, error) {
+func (m *Manager) Snapshot(sessionID string) (SnapshotInfo, error) {
 	session, err := m.getSession(sessionID)
 	if err != nil {
-		return AttachInfo{}, err
+		return SnapshotInfo{}, err
 	}
 	return session.screenSnapshot(), nil
 }

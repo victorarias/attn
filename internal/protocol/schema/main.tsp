@@ -2816,10 +2816,6 @@ model GetScreenSnapshotResultMessage {
   screen_snapshot?: string; // base64 ANSI replay of the visible frame
   screen_rows?: int32;
   screen_cols?: int32;
-  screen_cursor_x?: int32; // 0-based
-  screen_cursor_y?: int32; // 0-based
-  screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
   last_seq?: int32;
   cols?: int32;
   rows?: int32;
@@ -3449,15 +3445,10 @@ model WebSocketEvent {
   // PTY lifecycle
   data?: string;
   seq?: int32;
-  scrollback?: string;
   scrollback_truncated?: boolean;
   screen_snapshot?: string;
   screen_rows?: int32;
   screen_cols?: int32;
-  screen_cursor_x?: int32;
-  screen_cursor_y?: int32;
-  screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
   last_seq?: int32;
   cols?: int32;
   rows?: int32;

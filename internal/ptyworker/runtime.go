@@ -799,22 +799,18 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			c.sendError(req.ID, ErrInternal, err.Error())
 			return
 		}
-		// Screen + watermark only; scrollback/replay are intentionally omitted.
-		c.sendResult(req.ID, AttachResult{
-			LastSeq:             info.LastSeq,
-			Cols:                info.Cols,
-			Rows:                info.Rows,
-			PID:                 info.PID,
-			Running:             info.Running,
-			ScreenSnapshot:      info.ScreenSnapshot,
-			ScreenCols:          info.ScreenCols,
-			ScreenRows:          info.ScreenRows,
-			ScreenCursorX:       info.ScreenCursorX,
-			ScreenCursorY:       info.ScreenCursorY,
-			ScreenCursorVisible: info.ScreenCursorVisible,
-			ScreenSnapshotFresh: info.ScreenSnapshotFresh,
-			GhosttySnapshot:     info.GhosttySnapshot,
-		})
+		result := SnapshotResult{
+			LastSeq: info.LastSeq,
+			Cols:    info.Cols,
+			Rows:    info.Rows,
+			Running: info.Running,
+		}
+		if info.Screen != nil {
+			result.ScreenSnapshot = info.Screen.Payload
+			result.ScreenCols = info.Screen.Cols
+			result.ScreenRows = info.Screen.Rows
+		}
+		c.sendResult(req.ID, result)
 	case MethodAttach:
 		var params AttachParams
 		if len(req.Params) > 0 {
@@ -909,13 +905,6 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			Running:                    info.Running,
 			ExitCode:                   info.ExitCode,
 			ExitSignal:                 info.ExitSignal,
-			ScreenSnapshot:             info.ScreenSnapshot,
-			ScreenCols:                 info.ScreenCols,
-			ScreenRows:                 info.ScreenRows,
-			ScreenCursorX:              info.ScreenCursorX,
-			ScreenCursorY:              info.ScreenCursorY,
-			ScreenCursorVisible:        info.ScreenCursorVisible,
-			ScreenSnapshotFresh:        info.ScreenSnapshotFresh,
 			GhosttySnapshot:            info.GhosttySnapshot,
 			GhosttyBlocks:              attachBlocksToWire(info.GhosttyBlocks),
 			GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,
