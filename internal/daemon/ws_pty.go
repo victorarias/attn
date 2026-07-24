@@ -13,12 +13,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
-	"time"
 
-	"github.com/google/uuid"
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/git"
-	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -434,7 +431,9 @@ func buildSpawnSessionRecord(msg *protocol.SpawnSessionMessage, agent, cwd, labe
 		state = protocol.SessionStateIdle
 	}
 	stateSince, stateUpdatedAt := nowStr, nowStr
-	if existing != nil {
+	// A revive must re-enter the launch lifecycle; preserving recoverable would let
+	// commitSpawn's record overwrite the live state applied during spawn.
+	if existing != nil && existing.State != protocol.SessionStateRecoverable {
 		state, stateSince, stateUpdatedAt = existing.State, existing.StateSince, existing.StateUpdatedAt
 		if stateSince == "" {
 			stateSince = nowStr
@@ -461,10 +460,6 @@ func buildSpawnSessionRecord(msg *protocol.SpawnSessionMessage, agent, cwd, labe
 	return session
 }
 
-type internalSpawnPolicy struct {
-	unattendedLaunch launchcontract.UnattendedLaunchSpec
-}
-
 func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSessionMessage) {
 	d.handleSpawnSessionWithPolicy(client, msg, internalSpawnPolicy{})
 }
@@ -473,399 +468,83 @@ func (d *Daemon) handleSpawnSession(client *wsClient, msg *protocol.SpawnSession
 // public workspace protocol must not be able to grant automatic approval or
 // working-directory trust independently of the user's daemon settings.
 func (d *Daemon) handleSpawnSessionWithPolicy(client *wsClient, msg *protocol.SpawnSessionMessage, policy internalSpawnPolicy) {
-	requestedAgent := strings.TrimSpace(strings.ToLower(msg.Agent))
-	pluginDriver, hasPluginDriver := d.ensurePluginRegistry().driver(requestedAgent)
-	agent := normalizeSpawnAgent(msg.Agent)
-	if hasPluginDriver {
-		agent = pluginDriver.Agent
-	} else if requestedAgent != "" && requestedAgent != protocol.AgentShellValue && agentdriver.Get(requestedAgent) == nil {
-		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q is not available", requestedAgent))
+	if rejection := d.runSpawnPipeline(msg, policy); rejection != nil {
+		d.sendSpawnRejection(client, msg.ID, rejection)
 		return
 	}
-	isShell := agent == protocol.AgentShellValue
-	initialPrompt := protocol.Deref(msg.InitialPrompt)
-	if isShell && strings.TrimSpace(initialPrompt) != "" {
-		d.sendSpawnFailure(client, msg.ID, errors.New("shell sessions do not accept an initial prompt"))
+	d.sendToClient(client, protocol.SpawnResultMessage{Event: protocol.EventSpawnResult, ID: msg.ID, Success: true})
+}
+
+func (d *Daemon) sendSpawnRejection(client *wsClient, sessionID string, rejection *spawnRejection) {
+	if rejection.commandError != "" {
+		d.sendCommandError(client, protocol.CmdSpawnSession, rejection.commandError)
 		return
 	}
-	if strings.TrimSpace(initialPrompt) != "" {
-		if hasPluginDriver && !pluginDriver.Capabilities["initial_prompt"] {
-			d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q does not support initial prompts", requestedAgent))
-			return
-		}
-		if !hasPluginDriver {
-			driver := agentdriver.Get(agent)
-			if driver == nil || !agentdriver.EffectiveCapabilities(driver).HasInitialPrompt {
-				d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q does not support initial prompts", agent))
-				return
-			}
-		}
+	d.sendSpawnFailure(client, sessionID, rejection.err)
+}
+
+// reviveSessionForAttach respawns a recoverable session from its durable record
+// so a revive-policy attach can proceed. It refuses (error, no spawn) unless the
+// stored session is recoverable, geometry is positive, and a non-unattended
+// LaunchIntent exists.
+func (d *Daemon) reviveSessionForAttach(msg *protocol.AttachSessionMessage) error {
+	session := d.store.Get(msg.ID)
+	if session == nil || session.State != protocol.SessionStateRecoverable {
+		return errors.New("session not recoverable")
 	}
-	workspaceID := strings.TrimSpace(msg.WorkspaceID)
-	if workspaceID == "" {
-		d.sendCommandError(client, protocol.CmdSpawnSession, "missing workspace_id")
-		return
+	if msg.Cols == nil || msg.Rows == nil || *msg.Cols <= 0 || *msg.Rows <= 0 {
+		return errors.New("revive requires pty geometry")
 	}
-	if d.store.GetWorkspace(workspaceID) == nil {
-		d.setWorkspacePaneStatusForSession(msg.ID, workspacelayout.PaneStatusFailed, "unknown workspace")
-		d.sendCommandError(client, protocol.CmdSpawnSession, "unknown workspace")
-		return
+	intent, ok := d.store.LaunchIntent(msg.ID)
+	if !ok {
+		return errors.New("no stored launch intent")
 	}
-	spawnStartedAt := time.Now()
-	existingSession := d.store.Get(msg.ID)
-	cwd := resolveSpawnCWD(msg.Cwd)
-	label := protocol.Deref(msg.Label)
-	if label == "" {
-		label = filepath.Base(cwd)
-	}
-	// A non-empty stored label is the durable authority — a respawn or reload
-	// must not revert a user rename, even if the client sends a stale label.
-	if existingSession != nil && strings.TrimSpace(existingSession.Label) != "" {
-		label = existingSession.Label
-	}
-	if msg.Cols <= 0 || msg.Rows <= 0 || msg.Cols > maxPTYDimValue || msg.Rows > maxPTYDimValue {
-		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("invalid terminal size cols=%d rows=%d (expected 1..%d)", msg.Cols, msg.Rows, maxPTYDimValue))
-		return
-	}
-	resumeSessionID := protocol.Deref(msg.ResumeSessionID)
-	driver := agentdriver.Get(agent)
-	if existingSession != nil && !hasPluginDriver {
-		resumeSessionID = agentdriver.ResolveSpawnResumeSessionID(
-			driver,
-			existingSession.ID,
-			resumeSessionID,
-			d.store.GetResumeSessionID(msg.ID),
-		)
-	} else if !hasPluginDriver && resumeSessionID == "" && protocol.Deref(msg.ResumePicker) {
-		// Ticket "Resume": the bound session's row (and its resume_session_id) was
-		// deleted on close, so the session-keyed lookup above is skipped. The ticket
-		// persisted the resume key under the same id (its assignee), so resolve it
-		// here to resume the prior conversation directly instead of dropping the
-		// user into the agent's resume picker. Falls back to the picker (resumeSessionID
-		// stays "") when no ticket resume key exists.
-		if ticketResumeID := d.store.GetTicketResumeSessionID(msg.ID); ticketResumeID != "" {
-			// Only adopt the mirrored id when it is actually resumable. Claude writes
-			// its transcript lazily, so a session closed before it ever took a turn has
-			// a mirrored id pointing at a transcript that does not exist; `claude -r
-			// <dead-id>` would exit non-zero. Leaving resumeSessionID empty falls the
-			// ResumePicker back to the cwd-scoped picker instead. Mirrors the
-			// fresh-spawn downgrade in buildReloadSpawnOptions (reload.go).
-			if agentdriver.ResumeAvailable(driver, ticketResumeID) {
-				resumeSessionID = ticketResumeID
-			} else {
-				d.logf("spawn: ticket resume target %s for session %s is not resumable (no transcript yet); using resume picker", ticketResumeID, msg.ID)
-			}
-		}
+	if intent.Unattended {
+		return errors.New("unattended session cannot be revived from store")
 	}
 
-	configuredExecutable := strings.TrimSpace(protocol.Deref(msg.Executable))
-	if configuredExecutable == "" {
-		configuredExecutable = legacyExecutableFromSpawnMessage(msg, agent)
+	spawnMsg := &protocol.SpawnSessionMessage{
+		Cmd:         protocol.CmdSpawnSession,
+		ID:          session.ID,
+		Cwd:         session.Directory,
+		Agent:       string(session.Agent),
+		WorkspaceID: session.WorkspaceID,
+		Label:       protocol.Ptr(session.Label),
+		Cols:        *msg.Cols,
+		Rows:        *msg.Rows,
+		YoloMode:    protocol.Ptr(intent.YoloMode),
 	}
-	initialPromptFile := ""
-	cleanupInitialPrompt := func() {}
-	cleanupInitialPromptOnReturn := false
-	if !hasPluginDriver {
-		var promptErr error
-		initialPromptFile, cleanupInitialPrompt, promptErr = d.writeInitialPromptFile(msg.ID, initialPrompt)
-		if promptErr != nil {
-			d.sendSpawnFailure(client, msg.ID, promptErr)
-			return
-		}
-		cleanupInitialPromptOnReturn = initialPromptFile != ""
-		defer func() {
-			if cleanupInitialPromptOnReturn {
-				cleanupInitialPrompt()
-			}
-		}()
+	if intent.Executable != "" {
+		spawnMsg.Executable = protocol.Ptr(intent.Executable)
 	}
-	spawnOpts := ptybackend.SpawnOptions{
-		ID:                msg.ID,
-		CWD:               cwd,
-		Agent:             agent,
-		Label:             label,
-		Cols:              uint16(msg.Cols),
-		Rows:              uint16(msg.Rows),
-		ResumeSessionID:   resumeSessionID,
-		ResumePicker:      protocol.Deref(msg.ResumePicker),
-		YoloMode:          protocol.Deref(msg.YoloMode),
-		InitialPromptFile: initialPromptFile,
-		Theme:             d.currentTerminalTheme(),
-		Executable:        strings.TrimSpace(configuredExecutable),
-		ClaudeExecutable:  protocol.Deref(msg.ClaudeExecutable),
-		CodexExecutable:   protocol.Deref(msg.CodexExecutable),
-		CopilotExecutable: protocol.Deref(msg.CopilotExecutable),
-		LoginShellEnv:     d.cachedLoginShellEnv(),
-
-		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
-		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
-		Model:                   strings.TrimSpace(protocol.Deref(msg.Model)),
-		Effort:                  strings.TrimSpace(protocol.Deref(msg.Effort)),
+	if intent.Model != "" {
+		spawnMsg.Model = protocol.Ptr(intent.Model)
 	}
-	// The frontend sets chief_of_staff only on initial creation, not on
-	// reconnect/resume spawns after a daemon restart. Fall back to the
-	// persisted profile-roles table so chief settings survive respawns.
-	requestedChief := protocol.Deref(msg.ChiefOfStaff)
-	if hasPluginDriver && requestedChief && !pluginDriver.Capabilities["launch_instructions"] {
-		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q cannot be chief of staff without launch_instructions capability", agent))
-		return
+	if intent.Effort != "" {
+		spawnMsg.Effort = protocol.Ptr(intent.Effort)
 	}
-	if hasPluginDriver && requestedChief && !pluginDriver.Capabilities["resume"] {
-		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("agent %q cannot be chief of staff without resume capability", agent))
-		return
+	if rejection := d.runSpawnPipeline(spawnMsg, internalSpawnPolicy{}); rejection != nil {
+		return rejection.err
 	}
-	chiefAssigned := d.maybeAssignChiefOnSpawn(msg.ID, agent, requestedChief, existingSession)
-	chiefAssignmentCommitted := false
-	defer func() {
-		if chiefAssigned && !chiefAssignmentCommitted {
-			d.clearChiefOfStaffIfSession(msg.ID)
-		}
-	}()
-	isChief := d.isChiefOfStaffSession(msg.ID)
-	if spawnOpts.Model == "" {
-		// No per-spawn pin (delegation); a chief launch falls back to the
-		// chief_model_<agent> setting.
-		spawnOpts.Model = d.chiefLaunchModel(agent, isChief)
-	}
-	if spawnOpts.Effort == "" {
-		// No per-spawn pin (delegation); a chief launch falls back to the
-		// chief_effort_<agent> setting.
-		spawnOpts.Effort = d.chiefLaunchEffort(agent, isChief)
-	}
-	if launch := policy.unattendedLaunch; !launch.IsZero() {
-		if err := launch.Validate(); err != nil {
-			d.sendSpawnFailure(client, msg.ID, err)
-			return
-		}
-		if !strings.EqualFold(agent, launch.Agent) {
-			d.sendSpawnFailure(client, msg.ID, fmt.Errorf("unattended launch agent %q does not match spawn agent %q", launch.Agent, agent))
-			return
-		}
-		if strings.TrimSpace(protocol.Deref(msg.Model)) != strings.TrimSpace(launch.Model) ||
-			strings.TrimSpace(protocol.Deref(msg.Effort)) != strings.TrimSpace(launch.Effort) ||
-			strings.TrimSpace(configuredExecutable) != strings.TrimSpace(launch.Executable) {
-			d.sendSpawnFailure(client, msg.ID, errors.New("spawn message disagrees with unattended launch contract"))
-			return
-		}
-		spawnOpts.AutoApprove = false
-		spawnOpts.TrustWorkingDirectory = false
-		spawnOpts.Model = ""
-		spawnOpts.Effort = ""
-		spawnOpts.Executable = ""
-		spawnOpts.UnattendedLaunch = launch
-	}
-	// A chief launch caps its context window (chief_context_window_cap); non-chief
-	// launches stay uncapped so delegated interactive agents are never affected.
-	spawnOpts.ChiefContextWindowCap = d.chiefContextWindowCap(isChief)
-	if existingSession != nil {
-		for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
-			if liveID != msg.ID {
-				continue
-			}
-			d.sendToClient(client, protocol.SpawnResultMessage{
-				Event:   protocol.EventSpawnResult,
-				ID:      msg.ID,
-				Success: true,
-			})
-			return
-		}
-	}
-	pluginRunID := ""
-	instructionsRollback := func() {}
-	instructionsCommitted := false
-	defer func() {
-		if !instructionsCommitted {
-			instructionsRollback()
-		}
-	}()
-	if hasPluginDriver {
-		pluginRunID = uuid.NewString()
-		spawnOpts.LifecycleID = pluginRunID
-		d.beginPluginSessionLaunch(msg.ID, pluginDriver.PluginName, pluginRunID)
-		params := pluginDriverSpawnParams{
-			SessionID:     msg.ID,
-			RunID:         pluginRunID,
-			CWD:           cwd,
-			Label:         label,
-			Yolo:          protocol.Deref(msg.YoloMode),
-			Model:         spawnOpts.Model,
-			Effort:        spawnOpts.Effort,
-			InitialPrompt: initialPrompt,
-		}
-		if metadata := strings.TrimSpace(d.store.GetAgentMetadata(msg.ID)); metadata != "" && json.Valid([]byte(metadata)) {
-			params.Metadata = json.RawMessage(metadata)
-		}
-		if pluginDriver.Capabilities["launch_instructions"] {
-			var instructionErr error
-			params.Instructions, instructionsRollback, instructionErr = d.preparePluginLaunchInstructions(msg.ID, workspaceID, isChief)
-			if instructionErr != nil {
-				d.finishPluginSessionLaunch(msg.ID, false)
-				d.sendSpawnFailure(client, msg.ID, instructionErr)
-				return
-			}
-		}
-		result, err := d.resolvePluginDriverLaunch(pluginDriver, params, existingSession != nil && pluginDriver.Capabilities["resume"])
-		if err != nil {
-			d.finishPluginSessionLaunch(msg.ID, false)
-			d.sendSpawnFailure(client, msg.ID, err)
-			return
-		}
-		commandEnv, err := pluginCommandEnv(result.Env)
-		if err != nil {
-			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
-			d.sendSpawnFailure(client, msg.ID, err)
-			return
-		}
-		spawnOpts.ExternalCommand = append([]string(nil), result.Argv...)
-		spawnOpts.ExternalEnv = commandEnv
-		spawnOpts.ExternalCWD = strings.TrimSpace(result.CWD)
-	}
-
-	// Persist the complete launch intent before creating the worker. If the daemon
-	// dies after Spawn, startup recovery can now associate that worker with its
-	// workspace, pane, ticket, and automation run instead of seeing an anonymous
-	// process with no durable session row.
-	launchSession := buildSpawnSessionRecord(msg, agent, cwd, label, existingSession, isShell, hasPluginDriver && !pluginDriver.Capabilities["state_reporting"])
-	if err := d.store.AddChecked(launchSession); err != nil {
-		if hasPluginDriver {
-			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
-		}
-		if chiefAssigned {
-			d.clearChiefOfStaffIfSession(msg.ID)
-		}
-		d.sendSpawnFailure(client, msg.ID, fmt.Errorf("persist session launch intent: %w", err))
-		return
-	}
-
-	if err := d.ptyBackend.Spawn(context.Background(), spawnOpts); err != nil {
-		if existingSession == nil {
-			d.store.Remove(msg.ID)
-		} else if restoreErr := d.store.AddChecked(existingSession); restoreErr != nil {
-			err = errors.Join(err, fmt.Errorf("restore prior session after spawn failure: %w", restoreErr))
-		}
-		if hasPluginDriver {
-			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
-		}
-		if chiefAssigned {
-			d.clearChiefOfStaffIfSession(msg.ID)
-		}
-		d.sendSpawnFailure(client, msg.ID, err)
-		return
-	}
-	if initialPromptFile != "" {
-		// The spawned wrapper removes the file after reading it. Keep a fallback
-		// for failures between PTY spawn and wrapper startup.
-		cleanupInitialPromptOnReturn = false
-		time.AfterFunc(5*time.Minute, cleanupInitialPrompt)
-	}
-
-	{
-		d.clearLongRunTracking(msg.ID)
-		session := launchSession
-		if err := d.store.AddChecked(session); err != nil {
-			if hasPluginDriver {
-				d.abortPluginSessionLaunch(msg.ID, "launch_failed")
-			}
-			if chiefAssigned {
-				d.clearChiefOfStaffIfSession(msg.ID)
-			}
-			killErr := d.ptyBackend.Kill(context.Background(), msg.ID, syscall.SIGTERM)
-			removeErr := d.ptyBackend.Remove(context.Background(), msg.ID)
-			persistErr := fmt.Errorf("persist spawned session: %w", err)
-			if killErr != nil {
-				persistErr = fmt.Errorf("%w; kill spawned runtime: %v", persistErr, killErr)
-			}
-			if removeErr != nil {
-				persistErr = fmt.Errorf("%w; remove spawned runtime: %v", persistErr, removeErr)
-			}
-			d.sendSpawnFailure(client, msg.ID, persistErr)
-			return
-		}
-		if hasPluginDriver && !d.store.BeginAgentDriverRun(session.ID, pluginDriver.PluginName, pluginRunID) {
-			d.abortPluginSessionLaunch(msg.ID, "launch_failed")
-			if chiefAssigned {
-				d.clearChiefOfStaffIfSession(msg.ID)
-			}
-			killErr := d.ptyBackend.Kill(context.Background(), msg.ID, syscall.SIGTERM)
-			removeErr := d.ptyBackend.Remove(context.Background(), msg.ID)
-			if existingSession == nil {
-				d.store.Remove(session.ID)
-			}
-			cursorErr := fmt.Errorf("initialize plugin driver run cursor")
-			if killErr != nil {
-				cursorErr = fmt.Errorf("%w; kill spawned runtime: %v", cursorErr, killErr)
-			}
-			if removeErr != nil {
-				cursorErr = fmt.Errorf("%w; remove spawned runtime: %v", cursorErr, removeErr)
-			}
-			d.sendSpawnFailure(client, msg.ID, cursorErr)
-			return
-		}
-		if persistResumeID := agentdriver.SpawnResumeSessionID(
-			driver,
-			session.ID,
-			resumeSessionID,
-			protocol.Deref(msg.ResumePicker),
-		); persistResumeID != "" {
-			d.persistResumeSessionID(session.ID, persistResumeID)
-		}
-		if pendingResumeID := d.consumePendingResumeSessionID(session.ID); pendingResumeID != "" {
-			d.persistResumeSessionID(session.ID, pendingResumeID)
-		}
-		// Re-arm orphaned-ticket reconciliation: the owning session is alive again
-		// (a ticket Resume respawns under the same id), so a future death deserves
-		// a fresh verdict. No-op when nothing is flagged.
-		if err := d.store.ClearTicketReconciliationForAssignee(session.ID); err != nil {
-			d.logf("clear ticket reconciliation on spawn for %s: %v", session.ID, err)
-		}
-		// A crash-stamped ticket whose owner just respawned (dead-pane reload,
-		// ticket Resume) is no longer crashed: move it back to Working and put it
-		// back on the crash seam's radar (ticket_revive.go).
-		d.reviveCrashedTicketsForSession(session.ID)
-		if !isShell {
-			d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, spawnStartedAt)
-		}
-		d.store.UpsertRecentLocation(cwd)
-		d.associateSessionWithWorkspace(session.ID, workspaceID)
-		// Single mechanism: spawn_session guarantees the session has a layout
-		// pane. Clients that pre-created one (app, delegate, ticket resume) hit
-		// the adopt path; bare spawns (wsctl, scripts) get default placement.
-		// A pane failure must not fail the spawn — the session is already live.
-		if workspaceID != "" {
-			if _, err := d.ensureWorkspaceSessionPane(workspaceID, session.ID, session.Label); err != nil {
-				d.logf("ensure workspace pane for session %s: %v", session.ID, err)
-			}
-		}
-		d.setWorkspacePaneStatusForSession(session.ID, workspacelayout.PaneStatusReady, "")
-		eventType := protocol.EventSessionRegistered
-		if existingSession != nil {
-			eventType = protocol.EventSessionStateChanged
-		}
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:   eventType,
-			Session: d.sessionForBroadcast(session),
-		})
-		d.recomputeAndBroadcastWorkspaceForSession(session.ID)
-	}
-	if hasPluginDriver {
-		if exit := d.finishPluginSessionLaunch(msg.ID, true); exit != nil {
-			d.handlePTYExit(*exit)
-		}
-	}
-	chiefAssignmentCommitted = true
-	instructionsCommitted = true
-
-	d.sendToClient(client, protocol.SpawnResultMessage{
-		Event:   protocol.EventSpawnResult,
-		ID:      msg.ID,
-		Success: true,
-	})
+	return nil
 }
 
 func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessionMessage) {
 	subID := wsSubscriberID(client, msg.ID)
 
 	info, stream, err := d.ptyBackend.Attach(context.Background(), msg.ID, subID)
+	revived := false
+	if err != nil && errors.Is(err, pty.ErrSessionNotFound) && protocol.Deref(msg.AttachPolicy) == protocol.AttachPolicyRevive {
+		attachErr := err
+		if reviveErr := d.reviveSessionForAttach(msg); reviveErr != nil {
+			err = errors.Join(attachErr, reviveErr)
+		} else {
+			info, stream, err = d.ptyBackend.Attach(context.Background(), msg.ID, subID)
+			if err == nil {
+				revived = true
+			}
+		}
+	}
 	if err != nil {
 		d.sendToClient(client, protocol.AttachResultMessage{
 			Event:   protocol.EventAttachResult,
@@ -918,6 +597,9 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		Rows:                protocol.Ptr(int(info.Rows)),
 		Pid:                 protocol.Ptr(info.PID),
 		Running:             protocol.Ptr(info.Running),
+	}
+	if revived {
+		result.Revived = protocol.Ptr(true)
 	}
 	if len(replay.scrollback) > 0 {
 		encoded := base64.StdEncoding.EncodeToString(replay.scrollback)

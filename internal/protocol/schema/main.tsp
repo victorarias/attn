@@ -16,6 +16,7 @@ enum SessionState {
   idle,
   pending_approval,
   scheduled,
+  recoverable,
   state_unknown: "unknown",
 }
 
@@ -80,6 +81,7 @@ enum AttachPolicy {
   fresh_spawn,
   relaunch_restore,
   same_app_remount,
+  revive,
 }
 
 enum WorkspaceContextMaintenanceAction {
@@ -130,7 +132,6 @@ model Session {
   state_since: string;          // ISO timestamp, always set
   state_updated_at: string;     // ISO timestamp, always set
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
-  recoverable?: boolean;        // True when session can be recovered after daemon restart (agent has resumable conversation)
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
   ticket_unread?: boolean;      // True when this session has unread ticket events (drives the incoming-nudge indicator)
@@ -1681,6 +1682,9 @@ model AttachSessionMessage {
   cmd: "attach_session";
   id: string;
   attach_policy?: AttachPolicy;
+  // PTY geometry for revive; required when attach_policy is "revive"
+  cols?: int32;
+  rows?: int32;
 }
 
 model DetachSessionMessage {
@@ -2786,6 +2790,8 @@ model AttachResultMessage {
   rows?: int32;
   pid?: int32;
   running?: boolean;
+  // session was respawned by this attach (revive policy)
+  revived?: boolean;
   error?: string;
 }
 

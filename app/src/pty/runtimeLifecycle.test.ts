@@ -38,6 +38,7 @@ describe('runtimeLifecycle', () => {
   it('normalizes non-relaunch attach policies to same_app_remount', () => {
     expect(normalizeAttachPolicy('relaunch_restore')).toBe('relaunch_restore');
     expect(normalizeAttachPolicy('same_app_remount')).toBe('same_app_remount');
+    expect(normalizeAttachPolicy('revive')).toBe('revive');
     expect(normalizeAttachPolicy('fresh_spawn')).toBe('same_app_remount');
     expect(normalizeAttachPolicy(undefined)).toBe('same_app_remount');
   });
@@ -120,7 +121,7 @@ describe('runtimeLifecycle', () => {
         runtimeKnownToDaemon: true,
         existingSession: {
           agent: 'claude',
-          recoverable: true,
+          state: 'recoverable',
         },
       },
       operations,
@@ -129,7 +130,7 @@ describe('runtimeLifecycle', () => {
     expect(operations.logResumeRecovery).toHaveBeenCalledWith({
       id: 'runtime-1',
       agent: 'claude',
-      recoverable: true,
+      state: 'recoverable',
     });
     expect(operations.spawnRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -155,7 +156,7 @@ describe('runtimeLifecycle', () => {
         runtimeKnownToDaemon: true,
         existingSession: {
           agent: 'snipe',
-          recoverable: true,
+          state: 'recoverable',
         },
       },
       operations,
@@ -164,7 +165,7 @@ describe('runtimeLifecycle', () => {
     expect(operations.logResumeRecovery).toHaveBeenCalledWith({
       id: 'runtime-1',
       agent: 'snipe',
-      recoverable: true,
+      state: 'recoverable',
     });
     expect(operations.spawnRuntime).toHaveBeenCalledWith(
       expect.objectContaining({

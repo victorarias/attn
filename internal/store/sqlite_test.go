@@ -970,7 +970,6 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		{"sessions", "is_worktree"},
 		{"sessions", "main_repo"},
 		{"sessions", "agent"},
-		{"sessions", "recoverable"},
 		{"sessions", "resume_session_id"},
 		{"sessions", "endpoint_id"},
 		{"sessions", "agent_metadata"},
@@ -989,6 +988,53 @@ func TestMigrations_MigratedColumnsExist(t *testing.T) {
 		if err != nil {
 			t.Errorf("Column %s.%s should exist after migrations: %v", tc.table, tc.column, err)
 		}
+	}
+}
+
+func TestMigration79_ConvertsRecoverableFlagToState(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-79.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB setup: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO sessions (id, label, directory, state, state_since, state_updated_at, last_seen)
+		VALUES ('recoverable-session', 'Recoverable', '/tmp/recoverable', 'idle', '2026-07-24T00:00:00Z', '2026-07-24T00:00:00Z', '2026-07-24T00:00:00Z');
+		ALTER TABLE sessions ADD COLUMN recoverable INTEGER NOT NULL DEFAULT 0;
+		UPDATE sessions SET recoverable = 1 WHERE id = 'recoverable-session';
+		DELETE FROM schema_migrations WHERE version = 79;
+	`); err != nil {
+		t.Fatalf("seed pre-79 database: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close pre-79 database: %v", err)
+	}
+
+	migrated, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB migrate: %v", err)
+	}
+	defer migrated.Close()
+
+	var state string
+	if err := migrated.QueryRow(`SELECT state FROM sessions WHERE id = 'recoverable-session'`).Scan(&state); err != nil {
+		t.Fatalf("read migrated session: %v", err)
+	}
+	if state != "recoverable" {
+		t.Fatalf("state = %q, want recoverable", state)
+	}
+	if _, err := migrated.Exec(`SELECT recoverable FROM sessions LIMIT 1`); err == nil {
+		t.Fatal("recoverable column still exists after migration")
+	}
+	if _, err := migrated.Exec(`DELETE FROM schema_migrations WHERE version = 79`); err != nil {
+		t.Fatalf("rewind migration 79 after column drop: %v", err)
+	}
+	if err := migrated.Close(); err != nil {
+		t.Fatalf("close migrated database: %v", err)
+	}
+	migrated, err = OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("rerun migration 79 without column: %v", err)
 	}
 }
 

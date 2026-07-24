@@ -630,6 +630,55 @@ func TestStore_SQLitePersistence(t *testing.T) {
 	}
 }
 
+func TestStore_LaunchIntentRoundTrip(t *testing.T) {
+	s := New()
+	defer s.Close()
+	s.Add(&protocol.Session{ID: "launch-intent", Label: "launch-intent"})
+	want := LaunchIntent{
+		YoloMode:     true,
+		Executable:   "/opt/claude",
+		Model:        "claude-opus",
+		Effort:       "high",
+		ChiefOfStaff: true,
+		Unattended:   true,
+	}
+
+	s.SetLaunchIntent("launch-intent", want)
+	got, ok := s.LaunchIntent("launch-intent")
+	if !ok {
+		t.Fatal("LaunchIntent() = ok false, want true")
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LaunchIntent() = %+v, want %+v", got, want)
+	}
+}
+
+func TestStore_LaunchIntentMissingOrEmpty(t *testing.T) {
+	s := New()
+	defer s.Close()
+	s.Add(&protocol.Session{ID: "empty-launch-intent", Label: "empty-launch-intent"})
+
+	if _, ok := s.LaunchIntent("unknown-launch-intent"); ok {
+		t.Fatal("LaunchIntent() for an unknown session = ok true, want false")
+	}
+	if _, ok := s.LaunchIntent("empty-launch-intent"); ok {
+		t.Fatal("LaunchIntent() for an empty column = ok true, want false")
+	}
+}
+
+func TestStore_LaunchIntentRejectsCorruptJSON(t *testing.T) {
+	s := New()
+	defer s.Close()
+	s.Add(&protocol.Session{ID: "corrupt-launch-intent", Label: "corrupt-launch-intent"})
+	if _, err := s.db.Exec("UPDATE sessions SET launch_intent = ? WHERE id = ?", "{not-json", "corrupt-launch-intent"); err != nil {
+		t.Fatalf("seed corrupt launch intent: %v", err)
+	}
+
+	if _, ok := s.LaunchIntent("corrupt-launch-intent"); ok {
+		t.Fatal("LaunchIntent() for corrupt JSON = ok true, want false")
+	}
+}
+
 func TestStore_RepoState(t *testing.T) {
 	s := New()
 

@@ -2,11 +2,14 @@ import type { PtyAttachArgs, PtyAttachPolicy, PtySpawnArgs } from './bridge';
 
 export interface RuntimeLifecycleSessionSnapshot {
   agent?: string;
-  recoverable?: boolean;
+  state?: string;
 }
 
 export interface ExistingRuntimeAttachOptions {
-  policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount'>;
+  policy: Extract<
+    PtyAttachPolicy,
+    'relaunch_restore' | 'same_app_remount' | 'revive'
+  >;
   forceResizeBeforeAttach?: boolean;
 }
 
@@ -24,15 +27,16 @@ export interface SpawnPtyRuntimeOperations {
   attachFreshRuntime(args: PtySpawnArgs): Promise<unknown>;
   spawnRuntime(args: PtySpawnArgs): Promise<unknown>;
   resizeRuntime(id: string, cols: number, rows: number, reason: string): void;
-  logResumeRecovery?(details: { id: string; agent?: string; recoverable: boolean }): void;
+  logResumeRecovery?(details: { id: string; agent?: string; state?: string }): void;
 }
 
 export function normalizeAttachPolicy(
   policy?: PtyAttachPolicy,
-): Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount'> {
-  return policy === 'relaunch_restore'
-    ? 'relaunch_restore'
-    : 'same_app_remount';
+): Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount' | 'revive'> {
+  if (policy === 'relaunch_restore' || policy === 'revive') {
+    return policy;
+  }
+  return 'same_app_remount';
 }
 
 export function isAlreadyExistsError(error: unknown): boolean {
@@ -64,7 +68,7 @@ export async function spawnPtyRuntime(
       });
       return;
     } catch (attachError) {
-      if (context.existingSession?.agent === 'claude' || context.existingSession?.recoverable) {
+      if (context.existingSession?.agent === 'claude' || context.existingSession?.state === 'recoverable') {
         const resumeArgs: PtySpawnArgs = {
           ...args,
           resume_session_id: args.id,
@@ -73,7 +77,7 @@ export async function spawnPtyRuntime(
         operations.logResumeRecovery?.({
           id: args.id,
           agent: context.existingSession.agent,
-          recoverable: Boolean(context.existingSession.recoverable),
+          state: context.existingSession.state,
         });
         try {
           await operations.spawnRuntime(resumeArgs);

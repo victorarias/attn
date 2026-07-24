@@ -36,7 +36,8 @@ export interface PtyAttachArgs {
 export type PtyAttachPolicy =
   | 'fresh_spawn'
   | 'relaunch_restore'
-  | 'same_app_remount';
+  | 'same_app_remount'
+  | 'revive';
 
 export type PtyDataEventSource =
   | 'attach_replay';

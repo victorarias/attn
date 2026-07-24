@@ -185,6 +185,12 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-codex-resume'],
   },
   {
+    id: 'recoverable-auto-revive',
+    label: 'Recoverable Claude session auto-revives after daemon restart',
+    command: ['pnpm', 'run', 'real-app:scenario-recoverable-auto-revive'],
+    timeoutMs: 360_000,
+  },
+  {
     id: 'ghostty-scroll',
     label: 'Ghostty scrollback anchoring while output streams',
     command: ['pnpm', 'run', 'real-app:scenario-ghostty-scroll'],

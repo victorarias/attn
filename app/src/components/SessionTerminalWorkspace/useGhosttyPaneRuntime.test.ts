@@ -596,4 +596,55 @@ describe('useGhosttyPaneRuntime', () => {
 
     expect(mockPtyResize).not.toHaveBeenCalled();
   });
+
+  it('requests daemon-owned revive for a recoverable pane', async () => {
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      {
+        paneId: 'pane-session',
+        runtimeId: 'runtime-1',
+        paneKind: 'agent',
+        agent: 'claude',
+        state: 'recoverable',
+      },
+    ], 'pane-session', router, { current: true }));
+    const terminal = createTerminal();
+
+    await act(async () => {
+      await result.current.handleTerminalReady('pane-session')(terminal);
+    });
+
+    expect(mockPtyAttach).toHaveBeenCalledWith({
+      args: {
+        id: 'runtime-1',
+        cols: 120,
+        rows: 40,
+        shell: false,
+        agent: 'claude',
+        policy: 'revive',
+      },
+      forceResizeBeforeAttach: false,
+    });
+  });
+
+  it('surfaces a revive attach failure without a client-side retry loop', async () => {
+    mockPtyAttach.mockRejectedValueOnce(new Error('session not found: runtime-1'));
+    const { result } = renderHook(() => useGhosttyPaneRuntime([
+      {
+        paneId: 'pane-session',
+        runtimeId: 'runtime-1',
+        paneKind: 'agent',
+        agent: 'claude',
+        state: 'recoverable',
+      },
+    ], 'pane-session', router, { current: true }));
+    const terminal = createTerminal();
+
+    await act(async () => {
+      await result.current.handleTerminalReady('pane-session')(terminal);
+    });
+
+    expect(mockPtyAttach).toHaveBeenCalledTimes(1);
+    expect(terminal.write).toHaveBeenCalledWith(expect.stringContaining('Failed to attach PTY'));
+    expect(terminal.write).not.toHaveBeenCalledWith(expect.stringContaining('Recovering session'));
+  });
 });

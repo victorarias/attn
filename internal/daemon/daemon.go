@@ -188,6 +188,8 @@ type Daemon struct {
 	// cannot interleave and tear each other's respawn down. Lazily initialized.
 	reloadLocksMu sync.Mutex
 	reloadLocks   map[string]*sync.Mutex
+	spawnLocksMu  sync.Mutex
+	spawnLocks    map[string]*spawnLock
 	// reloadKills marks sessions whose next process exit was caused by a
 	// client-initiated reload (kill_session with reload:true, followed by a
 	// spawn_session of the same id). Unlike reloadingSessions it suppresses ONLY
@@ -626,6 +628,7 @@ func New(socketPath string) *Daemon {
 		pluginDir:           pluginDirForSocket(socketPath),
 		bundledPluginDir:    bundledPluginDirForExecutable(),
 		workspaces:          newWorkspaceRegistry(),
+		spawnLocks:          make(map[string]*spawnLock),
 	}
 	// Production wiring for the orphaned-ticket reconciliation classifier. Test
 	// constructors leave this nil so unit tests never shell out to a real CLI.
@@ -666,6 +669,7 @@ func NewForTesting(socketPath string) *Daemon {
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),
+		spawnLocks:         make(map[string]*spawnLock),
 		// A disabled runner (no root) keeps the unconditional Cancel/Enqueue
 		// callsites nil-safe in tests; tests that exercise a live compaction
 		// override this with an enabled runner (see newTestCompactRunner).
@@ -710,6 +714,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),
+		spawnLocks:         make(map[string]*spawnLock),
 		compactRunner:      tasks.New(tasks.Options{}),
 	}
 }
@@ -1011,10 +1016,9 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 		if d.recoverOnMissingPTY(session) {
 			d.applyState(sessionStateChange{
 				sessionID: session.ID,
-				state:     protocol.StateIdle,
+				state:     string(protocol.SessionStateRecoverable),
 				cause:     startupRecovery{},
 			})
-			d.store.SetRecoverable(session.ID, true)
 			recoverable++
 			continue
 		}
@@ -1289,10 +1293,6 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 		// startup reap on an earlier boot, a sweep misread) whose owner turns out
 		// to be alive goes back to Working (ticket_revive.go).
 		d.reviveCrashedTicketsForSession(sessionID)
-		if protocol.Deref(existing.Recoverable) {
-			d.store.SetRecoverable(sessionID, false)
-			report.Changed = true
-		}
 		// A hook-reported "scheduled" session is parked on a cron/loop. PTY and
 		// worker-info recovery cannot reconstruct that — the parked screen reads
 		// as an idle prompt, which would be mis-recovered as launching/idle — so
@@ -1342,7 +1342,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 		if _, ok := liveIDs[session.ID]; ok {
 			continue
 		}
-		if session.State == protocol.SessionStateIdle {
+		if session.State == protocol.SessionStateIdle || session.State == protocol.SessionStateRecoverable {
 			continue
 		}
 		if sessionUpdatedAfter(session, demotionCutoff) {
@@ -1368,10 +1368,9 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 		if d.recoverOnMissingPTY(session) {
 			d.applyState(sessionStateChange{
 				sessionID: session.ID,
-				state:     protocol.StateIdle,
+				state:     string(protocol.SessionStateRecoverable),
 				cause:     startupRecovery{},
 			})
-			d.store.SetRecoverable(session.ID, true)
 			report.StateUpdated++
 			report.MarkedRecoverable++
 			report.Changed = true

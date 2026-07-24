@@ -3,7 +3,9 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -13,6 +15,7 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
@@ -247,24 +250,49 @@ func (d *Daemon) executePreparedSessionReload(sessionID string, opts ptybackend.
 }
 
 // buildReloadSpawnOptions reconstructs the SpawnOptions for an in-place re-spawn of
-// an existing session. Geometry comes from the live worker (SessionInfoProvider);
-// the launch flags the daemon does not persist (yolo, executable) come from the
-// worker registry (SessionLaunchParamsProvider). Returns an error — and the caller
-// aborts — when those params cannot be trusted.
+// an existing session. Geometry comes from the live worker (SessionInfoProvider).
+// The worker registry is preferred for live reloading; a durable launch intent
+// supplies the same user-selected values when that registry is unavailable.
 func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.SpawnOptions, error) {
 	sessionID := session.ID
 	paramsProvider, ok := d.ptyBackend.(ptybackend.SessionLaunchParamsProvider)
 	if !ok {
-		return ptybackend.SpawnOptions{}, fmt.Errorf("backend does not record launch params")
+		return d.buildReloadSpawnOptionsFromStoredIntent(session, fmt.Errorf("backend does not record launch params"))
 	}
 	params, err := paramsProvider.SessionLaunchParams(context.Background(), sessionID)
 	if err != nil {
-		return ptybackend.SpawnOptions{}, fmt.Errorf("read launch params: %w", err)
+		registryErr := fmt.Errorf("read launch params: %w", err)
+		if errors.Is(err, pty.ErrSessionNotFound) || errors.Is(err, os.ErrNotExist) {
+			return d.buildReloadSpawnOptionsFromStoredIntent(session, registryErr)
+		}
+		return ptybackend.SpawnOptions{}, registryErr
 	}
 	if !params.Recorded {
-		return ptybackend.SpawnOptions{}, fmt.Errorf("launch params not recorded (pre-reload worker)")
+		return d.buildReloadSpawnOptionsFromStoredIntent(session, fmt.Errorf("launch params not recorded (pre-reload worker)"))
 	}
+	return d.buildReloadSpawnOptionsFromLaunchParams(session, params)
+}
 
+func (d *Daemon) buildReloadSpawnOptionsFromStoredIntent(session *protocol.Session, registryErr error) (ptybackend.SpawnOptions, error) {
+	intent, ok := d.store.LaunchIntent(session.ID)
+	if !ok {
+		return ptybackend.SpawnOptions{}, fmt.Errorf("%w; no stored launch intent exists either", registryErr)
+	}
+	if intent.Unattended {
+		return ptybackend.SpawnOptions{}, fmt.Errorf("relaunching an unattended session requires its live worker registry contract")
+	}
+	d.logf("reload: using stored launch intent for %s (worker registry unavailable)", session.ID)
+	return d.buildReloadSpawnOptionsFromLaunchParams(session, ptybackend.SessionLaunchParams{
+		Recorded:   true,
+		YoloMode:   intent.YoloMode,
+		Executable: intent.Executable,
+		Model:      intent.Model,
+		Effort:     intent.Effort,
+	})
+}
+
+func (d *Daemon) buildReloadSpawnOptionsFromLaunchParams(session *protocol.Session, params ptybackend.SessionLaunchParams) (ptybackend.SpawnOptions, error) {
+	sessionID := session.ID
 	cols, rows := uint16(80), uint16(24)
 	if infoProvider, ok := d.ptyBackend.(ptybackend.SessionInfoProvider); ok {
 		if info, err := infoProvider.SessionInfo(context.Background(), sessionID); err == nil {

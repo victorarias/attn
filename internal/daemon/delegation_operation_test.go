@@ -279,7 +279,7 @@ func TestDelegationOperationRespawnsPersistedSessionWithoutLiveRuntime(t *testin
 		t.Fatal(err)
 	}
 	now := string(protocol.TimestampNow())
-	d.store.Add(&protocol.Session{ID: record.Operation.SessionID, WorkspaceID: workspaceID, Label: "respawned", Agent: protocol.SessionAgentCodex, Directory: cwd, State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now, Recoverable: protocol.Ptr(true)})
+	d.store.Add(&protocol.Session{ID: record.Operation.SessionID, WorkspaceID: workspaceID, Label: "respawned", Agent: protocol.SessionAgentCodex, Directory: cwd, State: protocol.SessionStateRecoverable, StateSince: now, StateUpdatedAt: now, LastSeen: now})
 	d.runDelegationOperation(record.Operation.OperationID)
 	done := waitDelegationOperation(t, d, record.Operation.OperationID)
 	if done.State != protocol.DelegationOperationStateCompleted {

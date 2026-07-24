@@ -1173,6 +1173,70 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('sends measured geometry only with a revive attach policy', async () => {
+    const { unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+    const ws = await waitForOpenSocket();
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: PROTOCOL_VERSION,
+        sessions: [{
+          id: 'sess-recoverable',
+          label: 'Recoverable',
+          agent: 'claude',
+          directory: '/tmp/repo',
+          state: 'recoverable',
+        }],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+
+    const attachPromise = ptyAttach({
+      args: {
+        id: 'sess-recoverable',
+        cols: 113,
+        rows: 37,
+        agent: 'claude',
+        policy: 'revive',
+      },
+    });
+    await waitFor(() => {
+      expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+        cmd: 'attach_session',
+        id: 'sess-recoverable',
+        attach_policy: 'revive',
+        cols: 113,
+        rows: 37,
+      });
+    });
+    act(() => {
+      ws.emit({
+        event: 'attach_result',
+        id: 'sess-recoverable',
+        success: true,
+        cols: 113,
+        rows: 37,
+        running: true,
+        revived: true,
+      });
+    });
+    await expect(attachPromise).resolves.toBeUndefined();
+    unmount();
+  });
+
   it('preserves daemon geometry while relaunch restores before workspace layout settles', async () => {
     const onSessionsUpdate = vi.fn();
     const onWorkspacesUpdate = vi.fn();

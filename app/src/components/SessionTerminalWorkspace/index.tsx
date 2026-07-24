@@ -348,6 +348,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           agent: paneSession?.agent ?? 'shell',
           sessionId: pane.sessionId,
           testSessionId: pane.sessionId,
+          state: paneSession?.state,
         };
       }),
     ]), [agentPanes, sessionById]);

@@ -6,6 +6,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-24]
+
+### Fixed
+- **Sessions interrupted by a daemon or machine restart now recover when their terminal pane opens.** attn preserves the session's launch settings, restarts the recoverable session using the pane's current terminal size, and reconnects it automatically instead of leaving a "Failed to attach PTY" message. Sessions that cannot safely be revived still show the normal attach error.
+
 ## [2026-07-22]
 
 ### Fixed

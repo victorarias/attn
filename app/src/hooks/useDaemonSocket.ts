@@ -173,7 +173,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '180';
+export const PROTOCOL_VERSION = '182';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -3031,6 +3031,9 @@ export function useDaemonSocket({
         cmd: 'attach_session',
         id,
         ...(context?.policy ? { attach_policy: context.policy } : {}),
+        ...(context?.policy === 'revive'
+          ? { cols: context.requestedCols, rows: context.requestedRows }
+          : {}),
       }));
 
       setTimeout(() => {
@@ -3149,7 +3152,7 @@ export function useDaemonSocket({
   const attachExistingRuntime = useCallback(async (
     args: Pick<PtyAttachArgs, 'id' | 'cols' | 'rows' | 'shell' | 'agent' | 'reason'>,
     options: {
-      policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount'>;
+      policy: Extract<PtyAttachPolicy, 'relaunch_restore' | 'same_app_remount' | 'revive'>;
       forceResizeBeforeAttach?: boolean;
     },
   ): Promise<void> => {
@@ -3538,12 +3541,12 @@ export function useDaemonSocket({
             },
             spawnRuntime: sendSpawnSession,
             resizeRuntime: sendPtyResize,
-            logResumeRecovery: ({ id, agent, recoverable }) => {
+            logResumeRecovery: ({ id, agent, state }) => {
               console.log(
-                '[DaemonSocket] Recovering session %s (%s) via resume (recoverable=%s)',
+                '[DaemonSocket] Recovering session %s (%s) via resume (state=%s)',
                 id,
                 agent ?? 'unknown',
-                String(recoverable),
+                state ?? 'unknown',
               );
             },
           },

@@ -28,6 +28,7 @@ type AttachPolicy string
 
 const AttachPolicyFreshSpawn AttachPolicy = "fresh_spawn"
 const AttachPolicyRelaunchRestore AttachPolicy = "relaunch_restore"
+const AttachPolicyRevive AttachPolicy = "revive"
 const AttachPolicySameAppRemount AttachPolicy = "same_app_remount"
 
 type AttachResultMessage struct {
@@ -51,6 +52,9 @@ type AttachResultMessage struct {
 
 	// ReplaySegments corresponds to the JSON schema field "replay_segments".
 	ReplaySegments []ReplaySegment `json:"replay_segments,omitempty,omitzero"`
+
+	// Revived corresponds to the JSON schema field "revived".
+	Revived *bool `json:"revived,omitempty,omitzero"`
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows *int `json:"rows,omitempty,omitzero"`
@@ -99,8 +103,14 @@ type AttachSessionMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// Cols corresponds to the JSON schema field "cols".
+	Cols *int `json:"cols,omitempty,omitzero"`
+
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows *int `json:"rows,omitempty,omitzero"`
 }
 
 type AuthorState struct {
@@ -3726,9 +3736,6 @@ type Session struct {
 	// NudgeFiresAt corresponds to the JSON schema field "nudge_fires_at".
 	NudgeFiresAt *string `json:"nudge_fires_at,omitempty,omitzero"`
 
-	// Recoverable corresponds to the JSON schema field "recoverable".
-	Recoverable *bool `json:"recoverable,omitempty,omitzero"`
-
 	// State corresponds to the JSON schema field "state".
 	State SessionState `json:"state"`
 
@@ -3829,6 +3836,7 @@ type SessionStateChangedMessage struct {
 const SessionStateIdle SessionState = "idle"
 const SessionStateLaunching SessionState = "launching"
 const SessionStatePendingApproval SessionState = "pending_approval"
+const SessionStateRecoverable SessionState = "recoverable"
 const SessionStateScheduled SessionState = "scheduled"
 const SessionStateUnknown SessionState = "unknown"
 const SessionStateWaitingInput SessionState = "waiting_input"
