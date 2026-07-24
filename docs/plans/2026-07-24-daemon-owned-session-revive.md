@@ -193,19 +193,31 @@ Decided: recoverable is a lifecycle state, not a flag riding beside `idle`.
 ## Follow-ups (noted, not in scope; discuss with Victor)
 
 - Route the manual Reload button through daemon revive (after Phase 2 the
-  daemon owns everything reload needs except geometry).
+  daemon owns everything reload needs except geometry). Resolved: new `reload_session`
+  command (protocol 183); the daemon reuses the in-place reload composite for live
+  workers and the stored-intent spawn pipeline for dead sessions, broadcasting
+  `runtime_respawned`; the frontend Reload button now sends only `{id, cols, rows}`.
 - `buildSpawnSessionRecord` does not populate `Session.EndpointID` from the
-  spawn message (pre-existing gap).
+  spawn message (pre-existing gap). Resolved: the spawn record now takes the
+  explicit message value or preserves the existing binding.
 - `commitSpawn`'s final `AddChecked` rewrites the state snapshotted before Spawn,
   clobbering any state applied mid-spawn (e.g. the PTY working signal). Benign
   today only because fresh records carry launching; consider re-reading current
-  state before the commit upsert.
+  state before the commit upsert. Resolved: commitSpawn re-reads current state
+  before the commit upsert so mid-spawn transitions (e.g. the PTY working signal)
+  survive; mutation-verified by test.
 - Embedded backend's late-insert double-launch race in
   `internal/pty/manager.go` — masked via Phase 0 at the daemon layer; the
-  backend-level race itself may deserve its own fix.
+  backend-level race itself may deserve its own fix. Resolved: Spawn now reserves
+  the session id in a pendingSpawns set under the manager lock before forking,
+  so a concurrent same-id Spawn fails fast instead of double-launching.
 - `runtimeLifecycle.ts` still encodes other recovery special cases
   (`relaunch_restore`, resume-after-attach-failure); candidates for the same
-  daemon-owned treatment as revive.
+  daemon-owned treatment as revive. Resolved: the client-side resume-after-attach-failure
+  branch and the kill_session `reload` flag were deleted (protocol 184);
+  `spawnPtyRuntime` reduces to spawn + fresh attach, and reload/revive strategy
+  lives entirely in the daemon. `relaunch_restore` remains client-side by design —
+  it is a rendering policy (replay handling), not a recovery strategy.
 - Live-verification footgun (2026-07-24): in a non-fish shell, a failed
   `profile-env` selection left `make install PROFILE=` (empty expansion)
   targeting production twice (bundle overwritten; daemon untouched). Resolved:
@@ -213,7 +225,11 @@ Decided: recoverable is a lifecycle state, not a flag riding beside `idle`.
   for every goal; bare prod installs are unchanged.
 - `LaunchIntent` gained an `Unattended bool` field beyond the approved surface:
   a store-fallback relaunch must refuse unattended sessions rather than relaunch
-  them without their worker-registry launch contract. Flagged to Victor.
+  them without their worker-registry launch contract. Flagged to Victor. Resolved:
+  the interim refusal was replaced by persisting the full
+  `launchcontract.UnattendedLaunchSpec` in `LaunchIntent` (approved by Victor
+  2026-07-24), so store-fallback relaunches carry the complete launch contract
+  instead of refusing; the refusals were removed.
 
 ## Branch state note
 
