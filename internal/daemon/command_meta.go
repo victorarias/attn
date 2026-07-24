@@ -101,6 +101,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdPtyInput:                              commandMetadata(ScopeSession, true, false),
 	protocol.CmdPtyResize:                             commandMetadata(ScopeSession, true, true),
 	protocol.CmdKillSession:                           commandMetadata(ScopeSession, true, true),
+	protocol.CmdReloadSession:                         commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutGet:                    commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutAddSessionPane:         commandMetadata(ScopeSession, true, true),
 	protocol.CmdWorkspaceLayoutClosePane:              commandMetadata(ScopeSession, true, true),

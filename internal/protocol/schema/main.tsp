@@ -1734,6 +1734,17 @@ model KillSessionMessage {
   reload?: boolean;
 }
 
+// reload_session: kill and re-spawn a session's agent in place, daemon-owned.
+// The daemon rebuilds launch flags from the worker registry or the stored
+// launch intent; the client contributes only geometry (used when no live
+// worker exists to read geometry from).
+model ReloadSessionMessage {
+  cmd: "reload_session";
+  id: string;
+  cols: int32;
+  rows: int32;
+}
+
 model WorkspaceLayoutGetMessage {
   cmd: "workspace_layout_get";
   workspace_id: string;
@@ -2771,6 +2782,13 @@ model SpawnResultMessage {
   error?: string;
 }
 
+model ReloadSessionResultMessage {
+  event: "reload_session_result";
+  id: string;
+  success: boolean;
+  error?: string;
+}
+
 model AttachResultMessage {
   event: "attach_result";
   id: string;
@@ -3540,6 +3558,7 @@ alias DaemonEvent =
   | NotificationMarkReadResultMessage
   | NotificationsUpdatedMessage
   | SpawnResultMessage
+  | ReloadSessionResultMessage
   | AttachResultMessage
   | GetScreenSnapshotResultMessage
   | PtyOutputMessage

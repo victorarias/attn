@@ -19,6 +19,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
@@ -490,21 +491,10 @@ func (d *Daemon) sendSpawnRejection(client *wsClient, sessionID string, rejectio
 	d.sendSpawnFailure(client, sessionID, rejection.err)
 }
 
-// reviveSessionForAttach respawns a recoverable session from its durable record
-// so a revive-policy attach can proceed. It refuses (error, no spawn) unless the
-// stored session is recoverable, geometry is positive, and a LaunchIntent exists.
-func (d *Daemon) reviveSessionForAttach(msg *protocol.AttachSessionMessage) error {
-	session := d.store.Get(msg.ID)
-	if session == nil || session.State != protocol.SessionStateRecoverable {
-		return errors.New("session not recoverable")
-	}
-	if msg.Cols == nil || msg.Rows == nil || *msg.Cols <= 0 || *msg.Rows <= 0 {
-		return errors.New("revive requires pty geometry")
-	}
-	intent, ok := d.store.LaunchIntent(msg.ID)
-	if !ok {
-		return errors.New("no stored launch intent")
-	}
+// buildStoredIntentSpawn reconstructs the spawn message and internal policy for
+// relaunching a session from its durable record and launch intent, with
+// client-supplied geometry. Shared by revive-on-attach and daemon-owned reload.
+func buildStoredIntentSpawn(session *protocol.Session, intent store.LaunchIntent, cols, rows int) (*protocol.SpawnSessionMessage, internalSpawnPolicy) {
 	spawnMsg := &protocol.SpawnSessionMessage{
 		Cmd:         protocol.CmdSpawnSession,
 		ID:          session.ID,
@@ -512,8 +502,8 @@ func (d *Daemon) reviveSessionForAttach(msg *protocol.AttachSessionMessage) erro
 		Agent:       string(session.Agent),
 		WorkspaceID: session.WorkspaceID,
 		Label:       protocol.Ptr(session.Label),
-		Cols:        *msg.Cols,
-		Rows:        *msg.Rows,
+		Cols:        cols,
+		Rows:        rows,
 		YoloMode:    protocol.Ptr(intent.YoloMode),
 	}
 	if intent.Executable != "" {
@@ -532,7 +522,26 @@ func (d *Daemon) reviveSessionForAttach(msg *protocol.AttachSessionMessage) erro
 		spawnMsg.Effort = protocol.Ptr(launch.Effort)
 		spawnMsg.Executable = protocol.Ptr(launch.Executable)
 	}
-	if rejection := d.runSpawnPipeline(spawnMsg, internalSpawnPolicy{unattendedLaunch: launch}); rejection != nil {
+	return spawnMsg, internalSpawnPolicy{unattendedLaunch: launch}
+}
+
+// reviveSessionForAttach respawns a recoverable session from its durable record
+// so a revive-policy attach can proceed. It refuses (error, no spawn) unless the
+// stored session is recoverable, geometry is positive, and a LaunchIntent exists.
+func (d *Daemon) reviveSessionForAttach(msg *protocol.AttachSessionMessage) error {
+	session := d.store.Get(msg.ID)
+	if session == nil || session.State != protocol.SessionStateRecoverable {
+		return errors.New("session not recoverable")
+	}
+	if msg.Cols == nil || msg.Rows == nil || *msg.Cols <= 0 || *msg.Rows <= 0 {
+		return errors.New("revive requires pty geometry")
+	}
+	intent, ok := d.store.LaunchIntent(msg.ID)
+	if !ok {
+		return errors.New("no stored launch intent")
+	}
+	spawnMsg, policy := buildStoredIntentSpawn(session, intent, int(*msg.Cols), int(*msg.Rows))
+	if rejection := d.runSpawnPipeline(spawnMsg, policy); rejection != nil {
 		return rejection.err
 	}
 	return nil

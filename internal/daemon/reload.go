@@ -197,6 +197,66 @@ func (d *Daemon) reloadSessionAgent(sessionID string) {
 	}
 }
 
+// reloadSessionForClient is the daemon-owned Reload: kill and respawn a live
+// session in place, or relaunch a dead one from its stored launch intent.
+// Returns nil when the session is running again.
+func (d *Daemon) reloadSessionForClient(sessionID string, cols, rows int) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return errors.New("session not found")
+	}
+	session := d.store.Get(sessionID)
+	if session == nil {
+		return errors.New("session not found")
+	}
+
+	lock := d.reloadLockFor(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if d.sessionHasLiveWorker(sessionID) {
+		opts, err := d.buildReloadSpawnOptions(session)
+		if err != nil {
+			return err
+		}
+		pluginReload, err := d.preparePluginReload(session, &opts, d.isChiefOfStaffSession(sessionID))
+		if err != nil {
+			return err
+		}
+		return d.executePreparedSessionReload(sessionID, opts, pluginReload)
+	}
+
+	if cols <= 0 || rows <= 0 {
+		return errors.New("reload requires pty geometry when no live worker exists")
+	}
+	intent, ok := d.store.LaunchIntent(sessionID)
+	if !ok {
+		return errors.New("no stored launch intent")
+	}
+	spawnMsg, policy := buildStoredIntentSpawn(session, intent, cols, rows)
+	if rejection := d.runSpawnPipeline(spawnMsg, policy); rejection != nil {
+		return rejection.err
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventRuntimeRespawned,
+		ID:    protocol.Ptr(sessionID),
+	})
+	return nil
+}
+
+func (d *Daemon) handleReloadSession(client *wsClient, msg *protocol.ReloadSessionMessage) {
+	err := d.reloadSessionForClient(msg.ID, msg.Cols, msg.Rows)
+	result := protocol.ReloadSessionResultMessage{
+		Event:   protocol.EventReloadSessionResult,
+		ID:      msg.ID,
+		Success: err == nil,
+	}
+	if err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	d.sendToClient(client, result)
+}
+
 func (d *Daemon) executePreparedSessionReload(sessionID string, opts ptybackend.SpawnOptions, pluginReload *preparedPluginReload) error {
 	if pluginReload != nil {
 		defer pluginReload.abort()
