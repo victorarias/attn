@@ -1,4 +1,4 @@
-//go:build darwin && arm64
+//go:build (darwin && arm64) || (linux && amd64) || (linux && arm64)
 
 // Tracked grid references for the OSC 133 block tracker (server-authoritative
 // terminal, Phase 3a). A TrackedRef pins a grid cell so its SCREEN-space

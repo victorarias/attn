@@ -1,4 +1,4 @@
-//go:build !(darwin && arm64)
+//go:build !((darwin && arm64) || (linux && amd64) || (linux && arm64))
 
 // Package ghosttyvt's non-macOS-arm64 build is a portable no-op. The real
 // implementation links a native libghostty-vt static library that only exists

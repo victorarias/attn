@@ -1,6 +1,10 @@
 # attn agent guide
 
-macOS only. Do not add Linux or Windows compatibility unless requested.
+macOS only for the **app** (the Tauri UI). Do not add Linux or Windows app
+compatibility unless requested. The **headless daemon**, however, is supported on
+Linux (amd64/arm64) — the hub cross-compiles and runs it on Linux remotes — so
+daemon-side code (`cmd/attn`, `internal/**`) must build and run on Linux too. See
+"Native VT library" below.
 
 ## Commands
 
@@ -37,27 +41,38 @@ permissions.
 ### Native VT library
 
 `internal/ghosttyvt` links `libghostty-vt` (Ghostty's VT core) via cgo on
-Darwin/arm64; every other platform compiles a pure-Go stub. The static archive
-lives under gitignored `third_party/ghostty-vt/`. On a fresh checkout it is
-absent, so the `build` target depends on it and `scripts/build-libghostty-vt.sh`
-runs automatically on the first `make build`/`make dev`/`make install*`.
+darwin/arm64 **and** linux/amd64+arm64 (the daemon's restore path serializes on
+Linux too); every other target compiles a pure-Go stub. The `//go:build`
+constraint and the per-tuple `#cgo` directives in `ghosttyvt.go` must stay in
+lockstep with the supported-platform list in `scripts/lib/libghostty-vt.sh` and
+the Makefile. The static archive is **per platform**, living under gitignored
+`third_party/ghostty-vt/<goos>_<goarch>/`. On a fresh checkout it is absent, so
+the `build` target depends on the archive for the platform it targets and
+`scripts/build-libghostty-vt.sh` runs automatically on the first `make build`/
+`make dev`/`make install*` (and cross builds via `make build-linux-{amd64,arm64}`
+or `GOOS=… GOARCH=… make build`).
 
-**Download-first (no zig for most contributors).** The script fetches a prebuilt
-archive — keyed by the ghostty pin (`ghostty-vt-native.pin`) plus the carried
-`ghostty-vt-native.patch` — from the rolling `native-vt-prebuilts` GitHub release
-and verifies it against `ghostty-vt-native.lock` (sha256, fail-closed). The repo
-is public, so this needs only network access. A **source build (zig 0.16.x)**
-happens only when you have edited the pin/patch (no published asset for the new
-key yet), when the download/verify fails, or when `ATTN_VT_FROM_SOURCE=1` forces
-it.
+**Download-first (no zig for most contributors, and none in CI/release).** The
+script fetches the prebuilt archive **for the target platform** — assets are
+named `libghostty-vt-<key>-<goos>_<goarch>.tar.gz`, keyed by the ghostty pin
+(`ghostty-vt-native.pin`) plus the carried `ghostty-vt-native.patch` — from the
+rolling `native-vt-prebuilts` GitHub release and verifies it against the
+matching `sha256_<goos>_<goarch>` in `ghostty-vt-native.lock` (fail-closed). The
+key is shared across platforms (same source); the lock carries one sha per
+platform. The repo is public, so this needs only network access. A **source
+build (zig 0.16.x)** happens only when you have edited the pin/patch (no
+published asset for the new key yet), when the download/verify fails, or when
+`ATTN_VT_FROM_SOURCE=1` forces it. `GHOSTTY_VT_GOOS`/`GHOSTTY_VT_GOARCH` scope the
+script to a target when cross-building (the Makefile sets them).
 
 **Changing the VT source.** After editing `ghostty-vt-native.pin` or
 `ghostty-vt-native.patch`, run `make publish-native-vt`
-(`scripts/publish-libghostty-vt.sh`): it builds from source (needs zig 0.16.x and
-an authenticated `gh`), uploads the keyed asset, and rewrites
-`ghostty-vt-native.lock`. **Commit the regenerated lock** — the Makefile depends
-on it, so committing it is what makes every other checkout re-fetch. Shared logic
-lives in `scripts/lib/libghostty-vt.sh`. See
+(`scripts/publish-libghostty-vt.sh`): it cross-builds **every** supported target
+from one host (needs zig 0.16.x and an authenticated `gh`), uploads all the keyed
+assets, and rewrites `ghostty-vt-native.lock` with the shared key + per-platform
+shas. **Commit the regenerated lock** — the Makefile depends on it, so committing
+it is what makes every other checkout re-fetch. Shared logic lives in
+`scripts/lib/libghostty-vt.sh`. See
 [docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
 
 ## Profiles and live verification
