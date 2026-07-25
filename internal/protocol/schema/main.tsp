@@ -487,12 +487,14 @@ model RecentLocation {
 }
 
 // One file the user has touched, as recorded in the daemon's file-activity log.
-// `source` says how it was touched: "opened" is the only value today (every
-// open_markdown, whatever route it came from). It exists so a later signal —
-// files an agent edited — becomes another source value rather than a migration.
+// `source` says how it was touched: "opened" (any route into a reader tile) or
+// "edited" (an agent wrote it, reported by the tool-use hook). The log stores a
+// row per (path, source); a reply merges them into one row per path, so
+// `last_at` is the most recent activity of any source, `count` is the total,
+// and `source` names whichever source was most recent.
 model FileActivity {
   path: string;         // absolute
-  source: string;       // "opened"
+  source: string;       // "opened" | "edited"
   last_at: string;      // ISO timestamp
   count: int32;
   session_id?: string;  // the session in play at the time, when known
@@ -640,6 +642,15 @@ model TodosMessage {
   cmd: "todos";
   id: string;
   todos: string[];
+}
+
+// Files an agent just wrote, reported by the tool-use hook after a completed
+// edit. Paths are absolute; the daemon keeps only the ones the ⌘P opener can
+// show, so a session reporting source files costs a no-op rather than log rows.
+model FilesEditedMessage {
+  cmd: "files_edited";
+  id: string;
+  paths: string[];
 }
 
 model DelegateMessage {
@@ -1493,6 +1504,10 @@ model GetRecentLocationsMessage {
 model RecentFilesMessage {
   cmd: "recent_files";
   limit?: int32;  // Default 20
+  // The directory the caller is working in (the opener's fuzzy root). Files
+  // under it rank above equally-scored files from elsewhere, so the workspace
+  // in front of you wins without hiding the rest.
+  root?: string;
   request_id?: string;
 }
 

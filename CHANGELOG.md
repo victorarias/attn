@@ -46,6 +46,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   into it, Enter on a file opens it — so documents outside the session's folder,
   or ones `.gitignore` hides from the search, are still a few keystrokes away.
   Ordinary queries like `docs/plan` keep searching as before.
+- **⌘P offers markdown your agent just wrote.** A document Claude Code or Codex
+  creates or edits shows up in the opener without you having opened it first, so
+  the plan an agent produced mid-turn is one shortcut away instead of something
+  you have to go find. Files you opened yourself still rank first, and files in
+  the workspace you are looking at rank above ones from another project. Only
+  markdown is tracked, and edits an agent makes through the shell rather than
+  its edit tools are not counted.
 
 ### Changed
 - **Dot-folders like `.claude` are now searchable in ⌘P.** Documents kept in

@@ -242,12 +242,14 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					},
 				},
 				{
-					// Any tool completing means Claude is working again (resets pending_approval)
+					// Any tool completing means Claude is working again (resets
+					// pending_approval). The same payload names any markdown the
+					// call wrote, which _hook-tool-use records in the same spawn.
 					Matcher: "*",
 					Hooks: []Hook{
 						{
 							Type:    "command",
-							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-state "%s" "working"`, socketCmd, wrapperCmd, sessionID),
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-tool-use "%s"`, socketCmd, wrapperCmd, sessionID),
 						},
 					},
 				},

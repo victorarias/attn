@@ -40,6 +40,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdSessionTranscript:                     commandMetadata(ScopeSession, false, true),
 	protocol.CmdStop:                                  commandMetadata(ScopeSession, false, true),
 	protocol.CmdTodos:                                 commandMetadata(ScopeSession, false, true),
+	protocol.CmdFilesEdited:                           commandMetadata(ScopeSession, false, true),
 	protocol.CmdQuery:                                 commandMetadata(ScopeHubMerge, false, true),
 	protocol.CmdHeartbeat:                             commandMetadata(ScopeSession, false, true),
 	protocol.CmdSessionVisualized:                     commandMetadata(ScopeSession, false, true),

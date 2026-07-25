@@ -1256,6 +1256,17 @@ type FileDiffResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type FilesEditedMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Paths corresponds to the JSON schema field "paths".
+	Paths []string `json:"paths"`
+}
+
 type FsChangedMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -3473,6 +3484,9 @@ type RecentFilesMessage struct {
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID *string `json:"request_id,omitempty,omitzero"`
+
+	// Root corresponds to the JSON schema field "root".
+	Root *string `json:"root,omitempty,omitzero"`
 }
 
 type RecentFilesResultMessage struct {

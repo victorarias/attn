@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '187';
+export const PROTOCOL_VERSION = '188';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -5013,9 +5013,11 @@ export function useDaemonSocket({
   }, [nextRequestID]);
 
   // Get recent locations from daemon
-  // Files recently opened as reader tiles, frecency-ranked. Recorded daemon-side
-  // for every route into a markdown tile, so this list needs no client bookkeeping.
-  const sendRecentFiles = useCallback((limit?: number): Promise<RecentFile[]> => {
+  // Files recently opened as reader tiles or written by an agent, frecency-ranked
+  // and merged per file. Recorded daemon-side — every route into a markdown tile
+  // plus the tool-use hook — so this list needs no client bookkeeping. root is the
+  // caller's workspace, which ranks its own files above equally-scored strangers.
+  const sendRecentFiles = useCallback((limit?: number, root?: string): Promise<RecentFile[]> => {
     return new Promise((resolve, reject) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -5025,7 +5027,12 @@ export function useDaemonSocket({
       const requestId = nextRequestID('recent_files');
       const key = `recent_files:${requestId}`;
       pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'recent_files', request_id: requestId, ...(limit ? { limit } : {}) }));
+      ws.send(JSON.stringify({
+        cmd: 'recent_files',
+        request_id: requestId,
+        ...(limit ? { limit } : {}),
+        ...(root ? { root } : {}),
+      }));
       setTimeout(() => {
         if (pendingActionsRef.current.has(key)) {
           pendingActionsRef.current.delete(key);

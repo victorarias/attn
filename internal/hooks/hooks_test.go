@@ -48,6 +48,43 @@ func TestGenerateHooks(t *testing.T) {
 	}
 }
 
+// The catch-all PostToolUse hook is the one that fires on every tool call, so
+// it stays a single spawn: _hook-tool-use resets the working state AND records
+// any markdown the call wrote, instead of a second hook entry doing the latter.
+func TestGenerateHooks_CatchAllPostToolUseIsOneSpawn(t *testing.T) {
+	settings := Generate("abc123", "/tmp/test.sock", "/tmp/attn")
+
+	var parsed SettingsConfig
+	if err := json.Unmarshal([]byte(settings), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	var catchAll []Hook
+	for _, entry := range parsed.Hooks["PostToolUse"] {
+		if entry.Matcher == "*" {
+			catchAll = entry.Hooks
+		}
+	}
+	if len(catchAll) != 1 {
+		t.Fatalf("catch-all PostToolUse has %d commands, want exactly 1", len(catchAll))
+	}
+	if !strings.Contains(catchAll[0].Command, `_hook-tool-use "abc123"`) {
+		t.Errorf("catch-all PostToolUse command = %q, want _hook-tool-use", catchAll[0].Command)
+	}
+}
+
+func TestGenerateCodexConfigOverrides_PostToolUseRecordsEdits(t *testing.T) {
+	overrides := strings.Join(GenerateCodexConfigOverrides("abc123", "/tmp/test.sock", "/tmp/attn", "", "", false), "\n")
+
+	if !strings.Contains(overrides, "hooks.PostToolUse=[{ matcher = \"*\", hooks = [{ type = \"command\", command = \"'/tmp/attn' '_hook-tool-use'\"") {
+		t.Fatalf("codex PostToolUse should run _hook-tool-use: %q", overrides)
+	}
+	// Codex only runs a hook whose recorded hash matches, so the trust entry
+	// has to move with the command.
+	if !strings.Contains(overrides, "post_tool_use") {
+		t.Fatalf("codex overrides should trust the post_tool_use hook: %q", overrides)
+	}
+}
+
 func TestGenerateHooks_ContainsSessionID(t *testing.T) {
 	sessionID := "unique-session-id-12345"
 	socketPath := "/tmp/test.sock"

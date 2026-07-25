@@ -50,7 +50,11 @@ var (
 type hookInput struct {
 	SessionID      string          `json:"session_id"`
 	TranscriptPath string          `json:"transcript_path"`
+	ToolName       string          `json:"tool_name"`
 	ToolInput      json.RawMessage `json:"tool_input"`
+	// CWD is the agent's working directory, used to resolve a tool that
+	// reported a relative path. Both Claude and Codex send it on tool events.
+	CWD string `json:"cwd"`
 	// BackgroundTasks is reported by Claude Code on the Stop payload: the set
 	// of asynchronous tasks (background Workflows, background Bash) still
 	// outstanding when the turn yields. Agents that do not emit this field
@@ -305,6 +309,8 @@ func main() {
 		runHookState()
 	case "_hook-todo":
 		runHookTodo()
+	case "_hook-tool-use":
+		runHookToolUse()
 	case "_probe-tui":
 		runProbeTUI()
 	default:
@@ -3325,6 +3331,37 @@ func runHookState() {
 	if err := c.UpdateState(sessionID, state); err != nil {
 		fmt.Fprintf(os.Stderr, "error updating state: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+// runHookToolUse handles the catch-all PostToolUse hook for both agents. A
+// completed tool call means the agent is working again (this is what resets
+// pending_approval), and if that call wrote markdown, the same payload names
+// the file — so one hook does both rather than paying a second process spawn
+// on every tool call an agent makes.
+func runHookToolUse() {
+	sessionID := hookSessionIDFromArgOrEnv(2)
+	if sessionID == "" {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-tool-use [session_id]\n")
+		os.Exit(1)
+	}
+
+	var input hookInput
+	_ = json.NewDecoder(os.Stdin).Decode(&input)
+
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	syncSessionResumeID(c, sessionID, input.SessionID)
+	if err := c.UpdateState(sessionID, protocol.StateWorking); err != nil {
+		fmt.Fprintf(os.Stderr, "error updating state: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Recording an edit is a ranking nicety, not part of the state contract:
+	// a failure here must not fail the hook and stall the agent.
+	if edited := hooks.MarkdownEdits(input.ToolName, input.ToolInput, input.CWD); len(edited) > 0 {
+		if err := c.RecordFilesEdited(sessionID, edited); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not record edited files: %v\n", err)
+		}
 	}
 }
 
