@@ -50,6 +50,13 @@ func (d *Daemon) stateTraceRecorder() *statetrace.Recorder {
 }
 
 // recordStateObservation is the single write path into the trace.
+//
+// An observation for a session with no store row is logged and not ringed. Such
+// an id can never be read back — `attn state explain` needs a store row — and it
+// can never be cleaned up either, because the cleanup hangs off session removal.
+// Ringing it would leak one map entry per stale id for the daemon's lifetime,
+// and stale ids are not rare: a worker event racing a session removal produces
+// one every time. The daemon log is the right home for them.
 func (d *Daemon) recordStateObservation(sessionID string, obs statetrace.Observation) {
 	if strings.TrimSpace(sessionID) == "" {
 		return
@@ -60,7 +67,9 @@ func (d *Daemon) recordStateObservation(sessionID string, obs statetrace.Observa
 	if obs.ObservedAt.IsZero() {
 		obs.ObservedAt = obs.RecordedAt
 	}
-	d.stateTraceRecorder().Record(sessionID, obs)
+	if d.store != nil && d.store.Get(sessionID) != nil {
+		d.stateTraceRecorder().Record(sessionID, obs)
+	}
 	d.logf("%s", obs.LogLine(sessionID))
 }
 

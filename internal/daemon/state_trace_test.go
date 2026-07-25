@@ -89,14 +89,38 @@ func TestTraceRecordsDriverVetoedObservation(t *testing.T) {
 	}
 }
 
-func TestTraceRecordsObservationForUnknownSession(t *testing.T) {
+// An id with no store row can never be read back — `attn state explain` needs a
+// row — and can never be cleaned up, because cleanup hangs off session removal.
+// Ringing one would leak a map entry per stale id for the daemon's lifetime, so
+// these observations are log-only.
+func TestTraceDoesNotRingAnUnknownSession(t *testing.T) {
 	d := newTraceDaemon(t)
 
 	d.handlePTYState("ghost", screenObs(protocol.StateWorking))
 
-	got := onlyObservation(t, d, "ghost")
-	if got.Outcome != statetrace.OutcomeVetoed || got.Reason != "session_not_found" {
-		t.Fatalf("got %+v", got)
+	if got := traceOf(t, d, "ghost"); got != nil {
+		t.Fatalf("an unknown session must not create a ring: %+v", got)
+	}
+}
+
+// The stale-worker race: a session is removed while one of its state updates is
+// still in flight. The late observation must not resurrect a ring for an id that
+// will never be removed again.
+func TestTraceDoesNotResurrectARingAfterRemoval(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-raced"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+	d.handlePTYState(id, screenObs(protocol.StateIdle))
+
+	d.dropSessionRecord(id)
+	// The worker event the daemon was already holding when the row went away.
+	d.handlePTYState(id, screenObs(protocol.StateWorking))
+
+	if got := traceOf(t, d, id); got != nil {
+		t.Fatalf("a late observation resurrected the ring: %+v", got)
+	}
+	if got := d.stateTraceRecorder().SessionCount(); got != 0 {
+		t.Fatalf("recorder holds %d rings, want 0", got)
 	}
 }
 
@@ -159,9 +183,11 @@ func TestTraceRecordsStoreDiscardedClassifierResult(t *testing.T) {
 
 func TestTraceRecordsSkips(t *testing.T) {
 	d := newTraceDaemon(t)
-	d.traceStateSkip("sess-skip", stateSourceClassifier, "no_new_assistant_turn")
+	id := "sess-skip"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+	d.traceStateSkip(id, stateSourceClassifier, "no_new_assistant_turn")
 
-	got := onlyObservation(t, d, "sess-skip")
+	got := onlyObservation(t, d, id)
 	if got.Outcome != statetrace.OutcomeSkipped || got.Claim != "" {
 		t.Fatalf("got %+v", got)
 	}

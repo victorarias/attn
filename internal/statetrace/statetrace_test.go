@@ -157,3 +157,23 @@ func TestLogLineRendersMissingFieldsAsDashes(t *testing.T) {
 		t.Fatalf("empty optional fields should be omitted: %q", line)
 	}
 }
+
+// SessionCount is how a leaked ring is caught: the daemon gates ring creation on
+// a live session row, and a ring for an id nothing will ever forget would grow
+// the map for the daemon's lifetime.
+func TestRecorderSessionCountTracksRings(t *testing.T) {
+	r := New(4)
+	if got := r.SessionCount(); got != 0 {
+		t.Fatalf("fresh recorder holds %d rings", got)
+	}
+	r.Record("a", Observation{Claim: "working"})
+	r.Record("b", Observation{Claim: "working"})
+	r.Record("a", Observation{Claim: "idle"})
+	if got := r.SessionCount(); got != 2 {
+		t.Fatalf("got %d rings, want 2", got)
+	}
+	r.Forget("a")
+	if got := r.SessionCount(); got != 1 {
+		t.Fatalf("got %d rings after Forget, want 1", got)
+	}
+}

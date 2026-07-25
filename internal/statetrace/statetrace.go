@@ -170,6 +170,17 @@ func (r *Recorder) Observations(sessionID string) []Observation {
 	return target.snapshot()
 }
 
+// SessionCount is how many sessions currently hold a ring. It exists so a leak —
+// a ring created for an id that will never be forgotten — is assertable.
+func (r *Recorder) SessionCount() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.rings)
+}
+
 // Forget drops a session's ring. Called when a session is unregistered so the
 // recorder does not grow without bound across a long-lived daemon.
 func (r *Recorder) Forget(sessionID string) {

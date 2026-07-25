@@ -1750,8 +1750,11 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 		d.reconcileTicketsOnSessionEnd(sessionID, string(session.State))
 	}
 	d.clearNudgeState(sessionID)
-	d.forgetStateTrace(sessionID)
 	d.store.Remove(sessionID)
+	// After the row is gone, not before: recordStateObservation gates on the row,
+	// so forgetting first would leave a window where a concurrent observation
+	// rebuilds the ring for an id nothing will ever clean up again.
+	d.forgetStateTrace(sessionID)
 }
 
 // handlePTYState applies one PTY-layer observation. It is still last-writer-wins
