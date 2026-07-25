@@ -154,9 +154,8 @@ func TestEveryEvidenceWriteStampsMovement(t *testing.T) {
 	}
 }
 
-// The flip: the tick is now the thing that publishes state. A session sitting in
-// a state no source will ever contradict is moved by the resolver alone, which
-// is the stuck-color fix in one assertion.
+// The tick publishes state. A session sitting in a state no source will ever
+// contradict is moved by the resolver alone.
 func TestTheResolveTickPublishesTheResolution(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-flip"
@@ -255,9 +254,8 @@ func TestARunningClassificationHoldsTheSettle(t *testing.T) {
 	}
 }
 
-// A classifier that never returns must not be able to freeze a color — that is
-// the failure mode the whole plan exists to remove, and the gate would
-// reintroduce it if the hold were unbounded.
+// A classifier that never returns must not be able to freeze a color, which is
+// what an unbounded hold would allow.
 func TestAHungClassifierStopsHoldingTheSettle(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-classifier-hung"
@@ -467,9 +465,8 @@ func TestNotificationEvidenceSplitsByType(t *testing.T) {
 }
 
 // The socket handler has to reach the evidence table, not only the trace ring.
-// Phase 1b wired the Notification hook to the trace alone, which left the
-// resolver blind to the strongest approval signal either agent emits — fine
-// while the resolver was in shadow mode, wrong once it decides state.
+// Recording to the trace alone leaves the resolver blind to the strongest
+// approval signal either agent emits.
 func TestTheNotificationHandlerReachesTheEvidenceTable(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-notify-wire"

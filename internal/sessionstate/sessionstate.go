@@ -128,15 +128,13 @@ type Evidence struct {
 	// Notification hook 60s after a settle nobody answered, once, cancelled if
 	// the user types first.
 	//
-	// It is deliberately not an Observation carrying a claim. The message reads
-	// "Claude is waiting for your input", but it fires for any unanswered
-	// settle — a finished task gets it exactly as a question does (measured:
-	// run_claude_fg, a foreground Bash turn, +60.04s after Stop). So it cannot
-	// choose between idle and waiting_input, and reading its prose as if it
-	// could would be inventing a distinction the signal does not carry.
+	// It is not an Observation carrying a claim. The message reads "Claude is
+	// waiting for your input", but it fires for any unanswered settle: a
+	// finished foreground Bash turn gets it 60s after Stop exactly as a question
+	// does. So it cannot choose between idle and waiting_input.
 	//
-	// What it is, is an independent witness that the agent is not working —
-	// which is the one thing a lost Stop hook leaves attn unable to discover.
+	// What it is, is an independent witness that the agent is not working, which
+	// is the one thing a lost Stop hook leaves attn unable to discover.
 	PromptIdleAt time.Time
 
 	// ClassifyingSince is when a stop-time classification started, zero when none
@@ -201,13 +199,12 @@ const (
 	// Sized from claude's approval lag: its prompt renders at 14.6s and its
 	// Notification hook lands at 20.6s, so the bracket goes stale (14.6 + 4) at
 	// 18.6s with the approval still two seconds from being announced. Without the
-	// grace the resolver paints idle across that gap — a flicker in the middle of
-	// a live approval, and one the flip would introduce rather than inherit.
+	// grace the resolver paints idle across that gap, in the middle of a live
+	// approval.
 	//
-	// It is deliberately a bounded hold and not an open-ended one. Holding
-	// forever would reproduce the stuck color this whole plan exists to remove:
-	// codex has no idle_prompt equivalent, so a lost Stop hook there has nothing
-	// else to unstick it.
+	// The hold is bounded on purpose. Holding forever would reproduce the stuck
+	// color it exists to avoid: codex has no idle_prompt equivalent, so a lost
+	// Stop hook there has nothing else to unstick it.
 	defaultSettleGrace = 4 * time.Second
 	// defaultClassifierTimeout is generous on purpose. Overrunning it costs one
 	// visible settle that a late verdict then corrects; undershooting it

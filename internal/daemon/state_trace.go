@@ -17,8 +17,8 @@ import (
 // door, discarded by the store, or skipped by its own source — into a capped
 // per-session ring, and mirror each one to the daemon log.
 //
-// This is Phase 0 of the state-detection plan: it observes, it does not
-// arbitrate. No function here can change which state a session ends up in.
+// Nothing here arbitrates: no function in this file can change which state a
+// session ends up in.
 
 // Source names for state evidence that does not come from the PTY layer (those
 // carry pty.Source through pty.Observation). These are deliberately named after
@@ -46,8 +46,7 @@ const (
 	// fact on the state hook. It says who answers an approval request, which is
 	// what separates a real approval stall from a guardian's brief round trip.
 	stateSourceReviewer = "reviewer"
-	// stateSourceResolver is the evidence resolver's own verdict. In shadow mode
-	// it is recorded only when it disagrees with the state the session is in.
+	// stateSourceResolver is the evidence resolver's own verdict.
 	stateSourceResolver = "resolver"
 )
 

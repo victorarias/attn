@@ -48,7 +48,7 @@ func newSessionEvidenceTable() *sessionEvidenceTable {
 // forgotten" and "removal wins and the writer is refused". Checking liveness
 // outside the lock leaves a third: the writer passes the check, removal deletes
 // and forgets, and the writer then recreates an entry for an id nothing will
-// ever clean up again. That is the leak #668 fixed in the trace ring.
+// ever clean up again.
 func (t *sessionEvidenceTable) updateIf(sessionID string, at time.Time, admit func() bool, mutate func(*sessionstate.Evidence)) {
 	if t == nil || strings.TrimSpace(sessionID) == "" {
 		return
@@ -406,8 +406,8 @@ func (d *Daemon) publishResolution(sessionID string, current protocol.SessionSta
 	// ReasonNoEvidence is not a finding, it is the absence of one, and it
 	// resolves to unknown. Publishing it would repaint every session the
 	// evidence table has not heard about yet — including ones a hook is about to
-	// describe perfectly well. Stuck (also unknown, but from evidence that went
-	// silent) is a real finding and is surfaced in phase 3.
+	// describe perfectly well. Stuck is a real finding, but it is not published
+	// as a state yet.
 	if resolution.Reason == sessionstate.ReasonNoEvidence || resolution.Reason == sessionstate.ReasonStuck {
 		return
 	}
@@ -435,9 +435,8 @@ func resolutionDetail(resolution sessionstate.Resolution) string {
 	return string(resolution.Reason) + ": " + resolution.Detail
 }
 
-// traceResolutionSkip records a tick that deliberately changed nothing. Without
-// it a held session and an unresolved one look identical in the trace, which is
-// the exact confusion phase 0 existed to remove.
+// traceResolutionSkip records a tick that changed nothing on purpose. Without
+// it a held session and an unresolved one look identical in the trace.
 func (d *Daemon) traceResolutionSkip(sessionID string, resolution sessionstate.Resolution, reason string) {
 	d.recordStateObservation(sessionID, statetrace.Observation{
 		Source:  stateSourceResolver,
@@ -459,9 +458,9 @@ func approvalClaim(claim string) sessionstate.Claim {
 }
 
 // stateClaim maps a protocol state name onto what the source actually observed.
-// Sources that speak in state names are the ones this plan is unwinding; until
-// they are converted, the translation lives here rather than being spread across
-// every call site.
+// Sources that speak in state names are being unwound; until they are
+// converted, the translation lives here rather than being spread across every
+// call site.
 func stateClaim(state string) sessionstate.Claim {
 	switch state {
 	case protocol.StateWorking:

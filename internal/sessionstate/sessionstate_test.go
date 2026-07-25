@@ -256,8 +256,7 @@ func TestResolve(t *testing.T) {
 		},
 		{
 			// Every hold is bounded. A classifier that never returns must not be
-			// able to freeze a color — that is the failure this plan removes, and
-			// an unbounded gate would reintroduce it.
+			// able to freeze a color, which is what an unbounded gate would allow.
 			name: "a classification past its timeout stops holding the settle",
 			evidence: Evidence{
 				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),

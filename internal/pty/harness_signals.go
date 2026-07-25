@@ -27,7 +27,7 @@ import (
 // arriving cannot get stuck the way an edge-triggered claim can. It is not a
 // detector on its own — claude's title goes silent for ~3.5s in the middle of a
 // blocking foreground tool call, so no TTL gives both a fast settle and no false
-// settle. See docs/plans/2026-07-25-agent-state-detection.md.
+// settle.
 //
 // Nothing here drives session state yet. The observations are recorded as
 // evidence so the traces can be compared against the current behavior before
