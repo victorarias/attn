@@ -207,8 +207,12 @@ type Daemon struct {
 	stateTraceOnce sync.Once
 	stateTrace     *statetrace.Recorder
 	// sessionEvidence is the per-session evidence table the resolver reads.
-	sessionEvidenceOnce        sync.Once
-	sessionEvidence            *sessionEvidenceTable
+	sessionEvidenceOnce sync.Once
+	sessionEvidence     *sessionEvidenceTable
+	// sessionDwell holds transitions that have been resolved but not yet held
+	// long enough to publish.
+	sessionDwellOnce           sync.Once
+	sessionDwell               *dwellGate
 	nudgeMu                    sync.Mutex
 	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
 	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
@@ -1761,6 +1765,12 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	// rebuilds the ring for an id nothing will ever clean up again.
 	d.forgetStateTrace(sessionID)
 	d.evidenceTable().forget(sessionID)
+	// The dwell gate has to be cleared here rather than left to the resolve
+	// loop's own cleanup: that loop walks the evidence table, so forgetting the
+	// evidence row is exactly what stops it from ever visiting this session
+	// again. A session closed mid-dwell would otherwise leave its pending
+	// transition behind for the daemon's lifetime.
+	d.dwellGate().clear(sessionID)
 }
 
 // handlePTYState applies one PTY-layer observation. It is still last-writer-wins
@@ -2393,7 +2403,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.logf("state update: id=%s state=%s", msg.ID, msg.State)
 	d.tracePermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
-	d.recordReviewerEvidence(msg.ID, protocol.Deref(msg.PermissionMode))
+	d.recordReviewerEvidenceFromPermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.recordBracketEvidence(msg.ID, msg.State)
 	d.applyState(sessionStateChange{
 		sessionID: msg.ID,

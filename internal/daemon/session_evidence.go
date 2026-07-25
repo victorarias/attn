@@ -7,6 +7,7 @@ import (
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
+	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/sessionstate"
 	"github.com/victorarias/attn/internal/statetrace"
 )
@@ -129,6 +130,13 @@ func (d *Daemon) evidenceTable() *sessionEvidenceTable {
 		d.sessionEvidence = newSessionEvidenceTable()
 	})
 	return d.sessionEvidence
+}
+
+func (d *Daemon) dwellGate() *dwellGate {
+	d.sessionDwellOnce.Do(func() {
+		d.sessionDwell = newDwellGate()
+	})
+	return d.sessionDwell
 }
 
 // recordPTYEvidence files an observation from the PTY layer. Sources that only
@@ -264,16 +272,67 @@ func (d *Daemon) recordStopFacts(sessionID string, backgroundWork, pendingCron b
 }
 
 // recordReviewerEvidence files who answers approval requests. It is a level, not
-// an edge: it holds until the agent reports a different mode.
-func (d *Daemon) recordReviewerEvidence(sessionID, permissionMode string) {
+// an edge: it holds until something reports a different arrangement.
+//
+// It has two sources because the agents differ in what they will tell us. Both
+// are launched with a reviewer under the same condition, so the spawn is the
+// reliable one and the only one codex has — it reports no permission mode at all.
+// Claude's hook then carries the mode on every turn, which is what catches a user
+// changing it mid-session.
+func (d *Daemon) recordReviewerEvidence(sessionID string, inLoop bool) {
+	d.recordEvidence(sessionID, time.Now(), func(e *sessionstate.Evidence) {
+		e.ReviewerInLoop = inLoop
+	})
+}
+
+// reviewerInLoop reads the launch options for the one arrangement that puts
+// something other than the user in front of an approval request.
+//
+// Both agents gate their reviewer on the same option — claude with
+// `--permission-mode auto`, codex with `approvals_reviewer=auto_review` — and
+// yolo outranks it by removing the approval gate altogether, so a yolo session
+// has no reviewer because it has nothing to review.
+func reviewerInLoop(opts ptybackend.SpawnOptions) bool {
+	return opts.AutoApprove && !opts.YoloMode
+}
+
+// recordReviewerEvidenceFromPermissionMode files claude's reported mode.
+//
+// Two things must not reach the evidence table through here. An absent mode is
+// not a report of "no reviewer" — it is an older CLI, or a payload that omitted
+// the field — and any mode at all from an agent that does not route approvals
+// by permission mode is not a report about approvals. Codex is the second case
+// concretely: its hooks send `default` on every turn as a payload filler while
+// its actual reviewer comes from the `approvals_reviewer` flag, so believing it
+// would retire the spawn-time fact on the first turn of every codex session and
+// take the dwell with it.
+func (d *Daemon) recordReviewerEvidenceFromPermissionMode(sessionID, permissionMode string) {
 	mode := strings.TrimSpace(permissionMode)
 	if mode == "" {
 		return
 	}
-	inLoop := mode != "default"
-	d.recordEvidence(sessionID, time.Now(), func(e *sessionstate.Evidence) {
-		e.ReviewerInLoop = inLoop
-	})
+	if !permissionModeGovernsApprovals(d.sessionAgent(sessionID)) {
+		return
+	}
+	d.recordReviewerEvidence(sessionID, mode != "default")
+}
+
+// permissionModeGovernsApprovals reports whether an agent's permission mode is
+// what decides who answers its approval requests. Claude's is; the others state
+// their arrangement at launch and never revise it.
+func permissionModeGovernsApprovals(agent protocol.SessionAgent) bool {
+	return agent == protocol.SessionAgentClaude
+}
+
+func (d *Daemon) sessionAgent(sessionID string) protocol.SessionAgent {
+	if d.store == nil {
+		return ""
+	}
+	session := d.store.Get(sessionID)
+	if session == nil {
+		return ""
+	}
+	return session.Agent
 }
 
 // Notification types claude reports. Both are typed fields on the hook payload,
@@ -367,14 +426,16 @@ func (d *Daemon) resolveAllSessions(now time.Time) {
 		if session == nil {
 			// The session is gone; so is any reason to keep resolving it.
 			d.evidenceTable().forget(sessionID)
+			d.dwellGate().clear(sessionID)
 			continue
 		}
 		evidence, ok := d.evidenceTable().snapshot(sessionID)
 		if !ok {
 			continue
 		}
-		resolution := sessionstate.Resolve(evidence, sessionstate.PolicyFor(string(session.Agent)), now)
-		d.publishResolution(sessionID, session.State, resolution)
+		policy := sessionstate.PolicyFor(string(session.Agent))
+		resolution := sessionstate.Resolve(evidence, policy, now)
+		d.publishResolution(sessionID, session.State, resolution, sessionstate.DwellFor(resolution.State, evidence, policy), now)
 	}
 }
 
@@ -400,7 +461,7 @@ var resolverOwnedStates = map[protocol.SessionState]bool{
 // diagnosis a wrong color needs: Hold means the evidence is still arriving,
 // no-evidence means nothing has been recorded at all, and an unowned current
 // state means the resolver was not entitled to an opinion.
-func (d *Daemon) publishResolution(sessionID string, current protocol.SessionState, resolution sessionstate.Resolution) {
+func (d *Daemon) publishResolution(sessionID string, current protocol.SessionState, resolution sessionstate.Resolution, dwell time.Duration, now time.Time) {
 	// A hold is traced, and it is the only non-application that is. It is the one
 	// that is both bounded and surprising: bounded because every hold clause
 	// expires, so the rows cannot accumulate, and surprising because a held
@@ -424,6 +485,18 @@ func (d *Daemon) publishResolution(sessionID string, current protocol.SessionSta
 		return
 	}
 	if !resolverOwnedStates[current] || resolution.State == current {
+		// No transition is on the table, so nothing is waiting out a dwell.
+		// Dropping the wait here is what keeps a later transition from
+		// inheriting a clock that started before an unrelated one.
+		d.dwellGate().clear(sessionID)
+		return
+	}
+	// Last gate before publication on purpose: everything above decides what is
+	// true, and this decides whether it has been true long enough to be worth
+	// showing. Putting it earlier would let a transition serve out its dwell and
+	// then be discarded for a reason that had nothing to do with timing.
+	if !d.dwellGate().ready(sessionID, resolution.State, dwell, now) {
+		d.traceResolutionSkip(sessionID, resolution, "dwell")
 		return
 	}
 	d.applyState(sessionStateChange{

@@ -116,7 +116,7 @@ func TestReviewerEvidenceReadsThePermissionMode(t *testing.T) {
 		d := newTraceDaemon(t)
 		id := "sess-reviewer-" + tc.mode
 		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
-		d.recordReviewerEvidence(id, tc.mode)
+		d.recordReviewerEvidenceFromPermissionMode(id, tc.mode)
 		if got := evidenceOf(t, d, id).ReviewerInLoop; got != tc.want {
 			t.Fatalf("mode %q -> ReviewerInLoop %v, want %v", tc.mode, got, tc.want)
 		}
@@ -129,7 +129,7 @@ func TestReviewerEvidenceReadsThePermissionMode(t *testing.T) {
 func TestAnAbsentPermissionModeRecordsNothing(t *testing.T) {
 	d := newTraceDaemon(t)
 	addCharacterizationSession(t, d, "sess-no-mode", protocol.SessionAgentClaude, protocol.SessionStateWorking)
-	d.recordReviewerEvidence("sess-no-mode", "  ")
+	d.recordReviewerEvidenceFromPermissionMode("sess-no-mode", "  ")
 	if _, ok := d.evidenceTable().snapshot("sess-no-mode"); ok {
 		t.Fatal("an absent mode created an evidence record")
 	}
@@ -215,7 +215,7 @@ func TestTheResolveTickDoesNotPublishAnAbsenceOfEvidence(t *testing.T) {
 
 	// A reviewer report is evidence of who answers approvals and nothing else,
 	// so it creates the table entry without supporting any state.
-	d.recordReviewerEvidence(id, "acceptEdits")
+	d.recordReviewerEvidenceFromPermissionMode(id, "acceptEdits")
 	d.resolveAllSessions(time.Now())
 
 	if state := d.store.Get(id).State; state != protocol.SessionStateWaitingInput {
@@ -443,7 +443,7 @@ func TestEvidenceIsNotRecordedForAnUnknownSession(t *testing.T) {
 	d.recordPTYEvidence("ghost", pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: time.Now()})
 	d.recordBracketEvidence("ghost", protocol.StateWorking)
 	d.recordStopFacts("ghost", true, false)
-	d.recordReviewerEvidence("ghost", "auto")
+	d.recordReviewerEvidence("ghost", true)
 	d.recordProcessEvidence("ghost", true)
 
 	if _, ok := d.evidenceTable().snapshot("ghost"); ok {
