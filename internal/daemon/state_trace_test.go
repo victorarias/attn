@@ -71,9 +71,9 @@ func TestTraceRecordsAppliedPTYObservationWithItsSource(t *testing.T) {
 func TestTraceRecordsDriverVetoedObservation(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-vetoed"
-	// Claude's ShouldApplyPTYState guards a scheduled session against the screen
-	// detector knocking it out of the parked state.
-	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateScheduled)
+	// Copilot is the last agent with a transition filter: its screen scrape may
+	// claim working and pending_approval and nothing else.
+	addCharacterizationSession(t, d, id, protocol.SessionAgentCopilot, protocol.SessionStateWorking)
 
 	d.handlePTYState(id, screenObs(protocol.StateIdle))
 
@@ -87,7 +87,7 @@ func TestTraceRecordsDriverVetoedObservation(t *testing.T) {
 	if got.Claim != protocol.StateIdle {
 		t.Fatalf("claim %q, want the rejected claim %q", got.Claim, protocol.StateIdle)
 	}
-	if state := d.store.Get(id).State; state != protocol.SessionStateScheduled {
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
 		t.Fatalf("tracing must not change arbitration: state is %q", state)
 	}
 }

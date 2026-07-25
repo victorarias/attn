@@ -61,78 +61,38 @@ func TestRecoveredRunningSessionState_DefaultAndAgentOverrides(t *testing.T) {
 	}
 }
 
-func TestShouldApplyPTYState_AgentOverrides(t *testing.T) {
-	for _, incoming := range []string{
-		protocol.StateWorking,
-		protocol.StateWaitingInput,
-		protocol.StatePendingApproval,
-		protocol.StateIdle,
-	} {
-		if ShouldApplyPTYState(Get("codex"), protocol.SessionStateWorking, incoming) {
-			t.Fatalf("codex should ignore %s PTY state updates", incoming)
+// Copilot is the only agent whose state still reaches the store straight off the
+// rendered screen, so it is the only one that still filters. Claude and codex are
+// resolved from harness evidence and have no PTY state to filter.
+func TestShouldApplyPTYState_CopilotWhitelist(t *testing.T) {
+	copilot := Get("copilot")
+
+	for _, incoming := range []string{protocol.StateWaitingInput, protocol.StateIdle} {
+		if ShouldApplyPTYState(copilot, protocol.SessionStateWorking, incoming) {
+			t.Fatalf("copilot should ignore %s from the screen", incoming)
 		}
 	}
-	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateLaunching, protocol.StateWorking) {
-		t.Fatal("codex should ignore launch-time working PTY noise")
+	if !ShouldApplyPTYState(copilot, protocol.SessionStateWorking, protocol.StatePendingApproval) {
+		t.Fatal("copilot should apply pending_approval from the screen")
 	}
-	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateIdle, protocol.StateWorking) {
-		t.Fatal("codex should ignore working PTY noise while idle")
-	}
-	if ShouldApplyPTYState(Get("codex"), protocol.SessionStateWaitingInput, protocol.StateWorking) {
-		t.Fatal("codex should ignore working PTY noise while waiting_input")
-	}
-	// The one exception: no hook fires when the user approves, so codex relies on
-	// the rendered screen to clear pending_approval -> working.
-	if !ShouldApplyPTYState(Get("codex"), protocol.SessionStatePendingApproval, protocol.StateWorking) {
-		t.Fatal("codex should apply working PTY state to clear pending_approval")
-	}
-	// But only working clears it; other transitions out of pending stay hook-owned.
-	for _, incoming := range []string{
-		protocol.StateWaitingInput,
-		protocol.StateIdle,
-		protocol.StatePendingApproval,
-	} {
-		if ShouldApplyPTYState(Get("codex"), protocol.SessionStatePendingApproval, incoming) {
-			t.Fatalf("codex should ignore %s PTY state while pending_approval", incoming)
-		}
-	}
-	if ShouldApplyPTYState(Get("copilot"), protocol.SessionStatePendingApproval, protocol.StateWorking) {
+	if ShouldApplyPTYState(copilot, protocol.SessionStatePendingApproval, protocol.StateWorking) {
 		t.Fatal("copilot should ignore working PTY noise while pending_approval")
 	}
 }
 
-// TestShouldApplyPTYState_ClaudeProtectsScheduled guards the parked-on-a-loop
-// state: Claude's detector still classifies the settled idle prompt while a
-// session is scheduled, but only a genuine resume (working) may move it out.
-// This also asserts Claude actually satisfies PTYStatePolicyProvider — if the
-// interface were unsatisfied, ShouldApplyPTYState would fall to the default
-// (return true) and the idle/waiting_input/pending_approval cases below would
-// wrongly pass.
-func TestShouldApplyPTYState_ClaudeProtectsScheduled(t *testing.T) {
-	claude := Get("claude")
-
-	for _, incoming := range []string{
-		protocol.StateIdle,
-		protocol.StateWaitingInput,
-		protocol.StatePendingApproval,
-	} {
-		if ShouldApplyPTYState(claude, protocol.SessionStateScheduled, incoming) {
-			t.Fatalf("claude should reject %s PTY state while scheduled", incoming)
-		}
-	}
-	if !ShouldApplyPTYState(claude, protocol.SessionStateScheduled, protocol.StateWorking) {
-		t.Fatal("claude should apply working PTY state to resume a scheduled session")
-	}
-
-	// Non-scheduled Claude transitions keep the default (detector-trusting) behavior.
-	for _, incoming := range []string{
-		protocol.StateWorking,
-		protocol.StateWaitingInput,
-		protocol.StateIdle,
-		protocol.StatePendingApproval,
-	} {
-		if !ShouldApplyPTYState(claude, protocol.SessionStateWorking, incoming) {
-			t.Fatalf("claude should apply %s PTY state while working", incoming)
+// Claude and codex must not filter at all: a filter that still answered would
+// mean something is still writing state from the screen behind the resolver.
+func TestShouldApplyPTYState_ResolverOwnedAgentsDoNotFilter(t *testing.T) {
+	for _, agent := range []string{"claude", "codex"} {
+		for _, incoming := range []string{
+			protocol.StateWorking,
+			protocol.StateWaitingInput,
+			protocol.StateIdle,
+			protocol.StatePendingApproval,
+		} {
+			if !ShouldApplyPTYState(Get(agent), protocol.SessionStateScheduled, incoming) {
+				t.Fatalf("%s still filters %s; its state should come from the resolver", agent, incoming)
+			}
 		}
 	}
 }

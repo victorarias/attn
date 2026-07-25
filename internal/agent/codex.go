@@ -23,7 +23,7 @@ type Codex struct{}
 var _ Driver = (*Codex)(nil)
 var _ TranscriptFinder = (*Codex)(nil)
 var _ ClassifierProvider = (*Codex)(nil)
-var _ PTYStatePolicyProvider = (*Codex)(nil)
+var _ RecoveredStatePolicyProvider = (*Codex)(nil)
 var _ ExecutableClassifierProvider = (*Codex)(nil)
 var _ ConfigOverrideProvider = (*Codex)(nil)
 var _ ResumePolicyProvider = (*Codex)(nil)
@@ -49,7 +49,6 @@ func (c *Codex) Capabilities() Capabilities {
 		HasHooks:            true,
 		HasTranscript:       true,
 		HasClassifier:       true,
-		HasApprovalResolver: true,
 		HarnessSignals:      HarnessSignalsCodex,
 		HasResume:           true,
 		HasYolo:             true,
@@ -479,14 +478,6 @@ func (c *Codex) BootstrapBytes() int64 {
 
 func (c *Codex) RecoveredRunningState(ptyState string) protocol.SessionState {
 	return protocol.SessionStateLaunching
-}
-
-func (c *Codex) ShouldApplyPTYState(current protocol.SessionState, incoming string) bool {
-	// Codex live state is hook-owned, with one exception: no hook fires when the
-	// user approves a permission request, so the approval prompt leaving the
-	// rendered screen is the only signal the tool is now running. Allow that
-	// single pending_approval -> working transition; ignore all other PTY state.
-	return current == protocol.SessionStatePendingApproval && incoming == protocol.StateWorking
 }
 
 func (c *Codex) ResolveSpawnResumeSessionID(existingSessionID, requestedResumeID, storedResumeID string) string {

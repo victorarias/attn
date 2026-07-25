@@ -30,7 +30,7 @@ var _ TranscriptWatcherBehaviorProvider = (*Claude)(nil)
 var _ ClassifierProvider = (*Claude)(nil)
 var _ LaunchPreparer = (*Claude)(nil)
 var _ SessionRecoveryPolicyProvider = (*Claude)(nil)
-var _ PTYStatePolicyProvider = (*Claude)(nil)
+var _ RecoveredStatePolicyProvider = (*Claude)(nil)
 var _ ResumePolicyProvider = (*Claude)(nil)
 var _ ResumeAvailabilityProvider = (*Claude)(nil)
 var _ TranscriptClassificationExtractor = (*Claude)(nil)
@@ -62,9 +62,7 @@ func (c *Claude) Capabilities() Capabilities {
 		HasTranscript:        true,
 		HasTranscriptWatcher: true,
 		HasClassifier:        true,
-		ScreenDetector:       ScreenDetectorClaude,
 		HarnessSignals:       HarnessSignalsClaude,
-		HasApprovalResolver:  true,
 		HasResume:            true,
 		HasYolo:              true,
 		HasInitialPrompt:     true,
@@ -559,9 +557,8 @@ func (c *Claude) RecoverOnMissingPTY() bool {
 }
 
 // RecoveredRunningState mirrors the default recovered-state mapping. Claude has
-// no special recovery needs; this method exists only so Claude satisfies
-// PTYStatePolicyProvider (which requires both methods) and ShouldApplyPTYState
-// below is actually consulted.
+// no special recovery needs; the method exists to satisfy
+// RecoveredStatePolicyProvider.
 func (c *Claude) RecoveredRunningState(ptyState string) protocol.SessionState {
 	switch ptyState {
 	case protocol.StateWaitingInput:
@@ -571,22 +568,6 @@ func (c *Claude) RecoveredRunningState(ptyState string) protocol.SessionState {
 	default:
 		return protocol.SessionStateLaunching
 	}
-}
-
-// ShouldApplyPTYState keeps `scheduled` hook-authoritative. A session enters
-// `scheduled` only via the Stop hook when Claude parks on a /loop or cron
-// (session_crons present). The live PTY working-detector still observes the
-// settled idle prompt and would otherwise emit idle/waiting_input/pending_approval
-// and silently knock the session out of `scheduled`. The only legitimate live
-// exit from a park is the loop/cron actually firing, which resumes a turn and
-// the detector reports as `working` — so allow that single transition and
-// reject every other incoming PTY state while parked. All non-scheduled
-// transitions keep the default behavior (Claude otherwise trusts its detector).
-func (c *Claude) ShouldApplyPTYState(current protocol.SessionState, incoming string) bool {
-	if current == protocol.SessionStateScheduled {
-		return incoming == protocol.StateWorking
-	}
-	return true
 }
 
 func (c *Claude) ResolveSpawnResumeSessionID(existingSessionID, requestedResumeID, storedResumeID string) string {

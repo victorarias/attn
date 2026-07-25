@@ -102,6 +102,11 @@ type Evidence struct {
 
 	// TurnOpen: a prompt was submitted and no Stop has closed it.
 	TurnOpen bool
+	// TurnEverOpened: a turn has opened at least once in this session's life.
+	// It is what separates "settled" from "has not started yet", which look
+	// identical in every other field — a booting agent paints title frames, and
+	// codex flickers a busy one before its first prompt is even ready.
+	TurnEverOpened bool
 	// ToolOpen: a tool call started and has not reported completion.
 	ToolOpen bool
 	// BackgroundWork: the turn yielded with asynchronous work outstanding, so
@@ -291,7 +296,18 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 		return Resolution{State: protocol.SessionStateWorking, Reason: ReasonHeartbeatFresh, Detail: e.Heartbeat.Detail}
 	}
 
-	if e.LastHarnessEvent != nil && e.LastHarnessEvent.Claim == ClaimApprovalPending {
+	// An approval the agent has gone busy past was answered. Nothing announces
+	// an answer — claude has no counterpart to its permission_prompt
+	// notification, codex has no approval hook at all — so the agent painting a
+	// spinner frame again is the signal, and it is a reliable one: an agent
+	// blocked on a prompt is not running, which is exactly why the bracket goes
+	// stale during an approval in the first place.
+	//
+	// Without this the edge has no expiry. The screen scrape used to retire it by
+	// watching the prompt leave the display; that is the thing being deleted here,
+	// and an approval with nothing left to clear it is a permanent color.
+	if e.LastHarnessEvent != nil && e.LastHarnessEvent.Claim == ClaimApprovalPending &&
+		!supersededByBusy(e.LastHarnessEvent, e) {
 		return Resolution{
 			State:  protocol.SessionStatePendingApproval,
 			Reason: ReasonApprovalOpen,
@@ -363,7 +379,13 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// when it declines nothing else ever contradicts the working state the turn
 	// was in. Reading the heartbeat here means a settle no longer depends on any
 	// particular source having spoken.
-	if e.Heartbeat != nil && !e.TurnOpen && !e.ToolOpen {
+	//
+	// It needs a turn to have *opened*, not merely a busy frame to have been
+	// painted. A booting agent paints title frames before its prompt is ready —
+	// codex flickers a busy one — and settling on those reports a turn finished
+	// before the agent has taken one, which showed up live as an idle blip
+	// seconds after launch.
+	if e.Heartbeat != nil && e.TurnEverOpened && !e.TurnOpen && !e.ToolOpen {
 		return settled(e, ReasonHeartbeatSettled, policy, now)
 	}
 
@@ -427,7 +449,7 @@ func classifierVerdict(e Evidence) (Resolution, bool) {
 	if e.LastClassifier == nil {
 		return Resolution{}, false
 	}
-	if !e.LastBusyAt.IsZero() && e.LastBusyAt.After(e.LastClassifier.ObservedAt) {
+	if supersededByBusy(e.LastClassifier, e) {
 		return Resolution{}, false
 	}
 	switch e.LastClassifier.Claim {
@@ -475,6 +497,19 @@ func DwellFor(state protocol.SessionState, e Evidence, policy Policy) time.Durat
 		return policy.GuardianDwell
 	}
 	return 0
+}
+
+// supersededByBusy reports whether the agent has painted a busy frame since o
+// was observed.
+//
+// Both edges this retires — an unanswered approval and a stop-time verdict —
+// describe a moment the agent was *not* running. A later busy frame is proof it
+// moved on, and neither edge has an announcement of its own to expire on.
+func supersededByBusy(o *Observation, e Evidence) bool {
+	if o == nil || e.LastBusyAt.IsZero() {
+		return false
+	}
+	return e.LastBusyAt.After(o.ObservedAt)
 }
 
 // fresh reports whether o makes claim and is recent enough to still be believed.

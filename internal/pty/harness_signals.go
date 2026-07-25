@@ -192,10 +192,35 @@ func classifyCodexTitle(title string) (string, string, bool) {
 	}
 	// The marker is a prefix on an otherwise ordinary title, so the summary is
 	// whatever follows the separator — the cwd, same as any other codex title.
+	//
+	// The marker alone does not mean a prompt is waiting. Codex leaves the words
+	// in place after the prompt is answered and flips only the glyph, so the
+	// pending form is the one that counts; reading the marker on its own would
+	// re-arm the approval on every repaint and leave the session yellow for the
+	// rest of its life.
 	if strings.Contains(title, codexApprovalMarker) {
-		return claimApproval, codexTitleSummary(title), true
+		if codexApprovalPending(title) {
+			return claimApproval, codexTitleSummary(title), true
+		}
+		return claimNotBusy, codexTitleSummary(title), true
 	}
 	return claimNotBusy, stripLevelGlyph(title), true
+}
+
+// codexApprovalPending reads the glyph codex puts in front of the marker: "."
+// while the prompt is waiting for an answer, "!" once it has one. Measured on
+// codex 0.145.0.
+//
+// A title carrying the marker with neither glyph is treated as answered. The
+// cost of guessing wrong is asymmetric: a missed approval shows a session as not
+// waiting for a moment longer, while a stuck one shows it demanding attention
+// forever.
+func codexApprovalPending(title string) bool {
+	prefix, _, found := strings.Cut(title, codexApprovalMarker)
+	if !found {
+		return false
+	}
+	return strings.Contains(prefix, ".")
 }
 
 // codexTitleSummary strips the "[ x ] Action Required | " prefix.

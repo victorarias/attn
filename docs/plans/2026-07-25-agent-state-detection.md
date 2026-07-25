@@ -692,13 +692,42 @@ cleanup, and would bury the interesting change in a much larger diff.
 
 **2c-2 — the subtraction**, after 2c-1 has been verified live.
 
-- [ ] Gate `internal/pty/state_detector.go` to copilot only; delete the keyword
-      lists and `approval_resolver.go`'s screen-absence debounce for claude/codex.
-- [ ] Delete `ShouldApplyPTYState` and all three driver implementations — the
-      resolver now owns precedence. Verify each vetoed transition the comments
-      describe is covered by a `Resolve` table test first (Claude's `scheduled`
-      park, Codex's approval-clear, Copilot's two-state whitelist).
-- [ ] Replace `internal/pty`'s shadow state consts with `protocol.State*`.
+- [x] Gate `internal/pty/state_detector.go` to copilot only. **Deviation**: the
+      keyword lists survive. Copilot classifies its screen through the same
+      `classifyState`/`defaultStateHeuristics` the plan assumed were claude's, so
+      deleting them would have deleted copilot's detector too. Claude's own
+      heuristics — the status-frame glyph and timer patterns — are gone.
+      `approval_resolver.go` is deleted outright rather than gated: claude and
+      codex were its only users, copilot never had it.
+- [x] Delete `ShouldApplyPTYState`. **Deviation**: two of three implementations.
+      Claude's and codex's are gone and are unreachable by construction — neither
+      agent emits an applying PTY observation any more. Copilot's stays, because
+      copilot's state still reaches the store straight off the screen and a
+      whitelist there is the only thing stopping its prose from being read as a
+      state. `PTYStatePolicyProvider` split into `RecoveredStatePolicyProvider`
+      and `PTYStateFilterProvider`; the two methods were bundled only for
+      convenience, and claude needed the recovery half without the filter half.
+- [x] Replace `internal/pty`'s shadow state consts with `protocol.State*`.
+- [x] Retire the approval edge. Found while doing the above: nothing announces an
+      answered approval — claude has no counterpart to `permission_prompt`, codex
+      has no approval hook — so the screen scrape leaving the display *was* the
+      only thing clearing it. Deleting that without a replacement would have made
+      every approval a permanent color. The agent painting a busy frame again is
+      the replacement signal, and it is reliable for the same reason the settle
+      grace exists: an agent blocked on a prompt is not running.
+- [x] Fix codex's approval marker. Codex leaves "Action Required" in the title
+      after the prompt is answered and flips only the glyph (`[ . ]` -> `[ ! ]`),
+      so matching the words alone re-armed the approval on every repaint.
+- [x] Delete the two `internal/pty` spike test files. They scored the old claude
+      detector against the OSC candidate; the detector is gone and their
+      conclusions are in "Spike results" above.
+
+**Copilot is not resolver-owned.** It has no harness signals, so its evidence is
+a `Screen` level and nothing else, and it keeps a second writer (the direct
+`live_signal` path plus its filter) alongside the resolver's `Screen` clause,
+which applies no whitelist. That split is pre-existing and out of scope here, but
+it is real: phase 3.5 should decide whether copilot gets harness signals, gets
+its whitelist moved into the resolver, or stays screen-driven on purpose.
 
 ### Phase 3 — policy
 
