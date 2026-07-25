@@ -91,6 +91,62 @@ func TestTheReasonIsOmittedForStatesTheResolverDoesNotOwn(t *testing.T) {
 	}
 }
 
+// The reason rides on session broadcasts, which otherwise only happen when the
+// state itself moves. A session that is already `unknown` and then goes silent
+// would keep its old tooltip while the daemon knew it was stuck — the exact
+// explanation this is supposed to deliver, stranded inside the daemon.
+func TestAReasonChangeReachesClientsWithoutAStateChange(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-reason-delta"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentCodex, protocol.SessionStateWorking)
+
+	// The session is already `unknown` — a failed pane, a session the daemon
+	// never heard from — so the state has nowhere left to move.
+	now := time.Now()
+	d.applyState(sessionStateChange{
+		sessionID: id,
+		state:     string(protocol.SessionStateUnknown),
+		cause:     liveSignal{},
+	})
+	if state := d.store.Get(id).State; state != protocol.SessionStateUnknown {
+		t.Fatalf("state %q, want unknown before the reason changes", state)
+	}
+
+	capture := captureBroadcasts(d)
+
+	// The brackets open and close with nothing else ever heard, then stop too:
+	// still `unknown`, but now for a reason the user can act on.
+	d.recordBracketEvidence(id, protocol.StateWorking)
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	policy := sessionstate.PolicyFor(string(protocol.SessionAgentCodex))
+	at := now.Add(policy.StuckAfter + time.Second)
+	d.resolveAllSessions(at)
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateUnknown {
+		t.Fatalf("state %q, want unknown still: this test is about the reason, not the state", state)
+	}
+	var reason string
+	for _, event := range capture.snapshot() {
+		if event.Session != nil && event.Session.ID == id {
+			reason = protocol.Deref(event.Session.StateReason)
+		}
+	}
+	if reason != string(sessionstate.ReasonStuck) {
+		t.Fatalf("broadcast state_reason %q, want stuck: the explanation never left the daemon", reason)
+	}
+
+	// And it does not become a parade. The reason is recomputed every tick and
+	// almost never changes, so an unchanged one must broadcast nothing.
+	quiet := captureBroadcasts(d)
+	d.resolveAllSessions(at.Add(time.Second))
+	d.resolveAllSessions(at.Add(2 * time.Second))
+	for _, event := range quiet.snapshot() {
+		if event.Session != nil && event.Session.ID == id {
+			t.Fatal("an unchanged reason broadcast anyway")
+		}
+	}
+}
+
 // The reason is per-session runtime state with a cleanup path, like every other
 // map hanging off the daemon.
 func TestTheReasonIsForgottenWithTheSession(t *testing.T) {

@@ -30,13 +30,21 @@ func newSessionStateReasons() *sessionStateReasons {
 	return &sessionStateReasons{reasons: make(map[string]string)}
 }
 
-func (r *sessionStateReasons) set(sessionID, reason string) {
+// set files the reason and reports whether it differs from the one already
+// held. The delta is what keeps the one-second resolver tick from turning into
+// a broadcast parade: the reason is recomputed every tick and almost never
+// changes.
+func (r *sessionStateReasons) set(sessionID, reason string) bool {
 	if r == nil || strings.TrimSpace(sessionID) == "" {
-		return
+		return false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.reasons[sessionID] == reason {
+		return false
+	}
 	r.reasons[sessionID] = reason
+	return true
 }
 
 func (r *sessionStateReasons) get(sessionID string) string {
@@ -64,9 +72,10 @@ func (d *Daemon) stateReasons() *sessionStateReasons {
 	return d.sessionStateReason
 }
 
-// recordStateReason files the clause that produced the current resolution.
-func (d *Daemon) recordStateReason(sessionID string, resolution sessionstate.Resolution) {
-	d.stateReasons().set(sessionID, string(resolution.Reason))
+// recordStateReason files the clause that produced the current resolution, and
+// reports whether that is news.
+func (d *Daemon) recordStateReason(sessionID string, resolution sessionstate.Resolution) bool {
+	return d.stateReasons().set(sessionID, string(resolution.Reason))
 }
 
 // decorateSessionWithStateReason attaches the reason to an outgoing session.
