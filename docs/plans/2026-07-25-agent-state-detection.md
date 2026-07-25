@@ -463,6 +463,25 @@ being fixed as part of the current step.
   `shouldForwardStateLocked` (`internal/ptybackend/worker.go:166`) dedupes again
   with a `working`-pulse exemption the first layer does not have. Two suppressors
   in series over one stream, neither aware of the other.
+- **The working keepalive pulse is a dead letter on the default backend.** The
+  outer suppressor wins: `Runtime.run` broadcasts `stateChangedEvent` only
+  `if changed`, so the detector's 1.2s `workingPulseInterval` re-emit never
+  crosses the worker→daemon wire, and the backend's own 2s
+  `shouldForwardStateLocked` window only runs on the info-poll path, which is
+  gated behind `if !legacyLifecycle { continue }`. Confirmed live on profile
+  `statedet` (2026-07-25): eleven continuous seconds of claude working produced
+  exactly one `state=working` line in `daemon.log`. This matters beyond tidiness —
+  the pulse is the liveness signal the resolver's TTL design depends on, so the
+  resolver phase must either un-gate it or grow its own heartbeat.
+- **The copilot screen heuristics look stale against copilot 1.0.73.**
+  `classifyCopilotScreen` keys off `defaultStateHeuristics` — prompt markers
+  ` › ` / ` > ` / `❯ ` and status markers "context left" / "for shortcuts". The
+  current copilot CLI renders none of them (its composer is a `┃`-bordered box),
+  and a live copilot session on `statedet` produced no `source=screen` claim at
+  all. Not confirmed against a working turn — this org's policy blocks copilot
+  turns on that machine — so the finding is "the markers are absent from the
+  rendered frames", not "the detector is proven dead". Worth a deliberate check
+  before the resolver starts weighing copilot screen evidence.
 - **That dedup is why `approvalResolver` re-emits `pending_approval` it did not
   observe.** Its own type comment (`internal/pty/approval_resolver.go:13-20`)
   explains it: the onset hook bypasses the worker, so without a redundant
