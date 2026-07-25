@@ -2420,6 +2420,24 @@ func (d *Daemon) persistResumeSessionID(sessionID, resumeSessionID string) {
 
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
+
+	// A non-terminal stop is a yield, not an end: hold the session in the state the
+	// facts imply and do none of the end-of-turn work below (no resume-id capture,
+	// no narration enqueue, no classification). The turn resumes on its own.
+	if state := nonTerminalStopState(msg, d.isChiefOfStaffSession(msg.ID)); state != "" {
+		d.logf(
+			"handleStop: non-terminal stop session=%s state=%s background_tasks=%d pending_crons=%d",
+			msg.ID, state, len(msg.BackgroundTaskStatuses), protocol.Deref(msg.PendingSessionCrons),
+		)
+		d.applyState(sessionStateChange{
+			sessionID: msg.ID,
+			state:     state,
+			cause:     liveSignal{},
+		})
+		d.sendOK(conn)
+		return
+	}
+
 	if session := d.store.Get(msg.ID); session != nil {
 		if resumeSessionID := agentdriver.ResumeSessionIDFromStopTranscriptPath(
 			agentdriver.Get(string(session.Agent)),
@@ -2515,9 +2533,15 @@ func (d *Daemon) handleSessionVisualized(sessionID string) {
 	go d.classifySessionState(sessionID, transcriptPath)
 }
 
+// classifySessionState decides what a settled turn means and applies the result.
+// It is the IO shell around the rules in classify_decision.go: it gathers inputs,
+// performs the transcript read and the classifier call between rules, and owns the
+// single store write. The rules themselves make no decision about when to pay for
+// IO — they say what is still needed.
 func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
-	// Capture timestamp BEFORE starting classification
-	// This prevents slow classifier results from overwriting newer state updates
+	// Capture the timestamp BEFORE any classification work: applyState rejects a
+	// classifierObservation older than the state it would overwrite, so a slow
+	// classifier cannot clobber a newer live signal.
 	classificationStartTime := time.Now()
 	d.logf("classifySessionState: starting for session=%s, transcript=%s", sessionID, transcriptPath)
 
@@ -2525,6 +2549,19 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	if session == nil {
 		d.logf("classifySessionState: session %s not found, aborting", sessionID)
 		return
+	}
+
+	apply := func(decision classifyDecision) {
+		if decision.action != classifyApply {
+			d.logf("classifySessionState: session=%s no state applied reason=%s", sessionID, decision.reason)
+			return
+		}
+		d.logf("classifySessionState: session=%s state=%s reason=%s", sessionID, decision.state, decision.reason)
+		d.applyState(sessionStateChange{
+			sessionID: sessionID,
+			state:     decision.state,
+			cause:     classifierObservation{observedAt: classificationStartTime},
+		})
 	}
 
 	// Capability gates: agents can independently disable transcript parsing and
@@ -2537,42 +2574,19 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		classifierEnabled = caps.HasClassifier
 	}
 
-	// Check pending todos first (fast path)
-	// Todos are stored as "[✓] task" (completed), "[→] task" (in_progress), "[ ] task" (pending)
-	pendingCount := 0
+	// Todos are stored as "[✓] task" (completed), "[→] task" (in_progress),
+	// "[ ] task" (pending).
+	pendingTodos := 0
 	for _, todo := range session.Todos {
 		if !strings.HasPrefix(todo, "[✓]") {
-			pendingCount++
+			pendingTodos++
 		}
 	}
-	d.logf("classifySessionState: session %s has %d total todos, %d pending", sessionID, len(session.Todos), pendingCount)
-	if pendingCount > 0 {
-		d.logf("classifySessionState: session %s has pending todos, setting waiting_input", sessionID)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateWaitingInput,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
-		return
-	}
+	d.logf("classifySessionState: session %s has %d total todos, %d pending", sessionID, len(session.Todos), pendingTodos)
 
-	if !transcriptEnabled {
-		d.logf("classifySessionState: transcript disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateIdle,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
-		return
-	}
-
-	if !classifierEnabled {
-		d.logf("classifySessionState: classifier disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateIdle,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
+	decision := classifyPreTranscript(pendingTodos, transcriptEnabled, classifierEnabled)
+	if decision.action != classifyReadTranscript {
+		apply(decision)
 		return
 	}
 
@@ -2586,7 +2600,6 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		)
 	}
 
-	// Parse transcript for last assistant message
 	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
 	extract := d.extractLastAssistantMessage
 	if d.classificationTranscriptExtractor != nil {
@@ -2594,62 +2607,36 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	}
 	lastMessage, assistantTurnID, err := extract(session, resolvedTranscriptPath, 500, classificationStartTime)
 	if err != nil {
-		if errors.Is(err, agentdriver.ErrNoNewAssistantTurn) {
-			d.logf("classifySessionState: no new assistant turn for session %s, skipping classification", sessionID)
-			return
-		}
-		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
-		d.logf("classifySessionState: unknown reason=transcript_parse_error session=%s transcript=%s", sessionID, resolvedTranscriptPath)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateUnknown,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
-		return
+		d.logf("classifySessionState: transcript read failed for %s: %v (transcript=%s)", sessionID, err, resolvedTranscriptPath)
 	}
-	if strings.TrimSpace(assistantTurnID) != "" {
+	if strings.TrimSpace(assistantTurnID) != "" && err == nil {
 		defer d.clearClassifyingTurn(sessionID)
 	}
 
-	lastMessage = strings.TrimSpace(lastMessage)
-	if lastMessage == "" {
-		d.logf("classifySessionState: empty last message for session %s, setting idle", sessionID)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateIdle,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
+	decision = classifyPostTranscript(lastMessage, err)
+	if decision.action != classifyRunClassifier {
+		apply(decision)
 		return
 	}
+	lastMessage = strings.TrimSpace(lastMessage)
 
-	// Log truncated message
 	logMsg := lastMessage
 	if len(logMsg) > 100 {
 		logMsg = logMsg[:100] + "..."
 	}
 	d.logf("classifySessionState: last message for session %s: %s", sessionID, logMsg)
 
-	// Classify with LLM (can be slow - 30+ seconds)
+	// Can be slow — 30+ seconds.
 	d.logf("classifySessionState: calling classifier for session %s", sessionID)
 	state, err := d.runClassifier(session, lastMessage, 30*time.Second)
 	if err != nil {
 		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
-		d.logf("classifySessionState: unknown reason=classifier_error session=%s err=%v", sessionID, err)
-		state = protocol.StateUnknown
 	}
-	if err == nil && state == protocol.StateUnknown {
-		d.logf("classifySessionState: unknown reason=classifier_unknown_response session=%s", sessionID)
-	}
-
-	d.logf("classifySessionState: session %s classified as %s", sessionID, state)
+	decision = classifyVerdict(state, err)
 	if strings.TrimSpace(assistantTurnID) != "" {
 		d.setClassifiedTurnID(sessionID, assistantTurnID)
 	}
-	d.applyState(sessionStateChange{
-		sessionID: sessionID,
-		state:     state,
-		cause:     classifierObservation{observedAt: classificationStartTime},
-	})
+	apply(decision)
 }
 
 func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout time.Duration) (string, error) {

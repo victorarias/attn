@@ -533,10 +533,11 @@ being fixed as part of the current step.
       claim suppression, working pulse) are shared. `STATE_DETECTOR=0` still
       disables; `=1` keeps the driver's kind, which is what it already did in every
       reachable case.
-- [ ] Enabling refactor 4: the Stop hook reports `background_tasks` /
-      `session_crons` as facts; `nonTerminalStopState` and `sessionIsChiefOfStaff`
-      move daemon-side. Without this the resolver cannot see background work at
-      all.
+- [x] Enabling refactor 4: the Stop hook reports `background_task_statuses` /
+      `pending_session_crons` as facts on `StopMessage` (protocol 189);
+      `nonTerminalStopState` moved to `internal/daemon/stop_terminality.go` and the
+      chief-of-staff lookup is now an in-process `d.isChiefOfStaffSession` call
+      instead of a socket round-trip from the hook back to the daemon.
 - [ ] Feed all of the above into the Phase 0 ring only; still no arbitration
       change. Compare traces against the baseline.
 
@@ -544,9 +545,12 @@ being fixed as part of the current step.
 
 - [ ] New `internal/sessionstate` with `Evidence`, `Resolve`, table tests built
       from Phase 1 traces.
-- [ ] Enabling refactor 5: extract `classifySessionState`'s decision into
-      `Resolve` (todo level and capability gates become evidence rows), leaving a
-      thin IO shell. Six `applyState` exits collapse to one.
+- [x] Enabling refactor 5 (first half): `classifySessionState`'s rules extracted
+      to `internal/daemon/classify_decision.go` as three pure functions
+      (`classifyPreTranscript`, `classifyPostTranscript`, `classifyVerdict`)
+      returning a `classifyDecision`; the shell performs the IO between them and
+      owns the single store write. Six `applyState` exits collapsed to one. Folding
+      these rules into `Resolve` itself is Phase 2 work — this makes them movable.
 - [ ] Daemon evidence table + 1s tick; route live signals through the resolver
       into `applyState` with a new `resolverObservation` cause.
 - [ ] Gate `internal/pty/state_detector.go` to copilot only; delete the keyword

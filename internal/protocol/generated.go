@@ -4309,11 +4309,19 @@ type StateMessage struct {
 }
 
 type StopMessage struct {
+	// BackgroundTaskStatuses corresponds to the JSON schema field
+	// "background_task_statuses".
+	BackgroundTaskStatuses []string `json:"background_task_statuses,omitempty,omitzero"`
+
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+
+	// PendingSessionCrons corresponds to the JSON schema field
+	// "pending_session_crons".
+	PendingSessionCrons *int `json:"pending_session_crons,omitempty,omitzero"`
 
 	// TranscriptPath corresponds to the JSON schema field "transcript_path".
 	TranscriptPath string `json:"transcript_path"`
