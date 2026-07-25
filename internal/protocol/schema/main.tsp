@@ -610,6 +610,26 @@ model StateMessage {
   cmd: "state";
   id: string;
   state: string;
+  // permission_mode is the agent's *resolved* approval mode at the moment the
+  // hook fired ("default", "auto", "acceptEdits", …). attn's own launch flags
+  // cannot be trusted for this: a user's global agent settings can put a
+  // guardian in the loop for a session attn launched without asking for one,
+  // and Shift+Tab changes it mid-session. Absent from agents that do not
+  // report it.
+  permission_mode?: string;
+}
+
+// HookNotificationMessage carries Claude's `Notification` hook. The hook is
+// harness-owned and typed — notification_type is "permission_prompt" when the
+// agent is blocked on approval and "idle_prompt" when it has been waiting on
+// the user for 60s — so it needs no message-string parsing. It arrives ~6s
+// after the underlying event, which makes it a corroborator rather than a
+// low-latency trigger.
+model HookNotificationMessage {
+  cmd: "hook_notification";
+  id: string;
+  notification_type: string;
+  message?: string;
 }
 
 model SetSessionResumeIDMessage {

@@ -222,10 +222,34 @@ func (c *Client) Unregister(id string) error {
 
 // UpdateState updates a session's state
 func (c *Client) UpdateState(id, state string) error {
+	return c.UpdateStateFromHook(id, state, "")
+}
+
+// UpdateStateFromHook is UpdateState plus the agent's resolved permission mode,
+// which only a hook payload knows. An empty mode is simply not reported.
+func (c *Client) UpdateStateFromHook(id, state, permissionMode string) error {
 	msg := protocol.StateMessage{
 		Cmd:   protocol.CmdState,
 		ID:    id,
 		State: state,
+	}
+	if strings.TrimSpace(permissionMode) != "" {
+		msg.PermissionMode = protocol.Ptr(permissionMode)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// RecordNotification reports the agent's own notification event (Claude's
+// Notification hook) as state evidence.
+func (c *Client) RecordNotification(id, notificationType, message string) error {
+	msg := protocol.HookNotificationMessage{
+		Cmd:              protocol.CmdHookNotification,
+		ID:               id,
+		NotificationType: notificationType,
+	}
+	if strings.TrimSpace(message) != "" {
+		msg.Message = protocol.Ptr(message)
 	}
 	_, err := c.send(msg)
 	return err

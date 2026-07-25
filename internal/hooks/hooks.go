@@ -209,6 +209,23 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					},
 				},
 			},
+			// Notification is the harness announcing that it is blocked on the
+			// user: notification_type is "permission_prompt" ~6s after a
+			// permission request, and "idle_prompt" exactly 60s after a turn
+			// settles with the user not having replied. Too slow to lead a
+			// transition, which is why it is recorded as evidence rather than
+			// setting state.
+			"Notification": {
+				{
+					Matcher: "*",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-notification "%s"`, socketCmd, wrapperCmd, sessionID),
+						},
+					},
+				},
+			},
 			"PermissionRequest": {
 				{
 					// PermissionRequest fires when Claude needs user approval for a tool

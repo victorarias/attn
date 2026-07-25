@@ -129,6 +129,24 @@ func TestGenerateHooks_HasSessionStartHook(t *testing.T) {
 	}
 }
 
+// The Notification hook is the only harness-owned signal that says the agent is
+// blocked on the user *and* says why. Losing the registration would leave that
+// evidence silently absent rather than failing anything.
+func TestGenerateHooks_HasNotificationHook(t *testing.T) {
+	var parsed SettingsConfig
+	if err := json.Unmarshal([]byte(Generate("abc123", "/tmp/test.sock", "/tmp/attn")), &parsed); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	entries := parsed.Hooks["Notification"]
+	if len(entries) != 1 || len(entries[0].Hooks) != 1 {
+		t.Fatalf("want one Notification hook, got %+v", entries)
+	}
+	if cmd := entries[0].Hooks[0].Command; !strings.Contains(cmd, `_hook-notification "abc123"`) {
+		t.Fatalf("Notification command = %q, want _hook-notification for the session", cmd)
+	}
+}
+
 func TestGenerateHooks_HasUserPromptSubmitHook(t *testing.T) {
 	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
 

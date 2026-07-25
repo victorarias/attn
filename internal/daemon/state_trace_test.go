@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"encoding/json"
+	"net"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -416,5 +418,129 @@ func TestTraceCollapsesHeartbeatsAcrossSpinnerFrames(t *testing.T) {
 	if all := traceOf(t, withFrames, framed); len(all) != len(frames) {
 		t.Fatalf("volatile details collapsed unexpectedly (%d rows for %d frames); "+
 			"the ring pressure this test guards against would be invisible", len(all), len(frames))
+	}
+}
+
+// callHandler runs a conn-taking daemon handler against a pipe and returns the
+// response it wrote.
+func callHandler(t *testing.T, call func(net.Conn)) protocol.Response {
+	t.Helper()
+	server, client := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		call(server)
+		_ = server.Close()
+	}()
+	var resp protocol.Response
+	if err := json.NewDecoder(client).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	_ = client.Close()
+	<-done
+	return resp
+}
+
+// Claude's Notification hook is the harness saying out loud that it is blocked
+// on the user, and it says which kind. It lands ~6s late, so it is recorded as
+// evidence and must not move the session.
+func TestTraceRecordsTheNotificationHookAsEvidence(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-hook-notify"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	resp := callHandler(t, func(conn net.Conn) {
+		d.handleHookNotification(conn, &protocol.HookNotificationMessage{
+			ID:               id,
+			NotificationType: "permission_prompt",
+			Message:          protocol.Ptr("Claude needs your permission"),
+		})
+	})
+	if !resp.Ok {
+		t.Fatalf("response ok=%v error=%q", resp.Ok, protocol.Deref(resp.Error))
+	}
+
+	got := onlyObservation(t, d, id)
+	if got.Outcome != statetrace.OutcomeObserved {
+		t.Fatalf("outcome %q, want observed", got.Outcome)
+	}
+	if got.Source != stateSourceHookNotify {
+		t.Fatalf("source %q, want %q", got.Source, stateSourceHookNotify)
+	}
+	// The type is the load-bearing half: it separates "blocked on approval" from
+	// "waiting on a reply" without parsing an English sentence.
+	if got.Claim != "permission_prompt" || got.Detail != "Claude needs your permission" {
+		t.Fatalf("got %+v", got)
+	}
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("the notification changed state to %q", state)
+	}
+}
+
+func TestNotificationHookRequiresAType(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-hook-notify-bad"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	resp := callHandler(t, func(conn net.Conn) {
+		d.handleHookNotification(conn, &protocol.HookNotificationMessage{ID: id, NotificationType: "  "})
+	})
+	if resp.Ok {
+		t.Fatal("a typeless notification should be rejected")
+	}
+	if got := traceOf(t, d, id); len(got) != 0 {
+		t.Fatalf("rejected notification was still recorded: %+v", got)
+	}
+}
+
+// The permission mode rides along on the state hook because attn's own launch
+// flags are not authoritative: a user's global agent settings can put a guardian
+// in the loop for a session attn launched without asking for one.
+func TestTraceRecordsThePermissionModeReportedByTheStateHook(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-perm-mode"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateIdle)
+
+	callHandler(t, func(conn net.Conn) {
+		d.handleState(conn, &protocol.StateMessage{
+			ID:             id,
+			State:          protocol.StateWorking,
+			PermissionMode: protocol.Ptr("auto"),
+		})
+	})
+
+	got := traceOf(t, d, id)
+	if len(got) != 2 {
+		t.Fatalf("want the mode and the state, got %+v", got)
+	}
+	if got[0].Source != stateSourceReviewer || got[0].Claim != "auto" {
+		t.Fatalf("first observation %+v, want the reviewer level", got[0])
+	}
+	if got[0].Outcome != statetrace.OutcomeObserved {
+		t.Fatalf("the mode is evidence, not a state: outcome %q", got[0].Outcome)
+	}
+	// The state itself must still be applied — reporting the mode is additive.
+	if got[1].Source != stateSourceHook || got[1].Outcome != statetrace.OutcomeApplied {
+		t.Fatalf("second observation %+v, want the applied hook state", got[1])
+	}
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working", state)
+	}
+}
+
+// Codex reports no permission mode. An absent one must not open a row that says
+// the reviewer is unknown — that is indistinguishable from a real claim.
+func TestStateHookWithoutAPermissionModeRecordsOnlyTheState(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-no-perm-mode"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentCodex, protocol.SessionStateIdle)
+
+	callHandler(t, func(conn net.Conn) {
+		d.handleState(conn, &protocol.StateMessage{ID: id, State: protocol.StateWorking})
+	})
+
+	got := onlyObservation(t, d, id)
+	if got.Source != stateSourceHook {
+		t.Fatalf("got %+v, want only the hook state", got)
 	}
 }

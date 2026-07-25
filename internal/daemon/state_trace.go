@@ -38,6 +38,14 @@ const (
 	stateSourceTranscript = "transcript_watcher"
 	// stateSourcePluginDriver is an external agent driver's sequenced report.
 	stateSourcePluginDriver = "plugin_driver"
+	// stateSourceHookNotify is Claude's Notification hook — the harness saying
+	// out loud that it is blocked on the user. It reports a notification_type,
+	// not a state.
+	stateSourceHookNotify = "hook_notify"
+	// stateSourceReviewer is the agent's resolved permission mode, reported as a
+	// fact on the state hook. It says who answers an approval request, which is
+	// what separates a real approval stall from a guardian's brief round trip.
+	stateSourceReviewer = "reviewer"
 )
 
 // stateTraceRecordGateHook runs inside the recorder's lock, between the liveness
@@ -201,4 +209,34 @@ func (d *Daemon) stateExplainResult(session *protocol.Session) *protocol.StateEx
 		result.StateSince = protocol.Ptr(session.StateSince)
 	}
 	return result
+}
+
+// handleHookNotification records Claude's Notification hook. The hook is
+// evidence, not a command: it lands ~6s after the event it describes, so acting
+// on it directly would paint a state the session may already have left. The
+// resolver weighs it against fresher sources.
+func (d *Daemon) handleHookNotification(conn net.Conn, msg *protocol.HookNotificationMessage) {
+	kind := strings.TrimSpace(msg.NotificationType)
+	if kind == "" {
+		d.sendError(conn, "missing notification_type")
+		return
+	}
+	d.traceStateEvidence(msg.ID, stateOrigin{
+		source: stateSourceHookNotify,
+		detail: strings.TrimSpace(protocol.Deref(msg.Message)),
+	}, kind)
+	d.sendOK(conn)
+}
+
+// tracePermissionMode records the agent's resolved approval mode as a level.
+// It rides along on the state hook rather than being read from attn's launch
+// flags, which are not authoritative: a user's global agent settings can put a
+// guardian in the loop for a session attn launched without asking for one, and
+// the mode can change mid-session.
+func (d *Daemon) tracePermissionMode(sessionID, mode string) {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		return
+	}
+	d.traceStateEvidence(sessionID, stateOrigin{source: stateSourceReviewer}, mode)
 }
