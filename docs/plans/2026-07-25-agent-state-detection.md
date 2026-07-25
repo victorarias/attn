@@ -640,23 +640,47 @@ being fixed as part of the current step.
       trace *only when it disagrees* with the stored state. No `applyState` call
       — the flip is deliberately separate so the resolver can be witnessed
       agreeing first.
-- [ ] **Phase 2c**, the flip: route live signals through the resolver into
-      `applyState` with a new `resolverObservation` cause.
-- [ ] Feed the `Notification` hook into the evidence table. Phase 1b's
-      `handleHookNotification` records to the trace ring only, so the resolver
-      cannot see it — defensible while 2b was shadow mode, wrong to carry past
+Phase 2c is split into two PRs. The flip changes the color every session shows;
+the deletions are pure subtraction that only make sense once the flip has run
+live. Landing them together would mean a revert of a bad flip also reverts the
+cleanup, and would bury the interesting change in a much larger diff.
+
+**2c-1 — the flip.**
+
+- [x] Feed the `Notification` hook into the evidence table. Phase 1b's
+      `handleHookNotification` recorded to the trace ring only, so the resolver
+      could not see it — defensible while 2b was shadow mode, wrong to carry past
       the flip, since this is the strongest approval signal either agent emits
       and Victor asked for it explicitly. `permission_prompt` →
-      `LastHarnessEvent{ClaimApprovalPending}`; `idle_prompt` →
-      `ClaimNeedsInput` (it fires 60s after an unanswered settle, so it is a
-      late confirmation, not a leading edge — it must not outrank a fresher
-      heartbeat).
+      `LastHarnessEvent{ClaimApprovalPending}`; `idle_prompt` → `PromptIdleAt`,
+      **not** a claim. This plan previously said `→ ClaimNeedsInput`; the live
+      captures disproved it. `idle_prompt` fires 60s after *any* unanswered
+      settle — a finished foreground Bash turn gets it exactly as a question
+      does — so it cannot choose between `idle` and `waiting_input`. What it is
+      is an independent witness that the agent is not working, which is the one
+      thing a lost Stop hook leaves attn unable to discover.
+- [x] Read codex approvals off its title (`[ . ] Action Required | <cwd>`). Codex
+      has no notification escape and no approval hook, so without this the flip's
+      deletion of the screen scrape would leave codex approvals undetectable.
+- [ ] Route live signals through the resolver into `applyState` with a new
+      `resolverObservation` cause.
 - [ ] Settle flicker: publish the resolver's verdict unless a classification is
       in flight, in which case hold the pre-settle state until the verdict lands
       or the classifier times out. Chosen 2026-07-25 over publishing immediately
       (visible ~8s wrong color on every question-ending turn) and over always
       holding (keeps today's delay and forfeits the stuck-color fix for turns
       that never produce a verdict).
+- [ ] A stale bracket with no classifier verdict **holds** rather than asserting
+      `idle`. Measured: claude's approval prompt renders at 14.6s but its
+      `Notification` hook lands at 20.6s, so with `StaleAfter` 4s the bracket
+      goes stale at ~18.6s and `settled()` would paint idle for ~2s in the middle
+      of a live approval — a flicker the flip would *introduce*. Holding is only
+      safe because of the `PromptIdleAt` clause above: a lost Stop hook is
+      unstuck at 60s, so "hold" can no longer mean "stuck forever". That
+      dependency is the entire argument and belongs in a comment at the clause.
+
+**2c-2 — the subtraction**, after 2c-1 has been verified live.
+
 - [ ] Gate `internal/pty/state_detector.go` to copilot only; delete the keyword
       lists and `approval_resolver.go`'s screen-absence debounce for claude/codex.
 - [ ] Delete `ShouldApplyPTYState` and all three driver implementations — the

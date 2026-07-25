@@ -26,6 +26,16 @@ type classifierObservation struct {
 	observedAt time.Time
 }
 
+// resolverObservation is the evidence resolver's verdict on its tick. Unlike
+// every other cause it is not an edge reported by a source: it is a re-reading
+// of all the evidence at once, which is what lets it move a session no source
+// spoke about.
+//
+// It carries no timestamp. A resolution is a statement about now, computed from
+// evidence whose own ages the resolver has already weighed, so there is nothing
+// for the store to compare it against.
+type resolverObservation struct{}
+
 // pluginReport carries the active driver run cursor used for ordered state CAS.
 type pluginReport struct {
 	runID string
@@ -43,6 +53,7 @@ type processExit struct{}
 func (liveSignal) isSessionStateCause()            {}
 func (daemonObservation) isSessionStateCause()     {}
 func (classifierObservation) isSessionStateCause() {}
+func (resolverObservation) isSessionStateCause()   {}
 func (pluginReport) isSessionStateCause()          {}
 func (startupRecovery) isSessionStateCause()       {}
 func (processExit) isSessionStateCause()           {}
@@ -81,7 +92,7 @@ func stateEffectProfileFor(cause sessionStateCause) (stateEffectProfile, bool) {
 	switch cause.(type) {
 	case liveSignal:
 		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
-	case daemonObservation, classifierObservation:
+	case daemonObservation, classifierObservation, resolverObservation:
 		return stateEffectProfile{trackRun: true, syncNudge: true, broadcast: true}, true
 	case pluginReport:
 		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
@@ -102,6 +113,8 @@ func sessionStateCauseName(cause sessionStateCause) string {
 		return "daemon_observation"
 	case classifierObservation:
 		return "classifier_observation"
+	case resolverObservation:
+		return "resolver_observation"
 	case pluginReport:
 		return "plugin_report"
 	case startupRecovery:
@@ -168,7 +181,7 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 
 func (d *Daemon) commitSessionState(change sessionStateChange) bool {
 	switch cause := change.cause.(type) {
-	case liveSignal, daemonObservation, startupRecovery, processExit:
+	case liveSignal, daemonObservation, startupRecovery, processExit, resolverObservation:
 		return d.store.UpdateState(change.sessionID, change.state)
 	case classifierObservation:
 		return d.store.UpdateStateWithTimestamp(change.sessionID, change.state, cause.observedAt)

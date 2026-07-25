@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -153,11 +154,12 @@ func TestEveryEvidenceWriteStampsMovement(t *testing.T) {
 	}
 }
 
-// Shadow mode's contract: the tick records what the resolver would have said and
-// changes nothing.
-func TestTheResolveTickRecordsADisagreementWithoutApplyingIt(t *testing.T) {
+// The flip: the tick is now the thing that publishes state. A session sitting in
+// a state no source will ever contradict is moved by the resolver alone, which
+// is the stuck-color fix in one assertion.
+func TestTheResolveTickPublishesTheResolution(t *testing.T) {
 	d := newTraceDaemon(t)
-	id := "sess-shadow"
+	id := "sess-flip"
 	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateIdle)
 
 	now := time.Now()
@@ -170,21 +172,107 @@ func TestTheResolveTickRecordsADisagreementWithoutApplyingIt(t *testing.T) {
 
 	d.resolveAllSessions(now)
 
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working: a fresh heartbeat outranks the stored idle", state)
+	}
 	got := onlyObservation(t, d, id)
+	if got.Outcome != statetrace.OutcomeApplied {
+		t.Fatalf("outcome %q, want applied", got.Outcome)
+	}
 	if got.Source != stateSourceResolver {
 		t.Fatalf("source %q, want %q", got.Source, stateSourceResolver)
 	}
-	if got.Outcome != statetrace.OutcomeObserved {
-		t.Fatalf("outcome %q, want observed — the resolver must not write state yet", got.Outcome)
+	// The reason names the clause that won, which is the whole diagnostic value
+	// of the row: "working" alone never explains a wrong color.
+	if !strings.Contains(got.Detail, string(sessionstate.ReasonHeartbeatFresh)) {
+		t.Fatalf("detail %q does not name the winning clause", got.Detail)
 	}
-	if got.Claim != string(protocol.SessionStateWorking) {
-		t.Fatalf("claim %q, want working: a fresh heartbeat outranks the stored idle", got.Claim)
+}
+
+// States outside the resolver's remit describe the session's lifecycle, not its
+// agent. `recoverable` is the dangerous one: the revive path sets it precisely
+// because the worker died, so the process evidence the resolver would read is
+// both present and meaningless.
+func TestTheResolveTickLeavesAnUnownedStateAlone(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-unowned"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateRecoverable)
+
+	d.recordProcessEvidence(id, true)
+	d.resolveAllSessions(time.Now())
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateRecoverable {
+		t.Fatalf("state %q, want recoverable — the resolver overwrote a state it does not own", state)
 	}
-	if got.Reason != string(sessionstate.ReasonHeartbeatFresh) {
-		t.Fatalf("reason %q, want %q", got.Reason, sessionstate.ReasonHeartbeatFresh)
+}
+
+// A session the evidence table has barely heard of resolves to unknown for want
+// of evidence. Publishing that would repaint healthy sessions grey on the first
+// tick after any single observation.
+func TestTheResolveTickDoesNotPublishAnAbsenceOfEvidence(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-no-evidence"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWaitingInput)
+
+	// A reviewer report is evidence of who answers approvals and nothing else,
+	// so it creates the table entry without supporting any state.
+	d.recordReviewerEvidence(id, "acceptEdits")
+	d.resolveAllSessions(time.Now())
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWaitingInput {
+		t.Fatalf("state %q, want waiting_input untouched", state)
 	}
+}
+
+// The settle-flicker gate, end to end through the daemon: while a classification
+// is running, a settled turn holds its pre-settle state rather than flashing
+// idle and being corrected when the verdict lands.
+func TestARunningClassificationHoldsTheSettle(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-classifying"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	now := time.Now()
+	d.recordClassifierStarted(id, now)
+	// The turn is over as far as every other source is concerned: the Stop hook
+	// closed the bracket and the agent stopped painting spinner frames.
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: now})
+
+	d.resolveAllSessions(now.Add(time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working held while the classifier runs", state)
+	}
+
+	// The verdict lands and the hold ends on the same evidence.
+	d.recordClassifierEvidence(id, protocol.StateWaitingInput, now)
+	d.recordClassifierFinished(id)
+	d.resolveAllSessions(now.Add(2 * time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWaitingInput {
+		t.Fatalf("state %q, want the classifier verdict published", state)
+	}
+}
+
+// A classifier that never returns must not be able to freeze a color — that is
+// the failure mode the whole plan exists to remove, and the gate would
+// reintroduce it if the hold were unbounded.
+func TestAHungClassifierStopsHoldingTheSettle(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-classifier-hung"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	now := time.Now()
+	d.recordClassifierStarted(id, now)
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: now})
+
+	policy := sessionstate.PolicyFor(string(protocol.SessionAgentClaude))
+	d.resolveAllSessions(now.Add(policy.ClassifierTimeout + time.Second))
+
 	if state := d.store.Get(id).State; state != protocol.SessionStateIdle {
-		t.Fatalf("the shadow tick changed state to %q", state)
+		t.Fatalf("state %q, want idle: the hold must expire with the classifier", state)
 	}
 }
 

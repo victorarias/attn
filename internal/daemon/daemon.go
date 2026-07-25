@@ -2591,6 +2591,14 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		return
 	}
 
+	// Tell the resolver a verdict is coming, so its tick holds the pre-settle
+	// state instead of publishing idle and being corrected seconds later. The
+	// deferred clear covers every exit, including the early returns below: a
+	// classification that ends without a verdict is precisely when the session
+	// must be free to settle on its own.
+	d.recordClassifierStarted(sessionID, classificationStartTime)
+	defer d.recordClassifierFinished(sessionID)
+
 	apply := func(decision classifyDecision) {
 		if decision.action != classifyApply {
 			d.logf("classifySessionState: session=%s no state applied reason=%s", sessionID, decision.reason)
