@@ -491,6 +491,18 @@ being fixed as part of the current step.
   exactly one `state=working` line in `daemon.log`. This matters beyond tidiness —
   the pulse is the liveness signal the resolver's TTL design depends on, so the
   resolver phase must either un-gate it or grow its own heartbeat.
+- **An open bracket outranks stuck, so it can pin a session green forever.**
+  Found while publishing stuck. `TurnOpen` with `LastBusyAt` never set makes
+  `heartbeatSilentFor` return false — an agent that has never reported being
+  busy is deliberately not treated as silent — so the bracket-open clause returns
+  `working` on every tick and the stuck clause below it is unreachable. For
+  claude and codex this cannot happen, since both paint a busy title with every
+  turn. For an agent with hooks but no heartbeat it is exactly the stuck colour
+  the plan exists to remove, only now with a reason to believe it.
+  Consequently stuck is reachable today only when the brackets are the *only*
+  source that ever spoke and they have stopped too. Not fixed here: reordering
+  the clauses is a behavioural change to the resolver's trust model and deserves
+  its own treatment. Decide in phase 3.5.
 - **Neither guardian produced observable approval evidence, so the dwell has no
   live trigger yet.** Measured on `statedet` 2026-07-26, both agents launched
   with a reviewer and given a command that must escalate. Codex escalated (the
@@ -759,7 +771,11 @@ its whitelist moved into the resolver, or stays screen-driven on purpose.
       whose only reader is one clause. Claude's hook still refreshes it per turn,
       which is what catches a mid-session mode change; codex reports no permission
       mode ever, so for codex the spawn record is the only source.
-- [ ] Stuck detection (`stuckAfter`, reason surfaced in the UI).
+- [x] Stuck detection (`stuckAfter`, reason surfaced in the UI). Sessions carry
+      `state_reason` (protocol 193) and the state indicator turns it into a
+      tooltip for `unknown` only. See the two findings above: stuck is reachable
+      today only when the brackets are the sole source that ever spoke, and an
+      open bracket outranks it.
 - [ ] `idleStaleAfter` staleness marking, folding in
       `needs_review_after_long_run`. Marked in phase 3; only *consumed* as an
       unsettle trigger by phase 4.
@@ -896,3 +912,8 @@ placeholder only; do not implement against it.
 - Use the OSC 0 turn summary as a live sidebar label.
 - Copilot CLI is out of scope here; it keeps the screen-scrape path until it has
   its own harness signals.
+- `state_reason` is not in the UI-automation bridge's session projection
+  (`serializeSession`), so harness scenarios cannot assert on it. The daemon side
+  is verifiable straight off the WebSocket and the rendering is unit-tested;
+  adding it to the projection means threading the field through the app's local
+  session model, which is not worth doing until a scenario needs it.

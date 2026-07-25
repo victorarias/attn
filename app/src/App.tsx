@@ -1487,6 +1487,9 @@ sendFetchPRDetails,
       delegatedFromChief: daemonSession?.delegated_from_chief ?? false,
       ticketUnread: daemonSession?.ticket_unread ?? false,
       nudgeFiresAt: daemonSession?.nudge_fires_at,
+      // Dropped when a pane status overrides the state: the reason describes the
+      // resolver's answer, and a pane-derived state was not the resolver's.
+      state_reason: paneState ? undefined : daemonSession?.state_reason,
     };
   });
 

@@ -211,8 +211,12 @@ type Daemon struct {
 	sessionEvidence     *sessionEvidenceTable
 	// sessionDwell holds transitions that have been resolved but not yet held
 	// long enough to publish.
-	sessionDwellOnce           sync.Once
-	sessionDwell               *dwellGate
+	sessionDwellOnce sync.Once
+	sessionDwell     *dwellGate
+	// sessionStateReason is the resolver clause behind each session's current
+	// state, carried to clients beside the state itself.
+	sessionStateReasonOnce     sync.Once
+	sessionStateReason         *sessionStateReasons
 	nudgeMu                    sync.Mutex
 	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
 	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
@@ -1765,6 +1769,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	// rebuilds the ring for an id nothing will ever clean up again.
 	d.forgetStateTrace(sessionID)
 	d.evidenceTable().forget(sessionID)
+	d.stateReasons().forget(sessionID)
 	// The dwell gate has to be cleared here rather than left to the resolve
 	// loop's own cleanup: that loop walks the evidence table, so forgetting the
 	// evidence row is exactly what stops it from ever visiting this session
@@ -3013,6 +3018,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	} else {
 		clone.NeedsReviewAfterLongRun = nil
 	}
+	d.decorateSessionWithStateReason(clone)
 	d.decorateSessionWithNudge(clone)
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
