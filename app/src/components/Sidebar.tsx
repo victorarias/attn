@@ -30,6 +30,7 @@ interface LocalSession {
   delegatedFromChief?: boolean;
   ticketUnread?: boolean;
   nudgeFiresAt?: string;
+  state_reason?: string;
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
@@ -1011,7 +1012,7 @@ export function Sidebar({
                       : undefined}
                     title={session.state === 'recoverable' ? 'Session will be recovered when opened' : undefined}
                   >
-                    <StateIndicator state={session.state} size="md" seed={session.id} />
+                    <StateIndicator state={session.state} size="md" seed={session.id} reason={session.state_reason} />
                     <span className="session-label">{session.label}</span>
                     {session.endpointName && (
                       <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
@@ -1174,7 +1175,7 @@ export function Sidebar({
                           data-state={session.state}
                           onClick={() => onSelectSession(session.id)}
                         >
-                          <StateIndicator state={session.state} size="md" seed={session.id} />
+                          <StateIndicator state={session.state} size="md" seed={session.id} reason={session.state_reason} />
                           <span className="session-label">{session.label}</span>
                           {session.chiefOfStaff && <ChiefOfStaffBadge />}
                           {session.delegatedFromChief && <DelegatedFromChiefBadge />}

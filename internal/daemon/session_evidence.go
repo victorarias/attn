@@ -479,11 +479,19 @@ func (d *Daemon) publishResolution(sessionID string, current protocol.SessionSta
 	// ReasonNoEvidence is not a finding, it is the absence of one, and it
 	// resolves to unknown. Publishing it would repaint every session the
 	// evidence table has not heard about yet — including ones a hook is about to
-	// describe perfectly well. Stuck is a real finding, but it is not published
-	// as a state yet.
-	if resolution.Reason == sessionstate.ReasonNoEvidence || resolution.Reason == sessionstate.ReasonStuck {
+	// describe perfectly well.
+	//
+	// Stuck is the opposite: a session whose evidence stopped moving entirely is
+	// the one case where `unknown` is the honest answer rather than a shrug, and
+	// leaving it in whatever color it last showed is the failure this whole plan
+	// exists to remove.
+	if resolution.Reason == sessionstate.ReasonNoEvidence {
 		return
 	}
+	// Recorded whether or not the state moves. A session that is already
+	// `unknown` still needs to say why, and the reason is the difference between
+	// a badge the user can act on and one that only says "something".
+	d.recordStateReason(sessionID, resolution)
 	if !resolverOwnedStates[current] || resolution.State == current {
 		// No transition is on the table, so nothing is waiting out a dwell.
 		// Dropping the wait here is what keeps a later transition from

@@ -858,6 +858,7 @@ export interface SessionElement {
     needs_review_after_long_run?: boolean;
     nudge_fires_at?:              string;
     state:                        SessionState;
+    state_reason?:                string;
     state_since:                  string;
     state_updated_at:             string;
     ticket_unread?:               boolean;
@@ -4113,6 +4114,7 @@ export interface Session {
     needs_review_after_long_run?: boolean;
     nudge_fires_at?:              string;
     state:                        SessionState;
+    state_reason?:                string;
     state_since:                  string;
     state_updated_at:             string;
     ticket_unread?:               boolean;
@@ -9259,6 +9261,7 @@ const typeMap: any = {
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
         { json: "nudge_fires_at", js: "nudge_fires_at", typ: u(undefined, "") },
         { json: "state", js: "state", typ: r("SessionState") },
+        { json: "state_reason", js: "state_reason", typ: u(undefined, "") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "ticket_unread", js: "ticket_unread", typ: u(undefined, true) },
@@ -11210,6 +11213,7 @@ const typeMap: any = {
         { json: "needs_review_after_long_run", js: "needs_review_after_long_run", typ: u(undefined, true) },
         { json: "nudge_fires_at", js: "nudge_fires_at", typ: u(undefined, "") },
         { json: "state", js: "state", typ: r("SessionState") },
+        { json: "state_reason", js: "state_reason", typ: u(undefined, "") },
         { json: "state_since", js: "state_since", typ: "" },
         { json: "state_updated_at", js: "state_updated_at", typ: "" },
         { json: "ticket_unread", js: "ticket_unread", typ: u(undefined, true) },

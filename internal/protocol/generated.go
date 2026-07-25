@@ -3935,6 +3935,9 @@ type Session struct {
 	// State corresponds to the JSON schema field "state".
 	State SessionState `json:"state"`
 
+	// StateReason corresponds to the JSON schema field "state_reason".
+	StateReason *string `json:"state_reason,omitempty,omitzero"`
+
 	// StateSince corresponds to the JSON schema field "state_since".
 	StateSince string `json:"state_since"`
 

@@ -491,6 +491,18 @@ being fixed as part of the current step.
   exactly one `state=working` line in `daemon.log`. This matters beyond tidiness —
   the pulse is the liveness signal the resolver's TTL design depends on, so the
   resolver phase must either un-gate it or grow its own heartbeat.
+- **An open bracket outranks stuck, so it can pin a session green forever.**
+  Found while publishing stuck. `TurnOpen` with `LastBusyAt` never set makes
+  `heartbeatSilentFor` return false — an agent that has never reported being
+  busy is deliberately not treated as silent — so the bracket-open clause returns
+  `working` on every tick and the stuck clause below it is unreachable. For
+  claude and codex this cannot happen, since both paint a busy title with every
+  turn. For an agent with hooks but no heartbeat it is exactly the stuck colour
+  the plan exists to remove, only now with a reason to believe it.
+  Consequently stuck is reachable today only when the brackets are the *only*
+  source that ever spoke and they have stopped too. Not fixed here: reordering
+  the clauses is a behavioural change to the resolver's trust model and deserves
+  its own treatment. Decide in phase 3.5.
 - **Neither guardian produced observable approval evidence, so the dwell has no
   live trigger yet.** Measured on `statedet` 2026-07-26, both agents launched
   with a reviewer and given a command that must escalate. Codex escalated (the

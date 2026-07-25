@@ -70,6 +70,29 @@ describe('StateIndicator', () => {
     expect(indicator).toHaveClass('state-indicator--unknown');
   });
 
+  // An unknown badge with no explanation tells the user something is wrong and
+  // nothing about what, which is the dead end the resolver's reason replaces.
+  it('explains an unknown state from the resolver reason', () => {
+    render(<StateIndicator state="unknown" reason="stuck" />);
+    const indicator = screen.getByTestId('state-indicator');
+    expect(indicator).toHaveAttribute('title', expect.stringContaining('Stuck'));
+    expect(indicator.getAttribute('aria-label')).toContain('Stuck');
+  });
+
+  it('falls back rather than inventing an explanation for an unnamed reason', () => {
+    render(<StateIndicator state="unknown" reason="some_future_clause" />);
+    const indicator = screen.getByTestId('state-indicator');
+    expect(indicator).not.toHaveAttribute('title');
+    expect(indicator).toHaveAttribute('aria-label', 'state unknown');
+  });
+
+  // Every other state says what it means by its own name; a tooltip repeating
+  // that is noise.
+  it('does not explain states that speak for themselves', () => {
+    render(<StateIndicator state="working" reason="heartbeat_fresh" />);
+    expect(screen.getByTestId('state-indicator')).not.toHaveAttribute('title');
+  });
+
   it('renders launching state with emoji', () => {
     render(<StateIndicator state="launching" seed="session-emoji-seed" />);
     const indicator = screen.getByTestId('state-indicator');
