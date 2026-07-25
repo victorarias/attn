@@ -206,8 +206,9 @@ func TestResolve(t *testing.T) {
 			// was in. The heartbeat settles it without any source having to speak.
 			name: "closed brackets and a quiet heartbeat settle with no verdict at all",
 			evidence: Evidence{
-				Heartbeat:  seen(SourceHeartbeat, ClaimSettled, 2*time.Second),
-				LastBusyAt: now.Add(-30 * time.Second),
+				TurnEverOpened: true,
+				Heartbeat:      seen(SourceHeartbeat, ClaimSettled, 2*time.Second),
+				LastBusyAt:     now.Add(-30 * time.Second),
 			},
 			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonHeartbeatSettled,
@@ -247,6 +248,7 @@ func TestResolve(t *testing.T) {
 			// be corrected to waiting_input seconds later, visibly.
 			name: "a settle waits for a classification that is in flight",
 			evidence: Evidence{
+				TurnEverOpened:   true,
 				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
 				LastBusyAt:       now.Add(-30 * time.Second),
 				ClassifyingSince: now.Add(-2 * time.Second),
@@ -259,6 +261,7 @@ func TestResolve(t *testing.T) {
 			// able to freeze a color, which is what an unbounded gate would allow.
 			name: "a classification past its timeout stops holding the settle",
 			evidence: Evidence{
+				TurnEverOpened:   true,
 				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
 				LastBusyAt:       now.Add(-90 * time.Second),
 				ClassifyingSince: now.Add(-31 * time.Second),
@@ -274,6 +277,7 @@ func TestResolve(t *testing.T) {
 			// which is exactly the case the resolver exists to survive.
 			name: "a verdict the agent has gone busy past is not this turn's answer",
 			evidence: Evidence{
+				TurnEverOpened:   true,
 				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
 				LastBusyAt:       now.Add(-6 * time.Second),
 				LastClassifier:   seen(SourceClassifier, ClaimNeedsInput, 20*time.Second),
@@ -285,11 +289,14 @@ func TestResolve(t *testing.T) {
 
 		{
 			// A session between launch and its first prompt has a title and has
-			// never run a turn. Settling that reports a turn finished before the
-			// agent took one, which showed up live as an idle blip at launch.
-			name: "a session that has never been busy has not settled",
+			// never opened a turn. Settling that reports a turn finished before
+			// the agent took one, which showed up live as an idle blip seconds
+			// after launch. A busy frame is not enough to make it a turn: codex
+			// flickers one while booting, which is exactly how this was found.
+			name: "a session that has never opened a turn has not settled",
 			evidence: Evidence{
-				Heartbeat: seen(SourceHeartbeat, ClaimSettled, time.Second),
+				Heartbeat:  seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt: now.Add(-3 * time.Second),
 			},
 			wantState:  protocol.SessionStateUnknown,
 			wantReason: ReasonNoEvidence,
@@ -300,6 +307,7 @@ func TestResolve(t *testing.T) {
 			// scrape stops retiring it.
 			name: "an approval the agent has gone busy past was answered",
 			evidence: Evidence{
+				TurnEverOpened:   true,
 				LastHarnessEvent: seen(SourceHarnessEvent, ClaimApprovalPending, 30*time.Second),
 				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
 				LastBusyAt:       now.Add(-10 * time.Second),
@@ -523,8 +531,9 @@ func TestHeartbeatFreshnessBoundary(t *testing.T) {
 		// LastBusyAt travels with a busy frame — the daemon stamps both — and a
 		// settle needs a turn to have run.
 		e := Evidence{
-			Heartbeat:  seen(SourceHeartbeat, ClaimBusy, tc.age),
-			LastBusyAt: now.Add(-tc.age),
+			Heartbeat:      seen(SourceHeartbeat, ClaimBusy, tc.age),
+			LastBusyAt:     now.Add(-tc.age),
+			TurnEverOpened: true,
 		}
 		if got := Resolve(e, policy, now); got.State != tc.want {
 			t.Fatalf("heartbeat aged %s resolved %s, want %s", tc.age, got.State, tc.want)

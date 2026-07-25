@@ -102,6 +102,11 @@ type Evidence struct {
 
 	// TurnOpen: a prompt was submitted and no Stop has closed it.
 	TurnOpen bool
+	// TurnEverOpened: a turn has opened at least once in this session's life.
+	// It is what separates "settled" from "has not started yet", which look
+	// identical in every other field — a booting agent paints title frames, and
+	// codex flickers a busy one before its first prompt is even ready.
+	TurnEverOpened bool
 	// ToolOpen: a tool call started and has not reported completion.
 	ToolOpen bool
 	// BackgroundWork: the turn yielded with asynchronous work outstanding, so
@@ -375,12 +380,12 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// was in. Reading the heartbeat here means a settle no longer depends on any
 	// particular source having spoken.
 	//
-	// It needs a turn to have run, not merely a heartbeat to exist. A session
-	// still booting has a title and no busy frame yet, and settling that reports
-	// a turn finished before the agent has taken one — a visible idle blip
-	// between launch and the first prompt. The rule is the same one staleness
-	// uses: an agent that has never reported being busy has not gone quiet.
-	if e.Heartbeat != nil && !e.LastBusyAt.IsZero() && !e.TurnOpen && !e.ToolOpen {
+	// It needs a turn to have *opened*, not merely a busy frame to have been
+	// painted. A booting agent paints title frames before its prompt is ready —
+	// codex flickers a busy one — and settling on those reports a turn finished
+	// before the agent has taken one, which showed up live as an idle blip
+	// seconds after launch.
+	if e.Heartbeat != nil && e.TurnEverOpened && !e.TurnOpen && !e.ToolOpen {
 		return settled(e, ReasonHeartbeatSettled, policy, now)
 	}
 

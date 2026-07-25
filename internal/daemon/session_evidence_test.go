@@ -262,7 +262,9 @@ func TestAHungClassifierStopsHoldingTheSettle(t *testing.T) {
 	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 
 	now := time.Now()
-	// The turn ran before it settled, which is what makes the settle a settle.
+	// The turn opened and ran before it settled, which is what makes the settle
+	// a settle rather than a session that has not started.
+	d.recordBracketEvidence(id, protocol.StateWorking)
 	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: now})
 	d.recordClassifierStarted(id, now)
 	d.recordBracketEvidence(id, protocol.StateIdle)
