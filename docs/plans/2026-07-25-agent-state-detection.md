@@ -731,7 +731,14 @@ its whitelist moved into the resolver, or stays screen-driven on purpose.
 
 ### Phase 3 — policy
 
-- [ ] Dwell gate + `guardianDwell`.
+- [x] Dwell gate + `guardianDwell`.
+      **Deviation.** The plan had `ReviewerInLoop` arriving with the session's
+      persisted launch record. It is filed as ordinary evidence at spawn instead:
+      the fact is decided in the spawn pipeline, the evidence table is already the
+      thing the resolver reads, and persisting it would have added a store field
+      whose only reader is one clause. Claude's hook still refreshes it per turn,
+      which is what catches a mid-session mode change; codex reports no permission
+      mode ever, so for codex the spawn record is the only source.
 - [ ] Stuck detection (`stuckAfter`, reason surfaced in the UI).
 - [ ] `idleStaleAfter` staleness marking, folding in
       `needs_review_after_long_run`. Marked in phase 3; only *consumed* as an
