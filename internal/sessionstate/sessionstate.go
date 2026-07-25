@@ -115,6 +115,14 @@ type Evidence struct {
 	// before it is worth showing anyone.
 	ReviewerInLoop bool
 
+	// LastBusyAt is when the heartbeat last said the turn was running. Staleness
+	// is measured from here rather than from the latest heartbeat: claude blips
+	// its not-busy glyph mid-turn (between tool calls, and while a foreground
+	// tool is still running), so treating any non-busy frame as an immediate
+	// settle would flip a healthy open turn to idle. Zero means the agent has
+	// never reported being busy, which is not the same as having gone quiet.
+	LastBusyAt time.Time
+
 	// LastMovement is when any evidence last changed. A session whose evidence
 	// has stopped moving entirely is stuck, which is a distinct condition from
 	// any state it might be reported in.
@@ -243,7 +251,7 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// what the heartbeat is for: a bracket whose closing hook was lost would
 	// otherwise hold the session working for the rest of its life.
 	if e.TurnOpen || e.ToolOpen {
-		if !heartbeatSilentFor(e.Heartbeat, now, policy.StaleAfter) {
+		if !heartbeatSilentFor(e, now, policy.StaleAfter) {
 			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBracketOpen}
 		}
 		// The bracket is stale. Fall through to the settled clauses below, which
@@ -345,16 +353,19 @@ func fresh(o *Observation, claim Claim, now time.Time, ttl time.Duration) bool {
 }
 
 // heartbeatSilentFor reports whether the agent has stopped saying it is busy for
-// longer than d. A heartbeat that never arrived is not silence: an agent with no
+// longer than d.
+//
+// It reads LastBusyAt, not the latest heartbeat. A single non-busy frame is not
+// a settle: claude blips its idle glyph mid-turn, so closing the bracket on that
+// frame would reintroduce the false-settle path the measurements ruled out. Only
+// the absence of busy frames for a full window counts, and an explicit settle
+// arrives as its own fact — the Stop hook closing the bracket.
+//
+// An agent that has never reported being busy is not silent: an agent with no
 // harness signals must not have its brackets closed out from under it.
-func heartbeatSilentFor(o *Observation, now time.Time, d time.Duration) bool {
-	if o == nil {
+func heartbeatSilentFor(e Evidence, now time.Time, d time.Duration) bool {
+	if e.LastBusyAt.IsZero() {
 		return false
 	}
-	if o.Claim != ClaimBusy {
-		// The agent said out loud that it is not busy. That is stronger than
-		// silence, so the bracket is stale immediately.
-		return true
-	}
-	return now.Sub(o.ObservedAt) > d
+	return now.Sub(e.LastBusyAt) > d
 }

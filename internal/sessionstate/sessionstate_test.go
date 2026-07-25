@@ -49,8 +49,9 @@ func TestResolve(t *testing.T) {
 			// agent stops saying it is busy, the bracket has to give way.
 			name: "an open bracket goes stale when the heartbeat goes silent",
 			evidence: Evidence{
-				TurnOpen:  true,
-				Heartbeat: seen(SourceHeartbeat, ClaimBusy, 5*time.Second),
+				TurnOpen:   true,
+				Heartbeat:  seen(SourceHeartbeat, ClaimBusy, 5*time.Second),
+				LastBusyAt: now.Add(-5 * time.Second),
 			},
 			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonBracketStale,
@@ -62,18 +63,46 @@ func TestResolve(t *testing.T) {
 			evidence: Evidence{
 				TurnOpen:       true,
 				Heartbeat:      seen(SourceHeartbeat, ClaimBusy, 5*time.Second),
+				LastBusyAt:     now.Add(-5 * time.Second),
 				LastClassifier: seen(SourceClassifier, ClaimNeedsInput, 2*time.Second),
 			},
 			wantState:  protocol.SessionStateWaitingInput,
 			wantReason: ReasonClassifierVerdict,
 		},
 		{
-			// The agent saying "not busy" is stronger than silence: there is no
-			// reason to wait out StaleAfter for a fact already reported.
-			name: "an explicit not-busy heartbeat makes the bracket stale immediately",
+			// Claude blips its idle glyph mid-turn — between tool calls, and while
+			// a foreground tool is still running. Closing the bracket on that one
+			// frame is the false-settle path the measurements ruled out, so
+			// staleness is measured from the last *busy* frame, not the latest one.
+			name: "a not-busy blip inside the window does not settle an open turn",
 			evidence: Evidence{
-				TurnOpen:  true,
-				Heartbeat: seen(SourceHeartbeat, ClaimSettled, 10*time.Millisecond),
+				TurnOpen:   true,
+				Heartbeat:  seen(SourceHeartbeat, ClaimSettled, 10*time.Millisecond),
+				LastBusyAt: now.Add(-500 * time.Millisecond),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonBracketOpen,
+		},
+		{
+			// And the turn survives the blip being followed by more busy frames,
+			// which is what a real mid-turn gap looks like.
+			name: "busy resuming after a blip keeps the turn working",
+			evidence: Evidence{
+				TurnOpen:   true,
+				Heartbeat:  seen(SourceHeartbeat, ClaimBusy, 50*time.Millisecond),
+				LastBusyAt: now.Add(-50 * time.Millisecond),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonHeartbeatFresh,
+		},
+		{
+			// Only a full window with no busy frame at all settles it, however
+			// recently the agent said it was idle.
+			name: "a not-busy level past the window settles the turn",
+			evidence: Evidence{
+				TurnOpen:   true,
+				Heartbeat:  seen(SourceHeartbeat, ClaimSettled, 10*time.Millisecond),
+				LastBusyAt: now.Add(-5 * time.Second),
 			},
 			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonBracketStale,
@@ -93,8 +122,9 @@ func TestResolve(t *testing.T) {
 			// the bracket there would flicker every long tool to idle.
 			name: "a mid-tool heartbeat gap inside StaleAfter keeps the bracket open",
 			evidence: Evidence{
-				ToolOpen:  true,
-				Heartbeat: seen(SourceHeartbeat, ClaimBusy, 3500*time.Millisecond),
+				ToolOpen:   true,
+				Heartbeat:  seen(SourceHeartbeat, ClaimBusy, 3500*time.Millisecond),
+				LastBusyAt: now.Add(-3500 * time.Millisecond),
 			},
 			wantState:  protocol.SessionStateWorking,
 			wantReason: ReasonBracketOpen,
@@ -281,7 +311,7 @@ func TestBracketStalenessBoundary(t *testing.T) {
 		{age: policy.StaleAfter, want: ReasonBracketOpen},
 		{age: policy.StaleAfter + time.Millisecond, want: ReasonBracketStale},
 	} {
-		e := Evidence{TurnOpen: true, Heartbeat: seen(SourceHeartbeat, ClaimBusy, tc.age)}
+		e := Evidence{TurnOpen: true, Heartbeat: seen(SourceHeartbeat, ClaimBusy, tc.age), LastBusyAt: now.Add(-tc.age)}
 		if got := Resolve(e, policy, now); got.Reason != tc.want {
 			t.Fatalf("bracket with %s of silence resolved %s, want %s", tc.age, got.Reason, tc.want)
 		}
@@ -294,6 +324,7 @@ func TestResolveIsStableForTheSameInputs(t *testing.T) {
 	e := Evidence{
 		TurnOpen:       true,
 		Heartbeat:      seen(SourceHeartbeat, ClaimBusy, 2*time.Second),
+		LastBusyAt:     now.Add(-2 * time.Second),
 		LastClassifier: seen(SourceClassifier, ClaimIdle, time.Second),
 		LastMovement:   now.Add(-time.Second),
 	}
