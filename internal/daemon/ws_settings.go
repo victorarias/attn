@@ -55,6 +55,19 @@ const (
 	// model_reasoning_effort). Empty/unset => the agent's own default. Only
 	// consulted for chief launches.
 	SettingChiefEffortPrefix = "chief_effort_"
+	// SettingDefaultModelPrefix + agent (e.g. "default_model_claude") pins the
+	// model EVERY interactive launch of that agent uses (chief or not), passed
+	// through as --model. Empty/unset => the agent's own default. A per-spawn
+	// pin (delegation) or a chief_model_<agent> override still takes priority
+	// over this; see resolveLaunchModel.
+	SettingDefaultModelPrefix = "default_model_"
+	// SettingDefaultEffortPrefix + agent (e.g. "default_effort_claude") pins
+	// the reasoning effort EVERY interactive launch of that agent uses (chief
+	// or not), passed through as the agent's native effort mechanism (Claude
+	// --effort, Codex model_reasoning_effort). Empty/unset => the agent's own
+	// default. A per-spawn pin (delegation) or a chief_effort_<agent> override
+	// still takes priority over this; see resolveLaunchEffort.
+	SettingDefaultEffortPrefix = "default_effort_"
 	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
 	// the profile-derived default (~/attn-notebook[-profile]).
 	SettingNotebookRoot = "notebook.root"
@@ -331,6 +344,50 @@ func (d *Daemon) chiefLaunchEffort(agent string, chief bool) string {
 	return strings.TrimSpace(d.store.GetSetting(SettingChiefEffortPrefix + strings.ToLower(strings.TrimSpace(agent))))
 }
 
+// defaultLaunchModel returns the configured default model for EVERY
+// interactive launch of the given agent (from default_model_<agent>), chief
+// or not, or "" — the agent's own default — when none is configured.
+func (d *Daemon) defaultLaunchModel(agent string) string {
+	return strings.TrimSpace(d.store.GetSetting(SettingDefaultModelPrefix + strings.ToLower(strings.TrimSpace(agent))))
+}
+
+// defaultLaunchEffort returns the configured default reasoning effort for
+// EVERY interactive launch of the given agent (from default_effort_<agent>),
+// chief or not, or "" — the agent's own default — when none is configured.
+func (d *Daemon) defaultLaunchEffort(agent string) string {
+	return strings.TrimSpace(d.store.GetSetting(SettingDefaultEffortPrefix + strings.ToLower(strings.TrimSpace(agent))))
+}
+
+// resolveLaunchModel picks the model an interactive launch of the given agent
+// should use, honoring precedence: an explicit per-spawn pin (requested,
+// e.g. a delegation's --model) wins outright; otherwise a chief-of-staff
+// launch takes chief_model_<agent>; otherwise every launch (chief or not)
+// falls back to the operator-configured default_model_<agent>; otherwise the
+// agent's own built-in default (an empty string, meaning no --model flag).
+func (d *Daemon) resolveLaunchModel(agent string, chief bool, requested string) string {
+	if requested != "" {
+		return requested
+	}
+	if model := d.chiefLaunchModel(agent, chief); model != "" {
+		return model
+	}
+	return d.defaultLaunchModel(agent)
+}
+
+// resolveLaunchEffort mirrors resolveLaunchModel for reasoning effort:
+// explicit per-spawn pin, then chief_effort_<agent> for chief launches, then
+// the operator-configured default_effort_<agent> for any launch, then the
+// agent's own default.
+func (d *Daemon) resolveLaunchEffort(agent string, chief bool, requested string) string {
+	if requested != "" {
+		return requested
+	}
+	if effort := d.chiefLaunchEffort(agent, chief); effort != "" {
+		return effort
+	}
+	return d.defaultLaunchEffort(agent)
+}
+
 // chiefContextWindowCap returns the effective context-window token cap for a
 // chief-of-staff launch, or 0 (no cap) when this is not a chief launch. Mirrors
 // chiefLaunchModel: the policy (what the cap is, and that only the chief gets
@@ -404,6 +461,14 @@ func (d *Daemon) validateSetting(key, value string) error {
 			// Effort levels are agent-native (claude: low/medium/high/xhigh/max,
 			// codex: minimal/low/medium/high/xhigh); accept any value and let
 			// the agent reject bad ones. The UI constrains input.
+			return nil
+		}
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingDefaultModelPrefix) {
+			// Model names/aliases are free-form, same as chief_model_<agent>.
+			return nil
+		}
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingDefaultEffortPrefix) {
+			// Effort levels are agent-native, same as chief_effort_<agent>.
 			return nil
 		}
 		if _, ok := isAgentExecutableSettingKey(key); ok {
