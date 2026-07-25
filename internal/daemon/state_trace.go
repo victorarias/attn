@@ -46,6 +46,9 @@ const (
 	// fact on the state hook. It says who answers an approval request, which is
 	// what separates a real approval stall from a guardian's brief round trip.
 	stateSourceReviewer = "reviewer"
+	// stateSourceResolver is the evidence resolver's own verdict. In shadow mode
+	// it is recorded only when it disagrees with the state the session is in.
+	stateSourceResolver = "resolver"
 )
 
 // stateTraceRecordGateHook runs inside the recorder's lock, between the liveness

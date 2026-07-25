@@ -596,7 +596,7 @@ being fixed as part of the current step.
       `applyState` entirely — their claims are "busy"/"not_busy", not protocol
       state names — and past the worker/backend state dedup, which would
       otherwise swallow a repeated level.
-- [ ] Feed the hook signals into the ring the same way (phase 1b), then compare
+- [x] Feed the hook signals into the ring the same way (phase 1b), then compare
       traces against the baseline.
 
 ### Phase 2 — resolver
@@ -614,8 +614,14 @@ being fixed as part of the current step.
       returning a `classifyDecision`; the shell performs the IO between them and
       owns the single store write. Six `applyState` exits collapsed to one. Folding
       these rules into `Resolve` itself is Phase 2 work — this makes them movable.
-- [ ] Daemon evidence table + 1s tick; route live signals through the resolver
-      into `applyState` with a new `resolverObservation` cause.
+- [x] **Phase 2b (PR #672), shadow half.** Daemon evidence table + 1s tick.
+      Every existing source is teed into the table alongside its current path,
+      the tick re-resolves each session, and the resolution is recorded in the
+      trace *only when it disagrees* with the stored state. No `applyState` call
+      — the flip is deliberately separate so the resolver can be witnessed
+      agreeing first.
+- [ ] **Phase 2c**, the flip: route live signals through the resolver into
+      `applyState` with a new `resolverObservation` cause.
 - [ ] Gate `internal/pty/state_detector.go` to copilot only; delete the keyword
       lists and `approval_resolver.go`'s screen-absence debounce for claude/codex.
 - [ ] Delete `ShouldApplyPTYState` and all three driver implementations — the
@@ -698,6 +704,19 @@ placeholder only; do not implement against it.
   whenever it was consulted. Copilot keeps it until it has harness signals.
 
 ## Open questions
+
+- **A stale bracket with no classifier verdict settles to `idle`, and the
+  classifier may then say `waiting_input`.** Found in phase 2b's shadow run: the
+  agent said not-busy at 18:33:44.418 and the resolver reached `idle` about a
+  second later via `bracket_stale`, while the store stayed `working` until the
+  classifier landed ~8s after that. Settling fast is the improvement — it is the
+  whole point of the stale clause — but on a turn that ended in a question, the
+  flip would show `idle` for those 8s and then correct to `waiting_input`. That
+  is a flicker where today there is a delay. Options for phase 2c: hold the
+  pre-settle state until the verdict arrives, publish `idle` immediately and
+  accept the correction, or gate on whether a classification is in flight. Needs
+  a decision before the flip, and the shadow traces can measure how often the
+  verdict is `waiting_input` at all.
 
 - ~~Does Claude emit OSC 777 for permission prompts, or only for turn settle?~~
   Answered while implementing phase 1a: it emits no OSC 777 at all. The
