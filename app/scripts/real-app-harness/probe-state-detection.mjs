@@ -14,7 +14,15 @@ import {
 } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
-import { ensureClaudeInitialPanePromptReady } from './scenarioAgents.mjs';
+import {
+  ensureClaudeInitialPanePromptReady,
+  ensureCodexInitialPanePromptReady,
+} from './scenarioAgents.mjs';
+
+// PROBE_AGENT picks which harness the probe drives. The signals differ per agent
+// — claude's approvals arrive on a hook, codex's only in its title — so a run
+// against one says nothing about the other.
+const AGENT = process.env.PROBE_AGENT ?? 'claude';
 
 const PROMPT =
   process.env.PROBE_PROMPT ??
@@ -36,8 +44,9 @@ async function main() {
     observer,
     cwd: process.cwd(),
     label: `probe-state-${Date.now()}`,
-    agent: 'claude',
-    promptReadyFn: ensureClaudeInitialPanePromptReady,
+    agent: AGENT,
+    promptReadyFn:
+      AGENT === 'codex' ? ensureCodexInitialPanePromptReady : ensureClaudeInitialPanePromptReady,
   });
   console.log(`session ${sessionId}`);
 
