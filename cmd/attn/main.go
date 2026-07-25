@@ -87,74 +87,6 @@ type sessionCron struct {
 	Prompt    string `json:"prompt"`
 }
 
-// hasActiveBackgroundTask reports whether the Stop payload still has background
-// work in flight. Such a Stop is a yield, not a terminal stop: the agent will
-// auto-resume when the work completes, so the session should stay "working"
-// rather than be classified (which, mid-run, would read a not-yet-flushed
-// transcript and mis-detect the session as unknown/idle).
-func hasActiveBackgroundTask(input hookInput) bool {
-	for _, t := range input.BackgroundTasks {
-		if strings.EqualFold(strings.TrimSpace(t.Status), "running") {
-			return true
-		}
-	}
-	return false
-}
-
-// hasPendingSessionCron reports whether the Stop payload has a pending
-// scheduled wakeup. Such a Stop is not terminal: the session is parked and will
-// auto-resume when a cron fires, so it should read as "scheduled" rather than
-// be classified (which would treat the parked turn as idle/unknown). Detection
-// is presence-only — session_crons carries no per-item status, and a fired or
-// deleted cron leaves the list entirely.
-func hasPendingSessionCron(input hookInput) bool {
-	return len(input.SessionCrons) > 0
-}
-
-// nonTerminalStopState returns the runtime state to report for a Stop that is
-// not terminal, or "" when the Stop should fall through to normal daemon
-// classification. A Stop is non-terminal when the turn yields with background
-// work still in flight (auto-resumes on completion) or parked on a pending
-// scheduled wakeup (auto-resumes when a cron fires); classifying such a Stop
-// reads a not-yet-flushed transcript and mis-detects the session as
-// idle/unknown. Running background work outranks a parked schedule, so a Stop
-// with both stays "working"; once both drain, the next Stop classifies normally.
-//
-// relaxBackgroundWork drops the background-work -> "working" rule. It is set for
-// the chief of staff: a chief that has merely armed a Monitor to watch its
-// delegations (or a poll loop) is async-waiting, not working, and pegging it
-// green makes the at-a-glance "is the chief actually working?" signal
-// meaningless. With it set, background work no longer forces "working" (the Stop
-// falls through to normal classification, settling idle/waiting), while a pending
-// scheduled wakeup still parks "scheduled" (quiet/blue, not green).
-func nonTerminalStopState(input hookInput, relaxBackgroundWork bool) string {
-	switch {
-	case !relaxBackgroundWork && hasActiveBackgroundTask(input):
-		return protocol.StateWorking
-	case hasPendingSessionCron(input):
-		return protocol.StateScheduled
-	default:
-		return ""
-	}
-}
-
-// sessionIsChiefOfStaff reports whether sessionID currently holds the
-// profile-wide chief-of-staff role. The daemon owns the role, so the hook asks
-// it (the same decorated session list `attn list` shows). Best-effort: any query
-// error reports false, leaving the default (non-relaxed) busy detection intact.
-func sessionIsChiefOfStaff(c *client.Client, sessionID string) bool {
-	sessions, err := c.Query("")
-	if err != nil {
-		return false
-	}
-	for i := range sessions {
-		if sessions[i].ID == sessionID {
-			return sessions[i].ChiefOfStaff != nil && *sessions[i].ChiefOfStaff
-		}
-	}
-	return false
-}
-
 // todoWriteInput represents the tool_input for TodoWrite
 type todoWriteInput struct {
 	Todos []struct {
@@ -3102,7 +3034,7 @@ func runAgentDirectly(requestedAgent string) {
 				transcriptPath = tf.FindTranscript(sessionID, cwd, startedAt)
 			}
 		}
-		if sendErr := c.SendStop(sessionID, transcriptPath); sendErr != nil {
+		if sendErr := c.SendStop(sessionID, transcriptPath, client.StopFacts{}); sendErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not send stop: %v\n", sendErr)
 		}
 	}
@@ -3211,30 +3143,25 @@ func runHookStop() {
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
 	syncSessionResumeID(c, sessionID, input.SessionID)
 
-	// A Stop is not always terminal: if the turn yields with background work in
-	// flight or parked on a scheduled wakeup, report that non-terminal state and
-	// skip classification (see nonTerminalStopState for the precedence/rationale).
-	// For the chief of staff we relax the background-work -> "working" rule so a
-	// chief merely watching its delegations is not pegged green; only resolve the
-	// (daemon-owned) chief role when there is background work to relax, so normal
-	// stops pay nothing.
-	relaxBackgroundWork := false
-	if hasActiveBackgroundTask(input) {
-		relaxBackgroundWork = sessionIsChiefOfStaff(c, sessionID)
-	}
-	if state := nonTerminalStopState(input, relaxBackgroundWork); state != "" {
-		if err := c.UpdateState(sessionID, state); err != nil {
-			fmt.Fprintf(os.Stderr, "error sending %s state: %v\n", state, err)
-			os.Exit(1)
-		}
-		return
-	}
-
-	// Send stop event to daemon for classification
-	if err := c.SendStop(sessionID, transcriptPath); err != nil {
+	// Report what the payload says about whether the turn actually finished and let
+	// the daemon decide. A stop that yields with background work in flight or parks
+	// on a scheduled wakeup is not terminal, but that judgment (and the chief-of-
+	// staff exception to it) belongs where every other state source is arbitrated.
+	if err := c.SendStop(sessionID, transcriptPath, stopFacts(input)); err != nil {
 		fmt.Fprintf(os.Stderr, "error sending stop: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// stopFacts extracts the terminality facts from a Stop payload. Statuses are
+// passed through verbatim: they are the agent harness's strings, and the rule that
+// reads them lives in the daemon.
+func stopFacts(input hookInput) client.StopFacts {
+	facts := client.StopFacts{PendingSessionCrons: len(input.SessionCrons)}
+	for _, t := range input.BackgroundTasks {
+		facts.BackgroundTaskStatuses = append(facts.BackgroundTaskStatuses, t.Status)
+	}
+	return facts
 }
 
 func runHookSessionStart() {

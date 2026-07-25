@@ -281,11 +281,25 @@ func (c *Client) SessionTranscript(targetSessionID, afterCursor string) (*protoc
 }
 
 // SendStop sends a stop signal with transcript path for classification
-func (c *Client) SendStop(id, transcriptPath string) error {
+// StopFacts carries what the Stop hook observed about whether the turn actually
+// finished. The daemon decides what it means; see nonTerminalStopState there. A
+// caller with nothing to report (a hookless agent's process exit) passes the zero
+// value, which reads as a terminal stop.
+type StopFacts struct {
+	// BackgroundTaskStatuses is one status string per background task the agent
+	// reported, verbatim from the harness.
+	BackgroundTaskStatuses []string
+	// PendingSessionCrons counts the scheduled wakeups still pending.
+	PendingSessionCrons int
+}
+
+func (c *Client) SendStop(id, transcriptPath string, facts StopFacts) error {
 	msg := protocol.StopMessage{
-		Cmd:            protocol.CmdStop,
-		ID:             id,
-		TranscriptPath: transcriptPath,
+		Cmd:                    protocol.CmdStop,
+		ID:                     id,
+		TranscriptPath:         transcriptPath,
+		BackgroundTaskStatuses: facts.BackgroundTaskStatuses,
+		PendingSessionCrons:    protocol.Ptr(facts.PendingSessionCrons),
 	}
 	_, err := c.send(msg)
 	return err

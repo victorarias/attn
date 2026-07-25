@@ -463,6 +463,25 @@ being fixed as part of the current step.
   `shouldForwardStateLocked` (`internal/ptybackend/worker.go:166`) dedupes again
   with a `working`-pulse exemption the first layer does not have. Two suppressors
   in series over one stream, neither aware of the other.
+- **The working keepalive pulse is a dead letter on the default backend.** The
+  outer suppressor wins: `Runtime.run` broadcasts `stateChangedEvent` only
+  `if changed`, so the detector's 1.2s `workingPulseInterval` re-emit never
+  crosses the worker→daemon wire, and the backend's own 2s
+  `shouldForwardStateLocked` window only runs on the info-poll path, which is
+  gated behind `if !legacyLifecycle { continue }`. Confirmed live on profile
+  `statedet` (2026-07-25): eleven continuous seconds of claude working produced
+  exactly one `state=working` line in `daemon.log`. This matters beyond tidiness —
+  the pulse is the liveness signal the resolver's TTL design depends on, so the
+  resolver phase must either un-gate it or grow its own heartbeat.
+- **The copilot screen heuristics look stale against copilot 1.0.73.**
+  `classifyCopilotScreen` keys off `defaultStateHeuristics` — prompt markers
+  ` › ` / ` > ` / `❯ ` and status markers "context left" / "for shortcuts". The
+  current copilot CLI renders none of them (its composer is a `┃`-bordered box),
+  and a live copilot session on `statedet` produced no `source=screen` claim at
+  all. Not confirmed against a working turn — this org's policy blocks copilot
+  turns on that machine — so the finding is "the markers are absent from the
+  rendered frames", not "the detector is proven dead". Worth a deliberate check
+  before the resolver starts weighing copilot screen evidence.
 - **That dedup is why `approvalResolver` re-emits `pending_approval` it did not
   observe.** Its own type comment (`internal/pty/approval_resolver.go:13-20`)
   explains it: the onset hook bypasses the worker, so without a redundant
@@ -533,10 +552,11 @@ being fixed as part of the current step.
       claim suppression, working pulse) are shared. `STATE_DETECTOR=0` still
       disables; `=1` keeps the driver's kind, which is what it already did in every
       reachable case.
-- [ ] Enabling refactor 4: the Stop hook reports `background_tasks` /
-      `session_crons` as facts; `nonTerminalStopState` and `sessionIsChiefOfStaff`
-      move daemon-side. Without this the resolver cannot see background work at
-      all.
+- [x] Enabling refactor 4: the Stop hook reports `background_task_statuses` /
+      `pending_session_crons` as facts on `StopMessage` (protocol 189);
+      `nonTerminalStopState` moved to `internal/daemon/stop_terminality.go` and the
+      chief-of-staff lookup is now an in-process `d.isChiefOfStaffSession` call
+      instead of a socket round-trip from the hook back to the daemon.
 - [ ] Feed all of the above into the Phase 0 ring only; still no arbitration
       change. Compare traces against the baseline.
 
@@ -544,9 +564,12 @@ being fixed as part of the current step.
 
 - [ ] New `internal/sessionstate` with `Evidence`, `Resolve`, table tests built
       from Phase 1 traces.
-- [ ] Enabling refactor 5: extract `classifySessionState`'s decision into
-      `Resolve` (todo level and capability gates become evidence rows), leaving a
-      thin IO shell. Six `applyState` exits collapse to one.
+- [x] Enabling refactor 5 (first half): `classifySessionState`'s rules extracted
+      to `internal/daemon/classify_decision.go` as three pure functions
+      (`classifyPreTranscript`, `classifyPostTranscript`, `classifyVerdict`)
+      returning a `classifyDecision`; the shell performs the IO between them and
+      owns the single store write. Six `applyState` exits collapsed to one. Folding
+      these rules into `Resolve` itself is Phase 2 work — this makes them movable.
 - [ ] Daemon evidence table + 1s tick; route live signals through the resolver
       into `applyState` with a new `resolverObservation` cause.
 - [ ] Gate `internal/pty/state_detector.go` to copilot only; delete the keyword

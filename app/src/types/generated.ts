@@ -4382,9 +4382,11 @@ export enum StateMessageCmd {
 }
 
 export interface StopMessage {
-    cmd:             StopMessageCmd;
-    id:              string;
-    transcript_path: string;
+    background_task_statuses?: string[];
+    cmd:                       StopMessageCmd;
+    id:                        string;
+    pending_session_crons?:    number;
+    transcript_path:           string;
     [property: string]: any;
 }
 
@@ -11237,8 +11239,10 @@ const typeMap: any = {
         { json: "state", js: "state", typ: "" },
     ], "any"),
     "StopMessage": o([
+        { json: "background_task_statuses", js: "background_task_statuses", typ: u(undefined, a("")) },
         { json: "cmd", js: "cmd", typ: r("StopMessageCmd") },
         { json: "id", js: "id", typ: "" },
+        { json: "pending_session_crons", js: "pending_session_crons", typ: u(undefined, 0) },
         { json: "transcript_path", js: "transcript_path", typ: "" },
     ], "any"),
     "SubscribeGitStatusMessage": o([

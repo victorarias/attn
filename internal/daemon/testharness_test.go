@@ -99,7 +99,7 @@ func TestHarness_ClaudeStop_RetriesTranscriptReadOnFirstTurn(t *testing.T) {
 		_ = os.WriteFile(transcriptPath, []byte(line), 0o644)
 	}()
 
-	if err := c.SendStop("claude-session", transcriptPath); err != nil {
+	if err := c.SendStop("claude-session", transcriptPath, client.StopFacts{}); err != nil {
 		t.Fatalf("SendStop error: %v", err)
 	}
 

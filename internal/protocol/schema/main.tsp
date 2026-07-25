@@ -632,10 +632,23 @@ model SessionTranscriptMessage {
   after_cursor?: string;
 }
 
+// A Stop is not always terminal: the turn may yield with background work still
+// in flight (it auto-resumes on completion) or park on a pending scheduled
+// wakeup. These carry that as FACTS observed by the hook — the statuses of the
+// agent's background tasks, and how many scheduled wakeups are pending — and the
+// daemon decides what they mean. The hook used to decide and report a state
+// instead, which hid the facts from the daemon and forced the hook to query the
+// daemon back for the chief-of-staff role it needed to decide.
+//
+// Both are optional: a hook binary predating them reports neither, and the
+// daemon then classifies the stop as terminal, which is what such a hook already
+// caused by omitting the state update.
 model StopMessage {
   cmd: "stop";
   id: string;
   transcript_path: string;
+  background_task_statuses?: string[];
+  pending_session_crons?: int32;
 }
 
 model TodosMessage {
