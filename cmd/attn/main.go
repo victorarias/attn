@@ -202,6 +202,9 @@ func main() {
 	case "session":
 		maybePrintProfileBanner()
 		runSession()
+	case "state":
+		maybePrintProfileBanner()
+		runState()
 	case "debug":
 		maybePrintProfileBanner()
 		runDebug()
@@ -567,6 +570,7 @@ func writeHelp(w io.Writer) {
 commands:
   presence                          check whether the current shell runs inside attn
 	  session <command>                 inspect a session's conversation
+  state explain <id>                replay why a session's state is what it is
   delegate --brief-file <path>      start another agent with a delegated brief
   journal append --entry <text>     serialized append to the daily notebook journal
   workspace context <command>       edit shared workspace context

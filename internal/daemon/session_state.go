@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/statetrace"
 )
 
 // sessionStateCause is a package-private sum type. Each variant identifies one
@@ -50,6 +51,21 @@ type sessionStateChange struct {
 	sessionID string
 	state     string
 	cause     sessionStateCause
+	// origin describes the evidence behind the change for the diagnostic trace.
+	// It is optional: a caller that leaves it zero is traced under its cause
+	// name, which is all a daemon-internal transition has to say about itself.
+	// It never affects whether the change commits.
+	origin stateOrigin
+}
+
+// stateOrigin is where a state claim came from, as distinct from the commit rule
+// it travels under. Several sources share one cause — every trusted PTY
+// observation is a liveSignal — so the cause alone cannot tell a screen scrape
+// from an approval edge when a color turns out wrong.
+type stateOrigin struct {
+	source     string
+	detail     string
+	observedAt time.Time
 }
 
 // stateEffectProfile is internal policy derived from a closed cause. Callers do
@@ -107,6 +123,7 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	profile, ok := stateEffectProfileFor(change.cause)
 	if !ok {
 		d.logf("state update discarded: session=%s state=%s cause=unknown", change.sessionID, change.state)
+		d.traceStateChange(change, statetrace.OutcomeDiscarded, "unknown_cause")
 		return false
 	}
 
@@ -124,8 +141,10 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 			change.state,
 			sessionStateCauseName(change.cause),
 		)
+		d.traceStateChange(change, statetrace.OutcomeDiscarded, "store_rejected")
 		return false
 	}
+	d.traceStateChange(change, statetrace.OutcomeApplied, "")
 
 	if profile.touch {
 		d.store.Touch(change.sessionID)

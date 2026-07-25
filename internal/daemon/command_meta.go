@@ -38,6 +38,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdSetSessionResumeID:                    commandMetadata(ScopeSession, false, true),
 	protocol.CmdSessionInstructions:                   commandMetadata(ScopeSession, false, true),
 	protocol.CmdSessionTranscript:                     commandMetadata(ScopeSession, false, true),
+	protocol.CmdStateExplain:                          commandMetadata(ScopeSession, false, true),
 	protocol.CmdStop:                                  commandMetadata(ScopeSession, false, true),
 	protocol.CmdTodos:                                 commandMetadata(ScopeSession, false, true),
 	protocol.CmdFilesEdited:                           commandMetadata(ScopeSession, false, true),

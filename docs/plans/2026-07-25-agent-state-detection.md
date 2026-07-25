@@ -517,12 +517,24 @@ being fixed as part of the current step.
 
 ### Phase 0 — instrumentation (ship first, no behavior change)
 
-- [ ] Per-session ring buffer of state observations: `(source, claim, detail, at,
-      resolved_state)`, capped, in memory, dumped to the daemon log on transition.
-- [ ] `attn state explain <session>` — replay the ring and show why the current
-      color is what it is. Makes "sometimes it gets stuck" falsifiable.
-- [ ] Record from every existing source *without* changing arbitration, so the
-      current behavior is captured as a baseline trace.
+- [x] Per-session ring buffer of state observations in `internal/statetrace`
+      (`Source, Claim, Detail, Cause, Outcome, Reason, ObservedAt, RecordedAt`),
+      capped at 256, in memory, dropped with the session record. Every recorded
+      observation is also mirrored to `daemon.log` as a `state trace:` line, so a
+      session already gone still leaves its trace in the log.
+- [x] `attn state explain <session>` (`--json`) — replays the ring over the new
+      `state_explain` command (protocol 190). Makes "sometimes it gets stuck"
+      falsifiable.
+- [x] Record from every existing source *without* changing arbitration. The
+      recording is deliberately wider than the applied transitions: `Outcome`
+      separates `applied` from `vetoed` (rejected before `applyState` — a driver's
+      `ShouldApplyPTYState`, a plugin-owned session, an unknown session),
+      `discarded` (the store's own commit rule refused it), and `skipped` (the
+      source looked and had nothing to claim). A stuck color is precisely a
+      session with no applied observations, so the rejected ones are the whole
+      point. `sessionStateChange` grew an optional `origin{source, detail,
+      observedAt}` so several sources sharing one cause (every trusted PTY
+      observation is a `liveSignal`) stay distinguishable.
 - [x] Enabling refactor 1: widen `session.onState` to carry
       `Observation{Source, Claim, Detail, At}`. Behavior-preserving; every later
       phase is additive on top of it. Landed as `internal/pty/observation.go` plus

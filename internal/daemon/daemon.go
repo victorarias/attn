@@ -35,6 +35,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/statetrace"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/tasks"
 	"github.com/victorarias/attn/internal/transcript"
@@ -199,7 +200,12 @@ type Daemon struct {
 	// doorbellMu serializes authoritative session-state commits with a complete
 	// doorbell write. This keeps a pending_approval report from interleaving
 	// between the prompt and its trailing Enter.
-	doorbellMu                 sync.Mutex
+	doorbellMu sync.Mutex
+	// stateTrace is the diagnostic ring of state observations behind
+	// `attn state explain`. Lazily built so a directly-constructed test daemon
+	// traces without an init site.
+	stateTraceOnce             sync.Once
+	stateTrace                 *statetrace.Recorder
 	nudgeMu                    sync.Mutex
 	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
 	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
@@ -1745,6 +1751,10 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	}
 	d.clearNudgeState(sessionID)
 	d.store.Remove(sessionID)
+	// After the row is gone, not before: recordStateObservation gates on the row,
+	// so forgetting first would leave a window where a concurrent observation
+	// rebuilds the ring for an id nothing will ever clean up again.
+	d.forgetStateTrace(sessionID)
 }
 
 // handlePTYState applies one PTY-layer observation. It is still last-writer-wins
@@ -1752,17 +1762,21 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 // carried so the resolver can arbitrate once it exists, and are logged meanwhile.
 func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 	state := obs.Claim
+	origin := stateOrigin{source: string(obs.Source), detail: obs.Detail, observedAt: obs.At}
 	session := d.store.Get(sessionID)
 	if session == nil {
+		d.traceStateVeto(sessionID, origin, state, "session_not_found")
 		return
 	}
 	if run := d.store.GetAgentDriverRun(sessionID); run.RunID != "" && d.pluginDriverReportsState(session.Agent) {
 		// External drivers own state through sequenced session.report_* calls.
+		d.traceStateVeto(sessionID, origin, state, "plugin_driver_owns_state")
 		return
 	}
 	agent := session.Agent
 	driver := agentdriver.Get(string(agent))
 	if !agentdriver.ShouldApplyPTYState(driver, session.State, state) {
+		d.traceStateVeto(sessionID, origin, state, "driver_transition_filter")
 		return
 	}
 
@@ -1774,6 +1788,7 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 		sessionID: sessionID,
 		state:     state,
 		cause:     liveSignal{},
+		origin:    origin,
 	})
 }
 
@@ -2177,6 +2192,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSessionInstructions(conn, msg.(*protocol.SessionInstructionsMessage))
 	case protocol.CmdSessionTranscript:
 		d.handleSessionTranscript(conn, msg.(*protocol.SessionTranscriptMessage))
+	case protocol.CmdStateExplain:
+		d.handleStateExplain(conn, msg.(*protocol.StateExplainMessage))
 	case protocol.CmdStop:
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos:
@@ -2362,6 +2379,7 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 		sessionID: msg.ID,
 		state:     msg.State,
 		cause:     liveSignal{},
+		origin:    stateOrigin{source: stateSourceHook},
 	})
 	d.sendOK(conn)
 }
@@ -2433,6 +2451,7 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 			sessionID: msg.ID,
 			state:     state,
 			cause:     liveSignal{},
+			origin:    stateOrigin{source: stateSourceStopHook, detail: "non-terminal stop"},
 		})
 		d.sendOK(conn)
 		return
@@ -2554,6 +2573,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	apply := func(decision classifyDecision) {
 		if decision.action != classifyApply {
 			d.logf("classifySessionState: session=%s no state applied reason=%s", sessionID, decision.reason)
+			d.traceStateSkip(sessionID, stateSourceClassifier, decision.reason)
 			return
 		}
 		d.logf("classifySessionState: session=%s state=%s reason=%s", sessionID, decision.state, decision.reason)
@@ -2561,6 +2581,11 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 			sessionID: sessionID,
 			state:     decision.state,
 			cause:     classifierObservation{observedAt: classificationStartTime},
+			origin: stateOrigin{
+				source:     stateSourceClassifier,
+				detail:     decision.reason,
+				observedAt: classificationStartTime,
+			},
 		})
 	}
 
