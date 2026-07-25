@@ -662,15 +662,18 @@ cleanup, and would bury the interesting change in a much larger diff.
 - [x] Read codex approvals off its title (`[ . ] Action Required | <cwd>`). Codex
       has no notification escape and no approval hook, so without this the flip's
       deletion of the screen scrape would leave codex approvals undetectable.
-- [ ] Route live signals through the resolver into `applyState` with a new
+- [x] Route live signals through the resolver into `applyState` with a new
       `resolverObservation` cause.
-- [ ] Settle flicker: publish the resolver's verdict unless a classification is
+- [x] Settle flicker: publish the resolver's verdict unless a classification is
       in flight, in which case hold the pre-settle state until the verdict lands
       or the classifier times out. Chosen 2026-07-25 over publishing immediately
       (visible ~8s wrong color on every question-ending turn) and over always
       holding (keeps today's delay and forfeits the stuck-color fix for turns
-      that never produce a verdict).
-- [ ] A stale bracket with no classifier verdict **holds** rather than asserting
+      that never produce a verdict). Measured cost of the hold: ~9s on claude,
+      ~4s on codex. Victor 2026-07-25: "9s is more than fine, even 1m would be
+      fine" — so the hold is not worth optimizing, and `ClassifierTimeout` is a
+      safety bound rather than a latency budget.
+- [x] A stale bracket with no classifier verdict **holds** rather than asserting
       `idle`. Measured: claude's approval prompt renders at 14.6s but its
       `Notification` hook lands at 20.6s, so with `StaleAfter` 4s the bracket
       goes stale at ~18.6s and `settled()` would paint idle for ~2s in the middle
@@ -678,6 +681,14 @@ cleanup, and would bury the interesting change in a much larger diff.
       safe because of the `PromptIdleAt` clause above: a lost Stop hook is
       unstuck at 60s, so "hold" can no longer mean "stuck forever". That
       dependency is the entire argument and belongs in a comment at the clause.
+- [x] A verdict is scoped to the turn it judged. Found in review of 2c-1: the
+      verdict is an edge that stayed in the table after the next turn opened, so
+      a turn settling with its own classification in flight published the
+      *previous* turn's answer. Retired on two paths because a turn starts on
+      two paths — the opening bracket clears it (a turn too short to paint a busy
+      frame), and a verdict older than the last busy heartbeat is dropped when
+      read (a turn that starts without its hook). Only reachable because of the
+      hold above; before it, nothing consulted a verdict at that moment.
 
 **2c-2 — the subtraction**, after 2c-1 has been verified live.
 
@@ -699,6 +710,32 @@ cleanup, and would bury the interesting change in a much larger diff.
 
 Phases 0–3 are shippable on their own and are judged on one question: are the
 colors right?
+
+### Phase 3.5 — reflection and simplification
+
+Victor's call, 2026-07-25: after phase 3 lands and before phase 4 is planned,
+stop adding and look at the whole thing. Phases 0–3 were built one seam at a
+time under a working system, so some of what they added is scaffolding for a
+problem that no longer exists.
+
+Not a checklist yet — writing it now would prejudge what the finished system
+looks like. What to examine:
+
+- Signals that stopped earning their place once a later phase landed. The screen
+  scraper is the one 2c-2 already removes; ask the same question of every source
+  the resolver reads.
+- Clauses in `Resolve` that no longer discriminate anything, and clauses whose
+  ordering is load-bearing without a test that would catch a reorder.
+- The `Evidence` fields: which are levels, which are edges, and whether any is
+  both. The cross-turn verdict bug was exactly an edge that outlived its turn,
+  and it is worth asking whether any other field can do the same.
+- Whether the daemon-side evidence recorders and the pure resolver still have a
+  clean split, or whether policy has leaked back into the recorders.
+- Items in "Found while implementing" and "Follow-ups" below — decide each one
+  rather than carrying it forward.
+
+Output is a decision on what to delete or collapse, then the deletion. Judged on
+whether the next person can read `Resolve` top to bottom and predict the colors.
 
 ### Phase 4 — attention mode (opt-in working mode)
 
