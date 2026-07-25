@@ -2478,6 +2478,13 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 		return
 	}
 
+	// A terminal stop *is* the closing bracket. Recording it here rather than
+	// relying on a separate hook state message matters for codex, which sends no
+	// such message: its bracket stayed open past the end of the turn, so the
+	// resolver asserted working over the classifier's verdict until the heartbeat
+	// went stale.
+	d.recordBracketEvidence(msg.ID, protocol.StateIdle)
+
 	if session := d.store.Get(msg.ID); session != nil {
 		if resumeSessionID := agentdriver.ResumeSessionIDFromStopTranscriptPath(
 			agentdriver.Get(string(session.Agent)),
