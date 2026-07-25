@@ -771,7 +771,11 @@ its whitelist moved into the resolver, or stays screen-driven on purpose.
       whose only reader is one clause. Claude's hook still refreshes it per turn,
       which is what catches a mid-session mode change; codex reports no permission
       mode ever, so for codex the spawn record is the only source.
-- [ ] Stuck detection (`stuckAfter`, reason surfaced in the UI).
+- [x] Stuck detection (`stuckAfter`, reason surfaced in the UI). Sessions carry
+      `state_reason` (protocol 193) and the state indicator turns it into a
+      tooltip for `unknown` only. See the two findings above: stuck is reachable
+      today only when the brackets are the sole source that ever spoke, and an
+      open bracket outranks it.
 - [ ] `idleStaleAfter` staleness marking, folding in
       `needs_review_after_long_run`. Marked in phase 3; only *consumed* as an
       unsettle trigger by phase 4.
@@ -908,3 +912,8 @@ placeholder only; do not implement against it.
 - Use the OSC 0 turn summary as a live sidebar label.
 - Copilot CLI is out of scope here; it keeps the screen-scrape path until it has
   its own harness signals.
+- `state_reason` is not in the UI-automation bridge's session projection
+  (`serializeSession`), so harness scenarios cannot assert on it. The daemon side
+  is verifiable straight off the WebSocket and the rendering is unit-tested;
+  adding it to the projection means threading the field through the app's local
+  session model, which is not worth doing until a scenario needs it.
