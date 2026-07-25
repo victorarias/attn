@@ -119,6 +119,11 @@ func (bt *blockTable) ApplyMarker(m osc133Marker, ref blockRef, altScreen bool) 
 
 	switch m.Kind {
 	case osc133PromptStart:
+		// A second prompt-start with no command in between (a redrawn prompt)
+		// replaces the open block; retire the one it displaces or its refs leak.
+		if bt.pending != nil {
+			bt.pending.release()
+		}
 		bt.pending = &trackedBlock{id: bt.nextID, promptRef: cur, altScreen: altScreen}
 		cur.acquire()
 		bt.nextID++
@@ -126,12 +131,20 @@ func (bt *blockTable) ApplyMarker(m osc133Marker, ref blockRef, altScreen bool) 
 		if bt.pending == nil {
 			bt.pending = bt.openPending(cur, altScreen)
 		}
+		// A repeated input-start re-pins the input position; release the ref it
+		// replaces before overwriting the field.
+		if bt.pending.inputRef != nil {
+			bt.pending.inputRef.release()
+		}
 		bt.pending.inputRef = cur
 		cur.acquire()
 	case osc133PreExec:
 		if bt.pending == nil {
 			bt.pending = bt.openPending(cur, altScreen)
 		}
+		// No release-on-replace guard here: outputRef is set only alongside
+		// hasCommand, so a repeated pre-exec always trips self-heal above and
+		// arrives with a fresh pending block whose outputRef is nil.
 		bt.pending.outputRef = cur
 		cur.acquire()
 		bt.pending.command = m.Cmdline

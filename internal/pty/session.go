@@ -117,7 +117,13 @@ type Session struct {
 	subMu       sync.RWMutex
 	subscribers map[string]*sessionSubscriber
 
-	writeMu sync.Mutex
+	// writeMu guards every ptmx access that is not a Read: writes, the resize
+	// ioctl, and the close itself. os.File tolerates Read racing Close, but
+	// Fd() (which the resize ioctl needs) does not — it reads the descriptor
+	// while Close is destroying it. ptmxClosed makes the ordering explicit so a
+	// late resize or query reply becomes a no-op instead of touching a dead fd.
+	writeMu    sync.Mutex
+	ptmxClosed bool
 
 	// themeMu guards theme, which seeds OSC 10/11/12 (fg/bg/cursor color)
 	// replies. Set at spawn (SpawnOptions.Theme) and updated live via SetTheme;
@@ -262,7 +268,7 @@ func nextCoalescedRead(reads <-chan ptyRead, maxBytes int, window time.Duration)
 
 func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(string, ...interface{})) {
 	defer func() {
-		_ = s.ptmx.Close()
+		s.closePTMX()
 		if s.cleanup != nil {
 			s.cleanup()
 		}
@@ -401,10 +407,15 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 // worker answers every query and a snapshot-restored client can suppress all
 // responses. Must be called after replayMu is released; the sink has its own lock.
 func (s *Session) drainGhosttyResponses(logf func(string, ...interface{})) {
-	if s.ghostty == nil {
-		return
+	// The nil check and the drain are one critical section: teardown nils the
+	// field under replayMu, so checking outside the lock would let a freed
+	// terminal be drained.
+	s.replayMu.Lock()
+	var drained []byte
+	if s.ghostty != nil {
+		drained = s.ghostty.DrainResponses()
 	}
-	drained := s.ghostty.DrainResponses()
+	s.replayMu.Unlock()
 	if len(drained) == 0 {
 		return
 	}
@@ -503,7 +514,7 @@ const approvalEvalInterval = 100 * time.Millisecond
 // pending_approval->working clear complete even when the approved command goes
 // quiet and emits no further PTY output.
 func (s *Session) evaluateApproval(now time.Time, throttle bool) {
-	if s.approvalResolver == nil || s.onState == nil || s.ghostty == nil {
+	if s.approvalResolver == nil || s.onState == nil {
 		return
 	}
 	// Never emit a transition for a session that has already exited; a late
@@ -521,7 +532,21 @@ func (s *Session) evaluateApproval(now time.Time, throttle bool) {
 		return
 	}
 	s.lastApprovalEval = now
-	signal := s.approvalResolver.observe(s.ghostty.ViewportText(), now)
+	// Render under replayMu — teardown nils the terminal under that lock, so an
+	// unlocked read could render a freed handle. A torn-down session has nothing
+	// to observe and reports no transition.
+	s.replayMu.Lock()
+	var viewport string
+	haveTerminal := s.ghostty != nil
+	if haveTerminal {
+		viewport = s.ghostty.ViewportText()
+	}
+	s.replayMu.Unlock()
+	if !haveTerminal {
+		s.approvalMu.Unlock()
+		return
+	}
+	signal := s.approvalResolver.observe(viewport, now)
 	switch signal {
 	case approvalClearStarted:
 		s.scheduleApprovalRecheckLocked()
@@ -759,11 +784,34 @@ func (s *Session) resize(cols, rows uint16) error {
 	s.cols = cols
 	s.rows = rows
 	s.metaMu.Unlock()
+	// The reflow mutates the same terminal info() serializes and the block feed
+	// resolves rows against, so it belongs in that critical section.
+	s.replayMu.Lock()
 	if s.ghostty != nil {
 		s.ghostty.Resize(int(cols), int(rows))
 	}
+	s.replayMu.Unlock()
 
+	// The ioctl resolves ptmx.Fd(), so it must not overlap the close.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.ptmxClosed {
+		return nil
+	}
 	return creackpty.Setsize(s.ptmx, &creackpty.Winsize{Cols: cols, Rows: rows})
+}
+
+// closePTMX closes the pty exactly once, shutting out the writers and the
+// resize ioctl that share writeMu. Both the read loop's deferred cleanup and
+// closePTY funnel through here.
+func (s *Session) closePTMX() {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.ptmxClosed {
+		return
+	}
+	s.ptmxClosed = true
+	_ = s.ptmx.Close()
 }
 
 // sigtermToHUPGrace is how long kill waits for a SIGTERM'd child before
@@ -821,14 +869,28 @@ func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 	}
 }
 
+// closePTY releases the pty and the native terminal state behind it.
+//
+// The block feed and the Ghostty terminal own native refs that info() resolves
+// and resize() reflows, so their teardown takes replayMu — the same lock those
+// readers hold. Manager.Remove can hand an already-looked-up session to an
+// in-flight attach before closing it; without this hold that attach could read
+// or free the same native ref concurrently. Both fields are nil'd under the
+// lock so a reader that arrives after teardown sees absence, not a freed
+// handle.
 func (s *Session) closePTY() {
-	_ = s.ptmx.Close()
-	if s.blockFeed != nil {
-		s.blockFeed.close()
+	s.closePTMX()
+
+	s.replayMu.Lock()
+	blockFeed, ghostty := s.blockFeed, s.ghostty
+	s.blockFeed, s.ghostty = nil, nil
+	if blockFeed != nil {
+		blockFeed.close()
 	}
-	if s.ghostty != nil {
-		s.ghostty.Close()
+	if ghostty != nil {
+		ghostty.Close()
 	}
+	s.replayMu.Unlock()
 }
 
 func detectTerminalQueries(data []byte) terminalQueries {
@@ -939,10 +1001,14 @@ func isValidHexColor(value string) bool {
 // is no double-reply to confuse the shell.
 func (s *Session) writeCursorPositionResponse(logf func(string, ...any)) {
 	row, col := 1, 1
+	// Read the cursor under replayMu: teardown nils the terminal under that
+	// lock, so an unlocked check-then-use could query a freed handle.
+	s.replayMu.Lock()
 	if s.ghostty != nil {
 		x, y := s.ghostty.CursorPos()
 		row, col = y+1, x+1
 	}
+	s.replayMu.Unlock()
 	s.writeMu.Lock()
 	_, _ = fmt.Fprintf(s.ptmx, "\x1b[%d;%dR", row, col)
 	s.writeMu.Unlock()
