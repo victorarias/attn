@@ -122,6 +122,19 @@ func (d *Daemon) traceStateVeto(sessionID string, origin stateOrigin, claim, rea
 	})
 }
 
+// traceStateEvidence records an observation whose source does not drive session
+// state. It is recorded and goes no further — the observation never reaches
+// applyState, so it has no cause and cannot be applied or rejected by the store.
+func (d *Daemon) traceStateEvidence(sessionID string, origin stateOrigin, claim string) {
+	d.recordStateObservation(sessionID, statetrace.Observation{
+		Source:     origin.source,
+		Claim:      claim,
+		Detail:     origin.detail,
+		Outcome:    statetrace.OutcomeObserved,
+		ObservedAt: origin.observedAt,
+	})
+}
+
 // traceStateSkip records a source that looked and reported no claim. A skip and
 // a missing observation look identical in the store; only the trace separates
 // "the classifier ran and had nothing to add" from "the classifier never ran".
@@ -171,6 +184,9 @@ func (d *Daemon) stateExplainResult(session *protocol.Session) *protocol.StateEx
 		}
 		if obs.Reason != "" {
 			entry.Reason = protocol.Ptr(obs.Reason)
+		}
+		if obs.Repeats > 0 {
+			entry.Repeats = protocol.Ptr(obs.Repeats)
 		}
 		observations = append(observations, entry)
 	}

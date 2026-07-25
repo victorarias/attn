@@ -63,6 +63,7 @@ func (c *Claude) Capabilities() Capabilities {
 		HasTranscriptWatcher: true,
 		HasClassifier:        true,
 		ScreenDetector:       ScreenDetectorClaude,
+		HarnessSignals:       HarnessSignalsClaude,
 		HasApprovalResolver:  true,
 		HasResume:            true,
 		HasYolo:              true,

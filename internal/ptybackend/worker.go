@@ -2150,20 +2150,27 @@ func (b *WorkerBackend) handleLifecycleEvent(session *workerSession, evt ptywork
 			return
 		}
 		now := time.Now()
-		session.mu.Lock()
-		if !shouldForwardStateLocked(session, state, now) {
+		observation := ptyworker.ObservationFromEvent(evt, state, now)
+		// Evidence-only observations carry a claim in their own vocabulary rather
+		// than a protocol state, so the state dedup below does not apply to them:
+		// it would compare "busy" against the last *state* and drop a heartbeat
+		// whenever the two strings happened to match.
+		if !observation.Source.EvidenceOnly() {
+			session.mu.Lock()
+			if !shouldForwardStateLocked(session, state, now) {
+				session.mu.Unlock()
+				return
+			}
+			session.lastState = state
+			session.lastStateSentAt = now
 			session.mu.Unlock()
-			return
 		}
-		session.lastState = state
-		session.lastStateSentAt = now
-		session.mu.Unlock()
 
 		b.hooksMu.RLock()
 		onState := b.onState
 		b.hooksMu.RUnlock()
 		if onState != nil {
-			onState(session.SessionID, ptyworker.ObservationFromEvent(evt, state, now))
+			onState(session.SessionID, observation)
 		}
 	case ptyworker.EventExit:
 		session.mu.Lock()

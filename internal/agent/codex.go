@@ -50,6 +50,7 @@ func (c *Codex) Capabilities() Capabilities {
 		HasTranscript:       true,
 		HasClassifier:       true,
 		HasApprovalResolver: true,
+		HarnessSignals:      HarnessSignalsCodex,
 		HasResume:           true,
 		HasYolo:             true,
 		HasInitialPrompt:    true,

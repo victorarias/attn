@@ -187,6 +187,15 @@ func (r *Runtime) run(ctx context.Context) error {
 
 	r.manager = pty.NewManager(r.logf)
 	r.manager.SetStateHandler(func(_ string, obs pty.Observation) {
+		// An evidence-only observation does not claim a protocol state, so it must
+		// not touch the cached state or be deduped against it: "busy" and "working"
+		// are different vocabularies, and collapsing them would both corrupt the
+		// cache the worker replays to new watchers and silently drop a heartbeat
+		// whenever it happened to equal the last state string.
+		if obs.Source.EvidenceOnly() {
+			r.broadcastLifecycle(stateChangedEvent(r.cfg.SessionID, obs))
+			return
+		}
 		state := obs.Claim
 		r.stateMu.Lock()
 		previousState := r.state

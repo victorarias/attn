@@ -103,18 +103,27 @@ func printStateExplain(w io.Writer, result *protocol.StateExplainResult) {
 		fmt.Fprintf(w, "\n(showing the most recent %d observations; older ones were evicted)\n", result.Capacity)
 	}
 
-	fmt.Fprintf(w, "\n%-24s  %-18s  %-16s  %-9s  %s\n", "OBSERVED", "SOURCE", "CLAIM", "OUTCOME", "WHY")
+	fmt.Fprintf(w, "\n%-24s  %-18s  %-16s  %-14s  %s\n", "OBSERVED", "SOURCE", "CLAIM", "OUTCOME", "WHY")
 	for _, obs := range result.Observations {
 		fmt.Fprintf(
 			w,
-			"%-24s  %-18s  %-16s  %-9s  %s\n",
+			"%-24s  %-18s  %-16s  %-14s  %s\n",
 			formatStateExplainTime(obs.ObservedAt),
 			orPlaceholder(obs.Source),
 			orPlaceholder(obs.Claim),
-			obs.Outcome,
+			renderOutcome(obs),
 			stateExplainWhy(obs),
 		)
 	}
+}
+
+// renderOutcome appends a repeat count so a collapsed level source reads as one
+// row that kept saying the same thing, not as a single stale observation.
+func renderOutcome(obs protocol.StateExplainEntry) string {
+	if obs.Repeats != nil && *obs.Repeats > 0 {
+		return fmt.Sprintf("%s ×%d", obs.Outcome, *obs.Repeats+1)
+	}
+	return obs.Outcome
 }
 
 // stateExplainWhy is the human column: the rejection reason if there is one,

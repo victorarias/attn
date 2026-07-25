@@ -4322,6 +4322,9 @@ type StateExplainEntry struct {
 	// RecordedAt corresponds to the JSON schema field "recorded_at".
 	RecordedAt string `json:"recorded_at"`
 
+	// Repeats corresponds to the JSON schema field "repeats".
+	Repeats *int `json:"repeats,omitempty,omitzero"`
+
 	// Source corresponds to the JSON schema field "source".
 	Source string `json:"source"`
 }

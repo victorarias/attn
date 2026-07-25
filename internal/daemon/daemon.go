@@ -1763,6 +1763,14 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 	state := obs.Claim
 	origin := stateOrigin{source: string(obs.Source), detail: obs.Detail, observedAt: obs.At}
+	// The harness signals are wired ahead of the resolver that will weigh them, so
+	// their traces can be compared against the current behavior before anything
+	// arbitrates on them. They are recorded and go no further; their claims are in
+	// their own vocabulary and are not protocol states to apply.
+	if obs.Source.EvidenceOnly() {
+		d.traceStateEvidence(sessionID, origin, state)
+		return
+	}
 	session := d.store.Get(sessionID)
 	if session == nil {
 		d.traceStateVeto(sessionID, origin, state, "session_not_found")
