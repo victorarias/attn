@@ -601,8 +601,13 @@ being fixed as part of the current step.
 
 ### Phase 2 — resolver
 
-- [ ] New `internal/sessionstate` with `Evidence`, `Resolve`, table tests built
-      from Phase 1 traces.
+- [x] **Phase 2a (PR #671).** New `internal/sessionstate` with `Evidence`,
+      `Resolve`, `DwellFor`, and table tests. Timing is a `Policy` argument
+      rather than package constants, so each table case states the window it is
+      testing; `PolicyFor` holds the measured per-agent defaults. `Resolution`
+      ships without the plan's `Unsettles` projection — nothing consumes it
+      until the attention mode exists, and an unconsumed field is the same
+      unwitnessed-code mistake as the OSC 777 reader.
 - [x] Enabling refactor 5 (first half): `classifySessionState`'s rules extracted
       to `internal/daemon/classify_decision.go` as three pure functions
       (`classifyPreTranscript`, `classifyPostTranscript`, `classifyVerdict`)
