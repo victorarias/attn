@@ -206,6 +206,9 @@ type Daemon struct {
 	// traces without an init site.
 	stateTraceOnce             sync.Once
 	stateTrace                 *statetrace.Recorder
+	// sessionEvidence is the per-session evidence table the resolver reads.
+	sessionEvidenceOnce sync.Once
+	sessionEvidence     *sessionEvidenceTable
 	nudgeMu                    sync.Mutex
 	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
 	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
@@ -936,6 +939,7 @@ func (d *Daemon) Start() error {
 	// piggybacking the schedule-observation tick — that tick's cadence is
 	// driven by cron granularity, not retention policy.
 	go d.runAutomationRetentionSweep()
+	go d.runEvidenceResolveLoop()
 
 	// Ticket TTL sweep: hard-deletes terminal tickets past their retention
 	// window. This is also what actually bounds a bound continuity thread's
@@ -1590,6 +1594,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		}
 	}
 
+	d.recordProcessEvidence(info.ID, true)
 	if session := d.store.Get(info.ID); session != nil {
 		// Reconcile bound tickets against the pre-clobber state: the idle-clobber
 		// just below erases whether the agent was mid-flight (a crash or kill) or at
@@ -1755,6 +1760,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	// so forgetting first would leave a window where a concurrent observation
 	// rebuilds the ring for an id nothing will ever clean up again.
 	d.forgetStateTrace(sessionID)
+	d.evidenceTable().forget(sessionID)
 }
 
 // handlePTYState applies one PTY-layer observation. It is still last-writer-wins
@@ -1763,6 +1769,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 	state := obs.Claim
 	origin := stateOrigin{source: string(obs.Source), detail: obs.Detail, observedAt: obs.At}
+	d.recordPTYEvidence(sessionID, obs)
 	// The harness signals are wired ahead of the resolver that will weigh them, so
 	// their traces can be compared against the current behavior before anything
 	// arbitrates on them. They are recorded and go no further; their claims are in
@@ -2386,6 +2393,8 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.logf("state update: id=%s state=%s", msg.ID, msg.State)
 	d.tracePermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
+	d.recordReviewerEvidence(msg.ID, protocol.Deref(msg.PermissionMode))
+	d.recordBracketEvidence(msg.ID, msg.State)
 	d.applyState(sessionStateChange{
 		sessionID: msg.ID,
 		state:     msg.State,
@@ -2453,6 +2462,7 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	// A non-terminal stop is a yield, not an end: hold the session in the state the
 	// facts imply and do none of the end-of-turn work below (no resume-id capture,
 	// no narration enqueue, no classification). The turn resumes on its own.
+	d.recordStopFacts(msg.ID, len(msg.BackgroundTaskStatuses) > 0, protocol.Deref(msg.PendingSessionCrons) > 0)
 	if state := nonTerminalStopState(msg, d.isChiefOfStaffSession(msg.ID)); state != "" {
 		d.logf(
 			"handleStop: non-terminal stop session=%s state=%s background_tasks=%d pending_crons=%d",
@@ -2588,6 +2598,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 			return
 		}
 		d.logf("classifySessionState: session=%s state=%s reason=%s", sessionID, decision.state, decision.reason)
+		d.recordClassifierEvidence(sessionID, decision.state, classificationStartTime)
 		d.applyState(sessionStateChange{
 			sessionID: sessionID,
 			state:     decision.state,
