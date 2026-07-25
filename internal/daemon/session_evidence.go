@@ -36,15 +36,27 @@ func newSessionEvidenceTable() *sessionEvidenceTable {
 	return &sessionEvidenceTable{sessions: make(map[string]*sessionstate.Evidence)}
 }
 
-// update mutates one session's evidence under the table's lock, creating the
-// record on first use. It stamps LastMovement, so stuck detection cannot drift
-// out of sync with the writes it is supposed to be watching.
-func (t *sessionEvidenceTable) update(sessionID string, at time.Time, mutate func(*sessionstate.Evidence)) {
+// updateIf mutates one session's evidence, creating the record on first use, but
+// only when admit says the session is live. It stamps LastMovement, so stuck
+// detection cannot drift out of sync with the writes it is watching.
+//
+// admit runs while holding the table's lock, which is the whole point: the
+// caller's liveness check and the write have to be one atomic step. Removal
+// deletes the store row and then forgets the table, so with admission inside the
+// lock the two possible interleavings are "the writer wins and its entry is then
+// forgotten" and "removal wins and the writer is refused". Checking liveness
+// outside the lock leaves a third: the writer passes the check, removal deletes
+// and forgets, and the writer then recreates an entry for an id nothing will
+// ever clean up again. That is the leak #668 fixed in the trace ring.
+func (t *sessionEvidenceTable) updateIf(sessionID string, at time.Time, admit func() bool, mutate func(*sessionstate.Evidence)) {
 	if t == nil || strings.TrimSpace(sessionID) == "" {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if admit != nil && !admit() {
+		return
+	}
 	evidence := t.sessions[sessionID]
 	if evidence == nil {
 		evidence = &sessionstate.Evidence{}
@@ -92,6 +104,25 @@ func (t *sessionEvidenceTable) forget(sessionID string) {
 	delete(t.sessions, sessionID)
 }
 
+// evidenceRecordGateHook runs inside the evidence table's lock, between the
+// live-row check and the write. Tests only: it is the seam where a concurrent
+// removal would have to interleave for an orphan entry to appear.
+var evidenceRecordGateHook func(sessionID string)
+
+// recordEvidence is the single write path into the evidence table. Every source
+// goes through it so the liveness gate cannot be forgotten at one call site.
+func (d *Daemon) recordEvidence(sessionID string, at time.Time, mutate func(*sessionstate.Evidence)) {
+	d.evidenceTable().updateIf(sessionID, at, func() bool {
+		live := d.store != nil && d.store.Get(sessionID) != nil
+		// The hook runs after the check on purpose: check-then-write is the
+		// sequence that leaks when the two are not atomic.
+		if hook := evidenceRecordGateHook; hook != nil {
+			hook(sessionID)
+		}
+		return live
+	}, mutate)
+}
+
 func (d *Daemon) evidenceTable() *sessionEvidenceTable {
 	d.sessionEvidenceOnce.Do(func() {
 		d.sessionEvidence = newSessionEvidenceTable()
@@ -113,7 +144,7 @@ func (d *Daemon) recordPTYEvidence(sessionID string, obs pty.Observation) {
 		if obs.Claim == "busy" {
 			claim = sessionstate.ClaimBusy
 		}
-		d.evidenceTable().update(sessionID, at, func(e *sessionstate.Evidence) {
+		d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
 			e.Heartbeat = &sessionstate.Observation{
 				Source:     sessionstate.SourceHeartbeat,
 				Claim:      claim,
@@ -129,7 +160,7 @@ func (d *Daemon) recordPTYEvidence(sessionID string, obs pty.Observation) {
 			}
 		})
 	case pty.SourceApproval:
-		d.evidenceTable().update(sessionID, at, func(e *sessionstate.Evidence) {
+		d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
 			e.LastHarnessEvent = &sessionstate.Observation{
 				Source:     sessionstate.SourceHarnessEvent,
 				Claim:      approvalClaim(obs.Claim),
@@ -138,7 +169,7 @@ func (d *Daemon) recordPTYEvidence(sessionID string, obs pty.Observation) {
 			}
 		})
 	case pty.SourceScreen:
-		d.evidenceTable().update(sessionID, at, func(e *sessionstate.Evidence) {
+		d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
 			e.Screen = &sessionstate.Observation{
 				Source:     sessionstate.SourceScreen,
 				Claim:      stateClaim(obs.Claim),
@@ -154,7 +185,7 @@ func (d *Daemon) recordPTYEvidence(sessionID string, obs pty.Observation) {
 // title silence claude produces inside a blocking tool call.
 func (d *Daemon) recordBracketEvidence(sessionID, state string) {
 	at := time.Now()
-	d.evidenceTable().update(sessionID, at, func(e *sessionstate.Evidence) {
+	d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
 		switch state {
 		case protocol.StateWorking:
 			e.TurnOpen = true
@@ -180,7 +211,7 @@ func (d *Daemon) recordClassifierEvidence(sessionID, state string, observedAt ti
 	if claim == "" {
 		return
 	}
-	d.evidenceTable().update(sessionID, observedAt, func(e *sessionstate.Evidence) {
+	d.recordEvidence(sessionID, observedAt, func(e *sessionstate.Evidence) {
 		e.LastClassifier = &sessionstate.Observation{
 			Source:     sessionstate.SourceClassifier,
 			Claim:      claim,
@@ -193,7 +224,7 @@ func (d *Daemon) recordClassifierEvidence(sessionID, state string, observedAt ti
 // These are the facts the CLI used to collapse into a state string before they
 // crossed the socket, which is why the resolver could not see them.
 func (d *Daemon) recordStopFacts(sessionID string, backgroundWork, pendingCron bool) {
-	d.evidenceTable().update(sessionID, time.Now(), func(e *sessionstate.Evidence) {
+	d.recordEvidence(sessionID, time.Now(), func(e *sessionstate.Evidence) {
 		e.BackgroundWork = backgroundWork
 		e.PendingCron = pendingCron
 	})
@@ -207,7 +238,7 @@ func (d *Daemon) recordReviewerEvidence(sessionID, permissionMode string) {
 		return
 	}
 	inLoop := mode != "default"
-	d.evidenceTable().update(sessionID, time.Now(), func(e *sessionstate.Evidence) {
+	d.recordEvidence(sessionID, time.Now(), func(e *sessionstate.Evidence) {
 		e.ReviewerInLoop = inLoop
 	})
 }
@@ -219,7 +250,7 @@ func (d *Daemon) recordProcessEvidence(sessionID string, exited bool) {
 		return
 	}
 	at := time.Now()
-	d.evidenceTable().update(sessionID, at, func(e *sessionstate.Evidence) {
+	d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
 		e.Process = &sessionstate.Observation{
 			Source:     sessionstate.SourceProcess,
 			Claim:      sessionstate.ClaimExited,

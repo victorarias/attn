@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ func evidenceOf(t *testing.T, d *Daemon, sessionID string) sessionstate.Evidence
 func TestHeartbeatEvidenceKeepsItsObservationTime(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-hb-evidence"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 	observed := time.Now().Add(-300 * time.Millisecond)
 
 	d.recordPTYEvidence(id, pty.Observation{
@@ -49,6 +51,7 @@ func TestHeartbeatEvidenceKeepsItsObservationTime(t *testing.T) {
 func TestNotBusyHeartbeatEvidenceIsSettled(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-hb-settled"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 
 	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: time.Now()})
 
@@ -62,6 +65,7 @@ func TestNotBusyHeartbeatEvidenceIsSettled(t *testing.T) {
 func TestBracketEvidenceOpensAndCloses(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-bracket"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 
 	d.recordBracketEvidence(id, protocol.StateWorking)
 	if !evidenceOf(t, d, id).TurnOpen {
@@ -81,6 +85,7 @@ func TestBracketEvidenceOpensAndCloses(t *testing.T) {
 func TestStopFactsBecomeEvidence(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-stop-facts"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 
 	d.recordStopFacts(id, true, false)
 	if got := evidenceOf(t, d, id); !got.BackgroundWork || got.PendingCron {
@@ -108,6 +113,7 @@ func TestReviewerEvidenceReadsThePermissionMode(t *testing.T) {
 	} {
 		d := newTraceDaemon(t)
 		id := "sess-reviewer-" + tc.mode
+		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 		d.recordReviewerEvidence(id, tc.mode)
 		if got := evidenceOf(t, d, id).ReviewerInLoop; got != tc.want {
 			t.Fatalf("mode %q -> ReviewerInLoop %v, want %v", tc.mode, got, tc.want)
@@ -120,6 +126,7 @@ func TestReviewerEvidenceReadsThePermissionMode(t *testing.T) {
 // every codex session.
 func TestAnAbsentPermissionModeRecordsNothing(t *testing.T) {
 	d := newTraceDaemon(t)
+	addCharacterizationSession(t, d, "sess-no-mode", protocol.SessionAgentClaude, protocol.SessionStateWorking)
 	d.recordReviewerEvidence("sess-no-mode", "  ")
 	if _, ok := d.evidenceTable().snapshot("sess-no-mode"); ok {
 		t.Fatal("an absent mode created an evidence record")
@@ -131,6 +138,7 @@ func TestAnAbsentPermissionModeRecordsNothing(t *testing.T) {
 func TestEveryEvidenceWriteStampsMovement(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-movement"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 
 	d.recordBracketEvidence(id, protocol.StateWorking)
 	first := evidenceOf(t, d, id).LastMovement
@@ -220,6 +228,7 @@ func TestTheResolveTickForgetsARemovedSession(t *testing.T) {
 func TestOnlyABusyHeartbeatAdvancesLastBusy(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-lastbusy"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 
 	busy := time.Now().Add(-2 * time.Second)
 	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: busy})
@@ -236,5 +245,81 @@ func TestOnlyABusyHeartbeatAdvancesLastBusy(t *testing.T) {
 	// heartbeat-fresh clause reads.
 	if got.Heartbeat.Claim != sessionstate.ClaimSettled {
 		t.Fatalf("latest heartbeat %+v, want the settled frame", got.Heartbeat)
+	}
+}
+
+// An id with no store row can never be read back — the tick resolves against a
+// store row — and can never be cleaned up, because cleanup hangs off session
+// removal. Ringing one would leak an entry per stale id for the daemon's life.
+func TestEvidenceIsNotRecordedForAnUnknownSession(t *testing.T) {
+	d := newTraceDaemon(t)
+
+	d.recordPTYEvidence("ghost", pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: time.Now()})
+	d.recordBracketEvidence("ghost", protocol.StateWorking)
+	d.recordStopFacts("ghost", true, false)
+	d.recordReviewerEvidence("ghost", "auto")
+	d.recordProcessEvidence("ghost", true)
+
+	if _, ok := d.evidenceTable().snapshot("ghost"); ok {
+		t.Fatal("an unknown session created an evidence entry")
+	}
+}
+
+// The stale-worker race: a session is removed while one of its observations is
+// still in flight. The write's liveness check and its append have to be one
+// atomic step, or the late writer recreates an entry for an id that will never
+// be removed again.
+//
+// The hook parks the writer *after* it has read the store row and *before* it
+// appends — the exact window that leaks when the check sits outside the lock.
+func TestEvidenceDoesNotLeakWhenRemovalRacesTheWrite(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-evidence-race"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	paused := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	evidenceRecordGateHook = func(observed string) {
+		if observed != id {
+			return
+		}
+		once.Do(func() {
+			close(paused)
+			<-release
+		})
+	}
+	t.Cleanup(func() { evidenceRecordGateHook = nil })
+
+	wrote := make(chan struct{})
+	go func() {
+		defer close(wrote)
+		d.recordBracketEvidence(id, protocol.StateWorking)
+	}()
+
+	<-paused
+	// Removal runs entirely while the writer is parked mid-write. With admission
+	// inside the lock it cannot interleave here at all — it blocks until the
+	// writer finishes and then forgets whatever the writer left.
+	go func() {
+		d.dropSessionRecord(id)
+	}()
+	// Give the removal a chance to reach the table before the writer resumes, so
+	// the ordering under test is the hostile one rather than a lucky one.
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	<-wrote
+
+	// Whichever order won, no entry may survive the session.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, ok := d.evidenceTable().snapshot(id)
+		if !ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("evidence survived the racing removal: %+v", got)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
