@@ -1747,7 +1747,11 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	d.store.Remove(sessionID)
 }
 
-func (d *Daemon) handlePTYState(sessionID, state string) {
+// handlePTYState applies one PTY-layer observation. It is still last-writer-wins
+// against the other sources; the observation's source/detail/observation-time are
+// carried so the resolver can arbitrate once it exists, and are logged meanwhile.
+func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
+	state := obs.Claim
 	session := d.store.Get(sessionID)
 	if session == nil {
 		return
@@ -1762,7 +1766,10 @@ func (d *Daemon) handlePTYState(sessionID, state string) {
 		return
 	}
 
-	d.logf("pty state update: session=%s agent=%s state=%s", sessionID, agent, state)
+	d.logf(
+		"pty state update: session=%s agent=%s state=%s source=%s detail=%q observed_at=%s",
+		sessionID, agent, state, obs.Source, obs.Detail, obs.At.Format(time.RFC3339Nano),
+	)
 	d.applyState(sessionStateChange{
 		sessionID: sessionID,
 		state:     state,

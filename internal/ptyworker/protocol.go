@@ -1,6 +1,11 @@
 package ptyworker
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+
+	"github.com/victorarias/attn/internal/pty"
+)
 
 const (
 	RPCMajor = 1
@@ -81,6 +86,16 @@ type EventEnvelope struct {
 	State      *string `json:"state,omitempty"`
 	ExitCode   *int    `json:"exit_code,omitempty"`
 	ExitSignal *string `json:"exit_signal,omitempty"`
+
+	// StateSource / StateDetail / StateObservedAt qualify State on
+	// EventStateChanged: which observer spoke, why, and when it observed. The
+	// daemon arbitrates between observers, which a bare state name cannot
+	// support. Added without an RPC version bump, following the MethodSnapshot
+	// precedent: an older worker simply omits them and the daemon treats the
+	// state as source-unknown, observed on arrival.
+	StateSource     *string `json:"state_source,omitempty"`
+	StateDetail     *string `json:"state_detail,omitempty"`
+	StateObservedAt *string `json:"state_observed_at,omitempty"`
 }
 
 type HelloParams struct {
@@ -198,4 +213,50 @@ func IsCompatibleVersion(peerMajor, peerMinor int) bool {
 		return false
 	}
 	return true
+}
+
+// stateChangedEvent wraps one PTY observation as an EventStateChanged envelope.
+func stateChangedEvent(sessionID string, obs pty.Observation) EventEnvelope {
+	claim := obs.Claim
+	source := string(obs.Source)
+	evt := EventEnvelope{
+		Type:        "evt",
+		Event:       EventStateChanged,
+		SessionID:   sessionID,
+		State:       &claim,
+		StateSource: &source,
+	}
+	if obs.Detail != "" {
+		detail := obs.Detail
+		evt.StateDetail = &detail
+	}
+	if !obs.At.IsZero() {
+		at := obs.At.Format(time.RFC3339Nano)
+		evt.StateObservedAt = &at
+	}
+	return evt
+}
+
+// ObservationFromEvent reads an EventStateChanged envelope back into an
+// Observation. A worker older than the qualifying fields yields
+// pty.SourceUnknown observed at fallbackAt (the receive time), which is the
+// closest honest answer available.
+func ObservationFromEvent(evt EventEnvelope, claim string, fallbackAt time.Time) pty.Observation {
+	obs := pty.Observation{
+		Source: pty.SourceUnknown,
+		Claim:  claim,
+		At:     fallbackAt,
+	}
+	if evt.StateSource != nil && *evt.StateSource != "" {
+		obs.Source = pty.Source(*evt.StateSource)
+	}
+	if evt.StateDetail != nil {
+		obs.Detail = *evt.StateDetail
+	}
+	if evt.StateObservedAt != nil {
+		if at, err := time.Parse(time.RFC3339Nano, *evt.StateObservedAt); err == nil && !at.IsZero() {
+			obs.At = at
+		}
+	}
+	return obs
 }

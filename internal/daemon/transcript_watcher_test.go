@@ -30,7 +30,7 @@ func TestHandlePTYState_CodexIgnoresPTYState(t *testing.T) {
 			LastSeen:       nowStr,
 		})
 
-		d.handlePTYState(id, state)
+		d.handlePTYState(id, screenObs(state))
 		if got := d.store.Get(id); got.State != protocol.SessionStateIdle {
 			t.Fatalf("codex %s PTY state should be ignored, got=%s", state, got.State)
 		}
@@ -55,13 +55,13 @@ func TestHandlePTYState_CodexWorkingDoesNotOverrideStoppedStates(t *testing.T) {
 	}
 
 	addCodexSession("codex-idle", protocol.SessionStateIdle)
-	d.handlePTYState("codex-idle", protocol.StateWorking)
+	d.handlePTYState("codex-idle", screenObs(protocol.StateWorking))
 	if got := d.store.Get("codex-idle"); got.State != protocol.SessionStateIdle {
 		t.Fatalf("codex working PTY should not override idle, got=%s", got.State)
 	}
 
 	addCodexSession("codex-waiting", protocol.SessionStateWaitingInput)
-	d.handlePTYState("codex-waiting", protocol.StateWorking)
+	d.handlePTYState("codex-waiting", screenObs(protocol.StateWorking))
 	if got := d.store.Get("codex-waiting"); got.State != protocol.SessionStateWaitingInput {
 		t.Fatalf("codex working PTY should not override waiting_input, got=%s", got.State)
 	}
@@ -86,7 +86,7 @@ func TestHandlePTYState_CodexWorkingClearsPendingApproval(t *testing.T) {
 		LastSeen:       nowStr,
 	})
 
-	d.handlePTYState("codex-pending", protocol.StateWorking)
+	d.handlePTYState("codex-pending", screenObs(protocol.StateWorking))
 	if got := d.store.Get("codex-pending"); got.State != protocol.SessionStateWorking {
 		t.Fatalf("codex working PTY should clear pending_approval, got=%s", got.State)
 	}
@@ -107,7 +107,7 @@ func TestHandlePTYState_ClaudeAcceptsWaiting(t *testing.T) {
 		LastSeen:       nowStr,
 	})
 
-	d.handlePTYState("claude-sess", protocol.StateWaitingInput)
+	d.handlePTYState("claude-sess", screenObs(protocol.StateWaitingInput))
 	if got := d.store.Get("claude-sess"); got.State != protocol.SessionStateWaitingInput {
 		t.Fatalf("claude waiting_input should be applied, got=%s", got.State)
 	}
@@ -143,7 +143,7 @@ func TestHandlePTYState_ClaudeScheduledSurvivesDetectorNoise(t *testing.T) {
 	} {
 		id := "claude-scheduled-" + noise
 		addScheduled(id)
-		d.handlePTYState(id, noise)
+		d.handlePTYState(id, screenObs(noise))
 		if got := d.store.Get(id); got.State != protocol.SessionStateScheduled {
 			t.Fatalf("scheduled should survive %s PTY detector noise, got=%s", noise, got.State)
 		}
@@ -151,7 +151,7 @@ func TestHandlePTYState_ClaudeScheduledSurvivesDetectorNoise(t *testing.T) {
 
 	// A genuine resume (working) is the one signal that may leave scheduled.
 	addScheduled("claude-scheduled-resume")
-	d.handlePTYState("claude-scheduled-resume", protocol.StateWorking)
+	d.handlePTYState("claude-scheduled-resume", screenObs(protocol.StateWorking))
 	if got := d.store.Get("claude-scheduled-resume"); got.State != protocol.SessionStateWorking {
 		t.Fatalf("working PTY state should resume a scheduled session, got=%s", got.State)
 	}
@@ -172,7 +172,7 @@ func TestHandlePTYState_CopilotKeepsPendingAgainstWorkingNoise(t *testing.T) {
 		LastSeen:       nowStr,
 	})
 
-	d.handlePTYState("copilot-sess", protocol.StateWorking)
+	d.handlePTYState("copilot-sess", screenObs(protocol.StateWorking))
 	if got := d.store.Get("copilot-sess"); got.State != protocol.SessionStatePendingApproval {
 		t.Fatalf("copilot working should not override pending_approval, got=%s", got.State)
 	}

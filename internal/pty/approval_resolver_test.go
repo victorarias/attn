@@ -167,12 +167,12 @@ func TestApprovalResolver_PromptReappearsResetsDebounce(t *testing.T) {
 // prompt-gone sample we make no further evaluateApproval calls and rely solely on
 // the timer.
 func TestSession_ApprovalClearsWithoutFurtherOutput(t *testing.T) {
-	states := make(chan string, 8)
+	states := make(chan Observation, 8)
 	gt := newTestGhostty(t, 80, 24)
 	s := &Session{
 		approvalResolver: &approvalResolver{},
 		ghostty:          gt,
-		onState:          func(state string) { states <- state },
+		onState:          func(obs Observation) { states <- obs },
 	}
 	s.running = true
 
@@ -187,9 +187,12 @@ func TestSession_ApprovalClearsWithoutFurtherOutput(t *testing.T) {
 	paint(codexApprovalScreen)
 	s.evaluateApproval(time.Now(), false)
 	select {
-	case st := <-states:
-		if st != statePendingApproval {
-			t.Fatalf("expected %q when the prompt appears, got %q", statePendingApproval, st)
+	case obs := <-states:
+		if obs.Claim != statePendingApproval {
+			t.Fatalf("expected %q when the prompt appears, got %q", statePendingApproval, obs.Claim)
+		}
+		if obs.Source != SourceApproval {
+			t.Fatalf("expected source %q, got %q", SourceApproval, obs.Source)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected pending_approval when the prompt appears")
@@ -201,9 +204,12 @@ func TestSession_ApprovalClearsWithoutFurtherOutput(t *testing.T) {
 	s.evaluateApproval(time.Now(), false)
 
 	select {
-	case st := <-states:
-		if st != stateWorking {
-			t.Fatalf("expected %q from the scheduled recheck, got %q", stateWorking, st)
+	case obs := <-states:
+		if obs.Claim != stateWorking {
+			t.Fatalf("expected %q from the scheduled recheck, got %q", stateWorking, obs.Claim)
+		}
+		if obs.Source != SourceApproval {
+			t.Fatalf("expected source %q, got %q", SourceApproval, obs.Source)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("working was not emitted without further PTY output (timer did not drive the clear)")

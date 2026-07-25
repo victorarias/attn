@@ -187,7 +187,7 @@ type Backend interface {
 
 type LifecycleHooks interface {
 	SetExitHandler(func(ExitInfo))
-	SetStateHandler(func(sessionID, state string))
+	SetStateHandler(func(sessionID string, obs pty.Observation))
 }
 
 type SessionInfoProvider interface {

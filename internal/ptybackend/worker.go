@@ -131,7 +131,7 @@ type WorkerBackend struct {
 
 	hooksMu sync.RWMutex
 	onExit  func(ExitInfo)
-	onState func(sessionID, state string)
+	onState func(sessionID string, obs pty.Observation)
 
 	reqSeq atomic.Uint64
 }
@@ -312,7 +312,7 @@ func (b *WorkerBackend) SetExitHandler(handler func(ExitInfo)) {
 	b.onExit = handler
 }
 
-func (b *WorkerBackend) SetStateHandler(handler func(sessionID, state string)) {
+func (b *WorkerBackend) SetStateHandler(handler func(sessionID string, obs pty.Observation)) {
 	b.hooksMu.Lock()
 	defer b.hooksMu.Unlock()
 	b.onState = handler
@@ -1988,7 +1988,14 @@ func (b *WorkerBackend) startPoller(session *workerSession) {
 					onState := b.onState
 					b.hooksMu.RUnlock()
 					if onState != nil {
-						onState(session.SessionID, newState)
+						// The poll reports the worker's own last known state, not a
+						// fresh terminal observation.
+						onState(session.SessionID, pty.Observation{
+							Source: pty.SourceWorkerInfo,
+							Claim:  newState,
+							Detail: "worker info poll",
+							At:     now,
+						})
 					}
 				}
 
@@ -2156,7 +2163,7 @@ func (b *WorkerBackend) handleLifecycleEvent(session *workerSession, evt ptywork
 		onState := b.onState
 		b.hooksMu.RUnlock()
 		if onState != nil {
-			onState(session.SessionID, state)
+			onState(session.SessionID, ptyworker.ObservationFromEvent(evt, state, now))
 		}
 	case ptyworker.EventExit:
 		session.mu.Lock()
