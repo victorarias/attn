@@ -110,6 +110,39 @@ func TestSpawnFilesWhoAnswersApprovals(t *testing.T) {
 	}
 }
 
+// Codex's hooks send `permission_mode: default` on every turn as payload
+// filler, while its reviewer is set by the approvals_reviewer flag at launch.
+// Believing that field would retire the spawn-time fact on the session's first
+// turn and take the dwell with it — which is exactly what a live guardian run
+// showed before this guard existed.
+func TestCodexPermissionModeDoesNotRetireTheSpawnTimeReviewer(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-codex-mode"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentCodex, protocol.SessionStateWorking)
+
+	d.recordReviewerEvidence(id, true)
+	d.recordReviewerEvidenceFromPermissionMode(id, "default")
+
+	if !evidenceOf(t, d, id).ReviewerInLoop {
+		t.Fatal("codex's filler permission mode retired the reviewer recorded at spawn")
+	}
+}
+
+// Claude's mode is a genuine report, and a user switching back to answering for
+// themselves mid-session must take effect.
+func TestClaudePermissionModeStillRetiresTheReviewer(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-claude-mode"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	d.recordReviewerEvidence(id, true)
+	d.recordReviewerEvidenceFromPermissionMode(id, "default")
+
+	if evidenceOf(t, d, id).ReviewerInLoop {
+		t.Fatal("claude reported default and kept its reviewer")
+	}
+}
+
 // The reported bug, end to end: an unattended codex run asks permission on a
 // tool call, its guardian answers in milliseconds, and the user must never see
 // the session demand attention for it.

@@ -296,16 +296,43 @@ func reviewerInLoop(opts ptybackend.SpawnOptions) bool {
 	return opts.AutoApprove && !opts.YoloMode
 }
 
-// recordReviewerEvidenceFromPermissionMode files claude's reported mode. An
-// absent mode is not a report of "no reviewer" — it is an older CLI, or a hook
-// payload that omitted the field — and treating it as one would silently retire
-// the fact recorded at spawn.
+// recordReviewerEvidenceFromPermissionMode files claude's reported mode.
+//
+// Two things must not reach the evidence table through here. An absent mode is
+// not a report of "no reviewer" — it is an older CLI, or a payload that omitted
+// the field — and any mode at all from an agent that does not route approvals
+// by permission mode is not a report about approvals. Codex is the second case
+// concretely: its hooks send `default` on every turn as a payload filler while
+// its actual reviewer comes from the `approvals_reviewer` flag, so believing it
+// would retire the spawn-time fact on the first turn of every codex session and
+// take the dwell with it.
 func (d *Daemon) recordReviewerEvidenceFromPermissionMode(sessionID, permissionMode string) {
 	mode := strings.TrimSpace(permissionMode)
 	if mode == "" {
 		return
 	}
+	if !permissionModeGovernsApprovals(d.sessionAgent(sessionID)) {
+		return
+	}
 	d.recordReviewerEvidence(sessionID, mode != "default")
+}
+
+// permissionModeGovernsApprovals reports whether an agent's permission mode is
+// what decides who answers its approval requests. Claude's is; the others state
+// their arrangement at launch and never revise it.
+func permissionModeGovernsApprovals(agent protocol.SessionAgent) bool {
+	return agent == protocol.SessionAgentClaude
+}
+
+func (d *Daemon) sessionAgent(sessionID string) protocol.SessionAgent {
+	if d.store == nil {
+		return ""
+	}
+	session := d.store.Get(sessionID)
+	if session == nil {
+		return ""
+	}
+	return session.Agent
 }
 
 // Notification types claude reports. Both are typed fields on the hook payload,

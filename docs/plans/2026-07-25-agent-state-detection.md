@@ -491,6 +491,26 @@ being fixed as part of the current step.
   exactly one `state=working` line in `daemon.log`. This matters beyond tidiness —
   the pulse is the liveness signal the resolver's TTL design depends on, so the
   resolver phase must either un-gate it or grow its own heartbeat.
+- **Neither guardian produced observable approval evidence, so the dwell has no
+  live trigger yet.** Measured on `statedet` 2026-07-26, both agents launched
+  with a reviewer and given a command that must escalate. Codex escalated (the
+  write outside the workspace landed) and claude's command ran, and in both runs
+  the daemon recorded *no approval evidence at all* — codex never painted
+  `[ . ] Action Required`, claude sent no `permission_prompt` notification. The
+  same codex prompt with the reviewer removed does produce the title marker, so
+  the escalation is real; what is absent is any signal while a guardian is
+  answering. The dwell is therefore correct-but-unwitnessed: it costs nothing
+  when the guardian is fast, and it is the only thing standing between a slow
+  guardian and the reported flash. Worth deciding in phase 3.5 whether the flash
+  still exists on current agent versions, and if not, whether the dwell earns its
+  place.
+- **`ReviewerInLoop` had two sources and the wrong one won for codex.** Found
+  live: codex's hooks send `permission_mode: default` on every turn as payload
+  filler, which retired the spawn-time reviewer fact on the session's first turn
+  and took the dwell with it. Fixed by reading the mode only for claude, whose
+  mode genuinely governs approval routing. The general shape — a field that means
+  something for one agent and is filler for another, read without asking which
+  agent sent it — is worth a sweep in phase 3.5.
 - **The copilot screen heuristics look stale against copilot 1.0.73.**
   `classifyCopilotScreen` keys off `defaultStateHeuristics` — prompt markers
   ` › ` / ` > ` / `❯ ` and status markers "context left" / "for shortcuts". The
