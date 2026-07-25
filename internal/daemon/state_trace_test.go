@@ -359,3 +359,62 @@ func TestTraceCollapsesRepeatedEvidence(t *testing.T) {
 		t.Fatalf("a changed claim must open a new row: %+v", all)
 	}
 }
+
+// The contract phase 1a is judged on: a long busy turn must not consume one ring
+// slot per second. The heartbeat re-emits its unchanged level once a keepalive,
+// and the spinner frame differs on every one of those emissions — if the frame
+// reaches the trace, each row is distinct, Repeats never increments, and 256
+// seconds of work evicts every other kind of evidence from the ring.
+func TestTraceCollapsesHeartbeatsAcrossSpinnerFrames(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-spinner-frames"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	start := time.Now().Add(-30 * time.Second)
+	frames := []string{"⠐", "⠸", "⠿", "⠇", "⠏", "⠋", "⠙"}
+	for i, frame := range frames {
+		at := start.Add(time.Duration(i) * time.Second)
+		// What the observer produces for that frame. It strips the glyph, so the
+		// summary is identical across frames — see
+		// TestHeartbeatDetailIsStableAcrossSpinnerFrames for the proof that it
+		// does, and the sub-case below for what happens when it does not.
+		_ = frame
+		d.handlePTYState(id, heartbeatObs("busy", "Run background sleep command", at))
+	}
+
+	got := onlyObservation(t, d, id)
+	if got.Repeats != len(frames)-1 {
+		t.Fatalf("Repeats %d, want %d — one row for the whole turn", got.Repeats, len(frames)-1)
+	}
+	if got.Claim != "busy" {
+		t.Fatalf("claim %q, want busy", got.Claim)
+	}
+	if got.Detail != "Run background sleep command" {
+		t.Fatalf("detail %q, want the frame-free summary", got.Detail)
+	}
+	// The surviving row reports the latest sighting: freshness is the only thing
+	// a repeated heartbeat contributes.
+	if want := start.Add(time.Duration(len(frames)-1) * time.Second); !got.ObservedAt.Equal(want) {
+		t.Fatalf("ObservedAt %s, want the newest %s", got.ObservedAt, want)
+	}
+
+	// A genuinely different summary is news and opens its own row.
+	d.handlePTYState(id, heartbeatObs("busy", "Editing files", start.Add(30*time.Second)))
+	if all := traceOf(t, d, id); len(all) != 2 {
+		t.Fatalf("a changed summary must open a new row: %+v", all)
+	}
+
+	// And the failure this guards against: had the glyph reached the detail,
+	// every frame would be a distinct row rather than a repeat.
+	withFrames := newTraceDaemon(t)
+	framed := "sess-spinner-unstripped"
+	addCharacterizationSession(t, withFrames, framed, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+	for i, frame := range frames {
+		at := start.Add(time.Duration(i) * time.Second)
+		withFrames.handlePTYState(framed, heartbeatObs("busy", frame+" Run background sleep command", at))
+	}
+	if all := traceOf(t, withFrames, framed); len(all) != len(frames) {
+		t.Fatalf("volatile details collapsed unexpectedly (%d rows for %d frames); "+
+			"the ring pressure this test guards against would be invisible", len(all), len(frames))
+	}
+}

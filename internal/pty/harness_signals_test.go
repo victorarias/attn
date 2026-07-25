@@ -43,14 +43,15 @@ func TestNoObserverForAnAgentWithoutHarnessSignals(t *testing.T) {
 func TestClaudeTitleHeartbeat(t *testing.T) {
 	now := time.Now()
 	for _, tc := range []struct {
-		name  string
-		title string
-		claim string
+		name    string
+		title   string
+		claim   string
+		summary string
 	}{
 		// The braille block is the spinner; claude cycles through its frames.
-		{name: "braille spinner is busy", title: "⠐ Run background sleep command", claim: claimBusy},
-		{name: "another spinner frame", title: "⠸ Editing files", claim: claimBusy},
-		{name: "asterisk is not busy", title: "✳ Run background sleep command", claim: claimNotBusy},
+		{name: "braille spinner is busy", title: "⠐ Run background sleep command", claim: claimBusy, summary: "Run background sleep command"},
+		{name: "another spinner frame", title: "⠸ Editing files", claim: claimBusy, summary: "Editing files"},
+		{name: "asterisk is not busy", title: "✳ Run background sleep command", claim: claimNotBusy, summary: "Run background sleep command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o := newHarnessSignalObserver(agentdriver.HarnessSignalsClaude)
@@ -58,9 +59,10 @@ func TestClaudeTitleHeartbeat(t *testing.T) {
 			if got.Source != SourceHeartbeat || got.Claim != tc.claim {
 				t.Fatalf("got %+v, want %s/%s", got, SourceHeartbeat, tc.claim)
 			}
-			// The title doubles as a live turn summary — a free sidebar label.
-			if got.Detail != tc.title {
-				t.Fatalf("detail %q, want the title verbatim", got.Detail)
+			// The title doubles as a live turn summary — a free sidebar label —
+			// minus the level glyph, which says nothing the claim does not.
+			if got.Detail != tc.summary {
+				t.Fatalf("detail %q, want %q", got.Detail, tc.summary)
 			}
 			if !got.At.Equal(now) {
 				t.Fatalf("At %s, want %s", got.At, now)
@@ -86,8 +88,12 @@ func TestClaudeIgnoresAForeignTitle(t *testing.T) {
 func TestCodexTitleHeartbeat(t *testing.T) {
 	now := time.Now()
 	o := newHarnessSignalObserver(agentdriver.HarnessSignalsCodex)
-	if got := onlySignal(t, observeAt(o, now, title("⠸ attn--fix-state-detec..."))); got.Claim != claimBusy {
+	got := onlySignal(t, observeAt(o, now, title("⠸ attn--fix-state-detec...")))
+	if got.Claim != claimBusy {
 		t.Fatalf("got %+v, want busy", got)
+	}
+	if got.Detail != "attn--fix-state-detec..." {
+		t.Fatalf("detail %q, want the spinner stripped", got.Detail)
 	}
 	if got := onlySignal(t, observeAt(o, now, title("attn--fix-state-detec..."))); got.Claim != claimNotBusy {
 		t.Fatalf("got %+v, want not_busy", got)
@@ -160,5 +166,41 @@ func TestHeartbeatSurvivesEverySplitPoint(t *testing.T) {
 		if got[0].Claim != claimBusy || got[1].Claim != claimNotBusy {
 			t.Fatalf("split at %d: got %+v", split, got)
 		}
+	}
+}
+
+// The spinner frame changes several times a second while the level does not.
+// Carrying it in the detail made every keepalive emission a distinct row, so a
+// long turn consumed one trace slot per second and evicted every other kind of
+// evidence — the opposite of what the trace is for. The detail is the turn
+// summary, and it must be stable across frames.
+func TestHeartbeatDetailIsStableAcrossSpinnerFrames(t *testing.T) {
+	start := time.Now()
+	o := newHarnessSignalObserver(agentdriver.HarnessSignalsClaude)
+
+	var details []string
+	for i, frame := range []string{"⠐", "⠸", "⠿", "⠇", "⠏"} {
+		// One keepalive apart, so every frame is emitted rather than throttled.
+		at := start.Add(time.Duration(i) * (heartbeatKeepalive + time.Millisecond))
+		got := onlySignal(t, observeAt(o, at, title(frame+" Run background sleep command")))
+		if got.Claim != claimBusy {
+			t.Fatalf("frame %s: claim %q, want busy", frame, got.Claim)
+		}
+		details = append(details, got.Detail)
+	}
+
+	for _, detail := range details {
+		if detail != "Run background sleep command" {
+			t.Fatalf("details differ across frames: %q", details)
+		}
+	}
+}
+
+// A title that is only a spinner has no summary to report, and inventing one
+// (the glyph itself) would reintroduce the churn.
+func TestHeartbeatDetailIsEmptyForAGlyphOnlyTitle(t *testing.T) {
+	o := newHarnessSignalObserver(agentdriver.HarnessSignalsClaude)
+	if got := onlySignal(t, observeAt(o, time.Now(), title("⠐"))); got.Detail != "" {
+		t.Fatalf("detail %q, want empty", got.Detail)
 	}
 }

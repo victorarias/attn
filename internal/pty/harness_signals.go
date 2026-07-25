@@ -54,11 +54,21 @@ const (
 	oscCodeTitle        = 2
 )
 
-// titleClassifier reports whether an OSC 0 title means the agent's turn is
-// running. ok is false when the title says nothing about the agent — most often
-// because a subprocess overwrote it — in which case no observation is made and
-// whatever the previous level was still stands.
-type titleClassifier func(title string) (busy bool, ok bool)
+// titleClassifier reads an OSC 0 title. It reports whether the agent's turn is
+// running, plus the title with its level glyph removed.
+//
+// The glyph is stripped because it is the noisiest part of the title and the
+// least informative: it cycles through spinner frames several times a second
+// while saying nothing that the busy/not-busy claim does not already say. What
+// is left is the turn summary, which changes only when the agent moves on to
+// something else — so consecutive observations of an unchanged level are
+// genuinely identical and collapse into one trace row instead of consuming one
+// ring slot per second and evicting every other kind of evidence.
+//
+// ok is false when the title says nothing about the agent — most often because a
+// subprocess overwrote it — in which case no observation is made and whatever
+// the previous level was still stands.
+type titleClassifier func(title string) (busy bool, summary string, ok bool)
 
 // harnessSignalPolicy is the per-agent part. The mechanics below (scanning,
 // rate limiting, timestamping) are shared; only the reading of a title differs.
@@ -114,7 +124,7 @@ func (o *harnessSignalObserver) observeTitle(title string, now time.Time) (Obser
 	if o.policy.classifyTitle == nil {
 		return Observation{}, false
 	}
-	busy, ok := o.policy.classifyTitle(title)
+	busy, summary, ok := o.policy.classifyTitle(title)
 	if !ok {
 		return Observation{}, false
 	}
@@ -129,22 +139,22 @@ func (o *harnessSignalObserver) observeTitle(title string, now time.Time) (Obser
 	}
 	o.lastClaim = claim
 	o.lastEmit = now
-	return newObservation(SourceHeartbeat, claim, strings.TrimSpace(title), now), true
+	return newObservation(SourceHeartbeat, claim, summary, now), true
 }
 
 // classifyClaudeTitle reads Claude Code's title glyph: a braille spinner frame
 // while the turn runs, U+2733 EIGHT SPOKED ASTERISK when it does not. Anything
 // else is not claude talking.
-func classifyClaudeTitle(title string) (bool, bool) {
-	switch first, ok := firstRune(title); {
-	case !ok:
-		return false, false
-	case isBrailleSpinner(first):
-		return true, true
-	case first == '✳':
-		return false, true
+func classifyClaudeTitle(title string) (bool, string, bool) {
+	first, ok := firstRune(title)
+	if !ok {
+		return false, "", false
+	}
+	switch {
+	case isBrailleSpinner(first), first == '✳':
+		return isBrailleSpinner(first), stripLevelGlyph(title), true
 	default:
-		return false, false
+		return false, "", false
 	}
 }
 
@@ -154,12 +164,24 @@ func classifyClaudeTitle(title string) (bool, bool) {
 // a freshness rule — the level that matters is *when busy frames last arrived* —
 // and a live capture confirmed a competing title repaint moves accuracy by
 // 0.2pp, because the agent keeps painting over it.
-func classifyCodexTitle(title string) (bool, bool) {
+func classifyCodexTitle(title string) (bool, string, bool) {
 	first, ok := firstRune(title)
 	if !ok {
-		return false, false
+		return false, "", false
 	}
-	return isBrailleSpinner(first), true
+	return isBrailleSpinner(first), stripLevelGlyph(title), true
+}
+
+// stripLevelGlyph removes a leading level glyph and the space after it, leaving
+// the turn summary. A title that is only a glyph leaves an empty summary, which
+// is the honest answer: there was no summary.
+func stripLevelGlyph(title string) string {
+	trimmed := strings.TrimSpace(title)
+	first, size := utf8.DecodeRuneInString(trimmed)
+	if isBrailleSpinner(first) || first == '✳' {
+		return strings.TrimSpace(trimmed[size:])
+	}
+	return trimmed
 }
 
 // isBrailleSpinner reports whether r is in the Braille Patterns block, which is
