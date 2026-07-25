@@ -313,8 +313,8 @@ func (d *spikeOSCDetector) state(now float64) string {
 // ---------- scoring ----------
 
 type spikeScore struct {
-	Samples  int
-	Correct  int
+	Samples   int
+	Correct   int
 	Confusion map[string]int // "truth->guess"
 }
 
