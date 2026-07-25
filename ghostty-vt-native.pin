@@ -1,0 +1,8 @@
+# Ghostty commit for the NATIVE libghostty-vt static lib built into the worker.
+#
+# This is a SEPARATE pin from the frontend WASM build
+# (app/scripts/build-ghostty-vt-wasm.sh, pin 29d4aba): the Terminal C API used
+# by the server-authoritative restore path does NOT exist at the WASM pin.
+# Verified working at ab0b9da (2026-07-22). Never float either commit.
+# Converging the two pins is a follow-up (needs ghostty-web to move forward).
+ab0b9da9e88fcb4b0533a1854e84628f663930af

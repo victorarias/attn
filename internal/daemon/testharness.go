@@ -229,7 +229,7 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 	pidPath := b.socketPath + ".pid"
 	dataRoot := filepath.Dir(b.socketPath)
 	hub := newWSHub()
-	manager := pty.NewManager(pty.DefaultScrollbackSize, nil)
+	manager := pty.NewManager(nil)
 
 	// Set up broadcast listener if recording is enabled
 	if b.recordBroadcast {

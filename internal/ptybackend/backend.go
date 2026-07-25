@@ -107,30 +107,23 @@ func validateUnattendedSpawnOptions(opts SpawnOptions) error {
 }
 
 type AttachInfo struct {
-	Scrollback          []byte
-	ScrollbackTruncated bool
-	ReplaySegments      []ReplaySegment
-	ReplayTruncated     bool
-	LastSeq             uint32
-	Cols                uint16
-	Rows                uint16
-	PID                 int
-	Running             bool
-	ExitCode            *int
-	ExitSignal          *string
-	ScreenSnapshot      []byte
-	ScreenCols          uint16
-	ScreenRows          uint16
-	ScreenCursorX       uint16
-	ScreenCursorY       uint16
-	ScreenCursorVisible bool
-	ScreenSnapshotFresh bool
-}
-
-type ReplaySegment struct {
-	Cols uint16
-	Rows uint16
-	Data []byte
+	LastSeq    uint32
+	Cols       uint16
+	Rows       uint16
+	PID        int
+	Running    bool
+	ExitCode   *int
+	ExitSignal *string
+	// GhosttySnapshot is the server-authoritative VT serialization of the whole
+	// terminal from libghostty-vt (geometry is Cols/Rows). nil when absent.
+	GhosttySnapshot []byte
+	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
+	// SCREEN-space rows of GhosttySnapshot, captured atomically with it and
+	// LastSeq (Phase 3a). nil when absent.
+	GhosttyBlocks []pty.AttachBlockData
+	// GhosttyScrollbackTruncated reports whether the ghostty terminal dropped
+	// scrollback lines at its cap before GhosttySnapshot was serialized.
+	GhosttyScrollbackTruncated bool
 }
 
 type OutputEvent struct {
@@ -242,7 +235,7 @@ type WorkerProcessProvider interface {
 // attaching. Backends that cannot serve a snapshot (e.g. a worker built before
 // the capability existed) return an error; callers degrade gracefully.
 type SnapshotProvider interface {
-	Snapshot(ctx context.Context, sessionID string) (AttachInfo, error)
+	Snapshot(ctx context.Context, sessionID string) (pty.SnapshotInfo, error)
 }
 
 type SessionLivenessProber interface {

@@ -23,6 +23,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   does the new default setting apply; leaving both blank keeps today's
   behavior (the agent's own default).
 
+### Changed
+- **Session restore is now deeper and more faithful.** Reopening or reconnecting
+  to a running agent rebuilds the terminal from a full server-side snapshot of
+  the session's screen and scrollback — truecolor, soft-wrapped lines, and
+  alt-screen state included — instead of replaying a best-effort byte history.
+  Restores are text-only: inline images (sixel/kitty) still render live but are
+  not preserved across a restore.
+
 ## [2026-07-24]
 
 ### Added
@@ -89,26 +97,6 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   now loads with the rest of the list in one request instead of a separate
   fetch per definition, so opening the panel with many automations feels
   noticeably snappier.
-=======
-## [2026-07-22]
-
-### Added
-- **Claude's (and Codex's) default model and reasoning effort are now
-  configurable for every session, not just chief-of-staff launches.** New
-  Settings > Agents controls ("Default model & effort") set
-  `default_model_<agent>`/`default_effort_<agent>`, applied to every launch
-  of that agent (chief or not) via `--model`/`--effort`. Previously only a
-  chief-of-staff launch could pin a model/effort
-  (`chief_model_<agent>`/`chief_effort_<agent>`); a regular session always
-  fell through to the agent's own hardcoded default with no way to change
-  it. Precedence is unchanged and additive: an explicit per-spawn pin (e.g. a
-  delegation's `--model`) still wins outright, a chief launch still prefers
-  its `chief_model_<agent>`/`chief_effort_<agent>` override, and only then
-  does the new default setting apply; leaving both blank keeps today's
-  behavior (the agent's own default).
-
----
->>>>>>> faf95c8c (feat(agents): make Claude/Codex default model & effort configurable)
 
 ## [2026-07-21]
 

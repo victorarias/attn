@@ -1,88 +1,82 @@
 package daemon
 
 import (
+	"context"
+	"encoding/base64"
 	"testing"
 
-	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 )
 
-// snapshotSeedScreen backs grid-tile seeding. Older workers that survive a
-// daemon upgrade can't render a screen on demand (no snapshot RPC), so the
-// daemon must fall back to deriving the visible frame from buffered output.
-// These cases lock in that resolution order: fresh screen wins, otherwise we
-// derive from replay segments, otherwise from flat scrollback.
-
-func TestSnapshotSeedScreenPrefersFreshWorkerScreen(t *testing.T) {
-	info := ptybackend.AttachInfo{
-		ScreenSnapshot:      []byte("rendered-by-worker"),
-		ScreenCols:          80,
-		ScreenRows:          24,
-		ScreenSnapshotFresh: true,
-		// Scrollback is present too, but must be ignored in favor of the fresh frame.
-		Scrollback: []byte("stale scrollback"),
-		Cols:       80,
-		Rows:       24,
-	}
-
-	screen, derived, ok := snapshotSeedScreen(info)
-	if !ok {
-		t.Fatal("expected a screen when a fresh worker snapshot is present")
-	}
-	if derived {
-		t.Fatal("a fresh worker snapshot must not be reported as derived")
-	}
-	if string(screen.Payload) != "rendered-by-worker" {
-		t.Fatalf("expected the worker payload, got %q", screen.Payload)
-	}
+type snapshotBackend struct {
+	*fakeSpawnBackend
+	snapshot pty.SnapshotInfo
 }
 
-func TestSnapshotSeedScreenDerivesFromScrollback(t *testing.T) {
-	// No fresh worker screen: the old-worker case. We must still produce a
-	// paintable frame from the scrollback the worker returns on attach.
-	info := ptybackend.AttachInfo{
-		Scrollback: []byte("hello from a recovered session"),
-		Cols:       80,
-		Rows:       24,
-	}
-
-	screen, derived, ok := snapshotSeedScreen(info)
-	if !ok {
-		t.Fatal("expected a derived screen from non-empty scrollback")
-	}
-	if !derived {
-		t.Fatal("expected the screen to be reported as derived")
-	}
-	if len(screen.Payload) == 0 {
-		t.Fatal("derived screen payload must not be empty")
-	}
-	if screen.Cols != 80 || screen.Rows != 24 {
-		t.Fatalf("derived screen geometry = %dx%d, want 80x24", screen.Cols, screen.Rows)
-	}
+func (b *snapshotBackend) Snapshot(context.Context, string) (pty.SnapshotInfo, error) {
+	return b.snapshot, nil
 }
 
-func TestSnapshotSeedScreenPrefersReplaySegmentsOverScrollback(t *testing.T) {
-	info := ptybackend.AttachInfo{
-		ReplaySegments: []ptybackend.ReplaySegment{
-			{Cols: 100, Rows: 40, Data: []byte("from segments")},
+func TestHandleGetScreenSnapshotSeedsFromViewportPayload(t *testing.T) {
+	d := NewForTesting(t.TempDir())
+	d.ptyBackend = &snapshotBackend{
+		fakeSpawnBackend: &fakeSpawnBackend{},
+		snapshot: pty.SnapshotInfo{
+			LastSeq: 42,
+			Cols:    100,
+			Rows:    30,
+			Running: true,
+			Screen: &pty.ViewportSnapshot{
+				Payload: []byte("rendered-by-worker"),
+				Cols:    80,
+				Rows:    24,
+			},
 		},
-		Scrollback: []byte("from flat scrollback"),
-		Cols:       80,
-		Rows:       24,
 	}
+	client := &wsClient{send: make(chan outboundMessage, 1)}
 
-	screen, derived, ok := snapshotSeedScreen(info)
-	if !ok || !derived {
-		t.Fatalf("expected a derived screen, got ok=%v derived=%v", ok, derived)
+	d.handleGetScreenSnapshot(client, &protocol.GetScreenSnapshotMessage{ID: "session-1"})
+
+	var result protocol.GetScreenSnapshotResultMessage
+	readNotebookWSEvent(t, client.send, &result)
+	if !result.Success {
+		t.Fatalf("snapshot result failed: %v", result.Error)
 	}
-	// Segment geometry (100x40) wins over the flat scrollback geometry (80x24).
-	if screen.Cols != 100 || screen.Rows != 40 {
-		t.Fatalf("derived screen geometry = %dx%d, want 100x40 from replay segments", screen.Cols, screen.Rows)
+	if result.ScreenSnapshot == nil {
+		t.Fatal("expected viewport payload in snapshot result")
+	}
+	payload, err := base64.StdEncoding.DecodeString(*result.ScreenSnapshot)
+	if err != nil {
+		t.Fatalf("decode snapshot payload: %v", err)
+	}
+	if string(payload) != "rendered-by-worker" {
+		t.Fatalf("snapshot payload = %q, want rendered-by-worker", payload)
+	}
+	if got, want := protocol.Deref(result.ScreenCols), 80; got != want {
+		t.Fatalf("screen cols = %d, want %d", got, want)
+	}
+	if got, want := protocol.Deref(result.ScreenRows), 24; got != want {
+		t.Fatalf("screen rows = %d, want %d", got, want)
 	}
 }
 
-func TestSnapshotSeedScreenReturnsNothingWithoutBuffer(t *testing.T) {
-	_, _, ok := snapshotSeedScreen(ptybackend.AttachInfo{Cols: 80, Rows: 24})
-	if ok {
-		t.Fatal("expected no screen when neither a fresh frame nor any buffer is available")
+func TestHandleGetScreenSnapshotLeavesObserverUnseededWithoutViewport(t *testing.T) {
+	d := NewForTesting(t.TempDir())
+	d.ptyBackend = &snapshotBackend{
+		fakeSpawnBackend: &fakeSpawnBackend{},
+		snapshot:         pty.SnapshotInfo{LastSeq: 42, Cols: 100, Rows: 30, Running: true},
+	}
+	client := &wsClient{send: make(chan outboundMessage, 1)}
+
+	d.handleGetScreenSnapshot(client, &protocol.GetScreenSnapshotMessage{ID: "session-1"})
+
+	var result protocol.GetScreenSnapshotResultMessage
+	readNotebookWSEvent(t, client.send, &result)
+	if !result.Success {
+		t.Fatalf("snapshot result failed: %v", result.Error)
+	}
+	if result.ScreenSnapshot != nil || result.ScreenCols != nil || result.ScreenRows != nil {
+		t.Fatalf("expected unseeded observer result, got %+v", result)
 	}
 }

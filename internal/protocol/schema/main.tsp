@@ -547,11 +547,6 @@ model WorkspaceLayout {
   updated_at?: string;
 }
 
-model ReplaySegment {
-  cols: int32;
-  rows: int32;
-  data: string; // base64 bytes
-}
 
 model EndpointCapabilities {
   protocol_version: string;
@@ -2881,20 +2876,45 @@ model ReloadSessionResultMessage {
   error?: string;
 }
 
+// One OSC 133 shell-integration command block resolved by the worker, carried
+// beside the VT dump so restore reconstructs clickable prompt/command/output
+// regions (the dump has rendered cells, not the marks). Rows are SCREEN-space
+// rows of vt_dump_b64, which equal client buffer rows after the dump is written
+// into a fresh same-size terminal. See Phase 3a in
+// docs/plans/2026-07-22-server-authoritative-terminal.md.
+model AttachBlock {
+  id: safeint;                   // server-assigned, monotonic per session
+  pending: boolean;              // the single open block (no command-end yet)
+  prompt_row: int32;
+  input_row?: int32;
+  input_col?: int32;
+  output_start_row?: int32;
+  end_row?: int32;               // exclusive; absent while pending
+  command?: string;
+  exit_code?: int32;
+}
+
+// Server-authoritative restore snapshot: a self-contained VT serialization of
+// the worker's parsed terminal (grid + scrollback + cursor + modes, both
+// primary and alternate screens) produced by libghostty-vt. Present on every
+// restore attach; the client resets its model and replays vt_dump_b64, then
+// seeds its command-block store from blocks.
+model AttachSnapshot {
+  cols: int32;
+  rows: int32;
+  vt_dump_b64: string;           // base64 self-contained VT stream
+  blocks?: AttachBlock[];        // OSC 133 command blocks, empty/absent if none
+  scrollback_truncated: boolean; // ghostty dropped scrollback at its cap
+}
+
 model AttachResultMessage {
   event: "attach_result";
   id: string;
   success: boolean;
-  scrollback?: string;           // base64 bytes
-  scrollback_truncated?: boolean;
-  replay_segments?: ReplaySegment[];
-  screen_snapshot?: string;      // base64 ANSI replay of visible frame
-  screen_rows?: int32;
-  screen_cols?: int32;
-  screen_cursor_x?: int32;       // 0-based
-  screen_cursor_y?: int32;       // 0-based
-  screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
+  // The server-authoritative restore. Present whenever the attach restores prior
+  // terminal state; the client resets its model and replays snapshot.vt_dump_b64.
+  // Absent on a fresh spawn or when no parsed terminal is available.
+  snapshot?: AttachSnapshot;
   last_seq?: int32;
   cols?: int32;
   rows?: int32;
@@ -2912,10 +2932,6 @@ model GetScreenSnapshotResultMessage {
   screen_snapshot?: string; // base64 ANSI replay of the visible frame
   screen_rows?: int32;
   screen_cols?: int32;
-  screen_cursor_x?: int32; // 0-based
-  screen_cursor_y?: int32; // 0-based
-  screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
   last_seq?: int32;
   cols?: int32;
   rows?: int32;
@@ -3554,15 +3570,10 @@ model WebSocketEvent {
   // PTY lifecycle
   data?: string;
   seq?: int32;
-  scrollback?: string;
   scrollback_truncated?: boolean;
   screen_snapshot?: string;
   screen_rows?: int32;
   screen_cols?: int32;
-  screen_cursor_x?: int32;
-  screen_cursor_y?: int32;
-  screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
   last_seq?: int32;
   cols?: int32;
   rows?: int32;

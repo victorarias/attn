@@ -35,23 +35,25 @@ func previewWorkerBytesForLog(data []byte) string {
 	return preview
 }
 
-func replaySegmentsFromPTYAttachInfo(segments []pty.ReplaySegment) []ReplaySegment {
-	return cloneReplaySegments(segments, func(segment pty.ReplaySegment) ReplaySegment {
-		return ReplaySegment{
-			Cols: segment.Cols,
-			Rows: segment.Rows,
-			Data: append([]byte(nil), segment.Data...),
-		}
-	})
-}
-
-func cloneReplaySegments[From any, To any](segments []From, convert func(From) To) []To {
-	if len(segments) == 0 {
+// attachBlocksToWire converts the session's resolved command blocks to their
+// wire form (1:1 fields; pointers alias — both sides are read-only snapshots).
+func attachBlocksToWire(blocks []pty.AttachBlockData) []AttachBlock {
+	if len(blocks) == 0 {
 		return nil
 	}
-	out := make([]To, 0, len(segments))
-	for _, segment := range segments {
-		out = append(out, convert(segment))
+	out := make([]AttachBlock, len(blocks))
+	for i, b := range blocks {
+		out[i] = AttachBlock{
+			ID:             b.ID,
+			Pending:        b.Pending,
+			PromptRow:      b.PromptRow,
+			InputRow:       b.InputRow,
+			InputCol:       b.InputCol,
+			OutputStartRow: b.OutputStartRow,
+			EndRow:         b.EndRow,
+			Command:        b.Command,
+			ExitCode:       b.ExitCode,
+		}
 	}
 	return out
 }
@@ -183,7 +185,7 @@ func (r *Runtime) run(ctx context.Context) error {
 		return err
 	}
 
-	r.manager = pty.NewManager(pty.DefaultScrollbackSize, r.logf)
+	r.manager = pty.NewManager(r.logf)
 	r.manager.SetStateHandler(func(_ string, state string) {
 		r.stateMu.Lock()
 		previousState := r.state
@@ -797,21 +799,18 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			c.sendError(req.ID, ErrInternal, err.Error())
 			return
 		}
-		// Screen + watermark only; scrollback/replay are intentionally omitted.
-		c.sendResult(req.ID, AttachResult{
-			LastSeq:             info.LastSeq,
-			Cols:                info.Cols,
-			Rows:                info.Rows,
-			PID:                 info.PID,
-			Running:             info.Running,
-			ScreenSnapshot:      info.ScreenSnapshot,
-			ScreenCols:          info.ScreenCols,
-			ScreenRows:          info.ScreenRows,
-			ScreenCursorX:       info.ScreenCursorX,
-			ScreenCursorY:       info.ScreenCursorY,
-			ScreenCursorVisible: info.ScreenCursorVisible,
-			ScreenSnapshotFresh: info.ScreenSnapshotFresh,
-		})
+		result := SnapshotResult{
+			LastSeq: info.LastSeq,
+			Cols:    info.Cols,
+			Rows:    info.Rows,
+			Running: info.Running,
+		}
+		if info.Screen != nil {
+			result.ScreenSnapshot = info.Screen.Payload
+			result.ScreenCols = info.Screen.Cols
+			result.ScreenRows = info.Screen.Rows
+		}
+		c.sendResult(req.ID, result)
 	case MethodAttach:
 		var params AttachParams
 		if len(req.Params) > 0 {
@@ -899,24 +898,16 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 		c.subID = subID
 		c.runtime.logf("worker conn attached: conn=%s sub=%s", c.connID, subID)
 		c.sendResult(req.ID, AttachResult{
-			Scrollback:          info.Scrollback,
-			ScrollbackTruncated: info.ScrollbackTruncated,
-			ReplaySegments:      replaySegmentsFromPTYAttachInfo(info.ReplaySegments),
-			ReplayTruncated:     info.ReplayTruncated,
-			LastSeq:             info.LastSeq,
-			Cols:                info.Cols,
-			Rows:                info.Rows,
-			PID:                 info.PID,
-			Running:             info.Running,
-			ExitCode:            info.ExitCode,
-			ExitSignal:          info.ExitSignal,
-			ScreenSnapshot:      info.ScreenSnapshot,
-			ScreenCols:          info.ScreenCols,
-			ScreenRows:          info.ScreenRows,
-			ScreenCursorX:       info.ScreenCursorX,
-			ScreenCursorY:       info.ScreenCursorY,
-			ScreenCursorVisible: info.ScreenCursorVisible,
-			ScreenSnapshotFresh: info.ScreenSnapshotFresh,
+			LastSeq:                    info.LastSeq,
+			Cols:                       info.Cols,
+			Rows:                       info.Rows,
+			PID:                        info.PID,
+			Running:                    info.Running,
+			ExitCode:                   info.ExitCode,
+			ExitSignal:                 info.ExitSignal,
+			GhosttySnapshot:            info.GhosttySnapshot,
+			GhosttyBlocks:              attachBlocksToWire(info.GhosttyBlocks),
+			GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,
 		})
 	case MethodDetach:
 		if c.subID != "" {

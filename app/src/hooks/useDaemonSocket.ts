@@ -29,6 +29,7 @@ import type {
   HeatState,
   AutomationDefinitionSummary,
   AutomationRunSummary,
+  AttachBlock as GeneratedAttachBlock,
 } from '../types/generated';
 import {
   emitPtyEvent,
@@ -38,7 +39,7 @@ import {
   type PtySpawnArgs,
 } from '../pty/bridge';
 import {
-  classifyAttachReplay,
+  classifyAttachRestore,
   createAttachRequestContext,
   enqueuePendingAttachOutput,
   planAttachResultEffects,
@@ -116,16 +117,9 @@ type WebSocketEvent = GeneratedWebSocketEvent & {
   tile_id?: string;
   data?: string;
   seq?: number;
-  scrollback?: string;
-  scrollback_truncated?: boolean;
-  replay_segments?: Array<{ cols: number; rows: number; data: string }>;
   screen_snapshot?: string;
   screen_rows?: number;
   screen_cols?: number;
-  screen_cursor_x?: number;
-  screen_cursor_y?: number;
-  screen_cursor_visible?: boolean;
-  screen_snapshot_fresh?: boolean;
   last_seq?: number;
   cols?: number;
   rows?: number;
@@ -175,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '186';
+export const PROTOCOL_VERSION = '187';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -302,9 +296,6 @@ interface SpawnResult {
 type AttachResult = AttachResultData & {
   success: boolean;
   error?: string;
-  screen_cursor_x?: number;
-  screen_cursor_y?: number;
-  screen_cursor_visible?: boolean;
   pid?: number;
   running?: boolean;
 };
@@ -2165,22 +2156,13 @@ export function useDaemonSocket({
                 break;
               }
               const attachContext = ptyTransportRef.current.getAttachContext(data.id);
-              const replayPlan = classifyAttachReplay(data, attachContext);
+              const restorePlan = classifyAttachRestore(data, attachContext);
               if (pending) {
                 pendingActionsRef.current.delete(key);
                 if (data.success) {
                   pending.resolve({
                     success: true,
-                    scrollback: data.scrollback,
-                    scrollback_truncated: data.scrollback_truncated,
-                    replay_segments: data.replay_segments,
-                    screen_snapshot: data.screen_snapshot,
-                    screen_rows: data.screen_rows,
-                    screen_cols: data.screen_cols,
-                    screen_cursor_x: data.screen_cursor_x,
-                    screen_cursor_y: data.screen_cursor_y,
-                    screen_cursor_visible: data.screen_cursor_visible,
-                    screen_snapshot_fresh: data.screen_snapshot_fresh,
+                    snapshot: data.snapshot,
                     last_seq: data.last_seq,
                     cols: data.cols,
                     rows: data.rows,
@@ -2199,36 +2181,34 @@ export function useDaemonSocket({
               }
 
               if (data.success) {
-                const session = sessionsRef.current.find((entry) => entry.id === data.id);
                 const attachEffects = planAttachResultEffects({
                   attachResult: data,
-                  replayPlan,
+                  restorePlan,
                   previousSeq: ptyTransportRef.current.getLastSeq(data.id),
                   queuedOutputs: ptyTransportRef.current.getQueuedAttachOutputs(data.id),
-                  sessionAgent: session?.agent,
                 });
-                const snapshotGeometry = replayPlan.replayApplied
-                  && replayPlan.hasScreenSnapshot
-                  && typeof replayPlan.replayCols === 'number'
-                  && typeof replayPlan.replayRows === 'number'
-                  && (
-                    attachContext?.policy === 'relaunch_restore'
-                    || replayPlan.replayGeometryMismatch
-                  )
-                  ? { cols: replayPlan.replayCols, rows: replayPlan.replayRows }
+                // A Ghostty snapshot is a raw VT dump authored at the daemon
+                // worker's exact grid; the fresh model must be resized to that
+                // grid before the dump is written or its line-wrapping desyncs.
+                const snapshotGeometry = restorePlan.hasSnapshot
+                  && typeof restorePlan.restoreCols === 'number'
+                  && typeof restorePlan.restoreRows === 'number'
+                  ? { cols: restorePlan.restoreCols, rows: restorePlan.restoreRows }
                   : null;
+                // A snapshot-less relaunch_restore still reconstructs at the
+                // daemon's reported PTY grid so a resumed agent redraws cleanly.
                 const relaunchFallbackGeometry = attachContext?.policy === 'relaunch_restore'
                   && typeof data.cols === 'number'
                   && typeof data.rows === 'number'
                   ? { cols: data.cols, rows: data.rows }
                   : null;
-                const replayGeometry = snapshotGeometry || relaunchFallbackGeometry;
-                if (replayGeometry) {
+                const restoreGeometry = snapshotGeometry || relaunchFallbackGeometry;
+                if (restoreGeometry) {
                   emitPtyEvent({
                     event: 'local_resize',
                     id: data.id,
-                    cols: replayGeometry.cols,
-                    rows: replayGeometry.rows,
+                    cols: restoreGeometry.cols,
+                    rows: restoreGeometry.rows,
                     source: 'attach_replay',
                   });
                 }
@@ -2240,50 +2220,40 @@ export function useDaemonSocket({
                   });
                 }
                 ptyTransportRef.current.setLastSeq(data.id, attachEffects.nextSeq);
-                if (attachEffects.replayAction.kind === 'screen_snapshot') {
+                // The daemon worker already answered CPR/DA1/OSC during live
+                // parsing and forwarded the query gap over the wire, so the
+                // frontend must never re-answer queries embedded in the dump.
+                const restoreWasEmitted = attachEffects.restoreAction.kind === 'ghostty_snapshot';
+                if (attachEffects.restoreAction.kind === 'ghostty_snapshot') {
                   emitPtyEvent({
                     event: 'data',
                     id: data.id,
-                    data: attachEffects.replayAction.data,
+                    data: attachEffects.restoreAction.data,
                     source: 'attach_replay',
-                    suppressResponses: !replayPlan.respondToTerminalQueries,
+                    suppressResponses: true,
                   });
-                } else if (attachEffects.replayAction.kind === 'scrollback') {
-                  emitPtyEvent({
-                    event: 'data',
-                    id: data.id,
-                    data: attachEffects.replayAction.data,
-                    source: 'attach_replay',
-                    suppressResponses: !replayPlan.respondToTerminalQueries,
-                  });
-                }
-                const replayWasEmitted = attachEffects.replayAction.kind === 'screen_snapshot'
-                  || attachEffects.replayAction.kind === 'scrollback'
-                  || attachEffects.replayAction.kind === 'scrollback_segments';
-                if (attachEffects.replayAction.kind === 'scrollback_segments') {
-                  let replayCols: number | null = null;
-                  let replayRows: number | null = null;
-                  for (const segment of attachEffects.replayAction.segments) {
-                    if (segment.cols !== replayCols || segment.rows !== replayRows) {
-                      emitPtyEvent({
-                        event: 'local_resize',
-                        id: data.id,
-                        cols: segment.cols,
-                        rows: segment.rows,
-                        source: 'attach_replay',
-                      });
-                      replayCols = segment.cols;
-                      replayRows = segment.rows;
-                    }
-                    if (segment.data) {
-                      emitPtyEvent({
-                        event: 'data',
-                        id: data.id,
-                        data: segment.data,
-                        source: 'attach_replay',
-                        suppressResponses: !replayPlan.respondToTerminalQueries,
-                      });
-                    }
+                  // Seed OSC 133 command blocks from the snapshot: the VT dump is
+                  // marker-stripped, so the live parser rebuilds none on restore.
+                  // Enqueued after the dump write (seedBlocks runs on the write
+                  // chain) so anchor text reads the restored buffer. Wire shape
+                  // (snake_case) → client-domain SeededBlock.
+                  const snapshotBlocks = data.snapshot?.blocks;
+                  if (snapshotBlocks && snapshotBlocks.length > 0) {
+                    emitPtyEvent({
+                      event: 'seed_blocks',
+                      id: data.id,
+                      blocks: snapshotBlocks.map((b: GeneratedAttachBlock) => ({
+                        id: b.id,
+                        pending: b.pending,
+                        promptRow: b.prompt_row,
+                        inputRow: b.input_row,
+                        inputCol: b.input_col,
+                        outputStartRow: b.output_start_row,
+                        endRow: b.end_row,
+                        command: b.command,
+                        exitCode: b.exit_code,
+                      })),
+                    });
                   }
                 }
                 if (attachEffects.queuedOutputsToEmit.length > 0) {
@@ -2292,17 +2262,10 @@ export function useDaemonSocket({
                     emitPtyEvent({ event: 'data', id: data.id, data: chunk.data, seq: chunk.seq });
                   }
                 }
-                if (replayWasEmitted) {
+                if (restoreWasEmitted) {
                   emitPtyEvent({
                     event: 'replay_complete',
                     id: data.id,
-                  });
-                }
-                if (attachEffects.shouldWarnTruncatedRestore) {
-                  emitPtyEvent({
-                    event: 'error',
-                    id: data.id,
-                    error: 'Restore scrollback was truncated; Codex full-screen output may be incomplete.',
                   });
                 }
                 ptyTransportRef.current.setAttachContext(data.id);
@@ -2319,7 +2282,7 @@ export function useDaemonSocket({
                 pendingActionsRef.current.delete(key);
                 if (data.success) {
                   const result: ScreenSnapshotResult = {
-                    screenSnapshot: data.screen_snapshot_fresh ? data.screen_snapshot : undefined,
+                    screenSnapshot: data.screen_snapshot ?? undefined,
                     screenCols: data.screen_cols,
                     screenRows: data.screen_rows,
                     lastSeq: typeof data.last_seq === 'number' ? data.last_seq : 0,

@@ -15,7 +15,7 @@ import (
 	"github.com/victorarias/attn/internal/automation"
 	attngit "github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -711,6 +711,50 @@ func automationSessionPrompt(configuredPrompt, inputPath string, localOnlyReview
 
 const codexDirectoryTrustPrompt = "Do you trust the contents of this directory?"
 
+// stripANSIForPromptMatch removes terminal control sequences from a rendered VT
+// stream so screen prompts can be matched independently of formatting and cursor
+// positioning.
+func stripANSIForPromptMatch(data []byte) string {
+	out := make([]byte, 0, len(data))
+	for i := 0; i < len(data); {
+		if data[i] != 0x1b {
+			out = append(out, data[i])
+			i++
+			continue
+		}
+		if i+1 >= len(data) {
+			break
+		}
+		switch data[i+1] {
+		case '[':
+			i += 2
+			for i < len(data) {
+				if data[i] >= 0x40 && data[i] <= 0x7e {
+					i++
+					break
+				}
+				i++
+			}
+		case ']':
+			i += 2
+			for i < len(data) {
+				if data[i] == 0x07 {
+					i++
+					break
+				}
+				if data[i] == 0x1b && i+1 < len(data) && data[i+1] == '\\' {
+					i += 2
+					break
+				}
+				i++
+			}
+		default:
+			i += 2
+		}
+	}
+	return string(out)
+}
+
 // passUnattendedLaunchGate completes the one driver-owned confirmation that is
 // still shown for some non-repository directories even when Codex receives an
 // explicit trusted-project override. Definition application is the user's
@@ -722,7 +766,7 @@ func (d *Daemon) passUnattendedLaunchGate(req automation.WorkRequest) error {
 		return nil
 	}
 	snapshots, ok := d.ptyBackend.(interface {
-		Snapshot(context.Context, string) (ptybackend.AttachInfo, error)
+		Snapshot(context.Context, string) (pty.SnapshotInfo, error)
 	})
 	if !ok {
 		return errors.New("automation launch cannot verify Codex directory trust gate")
@@ -732,7 +776,11 @@ func (d *Daemon) passUnattendedLaunchGate(req automation.WorkRequest) error {
 	for time.Now().Before(deadline) {
 		info, err := snapshots.Snapshot(context.Background(), req.IDs.SessionID)
 		if err == nil {
-			screen := string(info.ScreenSnapshot)
+			var payload []byte
+			if info.Screen != nil {
+				payload = info.Screen.Payload
+			}
+			screen := stripANSIForPromptMatch(payload)
 			if strings.Contains(screen, codexDirectoryTrustPrompt) {
 				if !acknowledged {
 					if err := d.ptyBackend.Input(context.Background(), req.IDs.SessionID, []byte("\r")); err != nil {
@@ -742,7 +790,7 @@ func (d *Daemon) passUnattendedLaunchGate(req automation.WorkRequest) error {
 				}
 			} else if acknowledged {
 				return nil
-			} else if time.Until(deadline) < 5*time.Second && len(info.ScreenSnapshot) > 0 {
+			} else if time.Until(deadline) < 5*time.Second && len(payload) > 0 {
 				// A populated screen with no trust chooser after the startup half of
 				// the window means the launch did not need this compatibility gate.
 				return nil

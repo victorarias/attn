@@ -1,5 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { recordPtyListenerError } from '../utils/ptyPerf';
+import type { SeededBlock } from '../utils/terminalBlocks';
 
 export interface PtySpawnArgs {
   id: string;
@@ -51,6 +52,7 @@ export type PtyEventPayload =
   | { event: 'data'; id: string; data: string | Uint8Array; seq?: number; source?: PtyDataEventSource; suppressResponses?: boolean }
   | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyDataEventSource }
   | { event: 'replay_complete'; id: string }
+  | { event: 'seed_blocks'; id: string; blocks: SeededBlock[] }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }
   | { event: 'transcript'; id: string; matched: boolean }

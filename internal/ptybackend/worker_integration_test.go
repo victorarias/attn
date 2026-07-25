@@ -157,14 +157,14 @@ gotOutput:
 	if !snap.Running {
 		t.Fatalf("snapshot running=false, expected true")
 	}
-	if len(snap.ScreenSnapshot) == 0 || !snap.ScreenSnapshotFresh {
-		t.Fatalf("expected a fresh screen snapshot, got %d bytes fresh=%v", len(snap.ScreenSnapshot), snap.ScreenSnapshotFresh)
+	if snap.Screen == nil || len(snap.Screen.Payload) == 0 {
+		t.Fatal("expected a viewport snapshot")
 	}
-	if !bytes.Contains(snap.ScreenSnapshot, []byte("__ATTN_WORKER__")) {
-		t.Fatalf("snapshot missing printed marker; got %q", snap.ScreenSnapshot)
+	if !bytes.Contains(snap.Screen.Payload, []byte("__ATTN_WORKER__")) {
+		t.Fatalf("snapshot missing printed marker; got %q", snap.Screen.Payload)
 	}
-	if snap.ScreenCols == 0 || snap.ScreenRows == 0 {
-		t.Fatalf("snapshot geometry = %dx%d, want non-zero", snap.ScreenCols, snap.ScreenRows)
+	if snap.Screen.Cols == 0 || snap.Screen.Rows == 0 {
+		t.Fatalf("snapshot geometry = %dx%d, want non-zero", snap.Screen.Cols, snap.Screen.Rows)
 	}
 
 	// SetTheme round-trips over the worker RPC surface and takes effect on the
@@ -232,7 +232,7 @@ gotThemeReply:
 // upgrade and rejects the snapshot RPC. The daemon then derives the visible
 // frame from the worker's buffered output, fetched via a read-only attach that
 // must not leave a subscriber behind.
-func TestWorkerBackend_SnapshotViaReplayReadsScrollbackReadOnly(t *testing.T) {
+func TestWorkerBackend_SnapshotReadsScreenReadOnly(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping worker integration test in short mode")
 	}
@@ -275,39 +275,30 @@ func TestWorkerBackend_SnapshotViaReplayReadsScrollbackReadOnly(t *testing.T) {
 		t.Fatalf("Input() error: %v", err)
 	}
 
-	session, err := backend.getSession(sessionID)
-	if err != nil {
-		t.Fatalf("getSession() error: %v", err)
-	}
-
-	// snapshotViaReplay must fetch buffered output without a subscriber, so we
-	// can poll it repeatedly until the marker lands; if each call leaked a
+	// Snapshot must fetch the rendered screen without a subscriber, so we can
+	// poll it repeatedly until the marker lands; if each call leaked a
 	// subscriber the worker would accumulate dead ones.
-	var info AttachInfo
+	var info pty.SnapshotInfo
 	deadline := time.Now().Add(8 * time.Second)
 	for {
-		info, err = backend.snapshotViaReplay(context.Background(), session)
+		info, err = backend.Snapshot(context.Background(), sessionID)
 		if err != nil {
-			t.Fatalf("snapshotViaReplay() error: %v", err)
+			t.Fatalf("Snapshot() error: %v", err)
 		}
-		if derived, ok := pty.ScreenSnapshotFromReplay(info.Scrollback, info.Cols, info.Rows); ok &&
-			bytes.Contains(derived.Payload, []byte("__ATTN_REPLAY__")) {
-			break
-		}
-		if bytes.Contains(info.Scrollback, []byte("__ATTN_REPLAY__")) {
+		if bytes.Contains(info.Screen.Payload, []byte("__ATTN_REPLAY__")) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for marker in read-only replay; scrollback=%q", info.Scrollback)
+			t.Fatalf("timed out waiting for marker in read-only snapshot; screen=%q", info.Screen.Payload)
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
 
 	if !info.Running {
-		t.Fatalf("snapshotViaReplay running=false, expected true")
+		t.Fatalf("Snapshot running=false, expected true")
 	}
-	if len(info.Scrollback) == 0 && len(info.ReplaySegments) == 0 {
-		t.Fatal("expected replay buffer content, got none")
+	if info.Screen == nil || len(info.Screen.Payload) == 0 {
+		t.Fatal("expected a viewport snapshot")
 	}
 
 	// The session must stay fully usable after the read-only snapshots: a real

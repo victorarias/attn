@@ -1,0 +1,237 @@
+{
+  "description": "Behavioral corpus for OSC 133 command-block lifecycle semantics (Phase 3a). Consumed by BOTH app/src/utils/terminalBlocks.corpus.test.ts (proving it against the existing client TerminalBlockStore) and the Go worker block table's tests. Steps are parsed markers with the position the client captured at marker time (worker: the pinned ref's cell). expect.completed lists completed blocks in order with client-independent fields; expect.pending is the open block (null if none); expect.nextId is the next id the store would allocate. The TS runner verifies pending/nextId by flushing with sentinel markers; the Go runner asserts them directly. Positions are absolute buffer rows; inputRow/inputCol flatten the client's inputStart. Absent optional fields mean 'unset' (exitCode, inputRow/inputCol, and for pending also outputStartRow/command).",
+  "cases": [
+    {
+      "name": "full_lifecycle",
+      "steps": [
+        { "marker": "prompt-start", "row": 0, "col": 0 },
+        { "marker": "input-start", "row": 0, "col": 8 },
+        { "marker": "pre-exec", "row": 1, "col": 0, "cmdline": "echo hello" },
+        { "marker": "command-end", "row": 3, "col": 0, "exitCode": 0 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 0, "inputRow": 0, "inputCol": 8, "outputStartRow": 1, "endRow": 3, "command": "echo hello", "exitCode": 0 }
+        ],
+        "pending": null,
+        "nextId": 2
+      }
+    },
+    {
+      "name": "exit_code_nonzero",
+      "steps": [
+        { "marker": "prompt-start", "row": 2, "col": 0 },
+        { "marker": "input-start", "row": 2, "col": 8 },
+        { "marker": "pre-exec", "row": 3, "col": 0, "cmdline": "false" },
+        { "marker": "command-end", "row": 4, "col": 0, "exitCode": 1 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 2, "inputRow": 2, "inputCol": 8, "outputStartRow": 3, "endRow": 4, "command": "false", "exitCode": 1 }
+        ],
+        "pending": null,
+        "nextId": 2
+      }
+    },
+    {
+      "name": "cmdline_missing",
+      "steps": [
+        { "marker": "prompt-start", "row": 0, "col": 0 },
+        { "marker": "pre-exec", "row": 1, "col": 0 },
+        { "marker": "command-end", "row": 2, "col": 0, "exitCode": 0 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 0, "outputStartRow": 1, "endRow": 2, "command": "", "exitCode": 0 }
+        ],
+        "pending": null,
+        "nextId": 2
+      }
+    },
+    {
+      "name": "exit_code_missing",
+      "steps": [
+        { "marker": "prompt-start", "row": 0, "col": 0 },
+        { "marker": "pre-exec", "row": 1, "col": 0, "cmdline": "kill -9 $$" },
+        { "marker": "command-end", "row": 3, "col": 0 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 0, "outputStartRow": 1, "endRow": 3, "command": "kill -9 $$" }
+        ],
+        "pending": null,
+        "nextId": 2
+      }
+    },
+    {
+      "name": "bare_enter_consumes_id",
+      "steps": [
+        { "marker": "prompt-start", "row": 0, "col": 0 },
+        { "marker": "input-start", "row": 0, "col": 8 },
+        { "marker": "command-end", "row": 1, "col": 0, "exitCode": 0 },
+        { "marker": "prompt-start", "row": 1, "col": 0 },
+        { "marker": "pre-exec", "row": 2, "col": 0, "cmdline": "ls" },
+        { "marker": "command-end", "row": 4, "col": 0, "exitCode": 0 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 2, "promptRow": 1, "outputStartRow": 2, "endRow": 4, "command": "ls", "exitCode": 0 }
+        ],
+        "pending": null,
+        "nextId": 3
+      }
+    },
+    {
+      "name": "lost_d_healed_by_next_prompt",
+      "steps": [
+        { "marker": "prompt-start", "row": 0, "col": 0 },
+        { "marker": "pre-exec", "row": 1, "col": 0, "cmdline": "make install" },
+        { "marker": "prompt-start", "row": 40, "col": 0 },
+        { "marker": "pre-exec", "row": 41, "col": 0, "cmdline": "echo 1" },
+        { "marker": "command-end", "row": 43, "col": 0, "exitCode": 0 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 0, "outputStartRow": 1, "endRow": 40, "command": "make install" },
+          { "id": 2, "promptRow": 40, "outputStartRow": 41, "endRow": 43, "command": "echo 1", "exitCode": 0 }
+        ],
+        "pending": null,
+        "nextId": 3
+      }
+    },
+    {
+      "name": "lost_d_and_a_healed_by_input",
+      "steps": [
+        { "marker": "prompt-start", "row": 0, "col": 0 },
+        { "marker": "pre-exec", "row": 1, "col": 0, "cmdline": "make install" },
+        { "marker": "input-start", "row": 41, "col": 2 },
+        { "marker": "pre-exec", "row": 42, "col": 0, "cmdline": "echo 1" },
+        { "marker": "command-end", "row": 44, "col": 0, "exitCode": 0 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 0, "outputStartRow": 1, "endRow": 41, "command": "make install" },
+          { "id": 2, "promptRow": 41, "inputRow": 41, "inputCol": 2, "outputStartRow": 42, "endRow": 44, "command": "echo 1", "exitCode": 0 }
+        ],
+        "pending": null,
+        "nextId": 3
+      }
+    },
+    {
+      "name": "lost_d_healed_by_pre_exec",
+      "steps": [
+        { "marker": "prompt-start", "row": 0, "col": 0 },
+        { "marker": "pre-exec", "row": 1, "col": 0, "cmdline": "first" },
+        { "marker": "pre-exec", "row": 10, "col": 0, "cmdline": "second" },
+        { "marker": "command-end", "row": 12, "col": 0, "exitCode": 0 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 0, "outputStartRow": 1, "endRow": 10, "command": "first" },
+          { "id": 2, "promptRow": 10, "outputStartRow": 10, "endRow": 12, "command": "second", "exitCode": 0 }
+        ],
+        "pending": null,
+        "nextId": 3
+      }
+    },
+    {
+      "name": "orphan_d_ignored",
+      "steps": [
+        { "marker": "command-end", "row": 5, "col": 0, "exitCode": 0 }
+      ],
+      "expect": {
+        "completed": [],
+        "pending": null,
+        "nextId": 1
+      }
+    },
+    {
+      "name": "orphan_input_anchors_block",
+      "steps": [
+        { "marker": "input-start", "row": 3, "col": 4 },
+        { "marker": "pre-exec", "row": 4, "col": 0, "cmdline": "ls" },
+        { "marker": "command-end", "row": 6, "col": 0, "exitCode": 0 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 3, "inputRow": 3, "inputCol": 4, "outputStartRow": 4, "endRow": 6, "command": "ls", "exitCode": 0 }
+        ],
+        "pending": null,
+        "nextId": 2
+      }
+    },
+    {
+      "name": "orphan_pre_exec_anchors_block",
+      "steps": [
+        { "marker": "pre-exec", "row": 2, "col": 0, "cmdline": "top" },
+        { "marker": "command-end", "row": 9, "col": 0, "exitCode": 3 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 2, "outputStartRow": 2, "endRow": 9, "command": "top", "exitCode": 3 }
+        ],
+        "pending": null,
+        "nextId": 2
+      }
+    },
+    {
+      "name": "pending_open_prompt_only",
+      "steps": [
+        { "marker": "prompt-start", "row": 5, "col": 0 }
+      ],
+      "expect": {
+        "completed": [],
+        "pending": { "id": 1, "promptRow": 5 },
+        "nextId": 2
+      }
+    },
+    {
+      "name": "pending_mid_command",
+      "steps": [
+        { "marker": "prompt-start", "row": 5, "col": 0 },
+        { "marker": "input-start", "row": 5, "col": 8 },
+        { "marker": "pre-exec", "row": 6, "col": 0, "cmdline": "sleep 100" }
+      ],
+      "expect": {
+        "completed": [],
+        "pending": { "id": 1, "promptRow": 5, "inputRow": 5, "inputCol": 8, "outputStartRow": 6, "command": "sleep 100" },
+        "nextId": 2
+      }
+    },
+    {
+      "name": "two_commands",
+      "steps": [
+        { "marker": "prompt-start", "row": 0, "col": 0 },
+        { "marker": "input-start", "row": 0, "col": 8 },
+        { "marker": "pre-exec", "row": 1, "col": 0, "cmdline": "echo a" },
+        { "marker": "command-end", "row": 2, "col": 0, "exitCode": 0 },
+        { "marker": "prompt-start", "row": 2, "col": 0 },
+        { "marker": "input-start", "row": 2, "col": 8 },
+        { "marker": "pre-exec", "row": 3, "col": 0, "cmdline": "echo b" },
+        { "marker": "command-end", "row": 4, "col": 0, "exitCode": 0 }
+      ],
+      "expect": {
+        "completed": [
+          { "id": 1, "promptRow": 0, "inputRow": 0, "inputCol": 8, "outputStartRow": 1, "endRow": 2, "command": "echo a", "exitCode": 0 },
+          { "id": 2, "promptRow": 2, "inputRow": 2, "inputCol": 8, "outputStartRow": 3, "endRow": 4, "command": "echo b", "exitCode": 0 }
+        ],
+        "pending": null,
+        "nextId": 3
+      }
+    },
+    {
+      "name": "cap_keeps_newest_200",
+      "generate": { "fullCycles": 250, "rowsPerCycle": 3, "commandPrefix": "cmd-" },
+      "expect": {
+        "completedCount": 200,
+        "firstId": 51,
+        "lastId": 250,
+        "firstCommand": "cmd-50",
+        "lastCommand": "cmd-249",
+        "firstPromptRow": 150,
+        "pending": null,
+        "nextId": 251
+      }
+    }
+  ]
+}

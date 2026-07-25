@@ -18,26 +18,14 @@ import (
 
 	creackpty "github.com/creack/pty"
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/ghosttyvt"
 	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/launchenv"
 )
 
 const (
-	// DefaultScrollbackSize bounds the eager per-session ring buffer (flat
-	// scrollback, used for snapshot derivation and legacy flat replay). It is
-	// allocated up front in every PTY worker subprocess, so it stays small.
-	DefaultScrollbackSize = 1 * 1024 * 1024
-	// DefaultReplayLogSize bounds the lazily-grown segmented replay log — the
-	// source of terminal history restored on remount/relaunch (see
-	// daemon.buildAttachReplayPayload). Unlike the ring it only costs memory
-	// proportional to what a session actually emitted, so it retains enough
-	// history for the daemon to select a recent self-sufficient replay tail or
-	// derive a current screen snapshot. Attach transport is capped separately
-	// because parsing this whole log synchronously would stall the frontend.
-	// Must stay >= daemon.maxAgentRawReplayBytes or attach replay is starved.
-	DefaultReplayLogSize = 8 * 1024 * 1024
-	defaultKillTimeout   = 10 * time.Second
-	shellEnvTimeout      = 2 * time.Second
+	defaultKillTimeout = 10 * time.Second
+	shellEnvTimeout    = 2 * time.Second
 )
 
 var ErrSessionNotFound = errors.New("session not found")
@@ -90,25 +78,44 @@ type SpawnOptions struct {
 	Theme TerminalTheme
 }
 
+// ViewportSnapshot is the styled VT serialization of the visible frame. It is
+// self-contained (including cursor state in the payload) and seeds observers
+// (grid tiles) and the automations gate.
+type ViewportSnapshot struct {
+	Payload []byte
+	Cols    uint16
+	Rows    uint16
+}
+
+// SnapshotInfo is the read-only rendered state used to seed observers without
+// attaching or claiming PTY geometry.
+type SnapshotInfo struct {
+	LastSeq uint32
+	Cols    uint16
+	Rows    uint16
+	Running bool
+	Screen  *ViewportSnapshot // nil when the terminal has produced no frame
+}
+
 type AttachInfo struct {
-	Scrollback          []byte
-	ScrollbackTruncated bool
-	ReplaySegments      []ReplaySegment
-	ReplayTruncated     bool
-	LastSeq             uint32
-	Cols                uint16
-	Rows                uint16
-	PID                 int
-	Running             bool
-	ExitCode            *int
-	ExitSignal          *string
-	ScreenSnapshot      []byte
-	ScreenCols          uint16
-	ScreenRows          uint16
-	ScreenCursorX       uint16
-	ScreenCursorY       uint16
-	ScreenCursorVisible bool
-	ScreenSnapshotFresh bool
+	LastSeq    uint32
+	Cols       uint16
+	Rows       uint16
+	PID        int
+	Running    bool
+	ExitCode   *int
+	ExitSignal *string
+	// GhosttySnapshot is the server-authoritative VT serialization of the whole
+	// terminal (primary + alt screens, scrollback, cursor) from libghostty-vt.
+	// Snapshot geometry is Cols/Rows. nil when the ghostty terminal is absent.
+	GhosttySnapshot []byte
+	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
+	// SCREEN-space rows of GhosttySnapshot, captured under the same lock hold
+	// (atomic with the dump and LastSeq). nil when ghostty is absent.
+	GhosttyBlocks []AttachBlockData
+	// GhosttyScrollbackTruncated reports whether the ghostty terminal dropped
+	// scrollback lines at its cap before this snapshot was taken.
+	GhosttyScrollbackTruncated bool
 }
 
 type ExitInfo struct {
@@ -136,13 +143,12 @@ type SessionInfo struct {
 }
 
 type Manager struct {
-	mu             sync.RWMutex
-	sessions       map[string]*Session
-	pendingSpawns  map[string]struct{}
-	scrollbackSize int
-	logf           LogFunc
-	onExit         func(ExitInfo)
-	onState        func(sessionID, state string)
+	mu            sync.RWMutex
+	sessions      map[string]*Session
+	pendingSpawns map[string]struct{}
+	logf          LogFunc
+	onExit        func(ExitInfo)
+	onState       func(sessionID, state string)
 
 	// testHookAfterSpawnReserve, when non-nil, runs after Spawn reserves its
 	// session ID and releases the mutex. Test-only seam for deterministic
@@ -150,18 +156,14 @@ type Manager struct {
 	testHookAfterSpawnReserve func()
 }
 
-func NewManager(scrollbackSize int, logf LogFunc) *Manager {
-	if scrollbackSize <= 0 {
-		scrollbackSize = DefaultScrollbackSize
-	}
+func NewManager(logf LogFunc) *Manager {
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
 	}
 	return &Manager{
-		sessions:       make(map[string]*Session),
-		pendingSpawns:  make(map[string]struct{}),
-		scrollbackSize: scrollbackSize,
-		logf:           logf,
+		sessions:      make(map[string]*Session),
+		pendingSpawns: make(map[string]struct{}),
+		logf:          logf,
 	}
 }
 
@@ -294,8 +296,6 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		rows:        opts.Rows,
 		ptmx:        ptmx,
 		cmd:         cmd,
-		scrollback:  NewRingBuffer(m.scrollbackSize),
-		replayLog:   NewReplayLog(DefaultReplayLogSize),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
@@ -303,7 +303,24 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		theme:       opts.Theme,
 		cleanup:     deferCleanup,
 	}
-	session.screen = newVirtualScreen(opts.Cols, opts.Rows)
+	// The Ghostty terminal backs the classifier, CPR, tiles, and attach restore;
+	// a session without it is not viable.
+	gt, err := ghosttyvt.New(int(opts.Cols), int(opts.Rows), ghosttyvt.Options{})
+	if err != nil {
+		if ptmx != nil {
+			_ = ptmx.Close()
+		}
+		if cmd != nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+		if deferCleanup != nil {
+			deferCleanup()
+		}
+		return fmt.Errorf("ghostty terminal construction failed: %w", err)
+	}
+	session.ghostty = gt
+	session.blockFeed = newBlockFeeder(gt)
 
 	m.mu.Lock()
 	m.sessions[opts.ID] = session
@@ -372,10 +389,10 @@ func (m *Manager) SetTheme(sessionID string, theme TerminalTheme) error {
 // session WITHOUT registering a subscriber or claiming geometry. It is the
 // read-only seed for observers (e.g. grid tiles) that then dedup the live
 // firehose against LastSeq.
-func (m *Manager) Snapshot(sessionID string) (AttachInfo, error) {
+func (m *Manager) Snapshot(sessionID string) (SnapshotInfo, error) {
 	session, err := m.getSession(sessionID)
 	if err != nil {
-		return AttachInfo{}, err
+		return SnapshotInfo{}, err
 	}
 	return session.screenSnapshot(), nil
 }

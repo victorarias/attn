@@ -24,6 +24,35 @@ type ApprovePRMessage struct {
 	ID string `json:"id"`
 }
 
+type AttachBlock struct {
+	// Command corresponds to the JSON schema field "command".
+	Command *string `json:"command,omitempty,omitzero"`
+
+	// EndRow corresponds to the JSON schema field "end_row".
+	EndRow *int `json:"end_row,omitempty,omitzero"`
+
+	// ExitCode corresponds to the JSON schema field "exit_code".
+	ExitCode *int `json:"exit_code,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID int `json:"id"`
+
+	// InputCol corresponds to the JSON schema field "input_col".
+	InputCol *int `json:"input_col,omitempty,omitzero"`
+
+	// InputRow corresponds to the JSON schema field "input_row".
+	InputRow *int `json:"input_row,omitempty,omitzero"`
+
+	// OutputStartRow corresponds to the JSON schema field "output_start_row".
+	OutputStartRow *int `json:"output_start_row,omitempty,omitzero"`
+
+	// Pending corresponds to the JSON schema field "pending".
+	Pending bool `json:"pending"`
+
+	// PromptRow corresponds to the JSON schema field "prompt_row".
+	PromptRow int `json:"prompt_row"`
+}
+
 type AttachPolicy string
 
 const AttachPolicyFreshSpawn AttachPolicy = "fresh_spawn"
@@ -50,9 +79,6 @@ type AttachResultMessage struct {
 	// Pid corresponds to the JSON schema field "pid".
 	Pid *int `json:"pid,omitempty,omitzero"`
 
-	// ReplaySegments corresponds to the JSON schema field "replay_segments".
-	ReplaySegments []ReplaySegment `json:"replay_segments,omitempty,omitzero"`
-
 	// Revived corresponds to the JSON schema field "revived".
 	Revived *bool `json:"revived,omitempty,omitzero"`
 
@@ -62,35 +88,8 @@ type AttachResultMessage struct {
 	// Running corresponds to the JSON schema field "running".
 	Running *bool `json:"running,omitempty,omitzero"`
 
-	// ScreenCols corresponds to the JSON schema field "screen_cols".
-	ScreenCols *int `json:"screen_cols,omitempty,omitzero"`
-
-	// ScreenCursorVisible corresponds to the JSON schema field
-	// "screen_cursor_visible".
-	ScreenCursorVisible *bool `json:"screen_cursor_visible,omitempty,omitzero"`
-
-	// ScreenCursorX corresponds to the JSON schema field "screen_cursor_x".
-	ScreenCursorX *int `json:"screen_cursor_x,omitempty,omitzero"`
-
-	// ScreenCursorY corresponds to the JSON schema field "screen_cursor_y".
-	ScreenCursorY *int `json:"screen_cursor_y,omitempty,omitzero"`
-
-	// ScreenRows corresponds to the JSON schema field "screen_rows".
-	ScreenRows *int `json:"screen_rows,omitempty,omitzero"`
-
-	// ScreenSnapshot corresponds to the JSON schema field "screen_snapshot".
-	ScreenSnapshot *string `json:"screen_snapshot,omitempty,omitzero"`
-
-	// ScreenSnapshotFresh corresponds to the JSON schema field
-	// "screen_snapshot_fresh".
-	ScreenSnapshotFresh *bool `json:"screen_snapshot_fresh,omitempty,omitzero"`
-
-	// Scrollback corresponds to the JSON schema field "scrollback".
-	Scrollback *string `json:"scrollback,omitempty,omitzero"`
-
-	// ScrollbackTruncated corresponds to the JSON schema field
-	// "scrollback_truncated".
-	ScrollbackTruncated *bool `json:"scrollback_truncated,omitempty,omitzero"`
+	// Snapshot corresponds to the JSON schema field "snapshot".
+	Snapshot *AttachSnapshot `json:"snapshot,omitempty,omitzero"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -111,6 +110,24 @@ type AttachSessionMessage struct {
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows *int `json:"rows,omitempty,omitzero"`
+}
+
+type AttachSnapshot struct {
+	// Blocks corresponds to the JSON schema field "blocks".
+	Blocks []AttachBlock `json:"blocks,omitempty,omitzero"`
+
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
+
+	// ScrollbackTruncated corresponds to the JSON schema field
+	// "scrollback_truncated".
+	ScrollbackTruncated bool `json:"scrollback_truncated"`
+
+	// VtDumpB64 corresponds to the JSON schema field "vt_dump_b64".
+	VtDumpB64 string `json:"vt_dump_b64"`
 }
 
 type AuthorState struct {
@@ -1819,25 +1836,11 @@ type GetScreenSnapshotResultMessage struct {
 	// ScreenCols corresponds to the JSON schema field "screen_cols".
 	ScreenCols *int `json:"screen_cols,omitempty,omitzero"`
 
-	// ScreenCursorVisible corresponds to the JSON schema field
-	// "screen_cursor_visible".
-	ScreenCursorVisible *bool `json:"screen_cursor_visible,omitempty,omitzero"`
-
-	// ScreenCursorX corresponds to the JSON schema field "screen_cursor_x".
-	ScreenCursorX *int `json:"screen_cursor_x,omitempty,omitzero"`
-
-	// ScreenCursorY corresponds to the JSON schema field "screen_cursor_y".
-	ScreenCursorY *int `json:"screen_cursor_y,omitempty,omitzero"`
-
 	// ScreenRows corresponds to the JSON schema field "screen_rows".
 	ScreenRows *int `json:"screen_rows,omitempty,omitzero"`
 
 	// ScreenSnapshot corresponds to the JSON schema field "screen_snapshot".
 	ScreenSnapshot *string `json:"screen_snapshot,omitempty,omitzero"`
-
-	// ScreenSnapshotFresh corresponds to the JSON schema field
-	// "screen_snapshot_fresh".
-	ScreenSnapshotFresh *bool `json:"screen_snapshot_fresh,omitempty,omitzero"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
@@ -3661,17 +3664,6 @@ type RenameWorkspaceMessage struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
-type ReplaySegment struct {
-	// Cols corresponds to the JSON schema field "cols".
-	Cols int `json:"cols"`
-
-	// Data corresponds to the JSON schema field "data".
-	Data string `json:"data"`
-
-	// Rows corresponds to the JSON schema field "rows".
-	Rows int `json:"rows"`
-}
-
 type RepoInfo struct {
 	// Branches corresponds to the JSON schema field "branches".
 	Branches []Branch `json:"branches"`
@@ -5132,28 +5124,11 @@ type WebSocketEvent struct {
 	// ScreenCols corresponds to the JSON schema field "screen_cols".
 	ScreenCols *int `json:"screen_cols,omitempty,omitzero"`
 
-	// ScreenCursorVisible corresponds to the JSON schema field
-	// "screen_cursor_visible".
-	ScreenCursorVisible *bool `json:"screen_cursor_visible,omitempty,omitzero"`
-
-	// ScreenCursorX corresponds to the JSON schema field "screen_cursor_x".
-	ScreenCursorX *int `json:"screen_cursor_x,omitempty,omitzero"`
-
-	// ScreenCursorY corresponds to the JSON schema field "screen_cursor_y".
-	ScreenCursorY *int `json:"screen_cursor_y,omitempty,omitzero"`
-
 	// ScreenRows corresponds to the JSON schema field "screen_rows".
 	ScreenRows *int `json:"screen_rows,omitempty,omitzero"`
 
 	// ScreenSnapshot corresponds to the JSON schema field "screen_snapshot".
 	ScreenSnapshot *string `json:"screen_snapshot,omitempty,omitzero"`
-
-	// ScreenSnapshotFresh corresponds to the JSON schema field
-	// "screen_snapshot_fresh".
-	ScreenSnapshotFresh *bool `json:"screen_snapshot_fresh,omitempty,omitzero"`
-
-	// Scrollback corresponds to the JSON schema field "scrollback".
-	Scrollback *string `json:"scrollback,omitempty,omitzero"`
 
 	// ScrollbackTruncated corresponds to the JSON schema field
 	// "scrollback_truncated".

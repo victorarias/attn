@@ -21,7 +21,7 @@ import (
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -44,12 +44,20 @@ func writeCodexRolloutFixture(t *testing.T, resumeID string) {
 	}
 }
 
-func (b *automationResumeBackend) Snapshot(context.Context, string) (ptybackend.AttachInfo, error) {
+func (b *automationResumeBackend) Snapshot(context.Context, string) (pty.SnapshotInfo, error) {
 	b.snapshotCalls++
+	payload := []byte("reviewer ready")
 	if b.snapshotCalls == 1 {
-		return ptybackend.AttachInfo{ScreenSnapshot: []byte(codexDirectoryTrustPrompt)}, nil
+		payload = []byte(codexDirectoryTrustPrompt)
 	}
-	return ptybackend.AttachInfo{ScreenSnapshot: []byte("reviewer ready")}, nil
+	return pty.SnapshotInfo{Screen: &pty.ViewportSnapshot{Payload: payload}}, nil
+}
+
+func TestStripANSIForPromptMatch_PreservesStyledSplitPrompt(t *testing.T) {
+	stream := []byte("\x1b[2J\x1b[H\x1b[1;36mDo you trust \x1b[0m\x1b[8;4Hthe contents \x1b]8;;https://example.com\x1b\\of this directory?\x1b]8;;\x1b\\\x1b7")
+	if got := stripANSIForPromptMatch(stream); !strings.Contains(got, codexDirectoryTrustPrompt) {
+		t.Fatalf("stripped stream = %q, want prompt %q", got, codexDirectoryTrustPrompt)
+	}
 }
 
 func testAutomationLaunch(agent string) automation.EffectiveLaunch {

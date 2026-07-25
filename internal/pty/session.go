@@ -13,6 +13,8 @@ import (
 	"time"
 
 	creackpty "github.com/creack/pty"
+
+	"github.com/victorarias/attn/internal/ghosttyvt"
 )
 
 // TerminalTheme carries the frontend's resolved terminal colors as "#rrggbb"
@@ -31,11 +33,10 @@ const (
 	defaultThemeCursor     = "#d4d4d4"
 )
 
-// infoSnapshotHook is a test-only seam invoked inside info() after the replay
-// payload (scrollback/replay segments) and screen snapshot are captured but
-// before the attach sequence watermark (LastSeq) is read. It is nil in
-// production. Tests set it to inject PTY writes into that window to
-// deterministically reproduce the snapshot/watermark consistency race.
+// infoSnapshotHook is a test-only seam invoked inside info() after the ghostty
+// snapshot is serialized but before the attach sequence watermark (LastSeq) is
+// read. It is nil in production. Tests set it to inject PTY writes into that
+// window to deterministically reproduce the snapshot/watermark consistency race.
 var infoSnapshotHook func()
 
 // readLoopSeqGapHook is a test-only seam invoked in the read loop after a
@@ -92,23 +93,37 @@ type Session struct {
 	// such as an isolated startup-file overlay for an interactive shell pane.
 	cleanup func()
 
-	scrollback *RingBuffer
-	replayLog  *ReplayLog
-	screen     *virtualScreen
+	// ghostty is the server-authoritative parsed terminal (libghostty-vt). It
+	// backs approval-state detection, CPR replies, the grid/automation screen
+	// snapshot (Manager.Snapshot), and attach restore (see info()). It answers
+	// query responses during Write; the read loop forwards the responses the
+	// scan-based responder does not cover (e.g. kitty CSI ? u) so the worker is
+	// the complete query answerer and a snapshot-restored client can suppress
+	// every response.
+	ghostty *ghosttyvt.Terminal
+	// blockFeed owns writes into ghostty, splitting at OSC 133 markers to
+	// maintain the worker-side command-block table (Phase 3a). nil exactly
+	// when ghostty is nil; every use is nil-guarded like ghostty's.
+	blockFeed  *blockFeeder
 	seqCounter atomic.Uint32
 
-	// replayMu makes the attach replay payload (scrollback / replay segments /
-	// screen) and its sequence watermark (lastReplaySeq) a consistent pair, so
-	// a re-attaching frontend never drops a chunk that landed between the
-	// payload snapshot and the watermark read. Held briefly around each chunk's
-	// buffer writes and around info()'s snapshot; fanOut stays outside it.
+	// replayMu makes Ghostty feeds and lastReplaySeq atomic for snapshots, so a
+	// re-attaching frontend never drops a chunk that landed between the payload
+	// snapshot and the watermark read. Held briefly around each feed and around
+	// snapshot serialization; fanOut stays outside it.
 	replayMu      sync.Mutex
 	lastReplaySeq uint32
 
 	subMu       sync.RWMutex
 	subscribers map[string]*sessionSubscriber
 
-	writeMu sync.Mutex
+	// writeMu guards every ptmx access that is not a Read: writes, the resize
+	// ioctl, and the close itself. os.File tolerates Read racing Close, but
+	// Fd() (which the resize ioctl needs) does not — it reads the descriptor
+	// while Close is destroying it. ptmxClosed makes the ordering explicit so a
+	// late resize or query reply becomes a no-op instead of touching a dead fd.
+	writeMu    sync.Mutex
+	ptmxClosed bool
 
 	// themeMu guards theme, which seeds OSC 10/11/12 (fg/bg/cursor color)
 	// replies. Set at spawn (SpawnOptions.Theme) and updated live via SetTheme;
@@ -253,7 +268,7 @@ func nextCoalescedRead(reads <-chan ptyRead, maxBytes int, window time.Duration)
 
 func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(string, ...interface{})) {
 	defer func() {
-		_ = s.ptmx.Close()
+		s.closePTMX()
 		if s.cleanup != nil {
 			s.cleanup()
 		}
@@ -306,20 +321,20 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				if readLoopSeqGapHook != nil {
 					readLoopSeqGapHook()
 				}
-				s.metaMu.RLock()
-				cols := s.cols
-				rows := s.rows
-				s.metaMu.RUnlock()
 				s.replayMu.Lock()
-				s.scrollback.Write(data)
-				if s.replayLog != nil {
-					s.replayLog.Write(data, cols, rows)
-				}
-				if s.screen != nil {
-					s.screen.Observe(data)
+				if s.blockFeed != nil {
+					// Feed the server-authoritative terminal under the same lock
+					// as the seq watermark so a snapshot stays atomic with it;
+					// the feeder splits at OSC 133 markers to pin block positions.
+					s.blockFeed.feed(data)
 				}
 				s.lastReplaySeq = seq
 				s.replayMu.Unlock()
+				// Drain ghostty's query responses AFTER the lock (the sink has
+				// its own mutex) and forward the responses the scanner does not
+				// cover (kitty CSI ? u, etc.) so the worker answers every query
+				// and a snapshot-restored client can suppress all of them.
+				s.drainGhosttyResponses(logf)
 				// The daemon is the single authority for CPR (cursor position)
 				// and DA1 (device attributes) replies. Answer after the chunk is
 				// applied so the reported cursor is current, and reply in the
@@ -365,20 +380,13 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 	if len(carryover) > 0 {
 		seq := s.seqCounter.Add(1)
-		s.metaMu.RLock()
-		cols := s.cols
-		rows := s.rows
-		s.metaMu.RUnlock()
 		s.replayMu.Lock()
-		s.scrollback.Write(carryover)
-		if s.replayLog != nil {
-			s.replayLog.Write(carryover, cols, rows)
-		}
-		if s.screen != nil {
-			s.screen.Observe(carryover)
+		if s.blockFeed != nil {
+			s.blockFeed.feed(carryover)
 		}
 		s.lastReplaySeq = seq
 		s.replayMu.Unlock()
+		s.drainGhosttyResponses(logf)
 		s.fanOut(carryover, seq)
 	}
 
@@ -391,20 +399,122 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 	}
 }
 
+// attachSnapshotEnv gates server-authoritative snapshot attach. When set to "1"
+// the daemon serves a ghostty-serialized snapshot on attach and the worker
+// drainGhosttyResponses clears the ghostty terminal's accumulated query
+// responses and forwards the responses the scan-based responder does not cover
+// (kitty CSI ? u and any other non-CPR/DA1/OSC-color reports) to the PTY, so the
+// worker answers every query and a snapshot-restored client can suppress all
+// responses. Must be called after replayMu is released; the sink has its own lock.
+func (s *Session) drainGhosttyResponses(logf func(string, ...interface{})) {
+	// The nil check and the drain are one critical section: teardown nils the
+	// field under replayMu, so checking outside the lock would let a freed
+	// terminal be drained.
+	s.replayMu.Lock()
+	var drained []byte
+	if s.ghostty != nil {
+		drained = s.ghostty.DrainResponses()
+	}
+	s.replayMu.Unlock()
+	if len(drained) == 0 {
+		return
+	}
+	gap := stripScannerOwnedResponses(drained)
+	if len(gap) == 0 {
+		return
+	}
+	s.writeMu.Lock()
+	_, _ = s.ptmx.Write(gap)
+	s.writeMu.Unlock()
+	if logf != nil {
+		logf("pty ghostty gap reply: session=%s bytes=%d", s.id, len(gap))
+	}
+}
+
+// stripScannerOwnedResponses removes, from a ghostty query-response stream, the
+// response classes the scan-based responder already emits — CPR (CSI … R), DA
+// (CSI … c), and OSC 10/11/12 color reports — so forwarding the remainder never
+// double-answers a query the scanner handles. Kitty keyboard reports (CSI ? … u),
+// DECRQM reports (CSI ? … $ y), and anything else are kept. Unrecognized bytes
+// are preserved so a partial/interleaved stream is never silently dropped.
+func stripScannerOwnedResponses(resp []byte) []byte {
+	out := make([]byte, 0, len(resp))
+	for i := 0; i < len(resp); {
+		if resp[i] != 0x1b || i+1 >= len(resp) {
+			out = append(out, resp[i])
+			i++
+			continue
+		}
+		switch resp[i+1] {
+		case '[': // CSI … final byte in 0x40–0x7e
+			j := i + 2
+			for j < len(resp) && !(resp[j] >= 0x40 && resp[j] <= 0x7e) {
+				j++
+			}
+			if j >= len(resp) {
+				out = append(out, resp[i:]...)
+				i = len(resp)
+				continue
+			}
+			final := resp[j]
+			seq := resp[i : j+1]
+			// CPR (R) and DA (c) are the scanner's; drop them. Everything else
+			// (kitty u, DECRQM $y, …) is a gap the scanner misses — keep it.
+			if final != 'R' && final != 'c' {
+				out = append(out, seq...)
+			}
+			i = j + 1
+		case ']': // OSC … terminated by BEL or ST (ESC \)
+			j := i + 2
+			for j < len(resp) {
+				if resp[j] == 0x07 {
+					j++
+					break
+				}
+				if resp[j] == 0x1b && j+1 < len(resp) && resp[j+1] == '\\' {
+					j += 2
+					break
+				}
+				j++
+			}
+			seq := resp[i:j]
+			// OSC 10/11/12 color reports are the scanner's; drop them.
+			if !isOSCColorReport(seq) {
+				out = append(out, seq...)
+			}
+			i = j
+		default:
+			out = append(out, resp[i], resp[i+1])
+			i += 2
+		}
+	}
+	return out
+}
+
+// isOSCColorReport reports whether an OSC sequence is a 10/11/12 color report
+// (ESC ] 1{0,1,2} ;). It matches the codes the scan-based responder answers.
+func isOSCColorReport(seq []byte) bool {
+	const prefixLen = 5 // ESC ] 1 X ;
+	if len(seq) < prefixLen || seq[0] != 0x1b || seq[1] != ']' || seq[2] != '1' {
+		return false
+	}
+	return (seq[3] == '0' || seq[3] == '1' || seq[3] == '2') && seq[4] == ';'
+}
+
 // approvalEvalInterval throttles how often the readLoop path inspects the
 // rendered screen. Rendering is cheap but the output stream is dominated by many
 // tiny cursor-addressed frames; sampling at this cadence keeps cost bounded while
 // staying well below approvalClearDebounce.
 const approvalEvalInterval = 100 * time.Millisecond
 
-// evaluateApproval samples the rendered screen and applies any approval-state
+// evaluateApproval samples the rendered terminal and applies any approval-state
 // transition the resolver reports. It runs on two paths: the readLoop output path
 // (throttle=true, so high-frequency frames don't re-render constantly) and a
 // scheduled recheck (throttle=false). The scheduled recheck is what lets the
 // pending_approval->working clear complete even when the approved command goes
 // quiet and emits no further PTY output.
 func (s *Session) evaluateApproval(now time.Time, throttle bool) {
-	if s.approvalResolver == nil || s.onState == nil || s.screen == nil {
+	if s.approvalResolver == nil || s.onState == nil {
 		return
 	}
 	// Never emit a transition for a session that has already exited; a late
@@ -422,7 +532,21 @@ func (s *Session) evaluateApproval(now time.Time, throttle bool) {
 		return
 	}
 	s.lastApprovalEval = now
-	signal := s.approvalResolver.observe(s.screen.renderedText(), now)
+	// Render under replayMu — teardown nils the terminal under that lock, so an
+	// unlocked read could render a freed handle. A torn-down session has nothing
+	// to observe and reports no transition.
+	s.replayMu.Lock()
+	var viewport string
+	haveTerminal := s.ghostty != nil
+	if haveTerminal {
+		viewport = s.ghostty.ViewportText()
+	}
+	s.replayMu.Unlock()
+	if !haveTerminal {
+		s.approvalMu.Unlock()
+		return
+	}
+	signal := s.approvalResolver.observe(viewport, now)
 	switch signal {
 	case approvalClearStarted:
 		s.scheduleApprovalRecheckLocked()
@@ -535,37 +659,30 @@ func (s *Session) info() AttachInfo {
 		pid = s.cmd.Process.Pid
 	}
 
-	// Capture the replay payload and its sequence watermark atomically so a
-	// re-attaching frontend can dedup the live stream against LastSeq without a
-	// hole: every byte is either in this payload (seq <= LastSeq) or a live
-	// chunk it will apply (seq > LastSeq). Without this, a chunk written
-	// between the payload snapshot and the watermark read is in neither — lost.
+	// Serialize the server-authoritative ghostty terminal and read the sequence
+	// watermark atomically, so a re-attaching frontend can dedup the live stream
+	// against LastSeq without a hole: every byte in the dump has seq <= LastSeq,
+	// and a live chunk it will apply has seq > LastSeq. Without this atomicity a
+	// chunk written between the serialize and the watermark read is in neither —
+	// lost. Supported-platform sessions always have a Ghostty terminal; the
+	// unsupported-platform buildability stub serializes no dump.
 	s.replayMu.Lock()
-	scrollback, truncated := s.scrollback.Snapshot()
-	var replaySegments []ReplaySegment
-	replayTruncated := false
-	if s.replayLog != nil {
-		replaySegments, replayTruncated = s.replayLog.Snapshot()
+	var ghosttySnapshot []byte
+	// libghostty-vt does not surface a scrollback-truncation flag (the vestigial
+	// ghosttyvt.Snapshot.ScrollbackTruncated was removed in Phase 3a as always
+	// false), so the signal is reported false until the native serializer exposes
+	// one. The field is still plumbed for that future and for observability.
+	var ghosttyTruncated bool
+	if s.ghostty != nil {
+		snapshot := s.ghostty.Serialize()
+		ghosttySnapshot = snapshot.VTDump
 	}
-	var (
-		screenSnapshot      []byte
-		screenCols          uint16
-		screenRows          uint16
-		screenCursorX       uint16
-		screenCursorY       uint16
-		screenCursorVisible bool
-		screenSnapshotFresh bool
-	)
-	if s.screen != nil {
-		if snapshot, ok := s.screen.Snapshot(); ok {
-			screenSnapshot = snapshot.payload
-			screenCols = snapshot.cols
-			screenRows = snapshot.rows
-			screenCursorX = snapshot.cursorX
-			screenCursorY = snapshot.cursorY
-			screenCursorVisible = snapshot.cursorVisible
-			screenSnapshotFresh = true
-		}
+	// Resolve command blocks inside the SAME hold as the dump and watermark:
+	// the attach snapshot is an atomic {dump, blocks, watermark} triple, so a
+	// block row always indexes the dump it shipped with (Phase 3a contract).
+	var ghosttyBlocks []AttachBlockData
+	if s.blockFeed != nil {
+		ghosttyBlocks = s.blockFeed.snapshotBlocks()
 	}
 	replayWatermark := s.lastReplaySeq
 	s.replayMu.Unlock()
@@ -578,38 +695,31 @@ func (s *Session) info() AttachInfo {
 	}
 
 	// LastSeq is the dedup boundary: it names the last chunk covered by this
-	// payload, so the frontend applies live chunks with seq > LastSeq and
+	// snapshot, so the frontend applies live chunks with seq > LastSeq and
 	// drops the rest as already-replayed. screenSnapshot() reports the same
 	// covered-chunk semantics; the two must not diverge or the first live
 	// chunk after an attach is silently lost (or double-applied).
 	return AttachInfo{
-		Scrollback:          scrollback,
-		ScrollbackTruncated: truncated,
-		ReplaySegments:      replaySegments,
-		ReplayTruncated:     replayTruncated,
-		LastSeq:             replayWatermark,
-		Cols:                cols,
-		Rows:                rows,
-		PID:                 pid,
-		Running:             running,
-		ExitCode:            exitCode,
-		ExitSignal:          exitSignal,
-		ScreenSnapshot:      screenSnapshot,
-		ScreenCols:          screenCols,
-		ScreenRows:          screenRows,
-		ScreenCursorX:       screenCursorX,
-		ScreenCursorY:       screenCursorY,
-		ScreenCursorVisible: screenCursorVisible,
-		ScreenSnapshotFresh: screenSnapshotFresh,
+		LastSeq:                    replayWatermark,
+		Cols:                       cols,
+		Rows:                       rows,
+		PID:                        pid,
+		Running:                    running,
+		ExitCode:                   exitCode,
+		ExitSignal:                 exitSignal,
+		GhosttySnapshot:            ghosttySnapshot,
+		GhosttyBlocks:              ghosttyBlocks,
+		GhosttyScrollbackTruncated: ghosttyTruncated,
 	}
 }
 
-// screenSnapshot is a lean, read-only view of the current rendered screen plus
-// the sequence watermark. Unlike info() it omits scrollback and replay history,
-// so it is cheap enough to call for many sessions at once (e.g. seeding every
-// grid tile). It registers no subscriber and claims no geometry.
+// screenSnapshot is a lean, read-only ghostty viewport serialization plus the
+// sequence watermark. Its styled VT stream replays into a fresh Ghostty model;
+// unlike info() it omits scrollback and replay history, so it is cheap enough to
+// call for many sessions at once (e.g. seeding every grid tile). It registers no
+// subscriber and claims no geometry.
 //
-// The screen and its watermark are captured atomically under replayMu — the
+// The viewport and its watermark are captured atomically under replayMu — the
 // same critical section the read loop uses to apply a chunk and advance
 // lastReplaySeq — so LastSeq names exactly the last chunk baked into this
 // snapshot, matching info()/Attach semantics (the two must not diverge).
@@ -617,7 +727,7 @@ func (s *Session) info() AttachInfo {
 // the chunk, so a snapshot landing in that gap would claim to cover bytes the
 // screen does not contain, and an observer deduping the live stream against
 // LastSeq would silently drop the chunk carrying them.
-func (s *Session) screenSnapshot() AttachInfo {
+func (s *Session) screenSnapshot() SnapshotInfo {
 	s.metaMu.RLock()
 	cols := s.cols
 	rows := s.rows
@@ -627,27 +737,20 @@ func (s *Session) screenSnapshot() AttachInfo {
 	running := s.running
 	s.exitMu.RUnlock()
 
-	pid := 0
-	if s.cmd != nil && s.cmd.Process != nil {
-		pid = s.cmd.Process.Pid
-	}
-
-	info := AttachInfo{
+	info := SnapshotInfo{
 		Cols:    cols,
 		Rows:    rows,
-		PID:     pid,
 		Running: running,
 	}
 	s.replayMu.Lock()
-	if s.screen != nil {
-		if snapshot, ok := s.screen.Snapshot(); ok {
-			info.ScreenSnapshot = snapshot.payload
-			info.ScreenCols = snapshot.cols
-			info.ScreenRows = snapshot.rows
-			info.ScreenCursorX = snapshot.cursorX
-			info.ScreenCursorY = snapshot.cursorY
-			info.ScreenCursorVisible = snapshot.cursorVisible
-			info.ScreenSnapshotFresh = true
+	if s.ghostty != nil {
+		snapshot := s.ghostty.SerializeViewport()
+		if snapshot.VTDump != nil {
+			info.Screen = &ViewportSnapshot{
+				Payload: snapshot.VTDump,
+				Cols:    uint16(snapshot.Cols),
+				Rows:    uint16(snapshot.Rows),
+			}
 		}
 	}
 	info.LastSeq = s.lastReplaySeq
@@ -681,11 +784,34 @@ func (s *Session) resize(cols, rows uint16) error {
 	s.cols = cols
 	s.rows = rows
 	s.metaMu.Unlock()
-	if s.screen != nil {
-		s.screen.Resize(cols, rows)
+	// The reflow mutates the same terminal info() serializes and the block feed
+	// resolves rows against, so it belongs in that critical section.
+	s.replayMu.Lock()
+	if s.ghostty != nil {
+		s.ghostty.Resize(int(cols), int(rows))
 	}
+	s.replayMu.Unlock()
 
+	// The ioctl resolves ptmx.Fd(), so it must not overlap the close.
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.ptmxClosed {
+		return nil
+	}
 	return creackpty.Setsize(s.ptmx, &creackpty.Winsize{Cols: cols, Rows: rows})
+}
+
+// closePTMX closes the pty exactly once, shutting out the writers and the
+// resize ioctl that share writeMu. Both the read loop's deferred cleanup and
+// closePTY funnel through here.
+func (s *Session) closePTMX() {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if s.ptmxClosed {
+		return
+	}
+	s.ptmxClosed = true
+	_ = s.ptmx.Close()
 }
 
 // sigtermToHUPGrace is how long kill waits for a SIGTERM'd child before
@@ -743,8 +869,28 @@ func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 	}
 }
 
+// closePTY releases the pty and the native terminal state behind it.
+//
+// The block feed and the Ghostty terminal own native refs that info() resolves
+// and resize() reflows, so their teardown takes replayMu — the same lock those
+// readers hold. Manager.Remove can hand an already-looked-up session to an
+// in-flight attach before closing it; without this hold that attach could read
+// or free the same native ref concurrently. Both fields are nil'd under the
+// lock so a reader that arrives after teardown sees absence, not a freed
+// handle.
 func (s *Session) closePTY() {
-	_ = s.ptmx.Close()
+	s.closePTMX()
+
+	s.replayMu.Lock()
+	blockFeed, ghostty := s.blockFeed, s.ghostty
+	s.blockFeed, s.ghostty = nil, nil
+	if blockFeed != nil {
+		blockFeed.close()
+	}
+	if ghostty != nil {
+		ghostty.Close()
+	}
+	s.replayMu.Unlock()
 }
 
 func detectTerminalQueries(data []byte) terminalQueries {
@@ -855,12 +1001,14 @@ func isValidHexColor(value string) bool {
 // is no double-reply to confuse the shell.
 func (s *Session) writeCursorPositionResponse(logf func(string, ...any)) {
 	row, col := 1, 1
-	if s.screen != nil {
-		if snapshot, ok := s.screen.Snapshot(); ok {
-			row = int(snapshot.cursorY) + 1
-			col = int(snapshot.cursorX) + 1
-		}
+	// Read the cursor under replayMu: teardown nils the terminal under that
+	// lock, so an unlocked check-then-use could query a freed handle.
+	s.replayMu.Lock()
+	if s.ghostty != nil {
+		x, y := s.ghostty.CursorPos()
+		row, col = y+1, x+1
 	}
+	s.replayMu.Unlock()
 	s.writeMu.Lock()
 	_, _ = fmt.Fprintf(s.ptmx, "\x1b[%d;%dR", row, col)
 	s.writeMu.Unlock()

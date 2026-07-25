@@ -1,3 +1,9 @@
 
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
+
+# Recorded terminal output, byte-exact. Trailing spaces and CRs are the padding
+# a real VT emitted and are part of the fixture, so exempt these from the
+# whitespace check — otherwise they bury real whitespace defects elsewhere in
+# `git diff --check`.
+internal/pty/testdata/corpus/*.bytes -whitespace

@@ -1,38 +1,35 @@
 import type { PtyAttachPolicy } from './bridge';
 
-export type AttachReplayPreference =
-  | 'default'
-  | 'prefer_raw_scrollback';
-
-export interface AttachReplaySegment {
-  cols: number;
-  rows: number;
-  data: string;
-}
-
 export interface AttachRequestContext {
   requestedCols: number;
   requestedRows: number;
   policy: PtyAttachPolicy;
   shell: boolean;
   agent: string | null;
-  replayPreference: AttachReplayPreference;
 }
 
-export interface AttachReplayData {
-  scrollback?: string;
-  replay_segments?: AttachReplaySegment[];
-  screen_snapshot?: string;
-  screen_snapshot_fresh?: boolean;
-  screen_cols?: number;
-  screen_rows?: number;
+export interface AttachGhosttySnapshot {
+  cols: number;
+  rows: number;
+  vt_dump_b64: string;
+  scrollback_truncated?: boolean;
+}
+
+export interface AttachRestoreData {
   cols?: number;
   rows?: number;
+  // Server-authoritative terminal snapshot: the sole restore payload. A raw VT
+  // byte stream (base64) that reconstructs the daemon worker's full parsed grid
+  // + scrollback (primary and alt screen) when written into a fresh Ghostty
+  // model. Absent when the policy omits restore or the worker has no
+  // serialization to offer (ghostty construction failed, or a non-macOS build's
+  // pure-Go stub); the client then keeps whatever it has and dedups the live
+  // stream against last_seq.
+  snapshot?: AttachGhosttySnapshot;
 }
 
-export type AttachResultData = AttachReplayData & {
+export type AttachResultData = AttachRestoreData & {
   last_seq?: number;
-  scrollback_truncated?: boolean;
 };
 
 export interface AttachRuntimeRequest {
@@ -72,7 +69,6 @@ export function createAttachRequestContext(
     policy,
     shell: normalizedAgent === 'shell',
     agent: normalizedAgent,
-    replayPreference: deriveAttachReplayPreference(normalizedAgent),
   };
 }
 
@@ -87,129 +83,59 @@ function normalizeAttachAgent(agent?: string | null, shell?: boolean): string | 
   return normalized.length > 0 ? normalized : null;
 }
 
-function deriveAttachReplayPreference(agent: string | null): AttachReplayPreference {
-  return agent === 'codex' || agent === 'shell' ? 'prefer_raw_scrollback' : 'default';
-}
-
-export function classifyAttachReplay(
-  data: AttachReplayData,
+// classifyAttachRestore resolves an attach result to the single restore
+// decision that remains: does the daemon hand us a Ghostty snapshot to
+// reconstruct from, and at what grid? There is exactly one restore payload
+// (the VT dump) or none — the raw-replay-vs-snapshot decision tree is gone.
+export function classifyAttachRestore(
+  data: AttachRestoreData,
   context?: AttachRequestContext,
 ) {
-  const availableScreenSnapshot = Boolean(data.screen_snapshot && data.screen_snapshot_fresh !== false);
-  const availableRawScrollback = Boolean(data.scrollback || (data.replay_segments && data.replay_segments.length > 0));
-  const replayPreference = context?.replayPreference ?? 'default';
-  // A same-app remount creates a fresh Ghostty model and therefore must
-  // rehydrate the visible state and available history. Codex fresh-spawn is
-  // separate: its startup query bytes must pass through the parser so the
-  // frontend can answer them before the TUI draws.
-  const policyEligibleForCodexRawReplay = context?.policy === 'fresh_spawn';
-  const codexRawReplayBootstrap = replayPreference === 'prefer_raw_scrollback'
-    && policyEligibleForCodexRawReplay;
-  const respondToTerminalQueries = codexRawReplayBootstrap;
-  const prefersRawScrollback = replayPreference === 'prefer_raw_scrollback'
-    && (context?.policy === 'relaunch_restore' || context?.policy === 'same_app_remount' || policyEligibleForCodexRawReplay);
-  const screenSnapshotSuppressed = availableScreenSnapshot && availableRawScrollback && prefersRawScrollback;
-  const hasScreenSnapshot = availableScreenSnapshot && !screenSnapshotSuppressed;
-  const hasReplayPayload = Boolean(
-    (hasScreenSnapshot && data.screen_snapshot)
-    || data.scrollback
-    || (data.replay_segments && data.replay_segments.length > 0),
-  );
-  const replayKind = hasScreenSnapshot
-    ? 'screen_snapshot'
-    : (data.scrollback || (data.replay_segments && data.replay_segments.length > 0))
-      ? 'scrollback'
-      : 'none';
+  const ghosttySnapshot = data.snapshot && data.snapshot.vt_dump_b64 ? data.snapshot : null;
+  const hasSnapshot = ghosttySnapshot !== null;
   const attachedCols = typeof data.cols === 'number' ? data.cols : null;
   const attachedRows = typeof data.rows === 'number' ? data.rows : null;
-  const replayCols = hasScreenSnapshot
-    ? (typeof data.screen_cols === 'number' ? data.screen_cols : attachedCols)
-    : attachedCols;
-  const replayRows = hasScreenSnapshot
-    ? (typeof data.screen_rows === 'number' ? data.screen_rows : attachedRows)
-    : attachedRows;
-  const requestedCols = context?.requestedCols ?? null;
-  const requestedRows = context?.requestedRows ?? null;
-  const attachedGeometryMismatch = requestedCols !== null && requestedRows !== null && (
-    attachedCols !== requestedCols || attachedRows !== requestedRows
-  );
-  const replayGeometryMismatch = requestedCols !== null && requestedRows !== null && hasReplayPayload && (
-    replayCols !== requestedCols || replayRows !== requestedRows
-  );
-  // Restore payloads describe the daemon's current terminal grid. Reconstruct
-  // the fresh frontend model at that grid first; the interactive client's
-  // subsequent fit/pty_resize remains authoritative.
-  const replayAtAttachedGeometry = context?.policy === 'relaunch_restore'
-    || context?.policy === 'same_app_remount';
-  const replayAllowedByPolicy = context?.policy === 'relaunch_restore'
-    || context?.policy === 'same_app_remount'
-    || codexRawReplayBootstrap;
-  const geometryMismatchSkipsReplay = !replayAtAttachedGeometry
-    && hasScreenSnapshot
-    && (attachedGeometryMismatch || replayGeometryMismatch);
-  const replaySkipped = hasReplayPayload && (
-    !replayAllowedByPolicy ||
-    geometryMismatchSkipsReplay
-  );
-  const replayApplied = hasReplayPayload && !replaySkipped;
+  // A Ghostty snapshot carries its own authoritative grid (we resize the fresh
+  // model to it before writing the dump). With no snapshot, geometry falls back
+  // to the daemon's reported PTY size.
+  const restoreCols = hasSnapshot ? ghosttySnapshot.cols : attachedCols;
+  const restoreRows = hasSnapshot ? ghosttySnapshot.rows : attachedRows;
 
   return {
-    shell: context?.shell ?? false,
     agent: context?.agent ?? null,
-    replayPreference,
-    prefersRawScrollback,
-    availableScreenSnapshot,
-    availableRawScrollback,
-    screenSnapshotSuppressed,
-    hasScreenSnapshot,
-    hasReplayPayload,
-    replayKind,
-    attachedCols,
-    attachedRows,
-    replayCols,
-    replayRows,
-    requestedCols,
-    requestedRows,
-    attachedGeometryMismatch,
-    replayGeometryMismatch,
-    replayAllowedByPolicy,
-    respondToTerminalQueries,
-    replayApplied,
-    replaySkipped,
+    hasSnapshot,
+    restoreCols,
+    restoreRows,
   };
 }
 
 export function planAttachedRuntimeGeometry(
   args: AttachRuntimeRequest,
-  attachResult: AttachReplayData,
+  attachResult: AttachRestoreData,
   options: {
     attachPolicy: PtyAttachPolicy;
     attachContext?: AttachRequestContext;
     requestedGeometryAuthoritative?: boolean;
   },
 ) {
-  const replayPlan = classifyAttachReplay(attachResult, options.attachContext);
+  const restorePlan = classifyAttachRestore(attachResult, options.attachContext);
   const requestedCols = args.cols;
   const requestedRows = args.rows;
   const attachedCols = typeof attachResult.cols === 'number' ? attachResult.cols : null;
   const attachedRows = typeof attachResult.rows === 'number' ? attachResult.rows : null;
-  const hasScreenSnapshotReplay = replayPlan.replayApplied && replayPlan.hasScreenSnapshot;
-  const hasRawScrollbackReplay = replayPlan.replayApplied && replayPlan.replayKind === 'scrollback';
-  const replayCols = replayPlan.replayCols;
-  const replayRows = replayPlan.replayRows;
+  const restoreCols = restorePlan.restoreCols;
+  const restoreRows = restorePlan.restoreRows;
   const ptyGeometryMatches = attachedCols === requestedCols && attachedRows === requestedRows;
-  const replayGeometryMatches = hasScreenSnapshotReplay
-    ? replayCols === requestedCols && replayRows === requestedRows
-    : hasRawScrollbackReplay
-      ? ptyGeometryMatches
-      : false;
+  // A Ghostty snapshot carries its own authoritative grid (restoreCols/Rows).
+  const restoreGeometryMatches = restorePlan.hasSnapshot
+    ? restoreCols === requestedCols && restoreRows === requestedRows
+    : false;
   // requestedGeometryAuthoritative === false means the client size is
   // provisional (never measured against a visible container): it must not
   // claim PTY geometry authority. Forcing the live PTY to a construction
   // default SIGWINCH-churns the shell and bounces every attached model's
-  // width, invalidating freshly replayed command blocks. The daemon's
-  // geometry stays authoritative until a real fit produces an interactive
-  // resize.
+  // width, invalidating a freshly restored grid. The daemon's geometry stays
+  // authoritative until a real fit produces an interactive resize.
   const preserveAttachedGeometry = options.attachPolicy === 'relaunch_restore'
     || options.requestedGeometryAuthoritative === false;
   const resizeRequired = !preserveAttachedGeometry && !ptyGeometryMatches;
@@ -219,19 +145,12 @@ export function planAttachedRuntimeGeometry(
     requestedRows,
     attachedCols,
     attachedRows,
-    replayCols,
-    replayRows,
+    restoreCols,
+    restoreRows,
     ptyGeometryMatches,
-    replayGeometryMatches,
-    hasScreenSnapshotReplay,
-    hasRawScrollbackReplay,
-    replayKind: replayPlan.replayKind,
-    replayApplied: replayPlan.replayApplied,
-    availableScreenSnapshot: replayPlan.availableScreenSnapshot,
-    availableRawScrollback: replayPlan.availableRawScrollback,
-    screenSnapshotSuppressed: replayPlan.screenSnapshotSuppressed,
-    replayPreference: replayPlan.replayPreference,
-    agent: replayPlan.agent,
+    restoreGeometryMatches,
+    hasSnapshot: restorePlan.hasSnapshot,
+    agent: restorePlan.agent,
     resizeRequired,
     strategy: resizeRequired ? 'resize' : preserveAttachedGeometry && !ptyGeometryMatches ? 'preserve_attached' : 'none',
     attachPolicy: options.attachPolicy,
@@ -240,57 +159,44 @@ export function planAttachedRuntimeGeometry(
 
 export function planAttachResultEffects({
   attachResult,
-  replayPlan,
+  restorePlan,
   previousSeq,
   queuedOutputs,
-  sessionAgent,
 }: {
   attachResult: AttachResultData;
-  replayPlan: ReturnType<typeof classifyAttachReplay>;
+  restorePlan: ReturnType<typeof classifyAttachRestore>;
   previousSeq?: number;
   queuedOutputs?: PendingAttachOutputChunk[];
-  sessionAgent?: string | null;
 }) {
-  const shouldReset = replayPlan.replayAllowedByPolicy && (
-    replayPlan.replayApplied || typeof previousSeq === 'number'
-  );
-  const resetReason = shouldReset
-    ? (replayPlan.hasScreenSnapshot && replayPlan.replayApplied ? 'snapshot_restore' : 'reattach')
-    : null;
-  const replayAction = replayPlan.replaySkipped
+  // Reset is only safe when a snapshot redraws the whole grid. Without one the
+  // server has no serialized state to hand us, so the client's existing model is
+  // the ONLY rendered terminal: resetting it (e.g. a same_app_remount after a
+  // ghostty construction failure) clears the screen with nothing to repaint it,
+  // leaving an idle shell blank until it next prints. Per AGENTS.md a
+  // snapshot-less attach keeps whatever the client already has.
+  const shouldReset = restorePlan.hasSnapshot;
+  const resetReason = shouldReset ? 'snapshot_restore' : null;
+  const restoreAction = restorePlan.hasSnapshot && attachResult.snapshot?.vt_dump_b64
     ? {
-        kind: 'skipped' as const,
-        replayKind: replayPlan.replayKind,
+        kind: 'ghostty_snapshot' as const,
+        data: attachResult.snapshot.vt_dump_b64,
       }
-    : replayPlan.replayApplied && replayPlan.hasScreenSnapshot && attachResult.screen_snapshot
-      ? {
-          kind: 'screen_snapshot' as const,
-          replayKind: 'screen_snapshot' as const,
-          data: attachResult.screen_snapshot,
-        }
-      : replayPlan.replayApplied && attachResult.replay_segments && attachResult.replay_segments.length > 0
-        ? {
-            kind: 'scrollback_segments' as const,
-            replayKind: 'scrollback' as const,
-            segments: attachResult.replay_segments,
-          }
-      : replayPlan.replayApplied && attachResult.scrollback
-        ? {
-            kind: 'scrollback' as const,
-            replayKind: 'scrollback' as const,
-            data: attachResult.scrollback,
-          }
-        : {
-            kind: 'none' as const,
-            replayKind: replayPlan.replayKind,
-          };
+    : {
+        kind: 'none' as const,
+      };
 
-  // last_seq names the last chunk covered by the replay payload (see
-  // Session.info in internal/pty/session.go). A queued chunk with
-  // seq <= last_seq is already inside the replay; emitting it again would
-  // double-apply those bytes. Live chunks resume at last_seq + 1, which
+  // The dedup baseline is the highest seq the client has already rendered.
+  // With a snapshot the dump covers everything through the server's last_seq
+  // (see Session.info in internal/pty/session.go), so that is the baseline and a
+  // queued chunk with seq <= last_seq is already inside the dump. Without a
+  // snapshot nothing was repainted for the client, so the baseline is the
+  // client's OWN watermark (previousSeq): advancing to the server's last_seq
+  // would silently drop queued chunks between previousSeq and last_seq that the
+  // client never rendered. Live chunks resume just past the baseline, which
   // planLivePtyOutput's `incomingSeq <= lastSeq` stale rule lets through.
-  let nextSeq = typeof attachResult.last_seq === 'number' ? attachResult.last_seq : 0;
+  let nextSeq = restorePlan.hasSnapshot
+    ? (typeof attachResult.last_seq === 'number' ? attachResult.last_seq : 0)
+    : (typeof previousSeq === 'number' ? previousSeq : 0);
   const queuedOutputsToEmit: PendingAttachOutputChunk[] = [];
   for (const chunk of queuedOutputs || []) {
     if (typeof chunk.seq === 'number' && chunk.seq <= nextSeq) {
@@ -302,25 +208,12 @@ export function planAttachResultEffects({
     queuedOutputsToEmit.push(chunk);
   }
 
-  // The daemon only returns segmented replay after verifying it reconstructs
-  // the fresh worker screen. Truncation then means older history was omitted.
-  const hasVerifiedSegmentedReplay = Boolean(
-    attachResult.replay_segments && attachResult.replay_segments.length > 0,
-  );
-  const shouldWarnTruncatedRestore = Boolean(
-    !replayPlan.hasScreenSnapshot &&
-    attachResult.scrollback_truncated &&
-    !hasVerifiedSegmentedReplay &&
-    String(sessionAgent || '').toLowerCase() === 'codex',
-  );
-
   return {
     shouldReset,
     resetReason,
-    replayAction,
+    restoreAction,
     nextSeq,
     queuedOutputsToEmit,
-    shouldWarnTruncatedRestore,
   };
 }
 

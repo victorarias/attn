@@ -1,12 +1,14 @@
 // To parse this data:
 //
-//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachPolicy, AttachResultMessage, AttachSessionMessage, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDefinitionSummary, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationRunSummary, AutomationsChangedMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PresentAnnotation, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, ReplaySegment, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDefinitionSummary, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationRunSummary, AutomationsChangedMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PresentAnnotation, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionVisualizedMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SetWorkspaceRankMessage, SpawnResultMessage, SpawnSessionMessage, StateMessage, StopMessage, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
+//   const attachBlock = Convert.toAttachBlock(json);
 //   const attachPolicy = Convert.toAttachPolicy(json);
 //   const attachResultMessage = Convert.toAttachResultMessage(json);
 //   const attachSessionMessage = Convert.toAttachSessionMessage(json);
+//   const attachSnapshot = Convert.toAttachSnapshot(json);
 //   const authorState = Convert.toAuthorState(json);
 //   const authorsUpdatedMessage = Convert.toAuthorsUpdatedMessage(json);
 //   const automationApplyMessage = Convert.toAutomationApplyMessage(json);
@@ -239,7 +241,6 @@
 //   const renameResultMessage = Convert.toRenameResultMessage(json);
 //   const renameSessionMessage = Convert.toRenameSessionMessage(json);
 //   const renameWorkspaceMessage = Convert.toRenameWorkspaceMessage(json);
-//   const replaySegment = Convert.toReplaySegment(json);
 //   const repoInfo = Convert.toRepoInfo(json);
 //   const repoState = Convert.toRepoState(json);
 //   const reposUpdatedMessage = Convert.toReposUpdatedMessage(json);
@@ -410,27 +411,31 @@ export enum ApprovePRMessageCmd {
     ApprovePR = "approve_pr",
 }
 
+export interface AttachBlock {
+    command?:          string;
+    end_row?:          number;
+    exit_code?:        number;
+    id:                number;
+    input_col?:        number;
+    input_row?:        number;
+    output_start_row?: number;
+    pending:           boolean;
+    prompt_row:        number;
+    [property: string]: any;
+}
+
 export interface AttachResultMessage {
-    cols?:                  number;
-    error?:                 string;
-    event:                  AttachResultMessageEvent;
-    id:                     string;
-    last_seq?:              number;
-    pid?:                   number;
-    replay_segments?:       ReplaySegmentElement[];
-    revived?:               boolean;
-    rows?:                  number;
-    running?:               boolean;
-    screen_cols?:           number;
-    screen_cursor_visible?: boolean;
-    screen_cursor_x?:       number;
-    screen_cursor_y?:       number;
-    screen_rows?:           number;
-    screen_snapshot?:       string;
-    screen_snapshot_fresh?: boolean;
-    scrollback?:            string;
-    scrollback_truncated?:  boolean;
-    success:                boolean;
+    cols?:     number;
+    error?:    string;
+    event:     AttachResultMessageEvent;
+    id:        string;
+    last_seq?: number;
+    pid?:      number;
+    revived?:  boolean;
+    rows?:     number;
+    running?:  boolean;
+    snapshot?: Snapshot;
+    success:   boolean;
     [property: string]: any;
 }
 
@@ -438,10 +443,25 @@ export enum AttachResultMessageEvent {
     AttachResult = "attach_result",
 }
 
-export interface ReplaySegmentElement {
-    cols: number;
-    data: string;
-    rows: number;
+export interface Snapshot {
+    blocks?:              BlockElement[];
+    cols:                 number;
+    rows:                 number;
+    scrollback_truncated: boolean;
+    vt_dump_b64:          string;
+    [property: string]: any;
+}
+
+export interface BlockElement {
+    command?:          string;
+    end_row?:          number;
+    exit_code?:        number;
+    id:                number;
+    input_col?:        number;
+    input_row?:        number;
+    output_start_row?: number;
+    pending:           boolean;
+    prompt_row:        number;
     [property: string]: any;
 }
 
@@ -463,6 +483,15 @@ export enum AttachPolicy {
 
 export enum AttachSessionMessageCmd {
     AttachSession = "attach_session",
+}
+
+export interface AttachSnapshot {
+    blocks?:              BlockElement[];
+    cols:                 number;
+    rows:                 number;
+    scrollback_truncated: boolean;
+    vt_dump_b64:          string;
+    [property: string]: any;
 }
 
 export interface AuthorState {
@@ -2061,21 +2090,17 @@ export enum GetScreenSnapshotMessageCmd {
 }
 
 export interface GetScreenSnapshotResultMessage {
-    cols?:                  number;
-    error?:                 string;
-    event:                  GetScreenSnapshotResultMessageEvent;
-    id:                     string;
-    last_seq?:              number;
-    rows?:                  number;
-    running?:               boolean;
-    screen_cols?:           number;
-    screen_cursor_visible?: boolean;
-    screen_cursor_x?:       number;
-    screen_cursor_y?:       number;
-    screen_rows?:           number;
-    screen_snapshot?:       string;
-    screen_snapshot_fresh?: boolean;
-    success:                boolean;
+    cols?:            number;
+    error?:           string;
+    event:            GetScreenSnapshotResultMessageEvent;
+    id:               string;
+    last_seq?:        number;
+    rows?:            number;
+    running?:         boolean;
+    screen_cols?:     number;
+    screen_rows?:     number;
+    screen_snapshot?: string;
+    success:          boolean;
     [property: string]: any;
 }
 
@@ -3728,13 +3753,6 @@ export enum RenameWorkspaceMessageCmd {
     RenameWorkspace = "rename_workspace",
 }
 
-export interface ReplaySegment {
-    cols: number;
-    data: string;
-    rows: number;
-    [property: string]: any;
-}
-
 export interface RepoInfo {
     branches:            BranchElement[];
     current_branch:      string;
@@ -4932,13 +4950,8 @@ export interface WebSocketEvent {
     running?:                  boolean;
     runtime_id?:               string;
     screen_cols?:              number;
-    screen_cursor_visible?:    boolean;
-    screen_cursor_x?:          number;
-    screen_cursor_y?:          number;
     screen_rows?:              number;
     screen_snapshot?:          string;
-    screen_snapshot_fresh?:    boolean;
-    scrollback?:               string;
     scrollback_truncated?:     boolean;
     seq?:                      number;
     session?:                  SessionElement;
@@ -5636,6 +5649,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("ApprovePRMessage")), null, 2);
     }
 
+    public static toAttachBlock(json: string): AttachBlock {
+        return cast(JSON.parse(json), r("AttachBlock"));
+    }
+
+    public static attachBlockToJson(value: AttachBlock): string {
+        return JSON.stringify(uncast(value, r("AttachBlock")), null, 2);
+    }
+
     public static toAttachPolicy(json: string): AttachPolicy {
         return cast(JSON.parse(json), r("AttachPolicy"));
     }
@@ -5658,6 +5679,14 @@ export class Convert {
 
     public static attachSessionMessageToJson(value: AttachSessionMessage): string {
         return JSON.stringify(uncast(value, r("AttachSessionMessage")), null, 2);
+    }
+
+    public static toAttachSnapshot(json: string): AttachSnapshot {
+        return cast(JSON.parse(json), r("AttachSnapshot"));
+    }
+
+    public static attachSnapshotToJson(value: AttachSnapshot): string {
+        return JSON.stringify(uncast(value, r("AttachSnapshot")), null, 2);
     }
 
     public static toAuthorState(json: string): AuthorState {
@@ -7516,14 +7545,6 @@ export class Convert {
         return JSON.stringify(uncast(value, r("RenameWorkspaceMessage")), null, 2);
     }
 
-    public static toReplaySegment(json: string): ReplaySegment {
-        return cast(JSON.parse(json), r("ReplaySegment"));
-    }
-
-    public static replaySegmentToJson(value: ReplaySegment): string {
-        return JSON.stringify(uncast(value, r("ReplaySegment")), null, 2);
-    }
-
     public static toRepoInfo(json: string): RepoInfo {
         return cast(JSON.parse(json), r("RepoInfo"));
     }
@@ -8840,6 +8861,17 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
     ], "any"),
+    "AttachBlock": o([
+        { json: "command", js: "command", typ: u(undefined, "") },
+        { json: "end_row", js: "end_row", typ: u(undefined, 0) },
+        { json: "exit_code", js: "exit_code", typ: u(undefined, 0) },
+        { json: "id", js: "id", typ: 0 },
+        { json: "input_col", js: "input_col", typ: u(undefined, 0) },
+        { json: "input_row", js: "input_row", typ: u(undefined, 0) },
+        { json: "output_start_row", js: "output_start_row", typ: u(undefined, 0) },
+        { json: "pending", js: "pending", typ: true },
+        { json: "prompt_row", js: "prompt_row", typ: 0 },
+    ], "any"),
     "AttachResultMessage": o([
         { json: "cols", js: "cols", typ: u(undefined, 0) },
         { json: "error", js: "error", typ: u(undefined, "") },
@@ -8847,25 +8879,29 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "last_seq", js: "last_seq", typ: u(undefined, 0) },
         { json: "pid", js: "pid", typ: u(undefined, 0) },
-        { json: "replay_segments", js: "replay_segments", typ: u(undefined, a(r("ReplaySegmentElement"))) },
         { json: "revived", js: "revived", typ: u(undefined, true) },
         { json: "rows", js: "rows", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: u(undefined, true) },
-        { json: "screen_cols", js: "screen_cols", typ: u(undefined, 0) },
-        { json: "screen_cursor_visible", js: "screen_cursor_visible", typ: u(undefined, true) },
-        { json: "screen_cursor_x", js: "screen_cursor_x", typ: u(undefined, 0) },
-        { json: "screen_cursor_y", js: "screen_cursor_y", typ: u(undefined, 0) },
-        { json: "screen_rows", js: "screen_rows", typ: u(undefined, 0) },
-        { json: "screen_snapshot", js: "screen_snapshot", typ: u(undefined, "") },
-        { json: "screen_snapshot_fresh", js: "screen_snapshot_fresh", typ: u(undefined, true) },
-        { json: "scrollback", js: "scrollback", typ: u(undefined, "") },
-        { json: "scrollback_truncated", js: "scrollback_truncated", typ: u(undefined, true) },
+        { json: "snapshot", js: "snapshot", typ: u(undefined, r("Snapshot")) },
         { json: "success", js: "success", typ: true },
     ], "any"),
-    "ReplaySegmentElement": o([
+    "Snapshot": o([
+        { json: "blocks", js: "blocks", typ: u(undefined, a(r("BlockElement"))) },
         { json: "cols", js: "cols", typ: 0 },
-        { json: "data", js: "data", typ: "" },
         { json: "rows", js: "rows", typ: 0 },
+        { json: "scrollback_truncated", js: "scrollback_truncated", typ: true },
+        { json: "vt_dump_b64", js: "vt_dump_b64", typ: "" },
+    ], "any"),
+    "BlockElement": o([
+        { json: "command", js: "command", typ: u(undefined, "") },
+        { json: "end_row", js: "end_row", typ: u(undefined, 0) },
+        { json: "exit_code", js: "exit_code", typ: u(undefined, 0) },
+        { json: "id", js: "id", typ: 0 },
+        { json: "input_col", js: "input_col", typ: u(undefined, 0) },
+        { json: "input_row", js: "input_row", typ: u(undefined, 0) },
+        { json: "output_start_row", js: "output_start_row", typ: u(undefined, 0) },
+        { json: "pending", js: "pending", typ: true },
+        { json: "prompt_row", js: "prompt_row", typ: 0 },
     ], "any"),
     "AttachSessionMessage": o([
         { json: "attach_policy", js: "attach_policy", typ: u(undefined, r("AttachPolicy")) },
@@ -8873,6 +8909,13 @@ const typeMap: any = {
         { json: "cols", js: "cols", typ: u(undefined, 0) },
         { json: "id", js: "id", typ: "" },
         { json: "rows", js: "rows", typ: u(undefined, 0) },
+    ], "any"),
+    "AttachSnapshot": o([
+        { json: "blocks", js: "blocks", typ: u(undefined, a(r("BlockElement"))) },
+        { json: "cols", js: "cols", typ: 0 },
+        { json: "rows", js: "rows", typ: 0 },
+        { json: "scrollback_truncated", js: "scrollback_truncated", typ: true },
+        { json: "vt_dump_b64", js: "vt_dump_b64", typ: "" },
     ], "any"),
     "AuthorState": o([
         { json: "author", js: "author", typ: "" },
@@ -9826,12 +9869,8 @@ const typeMap: any = {
         { json: "rows", js: "rows", typ: u(undefined, 0) },
         { json: "running", js: "running", typ: u(undefined, true) },
         { json: "screen_cols", js: "screen_cols", typ: u(undefined, 0) },
-        { json: "screen_cursor_visible", js: "screen_cursor_visible", typ: u(undefined, true) },
-        { json: "screen_cursor_x", js: "screen_cursor_x", typ: u(undefined, 0) },
-        { json: "screen_cursor_y", js: "screen_cursor_y", typ: u(undefined, 0) },
         { json: "screen_rows", js: "screen_rows", typ: u(undefined, 0) },
         { json: "screen_snapshot", js: "screen_snapshot", typ: u(undefined, "") },
-        { json: "screen_snapshot_fresh", js: "screen_snapshot_fresh", typ: u(undefined, true) },
         { json: "success", js: "success", typ: true },
     ], "any"),
     "GetSettingsMessage": o([
@@ -10783,11 +10822,6 @@ const typeMap: any = {
         { json: "title", js: "title", typ: "" },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
-    "ReplaySegment": o([
-        { json: "cols", js: "cols", typ: 0 },
-        { json: "data", js: "data", typ: "" },
-        { json: "rows", js: "rows", typ: 0 },
-    ], "any"),
     "RepoInfo": o([
         { json: "branches", js: "branches", typ: a(r("BranchElement")) },
         { json: "current_branch", js: "current_branch", typ: "" },
@@ -11522,13 +11556,8 @@ const typeMap: any = {
         { json: "running", js: "running", typ: u(undefined, true) },
         { json: "runtime_id", js: "runtime_id", typ: u(undefined, "") },
         { json: "screen_cols", js: "screen_cols", typ: u(undefined, 0) },
-        { json: "screen_cursor_visible", js: "screen_cursor_visible", typ: u(undefined, true) },
-        { json: "screen_cursor_x", js: "screen_cursor_x", typ: u(undefined, 0) },
-        { json: "screen_cursor_y", js: "screen_cursor_y", typ: u(undefined, 0) },
         { json: "screen_rows", js: "screen_rows", typ: u(undefined, 0) },
         { json: "screen_snapshot", js: "screen_snapshot", typ: u(undefined, "") },
-        { json: "screen_snapshot_fresh", js: "screen_snapshot_fresh", typ: u(undefined, true) },
-        { json: "scrollback", js: "scrollback", typ: u(undefined, "") },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: u(undefined, true) },
         { json: "seq", js: "seq", typ: u(undefined, 0) },
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },

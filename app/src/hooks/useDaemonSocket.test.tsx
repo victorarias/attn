@@ -2087,10 +2087,11 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         success: true,
         cols: 56,
         rows: 35,
-        screen_cols: 56,
-        screen_rows: 35,
-        screen_snapshot: btoa('fresh-daemon-frame'),
-        screen_snapshot_fresh: true,
+        snapshot: {
+          cols: 56,
+          rows: 35,
+          vt_dump_b64: btoa('fresh-daemon-frame'),
+        },
         last_seq: 29376,
         running: true,
       });
@@ -2138,148 +2139,6 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     expect(snapshotIndex).toBeGreaterThanOrEqual(0);
     expect(queuedLiveIndex).toBeGreaterThan(snapshotIndex);
     expect(replayCompleteIndex).toBeGreaterThan(queuedLiveIndex);
-    unmount();
-  });
-
-  it('replays geometry-aware segmented history through relaunch restoration attach', async () => {
-    (window as Window & {
-      __TEST_PTY_EVENTS?: Array<{
-        event: string;
-        id: string;
-        data?: string;
-        cols?: number;
-        rows?: number;
-        source?: string;
-        reason?: string;
-      }>;
-    }).__TEST_PTY_EVENTS = [];
-    const { unmount } = renderHook(() =>
-      useDaemonSocket({
-        onSessionsUpdate: vi.fn(),
-        onWorkspacesUpdate: vi.fn(),
-        onPRsUpdate: vi.fn(),
-        onReposUpdate: vi.fn(),
-        onAuthorsUpdate: vi.fn(),
-        wsUrl: 'ws://localhost:9999/ws',
-      }),
-    );
-
-    const ws = await waitForOpenSocket();
-    act(() => {
-      ws.emit({
-        event: 'initial_state',
-        protocol_version: PROTOCOL_VERSION,
-        sessions: [{
-          id: 'sess-existing',
-          label: 'attn',
-          agent: 'codex',
-          directory: '/tmp/repo',
-          workspace_id: 'workspace-sess-existing',
-          state: 'idle',
-          state_since: '2026-04-08T00:00:00Z',
-          state_updated_at: '2026-04-08T00:00:00Z',
-          last_seen: '2026-04-08T00:00:00Z',
-        }],
-        workspaces: [],
-        prs: [],
-        repos: [],
-        authors: [],
-        settings: {},
-      });
-    });
-
-    const attachPromise = ptyAttach({
-      args: {
-        id: 'sess-existing',
-        cols: 58,
-        rows: 46,
-        shell: false,
-        agent: 'codex',
-        policy: 'relaunch_restore',
-      },
-    });
-
-    await waitFor(() => {
-      const sent = ws.sent.map((entry) => JSON.parse(entry));
-      expect(sent).toContainEqual({
-        cmd: 'attach_session',
-        id: 'sess-existing',
-        attach_policy: 'relaunch_restore',
-      });
-    });
-
-    act(() => {
-      ws.emit({
-        event: 'attach_result',
-        id: 'sess-existing',
-        success: true,
-        cols: 58,
-        rows: 46,
-        replay_segments: [
-          {
-            cols: 118,
-            rows: 48,
-            data: btoa('wide \x1b]8;;https://example.com\x07label\x1b]8;;\x07 history'),
-          },
-          {
-            cols: 118,
-            rows: 48,
-            data: btoa(' continued'),
-          },
-          { cols: 58, rows: 46, data: 'bmFycm93LXRhaWw=' },
-        ],
-        screen_cols: 58,
-        screen_rows: 46,
-        running: true,
-      });
-    });
-
-    await expect(attachPromise).resolves.toBeUndefined();
-
-    const ptyEvents = (window as Window & {
-      __TEST_PTY_EVENTS?: Array<{
-        event: string;
-        id: string;
-        data?: string;
-        cols?: number;
-        rows?: number;
-        source?: string;
-        reason?: string;
-      }>;
-    }).__TEST_PTY_EVENTS || [];
-    expect(ptyEvents).toContainEqual({ event: 'reset', id: 'sess-existing', reason: 'reattach' });
-    expect(ptyEvents).toContainEqual({ event: 'local_resize', id: 'sess-existing', cols: 118, rows: 48, source: 'attach_replay' });
-    expect(ptyEvents).toContainEqual({
-      event: 'data',
-      id: 'sess-existing',
-      data: btoa('wide \x1b]8;;https://example.com\x07label\x1b]8;;\x07 history'),
-      source: 'attach_replay',
-      suppressResponses: true,
-    });
-    expect(ptyEvents).toContainEqual({
-      event: 'data',
-      id: 'sess-existing',
-      data: btoa(' continued'),
-      source: 'attach_replay',
-      suppressResponses: true,
-    });
-    expect(ptyEvents).toContainEqual({ event: 'local_resize', id: 'sess-existing', cols: 58, rows: 46, source: 'attach_replay' });
-    expect(ptyEvents).toContainEqual({
-      event: 'data',
-      id: 'sess-existing',
-      data: 'bmFycm93LXRhaWw=',
-      source: 'attach_replay',
-      suppressResponses: true,
-    });
-    expect(ptyEvents).toContainEqual({ event: 'replay_complete', id: 'sess-existing' });
-    expect(ptyEvents.filter((event) => (
-      event.event === 'local_resize'
-      && event.id === 'sess-existing'
-      && event.cols === 118
-      && event.rows === 48
-    ))).toHaveLength(1);
-    expect(ws.sent.map((entry) => JSON.parse(entry)).some((entry) => entry.cmd === 'pty_input')).toBe(false);
-
     unmount();
   });
 

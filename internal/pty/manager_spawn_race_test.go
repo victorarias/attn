@@ -12,7 +12,7 @@ func TestSpawn_ReservesPendingSessionID(t *testing.T) {
 		t.Skip("skipping real PTY spawn in short mode")
 	}
 
-	manager := NewManager(DefaultScrollbackSize, nil)
+	manager := NewManager(nil)
 	t.Cleanup(manager.Shutdown)
 
 	opts := SpawnOptions{

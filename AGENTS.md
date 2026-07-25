@@ -1,6 +1,10 @@
 # attn agent guide
 
-macOS only. Do not add Linux or Windows compatibility unless requested.
+macOS only for the **app** (the Tauri UI). Do not add Linux or Windows app
+compatibility unless requested. The **headless daemon**, however, is supported on
+Linux (amd64/arm64) — the hub cross-compiles and runs it on Linux remotes — so
+daemon-side code (`cmd/attn`, `internal/**`) must build and run on Linux too. See
+"Native VT library" below.
 
 ## Commands
 
@@ -33,6 +37,43 @@ pnpm --dir app run e2e
 Run full app builds/installs outside the sandbox: code signing needs the macOS
 keychain; sandboxed identity lookup can cause ad-hoc signing and lose persistent
 permissions.
+
+### Native VT library
+
+`internal/ghosttyvt` links `libghostty-vt` (Ghostty's VT core) via cgo on
+darwin/arm64 **and** linux/amd64+arm64 (the daemon's restore path serializes on
+Linux too); every other target compiles a pure-Go stub. The `//go:build`
+constraint and the per-tuple `#cgo` directives in `ghosttyvt.go` must stay in
+lockstep with the supported-platform list in `scripts/lib/libghostty-vt.sh` and
+the Makefile. The static archive is **per platform**, living under gitignored
+`third_party/ghostty-vt/<goos>_<goarch>/`. On a fresh checkout it is absent, so
+the `build` target depends on the archive for the platform it targets and
+`scripts/build-libghostty-vt.sh` runs automatically on the first `make build`/
+`make dev`/`make install*` (and cross builds via `make build-linux-{amd64,arm64}`
+or `GOOS=… GOARCH=… make build`).
+
+**Download-first (no zig for most contributors, and none in CI/release).** The
+script fetches the prebuilt archive **for the target platform** — assets are
+named `libghostty-vt-<key>-<goos>_<goarch>.tar.gz`, keyed by the ghostty pin
+(`ghostty-vt-native.pin`) plus the carried `ghostty-vt-native.patch` — from the
+rolling `native-vt-prebuilts` GitHub release and verifies it against the
+matching `sha256_<goos>_<goarch>` in `ghostty-vt-native.lock` (fail-closed). The
+key is shared across platforms (same source); the lock carries one sha per
+platform. The repo is public, so this needs only network access. A **source
+build (zig 0.16.x)** happens only when you have edited the pin/patch (no
+published asset for the new key yet), when the download/verify fails, or when
+`ATTN_VT_FROM_SOURCE=1` forces it. `GHOSTTY_VT_GOOS`/`GHOSTTY_VT_GOARCH` scope the
+script to a target when cross-building (the Makefile sets them).
+
+**Changing the VT source.** After editing `ghostty-vt-native.pin` or
+`ghostty-vt-native.patch`, run `make publish-native-vt`
+(`scripts/publish-libghostty-vt.sh`): it cross-builds **every** supported target
+from one host (needs zig 0.16.x and an authenticated `gh`), uploads all the keyed
+assets, and rewrites `ghostty-vt-native.lock` with the shared key + per-platform
+shas. **Commit the regenerated lock** — the Makefile depends on it, so committing
+it is what makes every other checkout re-fetch. Shared logic lives in
+`scripts/lib/libghostty-vt.sh`. See
+[docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
 
 ## Profiles and live verification
 
@@ -177,11 +218,31 @@ must fail explicitly.
 ### Terminal
 
 - The latest active interactive client owns PTY geometry.
-- `pty_resize` is authoritative; attach replay is provisional context.
-- Do not use replay as redraw repair or infer PTY correctness from local `fit()`.
-- Replayed terminal queries must not generate fresh PTY input.
+- `pty_resize` is authoritative; attach restore is provisional context.
+- The daemon worker's single parsed terminal (libghostty-vt) backs approval
+  classification, CPR replies, grid/automation snapshots, and attach restore.
+  Ghostty construction failure is spawn-fatal on supported platforms.
+- Restore is server-authoritative: the daemon worker serializes that terminal
+  and the attach serves its VT dump as the sole restore payload
+  (`attach_result.snapshot`). The frontend resets a fresh Ghostty model, resizes
+  to the snapshot grid, and writes the dump with responses suppressed. There is
+  no raw-scrollback/screen-snapshot/segment fallback — a snapshot-less attach
+  keeps whatever the client has and dedups the live stream against `last_seq`.
+  See
+  [docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
+- OSC 133 command blocks are worker-owned state carried beside the dump as
+  structured `attach_result.snapshot.blocks` (the marker-stripped dump rebuilds
+  none); the frontend seeds `TerminalBlockStore` from them after the dump write
+  (Phase 3a).
+- Do not use restore as redraw repair or infer PTY correctness from local `fit()`.
+- Restored terminal queries must not generate fresh PTY input; the worker
+  already answered CPR/DA1/OSC and forwarded the query gap over the wire, so the
+  client always writes the dump suppressed.
 - The daemon/worker alone answers CPR, DA1, and OSC 10/11/12; frontend strips
   model replies and sends theme changes via `set_terminal_theme`.
+- Restores are text-only: sixel/kitty images render from the live stream but are
+  not preserved across a restore (accepted; image-preserving restore is a
+  follow-up).
 - Session switching must retain utility-terminal focus. `App.tsx` may fit the
   main terminal but focuses it only when utility is inactive;
   `SessionTerminalWorkspace` prefers the active `GhosttyTerminal` handle.

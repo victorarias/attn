@@ -11,15 +11,19 @@ import (
 )
 
 // TestAttachSnapshotSeqConsistency proves — deterministically — that a frontend
-// re-attach can lose PTY output at the replay/live boundary.
+// re-attach can lose PTY output at the restore/live boundary.
 //
-// On attach the daemon hands the frontend a replay payload (raw scrollback /
-// replay segments) plus a LastSeq watermark; the frontend applies the replay
-// and then keeps only live chunks with seq > LastSeq, assuming everything up
-// to LastSeq is already in the replay. If info() captured the replay payload
-// and read LastSeq (seqCounter) at DIFFERENT times, a PTY write landing in
-// that window is in neither: not yet in the replay payload, and deduped out of
-// the live stream because its seq <= LastSeq. It vanishes.
+// On attach the daemon hands the frontend a restore payload (the serialized
+// ghostty snapshot) plus a LastSeq watermark; the frontend applies the restore
+// and then keeps only live chunks with seq > LastSeq, assuming everything up to
+// LastSeq is already restored. If info() captured the payload and read LastSeq
+// at DIFFERENT times, a PTY write landing in that window is in neither: not yet
+// in the payload, and deduped out of the live stream because its seq <= LastSeq.
+// It vanishes. info() serializes the snapshot and reads lastReplaySeq under a
+// single replayMu critical section to close that window; this test proves the
+// watermark bounds exactly the covered history regardless of how the payload is
+// represented — LastSeq names the last chunk baked into the payload, so the
+// authoritative stream and the applied-live stream meet with no hole or overlap.
 //
 // fish emits `OSC 133;D` (close command) + `OSC 133;A` (open next prompt)
 // back-to-back at each new prompt, so a single lost chunk here silently merges
@@ -38,15 +42,15 @@ func TestAttachSnapshotSeqConsistency(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = w.Close(); _ = r.Close() })
 
+	gt := newTestGhostty(t, cols, rows)
 	s := &Session{
 		id:          "race",
 		cols:        cols,
 		rows:        rows,
 		ptmx:        r,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
-		scrollback:  NewRingBuffer(64 << 20),
-		replayLog:   NewReplayLog(64 << 20),
-		screen:      newVirtualScreen(cols, rows),
+		ghostty:     gt,
+		blockFeed:   newBlockFeeder(gt),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
@@ -117,15 +121,14 @@ func TestAttachSnapshotSeqConsistency(t *testing.T) {
 	s.addSubscriber("probe", probe.send, nil)
 	info := s.info()
 
-	segLen := 0
-	for _, seg := range info.ReplaySegments {
-		segLen += len(seg.Data)
-	}
-	if segLen != seeded {
-		t.Fatalf("replay payload (%d bytes) should be exactly the seeded history (%d bytes)", segLen, seeded)
-	}
+	// The payload covers exactly the seeded history (all of it was fanned before
+	// the attach), so the restore/live boundary sits at `seeded` bytes in the
+	// authoritative stream. This holds independently of the payload's
+	// representation (ghostty snapshot); what is under test is that LastSeq names
+	// the last chunk baked into the payload.
+	boundary := seeded
 
-	// The bytes the frontend would actually apply after the replay: live chunks
+	// The bytes the frontend would actually apply after the restore: live chunks
 	// with seq > LastSeq (matching planLivePtyOutput's stale rule).
 	var applied []byte
 	deadline := time.Now().Add(time.Second)
@@ -141,16 +144,16 @@ func TestAttachSnapshotSeqConsistency(t *testing.T) {
 		t.Fatal("probe never received an applied live chunk")
 	}
 
-	waitMirror(segLen + len(applied))
-	ok, have := mirror.matchAt(segLen, applied)
+	waitMirror(boundary + len(applied))
+	ok, have := mirror.matchAt(boundary, applied)
 	if !have {
 		t.Fatal("mirror did not cover the reconstruction boundary")
 	}
 	if !ok {
-		// reconstruction = replay payload ++ applied-live has a hole/overlap:
+		// reconstruction = restore payload ++ applied-live has a hole/overlap:
 		// the user loses (or double-sees) output across the re-attach.
-		t.Fatalf("re-attach lost output: replay ended at %d bytes, LastSeq=%d, but the first applied live bytes are %q, not the next bytes in the stream %q",
-			segLen, info.LastSeq, firstLine(applied), firstLine(mirror.slice(segLen, len(applied))))
+		t.Fatalf("re-attach lost output: payload covered %d bytes, LastSeq=%d, but the first applied live bytes are %q, not the next bytes in the stream %q",
+			boundary, info.LastSeq, firstLine(applied), firstLine(mirror.slice(boundary, len(applied))))
 	}
 }
 
@@ -177,15 +180,15 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = w.Close(); _ = r.Close() })
 
+	gt := newTestGhostty(t, cols, rows)
 	s := &Session{
 		id:          "snapshot-race",
 		cols:        cols,
 		rows:        rows,
 		ptmx:        r,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
-		scrollback:  NewRingBuffer(1 << 20),
-		replayLog:   NewReplayLog(1 << 20),
-		screen:      newVirtualScreen(cols, rows),
+		ghostty:     gt,
+		blockFeed:   newBlockFeeder(gt),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
@@ -222,7 +225,7 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 	// not yet reached the screen, take the observer snapshot inside the gap.
 	var (
 		once    sync.Once
-		gapInfo AttachInfo
+		gapInfo SnapshotInfo
 		gapSeq  uint32
 	)
 	readLoopSeqGapHook = func() {
@@ -237,7 +240,7 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 	if gapSeq == 0 {
 		t.Fatal("readLoopSeqGapHook never fired")
 	}
-	if bytes.Contains(gapInfo.ScreenSnapshot, []byte("MARKER")) {
+	if bytes.Contains(gapInfo.Screen.Payload, []byte("MARKER")) {
 		t.Fatal("gap snapshot already contains the in-flight chunk; the seam fired too late to exercise the race")
 	}
 	// The core invariant: a snapshot whose screen lacks the chunk's bytes must
@@ -253,8 +256,8 @@ func TestScreenSnapshotSeqConsistency(t *testing.T) {
 	if settled.LastSeq != gapSeq {
 		t.Fatalf("settled snapshot LastSeq = %d, want %d (the applied marker chunk)", settled.LastSeq, gapSeq)
 	}
-	if !bytes.Contains(settled.ScreenSnapshot, []byte("MARKER")) {
-		t.Fatalf("settled snapshot screen should contain the applied marker chunk; got %q", settled.ScreenSnapshot)
+	if !bytes.Contains(settled.Screen.Payload, []byte("MARKER")) {
+		t.Fatalf("settled snapshot screen should contain the applied marker chunk; got %q", settled.Screen.Payload)
 	}
 }
 

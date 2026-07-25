@@ -114,32 +114,54 @@ type InfoResult struct {
 }
 
 type AttachResult struct {
-	Scrollback          []byte          `json:"scrollback,omitempty"`
-	ScrollbackTruncated bool            `json:"scrollback_truncated"`
-	ReplaySegments      []ReplaySegment `json:"replay_segments,omitempty"`
-	ReplayTruncated     bool            `json:"replay_truncated,omitempty"`
-	LastSeq             uint32          `json:"last_seq"`
-	Cols                uint16          `json:"cols"`
-	Rows                uint16          `json:"rows"`
-	PID                 int             `json:"pid"`
-	Running             bool            `json:"running"`
+	LastSeq uint32 `json:"last_seq"`
+	Cols    uint16 `json:"cols"`
+	Rows    uint16 `json:"rows"`
+	PID     int    `json:"pid"`
+	Running bool   `json:"running"`
 
 	ExitCode   *int    `json:"exit_code,omitempty"`
 	ExitSignal *string `json:"exit_signal,omitempty"`
 
-	ScreenSnapshot      []byte `json:"screen_snapshot,omitempty"`
-	ScreenCols          uint16 `json:"screen_cols,omitempty"`
-	ScreenRows          uint16 `json:"screen_rows,omitempty"`
-	ScreenCursorX       uint16 `json:"screen_cursor_x,omitempty"`
-	ScreenCursorY       uint16 `json:"screen_cursor_y,omitempty"`
-	ScreenCursorVisible bool   `json:"screen_cursor_visible,omitempty"`
-	ScreenSnapshotFresh bool   `json:"screen_snapshot_fresh,omitempty"`
+	// GhosttySnapshot is the server-authoritative VT serialization of the whole
+	// terminal from libghostty-vt (geometry is Cols/Rows). Omitted when absent.
+	GhosttySnapshot []byte `json:"ghostty_snapshot,omitempty"`
+	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
+	// SCREEN-space rows of GhosttySnapshot, captured atomically with it and
+	// LastSeq (Phase 3a). Mirrors pty.AttachBlockData. Omitted when absent;
+	// additive and skew-safe like GhosttySnapshot.
+	GhosttyBlocks []AttachBlock `json:"ghostty_blocks,omitempty"`
+	// GhosttyScrollbackTruncated reports whether the ghostty terminal dropped
+	// scrollback lines at its cap before GhosttySnapshot was serialized.
+	GhosttyScrollbackTruncated bool `json:"ghostty_scrollback_truncated,omitempty"`
 }
 
-type ReplaySegment struct {
-	Cols uint16 `json:"cols"`
-	Rows uint16 `json:"rows"`
-	Data []byte `json:"data"`
+// SnapshotResult is the lean read-only viewport seed returned by MethodSnapshot.
+// An absent ScreenSnapshot leaves observers unseeded for graceful worker-version
+// skew and sessions that have not yet produced a frame.
+type SnapshotResult struct {
+	LastSeq        uint32 `json:"last_seq"`
+	Cols           uint16 `json:"cols"`
+	Rows           uint16 `json:"rows"`
+	Running        bool   `json:"running"`
+	ScreenSnapshot []byte `json:"screen_snapshot,omitempty"`
+	ScreenCols     uint16 `json:"screen_cols,omitempty"`
+	ScreenRows     uint16 `json:"screen_rows,omitempty"`
+}
+
+// AttachBlock is the wire form of one resolved command block (see
+// pty.AttachBlockData for field semantics; EndRow is exclusive, Pending marks
+// the single open block).
+type AttachBlock struct {
+	ID             uint64  `json:"id"`
+	Pending        bool    `json:"pending,omitempty"`
+	PromptRow      int32   `json:"prompt_row"`
+	InputRow       *int32  `json:"input_row,omitempty"`
+	InputCol       *int32  `json:"input_col,omitempty"`
+	OutputStartRow *int32  `json:"output_start_row,omitempty"`
+	EndRow         *int32  `json:"end_row,omitempty"`
+	Command        *string `json:"command,omitempty"`
+	ExitCode       *int32  `json:"exit_code,omitempty"`
 }
 
 type AttachParams struct {

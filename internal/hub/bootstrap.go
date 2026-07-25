@@ -349,6 +349,15 @@ func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform Remot
 	if gc := buildinfo.GitCommit; gc != "" && gc != "unknown" {
 		ldflags += " -X github.com/victorarias/attn/internal/buildinfo.GitCommit=" + gc
 	}
+	// The worker's server-authoritative terminal links libghostty-vt via cgo on
+	// Linux too (internal/ghosttyvt), so the cross-compile needs that target's
+	// native archive present. It is download-first (no zig for the archive
+	// itself), keyed by pin+patch, and installs under
+	// third_party/ghostty-vt/<goos>_<goarch>/. Ensure it before the go build.
+	if err := ensureNativeVTArchive(ctx, root, platform); err != nil {
+		return err
+	}
+
 	cmd := exec.CommandContext(
 		ctx,
 		"go",
@@ -385,6 +394,29 @@ func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform Remot
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("cross-compile %s: %s", platform.ArtifactName, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// ensureNativeVTArchive fetches (or, on a locally-edited pin, source-builds) the
+// libghostty-vt archive for the cross-compile target so its cgo link resolves.
+// The download-first script is idempotent and a no-op once the archive is
+// present for the current key. It is scoped to the build target via
+// GHOSTTY_VT_GOOS/GOARCH so a Mac hub lays down the Linux archive, not its own.
+func ensureNativeVTArchive(ctx context.Context, root string, platform RemotePlatform) error {
+	script := filepath.Join(root, "scripts", "build-libghostty-vt.sh")
+	if _, err := os.Stat(script); err != nil {
+		// No script in this checkout (older source tree): nothing to ensure.
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "bash", script)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"GHOSTTY_VT_GOOS="+platform.GOOS,
+		"GHOSTTY_VT_GOARCH="+platform.GOARCH,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("ensure native libghostty-vt for %s: %s", platform.ArtifactName, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
