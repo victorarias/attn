@@ -1765,6 +1765,12 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	// rebuilds the ring for an id nothing will ever clean up again.
 	d.forgetStateTrace(sessionID)
 	d.evidenceTable().forget(sessionID)
+	// The dwell gate has to be cleared here rather than left to the resolve
+	// loop's own cleanup: that loop walks the evidence table, so forgetting the
+	// evidence row is exactly what stops it from ever visiting this session
+	// again. A session closed mid-dwell would otherwise leave its pending
+	// transition behind for the daemon's lifetime.
+	d.dwellGate().clear(sessionID)
 }
 
 // handlePTYState applies one PTY-layer observation. It is still last-writer-wins

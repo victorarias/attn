@@ -72,6 +72,19 @@ func (g *dwellGate) ready(sessionID string, state protocol.SessionState, dwell t
 	return true
 }
 
+// waiting reports whether a transition is currently serving out a dwell. It
+// exists so a lifecycle test can assert the gate holds nothing after a session
+// is gone, which is otherwise invisible from outside.
+func (g *dwellGate) waiting(sessionID string) bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, ok := g.pending[sessionID]
+	return ok
+}
+
 // clear drops any wait in progress. Called whenever the resolver stops proposing
 // a transition at all, so a later one starts its dwell from scratch instead of
 // inheriting an abandoned clock.

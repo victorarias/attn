@@ -195,6 +195,40 @@ func TestAnUnansweredApprovalIsPublishedOnceTheDwellElapses(t *testing.T) {
 	}
 }
 
+// A session closed mid-dwell must not leave its pending transition behind. The
+// resolve loop's own cleanup cannot do it: that loop walks the evidence table,
+// and removal forgets the evidence row, so the tick never visits this session
+// again. Without a clear in the removal path the entry outlives the daemon's
+// interest in it, and enough short-lived unattended sessions turn a transient UX
+// gate into permanent state.
+func TestClosingASessionMidDwellLeavesNothingBehind(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-dwell-closed"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentCodex, protocol.SessionStateWorking)
+
+	now := time.Now()
+	d.recordReviewerEvidence(id, true)
+	d.recordBracketEvidence(id, protocol.StateWorking)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "approval", At: now, Detail: "Action Required"})
+
+	d.resolveAllSessions(now.Add(time.Second))
+	if !d.dwellGate().waiting(id) {
+		t.Fatal("no dwell was armed, so the test cannot show one being cleaned up")
+	}
+
+	d.dropSessionRecord(id)
+
+	if d.dwellGate().waiting(id) {
+		t.Fatal("the closed session's dwell is still pending")
+	}
+	// And the tick that would have cleaned it up never comes, which is the whole
+	// reason the removal path has to do it.
+	d.resolveAllSessions(now.Add(2 * time.Second))
+	if d.dwellGate().waiting(id) {
+		t.Fatal("the dwell survived a later tick")
+	}
+}
+
 // With nobody but the user to answer, the request is the user's the instant it
 // arrives. A dwell here would be a regression, not a refinement.
 func TestAnApprovalWithNoReviewerPublishesImmediately(t *testing.T) {
