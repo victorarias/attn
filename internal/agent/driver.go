@@ -14,7 +14,8 @@
 //	ClassifierProvider              — custom classification backend
 //	LaunchPreparer                  — best-effort setup before launch (e.g. resume copy)
 //	SessionRecoveryPolicyProvider   — startup missing-PTY recovery policy
-//	PTYStatePolicyProvider          — PTY state filtering/recovered-state policy
+//	RecoveredStatePolicyProvider    — recovered-state mapping at startup
+//	PTYStateFilterProvider          — live PTY state filtering
 //	ResumePolicyProvider            — resume ID lifecycle policy
 //	TranscriptClassificationExtractor — stop-time transcript extraction policy
 //	ExecutableClassifierProvider    — classifier hook with explicit executable path
@@ -109,12 +110,6 @@ type Capabilities struct {
 	// unlike ScreenDetector they survive any change to how the agent draws.
 	HarnessSignals HarnessSignalKind
 
-	// HasApprovalResolver indicates the daemon should clear pending_approval ->
-	// working off the rendered PTY screen for this agent. Needed by hook-driven
-	// agents that fire no hook when an approval is granted, so the only signal
-	// the tool is now running is the approval prompt leaving the screen.
-	HasApprovalResolver bool
-
 	// HasResume indicates the agent supports resuming previous sessions.
 	HasResume bool
 
@@ -152,8 +147,6 @@ type ScreenDetectorKind string
 const (
 	// ScreenDetectorNone disables screen-scrape state detection.
 	ScreenDetectorNone ScreenDetectorKind = ""
-	// ScreenDetectorClaude reads Claude Code's status-line frames.
-	ScreenDetectorClaude ScreenDetectorKind = "claude"
 	// ScreenDetectorCopilot reads Copilot CLI's prompt and progress frames.
 	ScreenDetectorCopilot ScreenDetectorKind = "copilot"
 )
@@ -226,9 +219,6 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	// agent whose driver declares none.
 	if v, ok := boolEnv(prefix + "HARNESS_SIGNALS"); ok && !v {
 		caps.HarnessSignals = HarnessSignalsNone
-	}
-	if v, ok := boolEnv(prefix + "APPROVAL_RESOLVER"); ok {
-		caps.HasApprovalResolver = v
 	}
 	if v, ok := boolEnv(prefix + "RESUME"); ok {
 		caps.HasResume = v

@@ -218,7 +218,10 @@ func TestCodexTitleReportsAnApproval(t *testing.T) {
 	}{
 		{"running", "⠼ scratchpad", claimBusy, "scratchpad"},
 		{"approval prompt on screen", "[ . ] Action Required | scratchpad", claimApproval, "scratchpad"},
-		{"approval answered", "[ ! ] Action Required | scratchpad", claimApproval, "scratchpad"},
+		// Codex leaves the words in place and flips only the glyph, so an
+		// answered prompt still carries the marker. Reading it as an approval
+		// re-arms the edge on every repaint.
+		{"approval answered", "[ ! ] Action Required | scratchpad", claimNotBusy, "scratchpad"},
 		{"settled", "scratchpad", claimNotBusy, "scratchpad"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

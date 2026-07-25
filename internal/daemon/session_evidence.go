@@ -215,6 +215,12 @@ func (d *Daemon) recordBracketEvidence(sessionID, state string) {
 			// in the table lets the resolver report it as this turn's state the
 			// moment this turn settles.
 			e.LastClassifier = nil
+			// The same holds for an unanswered approval: a turn cannot open
+			// while the one before it is still blocked on a prompt, so an
+			// approval still sitting here was answered.
+			if e.LastHarnessEvent != nil && e.LastHarnessEvent.Claim == sessionstate.ClaimApprovalPending {
+				e.LastHarnessEvent = nil
+			}
 		case protocol.StateIdle, protocol.StateWaitingInput:
 			e.TurnOpen = false
 			e.ToolOpen = false

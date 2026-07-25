@@ -17,7 +17,8 @@ var _ Driver = (*Copilot)(nil)
 var _ TranscriptFinder = (*Copilot)(nil)
 var _ TranscriptWatcherBehaviorProvider = (*Copilot)(nil)
 var _ ClassifierProvider = (*Copilot)(nil)
-var _ PTYStatePolicyProvider = (*Copilot)(nil)
+var _ RecoveredStatePolicyProvider = (*Copilot)(nil)
+var _ PTYStateFilterProvider = (*Copilot)(nil)
 
 func init() {
 	Register(&Copilot{})

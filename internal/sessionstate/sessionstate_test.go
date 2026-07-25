@@ -283,6 +283,45 @@ func TestResolve(t *testing.T) {
 			wantReason: ReasonAwaitingVerdict,
 		},
 
+		{
+			// A session between launch and its first prompt has a title and has
+			// never run a turn. Settling that reports a turn finished before the
+			// agent took one, which showed up live as an idle blip at launch.
+			name: "a session that has never been busy has not settled",
+			evidence: Evidence{
+				Heartbeat: seen(SourceHeartbeat, ClaimSettled, time.Second),
+			},
+			wantState:  protocol.SessionStateUnknown,
+			wantReason: ReasonNoEvidence,
+		},
+		{
+			// Nothing announces an answered approval, so the agent running again
+			// is the signal. Without it the edge never expires once the screen
+			// scrape stops retiring it.
+			name: "an approval the agent has gone busy past was answered",
+			evidence: Evidence{
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimApprovalPending, 30*time.Second),
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt:       now.Add(-10 * time.Second),
+				LastClassifier:   seen(SourceClassifier, ClaimIdle, 2*time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonClassifierVerdict,
+		},
+		{
+			// The other side of it: an approval is answered by a person, and
+			// while it waits the agent is blocked and painting nothing. A busy
+			// frame from *before* the request says nothing about it.
+			name: "an approval still newer than the last busy frame is live",
+			evidence: Evidence{
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimApprovalPending, 5*time.Second),
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt:       now.Add(-20 * time.Second),
+			},
+			wantState:  protocol.SessionStatePendingApproval,
+			wantReason: ReasonApprovalOpen,
+		},
+
 		// --- ordering -------------------------------------------------------
 
 		{
@@ -340,6 +379,33 @@ func TestResolve(t *testing.T) {
 			},
 			wantState:  protocol.SessionStateScheduled,
 			wantReason: ReasonCronPending,
+		},
+		{
+			// The park used to be defended by a per-driver veto against the
+			// screen scraper knocking it to idle. The scraper is gone and the
+			// defense is now clause order: a settled turn is what a parked
+			// session looks like, so settling must not outrank the wakeup.
+			name: "a parked session stays parked once its turn settles",
+			evidence: Evidence{
+				PendingCron: true,
+				Heartbeat:   seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt:  now.Add(-30 * time.Second),
+			},
+			wantState:  protocol.SessionStateScheduled,
+			wantReason: ReasonCronPending,
+		},
+		{
+			// And the one legitimate exit: the wakeup fires, the agent runs
+			// again, and a park that outranked a running turn would be a stuck
+			// color of its own.
+			name: "a parked session that starts running again is working",
+			evidence: Evidence{
+				PendingCron: true,
+				Heartbeat:   seen(SourceHeartbeat, ClaimBusy, 100*time.Millisecond),
+				LastBusyAt:  now.Add(-100 * time.Millisecond),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonHeartbeatFresh,
 		},
 		{
 			// An outstanding background task auto-resumes the turn, so the
@@ -454,7 +520,12 @@ func TestHeartbeatFreshnessBoundary(t *testing.T) {
 		// not an absence of evidence.
 		{age: policy.HeartbeatTTL + time.Millisecond, want: protocol.SessionStateIdle},
 	} {
-		e := Evidence{Heartbeat: seen(SourceHeartbeat, ClaimBusy, tc.age)}
+		// LastBusyAt travels with a busy frame — the daemon stamps both — and a
+		// settle needs a turn to have run.
+		e := Evidence{
+			Heartbeat:  seen(SourceHeartbeat, ClaimBusy, tc.age),
+			LastBusyAt: now.Add(-tc.age),
+		}
 		if got := Resolve(e, policy, now); got.State != tc.want {
 			t.Fatalf("heartbeat aged %s resolved %s, want %s", tc.age, got.State, tc.want)
 		}

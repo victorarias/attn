@@ -1,18 +1,11 @@
 package pty
 
 import (
-	"regexp"
 	"strings"
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
-)
-
-const (
-	stateWorking         = "working"
-	stateWaitingInput    = "waiting_input"
-	statePendingApproval = "pending_approval"
-	stateIdle            = "idle"
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 type stateHeuristics struct {
@@ -70,15 +63,10 @@ const maxScreenTail = 2000
 
 const workingPulseInterval = 1200 * time.Millisecond
 
-var claudeStatusTimerPattern = regexp.MustCompile(`\((?:\d+h\s+)?(?:\d+m\s+)?\d+s(?:\s+·[^)]*)?\)`)
-var claudeFinalSummaryPattern = regexp.MustCompile(`(?i)\bfor\s+(?:\d+h\s+)?(?:\d+m\s+)?\d+s\b`)
-
 // newScreenDetector builds the detector the driver asked for, or nil (as a nil
 // interface, so callers' nil checks work) when the agent gets none.
 func newScreenDetector(kind agentdriver.ScreenDetectorKind) stateDetector {
 	switch kind {
-	case agentdriver.ScreenDetectorClaude:
-		return newClaudeWorkingDetector()
 	case agentdriver.ScreenDetectorCopilot:
 		return newCopilotStateDetector()
 	default:
@@ -90,13 +78,6 @@ func newCopilotStateDetector() *screenDetector {
 	return &screenDetector{policy: screenPolicy{
 		clean:    stripANSI,
 		classify: classifyCopilotScreen,
-	}}
-}
-
-func newClaudeWorkingDetector() *screenDetector {
-	return &screenDetector{policy: screenPolicy{
-		clean:    func(raw string) string { return normalizeDetectorText(stripANSI(raw)) },
-		classify: classifyClaudeScreen,
 	}}
 }
 
@@ -127,12 +108,12 @@ func (d *screenDetector) Observe(chunk []byte) (string, bool) {
 func (d *screenDetector) claim(state string, now time.Time, pulseEligible bool) (string, bool) {
 	if state != d.lastState {
 		d.lastState = state
-		if state == stateWorking {
+		if state == protocol.StateWorking {
 			d.lastWorkingPulse = now
 		}
 		return state, true
 	}
-	if state == stateWorking && pulseEligible && now.Sub(d.lastWorkingPulse) >= workingPulseInterval {
+	if state == protocol.StateWorking && pulseEligible && now.Sub(d.lastWorkingPulse) >= workingPulseInterval {
 		d.lastWorkingPulse = now
 		return state, true
 	}
@@ -147,7 +128,7 @@ func classifyCopilotScreen(tail, raw string, visible bool) (string, bool) {
 	if desired == "" {
 		return "", false
 	}
-	return desired, desired == stateWorking && looksLikeWorkingAnimation(raw)
+	return desired, desired == protocol.StateWorking && looksLikeWorkingAnimation(raw)
 }
 
 func looksLikeWorkingAnimation(raw string) bool {
@@ -161,65 +142,6 @@ func looksLikeWorkingAnimation(raw string) bool {
 		strings.Contains(lower, "executing")
 	// Progress-wave redraws are emitted as ANSI-updated carriage-return frames.
 	return hasWorkingKeyword && strings.Contains(raw, "\r") && strings.Contains(raw, "\x1b[")
-}
-
-func classifyClaudeScreen(tail, raw string, visible bool) (string, bool) {
-	if visible {
-		recent := strings.ToLower(tailLines(tail, 6))
-		if strings.Contains(recent, "interrupted") && strings.Contains(recent, "what should claude do instead?") {
-			return stateWaitingInput, false
-		}
-		switch desired := classifyState(tailLines(tail, 6), defaultStateHeuristics); desired {
-		case stateWaitingInput, stateIdle, statePendingApproval:
-			return desired, false
-		}
-	}
-	if !looksLikeClaudeWorkingStatusFrame(raw) {
-		return "", false
-	}
-	return stateWorking, true
-}
-
-func normalizeDetectorText(input string) string {
-	if input == "" {
-		return ""
-	}
-	replaced := strings.ReplaceAll(input, "\r", "\n")
-	replaced = strings.ReplaceAll(replaced, "\u00a0", " ")
-	return replaced
-}
-
-func looksLikeClaudeWorkingStatusFrame(raw string) bool {
-	if raw == "" || !strings.Contains(raw, "\r") {
-		return false
-	}
-
-	cleaned := strings.TrimSpace(stripANSI(raw))
-	if cleaned == "" {
-		return false
-	}
-	if !hasClaudeStatusGlyphPrefix(cleaned) {
-		return false
-	}
-	if claudeFinalSummaryPattern.MatchString(cleaned) && !claudeStatusTimerPattern.MatchString(cleaned) {
-		// Final completion summary lines vary by wording, but consistently look like:
-		// "✻ <verb> for 3m 27s" without the live status parenthesized timer.
-		return false
-	}
-	return claudeStatusTimerPattern.MatchString(cleaned)
-}
-
-func hasClaudeStatusGlyphPrefix(text string) bool {
-	trimmed := strings.TrimLeft(text, " \t")
-	if trimmed == "" {
-		return false
-	}
-
-	r := []rune(trimmed)[0]
-	// Claude Code uses varying decorative star/asterisk glyphs from the
-	// Dingbats block. U+2722–U+274B covers asterisks, stars, snowflakes,
-	// and florettes while excluding crosses (U+2720), circles, and squares.
-	return r >= '\u2722' && r <= '\u274B'
 }
 
 func trimToLastChars(input string, maxChars int) string {
@@ -565,16 +487,16 @@ func classifyState(text string, h stateHeuristics) string {
 	last := lastNonEmptyLine(lines)
 
 	if isPendingApproval(cleaned) {
-		return statePendingApproval
+		return protocol.StatePendingApproval
 	}
 	if isWaitingInput(cleaned, h) {
-		return stateWaitingInput
+		return protocol.StateWaitingInput
 	}
 	if promptShown && isPromptLine(last) {
-		return stateIdle
+		return protocol.StateIdle
 	}
 	if strings.TrimSpace(cleaned) != "" {
-		return stateWorking
+		return protocol.StateWorking
 	}
 	return ""
 }
