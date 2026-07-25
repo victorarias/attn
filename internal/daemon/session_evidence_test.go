@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -152,11 +154,11 @@ func TestEveryEvidenceWriteStampsMovement(t *testing.T) {
 	}
 }
 
-// Shadow mode's contract: the tick records what the resolver would have said and
-// changes nothing.
-func TestTheResolveTickRecordsADisagreementWithoutApplyingIt(t *testing.T) {
+// The tick publishes state. A session sitting in a state no source will ever
+// contradict is moved by the resolver alone.
+func TestTheResolveTickPublishesTheResolution(t *testing.T) {
 	d := newTraceDaemon(t)
-	id := "sess-shadow"
+	id := "sess-flip"
 	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateIdle)
 
 	now := time.Now()
@@ -169,21 +171,201 @@ func TestTheResolveTickRecordsADisagreementWithoutApplyingIt(t *testing.T) {
 
 	d.resolveAllSessions(now)
 
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working: a fresh heartbeat outranks the stored idle", state)
+	}
 	got := onlyObservation(t, d, id)
+	if got.Outcome != statetrace.OutcomeApplied {
+		t.Fatalf("outcome %q, want applied", got.Outcome)
+	}
 	if got.Source != stateSourceResolver {
 		t.Fatalf("source %q, want %q", got.Source, stateSourceResolver)
 	}
-	if got.Outcome != statetrace.OutcomeObserved {
-		t.Fatalf("outcome %q, want observed — the resolver must not write state yet", got.Outcome)
+	// The reason names the clause that won, which is the whole diagnostic value
+	// of the row: "working" alone never explains a wrong color.
+	if !strings.Contains(got.Detail, string(sessionstate.ReasonHeartbeatFresh)) {
+		t.Fatalf("detail %q does not name the winning clause", got.Detail)
 	}
-	if got.Claim != string(protocol.SessionStateWorking) {
-		t.Fatalf("claim %q, want working: a fresh heartbeat outranks the stored idle", got.Claim)
+}
+
+// States outside the resolver's remit describe the session's lifecycle, not its
+// agent. `recoverable` is the dangerous one: the revive path sets it precisely
+// because the worker died, so the process evidence the resolver would read is
+// both present and meaningless.
+func TestTheResolveTickLeavesAnUnownedStateAlone(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-unowned"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateRecoverable)
+
+	d.recordProcessEvidence(id, true)
+	d.resolveAllSessions(time.Now())
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateRecoverable {
+		t.Fatalf("state %q, want recoverable — the resolver overwrote a state it does not own", state)
 	}
-	if got.Reason != string(sessionstate.ReasonHeartbeatFresh) {
-		t.Fatalf("reason %q, want %q", got.Reason, sessionstate.ReasonHeartbeatFresh)
+}
+
+// A session the evidence table has barely heard of resolves to unknown for want
+// of evidence. Publishing that would repaint healthy sessions grey on the first
+// tick after any single observation.
+func TestTheResolveTickDoesNotPublishAnAbsenceOfEvidence(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-no-evidence"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWaitingInput)
+
+	// A reviewer report is evidence of who answers approvals and nothing else,
+	// so it creates the table entry without supporting any state.
+	d.recordReviewerEvidence(id, "acceptEdits")
+	d.resolveAllSessions(time.Now())
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWaitingInput {
+		t.Fatalf("state %q, want waiting_input untouched", state)
 	}
+}
+
+// The settle-flicker gate, end to end through the daemon: while a classification
+// is running, a settled turn holds its pre-settle state rather than flashing
+// idle and being corrected when the verdict lands.
+func TestARunningClassificationHoldsTheSettle(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-classifying"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	now := time.Now()
+	d.recordClassifierStarted(id, now)
+	// The turn is over as far as every other source is concerned: the Stop hook
+	// closed the bracket and the agent stopped painting spinner frames.
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: now})
+
+	d.resolveAllSessions(now.Add(time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working held while the classifier runs", state)
+	}
+
+	// The verdict lands and the hold ends on the same evidence.
+	d.recordClassifierEvidence(id, protocol.StateWaitingInput, now)
+	d.recordClassifierFinished(id)
+	d.resolveAllSessions(now.Add(2 * time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWaitingInput {
+		t.Fatalf("state %q, want the classifier verdict published", state)
+	}
+}
+
+// A classifier that never returns must not be able to freeze a color, which is
+// what an unbounded hold would allow.
+func TestAHungClassifierStopsHoldingTheSettle(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-classifier-hung"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	now := time.Now()
+	d.recordClassifierStarted(id, now)
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: now})
+
+	policy := sessionstate.PolicyFor(string(protocol.SessionAgentClaude))
+	d.resolveAllSessions(now.Add(policy.ClassifierTimeout + time.Second))
+
 	if state := d.store.Get(id).State; state != protocol.SessionStateIdle {
-		t.Fatalf("the shadow tick changed state to %q", state)
+		t.Fatalf("state %q, want idle: the hold must expire with the classifier", state)
+	}
+}
+
+// A verdict belongs to the turn it judged. Turn A's answer must never be
+// published as turn B's state, which is what a verdict left in the table does
+// the moment B settles with its own classification still in flight.
+func TestAVerdictDoesNotSurviveIntoTheNextTurn(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-cross-turn"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	now := time.Now()
+
+	// Turn A ends waiting on the user, and that verdict is published.
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: now})
+	d.recordClassifierEvidence(id, protocol.StateWaitingInput, now)
+	d.resolveAllSessions(now.Add(time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWaitingInput {
+		t.Fatalf("state %q, want turn A's verdict published", state)
+	}
+
+	// Turn B opens and the agent goes busy.
+	openedAt := now.Add(2 * time.Second)
+	d.recordBracketEvidence(id, protocol.StateWorking)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: openedAt})
+	d.resolveAllSessions(openedAt)
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working for turn B", state)
+	}
+
+	// Turn B settles and begins its own classification.
+	settledAt := now.Add(10 * time.Second)
+	d.recordClassifierStarted(id, settledAt)
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: settledAt})
+	d.resolveAllSessions(settledAt.Add(time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want the settle held for turn B's own verdict", state)
+	}
+
+	// And turn B's own answer is what lands.
+	d.recordClassifierEvidence(id, protocol.StateIdle, settledAt)
+	d.recordClassifierFinished(id)
+	d.resolveAllSessions(settledAt.Add(2 * time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateIdle {
+		t.Fatalf("state %q, want turn B's verdict published", state)
+	}
+}
+
+// The other half of the same rule. A turn short enough that the agent never
+// paints a busy frame leaves the previous verdict newer than the last busy
+// heartbeat, so freshness alone cannot tell it is spent — the opening bracket
+// has to retire it.
+func TestAVerdictDoesNotSurviveATurnThatNeverPaintedBusy(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-cross-turn-quiet"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	now := time.Now()
+
+	// Turn A: busy, settles, verdict lands after the last busy frame.
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: now})
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: now.Add(time.Second)})
+	d.recordClassifierEvidence(id, protocol.StateWaitingInput, now.Add(2*time.Second))
+	d.resolveAllSessions(now.Add(2500 * time.Millisecond))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWaitingInput {
+		t.Fatalf("state %q, want turn A's verdict published", state)
+	}
+
+	// Turn B opens — still inside the busy window, so no new busy frame is
+	// needed to hold it working.
+	openedAt := now.Add(3 * time.Second)
+	d.recordBracketEvidence(id, protocol.StateWorking)
+	d.resolveAllSessions(openedAt)
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working for turn B", state)
+	}
+
+	// It settles with its own classification in flight, having never painted a
+	// busy frame of its own.
+	settledAt := now.Add(3500 * time.Millisecond)
+	d.recordClassifierStarted(id, settledAt)
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.resolveAllSessions(settledAt)
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want the settle held: turn A's verdict is not turn B's answer", state)
 	}
 }
 
@@ -321,5 +503,121 @@ func TestEvidenceDoesNotLeakWhenRemovalRacesTheWrite(t *testing.T) {
 			t.Fatalf("evidence survived the racing removal: %+v", got)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// The two Notification types are different signals and must not land in the same
+// slot. permission_prompt is a leading edge the resolver acts on; idle_prompt is
+// a late confirmation that only says the agent stopped.
+func TestNotificationEvidenceSplitsByType(t *testing.T) {
+	t.Run("a permission prompt becomes an open approval", func(t *testing.T) {
+		d := newTraceDaemon(t)
+		id := "sess-notify-permission"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+		d.recordNotificationEvidence(id, notifyPermissionPrompt, "Claude needs your permission")
+
+		got := evidenceOf(t, d, id)
+		if got.LastHarnessEvent == nil {
+			t.Fatal("permission_prompt recorded no harness event")
+		}
+		if got.LastHarnessEvent.Claim != sessionstate.ClaimApprovalPending {
+			t.Fatalf("claim = %q, want %q", got.LastHarnessEvent.Claim, sessionstate.ClaimApprovalPending)
+		}
+		if !got.PromptIdleAt.IsZero() {
+			t.Fatal("permission_prompt set PromptIdleAt; it is not a settle confirmation")
+		}
+	})
+
+	t.Run("an idle prompt confirms the prompt without claiming why", func(t *testing.T) {
+		d := newTraceDaemon(t)
+		id := "sess-notify-idle"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+		d.recordNotificationEvidence(id, notifyIdlePrompt, "Claude is waiting for your input")
+
+		got := evidenceOf(t, d, id)
+		if got.PromptIdleAt.IsZero() {
+			t.Fatal("idle_prompt did not confirm the prompt")
+		}
+		// The message says "waiting for your input", but the signal fires for a
+		// finished task too. Turning it into a claim would invent a distinction
+		// it does not carry, and would outrank the classifier that can tell.
+		if got.LastHarnessEvent != nil {
+			t.Fatalf("idle_prompt became a %q claim; it is a confirmation, not a verdict",
+				got.LastHarnessEvent.Claim)
+		}
+	})
+
+	t.Run("an unknown type records nothing", func(t *testing.T) {
+		d := newTraceDaemon(t)
+		id := "sess-notify-unknown"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+		d.recordNotificationEvidence(id, "some_future_type", "")
+
+		if _, ok := d.evidenceTable().snapshot(id); ok {
+			t.Fatal("an unrecognized notification type wrote evidence")
+		}
+	})
+}
+
+// The socket handler has to reach the evidence table, not only the trace ring.
+// Recording to the trace alone leaves the resolver blind to the strongest
+// approval signal either agent emits.
+func TestTheNotificationHandlerReachesTheEvidenceTable(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-notify-wire"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	resp := callHandler(t, func(conn net.Conn) {
+		d.handleHookNotification(conn, &protocol.HookNotificationMessage{
+			ID:               id,
+			NotificationType: notifyPermissionPrompt,
+			Message:          protocol.Ptr("Claude needs your permission"),
+		})
+	})
+	if !resp.Ok {
+		t.Fatalf("handler failed: %s", protocol.Deref(resp.Error))
+	}
+
+	got := evidenceOf(t, d, id)
+	if got.LastHarnessEvent == nil || got.LastHarnessEvent.Claim != sessionstate.ClaimApprovalPending {
+		t.Fatal("the notification handler recorded no approval evidence")
+	}
+}
+
+// A codex approval arrives on the heartbeat channel, because codex announces it
+// in its title. It has to become an approval claim and simultaneously stop
+// looking busy: leaving the heartbeat busy would let the fresh-busy clause,
+// which outranks the approval clause, hide the approval entirely.
+func TestACodexApprovalTitleBecomesAnApproval(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-codex-approval"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentCodex, protocol.SessionStateWorking)
+	at := time.Now()
+	d.recordPTYEvidence(id, pty.Observation{
+		Source: pty.SourceHeartbeat,
+		Claim:  "approval",
+		Detail: "scratchpad",
+		At:     at,
+	})
+
+	got := evidenceOf(t, d, id)
+	if got.LastHarnessEvent == nil || got.LastHarnessEvent.Claim != sessionstate.ClaimApprovalPending {
+		t.Fatal("the codex approval title recorded no approval")
+	}
+	if got.Heartbeat == nil || got.Heartbeat.Claim != sessionstate.ClaimBusy {
+		// Guard the exact hazard: an approval title that still reads busy is
+		// invisible, because ReasonHeartbeatFresh returns before the approval
+		// clause is reached.
+	} else {
+		t.Fatal("the approval title left the heartbeat busy, which hides the approval")
+	}
+	if !got.LastBusyAt.IsZero() {
+		t.Fatal("an approval title advanced LastBusyAt; it is not a running turn")
+	}
+
+	// End to end through the resolver, which is the claim that matters.
+	res := sessionstate.Resolve(got, sessionstate.PolicyFor(string(protocol.SessionAgentCodex)), at)
+	if res.State != protocol.SessionStatePendingApproval {
+		t.Fatalf("resolved %q (%s), want pending_approval", res.State, res.Reason)
 	}
 }

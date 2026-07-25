@@ -123,6 +123,26 @@ type Evidence struct {
 	// never reported being busy, which is not the same as having gone quiet.
 	LastBusyAt time.Time
 
+	// PromptIdleAt is when the harness last confirmed the agent is sitting at
+	// its prompt with nothing outstanding. Claude reports this via its
+	// Notification hook 60s after a settle nobody answered, once, cancelled if
+	// the user types first.
+	//
+	// It is not an Observation carrying a claim. The message reads "Claude is
+	// waiting for your input", but it fires for any unanswered settle: a
+	// finished foreground Bash turn gets it 60s after Stop exactly as a question
+	// does. So it cannot choose between idle and waiting_input.
+	//
+	// What it is, is an independent witness that the agent is not working, which
+	// is the one thing a lost Stop hook leaves attn unable to discover.
+	PromptIdleAt time.Time
+
+	// ClassifyingSince is when a stop-time classification started, zero when none
+	// is running. It is the difference between "the turn settled and it is idle"
+	// and "the turn settled and we are still finding out", which look identical
+	// in every other field.
+	ClassifyingSince time.Time
+
 	// LastMovement is when any evidence last changed. A session whose evidence
 	// has stopped moving entirely is stuck, which is a distinct condition from
 	// any state it might be reported in.
@@ -144,6 +164,13 @@ type Policy struct {
 	// StuckAfter is total evidence silence — no source of any kind — after which
 	// the session is reported stuck rather than left in whatever it last showed.
 	StuckAfter time.Duration
+	// SettleGrace is how long past StaleAfter a stale bracket keeps its current
+	// state instead of asserting idle, waiting for a late explanation.
+	SettleGrace time.Duration
+	// ClassifierTimeout bounds how long a running classification may hold a
+	// settle. Past it the session settles without the verdict, because a
+	// classifier that never returns must not be able to freeze a color.
+	ClassifierTimeout time.Duration
 	// GuardianDwell is how long an approval must hold before it is published
 	// when a reviewer is in the loop. It is not a delay on genuine approval
 	// requests: with no reviewer the dwell is zero.
@@ -166,6 +193,23 @@ const (
 	// waiting is a late notification, the cost of not waiting is a yellow flash
 	// on every tool call of an unattended run.
 	guardianDwell = 60 * time.Second
+	// defaultSettleGrace is the window past StaleAfter in which a stale bracket
+	// holds rather than asserting idle.
+	//
+	// Sized from claude's approval lag: its prompt renders at 14.6s and its
+	// Notification hook lands at 20.6s, so the bracket goes stale (14.6 + 4) at
+	// 18.6s with the approval still two seconds from being announced. Without the
+	// grace the resolver paints idle across that gap, in the middle of a live
+	// approval.
+	//
+	// The hold is bounded on purpose. Holding forever would reproduce the stuck
+	// color it exists to avoid: codex has no idle_prompt equivalent, so a lost
+	// Stop hook there has nothing else to unstick it.
+	defaultSettleGrace = 4 * time.Second
+	// defaultClassifierTimeout is generous on purpose. Overrunning it costs one
+	// visible settle that a late verdict then corrects; undershooting it
+	// reintroduces the flicker the gate exists to prevent.
+	defaultClassifierTimeout = 30 * time.Second
 )
 
 // PolicyFor returns the timing for an agent. An agent with no measured numbers
@@ -174,10 +218,12 @@ const (
 // bracket early.
 func PolicyFor(agent string) Policy {
 	policy := Policy{
-		HeartbeatTTL:  codexHeartbeatTTL,
-		StaleAfter:    defaultStaleAfter,
-		StuckAfter:    defaultStuckAfter,
-		GuardianDwell: guardianDwell,
+		HeartbeatTTL:      codexHeartbeatTTL,
+		StaleAfter:        defaultStaleAfter,
+		StuckAfter:        defaultStuckAfter,
+		GuardianDwell:     guardianDwell,
+		SettleGrace:       defaultSettleGrace,
+		ClassifierTimeout: defaultClassifierTimeout,
 	}
 	if agent == string(protocol.SessionAgentClaude) {
 		policy.HeartbeatTTL = claudeHeartbeatTTL
@@ -190,17 +236,21 @@ func PolicyFor(agent string) Policy {
 type Reason string
 
 const (
-	ReasonProcessExited    Reason = "process_exited"
-	ReasonHeartbeatFresh   Reason = "heartbeat_fresh"
-	ReasonApprovalOpen     Reason = "approval_open"
-	ReasonCronPending      Reason = "cron_pending"
-	ReasonBracketOpen      Reason = "bracket_open"
-	ReasonBracketStale     Reason = "bracket_stale"
-	ReasonBackgroundWork   Reason = "background_work"
+	ReasonProcessExited     Reason = "process_exited"
+	ReasonHeartbeatFresh    Reason = "heartbeat_fresh"
+	ReasonApprovalOpen      Reason = "approval_open"
+	ReasonCronPending       Reason = "cron_pending"
+	ReasonBracketOpen       Reason = "bracket_open"
+	ReasonPromptIdle        Reason = "prompt_idle"
+	ReasonBracketStale      Reason = "bracket_stale"
+	ReasonHeartbeatSettled  Reason = "heartbeat_settled"
+	ReasonSettleGrace       Reason = "settle_grace"
+	ReasonAwaitingVerdict   Reason = "awaiting_verdict"
+	ReasonBackgroundWork    Reason = "background_work"
 	ReasonClassifierVerdict Reason = "classifier_verdict"
-	ReasonScreen           Reason = "screen"
-	ReasonStuck            Reason = "stuck"
-	ReasonNoEvidence       Reason = "no_evidence"
+	ReasonScreen            Reason = "screen"
+	ReasonStuck             Reason = "stuck"
+	ReasonNoEvidence        Reason = "no_evidence"
 )
 
 // Resolution is the resolver's answer.
@@ -210,6 +260,14 @@ type Resolution struct {
 	// Detail carries the winning observation's detail so a diagnosis does not
 	// require re-reading the evidence table.
 	Detail string
+	// Hold means "keep whatever the session already shows". It is not a state,
+	// and State is empty when it is set.
+	//
+	// A pure resolver cannot express "unchanged" any other way: it does not read
+	// the current state, deliberately, so that its answer is a function of the
+	// evidence alone. Hold is how it says the evidence does not yet support
+	// moving — always for a bounded window, never indefinitely.
+	Hold bool
 }
 
 // Resolve decides what a session is doing. Pure: same evidence and same clock
@@ -247,6 +305,20 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 		return Resolution{State: protocol.SessionStateScheduled, Reason: ReasonCronPending}
 	}
 
+	// The harness says the agent is parked at its prompt. That outranks an open
+	// bracket, because a bracket only ever closes on a hook that may never come,
+	// and this is a second hook on a different trigger saying the same turn is
+	// over.
+	//
+	// LastBusyAt is the guard, not the 60s the notification happens to use: if
+	// the agent painted a spinner after the confirmation, a new turn started and
+	// the confirmation is spent. Nothing here breaks if claude retunes the timer.
+	// It sits below the approval clause on purpose — an unanswered approval is
+	// also "parked at the prompt", and approval is the more useful thing to say.
+	if !e.PromptIdleAt.IsZero() && e.PromptIdleAt.After(e.LastBusyAt) {
+		return settled(e, ReasonPromptIdle, policy, now)
+	}
+
 	// An open bracket says work is outstanding. Whether to believe it is exactly
 	// what the heartbeat is for: a bracket whose closing hook was lost would
 	// otherwise hold the session working for the rest of its life.
@@ -257,7 +329,22 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 		// The bracket is stale. Fall through to the settled clauses below, which
 		// decide *how* it settled — but remember it, so a settle with no verdict
 		// is reported as an un-stick rather than as an absence of evidence.
-		return settled(e, ReasonBracketStale)
+		//
+		// Briefly, though. Going stale means the agent stopped painting spinner
+		// frames, which happens both when a turn ends and when it pauses on an
+		// approval nobody has announced yet, and those are indistinguishable at
+		// this instant. Asserting idle here would flicker every approval whose
+		// announcement lags its prompt. So the first SettleGrace after the
+		// bracket goes stale holds instead, and only then settles.
+		// A verdict that already landed ends the grace early: there is nothing
+		// left to wait for, so waiting would only delay a known answer.
+		if r, ok := classifierVerdict(e); ok {
+			return r
+		}
+		if !heartbeatSilentFor(e, now, policy.StaleAfter+policy.SettleGrace) {
+			return Resolution{Hold: true, Reason: ReasonSettleGrace}
+		}
+		return settled(e, ReasonBracketStale, policy, now)
 	}
 
 	// Background work auto-resumes the turn, so the session is still working
@@ -265,6 +352,19 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// session to idle and back for every backgrounded command.
 	if e.BackgroundWork {
 		return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundWork}
+	}
+
+	// Brackets closed, and the agent is not painting busy frames: the turn is
+	// over, whatever else did or did not happen afterwards.
+	//
+	// This is the settled half of the stuck-color fix and it has to be a clause
+	// of its own. The classifier is what usually publishes a settle, but it is
+	// allowed to decline — no transcript, capability disabled, an error — and
+	// when it declines nothing else ever contradicts the working state the turn
+	// was in. Reading the heartbeat here means a settle no longer depends on any
+	// particular source having spoken.
+	if e.Heartbeat != nil && !e.TurnOpen && !e.ToolOpen {
+		return settled(e, ReasonHeartbeatSettled, policy, now)
 	}
 
 	if r, ok := classifierVerdict(e); ok {
@@ -289,15 +389,45 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 
 // settled resolves a turn that is over, preferring the classifier's verdict and
 // falling back to the reason that got us here.
-func settled(e Evidence, fallback Reason) Resolution {
+//
+// When no verdict has landed but one is being computed, it holds. The classifier
+// is what separates idle from waiting_input, and it takes seconds: publishing
+// idle first and correcting it on arrival turns every question-ending turn into
+// a visible green-then-yellow flicker. Holding is bounded by ClassifierTimeout,
+// so a classifier that dies still settles the session.
+func settled(e Evidence, fallback Reason, policy Policy, now time.Time) Resolution {
 	if r, ok := classifierVerdict(e); ok {
 		return r
+	}
+	if verdictPending(e, policy, now) {
+		return Resolution{Hold: true, Reason: ReasonAwaitingVerdict}
 	}
 	return Resolution{State: protocol.SessionStateIdle, Reason: fallback}
 }
 
+// verdictPending reports whether a classification is running and still worth
+// waiting for.
+func verdictPending(e Evidence, policy Policy, now time.Time) bool {
+	if e.ClassifyingSince.IsZero() {
+		return false
+	}
+	return now.Sub(e.ClassifyingSince) <= policy.ClassifierTimeout
+}
+
+// classifierVerdict reads the stop-time verdict, if one belongs to the current
+// turn.
+//
+// A verdict describes the turn it was computed for and nothing else. The turn
+// bracket clears it when the next turn opens, but a turn may also start without
+// its hook — surviving that is the whole reason the heartbeat is here — so this
+// also drops a verdict the agent has since gone busy past. Otherwise a turn that
+// settles while its own classification is still running takes the previous
+// turn's answer instead of holding for its own.
 func classifierVerdict(e Evidence) (Resolution, bool) {
 	if e.LastClassifier == nil {
+		return Resolution{}, false
+	}
+	if !e.LastBusyAt.IsZero() && e.LastBusyAt.After(e.LastClassifier.ObservedAt) {
 		return Resolution{}, false
 	}
 	switch e.LastClassifier.Claim {

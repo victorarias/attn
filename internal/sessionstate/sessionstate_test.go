@@ -13,10 +13,12 @@ var now = time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 
 func testPolicy() Policy {
 	return Policy{
-		HeartbeatTTL:  time.Second,
-		StaleAfter:    4 * time.Second,
-		StuckAfter:    90 * time.Second,
-		GuardianDwell: 60 * time.Second,
+		HeartbeatTTL:      time.Second,
+		StaleAfter:        4 * time.Second,
+		StuckAfter:        90 * time.Second,
+		GuardianDwell:     60 * time.Second,
+		SettleGrace:       4 * time.Second,
+		ClassifierTimeout: 30 * time.Second,
 	}
 }
 
@@ -31,6 +33,9 @@ func TestResolve(t *testing.T) {
 		evidence   Evidence
 		wantState  protocol.SessionState
 		wantReason Reason
+		// wantHold expects "keep the current state". State must be empty then:
+		// a hold that also named a state would be two answers at once.
+		wantHold bool
 	}{
 		// --- the two clauses that do not exist today ------------------------
 
@@ -50,8 +55,8 @@ func TestResolve(t *testing.T) {
 			name: "an open bracket goes stale when the heartbeat goes silent",
 			evidence: Evidence{
 				TurnOpen:   true,
-				Heartbeat:  seen(SourceHeartbeat, ClaimBusy, 5*time.Second),
-				LastBusyAt: now.Add(-5 * time.Second),
+				Heartbeat:  seen(SourceHeartbeat, ClaimBusy, 10*time.Second),
+				LastBusyAt: now.Add(-10 * time.Second),
 			},
 			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonBracketStale,
@@ -84,6 +89,68 @@ func TestResolve(t *testing.T) {
 			wantReason: ReasonBracketOpen,
 		},
 		{
+			// The lost-Stop-hook rescue. The bracket never closes and the agent
+			// stopped painting long ago, so without a second witness the session
+			// would sit working forever. Claude's 60s notification is that
+			// witness.
+			name: "a prompt-idle confirmation closes a bracket whose hook never came",
+			evidence: Evidence{
+				TurnOpen:     true,
+				LastBusyAt:   now.Add(-90 * time.Second),
+				PromptIdleAt: now.Add(-30 * time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonPromptIdle,
+		},
+		{
+			// The guard that makes the confirmation self-expiring: a spinner
+			// after it means a new turn started, so the confirmation is spent.
+			// This is the type-at-59.9s race — if the notification competed on
+			// its own arrival time it would beat a genuinely running turn.
+			//
+			// The timings pick the one window where the guard is the only thing
+			// deciding the answer. The heartbeat is 2s old, so it is past the
+			// 1.5s TTL and the fresh-busy clause does not fire, but it is inside
+			// the 4s StaleAfter, so the bracket still holds. Drop the guard and
+			// the confirmation settles a turn that is visibly running.
+			name: "a busy frame after the confirmation spends it",
+			evidence: Evidence{
+				TurnOpen:     true,
+				Heartbeat:    seen(SourceHeartbeat, ClaimBusy, 2*time.Second),
+				LastBusyAt:   now.Add(-2 * time.Second),
+				PromptIdleAt: now.Add(-30 * time.Second),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonBracketOpen,
+		},
+		{
+			// An unanswered approval is also "parked at the prompt". Approval is
+			// the more useful thing to say, so it wins.
+			name: "an open approval outranks a prompt-idle confirmation",
+			evidence: Evidence{
+				TurnOpen:         true,
+				LastBusyAt:       now.Add(-90 * time.Second),
+				PromptIdleAt:     now.Add(-30 * time.Second),
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimApprovalPending, 40*time.Second),
+			},
+			wantState:  protocol.SessionStatePendingApproval,
+			wantReason: ReasonApprovalOpen,
+		},
+		{
+			// The confirmation says the agent is not working. It does not say
+			// why it stopped — it fires for a finished task exactly as it fires
+			// for a question — so the classifier still picks between them.
+			name: "a prompt-idle confirmation defers to the classifier verdict",
+			evidence: Evidence{
+				TurnOpen:       true,
+				LastBusyAt:     now.Add(-90 * time.Second),
+				PromptIdleAt:   now.Add(-30 * time.Second),
+				LastClassifier: seen(SourceClassifier, ClaimNeedsInput, 25*time.Second),
+			},
+			wantState:  protocol.SessionStateWaitingInput,
+			wantReason: ReasonClassifierVerdict,
+		},
+		{
 			// And the turn survives the blip being followed by more busy frames,
 			// which is what a real mid-turn gap looks like.
 			name: "busy resuming after a blip keeps the turn working",
@@ -102,7 +169,7 @@ func TestResolve(t *testing.T) {
 			evidence: Evidence{
 				TurnOpen:   true,
 				Heartbeat:  seen(SourceHeartbeat, ClaimSettled, 10*time.Millisecond),
-				LastBusyAt: now.Add(-5 * time.Second),
+				LastBusyAt: now.Add(-10 * time.Second),
 			},
 			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonBracketStale,
@@ -128,6 +195,92 @@ func TestResolve(t *testing.T) {
 			},
 			wantState:  protocol.SessionStateWorking,
 			wantReason: ReasonBracketOpen,
+		},
+
+		// --- settling without a classifier ----------------------------------
+
+		{
+			// The settled half of the stuck-color fix. The classifier is allowed to
+			// decline — no transcript, capability off, an error — and when it does,
+			// nothing else was ever going to contradict the working state the turn
+			// was in. The heartbeat settles it without any source having to speak.
+			name: "closed brackets and a quiet heartbeat settle with no verdict at all",
+			evidence: Evidence{
+				Heartbeat:  seen(SourceHeartbeat, ClaimSettled, 2*time.Second),
+				LastBusyAt: now.Add(-30 * time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonHeartbeatSettled,
+		},
+		{
+			// An agent with no title signals at all gets no free settle: absent
+			// evidence is not evidence of absence, and copilot resolves from its
+			// screen instead.
+			name: "closed brackets with no heartbeat do not settle on their own",
+			evidence: Evidence{
+				Screen: seen(SourceScreen, ClaimBusy, time.Second),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonScreen,
+		},
+
+		// --- holds ----------------------------------------------------------
+
+		{
+			// The measured claude approval, at the instant the flicker would show.
+			// Its prompt renders at t=14.6s and its Notification hook lands at
+			// t=20.6s; the bracket goes stale 4s after the last busy frame, at
+			// 18.6s. Without the grace the resolver paints idle across that gap —
+			// in the middle of a live approval — and then corrects itself.
+			name: "a bracket that just went stale holds instead of asserting idle",
+			evidence: Evidence{
+				TurnOpen:   true,
+				Heartbeat:  seen(SourceHeartbeat, ClaimBusy, 5*time.Second),
+				LastBusyAt: now.Add(-5 * time.Second),
+			},
+			wantHold:   true,
+			wantReason: ReasonSettleGrace,
+		},
+		{
+			// The gate that keeps a question-ending turn from flashing green. The
+			// turn is over and the classifier is running; publishing idle now would
+			// be corrected to waiting_input seconds later, visibly.
+			name: "a settle waits for a classification that is in flight",
+			evidence: Evidence{
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt:       now.Add(-30 * time.Second),
+				ClassifyingSince: now.Add(-2 * time.Second),
+			},
+			wantHold:   true,
+			wantReason: ReasonAwaitingVerdict,
+		},
+		{
+			// Every hold is bounded. A classifier that never returns must not be
+			// able to freeze a color, which is what an unbounded gate would allow.
+			name: "a classification past its timeout stops holding the settle",
+			evidence: Evidence{
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt:       now.Add(-90 * time.Second),
+				ClassifyingSince: now.Add(-31 * time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonHeartbeatSettled,
+		},
+		{
+			// The cross-turn race. A verdict answers the turn it was computed
+			// for; once the agent has gone busy past it, it is the previous
+			// turn's answer and must not be published as this turn's state. The
+			// turn bracket clears it too, but a turn can start without its hook,
+			// which is exactly the case the resolver exists to survive.
+			name: "a verdict the agent has gone busy past is not this turn's answer",
+			evidence: Evidence{
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt:       now.Add(-6 * time.Second),
+				LastClassifier:   seen(SourceClassifier, ClaimNeedsInput, 20*time.Second),
+				ClassifyingSince: now.Add(-2 * time.Second),
+			},
+			wantHold:   true,
+			wantReason: ReasonAwaitingVerdict,
 		},
 
 		// --- ordering -------------------------------------------------------
@@ -274,6 +427,9 @@ func TestResolve(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Resolve(tc.evidence, testPolicy(), now)
+			if got.Hold != tc.wantHold {
+				t.Fatalf("hold %v, want %v (got %s/%s)", got.Hold, tc.wantHold, got.State, got.Reason)
+			}
 			if got.State != tc.wantState || got.Reason != tc.wantReason {
 				t.Fatalf("got %s/%s, want %s/%s", got.State, got.Reason, tc.wantState, tc.wantReason)
 			}
@@ -292,7 +448,11 @@ func TestHeartbeatFreshnessBoundary(t *testing.T) {
 	}{
 		{age: policy.HeartbeatTTL - time.Millisecond, want: protocol.SessionStateWorking},
 		{age: policy.HeartbeatTTL, want: protocol.SessionStateWorking},
-		{age: policy.HeartbeatTTL + time.Millisecond, want: protocol.SessionStateUnknown},
+		// Past the TTL the agent is no longer visibly running, and with no bracket
+		// open there is nothing outstanding: the turn is over. It resolves idle
+		// rather than unknown because the heartbeat is real evidence of a settle,
+		// not an absence of evidence.
+		{age: policy.HeartbeatTTL + time.Millisecond, want: protocol.SessionStateIdle},
 	} {
 		e := Evidence{Heartbeat: seen(SourceHeartbeat, ClaimBusy, tc.age)}
 		if got := Resolve(e, policy, now); got.State != tc.want {
@@ -309,7 +469,11 @@ func TestBracketStalenessBoundary(t *testing.T) {
 		want Reason
 	}{
 		{age: policy.StaleAfter, want: ReasonBracketOpen},
-		{age: policy.StaleAfter + time.Millisecond, want: ReasonBracketStale},
+		// Going stale does not settle immediately: the grace holds the current
+		// state while a late explanation might still arrive.
+		{age: policy.StaleAfter + time.Millisecond, want: ReasonSettleGrace},
+		{age: policy.StaleAfter + policy.SettleGrace, want: ReasonSettleGrace},
+		{age: policy.StaleAfter + policy.SettleGrace + time.Millisecond, want: ReasonBracketStale},
 	} {
 		e := Evidence{TurnOpen: true, Heartbeat: seen(SourceHeartbeat, ClaimBusy, tc.age), LastBusyAt: now.Add(-tc.age)}
 		if got := Resolve(e, policy, now); got.Reason != tc.want {

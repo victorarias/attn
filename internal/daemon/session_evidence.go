@@ -14,11 +14,12 @@ import (
 // The evidence table: what each source has said about a session, kept so the
 // resolver can weigh them instead of the last writer winning.
 //
-// This is shadow mode. The table is filled and resolved on a tick, and the
-// resolution is recorded in the state trace — it does not reach applyState. The
-// point is to have a live witness that the resolver agrees with the current
-// behavior (and a record of exactly where it does not) before it takes over.
-// The flip is a separate change.
+// Sources write here and nowhere else. The tick resolves the table and is what
+// publishes state, which is the point of the whole design: a state now has to be
+// re-justified from live evidence every second, so it cannot outlive the
+// evidence behind it. That is the structural difference from the edge-triggered
+// scheme it replaces, where a state persisted until some source happened to
+// contradict it and got stuck forever when none did.
 
 // evidenceTickInterval is how often every session's evidence is re-resolved.
 // The tick is what makes evidence expire: without it a resolution would only be
@@ -47,7 +48,7 @@ func newSessionEvidenceTable() *sessionEvidenceTable {
 // forgotten" and "removal wins and the writer is refused". Checking liveness
 // outside the lock leaves a third: the writer passes the check, removal deletes
 // and forgets, and the writer then recreates an entry for an id nothing will
-// ever clean up again. That is the leak #668 fixed in the trace ring.
+// ever clean up again.
 func (t *sessionEvidenceTable) updateIf(sessionID string, at time.Time, admit func() bool, mutate func(*sessionstate.Evidence)) {
 	if t == nil || strings.TrimSpace(sessionID) == "" {
 		return
@@ -140,6 +141,26 @@ func (d *Daemon) recordPTYEvidence(sessionID string, obs pty.Observation) {
 	}
 	switch obs.Source {
 	case pty.SourceHeartbeat:
+		// Codex announces an approval in its title, so the heartbeat channel
+		// carries three claims rather than two. It is still a level: the
+		// approval title holds, unrepainted, until the prompt is answered.
+		if obs.Claim == "approval" {
+			d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
+				e.LastHarnessEvent = &sessionstate.Observation{
+					Source:     sessionstate.SourceHarnessEvent,
+					Claim:      sessionstate.ClaimApprovalPending,
+					Detail:     obs.Detail,
+					ObservedAt: at,
+				}
+				e.Heartbeat = &sessionstate.Observation{
+					Source:     sessionstate.SourceHeartbeat,
+					Claim:      sessionstate.ClaimSettled,
+					Detail:     obs.Detail,
+					ObservedAt: at,
+				}
+			})
+			return
+		}
 		claim := sessionstate.ClaimSettled
 		if obs.Claim == "busy" {
 			claim = sessionstate.ClaimBusy
@@ -189,6 +210,11 @@ func (d *Daemon) recordBracketEvidence(sessionID, state string) {
 		switch state {
 		case protocol.StateWorking:
 			e.TurnOpen = true
+			// A verdict judged the turn that just ended. Once the next one opens
+			// it is an answer to a question nobody asked any more, and leaving it
+			// in the table lets the resolver report it as this turn's state the
+			// moment this turn settles.
+			e.LastClassifier = nil
 		case protocol.StateIdle, protocol.StateWaitingInput:
 			e.TurnOpen = false
 			e.ToolOpen = false
@@ -243,6 +269,40 @@ func (d *Daemon) recordReviewerEvidence(sessionID, permissionMode string) {
 	})
 }
 
+// Notification types claude reports. Both are typed fields on the hook payload,
+// which is why attn reads them rather than the English message beside them.
+const (
+	notifyPermissionPrompt = "permission_prompt"
+	notifyIdlePrompt       = "idle_prompt"
+)
+
+// recordNotificationEvidence files claude's Notification hook.
+//
+// The two types are not two flavors of one signal and do not land in the same
+// place. permission_prompt is a leading edge — the agent asked a question and is
+// blocked on the answer — so it becomes an approval claim. idle_prompt is a late
+// confirmation that the agent is parked at its prompt, 60s after a settle, and
+// it deliberately does not become a claim at all: it fires for finished turns
+// and for questions alike, so it can say "not working" but not what instead.
+func (d *Daemon) recordNotificationEvidence(sessionID, notificationType, message string) {
+	at := time.Now()
+	switch strings.TrimSpace(notificationType) {
+	case notifyPermissionPrompt:
+		d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
+			e.LastHarnessEvent = &sessionstate.Observation{
+				Source:     sessionstate.SourceHarnessEvent,
+				Claim:      sessionstate.ClaimApprovalPending,
+				Detail:     message,
+				ObservedAt: at,
+			}
+		})
+	case notifyIdlePrompt:
+		d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
+			e.PromptIdleAt = at
+		})
+	}
+}
+
 // recordProcessEvidence files the PTY lifecycle. An exited process is terminal
 // and outranks every other clause.
 func (d *Daemon) recordProcessEvidence(sessionID string, exited bool) {
@@ -259,8 +319,28 @@ func (d *Daemon) recordProcessEvidence(sessionID string, exited bool) {
 	})
 }
 
-// runEvidenceResolveLoop re-resolves every session on a tick and records what
-// the resolver would have said. Shadow mode: nothing here writes state.
+// recordClassifierStarted marks a stop-time classification as running, so a
+// settle can wait for its verdict instead of publishing idle and correcting it
+// seconds later.
+func (d *Daemon) recordClassifierStarted(sessionID string, at time.Time) {
+	d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
+		e.ClassifyingSince = at
+	})
+}
+
+// recordClassifierFinished clears that mark. It must run on every exit from a
+// classification, verdict or not: a classification that ends without applying
+// anything is exactly the case where the session has to settle on its own.
+func (d *Daemon) recordClassifierFinished(sessionID string) {
+	d.recordEvidence(sessionID, time.Now(), func(e *sessionstate.Evidence) {
+		e.ClassifyingSince = time.Time{}
+	})
+}
+
+// runEvidenceResolveLoop re-resolves every session on a tick and publishes the
+// verdict. The tick is what makes evidence expire, and therefore what makes a
+// stuck state impossible: a session whose sources have all gone quiet is still
+// re-decided every second.
 func (d *Daemon) runEvidenceResolveLoop() {
 	ticker := time.NewTicker(evidenceTickInterval)
 	defer ticker.Stop()
@@ -287,23 +367,88 @@ func (d *Daemon) resolveAllSessions(now time.Time) {
 			continue
 		}
 		resolution := sessionstate.Resolve(evidence, sessionstate.PolicyFor(string(session.Agent)), now)
-		d.traceResolution(sessionID, session.State, resolution)
+		d.publishResolution(sessionID, session.State, resolution)
 	}
 }
 
-// traceResolution records the resolver's verdict and how it compares to the
-// state the session is actually in. Only a disagreement is worth a row: a tick
-// that agrees every second would bury everything else in the ring.
-func (d *Daemon) traceResolution(sessionID string, current protocol.SessionState, resolution sessionstate.Resolution) {
-	if resolution.State == current {
+// resolverOwnedStates are the states the resolver decides. A state outside this
+// set describes the session's lifecycle rather than what its agent is doing, and
+// the resolver has no evidence bearing on it: `launching` is owned by spawn until
+// the agent first speaks, and `recoverable` by the revive path, which sets it
+// precisely because the worker is gone and its evidence is therefore meaningless.
+// Resolving those would let a stale process observation stomp a state the
+// resolver knows nothing about.
+var resolverOwnedStates = map[protocol.SessionState]bool{
+	protocol.SessionStateWorking:         true,
+	protocol.SessionStatePendingApproval: true,
+	protocol.SessionStateWaitingInput:    true,
+	protocol.SessionStateIdle:            true,
+	protocol.SessionStateScheduled:       true,
+	protocol.SessionStateUnknown:         true,
+}
+
+// publishResolution applies the resolver's verdict, or records why it did not.
+//
+// Three verdicts do not move a session, and the difference between them is the
+// diagnosis a wrong color needs: Hold means the evidence is still arriving,
+// no-evidence means nothing has been recorded at all, and an unowned current
+// state means the resolver was not entitled to an opinion.
+func (d *Daemon) publishResolution(sessionID string, current protocol.SessionState, resolution sessionstate.Resolution) {
+	// A hold is traced, and it is the only non-application that is. It is the one
+	// that is both bounded and surprising: bounded because every hold clause
+	// expires, so the rows cannot accumulate, and surprising because a held
+	// session looks exactly like a stuck one from outside. The other three
+	// non-applications are the steady state of a quiet daemon — they would log
+	// once per session per second, forever, and say nothing.
+	if resolution.Hold {
+		// The specific hold, not the word "hold": settle_grace and
+		// awaiting_verdict are held for different reasons and clear on different
+		// evidence, and a trace that collapses them cannot tell a session waiting
+		// on a classifier from one waiting on an approval announcement.
+		d.traceResolutionSkip(sessionID, resolution, string(resolution.Reason))
 		return
 	}
+	// ReasonNoEvidence is not a finding, it is the absence of one, and it
+	// resolves to unknown. Publishing it would repaint every session the
+	// evidence table has not heard about yet — including ones a hook is about to
+	// describe perfectly well. Stuck is a real finding, but it is not published
+	// as a state yet.
+	if resolution.Reason == sessionstate.ReasonNoEvidence || resolution.Reason == sessionstate.ReasonStuck {
+		return
+	}
+	if !resolverOwnedStates[current] || resolution.State == current {
+		return
+	}
+	d.applyState(sessionStateChange{
+		sessionID: sessionID,
+		state:     string(resolution.State),
+		cause:     resolverObservation{},
+		origin: stateOrigin{
+			source: stateSourceResolver,
+			detail: resolutionDetail(resolution),
+		},
+	})
+}
+
+// resolutionDetail is what `attn state explain` shows for a resolver row. The
+// reason is the useful half — it names the clause that won — so it leads, and
+// the winning observation's own detail follows when it has one.
+func resolutionDetail(resolution sessionstate.Resolution) string {
+	if resolution.Detail == "" {
+		return string(resolution.Reason)
+	}
+	return string(resolution.Reason) + ": " + resolution.Detail
+}
+
+// traceResolutionSkip records a tick that changed nothing on purpose. Without
+// it a held session and an unresolved one look identical in the trace.
+func (d *Daemon) traceResolutionSkip(sessionID string, resolution sessionstate.Resolution, reason string) {
 	d.recordStateObservation(sessionID, statetrace.Observation{
 		Source:  stateSourceResolver,
 		Claim:   string(resolution.State),
 		Detail:  resolution.Detail,
-		Outcome: statetrace.OutcomeObserved,
-		Reason:  string(resolution.Reason),
+		Outcome: statetrace.OutcomeSkipped,
+		Reason:  reason,
 	})
 }
 
@@ -318,9 +463,9 @@ func approvalClaim(claim string) sessionstate.Claim {
 }
 
 // stateClaim maps a protocol state name onto what the source actually observed.
-// Sources that speak in state names are the ones this plan is unwinding; until
-// they are converted, the translation lives here rather than being spread across
-// every call site.
+// Sources that speak in state names are being unwound; until they are
+// converted, the translation lives here rather than being spread across every
+// call site.
 func stateClaim(state string) sessionstate.Claim {
 	switch state {
 	case protocol.StateWorking:

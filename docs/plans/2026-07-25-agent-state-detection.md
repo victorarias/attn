@@ -66,12 +66,28 @@ codex:   ESC ] 0 ; ⠸ attn--fix-state-detec... BEL       <- spinner prefix = bu
   running. A level that stops arriving cannot get stuck — though the spike below
   shows it goes briefly silent mid-tool, which is why it corroborates rather than
   leads.
-- **OSC 777 is not a signal claude emits.** An earlier draft of this plan listed
-  it as claude's explicit settle event. It is not: no OSC 777 appears in any of
-  the nine captures, and claude 2.1.220 offers only `iterm2`, `iterm2_with_bell`,
-  and `terminal_bell` notification channels. Claude's settle event is the
-  **`Notification` hook**, below. Corrected while implementing phase 1a, after
-  building and then deleting the OSC 777 reader.
+- **OSC 777 is real but strictly redundant with the `Notification` hook.** Claude
+  emits `ESC ] 777 ; notify ; Claude Code ; <message> BEL` — it appears in three
+  of the nine captures (`run_approval`, `run_approval2`, `run_claude_fg`), the
+  three where a turn ended needing the user. Aligning the hook and stream clocks
+  on the spinner-vs-`UserPromptSubmit` anchor, the escape lands **+0.07s to
+  +0.08s after** the `Notification` hook for the same event, consistent to 10ms
+  across all three: one emission site, hook dispatched first, escape written
+  after. The hook is therefore strictly earlier, carries `notification_type` as a
+  typed field where the escape carries only English prose, and has no config
+  gate — 777 is selected by `preferredNotifChannel` (`auto`, `ghostty`, `iterm2`,
+  `iterm2_with_bell`, `kitty`, `terminal_bell`, `notifications_disabled`), so it
+  is silent for some users. **Use the hook; do not parse 777.**
+
+  Two corrections are folded in here, because the second is the one worth
+  remembering. Phase 1a deleted the OSC 777 reader on the claim that claude emits
+  no 777 at all. That claim was false and rested on two broken greps:
+  `stream.jsonl` holds base64-encoded PTY bytes, so searching it for a raw `ESC`
+  cannot match, and `777;notify` is built from a template literal in the claude
+  binary rather than stored as a contiguous string, so `strings | grep` missed it
+  too. Absence found by a search that could not have succeeded is not evidence.
+  Decode before scanning a capture, and confirm a negative with a positive
+  control.
 - The title also carries a live turn summary ("Run background sleep command") —
   a free sidebar label with no LLM call.
 
@@ -558,9 +574,13 @@ being fixed as part of the current step.
       `ScreenDetector` kind pattern. An unchanged level re-emits at most once a
       second, and the phase 0 ring collapses consecutive identical observations
       into a repeat count, so a long turn cannot flush the ring.
-- [x] ~~Parse OSC 777 `notify`~~ — **dropped**: claude does not emit it (see
-      "The unused signals" above). Built, found unwitnessable on a live PTY, and
-      deleted rather than shipped as untested-in-production code.
+- [x] ~~Parse OSC 777 `notify`~~ — **dropped as redundant**: claude does emit it,
+      but ~70ms *after* the `Notification` hook carrying the same event, with the
+      message as prose instead of a typed field and behind a
+      `preferredNotifChannel` gate. The hook (phase 1b) is the better transport.
+      See "The unused signals" above for the full comparison, and for the
+      base64/`strings` search error that first led this to be dropped for the
+      wrong reason.
 - [x] **Phase 1b (PR #670).** Claude `Notification` hook registered in
       `internal/hooks/hooks.go`, routed to a new `_hook-notification` command.
       It carries `notification_type` — `permission_prompt` when the agent is
@@ -620,8 +640,47 @@ being fixed as part of the current step.
       trace *only when it disagrees* with the stored state. No `applyState` call
       — the flip is deliberately separate so the resolver can be witnessed
       agreeing first.
-- [ ] **Phase 2c**, the flip: route live signals through the resolver into
-      `applyState` with a new `resolverObservation` cause.
+Phase 2c is split into two PRs. The flip changes the color every session shows;
+the deletions are pure subtraction that only make sense once the flip has run
+live. Landing them together would mean a revert of a bad flip also reverts the
+cleanup, and would bury the interesting change in a much larger diff.
+
+**2c-1 — the flip.**
+
+- [x] Feed the `Notification` hook into the evidence table. Phase 1b's
+      `handleHookNotification` recorded to the trace ring only, so the resolver
+      could not see it — defensible while 2b was shadow mode, wrong to carry past
+      the flip, since this is the strongest approval signal either agent emits
+      and Victor asked for it explicitly. `permission_prompt` →
+      `LastHarnessEvent{ClaimApprovalPending}`; `idle_prompt` → `PromptIdleAt`,
+      **not** a claim. This plan previously said `→ ClaimNeedsInput`; the live
+      captures disproved it. `idle_prompt` fires 60s after *any* unanswered
+      settle — a finished foreground Bash turn gets it exactly as a question
+      does — so it cannot choose between `idle` and `waiting_input`. What it is
+      is an independent witness that the agent is not working, which is the one
+      thing a lost Stop hook leaves attn unable to discover.
+- [x] Read codex approvals off its title (`[ . ] Action Required | <cwd>`). Codex
+      has no notification escape and no approval hook, so without this the flip's
+      deletion of the screen scrape would leave codex approvals undetectable.
+- [ ] Route live signals through the resolver into `applyState` with a new
+      `resolverObservation` cause.
+- [ ] Settle flicker: publish the resolver's verdict unless a classification is
+      in flight, in which case hold the pre-settle state until the verdict lands
+      or the classifier times out. Chosen 2026-07-25 over publishing immediately
+      (visible ~8s wrong color on every question-ending turn) and over always
+      holding (keeps today's delay and forfeits the stuck-color fix for turns
+      that never produce a verdict).
+- [ ] A stale bracket with no classifier verdict **holds** rather than asserting
+      `idle`. Measured: claude's approval prompt renders at 14.6s but its
+      `Notification` hook lands at 20.6s, so with `StaleAfter` 4s the bracket
+      goes stale at ~18.6s and `settled()` would paint idle for ~2s in the middle
+      of a live approval — a flicker the flip would *introduce*. Holding is only
+      safe because of the `PromptIdleAt` clause above: a lost Stop hook is
+      unstuck at 60s, so "hold" can no longer mean "stuck forever". That
+      dependency is the entire argument and belongs in a comment at the clause.
+
+**2c-2 — the subtraction**, after 2c-1 has been verified live.
+
 - [ ] Gate `internal/pty/state_detector.go` to copilot only; delete the keyword
       lists and `approval_resolver.go`'s screen-absence debounce for claude/codex.
 - [ ] Delete `ShouldApplyPTYState` and all three driver implementations — the
@@ -719,8 +778,9 @@ placeholder only; do not implement against it.
   verdict is `waiting_input` at all.
 
 - ~~Does Claude emit OSC 777 for permission prompts, or only for turn settle?~~
-  Answered while implementing phase 1a: it emits no OSC 777 at all. The
-  `Notification` hook is the only settle event, at ~6s.
+  Answered: it emits 777 for both, with `Claude needs your permission` and
+  `Claude is waiting for your input` as the message — but always ~70ms behind the
+  `Notification` hook reporting the same event, so the hook is what attn reads.
 - Codex has no notification OSC. Its `notify` program config
   (`agent-turn-complete`) is the analogue; confirm it fires for approval requests
   too, or accept hooks-only for Codex settle detection.
