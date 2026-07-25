@@ -47,6 +47,9 @@ const (
 	// question, and a finished turn all look identical to it.
 	claimBusy    = "busy"
 	claimNotBusy = "not_busy"
+	// claimApproval is the title saying the agent is blocked on the user. Only
+	// codex has it; claude announces approvals on its Notification hook instead.
+	claimApproval = "approval"
 )
 
 const (
@@ -68,7 +71,7 @@ const (
 // ok is false when the title says nothing about the agent — most often because a
 // subprocess overwrote it — in which case no observation is made and whatever
 // the previous level was still stands.
-type titleClassifier func(title string) (busy bool, summary string, ok bool)
+type titleClassifier func(title string) (claim string, summary string, ok bool)
 
 // harnessSignalPolicy is the per-agent part. The mechanics below (scanning,
 // rate limiting, timestamping) are shared; only the reading of a title differs.
@@ -124,13 +127,9 @@ func (o *harnessSignalObserver) observeTitle(title string, now time.Time) (Obser
 	if o.policy.classifyTitle == nil {
 		return Observation{}, false
 	}
-	busy, summary, ok := o.policy.classifyTitle(title)
+	claim, summary, ok := o.policy.classifyTitle(title)
 	if !ok {
 		return Observation{}, false
-	}
-	claim := claimNotBusy
-	if busy {
-		claim = claimBusy
 	}
 	// A level only needs re-stating periodically: it changed, or it has been long
 	// enough that "still true" is news.
@@ -145,31 +144,66 @@ func (o *harnessSignalObserver) observeTitle(title string, now time.Time) (Obser
 // classifyClaudeTitle reads Claude Code's title glyph: a braille spinner frame
 // while the turn runs, U+2733 EIGHT SPOKED ASTERISK when it does not. Anything
 // else is not claude talking.
-func classifyClaudeTitle(title string) (bool, string, bool) {
+func classifyClaudeTitle(title string) (string, string, bool) {
 	first, ok := firstRune(title)
 	if !ok {
-		return false, "", false
+		return "", "", false
 	}
 	switch {
-	case isBrailleSpinner(first), first == '✳':
-		return isBrailleSpinner(first), stripLevelGlyph(title), true
+	case isBrailleSpinner(first):
+		return claimBusy, stripLevelGlyph(title), true
+	case first == '✳':
+		return claimNotBusy, stripLevelGlyph(title), true
 	default:
-		return false, "", false
+		return "", "", false
 	}
 }
 
-// classifyCodexTitle reads Codex's title: a braille spinner frame while busy,
-// the bare working directory otherwise. Unlike claude there is no distinct idle
-// glyph, so a title a subprocess overwrote reads as not-busy. That is safe under
-// a freshness rule — the level that matters is *when busy frames last arrived* —
-// and a live capture confirmed a competing title repaint moves accuracy by
-// 0.2pp, because the agent keeps painting over it.
-func classifyCodexTitle(title string) (bool, string, bool) {
+// codexApprovalMarker is what codex puts in its title while an approval prompt
+// is on screen: "[ . ] Action Required | <cwd>", switching the glyph to "!" the
+// moment it is answered. Measured on codex 0.145.0 driven through a real PTY
+// with --ask-for-approval untrusted.
+//
+// Matching harness UI text is a real cost and worth naming: a codex release
+// that rewords this silently drops the signal. It degrades safely — the title
+// stops looking busy, which is what it already did before this existed, so the
+// worst case is the behavior attn shipped without it. The alternative is worse:
+// codex has no notification escape at all (its OSC vocabulary is 0, 10, 11 —
+// there is no 777) and no approval hook, so the title is the only leading edge
+// available.
+const codexApprovalMarker = "Action Required"
+
+// classifyCodexTitle reads Codex's title. A braille spinner frame means the turn
+// is running; the approval marker means it is blocked on the user; the bare
+// working directory means neither.
+//
+// Unlike claude there is no distinct idle glyph, so a title a subprocess
+// overwrote reads as not-busy. That is safe under a freshness rule — the level
+// that matters is *when busy frames last arrived* — and a live capture confirmed
+// a competing title repaint moves accuracy by 0.2pp, because the agent keeps
+// painting over it.
+func classifyCodexTitle(title string) (string, string, bool) {
 	first, ok := firstRune(title)
 	if !ok {
-		return false, "", false
+		return "", "", false
 	}
-	return isBrailleSpinner(first), stripLevelGlyph(title), true
+	if isBrailleSpinner(first) {
+		return claimBusy, stripLevelGlyph(title), true
+	}
+	// The marker is a prefix on an otherwise ordinary title, so the summary is
+	// whatever follows the separator — the cwd, same as any other codex title.
+	if strings.Contains(title, codexApprovalMarker) {
+		return claimApproval, codexTitleSummary(title), true
+	}
+	return claimNotBusy, stripLevelGlyph(title), true
+}
+
+// codexTitleSummary strips the "[ x ] Action Required | " prefix.
+func codexTitleSummary(title string) string {
+	if _, rest, found := strings.Cut(title, "|"); found {
+		return strings.TrimSpace(rest)
+	}
+	return strings.TrimSpace(title)
 }
 
 // stripLevelGlyph removes a leading level glyph and the space after it, leaving

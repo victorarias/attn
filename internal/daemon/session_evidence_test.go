@@ -403,3 +403,41 @@ func TestTheNotificationHandlerReachesTheEvidenceTable(t *testing.T) {
 		t.Fatal("the notification handler recorded no approval evidence")
 	}
 }
+
+// A codex approval arrives on the heartbeat channel, because codex announces it
+// in its title. It has to become an approval claim and simultaneously stop
+// looking busy: leaving the heartbeat busy would let the fresh-busy clause,
+// which outranks the approval clause, hide the approval entirely.
+func TestACodexApprovalTitleBecomesAnApproval(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-codex-approval"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentCodex, protocol.SessionStateWorking)
+	at := time.Now()
+	d.recordPTYEvidence(id, pty.Observation{
+		Source: pty.SourceHeartbeat,
+		Claim:  "approval",
+		Detail: "scratchpad",
+		At:     at,
+	})
+
+	got := evidenceOf(t, d, id)
+	if got.LastHarnessEvent == nil || got.LastHarnessEvent.Claim != sessionstate.ClaimApprovalPending {
+		t.Fatal("the codex approval title recorded no approval")
+	}
+	if got.Heartbeat == nil || got.Heartbeat.Claim != sessionstate.ClaimBusy {
+		// Guard the exact hazard: an approval title that still reads busy is
+		// invisible, because ReasonHeartbeatFresh returns before the approval
+		// clause is reached.
+	} else {
+		t.Fatal("the approval title left the heartbeat busy, which hides the approval")
+	}
+	if !got.LastBusyAt.IsZero() {
+		t.Fatal("an approval title advanced LastBusyAt; it is not a running turn")
+	}
+
+	// End to end through the resolver, which is the claim that matters.
+	res := sessionstate.Resolve(got, sessionstate.PolicyFor(string(protocol.SessionAgentCodex)), at)
+	if res.State != protocol.SessionStatePendingApproval {
+		t.Fatalf("resolved %q (%s), want pending_approval", res.State, res.Reason)
+	}
+}

@@ -140,6 +140,26 @@ func (d *Daemon) recordPTYEvidence(sessionID string, obs pty.Observation) {
 	}
 	switch obs.Source {
 	case pty.SourceHeartbeat:
+		// Codex announces an approval in its title, so the heartbeat channel
+		// carries three claims rather than two. It is still a level: the
+		// approval title holds, unrepainted, until the prompt is answered.
+		if obs.Claim == "approval" {
+			d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
+				e.LastHarnessEvent = &sessionstate.Observation{
+					Source:     sessionstate.SourceHarnessEvent,
+					Claim:      sessionstate.ClaimApprovalPending,
+					Detail:     obs.Detail,
+					ObservedAt: at,
+				}
+				e.Heartbeat = &sessionstate.Observation{
+					Source:     sessionstate.SourceHeartbeat,
+					Claim:      sessionstate.ClaimSettled,
+					Detail:     obs.Detail,
+					ObservedAt: at,
+				}
+			})
+			return
+		}
 		claim := sessionstate.ClaimSettled
 		if obs.Claim == "busy" {
 			claim = sessionstate.ClaimBusy

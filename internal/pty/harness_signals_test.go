@@ -204,3 +204,43 @@ func TestHeartbeatDetailIsEmptyForAGlyphOnlyTitle(t *testing.T) {
 		t.Fatalf("detail %q, want empty", got.Detail)
 	}
 }
+
+// Codex puts an approval in its title, which is the only leading approval edge
+// it emits: it has no notification escape and no approval hook. The titles here
+// are verbatim from a codex 0.145.0 session driven through a real PTY with
+// --ask-for-approval untrusted, across prompt → approve → resume.
+func TestCodexTitleReportsAnApproval(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		title       string
+		wantClaim   string
+		wantSummary string
+	}{
+		{"running", "⠼ scratchpad", claimBusy, "scratchpad"},
+		{"approval prompt on screen", "[ . ] Action Required | scratchpad", claimApproval, "scratchpad"},
+		{"approval answered", "[ ! ] Action Required | scratchpad", claimApproval, "scratchpad"},
+		{"settled", "scratchpad", claimNotBusy, "scratchpad"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			claim, summary, ok := classifyCodexTitle(tc.title)
+			if !ok {
+				t.Fatalf("classifyCodexTitle(%q) reported nothing", tc.title)
+			}
+			if claim != tc.wantClaim {
+				t.Errorf("claim = %q, want %q", claim, tc.wantClaim)
+			}
+			if summary != tc.wantSummary {
+				t.Errorf("summary = %q, want %q", summary, tc.wantSummary)
+			}
+		})
+	}
+}
+
+// Claude's title has no approval marker — it announces approvals on the
+// Notification hook instead — so the marker must not leak across agents.
+func TestClaudeTitleHasNoApprovalMarker(t *testing.T) {
+	claim, _, ok := classifyClaudeTitle("[ . ] Action Required | whatever")
+	if ok {
+		t.Fatalf("claude classified a codex title as %q", claim)
+	}
+}
