@@ -38,7 +38,7 @@ func (c *Copilot) Capabilities() Capabilities {
 		HasTranscript:        true,
 		HasTranscriptWatcher: true,
 		HasClassifier:        true,
-		HasStateDetector:     true,
+		ScreenDetector:       ScreenDetectorCopilot,
 		HasResume:            true,
 		HasYolo:              true,
 		HasInitialPrompt:     true,

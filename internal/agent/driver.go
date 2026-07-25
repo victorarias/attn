@@ -95,8 +95,13 @@ type Capabilities struct {
 	// backend via ClassifierProvider.
 	HasClassifier bool
 
-	// HasStateDetector indicates PTY state detection is enabled for this agent.
-	HasStateDetector bool
+	// ScreenDetector names which screen-scrape state detector this agent gets,
+	// or ScreenDetectorNone for no PTY state detection. It is a named kind rather
+	// than a boolean because the boolean it replaced encoded the same per-agent
+	// fact twice — once here and once as a switch on the agent name in
+	// internal/pty — and the two could disagree silently: a driver that set the
+	// boolean without a matching case got no detector at all, with no error.
+	ScreenDetector ScreenDetectorKind
 
 	// HasApprovalResolver indicates the daemon should clear pending_approval ->
 	// working off the rendered PTY screen for this agent. Needed by hook-driven
@@ -132,6 +137,20 @@ type Capabilities struct {
 	// agents without it.
 	HasEffortPin bool
 }
+
+// ScreenDetectorKind identifies a screen-scrape state detector implementation.
+// The detectors themselves live in internal/pty, which parses the agent's TUI;
+// this names which one to build.
+type ScreenDetectorKind string
+
+const (
+	// ScreenDetectorNone disables screen-scrape state detection.
+	ScreenDetectorNone ScreenDetectorKind = ""
+	// ScreenDetectorClaude reads Claude Code's status-line frames.
+	ScreenDetectorClaude ScreenDetectorKind = "claude"
+	// ScreenDetectorCopilot reads Copilot CLI's prompt and progress frames.
+	ScreenDetectorCopilot ScreenDetectorKind = "copilot"
+)
 
 var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
@@ -173,8 +192,12 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	if v, ok := boolEnv(prefix + "CLASSIFIER"); ok {
 		caps.HasClassifier = v
 	}
-	if v, ok := boolEnv(prefix + "STATE_DETECTOR"); ok {
-		caps.HasStateDetector = v
+	// STATE_DETECTOR=0 disables the detector; =1 keeps whichever kind the driver
+	// declares. There is nothing for =1 to select for an agent whose driver
+	// declares none, which matches the previous behavior exactly: the boolean
+	// could be forced on, but internal/pty had no detector to build for it.
+	if v, ok := boolEnv(prefix + "STATE_DETECTOR"); ok && !v {
+		caps.ScreenDetector = ScreenDetectorNone
 	}
 	if v, ok := boolEnv(prefix + "APPROVAL_RESOLVER"); ok {
 		caps.HasApprovalResolver = v

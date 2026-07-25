@@ -3,6 +3,8 @@ package pty
 import (
 	"testing"
 	"time"
+
+	agentdriver "github.com/victorarias/attn/internal/agent"
 )
 
 func TestClassifyState_PromptAtEndIsWaiting(t *testing.T) {
@@ -190,5 +192,40 @@ func TestClaudeWorkingDetector_WelcomePromptBecomesWaitingInput(t *testing.T) {
 	}
 	if state != stateWaitingInput {
 		t.Fatalf("state=%q want=%q", state, stateWaitingInput)
+	}
+}
+
+// TestNewScreenDetector_NoneIsNilInterface guards the typed-nil trap: the session
+// wires its state callback on `detector != nil`, so returning a nil *screenDetector
+// as a non-nil stateDetector would silently give a detector-less agent a detector
+// that claims nothing.
+func TestNewScreenDetector_NoneIsNilInterface(t *testing.T) {
+	if d := newScreenDetector(agentdriver.ScreenDetectorNone); d != nil {
+		t.Fatalf("newScreenDetector(none) = %#v, want a nil interface", d)
+	}
+	if d := newScreenDetector(agentdriver.ScreenDetectorKind("nonexistent")); d != nil {
+		t.Fatalf("newScreenDetector(unknown) = %#v, want a nil interface", d)
+	}
+	if newScreenDetector(agentdriver.ScreenDetectorClaude) == nil {
+		t.Fatal("newScreenDetector(claude) = nil, want a detector")
+	}
+	if newScreenDetector(agentdriver.ScreenDetectorCopilot) == nil {
+		t.Fatal("newScreenDetector(copilot) = nil, want a detector")
+	}
+}
+
+// TestScreenDetector_RepeatedSettledClaimIsDroppedOnce covers the claim
+// suppression both agents now share: a settled state is reported once, and a
+// repeat of it says nothing new, so it must not re-emit.
+func TestScreenDetector_RepeatedSettledClaimIsDroppedOnce(t *testing.T) {
+	d := newScreenDetector(agentdriver.ScreenDetectorClaude)
+	frame := []byte("\r\n> Try \"fix the bug\"\r\n")
+
+	state, changed := d.Observe(frame)
+	if !changed || state != stateWaitingInput {
+		t.Fatalf("first observe = (%q, %v), want (%q, true)", state, changed, stateWaitingInput)
+	}
+	if state, changed := d.Observe(frame); changed {
+		t.Fatalf("repeat observe = (%q, true), want no claim", state)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	agentdriver "github.com/victorarias/attn/internal/agent"
 )
 
 const (
@@ -39,67 +41,113 @@ var defaultStateHeuristics = stateHeuristics{
 	listRequestTriggers: []string{"pick one", "choose", "select", "tell me"},
 }
 
-type copilotStateDetector struct {
+// screenDetector scrapes session state from the agent's rendered output. The
+// mechanics are shared across agents — accumulate an ANSI-stripped tail, suppress
+// a claim identical to the last one, re-emit a sustained `working` as a keepalive
+// pulse. What a tail *means* is agent-specific and lives in screenPolicy, which is
+// the only part that changes per agent.
+type screenDetector struct {
+	policy           screenPolicy
 	tail             string
 	lastState        string
 	lastWorkingPulse time.Time
 }
 
-type claudeWorkingDetector struct {
-	tail             string
-	lastState        string
-	lastWorkingPulse time.Time
+// screenPolicy is the agent-specific half of screen scraping.
+type screenPolicy struct {
+	// clean turns a raw chunk into the text that joins the tail.
+	clean func(raw string) string
+	// classify reports the state the tail implies. tail is already updated when
+	// the chunk carried visible text; visible says whether it did, which matters
+	// for agents whose working animation repaints without adding any text.
+	// pulseEligible allows a repeated `working` to re-emit as a keepalive, and is
+	// true only for chunks that look like a live animation frame, so a static
+	// screen never pulses.
+	classify func(tail, raw string, visible bool) (state string, pulseEligible bool)
 }
 
-func newCopilotStateDetector() *copilotStateDetector {
-	return &copilotStateDetector{}
-}
-
-func newClaudeWorkingDetector() *claudeWorkingDetector {
-	return &claudeWorkingDetector{}
-}
+const maxScreenTail = 2000
 
 const workingPulseInterval = 1200 * time.Millisecond
 
 var claudeStatusTimerPattern = regexp.MustCompile(`\((?:\d+h\s+)?(?:\d+m\s+)?\d+s(?:\s+·[^)]*)?\)`)
 var claudeFinalSummaryPattern = regexp.MustCompile(`(?i)\bfor\s+(?:\d+h\s+)?(?:\d+m\s+)?\d+s\b`)
 
-func (d *copilotStateDetector) Observe(chunk []byte) (string, bool) {
+// newScreenDetector builds the detector the driver asked for, or nil (as a nil
+// interface, so callers' nil checks work) when the agent gets none.
+func newScreenDetector(kind agentdriver.ScreenDetectorKind) stateDetector {
+	switch kind {
+	case agentdriver.ScreenDetectorClaude:
+		return newClaudeWorkingDetector()
+	case agentdriver.ScreenDetectorCopilot:
+		return newCopilotStateDetector()
+	default:
+		return nil
+	}
+}
+
+func newCopilotStateDetector() *screenDetector {
+	return &screenDetector{policy: screenPolicy{
+		clean:    stripANSI,
+		classify: classifyCopilotScreen,
+	}}
+}
+
+func newClaudeWorkingDetector() *screenDetector {
+	return &screenDetector{policy: screenPolicy{
+		clean:    func(raw string) string { return normalizeDetectorText(stripANSI(raw)) },
+		classify: classifyClaudeScreen,
+	}}
+}
+
+func (d *screenDetector) Observe(chunk []byte) (string, bool) {
 	if len(chunk) == 0 {
 		return "", false
 	}
 	raw := string(chunk)
-	cleaned := stripANSI(raw)
-	if strings.TrimSpace(cleaned) == "" {
+	cleaned := d.policy.clean(raw)
+	visible := strings.TrimSpace(cleaned) != ""
+	if visible {
+		d.tail += cleaned
+		if len(d.tail) > maxScreenTail {
+			d.tail = trimToLastChars(d.tail, maxScreenTail)
+		}
+	}
+
+	state, pulseEligible := d.policy.classify(d.tail, raw, visible)
+	if state == "" {
 		return "", false
 	}
+	return d.claim(state, time.Now(), pulseEligible)
+}
 
-	d.tail += cleaned
-	const maxTail = 2000
-	if len(d.tail) > maxTail {
-		d.tail = trimToLastChars(d.tail, maxTail)
+// claim reports state to the caller unless it says nothing new: a repeat of the
+// last claim is dropped, except for a `working` animation frame once the pulse
+// interval has elapsed, which keeps a long run visibly alive.
+func (d *screenDetector) claim(state string, now time.Time, pulseEligible bool) (string, bool) {
+	if state != d.lastState {
+		d.lastState = state
+		if state == stateWorking {
+			d.lastWorkingPulse = now
+		}
+		return state, true
 	}
+	if state == stateWorking && pulseEligible && now.Sub(d.lastWorkingPulse) >= workingPulseInterval {
+		d.lastWorkingPulse = now
+		return state, true
+	}
+	return "", false
+}
 
-	recent := tailLines(d.tail, 6)
-	desired := classifyState(recent, defaultStateHeuristics)
+func classifyCopilotScreen(tail, raw string, visible bool) (string, bool) {
+	if !visible {
+		return "", false
+	}
+	desired := classifyState(tailLines(tail, 6), defaultStateHeuristics)
 	if desired == "" {
 		return "", false
 	}
-
-	now := time.Now()
-	emitWorkingPulse := desired == stateWorking &&
-		desired == d.lastState &&
-		looksLikeWorkingAnimation(raw) &&
-		(now.Sub(d.lastWorkingPulse) >= workingPulseInterval)
-
-	if desired == d.lastState && !emitWorkingPulse {
-		return "", false
-	}
-	d.lastState = desired
-	if desired == stateWorking {
-		d.lastWorkingPulse = now
-	}
-	return desired, true
+	return desired, desired == stateWorking && looksLikeWorkingAnimation(raw)
 }
 
 func looksLikeWorkingAnimation(raw string) bool {
@@ -115,49 +163,21 @@ func looksLikeWorkingAnimation(raw string) bool {
 	return hasWorkingKeyword && strings.Contains(raw, "\r") && strings.Contains(raw, "\x1b[")
 }
 
-func (d *claudeWorkingDetector) Observe(chunk []byte) (string, bool) {
-	if len(chunk) == 0 {
-		return "", false
-	}
-	raw := string(chunk)
-	cleaned := normalizeDetectorText(stripANSI(raw))
-	if strings.TrimSpace(cleaned) != "" {
-		d.tail += cleaned
-		const maxTail = 2000
-		if len(d.tail) > maxTail {
-			d.tail = trimToLastChars(d.tail, maxTail)
-		}
-		recent := strings.ToLower(tailLines(d.tail, 6))
+func classifyClaudeScreen(tail, raw string, visible bool) (string, bool) {
+	if visible {
+		recent := strings.ToLower(tailLines(tail, 6))
 		if strings.Contains(recent, "interrupted") && strings.Contains(recent, "what should claude do instead?") {
-			if d.lastState != stateWaitingInput {
-				d.lastState = stateWaitingInput
-				return stateWaitingInput, true
-			}
-			return "", false
+			return stateWaitingInput, false
 		}
-		if desired := classifyState(tailLines(d.tail, 6), defaultStateHeuristics); desired == stateWaitingInput || desired == stateIdle || desired == statePendingApproval {
-			if d.lastState != desired {
-				d.lastState = desired
-				return desired, true
-			}
-			return "", false
+		switch desired := classifyState(tailLines(tail, 6), defaultStateHeuristics); desired {
+		case stateWaitingInput, stateIdle, statePendingApproval:
+			return desired, false
 		}
 	}
 	if !looksLikeClaudeWorkingStatusFrame(raw) {
 		return "", false
 	}
-
-	now := time.Now()
-	if d.lastState != stateWorking {
-		d.lastState = stateWorking
-		d.lastWorkingPulse = now
-		return stateWorking, true
-	}
-	if now.Sub(d.lastWorkingPulse) >= workingPulseInterval {
-		d.lastWorkingPulse = now
-		return stateWorking, true
-	}
-	return "", false
+	return stateWorking, true
 }
 
 func normalizeDetectorText(input string) string {

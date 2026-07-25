@@ -328,21 +328,15 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	onState := m.onState
 	m.mu.Unlock()
 
-	detectorEnabled := true
+	// The driver names which observers this agent gets; this only builds them.
+	detectorKind := agentdriver.ScreenDetectorNone
 	approvalResolverEnabled := false
 	if d := agentdriver.Get(agent); d != nil {
 		caps := agentdriver.EffectiveCapabilities(d)
-		detectorEnabled = caps.HasStateDetector
+		detectorKind = caps.ScreenDetector
 		approvalResolverEnabled = caps.HasApprovalResolver
 	}
-	if detectorEnabled {
-		switch agent {
-		case "copilot":
-			session.detector = newCopilotStateDetector()
-		case "claude":
-			session.detector = newClaudeWorkingDetector()
-		}
-	}
+	session.detector = newScreenDetector(detectorKind)
 	if approvalResolverEnabled {
 		session.approvalResolver = &approvalResolver{}
 	}
