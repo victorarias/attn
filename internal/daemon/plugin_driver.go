@@ -358,6 +358,7 @@ func (d *Daemon) applyPluginReportedState(params pluginReportStateParams) bool {
 			runID: params.RunID,
 			seq:   params.Seq,
 		},
+		origin: stateOrigin{source: stateSourcePluginDriver, detail: params.RunID},
 	}) {
 		d.logf("plugin state report discarded: session=%s run=%s seq=%d state=%s", params.SessionID, params.RunID, params.Seq, state)
 		return false

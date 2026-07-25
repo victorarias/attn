@@ -280,6 +280,23 @@ func (c *Client) SessionTranscript(targetSessionID, afterCursor string) (*protoc
 	return resp.SessionTranscriptResult, nil
 }
 
+// StateExplain replays the daemon's per-session ring of state observations. It
+// is a read-only diagnostic: it reports what each source claimed and what
+// happened to the claim, and changes nothing.
+func (c *Client) StateExplain(targetSessionID string) (*protocol.StateExplainResult, error) {
+	resp, err := c.send(protocol.StateExplainMessage{
+		Cmd:             protocol.CmdStateExplain,
+		TargetSessionID: targetSessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.StateExplainResult == nil {
+		return nil, errors.New("daemon returned no state explain result")
+	}
+	return resp.StateExplainResult, nil
+}
+
 // SendStop sends a stop signal with transcript path for classification
 // StopFacts carries what the Stop hook observed about whether the turn actually
 // finished. The daemon decides what it means; see nonTerminalStopState there. A

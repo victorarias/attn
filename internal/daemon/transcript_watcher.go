@@ -248,6 +248,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 						sessionID: w.sessionID,
 						state:     lineResult.State,
 						cause:     daemonObservation{},
+						origin:    stateOrigin{source: stateSourceTranscript, detail: "transcript line", observedAt: now},
 					})
 					sessionState = protocol.SessionState(lineResult.State)
 				}
@@ -290,6 +291,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				sessionID: w.sessionID,
 				state:     tickResult.State,
 				cause:     daemonObservation{},
+				origin:    stateOrigin{source: stateSourceTranscript, detail: "watcher tick"},
 			})
 			sessionState = protocol.SessionState(tickResult.State)
 		}

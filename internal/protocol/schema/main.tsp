@@ -632,6 +632,14 @@ model SessionTranscriptMessage {
   after_cursor?: string;
 }
 
+// Replays the daemon's per-session ring of state observations so a wrong color
+// can be explained: which sources spoke, what each claimed, and what happened to
+// each claim. Diagnostic only — reading it changes nothing.
+model StateExplainMessage {
+  cmd: "state_explain";
+  target_session_id: string;
+}
+
 // A Stop is not always terminal: the turn may yield with background work still
 // in flight (it auto-resumes on completion) or park on a pending scheduled
 // wakeup. These carry that as FACTS observed by the hook — the statuses of the
@@ -3059,6 +3067,34 @@ model Response {
   present_feedback_result?: PresentFeedbackResult;
   session_instructions_result?: SessionInstructionsResult;
   session_transcript_result?: SessionTranscriptResult;
+  state_explain_result?: StateExplainResult;
+}
+
+// One recorded state observation and its fate. Outcome separates the ways an
+// observation can fail to reach the store: "vetoed" is a driver transition
+// filter refusing it before the store door, "discarded" is the store's own
+// commit rule refusing it, "skipped" is the source deciding it had nothing to
+// say. A stuck color is a session whose observations are all non-applied.
+model StateExplainEntry {
+  source: string;
+  claim: string;
+  outcome: string; // "applied" | "discarded" | "vetoed" | "skipped"
+  detail?: string;
+  cause?: string;
+  reason?: string;
+  observed_at: string;
+  recorded_at: string;
+}
+
+model StateExplainResult {
+  session_id: string;
+  agent: string;
+  state: string;
+  state_since?: string;
+  observations: StateExplainEntry[];
+  // capacity is the ring size, so a full ring can be reported as truncated
+  // rather than read as the whole history.
+  capacity: int32;
 }
 
 model EvidenceExcerpt {
