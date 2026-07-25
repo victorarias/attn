@@ -49,7 +49,6 @@ func (c *Codex) Capabilities() Capabilities {
 		HasHooks:            true,
 		HasTranscript:       true,
 		HasClassifier:       true,
-		HasStateDetector:    false,
 		HasApprovalResolver: true,
 		HasResume:           true,
 		HasYolo:             true,

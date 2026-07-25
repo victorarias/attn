@@ -525,10 +525,14 @@ being fixed as part of the current step.
       we care about — ~6s after a permission request, and exactly 60s after a Stop
       that settled idle — so it is a first-class source, not a backstop.
 - [ ] Persist `ReviewerInLoop` on the session at spawn.
-- [ ] Enabling refactors 2 and 3: driver-owned observers (drop the capability
-      booleans and the agent-name switch in `manager.go`), and one `screenDetector`
-      in place of the two identical structs. Needed here because this phase adds a
-      third observer per agent.
+- [x] Enabling refactors 2 and 3: driver-named observers (`Capabilities.
+      ScreenDetector` kind replaces `HasStateDetector` plus the agent-name switch
+      in `manager.go`), and one `screenDetector` + `screenPolicy` in place of the
+      two near-identical structs. The per-agent *meaning* stays in
+      `classifyClaudeScreen` / `classifyCopilotScreen`; only the mechanics (tail,
+      claim suppression, working pulse) are shared. `STATE_DETECTOR=0` still
+      disables; `=1` keeps the driver's kind, which is what it already did in every
+      reachable case.
 - [ ] Enabling refactor 4: the Stop hook reports `background_tasks` /
       `session_crons` as facts; `nonTerminalStopState` and `sessionIsChiefOfStaff`
       move daemon-side. Without this the resolver cannot see background work at
