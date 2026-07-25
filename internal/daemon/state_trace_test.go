@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -209,6 +210,51 @@ func TestTraceIsDroppedWhenTheSessionRecordGoes(t *testing.T) {
 
 	if got := traceOf(t, d, id); got != nil {
 		t.Fatalf("trace survived session removal: %+v", got)
+	}
+}
+
+// The interleaving the store-row gate has to survive: a writer passes the
+// liveness check, the session is removed and its ring forgotten, and only then
+// does the writer reach the append. If the check and the append are not atomic,
+// the writer creates a ring for an id nothing will ever forget again — one
+// leaked map entry per race, for the daemon's lifetime.
+//
+// The hook fires inside the recorder's lock, which is exactly where the removal
+// must be attempted for the race to be real.
+func TestTraceDoesNotLeakWhenRemovalRacesTheWrite(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-racing"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	removalDone := make(chan struct{})
+	var once sync.Once
+	stateTraceRecordGateHook = func(observed string) {
+		if observed != id {
+			return
+		}
+		once.Do(func() {
+			// Remove the session from under the in-flight writer. This blocks on
+			// the recorder's lock inside forgetStateTrace, which is what proves
+			// the two operations are serialized rather than interleaved.
+			go func() {
+				defer close(removalDone)
+				d.dropSessionRecord(id)
+			}()
+			// Give the removal a chance to get as far as it can before the write
+			// proceeds. Without RecordIf's lock it would complete here.
+			time.Sleep(20 * time.Millisecond)
+		})
+	}
+	t.Cleanup(func() { stateTraceRecordGateHook = nil })
+
+	d.handlePTYState(id, screenObs(protocol.StateIdle))
+	<-removalDone
+
+	if got := traceOf(t, d, id); got != nil {
+		t.Fatalf("ring survived the racing removal: %+v", got)
+	}
+	if got := d.stateTraceRecorder().SessionCount(); got != 0 {
+		t.Fatalf("recorder holds %d rings after the race, want 0", got)
 	}
 }
 

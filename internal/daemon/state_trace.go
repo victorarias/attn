@@ -40,6 +40,11 @@ const (
 	stateSourcePluginDriver = "plugin_driver"
 )
 
+// stateTraceRecordGateHook runs inside the recorder's lock, between the liveness
+// check and the write. Tests only: it is the seam where a concurrent removal
+// would have to interleave for the ring to leak.
+var stateTraceRecordGateHook func(sessionID string)
+
 // stateTraceRecorder returns the daemon's trace ring, building it on first use
 // so a directly-constructed test daemon traces without a dedicated init site.
 func (d *Daemon) stateTraceRecorder() *statetrace.Recorder {
@@ -67,9 +72,20 @@ func (d *Daemon) recordStateObservation(sessionID string, obs statetrace.Observa
 	if obs.ObservedAt.IsZero() {
 		obs.ObservedAt = obs.RecordedAt
 	}
-	if d.store != nil && d.store.Get(sessionID) != nil {
-		d.stateTraceRecorder().Record(sessionID, obs)
-	}
+	// The liveness check runs inside the recorder's lock (RecordIf), not before
+	// it. Checking first and recording after leaves a window where the session is
+	// removed and its ring forgotten in between, and the writer then creates a
+	// fresh ring for an id that will never be forgotten again.
+	d.stateTraceRecorder().RecordIf(sessionID, obs, func() bool {
+		live := d.store != nil && d.store.Get(sessionID) != nil
+		// The hook runs after the check on purpose: check-then-write is the
+		// sequence that leaks when the two are not atomic, so this is where a
+		// racing removal has to be injected to falsify the lock.
+		if hook := stateTraceRecordGateHook; hook != nil {
+			hook(sessionID)
+		}
+		return live
+	})
 	d.logf("%s", obs.LogLine(sessionID))
 }
 

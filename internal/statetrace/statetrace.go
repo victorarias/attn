@@ -136,6 +136,22 @@ func (r *Recorder) Capacity() int {
 // Record appends an observation, evicting the oldest once the ring is full. A
 // nil recorder records nothing, so callers need no guard.
 func (r *Recorder) Record(sessionID string, obs Observation) {
+	r.RecordIf(sessionID, obs, nil)
+}
+
+// RecordIf appends an observation only when admit reports the session is still
+// one the recorder should hold a ring for. A nil admit always appends.
+//
+// admit runs while the recorder's lock is held, which is the whole point: the
+// caller's liveness check and the write are then atomic with respect to Forget.
+// Checking liveness before calling Record instead leaves a window — check
+// passes, the session is removed and its ring forgotten, the writer resumes and
+// creates a fresh ring for an id nothing will ever forget again — which is a
+// leak that grows for the daemon's lifetime.
+//
+// admit must not call back into the recorder, and must not take a lock that
+// anything holds while calling in here.
+func (r *Recorder) RecordIf(sessionID string, obs Observation, admit func() bool) {
 	if r == nil || sessionID == "" {
 		return
 	}
@@ -147,6 +163,9 @@ func (r *Recorder) Record(sessionID string, obs Observation) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if admit != nil && !admit() {
+		return
+	}
 	target := r.rings[sessionID]
 	if target == nil {
 		target = newRing(r.capacity)
