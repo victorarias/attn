@@ -148,7 +148,7 @@ type Manager struct {
 	pendingSpawns map[string]struct{}
 	logf          LogFunc
 	onExit        func(ExitInfo)
-	onState       func(sessionID, state string)
+	onState       func(sessionID string, obs Observation)
 
 	// testHookAfterSpawnReserve, when non-nil, runs after Spawn reserves its
 	// session ID and releases the mutex. Test-only seam for deterministic
@@ -173,7 +173,7 @@ func (m *Manager) SetExitHandler(handler func(ExitInfo)) {
 	m.onExit = handler
 }
 
-func (m *Manager) SetStateHandler(handler func(sessionID, state string)) {
+func (m *Manager) SetStateHandler(handler func(sessionID string, obs Observation)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onState = handler
@@ -347,8 +347,8 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		session.approvalResolver = &approvalResolver{}
 	}
 	if (session.detector != nil || session.approvalResolver != nil) && onState != nil {
-		session.onState = func(state string) {
-			onState(opts.ID, state)
+		session.onState = func(obs Observation) {
+			onState(opts.ID, obs)
 		}
 	}
 

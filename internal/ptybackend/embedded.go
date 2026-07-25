@@ -29,7 +29,7 @@ func (b *EmbeddedBackend) SetExitHandler(handler func(ExitInfo)) {
 	})
 }
 
-func (b *EmbeddedBackend) SetStateHandler(handler func(sessionID, state string)) {
+func (b *EmbeddedBackend) SetStateHandler(handler func(sessionID string, obs pty.Observation)) {
 	b.manager.SetStateHandler(handler)
 }
 

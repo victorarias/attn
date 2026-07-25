@@ -777,7 +777,7 @@ func TestPluginDriverRun_IgnoresGenericPTYState(t *testing.T) {
 		t.Fatal("failed to begin plugin-owned state run")
 	}
 
-	d.handlePTYState("plugin-state-owner", protocol.StateWorking)
+	d.handlePTYState("plugin-state-owner", screenObs(protocol.StateWorking))
 	if got := d.store.Get("plugin-state-owner").State; got != protocol.SessionStateWaitingInput {
 		t.Fatalf("state=%q after generic PTY event, want plugin-owned waiting_input", got)
 	}

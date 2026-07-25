@@ -133,7 +133,7 @@ type Session struct {
 
 	// CLI state detection based on PTY output.
 	detector      stateDetector
-	onState       func(state string)
+	onState       func(obs Observation)
 	stateMu       sync.RWMutex
 	detectorState string
 
@@ -362,7 +362,7 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 						s.stateMu.Lock()
 						s.detectorState = state
 						s.stateMu.Unlock()
-						s.onState(state)
+						s.onState(newObservation(SourceScreen, state, "screen scrape", time.Now()))
 					}
 				}
 				if len(data) > 0 {
@@ -557,17 +557,17 @@ func (s *Session) evaluateApproval(now time.Time, throttle bool) {
 
 	switch signal {
 	case approvalArmedPending:
-		s.applyApprovalState(statePendingApproval)
+		s.applyApprovalState(statePendingApproval, "approval prompt on screen", now)
 	case approvalCleared:
-		s.applyApprovalState(stateWorking)
+		s.applyApprovalState(stateWorking, "approval prompt gone for debounce", now)
 	}
 }
 
-func (s *Session) applyApprovalState(state string) {
+func (s *Session) applyApprovalState(state, detail string, at time.Time) {
 	s.stateMu.Lock()
 	s.detectorState = state
 	s.stateMu.Unlock()
-	s.onState(state)
+	s.onState(newObservation(SourceApproval, state, detail, at))
 }
 
 // scheduleApprovalRecheckLocked arms a one-shot recheck a little past the

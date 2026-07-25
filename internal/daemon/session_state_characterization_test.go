@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
@@ -103,7 +104,7 @@ func TestSessionStateCharacterization_LiveSignalsShareEffects(t *testing.T) {
 			agent:        protocol.SessionAgentClaude,
 			initialState: protocol.SessionStateWaitingInput,
 			apply: func(d *Daemon, id string) {
-				d.handlePTYState(id, protocol.StateWorking)
+				d.handlePTYState(id, screenObs(protocol.StateWorking))
 			},
 		},
 	} {
@@ -286,5 +287,17 @@ func TestSessionStateCharacterization_ProcessExitEffects(t *testing.T) {
 	}
 	if got := characterizationEventCount(events, protocol.EventSessionExited, ""); got != 1 {
 		t.Fatalf("session_exited events=%d, want 1; events=%+v", got, events)
+	}
+}
+
+// screenObs builds the observation the screen detector would send for state.
+// These tests exercise the daemon's handling of a PTY observation, not the
+// observation's own construction.
+func screenObs(state string) pty.Observation {
+	return pty.Observation{
+		Source: pty.SourceScreen,
+		Claim:  state,
+		Detail: "test",
+		At:     time.Now(),
 	}
 }

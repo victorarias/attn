@@ -186,7 +186,8 @@ func (r *Runtime) run(ctx context.Context) error {
 	}
 
 	r.manager = pty.NewManager(r.logf)
-	r.manager.SetStateHandler(func(_ string, state string) {
+	r.manager.SetStateHandler(func(_ string, obs pty.Observation) {
+		state := obs.Claim
 		r.stateMu.Lock()
 		previousState := r.state
 		changed := previousState != state
@@ -204,12 +205,7 @@ func (r *Runtime) run(ctx context.Context) error {
 			}
 		}
 		if changed {
-			r.broadcastLifecycle(EventEnvelope{
-				Type:      "evt",
-				Event:     EventStateChanged,
-				SessionID: r.cfg.SessionID,
-				State:     &state,
-			})
+			r.broadcastLifecycle(stateChangedEvent(r.cfg.SessionID, obs))
 		}
 	})
 	r.manager.SetExitHandler(func(info pty.ExitInfo) {
@@ -1025,12 +1021,14 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 		if state == "" {
 			state = "working"
 		}
-		_ = c.sendEvent(EventEnvelope{
-			Type:      "evt",
-			Event:     EventStateChanged,
-			SessionID: c.runtime.cfg.SessionID,
-			State:     &state,
-		})
+		// Not a fresh terminal observation: this replays the worker's cached state
+		// so a newly subscribed watcher starts in sync.
+		_ = c.sendEvent(stateChangedEvent(c.runtime.cfg.SessionID, pty.Observation{
+			Source: pty.SourceWorkerInfo,
+			Claim:  state,
+			Detail: "watch subscribe replay",
+			At:     time.Now(),
+		}))
 		if exitCode != nil || exitSignal != nil {
 			_ = c.sendEvent(EventEnvelope{
 				Type:       "evt",
