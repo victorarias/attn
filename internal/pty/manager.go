@@ -330,17 +330,20 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 
 	// The driver names which observers this agent gets; this only builds them.
 	detectorKind := agentdriver.ScreenDetectorNone
+	harnessSignalKind := agentdriver.HarnessSignalsNone
 	approvalResolverEnabled := false
 	if d := agentdriver.Get(agent); d != nil {
 		caps := agentdriver.EffectiveCapabilities(d)
 		detectorKind = caps.ScreenDetector
+		harnessSignalKind = caps.HarnessSignals
 		approvalResolverEnabled = caps.HasApprovalResolver
 	}
 	session.detector = newScreenDetector(detectorKind)
+	session.harnessSignals = newHarnessSignalObserver(harnessSignalKind)
 	if approvalResolverEnabled {
 		session.approvalResolver = &approvalResolver{}
 	}
-	if (session.detector != nil || session.approvalResolver != nil) && onState != nil {
+	if (session.detector != nil || session.harnessSignals != nil || session.approvalResolver != nil) && onState != nil {
 		session.onState = func(obs Observation) {
 			onState(opts.ID, obs)
 		}

@@ -103,6 +103,12 @@ type Capabilities struct {
 	// boolean without a matching case got no detector at all, with no error.
 	ScreenDetector ScreenDetectorKind
 
+	// HarnessSignals names which harness-owned PTY signals this agent emits (the
+	// OSC 0 title heartbeat, OSC 777 notifications), or HarnessSignalsNone. These
+	// come from the agent itself rather than from reading its rendered TUI, so
+	// unlike ScreenDetector they survive any change to how the agent draws.
+	HarnessSignals HarnessSignalKind
+
 	// HasApprovalResolver indicates the daemon should clear pending_approval ->
 	// working off the rendered PTY screen for this agent. Needed by hook-driven
 	// agents that fire no hook when an approval is granted, so the only signal
@@ -152,6 +158,21 @@ const (
 	ScreenDetectorCopilot ScreenDetectorKind = "copilot"
 )
 
+// HarnessSignalKind identifies a set of harness-owned PTY signals. The parsing
+// lives in internal/pty; this names which agent's dialect to read.
+type HarnessSignalKind string
+
+const (
+	// HarnessSignalsNone is an agent that emits no harness state signals.
+	HarnessSignalsNone HarnessSignalKind = ""
+	// HarnessSignalsClaude is Claude Code: a braille/U+2733 title heartbeat plus
+	// OSC 777 notifications.
+	HarnessSignalsClaude HarnessSignalKind = "claude"
+	// HarnessSignalsCodex is Codex: a braille title heartbeat, no notification
+	// OSC.
+	HarnessSignalsCodex HarnessSignalKind = "codex"
+)
+
 var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
 // EffectiveCapabilities returns driver capabilities after applying env overrides.
@@ -162,6 +183,7 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_TRANSCRIPT_WATCHER=0|1
 //   - ATTN_AGENT_<AGENT>_CLASSIFIER=0|1
 //   - ATTN_AGENT_<AGENT>_STATE_DETECTOR=0|1
+//   - ATTN_AGENT_<AGENT>_HARNESS_SIGNALS=0|1
 //   - ATTN_AGENT_<AGENT>_APPROVAL_RESOLVER=0|1
 //   - ATTN_AGENT_<AGENT>_RESUME=0|1
 //   - ATTN_AGENT_<AGENT>_YOLO=0|1
@@ -198,6 +220,12 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	// could be forced on, but internal/pty had no detector to build for it.
 	if v, ok := boolEnv(prefix + "STATE_DETECTOR"); ok && !v {
 		caps.ScreenDetector = ScreenDetectorNone
+	}
+	// HARNESS_SIGNALS=0 disables them; =1 keeps the driver's kind, for the same
+	// reason as STATE_DETECTOR above — there is no dialect for =1 to invent for an
+	// agent whose driver declares none.
+	if v, ok := boolEnv(prefix + "HARNESS_SIGNALS"); ok && !v {
+		caps.HarnessSignals = HarnessSignalsNone
 	}
 	if v, ok := boolEnv(prefix + "APPROVAL_RESOLVER"); ok {
 		caps.HasApprovalResolver = v

@@ -3925,6 +3925,7 @@ export interface ObservationElement {
     outcome:     string;
     reason?:     string;
     recorded_at: string;
+    repeats?:    number;
     source:      string;
     [property: string]: any;
 }
@@ -4404,6 +4405,7 @@ export interface StateExplainEntry {
     outcome:     string;
     reason?:     string;
     recorded_at: string;
+    repeats?:    number;
     source:      string;
     [property: string]: any;
 }
@@ -11059,6 +11061,7 @@ const typeMap: any = {
         { json: "outcome", js: "outcome", typ: "" },
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "recorded_at", js: "recorded_at", typ: "" },
+        { json: "repeats", js: "repeats", typ: u(undefined, 0) },
         { json: "source", js: "source", typ: "" },
     ], "any"),
     "TicketAttachResultObject": o([
@@ -11342,6 +11345,7 @@ const typeMap: any = {
         { json: "outcome", js: "outcome", typ: "" },
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "recorded_at", js: "recorded_at", typ: "" },
+        { json: "repeats", js: "repeats", typ: u(undefined, 0) },
         { json: "source", js: "source", typ: "" },
     ], "any"),
     "StateExplainMessage": o([

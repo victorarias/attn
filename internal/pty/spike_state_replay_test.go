@@ -241,7 +241,7 @@ func (d *spikeOSCDetector) feed(at float64, data []byte) {
 			}
 			return
 		}
-		body, next, ok := scanOSCBody(d.pending, start)
+		body, next, ok := spikeScanOSCBody(d.pending, start)
 		if !ok {
 			d.pending = d.pending[start:]
 			return
@@ -260,8 +260,8 @@ func indexOSC(buf []byte) int {
 	return -1
 }
 
-// scanOSCBody returns the payload between ESC] and its BEL/ST terminator.
-func scanOSCBody(buf []byte, start int) (body string, next int, ok bool) {
+// spikeScanOSCBody returns the payload between ESC] and its BEL/ST terminator.
+func spikeScanOSCBody(buf []byte, start int) (body string, next int, ok bool) {
 	i := start + 2
 	for i < len(buf) {
 		if buf[i] == 0x07 {

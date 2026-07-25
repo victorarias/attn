@@ -132,10 +132,13 @@ type Session struct {
 	theme   TerminalTheme
 
 	// CLI state detection based on PTY output.
-	detector      stateDetector
-	onState       func(obs Observation)
-	stateMu       sync.RWMutex
-	detectorState string
+	detector stateDetector
+	// harnessSignals reads the agent's own OSC state signals off the same stream
+	// the detector scrapes. Read-only: it never alters the bytes.
+	harnessSignals *harnessSignalObserver
+	onState        func(obs Observation)
+	stateMu        sync.RWMutex
+	detectorState  string
 
 	// approvalResolver clears pending_approval->working off the rendered screen
 	// when the user resolves an approval prompt (no hook fires at that moment).
@@ -363,6 +366,11 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 						s.detectorState = state
 						s.stateMu.Unlock()
 						s.onState(newObservation(SourceScreen, state, "screen scrape", time.Now()))
+					}
+				}
+				if s.harnessSignals != nil && s.onState != nil {
+					for _, obs := range s.harnessSignals.Observe(data, time.Now()) {
+						s.onState(obs)
 					}
 				}
 				if len(data) > 0 {

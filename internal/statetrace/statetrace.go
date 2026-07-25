@@ -47,6 +47,10 @@ const (
 	// OutcomeSkipped means the source produced no claim at all — it looked and
 	// decided there was nothing to report.
 	OutcomeSkipped Outcome = "skipped"
+	// OutcomeObserved means the observation was recorded as evidence and never
+	// offered to the store, because its source does not drive state. The harness
+	// signals are wired this way ahead of the resolver that will weigh them.
+	OutcomeObserved Outcome = "observed"
 )
 
 // Observation is one recorded piece of state evidence and its fate.
@@ -74,6 +78,25 @@ type Observation struct {
 	ObservedAt time.Time
 	// RecordedAt is when the daemon acted on it.
 	RecordedAt time.Time
+	// Repeats counts how many identical observations this entry stands for beyond
+	// the first. A level source restates itself continuously — the OSC 0 title
+	// heartbeat repaints about once a second — and appending every restatement
+	// would evict the rest of the history from a bounded ring within a minute.
+	// Consecutive identical observations collapse into one entry whose RecordedAt
+	// tracks the latest, so the ring holds real history and still shows liveness.
+	Repeats int
+}
+
+// sameEvidenceAs reports whether two observations say the same thing, which is
+// what makes them collapsible. RecordedAt and ObservedAt deliberately do not
+// count: the whole point is that the newer one only updates the timestamps.
+func (o Observation) sameEvidenceAs(other Observation) bool {
+	return o.Source == other.Source &&
+		o.Claim == other.Claim &&
+		o.Cause == other.Cause &&
+		o.Outcome == other.Outcome &&
+		o.Reason == other.Reason &&
+		o.Detail == other.Detail
 }
 
 // LogLine renders one observation as a single daemon-log line. It is the form
@@ -171,6 +194,12 @@ func (r *Recorder) RecordIf(sessionID string, obs Observation, admit func() bool
 		target = newRing(r.capacity)
 		r.rings[sessionID] = target
 	}
+	if last := target.newest(); last != nil && last.sameEvidenceAs(obs) {
+		last.Repeats++
+		last.RecordedAt = obs.RecordedAt
+		last.ObservedAt = obs.ObservedAt
+		return
+	}
 	target.push(obs)
 }
 
@@ -232,6 +261,16 @@ func (r *ring) push(obs Observation) {
 	}
 	r.items[r.start] = obs
 	r.start = (r.start + 1) % capacity
+}
+
+// newest returns a pointer to the most recently pushed observation, or nil when
+// the ring is empty. The pointer is into the ring's own storage so a collapsing
+// repeat can update it in place.
+func (r *ring) newest() *Observation {
+	if r.size == 0 {
+		return nil
+	}
+	return &r.items[(r.start+r.size-1)%len(r.items)]
 }
 
 func (r *ring) snapshot() []Observation {

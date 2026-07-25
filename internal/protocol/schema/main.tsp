@@ -3084,6 +3084,11 @@ model StateExplainEntry {
   reason?: string;
   observed_at: string;
   recorded_at: string;
+  // repeats counts identical consecutive observations collapsed into this one.
+  // A level source (the OSC 0 title heartbeat) restates itself continuously;
+  // without collapsing, it would evict every other kind of evidence from the
+  // bounded ring within a minute.
+  repeats?: int32;
 }
 
 model StateExplainResult {

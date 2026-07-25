@@ -56,7 +56,6 @@ Raw PTY captures of `claude` 2.1.220 and `codex`, driven through a real pty:
 ```text
 claude:  ESC ] 0 ; ⠐ Run background sleep command BEL   <- braille spinner = turn RUNNING
          ESC ] 0 ; ✳ Run background sleep command BEL   <- U+2733 = turn NOT running
-         ESC ] 777 ; notify ; Claude Code ; Claude is waiting for your input BEL
 
 codex:   ESC ] 0 ; ⠸ attn--fix-state-detec... BEL       <- spinner prefix = busy
          ESC ] 0 ; attn--fix-state-detec... BEL         <- bare cwd = idle
@@ -67,13 +66,16 @@ codex:   ESC ] 0 ; ⠸ attn--fix-state-detec... BEL       <- spinner prefix = bu
   running. A level that stops arriving cannot get stuck — though the spike below
   shows it goes briefly silent mid-tool, which is why it corroborates rather than
   leads.
-- **OSC 777 is Claude's explicit settle event.** In the background-task capture it
-  did *not* fire while the background task was outstanding; the turn auto-resumed
-  on completion and settled afterwards.
+- **OSC 777 is not a signal claude emits.** An earlier draft of this plan listed
+  it as claude's explicit settle event. It is not: no OSC 777 appears in any of
+  the nine captures, and claude 2.1.220 offers only `iterm2`, `iterm2_with_bell`,
+  and `terminal_bell` notification channels. Claude's settle event is the
+  **`Notification` hook**, below. Corrected while implementing phase 1a, after
+  building and then deleting the OSC 777 reader.
 - The title also carries a live turn summary ("Run background sleep command") —
   a free sidebar label with no LLM call.
 
-attn parses OSC 133 in `internal/pty/blockfeed.go` and ignores OSC 0 / 777
+attn parses OSC 133 in `internal/pty/blockfeed.go` and ignored OSC 0
 entirely. Unwired hooks: Claude **`Notification`** (fires on permission-needed and
 on 60s-idle-waiting), `SessionEnd`, `SubagentStop`; Codex's `notify` program
 (`agent-turn-complete`).
@@ -205,7 +207,7 @@ Target:
   hook brackets (turn/tool open) ──> recordEvidence(level)   ┐
   approval edge ──────────────────> recordEvidence(edge)     │
   OSC 0 title heartbeat ──────────> recordEvidence(level)    ├──> sessionEvidence
-  OSC 777 / Notification ─────────> recordEvidence(edge)     │      (per session)
+  Notification hook ──────────────> recordEvidence(edge)     │      (per session)
   stop classifier ────────────────> recordEvidence(edge)     │
   process exit ───────────────────> recordEvidence(level)    ┘          │
                                                                         v
@@ -260,7 +262,7 @@ no harness signals (copilot) keep it until they have some.
 
 type Source string
 const (
-    SourceHarnessEvent Source = "harness_event"   // hooks, OSC 777, Notification
+    SourceHarnessEvent Source = "harness_event"   // hooks, Notification
     SourceHeartbeat    Source = "heartbeat"       // OSC 0 title glyph
     SourceClassifier   Source = "classifier"      // stop-time LLM
     SourceBracket      Source = "hook_bracket"    // turn/tool open-close, PRIMARY level
@@ -347,7 +349,7 @@ the UI consumes it. Nothing in phases 0–3 may depend on the mode being on.
 
 ## Boundaries
 
-- `internal/pty` owns byte-level extraction only: OSC 0 title and OSC 777 are
+- `internal/pty` owns byte-level extraction only: the OSC 0 title is
   parsed where OSC 133 already is (`blockfeed.go` / `boundary.go`) and surfaced
   through the existing `s.onState` channel (`internal/pty/session.go:360`),
   widened from `string` to a typed observation. It must not know about
@@ -547,9 +549,18 @@ being fixed as part of the current step.
 
 ### Phase 1 — wire the harness signals
 
-- [ ] Parse OSC 0 in the worker; classify the glyph prefix (braille block = busy,
-      `✳`/bare = not busy) per agent; expose title text as `Detail`.
-- [ ] Parse OSC 777 `notify` (Claude settle event).
+- [x] **Phase 1a (PR #669).** Parse OSC 0/2 in the worker; classify the glyph
+      prefix (braille block = busy, `✳`/bare = not busy) per agent; expose title
+      text as `Detail`. Read-only `oscScanner` in `internal/pty/oscscan.go` — the
+      OSC 133 segmenter could not be reused because it strips markers from the
+      stream and is corpus-locked to a frontend parity fixture. Per-agent behavior
+      is a driver capability (`Capabilities.HarnessSignals`), matching the
+      `ScreenDetector` kind pattern. An unchanged level re-emits at most once a
+      second, and the phase 0 ring collapses consecutive identical observations
+      into a repeat count, so a long turn cannot flush the ring.
+- [x] ~~Parse OSC 777 `notify`~~ — **dropped**: claude does not emit it (see
+      "The unused signals" above). Built, found unwitnessable on a live PTY, and
+      deleted rather than shipped as untested-in-production code.
 - [ ] Add the Claude `Notification` hook to `internal/hooks/hooks.go`, routed to a
       new `_hook-notification` command, carrying the notification `message`
       verbatim as evidence detail. It is harness-owned and fires on both branches
@@ -569,8 +580,13 @@ being fixed as part of the current step.
       `nonTerminalStopState` moved to `internal/daemon/stop_terminality.go` and the
       chief-of-staff lookup is now an in-process `d.isChiefOfStaffSession` call
       instead of a socket round-trip from the hook back to the daemon.
-- [ ] Feed all of the above into the Phase 0 ring only; still no arbitration
-      change. Compare traces against the baseline.
+- [x] Feed the OSC signals into the Phase 0 ring only; still no arbitration
+      change (phase 1a). `pty.Source.EvidenceOnly()` routes them past
+      `applyState` entirely — their claims are "busy"/"not_busy", not protocol
+      state names — and past the worker/backend state dedup, which would
+      otherwise swallow a repeated level.
+- [ ] Feed the hook signals into the ring the same way (phase 1b), then compare
+      traces against the baseline.
 
 ### Phase 2 — resolver
 
@@ -667,10 +683,9 @@ placeholder only; do not implement against it.
 
 ## Open questions
 
-- Does Claude emit OSC 777 for permission prompts, or only for turn settle? Not
-  observed in the captures. Either way the `Notification` hook covers it, so this
-  only affects how fast the approval evidence arrives (OSC would be immediate, the
-  hook is ~6s).
+- ~~Does Claude emit OSC 777 for permission prompts, or only for turn settle?~~
+  Answered while implementing phase 1a: it emits no OSC 777 at all. The
+  `Notification` hook is the only settle event, at ~6s.
 - Codex has no notification OSC. Its `notify` program config
   (`agent-turn-complete`) is the analogue; confirm it fires for approval requests
   too, or accept hooks-only for Codex settle detection.
