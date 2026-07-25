@@ -396,7 +396,11 @@ func (d *Daemon) publishResolution(sessionID string, current protocol.SessionSta
 	// non-applications are the steady state of a quiet daemon — they would log
 	// once per session per second, forever, and say nothing.
 	if resolution.Hold {
-		d.traceResolutionSkip(sessionID, resolution, "hold")
+		// The specific hold, not the word "hold": settle_grace and
+		// awaiting_verdict are held for different reasons and clear on different
+		// evidence, and a trace that collapses them cannot tell a session waiting
+		// on a classifier from one waiting on an approval announcement.
+		d.traceResolutionSkip(sessionID, resolution, string(resolution.Reason))
 		return
 	}
 	// ReasonNoEvidence is not a finding, it is the absence of one, and it
