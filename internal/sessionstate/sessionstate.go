@@ -414,8 +414,20 @@ func verdictPending(e Evidence, policy Policy, now time.Time) bool {
 	return now.Sub(e.ClassifyingSince) <= policy.ClassifierTimeout
 }
 
+// classifierVerdict reads the stop-time verdict, if one belongs to the current
+// turn.
+//
+// A verdict describes the turn it was computed for and nothing else. The turn
+// bracket clears it when the next turn opens, but a turn may also start without
+// its hook — surviving that is the whole reason the heartbeat is here — so this
+// also drops a verdict the agent has since gone busy past. Otherwise a turn that
+// settles while its own classification is still running takes the previous
+// turn's answer instead of holding for its own.
 func classifierVerdict(e Evidence) (Resolution, bool) {
 	if e.LastClassifier == nil {
+		return Resolution{}, false
+	}
+	if !e.LastBusyAt.IsZero() && e.LastBusyAt.After(e.LastClassifier.ObservedAt) {
 		return Resolution{}, false
 	}
 	switch e.LastClassifier.Claim {

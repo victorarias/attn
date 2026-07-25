@@ -266,6 +266,22 @@ func TestResolve(t *testing.T) {
 			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonHeartbeatSettled,
 		},
+		{
+			// The cross-turn race. A verdict answers the turn it was computed
+			// for; once the agent has gone busy past it, it is the previous
+			// turn's answer and must not be published as this turn's state. The
+			// turn bracket clears it too, but a turn can start without its hook,
+			// which is exactly the case the resolver exists to survive.
+			name: "a verdict the agent has gone busy past is not this turn's answer",
+			evidence: Evidence{
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt:       now.Add(-6 * time.Second),
+				LastClassifier:   seen(SourceClassifier, ClaimNeedsInput, 20*time.Second),
+				ClassifyingSince: now.Add(-2 * time.Second),
+			},
+			wantHold:   true,
+			wantReason: ReasonAwaitingVerdict,
+		},
 
 		// --- ordering -------------------------------------------------------
 

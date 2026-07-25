@@ -274,6 +274,101 @@ func TestAHungClassifierStopsHoldingTheSettle(t *testing.T) {
 	}
 }
 
+// A verdict belongs to the turn it judged. Turn A's answer must never be
+// published as turn B's state, which is what a verdict left in the table does
+// the moment B settles with its own classification still in flight.
+func TestAVerdictDoesNotSurviveIntoTheNextTurn(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-cross-turn"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	now := time.Now()
+
+	// Turn A ends waiting on the user, and that verdict is published.
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: now})
+	d.recordClassifierEvidence(id, protocol.StateWaitingInput, now)
+	d.resolveAllSessions(now.Add(time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWaitingInput {
+		t.Fatalf("state %q, want turn A's verdict published", state)
+	}
+
+	// Turn B opens and the agent goes busy.
+	openedAt := now.Add(2 * time.Second)
+	d.recordBracketEvidence(id, protocol.StateWorking)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: openedAt})
+	d.resolveAllSessions(openedAt)
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working for turn B", state)
+	}
+
+	// Turn B settles and begins its own classification.
+	settledAt := now.Add(10 * time.Second)
+	d.recordClassifierStarted(id, settledAt)
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: settledAt})
+	d.resolveAllSessions(settledAt.Add(time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want the settle held for turn B's own verdict", state)
+	}
+
+	// And turn B's own answer is what lands.
+	d.recordClassifierEvidence(id, protocol.StateIdle, settledAt)
+	d.recordClassifierFinished(id)
+	d.resolveAllSessions(settledAt.Add(2 * time.Second))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateIdle {
+		t.Fatalf("state %q, want turn B's verdict published", state)
+	}
+}
+
+// The other half of the same rule. A turn short enough that the agent never
+// paints a busy frame leaves the previous verdict newer than the last busy
+// heartbeat, so freshness alone cannot tell it is spent — the opening bracket
+// has to retire it.
+func TestAVerdictDoesNotSurviveATurnThatNeverPaintedBusy(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-cross-turn-quiet"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	now := time.Now()
+
+	// Turn A: busy, settles, verdict lands after the last busy frame.
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: now})
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: now.Add(time.Second)})
+	d.recordClassifierEvidence(id, protocol.StateWaitingInput, now.Add(2*time.Second))
+	d.resolveAllSessions(now.Add(2500 * time.Millisecond))
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWaitingInput {
+		t.Fatalf("state %q, want turn A's verdict published", state)
+	}
+
+	// Turn B opens — still inside the busy window, so no new busy frame is
+	// needed to hold it working.
+	openedAt := now.Add(3 * time.Second)
+	d.recordBracketEvidence(id, protocol.StateWorking)
+	d.resolveAllSessions(openedAt)
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working for turn B", state)
+	}
+
+	// It settles with its own classification in flight, having never painted a
+	// busy frame of its own.
+	settledAt := now.Add(3500 * time.Millisecond)
+	d.recordClassifierStarted(id, settledAt)
+	d.recordBracketEvidence(id, protocol.StateIdle)
+	d.resolveAllSessions(settledAt)
+
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want the settle held: turn A's verdict is not turn B's answer", state)
+	}
+}
+
 // A tick that agreed every second would bury every other observation in a ring
 // that holds 256 of them.
 func TestTheResolveTickIsSilentWhenItAgrees(t *testing.T) {

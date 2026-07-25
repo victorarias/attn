@@ -210,6 +210,11 @@ func (d *Daemon) recordBracketEvidence(sessionID, state string) {
 		switch state {
 		case protocol.StateWorking:
 			e.TurnOpen = true
+			// A verdict judged the turn that just ended. Once the next one opens
+			// it is an answer to a question nobody asked any more, and leaving it
+			// in the table lets the resolver report it as this turn's state the
+			// moment this turn settles.
+			e.LastClassifier = nil
 		case protocol.StateIdle, protocol.StateWaitingInput:
 			e.TurnOpen = false
 			e.ToolOpen = false
