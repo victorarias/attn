@@ -39,6 +39,15 @@ async function main() {
 
   await launchFreshAppAndConnect(client, observer);
 
+  // PROBE_GUARDIAN=off disables the auto-approve guardian for the run. With it
+  // on, codex routes every permission request to its auto_review reviewer, which
+  // answers in milliseconds — so no prompt ever reaches the terminal and the
+  // approval path cannot be observed at all.
+  if (process.env.PROBE_GUARDIAN === 'off') {
+    await client.request('set_setting', { key: 'auto_approve_enabled', value: 'false' });
+    console.log('guardian auto-approve disabled for this run');
+  }
+
   const sessionId = await createSessionAndWaitForInitialPane({
     client,
     observer,
