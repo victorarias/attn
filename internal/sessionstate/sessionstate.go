@@ -123,6 +123,22 @@ type Evidence struct {
 	// never reported being busy, which is not the same as having gone quiet.
 	LastBusyAt time.Time
 
+	// PromptIdleAt is when the harness last confirmed the agent is sitting at
+	// its prompt with nothing outstanding. Claude reports this via its
+	// Notification hook 60s after a settle nobody answered, once, cancelled if
+	// the user types first.
+	//
+	// It is deliberately not an Observation carrying a claim. The message reads
+	// "Claude is waiting for your input", but it fires for any unanswered
+	// settle — a finished task gets it exactly as a question does (measured:
+	// run_claude_fg, a foreground Bash turn, +60.04s after Stop). So it cannot
+	// choose between idle and waiting_input, and reading its prose as if it
+	// could would be inventing a distinction the signal does not carry.
+	//
+	// What it is, is an independent witness that the agent is not working —
+	// which is the one thing a lost Stop hook leaves attn unable to discover.
+	PromptIdleAt time.Time
+
 	// LastMovement is when any evidence last changed. A session whose evidence
 	// has stopped moving entirely is stuck, which is a distinct condition from
 	// any state it might be reported in.
@@ -195,6 +211,7 @@ const (
 	ReasonApprovalOpen     Reason = "approval_open"
 	ReasonCronPending      Reason = "cron_pending"
 	ReasonBracketOpen      Reason = "bracket_open"
+	ReasonPromptIdle       Reason = "prompt_idle"
 	ReasonBracketStale     Reason = "bracket_stale"
 	ReasonBackgroundWork   Reason = "background_work"
 	ReasonClassifierVerdict Reason = "classifier_verdict"
@@ -245,6 +262,20 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// anything, so it is parked rather than waiting on a person.
 	if e.PendingCron {
 		return Resolution{State: protocol.SessionStateScheduled, Reason: ReasonCronPending}
+	}
+
+	// The harness says the agent is parked at its prompt. That outranks an open
+	// bracket, because a bracket only ever closes on a hook that may never come,
+	// and this is a second hook on a different trigger saying the same turn is
+	// over.
+	//
+	// LastBusyAt is the guard, not the 60s the notification happens to use: if
+	// the agent painted a spinner after the confirmation, a new turn started and
+	// the confirmation is spent. Nothing here breaks if claude retunes the timer.
+	// It sits below the approval clause on purpose — an unanswered approval is
+	// also "parked at the prompt", and approval is the more useful thing to say.
+	if !e.PromptIdleAt.IsZero() && e.PromptIdleAt.After(e.LastBusyAt) {
+		return settled(e, ReasonPromptIdle)
 	}
 
 	// An open bracket says work is outstanding. Whether to believe it is exactly

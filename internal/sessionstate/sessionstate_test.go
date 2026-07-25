@@ -84,6 +84,68 @@ func TestResolve(t *testing.T) {
 			wantReason: ReasonBracketOpen,
 		},
 		{
+			// The lost-Stop-hook rescue. The bracket never closes and the agent
+			// stopped painting long ago, so without a second witness the session
+			// would sit working forever. Claude's 60s notification is that
+			// witness.
+			name: "a prompt-idle confirmation closes a bracket whose hook never came",
+			evidence: Evidence{
+				TurnOpen:     true,
+				LastBusyAt:   now.Add(-90 * time.Second),
+				PromptIdleAt: now.Add(-30 * time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonPromptIdle,
+		},
+		{
+			// The guard that makes the confirmation self-expiring: a spinner
+			// after it means a new turn started, so the confirmation is spent.
+			// This is the type-at-59.9s race — if the notification competed on
+			// its own arrival time it would beat a genuinely running turn.
+			//
+			// The timings pick the one window where the guard is the only thing
+			// deciding the answer. The heartbeat is 2s old, so it is past the
+			// 1.5s TTL and the fresh-busy clause does not fire, but it is inside
+			// the 4s StaleAfter, so the bracket still holds. Drop the guard and
+			// the confirmation settles a turn that is visibly running.
+			name: "a busy frame after the confirmation spends it",
+			evidence: Evidence{
+				TurnOpen:     true,
+				Heartbeat:    seen(SourceHeartbeat, ClaimBusy, 2*time.Second),
+				LastBusyAt:   now.Add(-2 * time.Second),
+				PromptIdleAt: now.Add(-30 * time.Second),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonBracketOpen,
+		},
+		{
+			// An unanswered approval is also "parked at the prompt". Approval is
+			// the more useful thing to say, so it wins.
+			name: "an open approval outranks a prompt-idle confirmation",
+			evidence: Evidence{
+				TurnOpen:         true,
+				LastBusyAt:       now.Add(-90 * time.Second),
+				PromptIdleAt:     now.Add(-30 * time.Second),
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimApprovalPending, 40*time.Second),
+			},
+			wantState:  protocol.SessionStatePendingApproval,
+			wantReason: ReasonApprovalOpen,
+		},
+		{
+			// The confirmation says the agent is not working. It does not say
+			// why it stopped — it fires for a finished task exactly as it fires
+			// for a question — so the classifier still picks between them.
+			name: "a prompt-idle confirmation defers to the classifier verdict",
+			evidence: Evidence{
+				TurnOpen:       true,
+				LastBusyAt:     now.Add(-90 * time.Second),
+				PromptIdleAt:   now.Add(-30 * time.Second),
+				LastClassifier: seen(SourceClassifier, ClaimNeedsInput, 25*time.Second),
+			},
+			wantState:  protocol.SessionStateWaitingInput,
+			wantReason: ReasonClassifierVerdict,
+		},
+		{
 			// And the turn survives the blip being followed by more busy frames,
 			// which is what a real mid-turn gap looks like.
 			name: "busy resuming after a blip keeps the turn working",

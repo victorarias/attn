@@ -243,6 +243,40 @@ func (d *Daemon) recordReviewerEvidence(sessionID, permissionMode string) {
 	})
 }
 
+// Notification types claude reports. Both are typed fields on the hook payload,
+// which is why attn reads them rather than the English message beside them.
+const (
+	notifyPermissionPrompt = "permission_prompt"
+	notifyIdlePrompt       = "idle_prompt"
+)
+
+// recordNotificationEvidence files claude's Notification hook.
+//
+// The two types are not two flavors of one signal and do not land in the same
+// place. permission_prompt is a leading edge — the agent asked a question and is
+// blocked on the answer — so it becomes an approval claim. idle_prompt is a late
+// confirmation that the agent is parked at its prompt, 60s after a settle, and
+// it deliberately does not become a claim at all: it fires for finished turns
+// and for questions alike, so it can say "not working" but not what instead.
+func (d *Daemon) recordNotificationEvidence(sessionID, notificationType, message string) {
+	at := time.Now()
+	switch strings.TrimSpace(notificationType) {
+	case notifyPermissionPrompt:
+		d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
+			e.LastHarnessEvent = &sessionstate.Observation{
+				Source:     sessionstate.SourceHarnessEvent,
+				Claim:      sessionstate.ClaimApprovalPending,
+				Detail:     message,
+				ObservedAt: at,
+			}
+		})
+	case notifyIdlePrompt:
+		d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
+			e.PromptIdleAt = at
+		})
+	}
+}
+
 // recordProcessEvidence files the PTY lifecycle. An exited process is terminal
 // and outranks every other clause.
 func (d *Daemon) recordProcessEvidence(sessionID string, exited bool) {

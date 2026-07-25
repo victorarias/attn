@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -321,5 +322,84 @@ func TestEvidenceDoesNotLeakWhenRemovalRacesTheWrite(t *testing.T) {
 			t.Fatalf("evidence survived the racing removal: %+v", got)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// The two Notification types are different signals and must not land in the same
+// slot. permission_prompt is a leading edge the resolver acts on; idle_prompt is
+// a late confirmation that only says the agent stopped.
+func TestNotificationEvidenceSplitsByType(t *testing.T) {
+	t.Run("a permission prompt becomes an open approval", func(t *testing.T) {
+		d := newTraceDaemon(t)
+		id := "sess-notify-permission"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+		d.recordNotificationEvidence(id, notifyPermissionPrompt, "Claude needs your permission")
+
+		got := evidenceOf(t, d, id)
+		if got.LastHarnessEvent == nil {
+			t.Fatal("permission_prompt recorded no harness event")
+		}
+		if got.LastHarnessEvent.Claim != sessionstate.ClaimApprovalPending {
+			t.Fatalf("claim = %q, want %q", got.LastHarnessEvent.Claim, sessionstate.ClaimApprovalPending)
+		}
+		if !got.PromptIdleAt.IsZero() {
+			t.Fatal("permission_prompt set PromptIdleAt; it is not a settle confirmation")
+		}
+	})
+
+	t.Run("an idle prompt confirms the prompt without claiming why", func(t *testing.T) {
+		d := newTraceDaemon(t)
+		id := "sess-notify-idle"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+		d.recordNotificationEvidence(id, notifyIdlePrompt, "Claude is waiting for your input")
+
+		got := evidenceOf(t, d, id)
+		if got.PromptIdleAt.IsZero() {
+			t.Fatal("idle_prompt did not confirm the prompt")
+		}
+		// The message says "waiting for your input", but the signal fires for a
+		// finished task too. Turning it into a claim would invent a distinction
+		// it does not carry, and would outrank the classifier that can tell.
+		if got.LastHarnessEvent != nil {
+			t.Fatalf("idle_prompt became a %q claim; it is a confirmation, not a verdict",
+				got.LastHarnessEvent.Claim)
+		}
+	})
+
+	t.Run("an unknown type records nothing", func(t *testing.T) {
+		d := newTraceDaemon(t)
+		id := "sess-notify-unknown"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+		d.recordNotificationEvidence(id, "some_future_type", "")
+
+		if _, ok := d.evidenceTable().snapshot(id); ok {
+			t.Fatal("an unrecognized notification type wrote evidence")
+		}
+	})
+}
+
+// The socket handler has to reach the evidence table, not only the trace ring.
+// Phase 1b wired the Notification hook to the trace alone, which left the
+// resolver blind to the strongest approval signal either agent emits — fine
+// while the resolver was in shadow mode, wrong once it decides state.
+func TestTheNotificationHandlerReachesTheEvidenceTable(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-notify-wire"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+
+	resp := callHandler(t, func(conn net.Conn) {
+		d.handleHookNotification(conn, &protocol.HookNotificationMessage{
+			ID:               id,
+			NotificationType: notifyPermissionPrompt,
+			Message:          protocol.Ptr("Claude needs your permission"),
+		})
+	})
+	if !resp.Ok {
+		t.Fatalf("handler failed: %s", protocol.Deref(resp.Error))
+	}
+
+	got := evidenceOf(t, d, id)
+	if got.LastHarnessEvent == nil || got.LastHarnessEvent.Claim != sessionstate.ClaimApprovalPending {
+		t.Fatal("the notification handler recorded no approval evidence")
 	}
 }

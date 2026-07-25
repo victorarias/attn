@@ -224,10 +224,12 @@ func (d *Daemon) handleHookNotification(conn net.Conn, msg *protocol.HookNotific
 		d.sendError(conn, "missing notification_type")
 		return
 	}
+	message := strings.TrimSpace(protocol.Deref(msg.Message))
 	d.traceStateEvidence(msg.ID, stateOrigin{
 		source: stateSourceHookNotify,
-		detail: strings.TrimSpace(protocol.Deref(msg.Message)),
+		detail: message,
 	}, kind)
+	d.recordNotificationEvidence(msg.ID, kind, message)
 	d.sendOK(conn)
 }
 
