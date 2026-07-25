@@ -2194,6 +2194,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:
 		d.handleState(conn, msg.(*protocol.StateMessage))
+	case protocol.CmdHookNotification:
+		d.handleHookNotification(conn, msg.(*protocol.HookNotificationMessage))
 	case protocol.CmdSetSessionResumeID:
 		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
 	case protocol.CmdSessionInstructions:
@@ -2383,6 +2385,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.logf("state update: id=%s state=%s", msg.ID, msg.State)
+	d.tracePermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.applyState(sessionStateChange{
 		sessionID: msg.ID,
 		state:     msg.State,

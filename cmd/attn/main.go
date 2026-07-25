@@ -65,6 +65,15 @@ type hookInput struct {
 	// auto-resume this session later. It is present-but-empty when nothing is
 	// scheduled. Agents that do not emit this field simply leave it empty.
 	SessionCrons []sessionCron `json:"session_crons"`
+	// PermissionMode is the agent's resolved approval mode at the moment the
+	// hook fired. Claude reports it on every hook that follows a prompt.
+	PermissionMode string `json:"permission_mode"`
+	// Message and NotificationType come from Claude's Notification hook.
+	// NotificationType is the load-bearing half ("permission_prompt" when the
+	// agent is blocked on approval, "idle_prompt" after 60s of waiting);
+	// Message is its human-readable form.
+	Message          string `json:"message"`
+	NotificationType string `json:"notification_type"`
 }
 
 // backgroundTask is one entry of hookInput.BackgroundTasks. Only Status is
@@ -240,6 +249,8 @@ func main() {
 		runHookStop()
 	case "_hook-session-start":
 		runHookSessionStart()
+	case "_hook-notification":
+		runHookNotification()
 	case "_hook-state":
 		runHookState()
 	case "_hook-todo":
@@ -3259,8 +3270,34 @@ func runHookState() {
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
 	syncSessionResumeID(c, sessionID, input.SessionID)
-	if err := c.UpdateState(sessionID, state); err != nil {
+	if err := c.UpdateStateFromHook(sessionID, state, input.PermissionMode); err != nil {
 		fmt.Fprintf(os.Stderr, "error updating state: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runHookNotification handles Claude's Notification hook. The hook is the
+// harness saying out loud that it is blocked on the user — it fires ~6s after a
+// permission request and exactly 60s after a turn settles idle. It reports
+// evidence and never sets state: at that latency the session may already have
+// moved on, so the resolver weighs it against fresher sources.
+func runHookNotification() {
+	sessionID := hookSessionIDFromArgOrEnv(2)
+	if sessionID == "" {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-notification [session_id]\n")
+		os.Exit(1)
+	}
+
+	var input hookInput
+	_ = json.NewDecoder(os.Stdin).Decode(&input)
+	if strings.TrimSpace(input.NotificationType) == "" {
+		return
+	}
+
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	syncSessionResumeID(c, sessionID, input.SessionID)
+	if err := c.RecordNotification(sessionID, input.NotificationType, input.Message); err != nil {
+		fmt.Fprintf(os.Stderr, "error recording notification: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -561,12 +561,23 @@ being fixed as part of the current step.
 - [x] ~~Parse OSC 777 `notify`~~ — **dropped**: claude does not emit it (see
       "The unused signals" above). Built, found unwitnessable on a live PTY, and
       deleted rather than shipped as untested-in-production code.
-- [ ] Add the Claude `Notification` hook to `internal/hooks/hooks.go`, routed to a
-      new `_hook-notification` command, carrying the notification `message`
-      verbatim as evidence detail. It is harness-owned and fires on both branches
-      we care about — ~6s after a permission request, and exactly 60s after a Stop
-      that settled idle — so it is a first-class source, not a backstop.
-- [ ] Persist `ReviewerInLoop` on the session at spawn.
+- [x] **Phase 1b (PR #670).** Claude `Notification` hook registered in
+      `internal/hooks/hooks.go`, routed to a new `_hook-notification` command.
+      It carries `notification_type` — `permission_prompt` when the agent is
+      blocked on approval, `idle_prompt` after 60s of waiting — which the plan
+      did not know about; the typed field is the claim and the message is only
+      the detail, so nothing parses an English sentence. Recorded as evidence
+      (`hook_notify`), never applied: at ~6s of latency the session may already
+      have moved on.
+- [x] ~~Persist `ReviewerInLoop` on the session at spawn.~~ **Changed**: the
+      resolved permission mode rides along on the state hook
+      (`StateMessage.permission_mode`) and is recorded as a `reviewer` level.
+      Spawn flags are not authoritative — a user's global agent settings can put
+      a guardian in the loop for a session attn launched without asking for one,
+      and the mode changes mid-session on Shift+Tab. Claude reports the field on
+      every post-prompt hook; Codex reports none, and an absent mode records
+      nothing rather than a fake "unknown" claim. Phase 2 derives
+      `Evidence.ReviewerInLoop` from this level plus the codex spawn flag.
 - [x] Enabling refactors 2 and 3: driver-named observers (`Capabilities.
       ScreenDetector` kind replaces `HasStateDetector` plus the agent-name switch
       in `manager.go`), and one `screenDetector` + `screenPolicy` in place of the
