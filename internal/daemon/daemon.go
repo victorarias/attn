@@ -204,11 +204,11 @@ type Daemon struct {
 	// stateTrace is the diagnostic ring of state observations behind
 	// `attn state explain`. Lazily built so a directly-constructed test daemon
 	// traces without an init site.
-	stateTraceOnce             sync.Once
-	stateTrace                 *statetrace.Recorder
+	stateTraceOnce sync.Once
+	stateTrace     *statetrace.Recorder
 	// sessionEvidence is the per-session evidence table the resolver reads.
-	sessionEvidenceOnce sync.Once
-	sessionEvidence     *sessionEvidenceTable
+	sessionEvidenceOnce        sync.Once
+	sessionEvidence            *sessionEvidenceTable
 	nudgeMu                    sync.Mutex
 	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
 	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration

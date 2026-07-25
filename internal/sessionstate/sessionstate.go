@@ -239,21 +239,21 @@ func PolicyFor(agent string) Policy {
 type Reason string
 
 const (
-	ReasonProcessExited    Reason = "process_exited"
-	ReasonHeartbeatFresh   Reason = "heartbeat_fresh"
-	ReasonApprovalOpen     Reason = "approval_open"
-	ReasonCronPending      Reason = "cron_pending"
-	ReasonBracketOpen      Reason = "bracket_open"
-	ReasonPromptIdle       Reason = "prompt_idle"
-	ReasonBracketStale     Reason = "bracket_stale"
-	ReasonHeartbeatSettled Reason = "heartbeat_settled"
-	ReasonSettleGrace      Reason = "settle_grace"
-	ReasonAwaitingVerdict  Reason = "awaiting_verdict"
-	ReasonBackgroundWork   Reason = "background_work"
+	ReasonProcessExited     Reason = "process_exited"
+	ReasonHeartbeatFresh    Reason = "heartbeat_fresh"
+	ReasonApprovalOpen      Reason = "approval_open"
+	ReasonCronPending       Reason = "cron_pending"
+	ReasonBracketOpen       Reason = "bracket_open"
+	ReasonPromptIdle        Reason = "prompt_idle"
+	ReasonBracketStale      Reason = "bracket_stale"
+	ReasonHeartbeatSettled  Reason = "heartbeat_settled"
+	ReasonSettleGrace       Reason = "settle_grace"
+	ReasonAwaitingVerdict   Reason = "awaiting_verdict"
+	ReasonBackgroundWork    Reason = "background_work"
 	ReasonClassifierVerdict Reason = "classifier_verdict"
-	ReasonScreen           Reason = "screen"
-	ReasonStuck            Reason = "stuck"
-	ReasonNoEvidence       Reason = "no_evidence"
+	ReasonScreen            Reason = "screen"
+	ReasonStuck             Reason = "stuck"
+	ReasonNoEvidence        Reason = "no_evidence"
 )
 
 // Resolution is the resolver's answer.
