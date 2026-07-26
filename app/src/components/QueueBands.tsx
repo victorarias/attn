@@ -81,6 +81,7 @@ function QueueRowView({
       {age && <span className="queue-row-age">{age}</span>}
       {onSettle && (
         <button
+          type="button"
           className="queue-row-settle"
           data-testid={`queue-settle-${session.id}`}
           title={`Settle this turn (${formatShortcut('session.settle')})`}
