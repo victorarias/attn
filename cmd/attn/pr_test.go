@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -931,6 +932,129 @@ func TestWaitForPRActionableSinceReplaysByTime(t *testing.T) {
 	}
 }
 
+// snapshotSource drives the waiter through the real snapshot parser, so a test
+// about which comments become events exercises the same path a live wait does.
+type snapshotSource struct {
+	payloads [][]byte
+	calls    int
+}
+
+func (s *snapshotSource) Fetch(_ context.Context, opts prWaitOptions) (*prReadiness, error) {
+	index := s.calls
+	s.calls++
+	if index >= len(s.payloads) {
+		index = len(s.payloads) - 1
+	}
+	return parsePRSnapshot(s.payloads[index], opts)
+}
+
+// The scenario the self-suppression exists for. A wait resumes from where the
+// previous one stopped, so a comment the caller posts between two waits is
+// genuinely new to the cursor and the start-of-wait baseline cannot catch it:
+// answer a reviewer, wait again, and the wait returns instantly quoting you back
+// at yourself.
+func TestWaitForPRActionableDoesNotWakeOnTheCallersOwnComment(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	mine := `{"id":"c1","createdAt":"2026-07-26T10:00:00Z","bodyText":"answering the review",
+	          "author":{"__typename":"User","login":"victorarias"}}`
+	theirs := `{"id":"c2","createdAt":"2026-07-26T10:05:00Z","bodyText":"one more thing",
+	            "author":{"__typename":"User","login":"figgyster"}}`
+	// Login comparison is case-insensitive: GitHub renders a login in whatever
+	// case it was registered with, and `gh api user` and a comment author need not
+	// agree on it.
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: time.Millisecond, SelfLogin: "VictorArias"}
+	// A non-empty cursor is what makes this a resumed wait rather than a first
+	// one, so nothing is baselined away and c1 arrives as unseen.
+	resumed := prWaitCursor{VerdictAt: mustTime(t, "2026-07-26T09:00:00Z")}
+	// The two waits below are supposed to return an event on their first poll.
+	// Given a deadline, one that stops returning fails the assertion below; given
+	// context.Background() it would poll a fixed snapshot forever and hang the
+	// package instead.
+	bounded := func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), 10*time.Second)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	own, err := waitForPRActionable(ctx, &snapshotSource{payloads: [][]byte{snapshotPayload(head, "", "", mine)}},
+		opts, resumed, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if own.Outcome != outcomeTimeout {
+		t.Fatalf("the caller's own comment ended the wait: outcome=%s comments=%#v", own.Outcome, own.Observation.Comments)
+	}
+
+	// Someone else's comment on the same poll is still the update being waited for.
+	otherCtx, cancelOther := bounded()
+	defer cancelOther()
+	other, err := waitForPRActionable(otherCtx,
+		&snapshotSource{payloads: [][]byte{snapshotPayload(head, "", "", mine+","+theirs)}},
+		opts, resumed, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.Outcome != outcomeComment || len(other.Observation.Comments) != 1 ||
+		other.Observation.Comments[0].ID != "c2" {
+		t.Fatalf("outcome=%s comments=%#v, want only figgyster's comment", other.Outcome, other.Observation.Comments)
+	}
+
+	// --include-self leaves SelfLogin unresolved, which is also what an
+	// unreachable `gh api user` falls back to: both report every author.
+	opts.SelfLogin = ""
+	includedCtx, cancelIncluded := bounded()
+	defer cancelIncluded()
+	included, err := waitForPRActionable(includedCtx,
+		&snapshotSource{payloads: [][]byte{snapshotPayload(head, "", "", mine)}},
+		opts, resumed, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if included.Outcome != outcomeComment || len(included.Observation.Comments) != 1 ||
+		included.Observation.Comments[0].ID != "c1" {
+		t.Fatalf("outcome=%s comments=%#v, want the caller's own comment reported", included.Outcome, included.Observation.Comments)
+	}
+}
+
+// The identity lookup costs a `gh` call, so it must not happen when the caller
+// has opted out, and it must never be able to fail a wait.
+func TestResolvePRSelfLoginIsSkippableAndFailureTolerant(t *testing.T) {
+	original := ghSelfLogin
+	t.Cleanup(func() { ghSelfLogin = original })
+
+	calls := 0
+	ghSelfLogin = func(context.Context, string) (string, error) {
+		calls++
+		return "", errors.New("gh: not authenticated")
+	}
+	var stderr bytes.Buffer
+	if login := resolvePRSelfLogin(prWaitOptions{}, &stderr); login != "" {
+		t.Fatalf("login = %q, want an unresolvable login to report everyone", login)
+	}
+	if calls != 1 || !strings.Contains(stderr.String(), "could not resolve") {
+		t.Fatalf("calls=%d stderr=%q", calls, stderr.String())
+	}
+
+	ghSelfLogin = func(_ context.Context, host string) (string, error) {
+		calls++
+		if host != "ghe.example.com" {
+			t.Fatalf("host = %q, want the lookup scoped to the pull request's host", host)
+		}
+		return "victorarias", nil
+	}
+	if login := resolvePRSelfLogin(prWaitOptions{Host: "ghe.example.com"}, io.Discard); login != "victorarias" {
+		t.Fatalf("login = %q", login)
+	}
+
+	ghSelfLogin = func(context.Context, string) (string, error) {
+		t.Error("--include-self asked GitHub who we are")
+		return "", nil
+	}
+	if login := resolvePRSelfLogin(prWaitOptions{IncludeSelf: true}, io.Discard); login != "" {
+		t.Fatalf("login = %q under --include-self", login)
+	}
+}
+
 func TestPRWaitCursorRoundTripsOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	opts := prWaitOptions{Owner: "victorarias", Name: "attn", Number: 679}
@@ -1027,11 +1151,11 @@ func TestParsePRWaitArgs(t *testing.T) {
 	}
 
 	opts, err = parsePRWaitArgs([]string{"602", "--repo", "victorarias/attn", "--reviewer", "figgyster",
-		"--reset", "--since", "2026-07-26T10:00:00Z"})
+		"--reset", "--since", "2026-07-26T10:00:00Z", "--include-self"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.Reset || !opts.Since.Equal(mustTime(t, "2026-07-26T10:00:00Z")) {
+	if !opts.Reset || !opts.IncludeSelf || !opts.Since.Equal(mustTime(t, "2026-07-26T10:00:00Z")) {
 		t.Fatalf("opts = %#v", opts)
 	}
 	if _, err := parsePRWaitArgs([]string{"602", "--repo", "victorarias/attn", "--reviewer", "figgyster", "--since", "yesterday"}); err == nil ||
