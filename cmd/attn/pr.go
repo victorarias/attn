@@ -246,7 +246,9 @@ type ghPRReadinessSource struct{}
 
 // prSelfLoginTimeout bounds the identity lookup. It is one small API call that
 // the wait cannot start without, so a hung network must degrade to "we do not
-// know who we are" rather than hold the wait open.
+// know who we are" rather than spend the caller's whole budget before the first
+// poll. It is a ceiling, never an extension: the lookup runs under the wait's
+// own deadline, so a --timeout shorter than this cuts it short instead.
 const prSelfLoginTimeout = 15 * time.Second
 
 // ghSelfLogin is the seam over `gh api user`. A variable so tests can drive both
@@ -267,11 +269,15 @@ var ghSelfLogin = func(ctx context.Context, host string) (string, error) {
 // fail. The login only ever removes an event, so not knowing it costs the caller
 // one spurious wake-up, while erroring out would cost them the wait entirely —
 // the command has to keep working on a machine whose `gh` cannot reach the API.
-func resolvePRSelfLogin(opts prWaitOptions, stderr io.Writer) string {
+//
+// It takes the wait's context rather than making its own, so the lookup spends
+// the caller's budget instead of adding to it: whichever of the two deadlines
+// comes first wins.
+func resolvePRSelfLogin(ctx context.Context, opts prWaitOptions, stderr io.Writer) string {
 	if opts.IncludeSelf {
 		return ""
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), prSelfLoginTimeout)
+	ctx, cancel := context.WithTimeout(ctx, prSelfLoginTimeout)
 	defer cancel()
 	login, err := ghSelfLogin(ctx, opts.Host)
 	if err != nil || login == "" {
@@ -330,10 +336,16 @@ func executePRCommand(args []string, stdout, stderr io.Writer) int {
 	// line can reach a data dir on its own.
 	opts.CursorDir = filepath.Join(config.DataDir(), "pr-wait")
 
-	// Resolve who we are once, here, for the same reason: one `gh` call for the
-	// whole wait, made only when a wait is actually about to run, and never
-	// reachable from the polling loop.
-	opts.SelfLogin = resolvePRSelfLogin(opts, stderr)
+	// The deadline covers everything the caller is waiting through, not just the
+	// polling. --timeout is a promise about when this command returns, so any
+	// network call made on the way to the first poll has to run inside it.
+	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+	defer cancel()
+
+	// Resolve who we are once, here, for the same reason the cursor dir is
+	// resolved here: one `gh` call for the whole wait, made only when a wait is
+	// actually about to run, and never reachable from the polling loop.
+	opts.SelfLogin = resolvePRSelfLogin(ctx, opts, stderr)
 
 	var cursor prWaitCursor
 	if !opts.Reset {
@@ -346,8 +358,6 @@ func executePRCommand(args []string, stdout, stderr io.Writer) int {
 		cursor = loaded
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
-	defer cancel()
 	result, err := waitForPRActionable(ctx, ghPRReadinessSource{}, opts, cursor, progress)
 	if err != nil {
 		fmt.Fprintf(stderr, "pr wait-ready: %v\n", err)

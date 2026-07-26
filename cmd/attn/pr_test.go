@@ -1028,7 +1028,7 @@ func TestResolvePRSelfLoginIsSkippableAndFailureTolerant(t *testing.T) {
 		return "", errors.New("gh: not authenticated")
 	}
 	var stderr bytes.Buffer
-	if login := resolvePRSelfLogin(prWaitOptions{}, &stderr); login != "" {
+	if login := resolvePRSelfLogin(context.Background(), prWaitOptions{}, &stderr); login != "" {
 		t.Fatalf("login = %q, want an unresolvable login to report everyone", login)
 	}
 	if calls != 1 || !strings.Contains(stderr.String(), "could not resolve") {
@@ -1042,7 +1042,7 @@ func TestResolvePRSelfLoginIsSkippableAndFailureTolerant(t *testing.T) {
 		}
 		return "victorarias", nil
 	}
-	if login := resolvePRSelfLogin(prWaitOptions{Host: "ghe.example.com"}, io.Discard); login != "victorarias" {
+	if login := resolvePRSelfLogin(context.Background(), prWaitOptions{Host: "ghe.example.com"}, io.Discard); login != "victorarias" {
 		t.Fatalf("login = %q", login)
 	}
 
@@ -1050,8 +1050,40 @@ func TestResolvePRSelfLoginIsSkippableAndFailureTolerant(t *testing.T) {
 		t.Error("--include-self asked GitHub who we are")
 		return "", nil
 	}
-	if login := resolvePRSelfLogin(prWaitOptions{IncludeSelf: true}, io.Discard); login != "" {
+	if login := resolvePRSelfLogin(context.Background(), prWaitOptions{IncludeSelf: true}, io.Discard); login != "" {
 		t.Fatalf("login = %q under --include-self", login)
+	}
+}
+
+// --timeout is a promise about when the command returns, and the identity lookup
+// happens before the first poll. Given a clock of its own it would spend up to
+// prSelfLoginTimeout on top of the caller's budget, so `--timeout 1s` against a
+// stalled GitHub would take sixteen seconds to come back.
+func TestResolvePRSelfLoginCannotOutlastTheWaitDeadline(t *testing.T) {
+	original := ghSelfLogin
+	t.Cleanup(func() { ghSelfLogin = original })
+
+	// A GitHub that never answers. Only the context can end this call, so the
+	// deadline the lookup runs under is the one that decides when it returns.
+	ghSelfLogin = func(ctx context.Context, _ string) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+
+	budget := 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	start := time.Now()
+	login := resolvePRSelfLogin(ctx, prWaitOptions{}, io.Discard)
+	elapsed := time.Since(start)
+
+	if login != "" {
+		t.Fatalf("login = %q, want a stalled lookup to report everyone", login)
+	}
+	// The bound is deliberately loose: the point is prSelfLoginTimeout not being
+	// spent, not the exact millisecond the short budget expires on.
+	if elapsed >= prSelfLoginTimeout {
+		t.Fatalf("lookup took %s with a %s budget: it borrowed its own clock", elapsed, budget)
 	}
 }
 
