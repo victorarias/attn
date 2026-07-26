@@ -787,6 +787,15 @@ its whitelist moved into the resolver, or stays screen-driven on purpose.
       tooltip for `unknown` only. See the two findings above: stuck is reachable
       today only when the brackets are the sole source that ever spoke, and an
       open bracket outranks it.
+      **Corrected 2026-07-26.** As shipped it also fired on a session that had
+      been launched and never prompted. Witnessed live on `statedet`: a claude
+      session painted one `not_busy` title frame at launch and nothing after, and
+      turned `unknown` ninety seconds later while sitting at a healthy empty
+      prompt. Claude paints its title on activity, and a session that has taken
+      no turn has no Stop and no `idle_prompt` notification to contradict the
+      verdict — the settled ones are unstickable only because that notification
+      arrives. Stuck now requires a turn to have opened: silence before the first
+      turn is nothing to report, not a stopped report.
 - [x] `idleStaleAfter` staleness marking. Sessions carry `idle_stale`
       (protocol 194) when an idle result has sat past `IdleStaleAfter` with
       nobody looking at it; nothing consumes it yet.

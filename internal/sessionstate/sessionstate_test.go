@@ -477,10 +477,24 @@ func TestResolve(t *testing.T) {
 			// anything about used to be indistinguishable from a quiet one.
 			name: "evidence that stopped moving is stuck",
 			evidence: Evidence{
-				LastMovement: now.Add(-91 * time.Second),
+				TurnEverOpened: true,
+				LastMovement:   now.Add(-91 * time.Second),
 			},
 			wantState:  protocol.SessionStateUnknown,
 			wantReason: ReasonStuck,
+		},
+		{
+			// A session launched and left alone is silent because there is nothing
+			// to report. Claude paints its title on activity and then goes quiet at
+			// an empty prompt, with no Stop and no idle_prompt notification to
+			// contradict a stuck verdict — witnessed live turning `unknown` ninety
+			// seconds after launch.
+			name: "a session that never took a turn is quiet, not stuck",
+			evidence: Evidence{
+				LastMovement: now.Add(-10 * time.Minute),
+			},
+			wantState:  protocol.SessionStateUnknown,
+			wantReason: ReasonNoEvidence,
 		},
 		{
 			name: "recent silence is not yet stuck",

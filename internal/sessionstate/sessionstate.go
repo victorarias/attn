@@ -414,7 +414,14 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// Nothing has moved at all. That is its own diagnosis, and reporting it is
 	// the whole point: a stuck session used to be indistinguishable from a
 	// correctly-quiet one.
-	if !e.LastMovement.IsZero() && now.Sub(e.LastMovement) > policy.StuckAfter {
+	//
+	// It needs a turn to have opened first. An agent that has been launched and
+	// left alone is silent because there is nothing to report, not because it
+	// stopped reporting: claude paints its title on activity and then goes quiet
+	// at an empty prompt, with no Stop and no idle_prompt notification to
+	// contradict a stuck verdict. Witnessed live on 2026-07-26 — a session
+	// created and never prompted turned `unknown` ninety seconds later.
+	if e.TurnEverOpened && !e.LastMovement.IsZero() && now.Sub(e.LastMovement) > policy.StuckAfter {
 		return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
 	}
 
