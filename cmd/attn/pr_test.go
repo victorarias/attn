@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,7 +112,10 @@ func TestParsePRSnapshotRequiresGreenChecksAndCurrentHeadApproval(t *testing.T) 
 	}
 }
 
-func TestParsePRSnapshotCollectsHumanCommentsAndDropsBots(t *testing.T) {
+// Bot comments are collected and tagged rather than dropped: they are their own
+// event with their own exit code, so the caller decides whether to care.
+// `--ignore-author` is the only thing that removes a comment outright.
+func TestParsePRSnapshotTagsBotCommentsAndDropsIgnoredAuthors(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	reviews := reviewNode("r1", "COMMENTED", "a real review remark", "2026-07-19T10:00:00Z", "figgyster", head,
 		inlineNode("t1", "2026-07-19T11:00:00Z", "figgyster"))
@@ -126,12 +131,24 @@ func TestParsePRSnapshotCollectsHumanCommentsAndDropsBots(t *testing.T) {
 
 	var got []string
 	for _, comment := range readiness.Comments {
-		got = append(got, comment.ID+":"+comment.Kind+":"+comment.Author)
+		kind := "human"
+		if comment.Bot {
+			kind = "bot"
+		}
+		got = append(got, comment.ID+":"+comment.Kind+":"+comment.Author+":"+kind)
 	}
-	// Sorted oldest-first; the bot and the ignored author are gone.
-	want := []string{"c1:issue:victorarias", "r1:review:figgyster", "t1:inline:figgyster"}
+	// Sorted oldest-first; the ignored author is gone and the bot is tagged.
+	want := []string{
+		"c1:issue:victorarias:human",
+		"c2:issue:chatgpt-codex-connector:bot",
+		"r1:review:figgyster:human",
+		"t1:inline:figgyster:human",
+	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("comments = %v, want %v", got, want)
+	}
+	if len(humanPRComments(readiness.Comments)) != 3 || len(botPRComments(readiness.Comments)) != 1 {
+		t.Fatalf("split = %d human / %d bot", len(humanPRComments(readiness.Comments)), len(botPRComments(readiness.Comments)))
 	}
 	// A COMMENTED review carries no verdict and must not move the review state.
 	if readiness.ReviewState != "waiting" {
@@ -244,7 +261,7 @@ func TestWaitForPRActionableResetsAcrossHeadChangeAndSuppressesDuplicatePolls(t 
 	opts := prWaitOptions{Number: 12, Owner: "owner", Name: "repo", Reviewer: "figgyster", Interval: 0}
 
 	var output bytes.Buffer
-	got, outcome, err := waitForPRActionable(context.Background(), source, opts, &output)
+	got, outcome, _, err := waitForPRActionable(context.Background(), source, opts, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +286,7 @@ func TestWaitForPRActionableReturnsPromptlyOnChangesRequested(t *testing.T) {
 	observation := readinessObservation("12", head, checksGreen, "changes_requested")
 	source := &fakeReadinessSource{results: []*prReadiness{observation}}
 
-	got, outcome, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster"}, &bytes.Buffer{})
+	got, outcome, _, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster"}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +311,7 @@ func TestWaitForPRActionableBaselinesExistingCommentsAndWakesOnNewOnes(t *testin
 	third.Comments = []prComment{existing, fresh}
 	source := &fakeReadinessSource{results: []*prReadiness{first, second, third}}
 
-	got, outcome, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster"}, &bytes.Buffer{})
+	got, outcome, _, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster"}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,14 +326,14 @@ func TestWaitForPRActionableBaselinesExistingCommentsAndWakesOnNewOnes(t *testin
 
 func TestWaitForPRActionableReportsCheckFailureAndClosure(t *testing.T) {
 	failed := readinessObservation("12", strings.Repeat("c", 40), checksFailed, "approved")
-	_, outcome, err := waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{failed}}, prWaitOptions{}, &bytes.Buffer{})
+	_, outcome, _, err := waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{failed}}, prWaitOptions{}, &bytes.Buffer{})
 	if err != nil || outcome != outcomeChecksFailed || outcome.exitCode() != prWaitExitChecksFailed {
 		t.Fatalf("outcome=%s err=%v", outcome, err)
 	}
 
 	closed := readinessObservation("12", strings.Repeat("c", 40), checksGreen, "waiting")
 	closed.State = "merged"
-	_, outcome, err = waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{closed}}, prWaitOptions{}, &bytes.Buffer{})
+	_, outcome, _, err = waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{closed}}, prWaitOptions{}, &bytes.Buffer{})
 	if err != nil || outcome != outcomeClosed || outcome.exitCode() != prWaitExitError {
 		t.Fatalf("outcome=%s err=%v", outcome, err)
 	}
@@ -328,7 +345,7 @@ func TestWaitForPRActionableReturnsTimeoutOutcome(t *testing.T) {
 	pending := readinessObservation("12", strings.Repeat("d", 40), checksPending, "waiting")
 	source := &fakeReadinessSource{results: []*prReadiness{pending}}
 
-	_, outcome, err := waitForPRActionable(ctx, source, prWaitOptions{Interval: time.Hour}, &bytes.Buffer{})
+	_, outcome, _, err := waitForPRActionable(ctx, source, prWaitOptions{Interval: time.Hour}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,22 +359,22 @@ func TestReportPROutcomeWritesPlainTextAndJSON(t *testing.T) {
 	result := readinessObservation("12", head, checksGreen, "approved")
 
 	var plain bytes.Buffer
-	if code := reportPROutcome(result, outcomeApproved, prWaitOptions{}, &plain); code != prWaitExitApproved {
+	if code := reportPROutcome(result, outcomeApproved, []prOutcome{outcomeApproved}, prWaitOptions{}, &plain); code != prWaitExitApproved {
 		t.Fatalf("exit code = %d", code)
 	}
 	if got := plain.String(); !strings.HasPrefix(got, "approved: figgyster approved eeeeeeeeeeee") {
 		t.Fatalf("plain output = %q", got)
 	}
 
-	// Baseline comments on the observation are not news on a non-comment outcome.
 	result.Comments = []prComment{{ID: "c1", Author: "victorarias", Kind: "issue"}}
 	var encoded bytes.Buffer
-	code := reportPROutcome(result, outcomeChangesRequested, prWaitOptions{JSON: true}, &encoded)
+	code := reportPROutcome(result, outcomeChangesRequested, []prOutcome{outcomeChangesRequested}, prWaitOptions{JSON: true}, &encoded)
 	if code != prWaitExitChangesRequested {
 		t.Fatalf("exit code = %d", code)
 	}
 	var payload struct {
 		Outcome  string      `json:"outcome"`
+		Events   []string    `json:"events"`
 		Head     string      `json:"head"`
 		Detail   string      `json:"detail"`
 		Comments []prComment `json:"comments"`
@@ -372,9 +389,217 @@ func TestReportPROutcomeWritesPlainTextAndJSON(t *testing.T) {
 		!strings.Contains(payload.Detail, "requested changes") {
 		t.Fatalf("payload = %#v", payload)
 	}
-	if len(payload.Comments) != 0 {
-		t.Fatalf("baseline comments reported as new: %#v", payload.Comments)
+	// Comments ride along whatever event won: the waiter has already reduced them
+	// to what arrived during the wait, so withholding them here would only make
+	// the caller re-query for news this poll already had.
+	if len(payload.Comments) != 1 || payload.Comments[0].Author != "victorarias" {
+		t.Fatalf("comments = %#v, want the fresh comment reported beside the verdict", payload.Comments)
 	}
+	if strings.Join(payload.Events, ",") != "changes_requested" {
+		t.Fatalf("events = %v", payload.Events)
+	}
+}
+
+// The regression that motivated the rewrite: figgyster approves with prose, and
+// the approval used to be reported as "a new comment" — exit 4, not 0 — because
+// the review body was collected as commentary and the comment branch returned
+// before the verdict branch was ever evaluated.
+func TestWaitForPRActionableApprovalWithBodyIsOneEvent(t *testing.T) {
+	head := strings.Repeat("f", 40)
+	at := mustTime(t, "2026-07-26T10:00:00Z")
+	reviews := reviewNode("r1", "APPROVED", "Approved. The witness is the proof I wanted.", "2026-07-26T10:00:00Z", "figgyster", head, "")
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
+
+	observation, err := parsePRSnapshot(snapshotPayload(head, "", reviews, ""), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observation.Comments) != 0 {
+		t.Fatalf("the verdict body was collected as a comment: %#v", observation.Comments)
+	}
+	if observation.ReviewState != "approved" || !observation.ReviewSubmittedAt.Equal(at) {
+		t.Fatalf("verdict not read: %#v", observation)
+	}
+
+	// Drive it through the waiter with the verdict arriving during the wait, so
+	// the baseline cannot be what hides the phantom comment.
+	waiting, err := parsePRSnapshot(snapshotPayload(head, "", "", ""), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &fakeReadinessSource{results: []*prReadiness{waiting, observation}}
+	_, outcome, events, err := waitForPRActionable(context.Background(), source, opts, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != outcomeApproved || outcome.exitCode() != prWaitExitApproved {
+		t.Fatalf("outcome = %s (exit %d), want approved", outcome, outcome.exitCode())
+	}
+	if strings.Join(outcomeStrings(events), ",") != "approved" {
+		t.Fatalf("events = %v, want the verdict alone", outcomeStrings(events))
+	}
+
+	// A COMMENTED review from the same reviewer stays commentary: it is how they
+	// say something without answering.
+	remark := reviewNode("r2", "COMMENTED", "one question before I approve", "2026-07-26T10:05:00Z", "figgyster", head, "")
+	commented, err := parsePRSnapshot(snapshotPayload(head, "", remark, ""), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commented.Comments) != 1 || commented.Comments[0].Kind != "review" {
+		t.Fatalf("a COMMENTED review must stay a comment: %#v", commented.Comments)
+	}
+}
+
+// One poll can hold several events. The exit code names the highest ranked, and
+// the rest must still be reported — a caller that gets `comment` alongside an
+// approval should not have to re-query to learn it can merge once answered.
+func TestWaitForPRActionableRanksConcurrentEventsAndReportsAll(t *testing.T) {
+	head := strings.Repeat("g", 40)
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
+	human := prComment{ID: "c1", Author: "victorarias", Kind: "issue", CreatedAt: time.Unix(2, 0)}
+	bot := prComment{ID: "c2", Author: "react-doctor", Kind: "issue", Bot: true, CreatedAt: time.Unix(3, 0)}
+
+	first := readinessObservation("12", head, checksPending, "waiting")
+	second := readinessObservation("12", head, checksGreen, "approved")
+	second.Comments = []prComment{human, bot}
+	source := &fakeReadinessSource{results: []*prReadiness{first, second}}
+
+	var output bytes.Buffer
+	_, outcome, events, err := waitForPRActionable(context.Background(), source, opts, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Human comment outranks both the bot's and the approval: someone has to read
+	// it before the approval means anything. The bot ranks below the approval —
+	// nobody is waiting on a doctor report, and it comments on nearly every push.
+	if outcome != outcomeComment {
+		t.Fatalf("outcome = %s, want the human comment to win", outcome)
+	}
+	if got := strings.Join(outcomeStrings(events), ","); got != "comment,approved,bot_comment" {
+		t.Fatalf("events = %s, want all three ranked", got)
+	}
+
+	var plain bytes.Buffer
+	if code := reportPROutcome(second, outcome, events, opts, &plain); code != prWaitExitComment {
+		t.Fatalf("exit code = %d, want %d", code, prWaitExitComment)
+	}
+	text := plain.String()
+	for _, want := range []string{"comment: 1 new comment from victorarias", "also approved:", "also bot_comment: 1 new comment from react-doctor"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("plain output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+// A failing check outranks any comment. The comment check used to return before
+// the check state was ever looked at, so a poll that saw both reported exit 4
+// while its own payload said the checks had failed.
+func TestWaitForPRActionableChecksFailedOutranksComment(t *testing.T) {
+	head := strings.Repeat("h", 40)
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
+	first := readinessObservation("12", head, checksPending, "waiting")
+	second := readinessObservation("12", head, checksFailed, "waiting")
+	second.Comments = []prComment{{ID: "c1", Author: "victorarias", Kind: "issue", CreatedAt: time.Unix(2, 0)}}
+
+	_, outcome, events, err := waitForPRActionable(context.Background(),
+		&fakeReadinessSource{results: []*prReadiness{first, second}}, opts, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != outcomeChecksFailed || outcome.exitCode() != prWaitExitChecksFailed {
+		t.Fatalf("outcome = %s, want checks_failed to outrank the comment", outcome)
+	}
+	if got := strings.Join(outcomeStrings(events), ","); got != "checks_failed,comment" {
+		t.Fatalf("events = %s", got)
+	}
+}
+
+// A bot comment is its own event with its own exit code, so a caller can wake on
+// a doctor report without treating it as a human waiting for an answer.
+func TestWaitForPRActionableBotCommentIsItsOwnEvent(t *testing.T) {
+	head := strings.Repeat("i", 40)
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
+	first := readinessObservation("12", head, checksPending, "waiting")
+	second := readinessObservation("12", head, checksPending, "waiting")
+	second.Comments = []prComment{{ID: "c1", Author: "react-doctor", Kind: "issue", Bot: true, CreatedAt: time.Unix(2, 0)}}
+
+	_, outcome, events, err := waitForPRActionable(context.Background(),
+		&fakeReadinessSource{results: []*prReadiness{first, second}}, opts, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != outcomeBotComment || outcome.exitCode() != prWaitExitBotComment {
+		t.Fatalf("outcome = %s (exit %d), want bot_comment", outcome, outcome.exitCode())
+	}
+	if got := strings.Join(outcomeStrings(events), ","); got != "bot_comment" {
+		t.Fatalf("events = %s", got)
+	}
+
+	// --ignore-author silences a bot exactly as it silences a human.
+	ignoring := prWaitOptions{Reviewer: "figgyster", Interval: 0, IgnoreAuthors: []string{"react-doctor"}}
+	snapshot, err := parsePRSnapshot(snapshotPayload(head, "",
+		"", `{"id":"c1","createdAt":"2026-07-26T10:00:00Z","author":{"__typename":"Bot","login":"react-doctor"}}`), ignoring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Comments) != 0 {
+		t.Fatalf("ignored bot still collected: %#v", snapshot.Comments)
+	}
+}
+
+// The fixture is a real `gh api graphql` response for the pull request that
+// exposed the bug — figgyster's approval carrying prose, plus a react-doctor
+// comment — with `state` flipped to OPEN so the closed event does not short the
+// wait. Hand-built fragments prove the logic; this proves the field names and
+// author typenames it keys on are GitHub's.
+func TestParsePRSnapshotAgainstRealApprovalPayload(t *testing.T) {
+	payload, err := os.ReadFile(filepath.Join("testdata", "pr-approval-with-body.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
+	observation, err := parsePRSnapshot(payload, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.ReviewState != "approved" || observation.CheckState != checksGreen || !observation.ready() {
+		t.Fatalf("real approval not read as ready: %#v", observation)
+	}
+	if len(humanPRComments(observation.Comments)) != 0 {
+		t.Fatalf("verdict prose collected as a human comment: %#v", humanPRComments(observation.Comments))
+	}
+	bots := botPRComments(observation.Comments)
+	if len(bots) != 1 || bots[0].Author != "github-actions" || !bots[0].Bot {
+		t.Fatalf("bot comment = %#v, want the react-doctor post tagged as a bot", bots)
+	}
+
+	// End to end: the bot comment arrives during the wait alongside the approval,
+	// and the approval is what the exit code reports.
+	first, err := parsePRSnapshot(payload, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.ReviewState, first.ReviewSubmittedAt = "waiting", time.Time{}
+	_, outcome, events, err := waitForPRActionable(context.Background(),
+		&fakeReadinessSource{results: []*prReadiness{first, observation}}, opts, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != outcomeApproved || outcome.exitCode() != prWaitExitApproved {
+		t.Fatalf("outcome = %s (exit %d), want approved", outcome, outcome.exitCode())
+	}
+	if got := strings.Join(outcomeStrings(events), ","); got != "approved" {
+		t.Fatalf("events = %s; the bot comment was in the baseline, so only the verdict is news", got)
+	}
+}
+
+func outcomeStrings(events []prOutcome) []string {
+	result := make([]string, 0, len(events))
+	for _, event := range events {
+		result = append(result, string(event))
+	}
+	return result
 }
 
 // A re-review request marks any pre-existing verdict as stale: parse must
@@ -429,7 +654,7 @@ func TestWaitForPRActionableIgnoresStaleVerdictWhileReReviewPending(t *testing.T
 	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
 
 	var output bytes.Buffer
-	got, outcome, err := waitForPRActionable(context.Background(), source, opts, &output)
+	got, outcome, _, err := waitForPRActionable(context.Background(), source, opts, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +686,7 @@ func TestWaitForPRActionableReturnsOnFreshChangesRequestedAfterReReview(t *testi
 	fresh := reReviewObservation(head, checksGreen, "changes_requested", true, freshAt, freshAt)
 	source := &fakeReadinessSource{results: []*prReadiness{stale, fresh}}
 
-	got, outcome, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
+	got, outcome, _, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +706,7 @@ func TestWaitForPRActionableReturnsImmediatelyWithoutReReview(t *testing.T) {
 
 	approved := reReviewObservation(head, checksGreen, "approved", false, at, at)
 	source := &fakeReadinessSource{results: []*prReadiness{approved}}
-	got, outcome, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
+	got, outcome, _, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +716,7 @@ func TestWaitForPRActionableReturnsImmediatelyWithoutReReview(t *testing.T) {
 
 	changes := reReviewObservation(head, checksGreen, "changes_requested", false, at, at)
 	source = &fakeReadinessSource{results: []*prReadiness{changes}}
-	got, outcome, err = waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
+	got, outcome, _, err = waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}

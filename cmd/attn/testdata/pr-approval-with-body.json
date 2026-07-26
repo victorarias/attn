@@ -1,0 +1,132 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "number": 679,
+        "state": "OPEN",
+        "isDraft": false,
+        "headRefOid": "689f742d73b66efd07770f5cd244cdc65de22fcd",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": {
+                  "contexts": {
+                    "pageInfo": {
+                      "hasNextPage": false
+                    },
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Bench A/B (base vs head)",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Changes",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "react-doctor",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Daemon",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Frontend",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Frontend E2E (1/3)",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Frontend E2E (2/3)",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Frontend E2E (3/3)",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Tauri",
+                        "status": "COMPLETED",
+                        "conclusion": "SKIPPED"
+                      },
+                      {
+                        "__typename": "CheckRun",
+                        "name": "Frontend E2E",
+                        "status": "COMPLETED",
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "__typename": "StatusContext",
+                        "context": "React Doctor",
+                        "state": "SUCCESS"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "reviewRequests": {
+          "nodes": []
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "id": "PRR_kwDOQoFRj88AAAABHQSTJg",
+              "state": "APPROVED",
+              "bodyText": "You finally made Phase 3\u2019s dwell gate mean what it said. #675 put the policy in the right room, but handleState still had a side door into pending_approval; this shuts it, and the yellow-flash witness is the proof I wanted to see.\nI traced the remaining evidence paths through the resolver, including the stale-bracket, classifier, long-run, and external-driver escapes. The clause-order tests give the next poor soul a map instead of a s\u00e9ance, and the live guardian/background-work runs cover the two races most likely to lie in a unit test. Daemon, Frontend, all three frontend E2E shards, Changes, and React Doctor are green. Bench A/B is still doing its slow walk, but it is trend evidence here, not a gate. Approved. The old scraper and staleness machinery can stay buried.",
+              "submittedAt": "2026-07-26T13:11:27Z",
+              "author": {
+                "__typename": "User",
+                "login": "figgyster"
+              },
+              "commit": {
+                "oid": "689f742d73b66efd07770f5cd244cdc65de22fcd"
+              },
+              "comments": {
+                "pageInfo": {
+                  "hasNextPage": false
+                },
+                "nodes": []
+              }
+            }
+          ]
+        },
+        "comments": {
+          "nodes": [
+            {
+              "id": "IC_kwDOQoFRj88AAAABLwGMVw",
+              "createdAt": "2026-07-26T13:06:04Z",
+              "author": {
+                "__typename": "Bot",
+                "login": "github-actions"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

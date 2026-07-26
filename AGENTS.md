@@ -137,10 +137,16 @@ output as product evidence.
 
 To wait on a GitHub PR, run `attn pr wait-ready <pr> --repo <owner/repo>
 --reviewer <login>` once; do not poll checks, reviews, and comments separately.
-It returns on the first actionable update and reports which one by exit code:
-`0` approved, `1` checks failed, `3` changes requested, `4` new human comment,
-`124` timeout. Bot comments are ignored; comments already present when the wait
-starts are the baseline.
+It returns on the first poll with an actionable update and reports it by exit
+code: `0` approved, `1` checks failed, `3` changes requested, `4` human comment,
+`5` error, `6` bot comment, `124` timeout. One poll can see several of those at
+once; the exit code names the highest ranked (closed, checks failed, changes
+requested, human comment, approved, bot comment) and the rest are still reported
+— `also <event>:` on stdout, `events` in `--json`. Do not treat the exit code as
+the whole answer when you need to know everything that happened. The reviewer's
+own verdict is one event, not a verdict plus a comment. Comments already present
+when the wait starts are the baseline; `--ignore-author` drops an author of
+either kind.
 
 ### Packaged-app harness
 

@@ -24,6 +24,7 @@ const (
 	prWaitExitChangesRequested = 3
 	prWaitExitComment          = 4
 	prWaitExitError            = 5
+	prWaitExitBotComment       = 6
 	prWaitExitTimeout          = 124
 
 	checksNone    = "none"
@@ -42,9 +43,56 @@ const (
 	outcomeChecksFailed     prOutcome = "checks_failed"
 	outcomeChangesRequested prOutcome = "changes_requested"
 	outcomeComment          prOutcome = "comment"
+	outcomeBotComment       prOutcome = "bot_comment"
 	outcomeClosed           prOutcome = "closed"
 	outcomeTimeout          prOutcome = "timeout"
 )
+
+// prOutcomeRanking is the whole precedence order, in one place. One poll can see
+// several events at once — CI can fail in the same 20 seconds someone comments —
+// and the exit code can only carry one, so the ranking decides which. It reads
+// by who is waiting on whom: the pull request being gone or broken first, then a
+// verdict, then a human who asked something and is waiting for an answer.
+//
+// Approval ranks below a human comment because approval says nothing needs doing
+// and reporting it over a fresh question would bury the question. It ranks above
+// a bot comment for the mirror-image reason: a bot is not waiting for an answer,
+// its findings usually arrive as a check as well, and it comments on nearly every
+// push — ranking it higher would report "a bot said something" instead of "you
+// can merge" in the ordinary case.
+//
+// Nothing is lost to the ranking: every event the ending poll saw is reported,
+// so a caller that gets `comment` still sees the approval that came with it.
+var prOutcomeRanking = []prOutcome{
+	outcomeClosed,
+	outcomeChecksFailed,
+	outcomeChangesRequested,
+	outcomeComment,
+	outcomeApproved,
+	outcomeBotComment,
+}
+
+// rankPROutcomes returns the highest-ranked event, and the events sorted by that
+// same ranking so the report reads in the order the operator should read it.
+func rankPROutcomes(events []prOutcome) (prOutcome, []prOutcome) {
+	if len(events) == 0 {
+		return "", nil
+	}
+	present := make(map[prOutcome]bool, len(events))
+	for _, event := range events {
+		present[event] = true
+	}
+	ranked := make([]prOutcome, 0, len(events))
+	for _, candidate := range prOutcomeRanking {
+		if present[candidate] {
+			ranked = append(ranked, candidate)
+		}
+	}
+	if len(ranked) == 0 {
+		return events[0], events
+	}
+	return ranked[0], ranked
+}
 
 func (o prOutcome) exitCode() int {
 	switch o {
@@ -56,6 +104,8 @@ func (o prOutcome) exitCode() int {
 		return prWaitExitChangesRequested
 	case outcomeComment:
 		return prWaitExitComment
+	case outcomeBotComment:
+		return prWaitExitBotComment
 	case outcomeTimeout:
 		return prWaitExitTimeout
 	default:
@@ -70,11 +120,45 @@ type prCheck struct {
 
 // prComment is any commentary surface: a standalone PR comment, an inline
 // review-thread comment, or a review submitted without a verdict.
+//
+// A review that carries a verdict is not commentary. Its body is the verdict's
+// explanation, and reporting it here as well would turn one review into two
+// events — which is how an approval used to end the wait as "a new comment".
 type prComment struct {
 	ID        string    `json:"-"`
 	Author    string    `json:"author"`
 	Kind      string    `json:"kind"`
+	Bot       bool      `json:"bot"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// isTrackedReviewerVerdict reports whether a review is the one the waiter reads
+// as the reviewer's answer. Only those reviews are exempt from being reported as
+// commentary; a `COMMENTED` review from the same person is a remark like any
+// other, and is what the reviewer uses to say something without answering yet.
+func isTrackedReviewerVerdict(author, state string, opts prWaitOptions) bool {
+	if !strings.EqualFold(author, opts.Reviewer) {
+		return false
+	}
+	return state == "APPROVED" || state == "CHANGES_REQUESTED"
+}
+
+func humanPRComments(comments []prComment) []prComment {
+	return filterPRComments(comments, false)
+}
+
+func botPRComments(comments []prComment) []prComment {
+	return filterPRComments(comments, true)
+}
+
+func filterPRComments(comments []prComment, bot bool) []prComment {
+	result := make([]prComment, 0, len(comments))
+	for _, comment := range comments {
+		if comment.Bot == bot {
+			result = append(result, comment)
+		}
+	}
+	return result
 }
 
 type prReadiness struct {
@@ -169,25 +253,32 @@ func executePRCommand(args []string, stdout, stderr io.Writer) int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
 	defer cancel()
-	result, outcome, err := waitForPRActionable(ctx, ghPRReadinessSource{}, opts, progress)
+	result, outcome, events, err := waitForPRActionable(ctx, ghPRReadinessSource{}, opts, progress)
 	if err != nil {
 		fmt.Fprintf(stderr, "pr wait-ready: %v\n", err)
 		return prWaitExitError
 	}
-	return reportPROutcome(result, outcome, opts, stdout)
+	return reportPROutcome(result, outcome, events, opts, stdout)
 }
 
-func reportPROutcome(result *prReadiness, outcome prOutcome, opts prWaitOptions, stdout io.Writer) int {
+func reportPROutcome(result *prReadiness, outcome prOutcome, events []prOutcome, opts prWaitOptions, stdout io.Writer) int {
 	detail := describePROutcome(result, outcome, opts)
 	if opts.JSON {
-		// "comments" reports what arrived during the wait. On any other outcome
-		// the observation still carries the baseline, which is not news.
-		fresh := []prComment{}
-		if outcome == outcomeComment {
-			fresh = result.Comments
+		// "comments" is everything that arrived during the wait, whichever event
+		// won: the exit code can only name one, and a caller that has to re-query
+		// for the rest is being made to fetch what this poll already saw. The
+		// waiter has already reduced Comments to the unseen ones.
+		fresh := result.Comments
+		if fresh == nil {
+			fresh = []prComment{}
+		}
+		reported := make([]string, 0, len(events))
+		for _, event := range events {
+			reported = append(reported, string(event))
 		}
 		payload := map[string]any{
 			"outcome": string(outcome),
+			"events":  reported,
 			"pr":      result.Number,
 			"head":    result.HeadSHA,
 			"state":   result.State,
@@ -211,6 +302,15 @@ func reportPROutcome(result *prReadiness, outcome prOutcome, opts prWaitOptions,
 		return outcome.exitCode()
 	}
 	fmt.Fprintf(stdout, "%s: %s\n", outcome, detail)
+	// Plain text gets the same completeness as JSON: the events the ranking did
+	// not pick are still things that happened, and a reader who only sees the
+	// winner will go looking for them.
+	for _, event := range events {
+		if event == outcome {
+			continue
+		}
+		fmt.Fprintf(stdout, "also %s: %s\n", event, describePROutcome(result, event, opts))
+	}
 	return outcome.exitCode()
 }
 
@@ -224,7 +324,9 @@ func describePROutcome(result *prReadiness, outcome prOutcome, opts prWaitOption
 	case outcomeChecksFailed:
 		return fmt.Sprintf("%s failed on %s", strings.Join(failedCheckNames(result.Checks), ", "), head)
 	case outcomeComment:
-		return describePRComments(result.Comments)
+		return describePRComments(humanPRComments(result.Comments))
+	case outcomeBotComment:
+		return describePRComments(botPRComments(result.Comments))
 	case outcomeClosed:
 		return fmt.Sprintf("pull request is %s", result.State)
 	case outcomeTimeout:
@@ -526,7 +628,13 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 		// A review with no text of its own is just the wrapper GitHub creates
 		// around an inline comment; its comments are reported below, so
 		// counting the wrapper too would report one remark twice.
-		if strings.TrimSpace(review.BodyText) != "" {
+		//
+		// The tracked reviewer's verdict is skipped for the same reason from the
+		// other direction: its body is the verdict's own explanation, and the
+		// verdict event already sends the caller to read it. Another author's
+		// approval is not tracked as a verdict at all, so their prose is
+		// commentary and stays reported.
+		if strings.TrimSpace(review.BodyText) != "" && !isTrackedReviewerVerdict(review.Author.Login, state, opts) {
 			result.Comments = appendPRComment(result.Comments, prGraphQLComment{
 				ID: review.ID, CreatedAt: review.SubmittedAt, Author: review.Author,
 			}, "review", opts)
@@ -561,17 +669,26 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 	return result, nil
 }
 
-// appendPRComment keeps only comments a human needs to answer. Bot authorship
-// comes from __typename; the token owner is deliberately NOT filtered, because
-// the operator and the agent share one token and the operator's own comment is
-// the most actionable event there is. Self-waking is prevented by the baseline
-// instead: anything present when the wait starts is never reported.
+// appendPRComment records a comment and who wrote it. Bot authorship comes from
+// __typename and separates the two comment events rather than dropping one: a
+// bot's remark is real news (a doctor report, a coverage regression) but it is
+// ranked below a human's and carries its own exit code, so a caller can act on
+// one and ignore the other. `--ignore-author` drops either kind.
+//
+// The token owner is deliberately NOT filtered, because the operator and the
+// agent share one token and the operator's own comment is the most actionable
+// event there is. Self-waking is prevented by the baseline instead: anything
+// present when the wait starts is never reported.
 func appendPRComment(comments []prComment, node prGraphQLComment, kind string, opts prWaitOptions) []prComment {
-	if node.ID == "" || node.Author.TypeName != "User" || opts.ignored(node.Author.Login) {
+	if node.ID == "" || opts.ignored(node.Author.Login) {
 		return comments
 	}
 	return append(comments, prComment{
-		ID: node.ID, Author: node.Author.Login, Kind: kind, CreatedAt: node.CreatedAt,
+		ID:        node.ID,
+		Author:    node.Author.Login,
+		Kind:      kind,
+		Bot:       node.Author.TypeName != "User",
+		CreatedAt: node.CreatedAt,
 	})
 }
 
@@ -616,10 +733,13 @@ func summarizePRChecks(checks []prCheck) string {
 	return result
 }
 
-// waitForPRActionable returns on the first actionable update. The error return
-// is reserved for the waiter itself failing; every product outcome, including a
-// timeout, comes back as a prOutcome so the caller can report it uniformly.
-func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prWaitOptions, progress io.Writer) (*prReadiness, prOutcome, error) {
+// waitForPRActionable returns on the first poll that sees an actionable update.
+// It returns every event that poll saw, ranked, plus the winner the exit code
+// reports; a caller that only wants the winner can ignore the rest. The error
+// return is reserved for the waiter itself failing; every product outcome,
+// including a timeout, comes back as a prOutcome so the caller can report it
+// uniformly.
+func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prWaitOptions, progress io.Writer) (*prReadiness, prOutcome, []prOutcome, error) {
 	var lastLine, lastHead string
 	var baseline map[string]bool
 	var reviewBaseline time.Time
@@ -630,9 +750,9 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 		observation, err := source.Fetch(ctx, opts)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return last, outcomeTimeout, nil
+				return last, outcomeTimeout, []prOutcome{outcomeTimeout}, nil
 			}
-			return last, "", err
+			return last, "", nil, err
 		}
 		last = observation
 
@@ -657,9 +777,13 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 			// review at wait start is stale context, so a verdict returns only
 			// when it (or a re-review) is newer than this.
 			reviewBaseline = observation.LatestReviewAt
-		} else if fresh := unseenPRComments(observation.Comments, baseline); len(fresh) > 0 {
-			observation.Comments = fresh
-			return observation, outcomeComment, nil
+			// Nothing already on the PR is news, so this poll contributes no
+			// comment event. Dropping them here rather than skipping the event
+			// tests below also keeps the report honest if some other event ends
+			// the wait on this very poll: no comment arrived during it.
+			observation.Comments = nil
+		} else {
+			observation.Comments = unseenPRComments(observation.Comments, baseline)
 		}
 
 		// An existing verdict that a pending re-review holds back is not a return
@@ -670,19 +794,37 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 			notedStaleVerdict = true
 		}
 
-		switch {
-		case observation.State != "open":
-			return observation, outcomeClosed, nil
-		case observation.CheckState == checksFailed:
-			return observation, outcomeChecksFailed, nil
-		case observation.ReviewState == "changes_requested" && freshReviewVerdict(observation, reviewBaseline):
-			return observation, outcomeChangesRequested, nil
-		case observation.ready() && freshReviewVerdict(observation, reviewBaseline):
-			return observation, outcomeApproved, nil
+		// Collect the whole poll before deciding anything. Every branch here used
+		// to return the moment it matched, in two separate places, so whichever
+		// event the code happened to test first won and the others were never
+		// looked at. The ranking is the only thing that chooses now.
+		var events []prOutcome
+		if observation.State != "open" {
+			events = append(events, outcomeClosed)
+		}
+		if observation.CheckState == checksFailed {
+			events = append(events, outcomeChecksFailed)
+		}
+		if freshReviewVerdict(observation, reviewBaseline) {
+			switch {
+			case observation.ReviewState == "changes_requested":
+				events = append(events, outcomeChangesRequested)
+			case observation.ready():
+				events = append(events, outcomeApproved)
+			}
+		}
+		if len(humanPRComments(observation.Comments)) > 0 {
+			events = append(events, outcomeComment)
+		}
+		if len(botPRComments(observation.Comments)) > 0 {
+			events = append(events, outcomeBotComment)
+		}
+		if winner, ranked := rankPROutcomes(events); winner != "" {
+			return observation, winner, ranked, nil
 		}
 
 		if err := waitPRPoll(ctx, opts.Interval); err != nil {
-			return observation, outcomeTimeout, nil
+			return observation, outcomeTimeout, []prOutcome{outcomeTimeout}, nil
 		}
 	}
 }
@@ -764,8 +906,9 @@ func shortSHA(sha string) string {
 func writePRHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn pr wait-ready <number-or-url> --reviewer <login> [options]
 
-Wait until a pull request has an actionable update: a failing check, a review
-requesting changes, a new human comment, or approval on a green exact head.
+Wait until a pull request has an actionable update: it closes, a check fails, the
+reviewer requests changes, a human comments, a bot comments, or the reviewer
+approves a green exact head.
 
 options:
   --repo [host/]owner/repository  required with a pull request number
@@ -775,14 +918,25 @@ options:
   --ignore-author login           comment author to ignore (repeatable)
   --json                          emit the result as JSON on stdout
 
-Bot comments are ignored. Comments already present when the wait starts are the
-baseline and never reported; only comments posted during the wait are. A review
-verdict present at wait start is likewise baselined: while the reviewer is
-re-requested (a re-review is pending) the pre-existing verdict is stale and does
-not end the wait; only a review submitted after the baseline does. When the
-reviewer is not re-requested, an existing verdict returns immediately.
+One poll can see several of these at once. The exit code reports the highest
+ranked: closed, checks failed, changes requested, human comment, approved, bot
+comment. A human comment outranks approval because someone is waiting for an
+answer; a bot comment ranks last because nobody is. Every event that poll saw is
+still reported — "also <event>: ..." on stdout, "events" in --json — so an
+approval that arrives alongside a comment is never lost to the one the exit code
+names. The reviewer's own approval or changes-requested is one event, not two:
+its body is the verdict's explanation, not a separate comment.
 
-exit: 0 approved; 1 checks failed; 2 usage; 3 changes requested; 4 new comment;
-      5 error; 124 timeout
+A bot comment ends the wait with its own exit code, so a caller can act on a
+human's remark and skip a doctor report; --ignore-author drops either kind.
+Comments already present when the wait starts are the baseline and never
+reported; only comments posted during the wait are. A review verdict present at
+wait start is likewise baselined: while the reviewer is re-requested (a re-review
+is pending) the pre-existing verdict is stale and does not end the wait; only a
+review submitted after the baseline does. When the reviewer is not re-requested,
+an existing verdict returns immediately.
+
+exit: 0 approved; 1 checks failed; 2 usage; 3 changes requested; 4 human comment;
+      5 error; 6 bot comment; 124 timeout
 `)
 }
