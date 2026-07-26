@@ -148,6 +148,14 @@ own verdict is one event, not a verdict plus a comment. Comments already present
 when the wait starts are the baseline; `--ignore-author` drops an author of
 either kind.
 
+The output carries what was said — comment bodies with `file:line` when inline,
+the verdict's text, failing check names with URLs, the PR URL — so act on it
+instead of querying GitHub again. Successive waits on the same PR resume from
+what the previous one reported (recorded under the data dir), so a comment that
+lands while you are answering the last one is still reported, and a failing check
+you were already told about does not return instantly a second time. `--reset`
+forgets that position and `--since <RFC3339>` replays from an instant.
+
 ### Packaged-app harness
 
 - Single-tenant: never run packaged-app scenarios in parallel.

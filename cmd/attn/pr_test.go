@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,13 @@ func (f *fakeReadinessSource) Fetch(context.Context, prWaitOptions) (*prReadines
 		index = len(f.results) - 1
 	}
 	return f.results[index], nil
+}
+
+// waitTuple runs a first-ever wait — no remembered position — and unpacks the
+// result, for the tests that are about the outcome rather than the memory.
+func waitTuple(ctx context.Context, source prReadinessSource, opts prWaitOptions, progress io.Writer) (*prReadiness, prOutcome, []prOutcome, error) {
+	result, err := waitForPRActionable(ctx, source, opts, prWaitCursor{}, progress)
+	return result.Observation, result.Outcome, result.Events, err
 }
 
 // snapshotPayload wraps GraphQL fragments in the envelope gh api graphql emits.
@@ -204,7 +212,7 @@ func TestParsePRSnapshotSeesReplyOnLongDormantThread(t *testing.T) {
 	for _, comment := range baseline {
 		seen[comment.ID] = true
 	}
-	fresh := unseenPRComments(readiness.Comments, seen)
+	fresh := unseenPRComments(readiness.Comments, seen, time.Time{})
 	if len(fresh) != 1 || fresh[0].ID != "reply-t" {
 		t.Fatalf("reply on a dormant thread was missed: fresh = %#v", fresh)
 	}
@@ -261,7 +269,7 @@ func TestWaitForPRActionableResetsAcrossHeadChangeAndSuppressesDuplicatePolls(t 
 	opts := prWaitOptions{Number: 12, Owner: "owner", Name: "repo", Reviewer: "figgyster", Interval: 0}
 
 	var output bytes.Buffer
-	got, outcome, _, err := waitForPRActionable(context.Background(), source, opts, &output)
+	got, outcome, _, err := waitTuple(context.Background(), source, opts, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +294,7 @@ func TestWaitForPRActionableReturnsPromptlyOnChangesRequested(t *testing.T) {
 	observation := readinessObservation("12", head, checksGreen, "changes_requested")
 	source := &fakeReadinessSource{results: []*prReadiness{observation}}
 
-	got, outcome, _, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster"}, &bytes.Buffer{})
+	got, outcome, _, err := waitTuple(context.Background(), source, prWaitOptions{Reviewer: "figgyster"}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +319,7 @@ func TestWaitForPRActionableBaselinesExistingCommentsAndWakesOnNewOnes(t *testin
 	third.Comments = []prComment{existing, fresh}
 	source := &fakeReadinessSource{results: []*prReadiness{first, second, third}}
 
-	got, outcome, _, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster"}, &bytes.Buffer{})
+	got, outcome, _, err := waitTuple(context.Background(), source, prWaitOptions{Reviewer: "figgyster"}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,14 +334,14 @@ func TestWaitForPRActionableBaselinesExistingCommentsAndWakesOnNewOnes(t *testin
 
 func TestWaitForPRActionableReportsCheckFailureAndClosure(t *testing.T) {
 	failed := readinessObservation("12", strings.Repeat("c", 40), checksFailed, "approved")
-	_, outcome, _, err := waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{failed}}, prWaitOptions{}, &bytes.Buffer{})
+	_, outcome, _, err := waitTuple(context.Background(), &fakeReadinessSource{results: []*prReadiness{failed}}, prWaitOptions{}, &bytes.Buffer{})
 	if err != nil || outcome != outcomeChecksFailed || outcome.exitCode() != prWaitExitChecksFailed {
 		t.Fatalf("outcome=%s err=%v", outcome, err)
 	}
 
 	closed := readinessObservation("12", strings.Repeat("c", 40), checksGreen, "waiting")
 	closed.State = "merged"
-	_, outcome, _, err = waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{closed}}, prWaitOptions{}, &bytes.Buffer{})
+	_, outcome, _, err = waitTuple(context.Background(), &fakeReadinessSource{results: []*prReadiness{closed}}, prWaitOptions{}, &bytes.Buffer{})
 	if err != nil || outcome != outcomeClosed || outcome.exitCode() != prWaitExitError {
 		t.Fatalf("outcome=%s err=%v", outcome, err)
 	}
@@ -345,7 +353,7 @@ func TestWaitForPRActionableReturnsTimeoutOutcome(t *testing.T) {
 	pending := readinessObservation("12", strings.Repeat("d", 40), checksPending, "waiting")
 	source := &fakeReadinessSource{results: []*prReadiness{pending}}
 
-	_, outcome, _, err := waitForPRActionable(ctx, source, prWaitOptions{Interval: time.Hour}, &bytes.Buffer{})
+	_, outcome, _, err := waitTuple(ctx, source, prWaitOptions{Interval: time.Hour}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +367,7 @@ func TestReportPROutcomeWritesPlainTextAndJSON(t *testing.T) {
 	result := readinessObservation("12", head, checksGreen, "approved")
 
 	var plain bytes.Buffer
-	if code := reportPROutcome(result, outcomeApproved, []prOutcome{outcomeApproved}, prWaitOptions{}, &plain); code != prWaitExitApproved {
+	if code := reportPROutcome(prWaitResult{Observation: result, Outcome: outcomeApproved, Events: []prOutcome{outcomeApproved}}, prWaitOptions{}, &plain); code != prWaitExitApproved {
 		t.Fatalf("exit code = %d", code)
 	}
 	if got := plain.String(); !strings.HasPrefix(got, "approved: figgyster approved eeeeeeeeeeee") {
@@ -368,7 +376,7 @@ func TestReportPROutcomeWritesPlainTextAndJSON(t *testing.T) {
 
 	result.Comments = []prComment{{ID: "c1", Author: "victorarias", Kind: "issue"}}
 	var encoded bytes.Buffer
-	code := reportPROutcome(result, outcomeChangesRequested, []prOutcome{outcomeChangesRequested}, prWaitOptions{JSON: true}, &encoded)
+	code := reportPROutcome(prWaitResult{Observation: result, Outcome: outcomeChangesRequested, Events: []prOutcome{outcomeChangesRequested}}, prWaitOptions{JSON: true}, &encoded)
 	if code != prWaitExitChangesRequested {
 		t.Fatalf("exit code = %d", code)
 	}
@@ -428,7 +436,7 @@ func TestWaitForPRActionableApprovalWithBodyIsOneEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := &fakeReadinessSource{results: []*prReadiness{waiting, observation}}
-	_, outcome, events, err := waitForPRActionable(context.Background(), source, opts, &bytes.Buffer{})
+	_, outcome, events, err := waitTuple(context.Background(), source, opts, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +474,7 @@ func TestWaitForPRActionableRanksConcurrentEventsAndReportsAll(t *testing.T) {
 	source := &fakeReadinessSource{results: []*prReadiness{first, second}}
 
 	var output bytes.Buffer
-	_, outcome, events, err := waitForPRActionable(context.Background(), source, opts, &output)
+	_, outcome, events, err := waitTuple(context.Background(), source, opts, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +489,7 @@ func TestWaitForPRActionableRanksConcurrentEventsAndReportsAll(t *testing.T) {
 	}
 
 	var plain bytes.Buffer
-	if code := reportPROutcome(second, outcome, events, opts, &plain); code != prWaitExitComment {
+	if code := reportPROutcome(prWaitResult{Observation: second, Outcome: outcome, Events: events}, opts, &plain); code != prWaitExitComment {
 		t.Fatalf("exit code = %d, want %d", code, prWaitExitComment)
 	}
 	text := plain.String()
@@ -502,7 +510,7 @@ func TestWaitForPRActionableChecksFailedOutranksComment(t *testing.T) {
 	second := readinessObservation("12", head, checksFailed, "waiting")
 	second.Comments = []prComment{{ID: "c1", Author: "victorarias", Kind: "issue", CreatedAt: time.Unix(2, 0)}}
 
-	_, outcome, events, err := waitForPRActionable(context.Background(),
+	_, outcome, events, err := waitTuple(context.Background(),
 		&fakeReadinessSource{results: []*prReadiness{first, second}}, opts, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
@@ -524,7 +532,7 @@ func TestWaitForPRActionableBotCommentIsItsOwnEvent(t *testing.T) {
 	second := readinessObservation("12", head, checksPending, "waiting")
 	second.Comments = []prComment{{ID: "c1", Author: "react-doctor", Kind: "issue", Bot: true, CreatedAt: time.Unix(2, 0)}}
 
-	_, outcome, events, err := waitForPRActionable(context.Background(),
+	_, outcome, events, err := waitTuple(context.Background(),
 		&fakeReadinessSource{results: []*prReadiness{first, second}}, opts, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
@@ -581,7 +589,7 @@ func TestParsePRSnapshotAgainstRealApprovalPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	first.ReviewState, first.ReviewSubmittedAt = "waiting", time.Time{}
-	_, outcome, events, err := waitForPRActionable(context.Background(),
+	_, outcome, events, err := waitTuple(context.Background(),
 		&fakeReadinessSource{results: []*prReadiness{first, observation}}, opts, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
@@ -654,7 +662,7 @@ func TestWaitForPRActionableIgnoresStaleVerdictWhileReReviewPending(t *testing.T
 	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
 
 	var output bytes.Buffer
-	got, outcome, _, err := waitForPRActionable(context.Background(), source, opts, &output)
+	got, outcome, _, err := waitTuple(context.Background(), source, opts, &output)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -686,7 +694,7 @@ func TestWaitForPRActionableReturnsOnFreshChangesRequestedAfterReReview(t *testi
 	fresh := reReviewObservation(head, checksGreen, "changes_requested", true, freshAt, freshAt)
 	source := &fakeReadinessSource{results: []*prReadiness{stale, fresh}}
 
-	got, outcome, _, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
+	got, outcome, _, err := waitTuple(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -706,7 +714,7 @@ func TestWaitForPRActionableReturnsImmediatelyWithoutReReview(t *testing.T) {
 
 	approved := reReviewObservation(head, checksGreen, "approved", false, at, at)
 	source := &fakeReadinessSource{results: []*prReadiness{approved}}
-	got, outcome, _, err := waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
+	got, outcome, _, err := waitTuple(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -716,12 +724,277 @@ func TestWaitForPRActionableReturnsImmediatelyWithoutReReview(t *testing.T) {
 
 	changes := reReviewObservation(head, checksGreen, "changes_requested", false, at, at)
 	source = &fakeReadinessSource{results: []*prReadiness{changes}}
-	got, outcome, _, err = waitForPRActionable(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
+	got, outcome, _, err = waitTuple(context.Background(), source, prWaitOptions{Reviewer: "figgyster", Interval: 0}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if outcome != outcomeChangesRequested || got != changes || source.calls != 1 {
 		t.Fatalf("changes_requested not returned immediately: outcome=%s calls=%d", outcome, source.calls)
+	}
+}
+
+// A caller that has to go read the remark on GitHub is making the follow-up query
+// this command exists to remove, so the words themselves are part of the report.
+func TestReportPROutcomePrintsWhatWasSaid(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	result := readinessObservation("12", head, checksFailed, "changes_requested")
+	result.URL = "https://github.com/victorarias/attn/pull/12"
+	result.ReviewBody = "The witness is missing."
+	result.Checks = []prCheck{
+		{Name: "CI", State: checksFailed, URL: "https://github.com/victorarias/attn/runs/1"},
+		{Name: "Lint", State: checksGreen},
+	}
+	result.Comments = []prComment{
+		{ID: "c1", Author: "victorarias", Kind: "review", Body: "This drops the guard.", Location: "cmd/attn/pr.go:42"},
+		{ID: "c2", Author: "react-doctor", Kind: "issue", Bot: true, Body: "One finding."},
+	}
+
+	var plain bytes.Buffer
+	events := []prOutcome{outcomeChecksFailed, outcomeChangesRequested, outcomeComment, outcomeBotComment}
+	reportPROutcome(prWaitResult{Observation: result, Outcome: outcomeChecksFailed, Events: events}, prWaitOptions{Reviewer: "figgyster"}, &plain)
+
+	for _, want := range []string{
+		"CI https://github.com/victorarias/attn/runs/1",
+		"--- figgyster ---",
+		"  The witness is missing.",
+		"--- victorarias on cmd/attn/pr.go:42 ---",
+		"  This drops the guard.",
+		"--- react-doctor ---",
+		"  One finding.",
+		"https://github.com/victorarias/attn/pull/12",
+	} {
+		if !strings.Contains(plain.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, plain.String())
+		}
+	}
+	if strings.Contains(plain.String(), "Lint https") {
+		t.Fatalf("a passing check was printed as a failure:\n%s", plain.String())
+	}
+
+	var encoded bytes.Buffer
+	reportPROutcome(prWaitResult{Observation: result, Outcome: outcomeChangesRequested, Events: events}, prWaitOptions{JSON: true, Reviewer: "figgyster"}, &encoded)
+	var payload struct {
+		URL    string `json:"url"`
+		Checks struct {
+			Failed []prCheck `json:"failed"`
+		} `json:"checks"`
+		Review struct {
+			Body string `json:"body"`
+		} `json:"review"`
+		Comments []prComment `json:"comments"`
+	}
+	if err := json.Unmarshal(encoded.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.URL == "" || payload.Review.Body != "The witness is missing." ||
+		len(payload.Checks.Failed) != 1 || payload.Checks.Failed[0].Name != "CI" ||
+		len(payload.Comments) != 2 || payload.Comments[0].Location != "cmd/attn/pr.go:42" ||
+		payload.Comments[0].Body != "This drops the guard." {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
+// The gap between two waits is where events used to disappear: the caller answers
+// a comment, waits again, and the wait baselines from a state that already
+// includes whatever landed while it was working.
+func TestWaitForPRActionableResumesFromCursorAcrossCalls(t *testing.T) {
+	head := strings.Repeat("b", 40)
+	first := prComment{ID: "c1", Author: "victorarias", Kind: "issue", CreatedAt: time.Unix(1, 0)}
+	gap := prComment{ID: "c2", Author: "victorarias", Kind: "issue", CreatedAt: time.Unix(2, 0)}
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
+
+	start := readinessObservation("12", head, checksPending, "waiting")
+	start.Comments = []prComment{first}
+	arrived := readinessObservation("12", head, checksPending, "waiting")
+	arrived.Comments = []prComment{first, gap}
+
+	// The first wait times out having seen only the pre-existing comment.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	timedOut, err := waitForPRActionable(ctx, &fakeReadinessSource{results: []*prReadiness{start}}, opts, prWaitCursor{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timedOut.Outcome != outcomeTimeout {
+		t.Fatalf("outcome = %s", timedOut.Outcome)
+	}
+	// Even reporting nothing, the wait must carry its baseline forward, or the
+	// next call rebuilds one from a later state and swallows the gap.
+	if strings.Join(timedOut.Cursor.CommentIDs, ",") != "c1" {
+		t.Fatalf("cursor = %#v, want the baseline comment recorded", timedOut.Cursor)
+	}
+
+	// The comment landed while the caller was between waits: the second wait must
+	// report it on its first poll rather than absorb it into a fresh baseline.
+	second, err := waitForPRActionable(context.Background(),
+		&fakeReadinessSource{results: []*prReadiness{arrived}}, opts, timedOut.Cursor, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Outcome != outcomeComment || len(second.Observation.Comments) != 1 ||
+		second.Observation.Comments[0].ID != "c2" {
+		t.Fatalf("outcome=%s comments=%#v", second.Outcome, second.Observation.Comments)
+	}
+	if strings.Join(second.Cursor.CommentIDs, ",") != "c1,c2" {
+		t.Fatalf("cursor = %#v, want the reported comment added", second.Cursor)
+	}
+
+	// And a third wait on the same state has nothing new to say.
+	ctx, cancel = context.WithCancel(context.Background())
+	cancel()
+	third, err := waitForPRActionable(ctx, &fakeReadinessSource{results: []*prReadiness{arrived}}, opts, second.Cursor, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Outcome != outcomeTimeout {
+		t.Fatalf("a comment already reported was reported again: outcome = %s", third.Outcome)
+	}
+}
+
+// A failing check stays true until someone pushes, so re-reporting it would make
+// every subsequent wait return instantly with nothing new.
+func TestWaitForPRActionableSuppressesAlreadyReportedFailure(t *testing.T) {
+	head := strings.Repeat("c", 40)
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0}
+	failing := readinessObservation("12", head, checksFailed, "waiting")
+	failing.Checks = []prCheck{{Name: "CI", State: checksFailed}}
+
+	first, err := waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{failing}}, opts, prWaitCursor{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Outcome != outcomeChecksFailed || first.Cursor.FailureHead != head ||
+		strings.Join(first.Cursor.FailureChecks, ",") != "CI" {
+		t.Fatalf("outcome=%s cursor=%#v", first.Outcome, first.Cursor)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	again, err := waitForPRActionable(ctx, &fakeReadinessSource{results: []*prReadiness{failing}}, opts, first.Cursor, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Outcome != outcomeTimeout {
+		t.Fatalf("the same failure returned twice: outcome = %s", again.Outcome)
+	}
+
+	// A different failing check on the same commit is a different failure.
+	worse := readinessObservation("12", head, checksFailed, "waiting")
+	worse.Checks = []prCheck{{Name: "CI", State: checksFailed}, {Name: "Lint", State: checksFailed}}
+	changed, err := waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{worse}}, opts, first.Cursor, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.Outcome != outcomeChecksFailed {
+		t.Fatalf("a new failing check was suppressed: outcome = %s", changed.Outcome)
+	}
+
+	// So is the same failure after a push.
+	pushed := readinessObservation("12", strings.Repeat("d", 40), checksFailed, "waiting")
+	pushed.Checks = []prCheck{{Name: "CI", State: checksFailed}}
+	repushed, err := waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{pushed}}, opts, first.Cursor, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repushed.Outcome != outcomeChecksFailed {
+		t.Fatalf("the failure on a new head was suppressed: outcome = %s", repushed.Outcome)
+	}
+}
+
+// --since is the escape hatch: it replays by arrival time, so a caller does not
+// need to know any comment ID to recover a window.
+func TestWaitForPRActionableSinceReplaysByTime(t *testing.T) {
+	head := strings.Repeat("e", 40)
+	old := prComment{ID: "c1", Author: "victorarias", Kind: "issue", CreatedAt: time.Unix(100, 0)}
+	recent := prComment{ID: "c2", Author: "victorarias", Kind: "issue", CreatedAt: time.Unix(300, 0)}
+	observation := readinessObservation("12", head, checksPending, "waiting")
+	observation.Comments = []prComment{old, recent}
+
+	opts := prWaitOptions{Reviewer: "figgyster", Interval: 0, Since: time.Unix(200, 0)}
+	// The cursor claims both comments were already reported; --since overrides it.
+	result, err := waitForPRActionable(context.Background(), &fakeReadinessSource{results: []*prReadiness{observation}}, opts,
+		prWaitCursor{CommentIDs: []string{"c1", "c2"}}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != outcomeComment || len(result.Observation.Comments) != 1 ||
+		result.Observation.Comments[0].ID != "c2" {
+		t.Fatalf("outcome=%s comments=%#v", result.Outcome, result.Observation.Comments)
+	}
+}
+
+func TestPRWaitCursorRoundTripsOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	opts := prWaitOptions{Owner: "victorarias", Name: "attn", Number: 679}
+	now := time.Unix(1_700_000_000, 0)
+
+	if cursor, err := loadPRWaitCursor(dir, opts); err != nil || !cursor.empty() {
+		t.Fatalf("first call must start empty: cursor=%#v err=%v", cursor, err)
+	}
+
+	saved := prWaitCursor{CommentIDs: []string{"c1"}, VerdictAt: now, FailureHead: "abc", FailureChecks: []string{"CI"}}
+	if err := savePRWaitCursor(dir, opts, saved, now); err != nil {
+		t.Fatal(err)
+	}
+	// Host defaults so a --repo owner/name target and a github.com URL agree.
+	path := filepath.Join(dir, "github.com", "victorarias", "attn", "679.json")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("cursor not at %s: %v", path, err)
+	}
+	loaded, err := loadPRWaitCursor(dir, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(loaded.CommentIDs, ",") != "c1" || !loaded.VerdictAt.Equal(now) ||
+		loaded.FailureHead != "abc" || !loaded.sameFailure("abc", []prCheck{{Name: "CI", State: checksFailed}}) {
+		t.Fatalf("loaded = %#v", loaded)
+	}
+
+	// A cursor with nothing recorded in a field says nothing about it, rather than
+	// claiming a verdict at the zero time.
+	encoded, err := json.Marshal(prWaitCursor{CommentIDs: []string{"c1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "0001-01-01") {
+		t.Fatalf("cursor = %s", encoded)
+	}
+
+	// A cursor is an optimization over re-baselining: a corrupt one must not stop
+	// the caller from waiting.
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cursor, err := loadPRWaitCursor(dir, opts); err == nil || !cursor.empty() {
+		t.Fatalf("corrupt cursor must report the problem and read as empty: cursor=%#v err=%v", cursor, err)
+	}
+
+	// Cursors nobody has waited on in a month are dropped, and the directory has
+	// no other owner to clean it.
+	stale := filepath.Join(dir, "github.com", "victorarias", "attn", "1.json")
+	if err := os.WriteFile(stale, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-2 * prCursorMaxAge)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := savePRWaitCursor(dir, opts, saved, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale cursor survived: %v", err)
+	}
+}
+
+// An empty directory disables the memory, which is what any code path that has no
+// business resolving a data dir passes.
+func TestPRWaitCursorWithoutDirectoryIsInert(t *testing.T) {
+	if err := savePRWaitCursor("", prWaitOptions{Number: 1}, prWaitCursor{CommentIDs: []string{"c1"}}, time.Unix(1, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if cursor, err := loadPRWaitCursor("", prWaitOptions{Number: 1}); err != nil || !cursor.empty() {
+		t.Fatalf("cursor=%#v err=%v", cursor, err)
 	}
 }
 
@@ -743,6 +1016,19 @@ func TestParsePRWaitArgs(t *testing.T) {
 	if opts.Host != "ghe.example.com" || opts.Owner != "victorarias" || opts.Name != "attn" || !opts.JSON ||
 		strings.Join(opts.IgnoreAuthors, ",") != "bot-one,bot-two" {
 		t.Fatalf("opts = %#v", opts)
+	}
+
+	opts, err = parsePRWaitArgs([]string{"602", "--repo", "victorarias/attn", "--reviewer", "figgyster",
+		"--reset", "--since", "2026-07-26T10:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !opts.Reset || !opts.Since.Equal(mustTime(t, "2026-07-26T10:00:00Z")) {
+		t.Fatalf("opts = %#v", opts)
+	}
+	if _, err := parsePRWaitArgs([]string{"602", "--repo", "victorarias/attn", "--reviewer", "figgyster", "--since", "yesterday"}); err == nil ||
+		!strings.Contains(err.Error(), "RFC3339") {
+		t.Fatalf("--since error = %v", err)
 	}
 
 	if _, err := parsePRWaitArgs([]string{"602", "--reviewer", "figgyster"}); err == nil || !strings.Contains(err.Error(), "--repo is required") {
