@@ -7,10 +7,7 @@ require (
 	nhooyr.io/websocket v1.8.17
 )
 
-require (
-	github.com/google/uuid v1.6.0
-	github.com/victorarias/claude-agent-sdk-go v0.1.2-0.20260218145855-698f077a144c
-)
+require github.com/google/uuid v1.6.0
 
 require (
 	github.com/creack/pty v1.1.24

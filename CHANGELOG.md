@@ -6,6 +6,19 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-26]
+
+### Changed
+- **Stop-time classification for Claude sessions now runs through the same
+  isolated headless path as attn's other background Claude runs**, instead of a
+  separate Go SDK wrapper. The judgment call is unchanged (same prompt, same
+  Haiku default, same `ATTN_CLAUDE_CLASSIFIER_MODEL` override, same
+  waiting/done verdict), but the run is now hermetic: no MCP servers attach, the
+  user's Claude settings and slash commands are not loaded, tools are disabled,
+  and the environment is scrubbed. Previously the classifier inherited ambient
+  Claude configuration, so a slow or needs-auth MCP connector could delay or sink
+  a classification and leave a session's state `unknown`.
+
 ## [2026-07-25]
 
 ### Added

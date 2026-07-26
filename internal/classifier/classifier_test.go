@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/victorarias/claude-agent-sdk-go/types"
 )
 
 func TestParseResponse_Waiting(t *testing.T) {
@@ -232,65 +230,62 @@ func TestBuildPrompt_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestClassify_EmptyText_ReturnsIdleImmediately(t *testing.T) {
-	// This test verifies the early return path for empty text
-	// The Classify function should return "idle" immediately without calling CLI
-	result, err := Classify("", 0) // 0 timeout is fine because it should return immediately
-	if err != nil {
-		t.Errorf("Classify empty text unexpected error: %v", err)
-	}
-	if result != "idle" {
-		t.Errorf("Classify empty text = %q, want 'idle'", result)
-	}
-}
-
-func TestClassifyClaudeMessages_PreservesAssistantVerdictWhenLaterToolCallIsEmpty(t *testing.T) {
-	messages := []types.Message{
-		&types.AssistantMessage{
-			Content: []types.ContentBlock{
-				&types.TextBlock{TextContent: "WAITING"},
-			},
-		},
-		&types.AssistantMessage{
-			Content: []types.ContentBlock{
-				&types.ToolUseBlock{Name: "StructuredOutput"},
-			},
-		},
-		&types.ResultMessage{
-			Subtype: "error_max_turns",
-		},
-	}
-
-	result, ok, lastAssistant := classifyClaudeMessages(messages)
+// A run that hits the turn cap before the structured-output turn still has its
+// prose verdict in the final text; that text is the fallback.
+func TestParseVerdict_FallsBackToFinalTextWithoutStructuredOutput(t *testing.T) {
+	result, ok := ParseVerdict(nil, "WAITING")
 	if !ok {
-		t.Fatal("expected classifyClaudeMessages to return a verdict")
+		t.Fatal("expected ParseVerdict to return a verdict")
 	}
 	if result != "waiting_input" {
 		t.Fatalf("result = %q, want waiting_input", result)
 	}
-	if lastAssistant != "WAITING" {
-		t.Fatalf("lastAssistant = %q, want WAITING", lastAssistant)
-	}
 }
 
-func TestClassifyClaudeMessages_PrefersStructuredOutputOverAssistantText(t *testing.T) {
-	messages := []types.Message{
-		&types.AssistantMessage{
-			Content: []types.ContentBlock{
-				&types.TextBlock{TextContent: "WAITING"},
-			},
-		},
-		&types.ResultMessage{
-			StructuredOutput: map[string]any{"verdict": "DONE"},
-		},
-	}
-
-	result, ok, _ := classifyClaudeMessages(messages)
+func TestParseVerdict_PrefersStructuredOutputOverFinalText(t *testing.T) {
+	result, ok := ParseVerdict(json.RawMessage(`{"verdict":"DONE"}`), "WAITING")
 	if !ok {
-		t.Fatal("expected classifyClaudeMessages to return a verdict")
+		t.Fatal("expected ParseVerdict to return a verdict")
 	}
 	if result != "idle" {
 		t.Fatalf("result = %q, want idle", result)
+	}
+}
+
+// An unusable structured output must not swallow a usable final text.
+func TestParseVerdict_IgnoresVerdictlessStructuredOutput(t *testing.T) {
+	result, ok := ParseVerdict(json.RawMessage(`{"unrelated":true}`), "WAITING")
+	if !ok {
+		t.Fatal("expected ParseVerdict to fall back to the final text")
+	}
+	if result != "waiting_input" {
+		t.Fatalf("result = %q, want waiting_input", result)
+	}
+}
+
+func TestParseVerdict_NoVerdictAnywhere(t *testing.T) {
+	if result, ok := ParseVerdict(nil, "I'll keep going."); ok {
+		t.Fatalf("expected no verdict, got %q", result)
+	}
+}
+
+func TestClaudeVerdictSchema_IsValidJSON(t *testing.T) {
+	var schema map[string]any
+	if err := json.Unmarshal([]byte(ClaudeVerdictSchema), &schema); err != nil {
+		t.Fatalf("ClaudeVerdictSchema is not valid JSON: %v", err)
+	}
+	if _, ok := schema["properties"].(map[string]any)["verdict"]; !ok {
+		t.Fatal("ClaudeVerdictSchema is missing the verdict property")
+	}
+}
+
+func TestClaudeClassifierModel_EnvOverride(t *testing.T) {
+	if got := ClaudeClassifierModel(); got != DefaultClaudeClassifierModel {
+		t.Fatalf("ClaudeClassifierModel() = %q, want %q", got, DefaultClaudeClassifierModel)
+	}
+	t.Setenv("ATTN_CLAUDE_CLASSIFIER_MODEL", "claude-haiku-4-5-20251001")
+	if got := ClaudeClassifierModel(); got != "claude-haiku-4-5-20251001" {
+		t.Fatalf("ClaudeClassifierModel() = %q, want the env override", got)
 	}
 }
 
