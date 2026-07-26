@@ -87,6 +87,14 @@ export const scenarioCatalog = [
     timeoutMs: 360_000,
   },
   {
+    id: 'agent-queue',
+    label: 'Agent queue: a turn opens on a state and closes only when the user settles it',
+    command: ['pnpm', 'run', 'real-app:scenario-agent-queue'],
+    // Boots two real Claude agents in two workspaces, steers one through a full
+    // run, and restarts the daemon; needs well more than the default budget.
+    timeoutMs: 900_000,
+  },
+  {
     id: 'automation-lifecycle',
     label: 'Automation lifecycle: edit-rebind, delete-resurrect, cleanup-dirty-safe',
     command: ['pnpm', 'run', 'real-app:scenario-automation-lifecycle'],
