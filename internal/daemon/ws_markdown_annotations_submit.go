@@ -17,7 +17,7 @@ const (
 
 // handleMarkdownAnnotationsSubmit formats the persisted annotation draft for
 // a path into the feedback payload and delivers it into the target session's
-// PTY via typeDoorbell (bracketed paste + Enter, atomic under doorbellMu).
+// PTY via typeDoorbell (bracketed paste, then Enter, both under doorbellMu).
 //
 // Drafts are tombstone-cleared ONLY after a successful delivery; every other
 // outcome (validation error, unknown session, pending_approval skip, PTY

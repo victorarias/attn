@@ -8,6 +8,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-26]
 
+### Fixed
+- **Sending markdown annotations to a Claude session now actually submits.** The
+  feedback landed in Claude's composer and sat there unsent until you pressed
+  Enter yourself. Claude folds an Enter that arrives together with a paste into
+  the pasted text, and attn was sending both at once. Enter now follows the paste
+  as its own keypress. Same fix for the ticket nudge, the notebook inbox
+  doorbell, and the Present review notice, which are delivered the same way.
+
 ### Added
 - **`attn state explain <session>` (`--json`)** replays a session's recent state
   observations and shows which rule produced the color it is showing, and why.

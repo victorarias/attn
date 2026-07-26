@@ -201,6 +201,10 @@ type Daemon struct {
 	// doorbell write. This keeps a pending_approval report from interleaving
 	// between the prompt and its trailing Enter.
 	doorbellMu sync.Mutex
+	// ptyWriteFences serializes writes into each session's PTY so nothing can
+	// land inside a multi-write delivery — see pty_write_fence.go.
+	ptyWriteFencesMu sync.Mutex
+	ptyWriteFences   map[string]*sync.Mutex
 	// stateTrace is the diagnostic ring of state observations behind
 	// `attn state explain`. Lazily built so a directly-constructed test daemon
 	// traces without an init site.
@@ -1773,6 +1777,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 		d.reconcileTicketsOnSessionEnd(sessionID, string(session.State))
 	}
 	d.clearNudgeState(sessionID)
+	d.clearPTYWriteFence(sessionID)
 	d.store.Remove(sessionID)
 	// After the row is gone, not before: recordStateObservation gates on the row,
 	// so forgetting first would leave a window where a concurrent observation

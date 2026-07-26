@@ -81,7 +81,7 @@ func TestTypeDoorbell_KeepsPTYPasteWithoutMessageDeliveryCapability(t *testing.T
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
 	var recordedInput []byte
-	backend.onInput = func(_ string, data []byte) { recordedInput = append([]byte(nil), data...) }
+	backend.onInput = func(_ string, data []byte) { recordedInput = append(recordedInput, data...) }
 	d.ptyBackend = backend
 
 	client, done := startPluginPipe(t, d, "pi-plugin", nil)
