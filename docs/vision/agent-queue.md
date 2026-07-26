@@ -32,8 +32,8 @@ is work only you can do.
 
 The unit is not the agent. It is **the turn you owe.** Every state we detect
 already answers that question: waiting for input, waiting for approval, stuck,
-crashed — your turn. Working, scheduled — its turn. The queue is just that
-question, asked continuously and answered out loud.
+crashed, finished — your turn. Working, scheduled — its turn. The queue is just
+that question, asked continuously and answered out loud.
 
 The vocabulary is one word in two forms. An agent that owes you nothing is
 **settled**, and that is the name of the band it sits in — working, snoozed, and
@@ -68,10 +68,12 @@ gesture, and nothing downstream needs to tell them apart.
   agent. This is a real departure from the sidebar today, where the row is a
   workspace and agents are panes inside its layout, and it is the departure the
   whole feature rests on.
-- **Predictable beats clever.** Most recently unsettled, first. Everything in the
-  queue is blocked, so ranking by cause makes position unguessable — but recency is
-  something you already hold in your head, and the thing that just came back to you
-  is the thing you have context for. Position is knowable without being memorized.
+- **Predictable beats clever.** Oldest unsettled, first. Everything in the queue is
+  blocked, so ranking by cause makes position unguessable. Ordering by age makes the
+  list stable under everything except your own draining: new turns land at the
+  bottom, out of your way, and a row moves only when something ahead of it leaves.
+  Ranking the other way would reshuffle the top of the list while you were still
+  reading it, every time an agent across the board came back.
 - **Drain a workspace before leaving it.** Switching workspace is the expensive
   context switch, not switching agent. This is a rule about where moving on takes
   you, and nothing else: if another agent in the workspace you are already in wants
@@ -87,11 +89,20 @@ gesture, and nothing downstream needs to tell them apart.
   the top, always, outside the queue — it is the console you drive the rest from,
   not a peer competing for a slot, and when it blocks on you it says so where it
   stands rather than being promoted into competition with the work it dispatched.
-  Then what is your turn. Then the workspaces you pinned, present whether or not
-  they want anything. Then the settled rest, quiet but reachable. Muted last, and
-  only if you go looking. The bands are the one thing you hand-order, and you can
-  drag them into the arrangement you want. Nothing inside the queue is
-  hand-orderable: its order is the answer to a question, not a preference.
+  Then what is your turn. Then the workspaces you pinned — a place to work rather
+  than a band of the queue, see below. Then the settled rest, quiet but reachable.
+  Muted last, and only if you go looking. The bands are the one thing you
+  hand-order, and you can drag them into the arrangement you want. Nothing inside
+  the queue is hand-orderable: its order is the answer to a question, not a
+  preference.
+- **Two arrangements, and neither one retires.** Pinning takes an agent out of the
+  queue for good: a pinned workspace is never handed to you, and you go to it
+  instead. That is not a lesser mode or a migration leftover — it is the other half
+  of the product. A sidebar you scan by color is exactly the right shape for work
+  you have deliberately chosen to hold in view, and it stays that shape forever. The
+  queue is where work is handed to you; the pinned band is where you go and get it.
+  An agent moves between them in either direction, and a workspace can be born
+  pinned, so the choice is yours at the start and at any point after.
 - **Explicit intent outranks inference.** Pin, mute, and snooze are the user saying
   what matters, and detection never overrides them. This is what makes the queue
   safe to trust: when it is wrong, the user can be right, permanently, in one
@@ -116,7 +127,9 @@ gesture, and nothing downstream needs to tell them apart.
 - **The daemon owns the queue; the app is a sensor.** Whose turn it is, countdowns,
   deferrals, and promotions are daemon state, resolved from evidence. The app
   reports what only it can see — that the user typed, scrolled, clicked — as more
-  evidence. Nothing about the queue lives only in a window.
+  evidence. Which arrangement is in effect is daemon state too: it changes what a
+  turn is and when one ends, which is policy, not a rendering preference. Nothing
+  about the queue lives only in a window.
 - **Deferral is honoured; muting is absolute.** Snoozing says *not now* — a
   considered act that business as usual does not undo, though what the user could
   not have anticipated still breaks through: errors and states we cannot explain.
@@ -134,15 +147,34 @@ existing session states are its entire vocabulary. The sidebar's standing order 
 chief on top, then your turn, then pinned workspaces, then the settled rest, then
 muted. Settle as the one intentional discharging act, available on any turn.
 Deferral (time-boxed snooze, broken only by errors and states we cannot explain),
-muting as its absolute sibling, pinning as its inverse, a shortcut for moving on
-to the next agent that wants you, unhurried exploration of settled agents, and a
-designed empty state.
+muting as its absolute sibling, pinning as the way out of the queue entirely, a
+shortcut for moving on to the next agent that wants you, unhurried exploration of
+settled agents, and a designed empty state.
 
 An agent whose run ended owes you a turn like any other. It is not running and it
 is not going to do anything else, but its output is exactly the thing you need to
 read, and it leaves the queue the same way everything does — by being settled, on
-purpose. A finished run that silently settles itself is how you lose
-forty minutes of work.
+purpose. A finished run that silently settles itself is how you lose forty minutes
+of work.
+
+That is the design's largest consequence and it is deliberate: nothing that ever
+ran leaves your plate by itself, so the queue at the start of a day holds every
+agent you did not settle the day before. It is also what retires today's long-run
+review flag rather than absorbing it. That flag exists only because a finished run
+is invisible, and it clears by being looked at, which this vision rejects; once a
+finished run is a turn like any other, it has no job left, and the machinery that
+holds a verdict back until someone glances at the session comes out with it.
+Whether the verdict is worth computing at all while an agent sits in the queue is
+an optimisation, not a design question.
+
+Moving between the two arrangements is one gesture: drag an agent out of the queue
+onto a pinned workspace to take it off your plate for good, or drag it back to put
+it on. That is the only drag the queue has. It replaces today's drag-to-anywhere,
+because a queue has no unpinned workspaces to drop onto — re-homing an agent to an
+arbitrary workspace is something the pinned arrangement keeps and the queue does
+not. A workspace can also be born outside the queue: the flow that creates a
+workspace and its first agent together carries a toggle for it, so work you already
+know you want to hold in view never enters the queue at all.
 
 Shells are not in the queue. A workspace holding only shells can never owe you a
 turn, so it has no queue presence at all — it lives in the settled band like any
@@ -153,13 +185,16 @@ the session states are the vocabulary.
 
 **What this costs, deliberately.** Today's sidebar is purely spatial — workspaces
 sort by a rank the user owns and nothing else ever moves them, which is what makes
-⌘1–9 and ⌘↑/⌘↓ into positional muscle memory. A queue that reorders under you
-cannot keep that, and in queue mode the numbered shortcuts stop addressing
+⌘1–9 and ⌘↑/⌘↓ into positional muscle memory — the numbers are painted on the rows
+today, so they are an affordance and not only a habit. A queue that reorders under
+you cannot keep that, and in queue mode the numbered shortcuts stop addressing
 positions in the list. They keep working for the things that never move: the chief
-and pinned entries. Navigating the queue itself is a separate gesture that moves
-you through it without settling anything, so looking ahead never costs you your
-place. Selection stays legible the way it already is — unfocused agents dim, and
-the selected row can carry its own edge.
+and pinned entries. Ordering by age is what keeps the rest of the loss small — rows
+only ever move up, and only because you drained what was above them. Navigating the
+queue itself is a separate gesture that moves you through it without settling
+anything, so looking ahead never costs you your place. Selection stays legible the
+way it already is — unfocused agents dim, and the selected row can carry its own
+edge.
 
 **Depends on, but is not.** The queue is only as good as the states beneath it,
 and one gap in particular is load-bearing: an agent that has gone quiet — no tool
@@ -178,9 +213,12 @@ later, without that being the first move.
 No unread counts, no read/unread state, no record of turns you already took. The
 queue is a live picture of the present, and it forgets.
 
-**Shipping posture.** Opt-in mode first, default later. The state-detection work
-that makes this possible ships off by default; the queue earns the default once
-detection is trusted in real use, not before. Automatic move-on is opted into
+**Shipping posture.** Opt-in first, default later — where "default" means the queue
+becomes the arrangement you land in, not that anything is retired. The
+state-detection work that makes this possible ships off by default; the queue earns
+the default once detection is trusted in real use, not before. Nothing about the
+sidebar you scan by color goes away when it does: that is where pinned work lives,
+and it lives there permanently. Automatic move-on is opted into
 separately again, on top of the queue — it is an experiment about feel, and it
 should be possible to live in the queue without ever turning it on.
 
@@ -189,20 +227,21 @@ should be possible to live in the queue without ever turning it on.
 - [x] **Trustworthy state detection.** The evidence-table resolver and
   harness-owned hook/heartbeat signals. Without near-perfect states the queue is
   a lie, and this is what makes "your turn" mechanically knowable.
-- [ ] **The queue itself.** The sidebar rendered as *Your turn* / *Settled*, one
-  row per agent that wants you, most recently unsettled first, behind a toggle. The single collapse of
-  today's several competing notions of "needs attention" into one — including its
-  earliest ancestor, the long run flagged for review. That flag was a first glimpse
-  of this vision built as a thin slice: it never encoded the full state, and it
-  clears by being seen, which this vision rejects. It should be absorbed into the
-  queue and settled like anything else.
+- [ ] **The queue itself.** The sidebar rendered as *Your turn* / *Settled*, one row
+  per agent that wants you, oldest unsettled first, behind a toggle. Whose turn it
+  is becomes daemon-owned and broadcast rather than recomputed in the app. The
+  single collapse of today's several competing notions of "needs attention" into
+  one — including its earliest ancestor, the long run flagged for review, which this
+  removes rather than reimplements.
 - [ ] **Settle.** One keystroke that takes a turn off your plate, on any agent, for
   either reason — done with it, or the queue was wrong. The act that makes the
   whole thing safe to trust, because it makes being wrong cheap.
 - [ ] **The standing order.** Chief anchored on top and able to say it is blocked
-  without leaving its slot, pinned workspaces held up, muted pushed out of sight —
-  the user-controlled bands the queue lives between, and the guarantee that
-  anything not in your face is still one click away.
+  without leaving its slot, pinned workspaces as a place to work rather than a queue
+  band, muted pushed out of sight — the user-controlled bands the queue lives
+  between, and the guarantee that anything not in your face is still one click away.
+  Carries the two ways an agent leaves the queue for good: dragged onto a pinned
+  workspace, or born there from the new-workspace flow.
 - [ ] **Move on.** A shortcut that takes you from the agent you just steered to the
   next one that wants you — a sibling in the workspace you are already in when
   there is one, the top of the queue when there is not. The core verb of the whole
@@ -222,7 +261,8 @@ should be possible to live in the queue without ever turning it on.
   should never queue at all.
 - [ ] **The empty state.** What the product says and shows when nothing wants you —
   starting as nothing, and eventually perhaps something.
-- [ ] **Default-on.** Flip it once the queue has earned belief.
+- [ ] **Default-on.** Make the queue the arrangement you land in, once it has earned
+  belief. Nothing is removed when that happens.
 
 ## Open questions
 
@@ -243,13 +283,14 @@ mode, many agents watchable at once, the shift from steering one at a time to
 seeing the whole board move. That is a later chapter, and naming it now mostly
 guards against filling the space with something worse in the meantime.
 
-**Blindspot — what this feels like at rest.** The design reasoning here is about
-motion: things entering, leaving, counting down. Much less is known about the
-steady state of living inside this all day, especially the transition from a
-spatial sidebar you've memorized to a list that reorders under you. Worth a
-grounding pass on the actual sidebar interaction model — session switching,
-workspace grouping, what muscle memory exists today — before the queue chunk
-starts.
+**What this feels like at rest.** The design reasoning here is about motion: things
+entering, leaving, counting down. Much less is known about the steady state of
+living inside it all day. A grounding pass on today's sidebar settled the
+mechanical half: selection is already addressed by agent rather than by workspace,
+so a flat list of agents is a rendering change and not a new selection model, and
+what a reordering list actually costs is the numbered shortcuts and the
+workspace-to-workspace drag. What it could not answer is whether a list you drain
+feels better to live in than a board you scan. Only using it answers that.
 
 **Naming.** *Your turn* and *settled* are the two halves, and *settle* is the verb.
 The feature itself is still not called "attention mode."
