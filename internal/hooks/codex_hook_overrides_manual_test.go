@@ -1,13 +1,18 @@
 package hooks
 
-// SPIKE — throwaway. Emits the codex `-c` overrides needed to wire an arbitrary
-// logger script as codex's hook set, reusing the production trusted-hash
-// computation so codex actually accepts them. Used to give the state-detection
-// spike hook-derived ground truth for codex, the same way --settings does for
-// claude.
+// A tool, not a test: it asserts nothing and skips unless pointed at a logger
+// script. It emits the codex `-c` overrides that wire an arbitrary script as
+// codex's whole hook set, reusing the production trusted-hash computation so
+// codex accepts them. That is how you capture which codex hooks fire, and in what
+// order, for a real turn — the ground truth behind every codex claim in
+// internal/sessionstate. claude needs no equivalent: `--settings` takes a file.
 //
-//   go test ./internal/hooks -run TestSpikePrintCodexOverrides -v \
-//     -args-unused   ATTN_SPIKE_HOOKLOG=/path/hooklog.sh
+// It lives here because the trusted-hash computation it depends on is unexported.
+//
+//   go test ./internal/hooks -run TestPrintCodexHookOverridesForManualCapture -v
+//
+// with ATTN_HOOKLOG_SCRIPT set to the logger. Re-run it whenever codex changes
+// which hooks it fires; the resolver's codex behavior is derived from that list.
 
 import (
 	"fmt"
@@ -17,10 +22,10 @@ import (
 	"testing"
 )
 
-func TestSpikePrintCodexOverrides(t *testing.T) {
-	logger := strings.TrimSpace(os.Getenv("ATTN_SPIKE_HOOKLOG"))
+func TestPrintCodexHookOverridesForManualCapture(t *testing.T) {
+	logger := strings.TrimSpace(os.Getenv("ATTN_HOOKLOG_SCRIPT"))
 	if logger == "" {
-		t.Skip("set ATTN_SPIKE_HOOKLOG to the hook logger script")
+		t.Skip("set ATTN_HOOKLOG_SCRIPT to the hook logger script")
 	}
 
 	// Same shape as GenerateCodexConfigOverrides, but each event invokes the

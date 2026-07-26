@@ -215,12 +215,8 @@ type Daemon struct {
 	sessionDwell     *dwellGate
 	// sessionStateReason is the resolver clause behind each session's current
 	// state, carried to clients beside the state itself.
-	sessionStateReasonOnce sync.Once
-	sessionStateReason     *sessionStateReasons
-	// sessionReadTimes is when the user last saw each session's output, and the
-	// idle-staleness mark derived from it.
-	sessionReadTimesOnce       sync.Once
-	sessionReadTimes           *sessionReadTimes
+	sessionStateReasonOnce     sync.Once
+	sessionStateReason         *sessionStateReasons
 	nudgeMu                    sync.Mutex
 	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
 	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
@@ -1007,7 +1003,16 @@ func (d *Daemon) Start() error {
 	}
 }
 
-func (d *Daemon) pruneSessionsWithoutPTY() int {
+// pruneSessionsWithoutPTY decides what to do with sessions the store carries over
+// from a previous daemon run: recover the ones that can resume, drop the rest.
+//
+// Sessions that moved after cutoff are left alone. This prune races the listener,
+// which is already accepting connections when it runs, so a session registered in
+// the gap belongs to this run and has no PTY yet — and every verdict here is
+// terminal for the resolver, which owns neither `recoverable` nor a removed row.
+// The worker-backend reconciler skips recent sessions for the same reason. Pass a
+// zero cutoff to consider every session.
+func (d *Daemon) pruneSessionsWithoutPTY(cutoff time.Time) int {
 	if d.store == nil {
 		return 0
 	}
@@ -1024,6 +1029,9 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 	recoverable := 0
 	for _, session := range sessions {
 		if _, ok := liveIDs[session.ID]; ok {
+			continue
+		}
+		if sessionUpdatedAfter(session, cutoff) {
 			continue
 		}
 		if d.recoverOnMissingPTY(session) {
@@ -1104,7 +1112,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 		return
 	}
 
-	removedSessions := d.pruneSessionsWithoutPTY()
+	removedSessions := d.pruneSessionsWithoutPTY(recoveryStartedAt)
 	if removedSessions > 0 {
 		d.logf("pruned %d stale sessions without live PTY on startup", removedSessions)
 		d.addWarning(
@@ -1606,18 +1614,16 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		}
 	}
 
+	// An exited process is the resolver's first and only unconditional clause, so
+	// recording it is all this needs to do: the session settles on the next tick,
+	// including when the process dies by a route this one never reaches.
 	d.recordProcessEvidence(info.ID, true)
 	if session := d.store.Get(info.ID); session != nil {
-		// Reconcile bound tickets against the pre-clobber state: the idle-clobber
-		// just below erases whether the agent was mid-flight (a crash or kill) or at
-		// a clean rest when its process exited — the signal that decides between the
-		// Crashed stamp and the orphaned-ticket classifier (ticket_reconcile.go).
+		// Read the state before that tick lands: it is the difference between an
+		// agent that was mid-flight (a crash or a kill) and one at a clean rest, and
+		// therefore between the Crashed stamp and the orphaned-ticket classifier
+		// (ticket_reconcile.go). The settle erases it.
 		d.reconcileTicketsOnSessionEnd(info.ID, string(session.State))
-		d.applyState(sessionStateChange{
-			sessionID: info.ID,
-			state:     protocol.StateIdle,
-			cause:     processExit{},
-		})
 	}
 
 	event := &protocol.WebSocketEvent{
@@ -1774,7 +1780,6 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	d.forgetStateTrace(sessionID)
 	d.evidenceTable().forget(sessionID)
 	d.stateReasons().forget(sessionID)
-	d.readTimes().forget(sessionID)
 	// The dwell gate has to be cleared here rather than left to the resolve
 	// loop's own cleanup: that loop walks the evidence table, so forgetting the
 	// evidence row is exactly what stops it from ever visiting this session
@@ -1783,18 +1788,14 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	d.dwellGate().clear(sessionID)
 }
 
-// handlePTYState applies one PTY-layer observation. It is still last-writer-wins
-// against the other sources; the observation's source/detail/observation-time are
-// carried so the resolver can arbitrate once it exists, and are logged meanwhile.
+// handlePTYState files one PTY-layer observation, and for the worker poll —
+// which names a state rather than a level, and is how a session leaves
+// `launching` — applies it directly. See Source.ClaimsProtocolState.
 func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 	state := obs.Claim
 	origin := stateOrigin{source: string(obs.Source), detail: obs.Detail, observedAt: obs.At}
 	d.recordPTYEvidence(sessionID, obs)
-	// The harness signals are wired ahead of the resolver that will weigh them, so
-	// their traces can be compared against the current behavior before anything
-	// arbitrates on them. They are recorded and go no further; their claims are in
-	// their own vocabulary and are not protocol states to apply.
-	if obs.Source.EvidenceOnly() {
+	if !obs.Source.ClaimsProtocolState() {
 		d.traceStateEvidence(sessionID, origin, state)
 		return
 	}
@@ -1809,12 +1810,6 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 		return
 	}
 	agent := session.Agent
-	driver := agentdriver.Get(string(agent))
-	if !agentdriver.ShouldApplyPTYState(driver, session.State, state) {
-		d.traceStateVeto(sessionID, origin, state, "driver_transition_filter")
-		return
-	}
-
 	d.logf(
 		"pty state update: session=%s agent=%s state=%s source=%s detail=%q observed_at=%s",
 		sessionID, agent, state, obs.Source, obs.Detail, obs.At.Format(time.RFC3339Nano),
@@ -2410,17 +2405,26 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 	}
 }
 
+// handleState files what a hook saw. It does not apply a state, deliberately:
+// the hook is one witness among several, and the resolver is what weighs them.
+//
+// It used to do both, and that was the last place two writers raced. The trace
+// of a codex approval showed the hook painting `pending_approval` ten seconds
+// before the resolver reached the same conclusion — which sounds harmless until
+// you notice the guardian dwell lives in the resolver, so an approval a robot
+// was about to answer flashed for attention anyway. Every gate the resolver
+// applies — the dwell, the ordering, the expiry of evidence that stopped
+// refreshing — was reachable only by a source that did not write state itself.
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
-	d.logf("state update: id=%s state=%s", msg.ID, msg.State)
+	d.logf("hook evidence: id=%s state=%s", msg.ID, msg.State)
 	d.tracePermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.recordReviewerEvidenceFromPermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.recordBracketEvidence(msg.ID, msg.State)
-	d.applyState(sessionStateChange{
-		sessionID: msg.ID,
-		state:     msg.State,
-		cause:     liveSignal{},
-		origin:    stateOrigin{source: stateSourceHook},
-	})
+	// A hook firing is proof the session is alive, which is a separate fact from
+	// what state it is in and the one thing the reaper reads. It rode on the
+	// applied state until now.
+	d.store.Touch(msg.ID)
+	d.traceStateEvidence(msg.ID, stateOrigin{source: stateSourceHook}, msg.State)
 	d.sendOK(conn)
 }
 
@@ -2479,21 +2483,31 @@ func (d *Daemon) persistResumeSessionID(sessionID, resumeSessionID string) {
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
 
-	// A non-terminal stop is a yield, not an end: hold the session in the state the
-	// facts imply and do none of the end-of-turn work below (no resume-id capture,
-	// no narration enqueue, no classification). The turn resumes on its own.
-	d.recordStopFacts(msg.ID, len(msg.BackgroundTaskStatuses) > 0, protocol.Deref(msg.PendingSessionCrons) > 0)
-	if state := nonTerminalStopState(msg, d.isChiefOfStaffSession(msg.ID)); state != "" {
+	// A non-terminal stop is a yield, not an end: do none of the end-of-turn work
+	// below (no resume-id capture, no narration enqueue, no classification), and
+	// leave the color to the facts recorded here. The turn resumes on its own.
+	//
+	// The facts are recorded as the rules read them, not raw. A background task
+	// the agent has already finished is present in the payload and means nothing,
+	// and a chief's background work is deliberately not work — filing either as
+	// "something will resume this turn" pins the session green with nothing left
+	// to unpin it.
+	relaxBackgroundWork := d.isChiefOfStaffSession(msg.ID)
+	d.recordStopFacts(
+		msg.ID,
+		!relaxBackgroundWork && hasActiveBackgroundTask(msg),
+		hasPendingSessionCron(msg),
+	)
+	if stopIsNonTerminal(msg, relaxBackgroundWork) {
 		d.logf(
-			"handleStop: non-terminal stop session=%s state=%s background_tasks=%d pending_crons=%d",
-			msg.ID, state, len(msg.BackgroundTaskStatuses), protocol.Deref(msg.PendingSessionCrons),
+			"handleStop: non-terminal stop session=%s background_tasks=%d pending_crons=%d",
+			msg.ID, len(msg.BackgroundTaskStatuses), protocol.Deref(msg.PendingSessionCrons),
 		)
-		d.applyState(sessionStateChange{
-			sessionID: msg.ID,
-			state:     state,
-			cause:     liveSignal{},
-			origin:    stateOrigin{source: stateSourceStopHook, detail: "non-terminal stop"},
-		})
+		d.traceStateEvidence(
+			msg.ID,
+			stateOrigin{source: stateSourceStopHook, detail: "non-terminal stop"},
+			"",
+		)
 		d.sendOK(conn)
 		return
 	}
@@ -2571,15 +2585,17 @@ func (d *Daemon) classifyOrDeferAfterStop(sessionID, transcriptPath string) {
 			sessionID,
 			runDuration.Round(time.Second),
 		)
-		if session.State == protocol.SessionStatePendingApproval || session.State == protocol.SessionStateWaitingInput {
-			d.broadcastSessionStateChanged(sessionID)
-		} else {
-			d.applyState(sessionStateChange{
-				sessionID: sessionID,
-				state:     protocol.StateWaitingInput,
-				cause:     daemonObservation{},
-			})
-		}
+		// The deferral itself is the evidence: a turn worth minutes of work ended
+		// and attn is holding the verdict until someone reads it, which the resolver
+		// reports as waiting on the user rather than settling the result away as
+		// seen. Applying that state here is what this used to do, in a write the
+		// resolver's next tick undid — the review flag was invisible to it, so the
+		// same settled evidence resolved to idle a second later.
+		//
+		// The broadcast stays for the case where the state does not move: the flag
+		// rides on session broadcasts, and a long run that ended on an approval or a
+		// question is already the state the deferral would ask for.
+		d.broadcastSessionStateChanged(sessionID)
 		return
 	}
 
@@ -2589,12 +2605,8 @@ func (d *Daemon) classifyOrDeferAfterStop(sessionID, transcriptPath string) {
 
 func (d *Daemon) handleSessionVisualized(sessionID string) {
 	// The frontend reports the focused session here, so this doubles as our
-	// signal for "currently selected session" (used by `attn open`) and as the
-	// moment attn can say a session's output has been seen. The tick keeps the
-	// selected session read while it stays on screen; this is what survives the
-	// user switching away from it.
+	// signal for "currently selected session" (used by `attn open`).
 	d.setSelectedSession(sessionID)
-	d.markSessionRead(sessionID, time.Now())
 
 	transcriptPath, shouldClassify := d.consumeNeedsReviewAfterLongRun(sessionID)
 	if !shouldClassify {
@@ -2637,17 +2649,22 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 			return
 		}
 		d.logf("classifySessionState: session=%s state=%s reason=%s", sessionID, decision.state, decision.reason)
+		// Filed, not applied. The verdict is one witness to how a turn ended and
+		// the weakest-timed of them: it describes the transcript as of
+		// classificationStartTime and lands seconds later, which is why it used to
+		// need a timestamp guard to stop it overwriting a newer state. As evidence
+		// it gets a stronger version of the same guard for free — the resolver drops
+		// a verdict the agent has since gone busy past, whatever the clock says.
 		d.recordClassifierEvidence(sessionID, decision.state, classificationStartTime)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     decision.state,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-			origin: stateOrigin{
+		d.traceStateEvidence(
+			sessionID,
+			stateOrigin{
 				source:     stateSourceClassifier,
 				detail:     decision.reason,
 				observedAt: classificationStartTime,
 			},
-		})
+			decision.state,
+		)
 	}
 
 	// Capability gates: agents can independently disable transcript parsing and
@@ -3028,7 +3045,6 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 		clone.NeedsReviewAfterLongRun = nil
 	}
 	d.decorateSessionWithStateReason(clone)
-	d.decorateSessionWithIdleStale(clone)
 	d.decorateSessionWithNudge(clone)
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)

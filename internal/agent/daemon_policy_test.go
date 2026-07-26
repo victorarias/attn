@@ -61,38 +61,17 @@ func TestRecoveredRunningSessionState_DefaultAndAgentOverrides(t *testing.T) {
 	}
 }
 
-// Copilot is the only agent whose state still reaches the store straight off the
-// rendered screen, so it is the only one that still filters. Claude and codex are
-// resolved from harness evidence and have no PTY state to filter.
-func TestShouldApplyPTYState_CopilotWhitelist(t *testing.T) {
-	copilot := Get("copilot")
-
-	for _, incoming := range []string{protocol.StateWaitingInput, protocol.StateIdle} {
-		if ShouldApplyPTYState(copilot, protocol.SessionStateWorking, incoming) {
-			t.Fatalf("copilot should ignore %s from the screen", incoming)
-		}
+// No driver may filter live PTY state any more: the interface is gone. The one
+// source that still applies a state is the worker poll, whose only job is ending
+// `launching`, and a per-agent veto over that arbitrates against the resolver
+// rather than for it. This test is the guard that nobody reintroduces one.
+func TestNoDriverFiltersPTYState(t *testing.T) {
+	type ptyStateFilter interface {
+		ShouldApplyPTYState(current protocol.SessionState, incoming string) bool
 	}
-	if !ShouldApplyPTYState(copilot, protocol.SessionStateWorking, protocol.StatePendingApproval) {
-		t.Fatal("copilot should apply pending_approval from the screen")
-	}
-	if ShouldApplyPTYState(copilot, protocol.SessionStatePendingApproval, protocol.StateWorking) {
-		t.Fatal("copilot should ignore working PTY noise while pending_approval")
-	}
-}
-
-// Claude and codex must not filter at all: a filter that still answered would
-// mean something is still writing state from the screen behind the resolver.
-func TestShouldApplyPTYState_ResolverOwnedAgentsDoNotFilter(t *testing.T) {
-	for _, agent := range []string{"claude", "codex"} {
-		for _, incoming := range []string{
-			protocol.StateWorking,
-			protocol.StateWaitingInput,
-			protocol.StateIdle,
-			protocol.StatePendingApproval,
-		} {
-			if !ShouldApplyPTYState(Get(agent), protocol.SessionStateScheduled, incoming) {
-				t.Fatalf("%s still filters %s; its state should come from the resolver", agent, incoming)
-			}
+	for _, name := range []string{"claude", "codex", "copilot"} {
+		if _, ok := Get(name).(ptyStateFilter); ok {
+			t.Fatalf("%s filters PTY state; its state comes from the resolver", name)
 		}
 	}
 }

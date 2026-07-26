@@ -240,64 +240,19 @@ func TestDaemon_StateUpdate(t *testing.T) {
 	// Register
 	c.Register("sess-1", "test", "/tmp")
 
-	// Update state
+	// Report the hook's evidence. The state follows on the resolver's tick.
 	err := c.UpdateState("sess-1", protocol.StateWaitingInput)
 	if err != nil {
 		t.Fatalf("UpdateState error: %v", err)
 	}
+	waitForResolvedState(t, d, "sess-1", protocol.SessionStateWaitingInput)
 
-	// Query waiting
 	sessions, err := c.Query(protocol.StateWaitingInput)
 	if err != nil {
 		t.Fatalf("Query error: %v", err)
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("got %d waiting sessions, want 1", len(sessions))
-	}
-}
-
-// TestDaemon_ScheduledStateUpdate exercises the exact wire the _hook-stop
-// wrapper uses for a session parked on a /loop or cron: c.UpdateState(id,
-// "scheduled") over the real socket. It must land as scheduled (not idle, not
-// dropped) so the parked session reads correctly end to end.
-func TestDaemon_ScheduledStateUpdate(t *testing.T) {
-	useFreeWSPort(t)
-
-	tmpDir := shortTempDir(t)
-	sockPath := filepath.Join(tmpDir, "test.sock")
-
-	d := NewForTesting(sockPath)
-	go d.Start()
-	defer d.Stop()
-
-	waitForSocket(t, sockPath, 5*time.Second)
-	waitForRecovery(t, d)
-
-	c := client.New(sockPath)
-	c.Register("sess-1", "loop-bot", "/tmp")
-
-	if err := c.UpdateState("sess-1", protocol.StateScheduled); err != nil {
-		t.Fatalf("UpdateState(scheduled) error: %v", err)
-	}
-
-	scheduled, err := c.Query(protocol.StateScheduled)
-	if err != nil {
-		t.Fatalf("Query(scheduled) error: %v", err)
-	}
-	if len(scheduled) != 1 {
-		t.Fatalf("got %d scheduled sessions, want 1", len(scheduled))
-	}
-	if scheduled[0].ID != "sess-1" {
-		t.Fatalf("scheduled session ID = %q, want sess-1", scheduled[0].ID)
-	}
-
-	// It must not have fallen through to idle.
-	idle, err := c.Query(protocol.StateIdle)
-	if err != nil {
-		t.Fatalf("Query(idle) error: %v", err)
-	}
-	if len(idle) != 0 {
-		t.Fatalf("got %d idle sessions, want 0 (scheduled must not read as idle)", len(idle))
 	}
 }
 
@@ -489,7 +444,7 @@ func TestDaemon_ReseedWorkspaceStatusesAfterRecovery(t *testing.T) {
 
 	// Recovery marks the missing-PTY session recoverable in the store, but does NOT
 	// recompute the rollup — so the cached status is now stale.
-	d.pruneSessionsWithoutPTY()
+	d.pruneSessionsWithoutPTY(time.Time{})
 	if got := d.store.Get(sessionID); got == nil || got.State != protocol.SessionStateRecoverable {
 		t.Fatalf("prune should keep session and mark it recoverable, got %+v", got)
 	}
@@ -1127,6 +1082,55 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_PreservesLivePluginReportedSt
 	}
 }
 
+// TestDaemon_PruneSessionsWithoutPTY_SkipsSessionsRegisteredAfterCutoff covers the
+// prune's race with its own listener: the socket accepts registrations before
+// startup recovery runs, so a session that belongs to this run is in the store
+// with no PTY yet. Both prune verdicts are terminal for the resolver — it owns
+// neither `recoverable` nor a removed row — so the session has to survive
+// untouched rather than be recovered or reaped.
+func TestDaemon_PruneSessionsWithoutPTY_SkipsSessionsRegisteredAfterCutoff(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	// The session store is the package's, not this daemon's, so the row outlives
+	// the test and the state this one ends on would seed the next run of it.
+	t.Cleanup(func() { d.store.Remove("just-registered") })
+	// Derive the registration time from the cutoff rather than calling the clock
+	// twice: consecutive time.Now() calls can land on the same microsecond, and
+	// then the session is not strictly after the cutoff for reasons that have
+	// nothing to do with the rule under test.
+	cutoff := time.Now()
+	now := string(protocol.NewTimestamp(cutoff.Add(time.Second)))
+	d.store.Add(&protocol.Session{
+		ID:             "just-registered",
+		Label:          "just-registered",
+		Agent:          protocol.SessionAgentClaude,
+		Directory:      "/tmp/just-registered",
+		State:          protocol.SessionStateLaunching,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+
+	if removed := d.pruneSessionsWithoutPTY(cutoff); removed != 0 {
+		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 0", removed)
+	}
+	session := d.store.Get("just-registered")
+	if session == nil {
+		t.Fatal("session was reaped; a registration newer than the cutoff is this run's")
+	}
+	if session.State != protocol.SessionStateLaunching {
+		t.Fatalf("state = %s, want %s untouched", session.State, protocol.SessionStateLaunching)
+	}
+
+	// Same session, no cutoff: the claude driver recovers on a missing PTY, which
+	// is what the guard above is holding off.
+	if removed := d.pruneSessionsWithoutPTY(time.Time{}); removed != 0 {
+		t.Fatalf("pruneSessionsWithoutPTY(zero) removed = %d, want 0", removed)
+	}
+	if session := d.store.Get("just-registered"); session == nil || session.State != protocol.SessionStateRecoverable {
+		t.Fatalf("session = %+v, want recoverable once the cutoff no longer protects it", session)
+	}
+}
+
 func TestDaemon_PruneSessionsWithoutPTY_PreservesPluginMetadataForResume(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	now := string(protocol.TimestampNow())
@@ -1147,7 +1151,7 @@ func TestDaemon_PruneSessionsWithoutPTY_PreservesPluginMetadataForResume(t *test
 		t.Fatal("ApplyAgentDriverMetadata(plugin-resume) failed")
 	}
 
-	if removed := d.pruneSessionsWithoutPTY(); removed != 0 {
+	if removed := d.pruneSessionsWithoutPTY(time.Time{}); removed != 0 {
 		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 0", removed)
 	}
 	session := d.store.Get("plugin-resume")
@@ -1193,7 +1197,7 @@ func TestDaemon_PruneSessionsWithoutPTY_RemovesReapedWorkspaceLayout(t *testing.
 		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
 	}
 
-	if removed := d.pruneSessionsWithoutPTY(); removed != 1 {
+	if removed := d.pruneSessionsWithoutPTY(time.Time{}); removed != 1 {
 		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 1", removed)
 	}
 	if got := d.store.Get(sessionID); got != nil {
@@ -1257,7 +1261,7 @@ func TestDaemon_PruneSessionsWithoutPTY_KeepsTileOnlyWorkspace(t *testing.T) {
 		t.Fatalf("SaveWorkspaceLayout() error = %v", err)
 	}
 
-	if removed := d.pruneSessionsWithoutPTY(); removed != 1 {
+	if removed := d.pruneSessionsWithoutPTY(time.Time{}); removed != 1 {
 		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 1", removed)
 	}
 	assertTileOnlyWorkspaceAlive(t, d, workspaceID, sessionID)
@@ -4603,7 +4607,15 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 	}
 }
 
-func TestDaemon_StateTransitions_AllStates(t *testing.T) {
+// TestDaemon_HookReportedStatesReachClients drives the three states a hook can
+// report over the real socket and pins that each one reaches a client as a state
+// change. The hook does not apply them any more, so this covers the whole chain:
+// the hook files evidence, the resolver reads it, and the publication broadcasts.
+//
+// It used to drive `idle` and `unknown` through the same wire. No hook reports
+// either — they are conclusions the resolver draws from a turn ending or from
+// evidence going silent, and TestResolve covers them where they are decided.
+func TestDaemon_HookReportedStatesReachClients(t *testing.T) {
 	wsPort := useFreeWSPort(t)
 
 	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
@@ -4623,64 +4635,47 @@ func TestDaemon_StateTransitions_AllStates(t *testing.T) {
 	waitForSocket(t, sockPath, 5*time.Second)
 
 	c := client.New(sockPath)
-	err := c.Register("test-session", "Test", "/tmp/test")
-	if err != nil {
+	if err := c.Register("test-session", "Test", "/tmp/test"); err != nil {
 		t.Fatalf("Register error: %v", err)
 	}
 
-	// Connect to WebSocket
 	ctx := context.Background()
 	wsURL := "ws://127.0.0.1:" + wsPort + "/ws"
 	var wsConn *websocket.Conn
-	maxRetries := 20
-	for i := 0; i < maxRetries; i++ {
+	for i := 0; i < 20; i++ {
 		time.Sleep(100 * time.Millisecond)
 		var dialErr error
 		wsConn, _, dialErr = websocket.Dial(ctx, wsURL, nil)
 		if dialErr == nil {
 			break
 		}
-		if i == maxRetries-1 {
-			t.Fatalf("WebSocket dial error after %d retries: %v", maxRetries, dialErr)
+		if i == 19 {
+			t.Fatalf("WebSocket dial error: %v", dialErr)
 		}
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state
-	_, _, err = wsConn.Read(ctx)
-	if err != nil {
-		t.Fatalf("Read initial state error: %v", err)
-	}
+	waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 
-	// Test state transitions after register default (launching)
-	states := []string{protocol.StateWaitingInput, protocol.StateIdle, protocol.StateWorking, protocol.StateUnknown}
-
-	for _, expectedState := range states {
-		err = c.UpdateState("test-session", expectedState)
-		if err != nil {
-			t.Fatalf("UpdateState to %s error: %v", expectedState, err)
+	// A turn starts, the agent asks the user a question, the user answers and the
+	// turn resumes: the sequence claude's hooks actually produce.
+	for _, expected := range []string{
+		protocol.StateWorking,
+		protocol.StateWaitingInput,
+		protocol.StateWorking,
+	} {
+		if err := c.UpdateState("test-session", expected); err != nil {
+			t.Fatalf("UpdateState to %s error: %v", expected, err)
 		}
+		waitForResolvedState(t, d, "test-session", protocol.SessionState(expected))
 
-		var event protocol.WebSocketEvent
-		for {
-			_, eventData, err := wsConn.Read(ctx)
-			if err != nil {
-				t.Fatalf("Read event error for state %s: %v", expectedState, err)
-			}
-			if err := json.Unmarshal(eventData, &event); err != nil {
-				t.Fatalf("Decode event for state %s: %v", expectedState, err)
-			}
-			if event.Event == protocol.EventSessionStateChanged {
-				break
-			}
-		}
-		// Compare state - need to handle string/SessionState conversion
-		gotState := ""
+		event := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventSessionStateChanged)
+		got := ""
 		if event.Session != nil {
-			gotState = string(event.Session.State)
+			got = string(event.Session.State)
 		}
-		if gotState != expectedState {
-			t.Errorf("Expected state=%s, got state=%s", expectedState, gotState)
+		if got != expected {
+			t.Errorf("broadcast state=%s, want %s", got, expected)
 		}
 	}
 }
@@ -4835,20 +4830,8 @@ func TestDaemon_StopCommand_PendingTodos_SetsWaitingInput(t *testing.T) {
 	json.NewDecoder(conn2).Decode(&resp)
 	conn2.Close()
 
-	// Wait for async classification to complete
-	time.Sleep(200 * time.Millisecond)
-
-	// Query session state
-	sessions, err := c.Query("")
-	if err != nil {
-		t.Fatalf("Query error: %v", err)
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("Expected 1 session, got %d", len(sessions))
-	}
-	if sessions[0].State != protocol.SessionStateWaitingInput {
-		t.Errorf("Expected state=%s (due to pending todos), got state=%s", protocol.SessionStateWaitingInput, sessions[0].State)
-	}
+	// Wait for the classification and the resolve tick that publishes its verdict.
+	waitForResolvedState(t, d, "test-session", protocol.SessionStateWaitingInput)
 }
 
 func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T) {
@@ -4924,7 +4907,11 @@ func TestDaemon_StopCommand_CompletedTodos_ProceedsToClassification(t *testing.T
 	t.Log("Test passed: todos with [✓] prefix are counted as completed, allowing classification to proceed")
 }
 
-func TestClassifySessionState_ClassifierError_StaysUnknown(t *testing.T) {
+// A classification that fails adds nothing to the evidence table, and a session
+// whose turn ended settles from the rest of it. This used to paint the session
+// grey — the classifier applied `unknown` itself — which said "attn has lost
+// track of this session" about a turn it had watched end normally.
+func TestClassifySessionState_ClassifierErrorAddsNoVerdict(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.classifier = &errorClassifier{
 		state: protocol.StateUnknown,
@@ -4951,14 +4938,21 @@ func TestClassifySessionState_ClassifierError_StaysUnknown(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 
+	// A turn that ran and ended, with the agent quiet at its prompt afterwards.
+	d.recordBracketEvidence("sess-unknown", protocol.StateWorking)
+	d.recordPTYEvidence("sess-unknown", pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: now})
+	d.recordBracketEvidence("sess-unknown", protocol.StateIdle)
+	d.recordPTYEvidence("sess-unknown", pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: now})
+
 	d.classifySessionState("sess-unknown", transcriptPath)
+	d.resolveAllSessions(time.Now())
 
 	sess := d.store.Get("sess-unknown")
 	if sess == nil {
 		t.Fatal("session missing after classify")
 	}
-	if sess.State != protocol.StateUnknown {
-		t.Fatalf("state = %s, want %s", sess.State, protocol.StateUnknown)
+	if sess.State != protocol.StateIdle {
+		t.Fatalf("state = %s, want %s: the turn ended, the classifier just could not say how", sess.State, protocol.StateIdle)
 	}
 }
 
@@ -4983,6 +4977,7 @@ func TestClassifySessionState_ClassifierCapabilityDisabled_SetsIdle(t *testing.T
 	})
 
 	d.classifySessionState("sess-no-classifier", filepath.Join(t.TempDir(), "missing.jsonl"))
+	d.resolveAllSessions(time.Now())
 
 	sess := d.store.Get("sess-no-classifier")
 	if sess == nil {
@@ -5018,6 +5013,7 @@ func TestClassifySessionState_TranscriptDisabledWithPendingTodos_SetsWaitingInpu
 	})
 
 	d.classifySessionState("sess-no-transcript", filepath.Join(t.TempDir(), "missing.jsonl"))
+	d.resolveAllSessions(time.Now())
 
 	sess := d.store.Get("sess-no-transcript")
 	if sess == nil {
@@ -5136,45 +5132,6 @@ func TestClassifySessionState_ClaudeConcurrentDuplicateTurnRunsOnce(t *testing.T
 	}
 }
 
-func TestClassifierStateTransition_StaleIdleDoesNotClearLongRunTracking(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-
-	now := time.Now()
-	nowStr := string(protocol.NewTimestamp(now))
-	d.store.Add(&protocol.Session{
-		ID:             "sess-stale",
-		Agent:          protocol.SessionAgentCodex,
-		Label:          "stale",
-		Directory:      "/tmp",
-		State:          protocol.StateWaitingInput,
-		StateSince:     nowStr,
-		StateUpdatedAt: nowStr,
-		LastSeen:       nowStr,
-	})
-	d.longRun["sess-stale"] = longRunSession{
-		workingSince:       now.Add(-6 * time.Minute),
-		deferredTranscript: "/tmp/transcript.jsonl",
-		needsReview:        true,
-	}
-
-	d.applyState(sessionStateChange{
-		sessionID: "sess-stale",
-		state:     protocol.StateIdle,
-		cause:     classifierObservation{observedAt: now.Add(-1 * time.Minute)},
-	})
-
-	session := d.store.Get("sess-stale")
-	if session == nil {
-		t.Fatal("session missing")
-	}
-	if session.State != protocol.StateWaitingInput {
-		t.Fatalf("state=%s, want %s", session.State, protocol.StateWaitingInput)
-	}
-	if !d.sessionNeedsReviewAfterLongRun("sess-stale") {
-		t.Fatal("needs_review_after_long_run should remain set for stale timestamped update")
-	}
-}
-
 // TestScheduledClearsLongRunTracking proves that parking on a cron/loop ends
 // the current run for long-run-review purposes: a session that did real work
 // and then goes "scheduled" must drop its workingSince, so a later short
@@ -5200,7 +5157,7 @@ func TestScheduledClearsLongRunTracking(t *testing.T) {
 	d.applyState(sessionStateChange{
 		sessionID: "sess-loop",
 		state:     protocol.StateScheduled,
-		cause:     daemonObservation{},
+		cause:     resolverObservation{},
 	})
 
 	d.longRunMu.Lock()
@@ -5236,7 +5193,14 @@ func TestClassifyOrDeferAfterStop_LongRunDefersUntilVisualized(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 
+	// The turn's closing bracket, so the session has evidence to be resolved from:
+	// the deferral is a fact about a turn that ended, and the resolver is what
+	// turns it into a color.
+	d.recordBracketEvidence("sess-long", protocol.StateWorking)
+	d.recordBracketEvidence("sess-long", protocol.StateIdle)
+
 	d.classifyOrDeferAfterStop("sess-long", transcriptPath)
+	d.resolveAllSessions(time.Now())
 
 	if got := mockClassifier.CallCount(); got != 0 {
 		t.Fatalf("classifier calls=%d, want 0 while long-run review is deferred", got)
@@ -5333,7 +5297,12 @@ func TestClassifyOrDeferAfterStop_ShortRunClassifiesImmediately(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 
+	d.recordBracketEvidence("sess-short", protocol.StateWorking)
+	d.recordBracketEvidence("sess-short", protocol.StateIdle)
+
 	d.classifyOrDeferAfterStop("sess-short", transcriptPath)
+	// The verdict is evidence; the resolver is what publishes it.
+	d.resolveAllSessions(time.Now())
 
 	if got := mockClassifier.CallCount(); got != 1 {
 		t.Fatalf("classifier calls=%d, want 1 for short run", got)

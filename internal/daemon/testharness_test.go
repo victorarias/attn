@@ -117,9 +117,9 @@ func TestHarness_ClaudeStop_RetriesTranscriptReadOnFirstTurn(t *testing.T) {
 			if len(sessions) != 1 {
 				t.Fatalf("Expected 1 session, got %d", len(sessions))
 			}
-			if sessions[0].State != protocol.SessionStateWaitingInput {
-				t.Fatalf("expected waiting_input after classification, got %s", sessions[0].State)
-			}
+			// The verdict is evidence; the resolver's next tick is what colors the
+			// session, so the state arrives after the classifier call, not with it.
+			waitForResolvedState(t, harness.Daemon, "claude-session", protocol.SessionStateWaitingInput)
 			return
 		}
 
@@ -175,7 +175,11 @@ func TestHarness_BroadcastRecorder(t *testing.T) {
 		t.Fatalf("UpdateState error: %v", err)
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	// A hook reports a fact; the resolver's next tick applies the state and
+	// broadcasts it, so the event is a tick away rather than immediate.
+	if harness.Recorder.WaitForEvent(protocol.EventSessionStateChanged, 5*time.Second) == nil {
+		t.Fatal("no session_state_changed event after the hook reported working")
+	}
 
 	stateEvents := harness.Recorder.EventsOfType(protocol.EventSessionStateChanged)
 	if len(stateEvents) != 1 {

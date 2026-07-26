@@ -32,16 +32,20 @@ func onlyObservation(t *testing.T, d *Daemon, sessionID string) statetrace.Obser
 	return got[0]
 }
 
-func TestTraceRecordsAppliedPTYObservationWithItsSource(t *testing.T) {
+// The worker poll is the one PTY source that still commits a state, and it is
+// what ends `launching`. Its row has to say applied and name the source: the
+// cause it travels under is shared, so the cause alone cannot tell it from
+// anything else.
+func TestTraceRecordsTheAppliedWorkerPollWithItsSource(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-applied"
-	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWaitingInput)
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateLaunching)
 
 	observed := time.Now().Add(-500 * time.Millisecond)
 	d.handlePTYState(id, pty.Observation{
-		Source: pty.SourceScreen,
+		Source: pty.SourceWorkerInfo,
 		Claim:  protocol.StateWorking,
-		Detail: "screen scrape",
+		Detail: "worker info",
 		At:     observed,
 	})
 
@@ -49,46 +53,17 @@ func TestTraceRecordsAppliedPTYObservationWithItsSource(t *testing.T) {
 	if got.Outcome != statetrace.OutcomeApplied {
 		t.Fatalf("outcome %q, want applied", got.Outcome)
 	}
-	// The source must survive the trip: liveSignal is shared by every trusted PTY
-	// source, so the cause alone cannot tell a screen scrape from an approval edge.
-	if got.Source != string(pty.SourceScreen) {
-		t.Fatalf("source %q, want %q", got.Source, pty.SourceScreen)
+	if got.Source != string(pty.SourceWorkerInfo) {
+		t.Fatalf("source %q, want %q", got.Source, pty.SourceWorkerInfo)
 	}
 	if got.Cause != "live_signal" {
 		t.Fatalf("cause %q, want live_signal", got.Cause)
 	}
-	if got.Claim != protocol.StateWorking || got.Detail != "screen scrape" {
+	if got.Claim != protocol.StateWorking || got.Detail != "worker info" {
 		t.Fatalf("claim/detail wrong: %+v", got)
 	}
 	if !got.ObservedAt.Equal(observed) {
 		t.Fatalf("ObservedAt %s, want the source's %s", got.ObservedAt, observed)
-	}
-}
-
-// The whole point of the trace: an observation a driver's transition filter
-// refuses never reaches the store and appears in no other log line, which is
-// exactly the case a stuck color needs explained.
-func TestTraceRecordsDriverVetoedObservation(t *testing.T) {
-	d := newTraceDaemon(t)
-	id := "sess-vetoed"
-	// Copilot is the last agent with a transition filter: its screen scrape may
-	// claim working and pending_approval and nothing else.
-	addCharacterizationSession(t, d, id, protocol.SessionAgentCopilot, protocol.SessionStateWorking)
-
-	d.handlePTYState(id, screenObs(protocol.StateIdle))
-
-	got := onlyObservation(t, d, id)
-	if got.Outcome != statetrace.OutcomeVetoed {
-		t.Fatalf("outcome %q, want vetoed", got.Outcome)
-	}
-	if got.Reason != "driver_transition_filter" {
-		t.Fatalf("reason %q, want driver_transition_filter", got.Reason)
-	}
-	if got.Claim != protocol.StateIdle {
-		t.Fatalf("claim %q, want the rejected claim %q", got.Claim, protocol.StateIdle)
-	}
-	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
-		t.Fatalf("tracing must not change arbitration: state is %q", state)
 	}
 }
 
@@ -99,7 +74,7 @@ func TestTraceRecordsDriverVetoedObservation(t *testing.T) {
 func TestTraceDoesNotRingAnUnknownSession(t *testing.T) {
 	d := newTraceDaemon(t)
 
-	d.handlePTYState("ghost", screenObs(protocol.StateWorking))
+	d.handlePTYState("ghost", heartbeatObs("busy", "test", time.Now()))
 
 	if got := traceOf(t, d, "ghost"); got != nil {
 		t.Fatalf("an unknown session must not create a ring: %+v", got)
@@ -113,11 +88,11 @@ func TestTraceDoesNotResurrectARingAfterRemoval(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-raced"
 	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
-	d.handlePTYState(id, screenObs(protocol.StateIdle))
+	d.handlePTYState(id, heartbeatObs("not_busy", "test", time.Now()))
 
 	d.dropSessionRecord(id)
 	// The worker event the daemon was already holding when the row went away.
-	d.handlePTYState(id, screenObs(protocol.StateWorking))
+	d.handlePTYState(id, heartbeatObs("busy", "test", time.Now()))
 
 	if got := traceOf(t, d, id); got != nil {
 		t.Fatalf("a late observation resurrected the ring: %+v", got)
@@ -134,53 +109,30 @@ func TestTraceRecordsHookSource(t *testing.T) {
 
 	d.handleState(&syncConn{}, &protocol.StateMessage{ID: id, State: protocol.StateWorking})
 
+	// Observed, not applied: a hook files what it saw and the resolver decides
+	// what it means. A trace that showed this as applied would be describing a
+	// writer that no longer exists.
 	got := onlyObservation(t, d, id)
-	if got.Source != stateSourceHook || got.Outcome != statetrace.OutcomeApplied {
+	if got.Source != stateSourceHook || got.Outcome != statetrace.OutcomeObserved {
 		t.Fatalf("got %+v", got)
+	}
+	if got.Claim != protocol.StateWorking {
+		t.Fatalf("claim %q, want the state the hook reported", got.Claim)
 	}
 }
 
 // A change with no origin still has to be attributable, or the internal
-// transitions (recovery, process exit) become blanks in the middle of a trace.
+// transitions (startup recovery) become blanks in the middle of a trace.
 func TestTraceFallsBackToTheCauseNameAsSource(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-cause"
 	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
 
-	d.applyState(sessionStateChange{sessionID: id, state: protocol.StateIdle, cause: processExit{}})
+	d.applyState(sessionStateChange{sessionID: id, state: protocol.StateIdle, cause: startupRecovery{}})
 
 	got := onlyObservation(t, d, id)
-	if got.Source != "process_exit" || got.Cause != "process_exit" {
+	if got.Source != "startup_recovery" || got.Cause != "startup_recovery" {
 		t.Fatalf("got %+v", got)
-	}
-}
-
-// A stale classifier result is refused by the store's commit rule rather than by
-// a caller-side guard, so it is a discard and not a veto — the distinction points
-// at a different layer when a color is wrong.
-func TestTraceRecordsStoreDiscardedClassifierResult(t *testing.T) {
-	d := newTraceDaemon(t)
-	id := "sess-stale"
-	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
-
-	applied := d.applyState(sessionStateChange{
-		sessionID: id,
-		state:     protocol.StateIdle,
-		// Older than the session's StateSince, which the characterization helper
-		// backdates to characterizationOldTimestamp.
-		cause:  classifierObservation{observedAt: time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC)},
-		origin: stateOrigin{source: stateSourceClassifier, detail: "classifier"},
-	})
-	if applied {
-		t.Fatal("a classifier result older than the current state should not commit")
-	}
-
-	got := onlyObservation(t, d, id)
-	if got.Outcome != statetrace.OutcomeDiscarded || got.Reason != "store_rejected" {
-		t.Fatalf("got %+v", got)
-	}
-	if got.Source != stateSourceClassifier {
-		t.Fatalf("source %q, want %q", got.Source, stateSourceClassifier)
 	}
 }
 
@@ -203,7 +155,7 @@ func TestTraceIsDroppedWhenTheSessionRecordGoes(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-gone"
 	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
-	d.handlePTYState(id, screenObs(protocol.StateIdle))
+	d.handlePTYState(id, heartbeatObs("not_busy", "test", time.Now()))
 	if len(traceOf(t, d, id)) == 0 {
 		t.Fatal("precondition: expected a recorded observation")
 	}
@@ -249,7 +201,7 @@ func TestTraceDoesNotLeakWhenRemovalRacesTheWrite(t *testing.T) {
 	}
 	t.Cleanup(func() { stateTraceRecordGateHook = nil })
 
-	d.handlePTYState(id, screenObs(protocol.StateIdle))
+	d.handlePTYState(id, heartbeatObs("not_busy", "test", time.Now()))
 	<-removalDone
 
 	if got := traceOf(t, d, id); got != nil {
@@ -264,13 +216,16 @@ func TestStateExplainResultRendersTheRing(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-explain"
 	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWaitingInput)
-	d.handlePTYState(id, screenObs(protocol.StateWorking))
+	d.handlePTYState(id, heartbeatObs("busy", "test", time.Now()))
 
 	result := d.stateExplainResult(d.store.Get(id))
 	if result.SessionID != id || result.Agent != string(protocol.SessionAgentClaude) {
 		t.Fatalf("identity wrong: %+v", result)
 	}
-	if result.State != protocol.StateWorking {
+	// The rendered state is the session's, not the claim in the ring: a source
+	// that speaks is not a source that wrote, which is most of what the ring is
+	// for reading.
+	if result.State != protocol.StateWaitingInput {
 		t.Fatalf("state %q, want the session's current state", result.State)
 	}
 	if result.Capacity != statetrace.DefaultCapacity {
@@ -280,11 +235,11 @@ func TestStateExplainResultRendersTheRing(t *testing.T) {
 		t.Fatalf("want 1 observation, got %d", len(result.Observations))
 	}
 	entry := result.Observations[0]
-	if entry.Source != string(pty.SourceScreen) || entry.Outcome != string(statetrace.OutcomeApplied) {
+	if entry.Source != string(pty.SourceHeartbeat) || entry.Outcome != string(statetrace.OutcomeObserved) {
 		t.Fatalf("entry %+v", entry)
 	}
-	if entry.Cause == nil || *entry.Cause != "live_signal" {
-		t.Fatalf("cause %v", entry.Cause)
+	if entry.Cause != nil {
+		t.Fatalf("cause %v, want none: the observation was filed as evidence, not applied", *entry.Cause)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, entry.ObservedAt); err != nil {
 		t.Fatalf("observed_at %q is not RFC3339Nano: %v", entry.ObservedAt, err)
@@ -519,12 +474,12 @@ func TestTraceRecordsThePermissionModeReportedByTheStateHook(t *testing.T) {
 	if got[0].Outcome != statetrace.OutcomeObserved {
 		t.Fatalf("the mode is evidence, not a state: outcome %q", got[0].Outcome)
 	}
-	// The state itself must still be applied — reporting the mode is additive.
-	if got[1].Source != stateSourceHook || got[1].Outcome != statetrace.OutcomeApplied {
-		t.Fatalf("second observation %+v, want the applied hook state", got[1])
+	// The state the hook reported is filed beside it, as evidence like the mode.
+	if got[1].Source != stateSourceHook || got[1].Outcome != statetrace.OutcomeObserved {
+		t.Fatalf("second observation %+v, want the hook's state as evidence", got[1])
 	}
-	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
-		t.Fatalf("state %q, want working", state)
+	if got[1].Claim != protocol.StateWorking {
+		t.Fatalf("second observation claim %q, want the reported state", got[1].Claim)
 	}
 }
 

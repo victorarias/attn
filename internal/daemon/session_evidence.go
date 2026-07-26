@@ -188,24 +188,6 @@ func (d *Daemon) recordPTYEvidence(sessionID string, obs pty.Observation) {
 				e.LastBusyAt = at
 			}
 		})
-	case pty.SourceApproval:
-		d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
-			e.LastHarnessEvent = &sessionstate.Observation{
-				Source:     sessionstate.SourceHarnessEvent,
-				Claim:      approvalClaim(obs.Claim),
-				Detail:     obs.Detail,
-				ObservedAt: at,
-			}
-		})
-	case pty.SourceScreen:
-		d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
-			e.Screen = &sessionstate.Observation{
-				Source:     sessionstate.SourceScreen,
-				Claim:      stateClaim(obs.Claim),
-				Detail:     obs.Detail,
-				ObservedAt: at,
-			}
-		})
 	}
 }
 
@@ -224,15 +206,42 @@ func (d *Daemon) recordBracketEvidence(sessionID, state string) {
 			// in the table lets the resolver report it as this turn's state the
 			// moment this turn settles.
 			e.LastClassifier = nil
-			// The same holds for an unanswered approval: a turn cannot open
-			// while the one before it is still blocked on a prompt, so an
-			// approval still sitting here was answered.
-			if e.LastHarnessEvent != nil && e.LastHarnessEvent.Claim == sessionstate.ClaimApprovalPending {
-				e.LastHarnessEvent = nil
+			// The same holds for an unanswered approval or question: a turn cannot
+			// open while the one before it is still blocked on a person, so an edge
+			// still sitting here was answered. This is what retires the question
+			// claude's PostToolUse hook answers — it reports `working` the moment
+			// the user picks an option.
+			if e.LastHarnessEvent != nil {
+				switch e.LastHarnessEvent.Claim {
+				case sessionstate.ClaimApprovalPending, sessionstate.ClaimNeedsInput:
+					e.LastHarnessEvent = nil
+				}
 			}
-		case protocol.StateIdle, protocol.StateWaitingInput:
+			// And for how the last turn yielded. These describe a turn that has
+			// ended; a turn is open again, so whatever was going to resume it did.
+			// Left behind, outstanding background work pins the session working
+			// with nothing but total silence left to unpin it.
+			e.BackgroundWork = false
+			e.PendingCron = false
+		case protocol.StateIdle:
 			e.TurnOpen = false
 			e.ToolOpen = false
+		case protocol.StateWaitingInput:
+			// The agent put a question to the user. It is an announcement of the
+			// same shape as an approval request — the turn is alive but blocked on a
+			// person, and nothing but the user answering ends it — so it is filed as
+			// one, and the resolver retires it the same way.
+			//
+			// Filing it is what lets the hook stop applying state itself. The
+			// brackets alone cannot express this: closing them says only that
+			// nothing is outstanding, which resolves to idle and loses the question.
+			e.TurnOpen = false
+			e.ToolOpen = false
+			e.LastHarnessEvent = &sessionstate.Observation{
+				Source:     sessionstate.SourceHarnessEvent,
+				Claim:      sessionstate.ClaimNeedsInput,
+				ObservedAt: at,
+			}
 		case protocol.StatePendingApproval:
 			e.LastHarnessEvent = &sessionstate.Observation{
 				Source:     sessionstate.SourceHarnessEvent,
@@ -243,12 +252,32 @@ func (d *Daemon) recordBracketEvidence(sessionID, state string) {
 	})
 }
 
+// recordTranscriptEvidence files what the transcript watcher read. Copilot only:
+// it is the one agent with no hooks, so its transcript is where its turn and tool
+// brackets come from, and the states its behavior reports are those brackets by
+// another name — a turn opening, a turn ending, an approval appearing in the tool
+// lifecycle and later leaving it.
+//
+// The behavior still phrases them as states, and as states they were applied
+// directly, which is why several of its rules are written against whatever the
+// session currently shows rather than against what it saw. Filed as evidence they
+// no longer race the resolver; unpicking the phrasing is the copilot work this
+// phase deferred.
+func (d *Daemon) recordTranscriptEvidence(sessionID, state, detail string, at time.Time) {
+	d.recordBracketEvidence(sessionID, state)
+	d.traceStateEvidence(
+		sessionID,
+		stateOrigin{source: stateSourceTranscript, detail: detail, observedAt: at},
+		state,
+	)
+}
+
 // recordClassifierEvidence files a stop-time verdict.
 func (d *Daemon) recordClassifierEvidence(sessionID, state string, observedAt time.Time) {
 	if observedAt.IsZero() {
 		observedAt = time.Now()
 	}
-	claim := stateClaim(state)
+	claim := classifierClaim(state)
 	if claim == "" {
 		return
 	}
@@ -433,24 +462,32 @@ func (d *Daemon) resolveAllSessions(now time.Time) {
 		if !ok {
 			continue
 		}
+		// Read live rather than mirrored into the table on every mutation. The
+		// deferral is set and consumed from five places, and a copy that drifts from
+		// the flag the UI reads would show a review as pending in one and done in the
+		// other.
+		evidence.AwaitingLongRunReview = d.sessionNeedsReviewAfterLongRun(sessionID)
 		policy := sessionstate.PolicyFor(string(session.Agent))
 		resolution := sessionstate.Resolve(evidence, policy, now)
 		d.publishResolution(sessionID, session.State, resolution, sessionstate.DwellFor(resolution.State, evidence, policy), now)
-		// After publication, and re-read from the store: staleness is a question
-		// about the state the session actually ended up in, which the line above
-		// may have just changed.
-		d.refreshIdleStaleness(d.store.Get(sessionID), policy, now)
 	}
 }
 
 // resolverOwnedStates are the states the resolver decides. A state outside this
 // set describes the session's lifecycle rather than what its agent is doing, and
-// the resolver has no evidence bearing on it: `launching` is owned by spawn until
-// the agent first speaks, and `recoverable` by the revive path, which sets it
-// precisely because the worker is gone and its evidence is therefore meaningless.
-// Resolving those would let a stale process observation stomp a state the
-// resolver knows nothing about.
+// the resolver has no evidence bearing on it: `recoverable` is owned by the revive
+// path, which sets it precisely because the worker is gone and its evidence is
+// therefore meaningless. Resolving that would let a stale process observation
+// stomp a state the resolver knows nothing about.
+//
+// `launching` is here because evidence is the definition of the agent having
+// spoken. It used to be excluded, with the first hook or worker poll writing a
+// state directly to end it; now that neither writes state, a session whose agent
+// is demonstrably running — hooks arriving, a title being painted — would sit in
+// `launching` for the rest of its life. A session registered from the user's own
+// terminal, which has no worker to poll at all, would never leave it.
 var resolverOwnedStates = map[protocol.SessionState]bool{
+	protocol.SessionStateLaunching:       true,
 	protocol.SessionStateWorking:         true,
 	protocol.SessionStatePendingApproval: true,
 	protocol.SessionStateWaitingInput:    true,
@@ -492,21 +529,31 @@ func (d *Daemon) publishResolution(sessionID string, current protocol.SessionSta
 	if resolution.Reason == sessionstate.ReasonNoEvidence {
 		return
 	}
-	// Recorded whether or not the state moves. A session that is already
-	// `unknown` still needs to say why, and the reason is the difference between
-	// a badge the user can act on and one that only says "something".
-	reasonChanged := d.recordStateReason(sessionID, resolution)
+	// An external driver owns its session's state through sequenced report_*
+	// calls, and its evidence table fills up anyway — a plugin-driven session has
+	// a PTY like any other. The veto used to sit on each source's own write path;
+	// now that the resolver is the writer, it belongs here, or the tick would
+	// overwrite a report the driver considers current.
+	if run := d.store.GetAgentDriverRun(sessionID); run.RunID != "" {
+		if session := d.store.Get(sessionID); session != nil && d.pluginDriverReportsState(session.Agent) {
+			d.traceResolutionSkip(sessionID, resolution, "plugin_driver_owns_state")
+			return
+		}
+	}
 	if !resolverOwnedStates[current] || resolution.State == current {
 		// No transition is on the table, so nothing is waiting out a dwell.
 		// Dropping the wait here is what keeps a later transition from
 		// inheriting a clock that started before an unrelated one.
 		d.dwellGate().clear(sessionID)
-		// The reason still has to reach the client. It rides on session
+		// The reason is recorded even though the state did not move: a session
+		// that is already `unknown` still needs to say why, and the reason is the
+		// difference between a badge the user can act on and one that only says
+		// "something". It still has to reach the client, and it rides on session
 		// broadcasts, which otherwise only happen when the state itself moves —
 		// so a session that is already `unknown` and then goes silent would keep
 		// its old tooltip while the daemon knew it was stuck. Gated on the delta
 		// because the reason is recomputed every tick and almost never changes.
-		if reasonChanged && resolverOwnedStates[current] {
+		if d.recordStateReason(sessionID, resolution) && resolverOwnedStates[current] {
 			d.broadcastSessionStateChanged(sessionID)
 		}
 		return
@@ -519,6 +566,12 @@ func (d *Daemon) publishResolution(sessionID string, current protocol.SessionSta
 		d.traceResolutionSkip(sessionID, resolution, "dwell")
 		return
 	}
+	// Below the dwell, not above it: the reason explains the state the session is
+	// showing, and recording it for a transition still serving out its dwell
+	// publishes a pair that contradicts itself — `working`, because a guardian may
+	// yet answer, alongside `approval_open`, because one is outstanding. Witnessed
+	// on a live guardian session before the move.
+	d.recordStateReason(sessionID, resolution)
 	d.applyState(sessionStateChange{
 		sessionID: sessionID,
 		state:     string(resolution.State),
@@ -552,30 +605,16 @@ func (d *Daemon) traceResolutionSkip(sessionID string, resolution sessionstate.R
 	})
 }
 
-// approvalClaim reads the approval resolver's vocabulary. It reports the state
-// it wants rather than an approval-specific claim, so an approval that cleared
-// arrives as some other state entirely.
-func approvalClaim(claim string) sessionstate.Claim {
-	if claim == protocol.StatePendingApproval {
-		return sessionstate.ClaimApprovalPending
-	}
-	return sessionstate.ClaimSettled
-}
-
-// stateClaim maps a protocol state name onto what the source actually observed.
-// Sources that speak in state names are being unwound; until they are
-// converted, the translation lives here rather than being spread across every
-// call site.
-func stateClaim(state string) sessionstate.Claim {
+// classifierClaim reads a verdict. The classifier judges how a finished turn
+// ended, so it can only say two things, and anything else — including the
+// `unknown` a failed classification used to publish — is no verdict at all
+// rather than a third answer.
+func classifierClaim(state string) sessionstate.Claim {
 	switch state {
-	case protocol.StateWorking:
-		return sessionstate.ClaimBusy
 	case protocol.StateWaitingInput:
 		return sessionstate.ClaimNeedsInput
 	case protocol.StateIdle:
 		return sessionstate.ClaimIdle
-	case protocol.StatePendingApproval:
-		return sessionstate.ClaimApprovalPending
 	default:
 		return ""
 	}

@@ -96,18 +96,12 @@ type Capabilities struct {
 	// backend via ClassifierProvider.
 	HasClassifier bool
 
-	// ScreenDetector names which screen-scrape state detector this agent gets,
-	// or ScreenDetectorNone for no PTY state detection. It is a named kind rather
-	// than a boolean because the boolean it replaced encoded the same per-agent
-	// fact twice — once here and once as a switch on the agent name in
-	// internal/pty — and the two could disagree silently: a driver that set the
-	// boolean without a matching case got no detector at all, with no error.
-	ScreenDetector ScreenDetectorKind
-
 	// HarnessSignals names which harness-owned PTY signals this agent emits (the
-	// OSC 0 title heartbeat, OSC 777 notifications), or HarnessSignalsNone. These
-	// come from the agent itself rather than from reading its rendered TUI, so
-	// unlike ScreenDetector they survive any change to how the agent draws.
+	// OSC 0 title heartbeat, OSC 777 notifications), or HarnessSignalsNone. They
+	// come from the agent itself rather than from reading its rendered TUI, which
+	// is why they are the only PTY state signals left: the scrapers they replaced
+	// broke on every redraw change and, for copilot, were confirmed silent
+	// through a whole live turn before being deleted.
 	HarnessSignals HarnessSignalKind
 
 	// HasResume indicates the agent supports resuming previous sessions.
@@ -139,18 +133,6 @@ type Capabilities struct {
 	HasEffortPin bool
 }
 
-// ScreenDetectorKind identifies a screen-scrape state detector implementation.
-// The detectors themselves live in internal/pty, which parses the agent's TUI;
-// this names which one to build.
-type ScreenDetectorKind string
-
-const (
-	// ScreenDetectorNone disables screen-scrape state detection.
-	ScreenDetectorNone ScreenDetectorKind = ""
-	// ScreenDetectorCopilot reads Copilot CLI's prompt and progress frames.
-	ScreenDetectorCopilot ScreenDetectorKind = "copilot"
-)
-
 // HarnessSignalKind identifies a set of harness-owned PTY signals. The parsing
 // lives in internal/pty; this names which agent's dialect to read.
 type HarnessSignalKind string
@@ -175,9 +157,7 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_TRANSCRIPT=0|1
 //   - ATTN_AGENT_<AGENT>_TRANSCRIPT_WATCHER=0|1
 //   - ATTN_AGENT_<AGENT>_CLASSIFIER=0|1
-//   - ATTN_AGENT_<AGENT>_STATE_DETECTOR=0|1
 //   - ATTN_AGENT_<AGENT>_HARNESS_SIGNALS=0|1
-//   - ATTN_AGENT_<AGENT>_APPROVAL_RESOLVER=0|1
 //   - ATTN_AGENT_<AGENT>_RESUME=0|1
 //   - ATTN_AGENT_<AGENT>_YOLO=0|1
 //   - ATTN_AGENT_<AGENT>_INITIAL_PROMPT=0|1
@@ -207,16 +187,8 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	if v, ok := boolEnv(prefix + "CLASSIFIER"); ok {
 		caps.HasClassifier = v
 	}
-	// STATE_DETECTOR=0 disables the detector; =1 keeps whichever kind the driver
-	// declares. There is nothing for =1 to select for an agent whose driver
-	// declares none, which matches the previous behavior exactly: the boolean
-	// could be forced on, but internal/pty had no detector to build for it.
-	if v, ok := boolEnv(prefix + "STATE_DETECTOR"); ok && !v {
-		caps.ScreenDetector = ScreenDetectorNone
-	}
-	// HARNESS_SIGNALS=0 disables them; =1 keeps the driver's kind, for the same
-	// reason as STATE_DETECTOR above — there is no dialect for =1 to invent for an
-	// agent whose driver declares none.
+	// HARNESS_SIGNALS=0 disables them; =1 keeps the driver's kind: there is no
+	// dialect for =1 to invent for an agent whose driver declares none.
 	if v, ok := boolEnv(prefix + "HARNESS_SIGNALS"); ok && !v {
 		caps.HarnessSignals = HarnessSignalsNone
 	}

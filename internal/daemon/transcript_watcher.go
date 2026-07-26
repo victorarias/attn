@@ -244,12 +244,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 					d.logf("%s session=%s", lineResult.Log, w.sessionID)
 				}
 				if lineResult.State != "" && protocol.SessionState(lineResult.State) != sessionState {
-					d.applyState(sessionStateChange{
-						sessionID: w.sessionID,
-						state:     lineResult.State,
-						cause:     daemonObservation{},
-						origin:    stateOrigin{source: stateSourceTranscript, detail: "transcript line", observedAt: now},
-					})
+					d.recordTranscriptEvidence(w.sessionID, lineResult.State, "transcript line", now)
 					sessionState = protocol.SessionState(lineResult.State)
 				}
 
@@ -287,12 +282,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 			d.logf("%s session=%s", tickResult.Log, w.sessionID)
 		}
 		if tickResult.State != "" && protocol.SessionState(tickResult.State) != sessionState {
-			d.applyState(sessionStateChange{
-				sessionID: w.sessionID,
-				state:     tickResult.State,
-				cause:     daemonObservation{},
-				origin:    stateOrigin{source: stateSourceTranscript, detail: "watcher tick"},
-			})
+			d.recordTranscriptEvidence(w.sessionID, tickResult.State, "watcher tick", time.Now())
 			sessionState = protocol.SessionState(tickResult.State)
 		}
 		if tickResult.BlockClassification {

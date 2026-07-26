@@ -192,7 +192,7 @@ func (r *Runtime) run(ctx context.Context) error {
 		// are different vocabularies, and collapsing them would both corrupt the
 		// cache the worker replays to new watchers and silently drop a heartbeat
 		// whenever it happened to equal the last state string.
-		if obs.Source.EvidenceOnly() {
+		if !obs.Source.ClaimsProtocolState() {
 			r.broadcastLifecycle(stateChangedEvent(r.cfg.SessionID, obs))
 			return
 		}

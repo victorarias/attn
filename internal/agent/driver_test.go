@@ -24,7 +24,7 @@ func (d testDriver) Capabilities() Capabilities                 { return d.caps 
 
 func TestEffectiveCapabilities_NilDriver(t *testing.T) {
 	caps := EffectiveCapabilities(nil)
-	if caps.HasHooks || caps.HasTranscript || caps.HasClassifier || caps.ScreenDetector != ScreenDetectorNone {
+	if caps.HasHooks || caps.HasTranscript || caps.HasClassifier || caps.HarnessSignals != HarnessSignalsNone {
 		t.Fatalf("expected zero capabilities for nil driver, got %+v", caps)
 	}
 	if _, ok := GetTranscriptFinder(nil); ok {

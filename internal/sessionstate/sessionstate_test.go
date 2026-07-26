@@ -213,17 +213,6 @@ func TestResolve(t *testing.T) {
 			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonHeartbeatSettled,
 		},
-		{
-			// An agent with no title signals at all gets no free settle: absent
-			// evidence is not evidence of absence, and copilot resolves from its
-			// screen instead.
-			name: "closed brackets with no heartbeat do not settle on their own",
-			evidence: Evidence{
-				Screen: seen(SourceScreen, ClaimBusy, time.Second),
-			},
-			wantState:  protocol.SessionStateWorking,
-			wantReason: ReasonScreen,
-		},
 
 		// --- holds ----------------------------------------------------------
 
@@ -293,10 +282,29 @@ func TestResolve(t *testing.T) {
 			// the agent took one, which showed up live as an idle blip seconds
 			// after launch. A busy frame is not enough to make it a turn: codex
 			// flickers one while booting, which is exactly how this was found.
-			name: "a session that has never opened a turn has not settled",
+			name: "a session that has never opened a turn is at its prompt, not settled",
 			evidence: Evidence{
 				Heartbeat:  seen(SourceHeartbeat, ClaimSettled, time.Second),
 				LastBusyAt: now.Add(-3 * time.Second),
+			},
+			wantState: protocol.SessionStateIdle,
+			// The reason is the assertion. Idle is reachable two ways here and only
+			// one of them is honest: `heartbeat_settled` would claim a turn finished
+			// that never started, which is what produced the launch-time idle blip
+			// this case was written to catch. `at_prompt` claims only what the title
+			// says — the agent is not running — and it is what finally retires the
+			// `working` a session is handed at spawn.
+			wantReason: ReasonAtPrompt,
+		},
+		{
+			// The other half of the same guard. A boot busy flicker is not a prompt,
+			// so a session whose last frame said "running" gets no opinion at all
+			// until something contradicts it — reporting idle off a stale busy frame
+			// would be inventing a settle from a frame that claimed the opposite.
+			name: "a stale busy frame before the first turn is not a prompt",
+			evidence: Evidence{
+				Heartbeat:  seen(SourceHeartbeat, ClaimBusy, time.Hour),
+				LastBusyAt: now.Add(-time.Hour),
 			},
 			wantState:  protocol.SessionStateUnknown,
 			wantReason: ReasonNoEvidence,
@@ -426,6 +434,128 @@ func TestResolve(t *testing.T) {
 			wantState:  protocol.SessionStateWorking,
 			wantReason: ReasonBackgroundWork,
 		},
+		{
+			// Both facts arrive together on the same Stop payload, and the order
+			// between them used to live in the daemon rule that read the payload
+			// and applied a state itself. Work still running is the more useful
+			// thing to say: the wakeup is not what resumes this turn.
+			name: "outstanding work outranks a parked wakeup",
+			evidence: Evidence{
+				BackgroundWork: true,
+				PendingCron:    true,
+				LastMovement:   now.Add(-time.Second),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonBackgroundWork,
+		},
+		{
+			// Neither fact expires on its own — they are cleared by the next turn
+			// opening or the next stop reporting otherwise — so total silence has
+			// to be able to retire them. Otherwise background work that never
+			// resumed anything is a green session for the rest of its life, which
+			// is the failure the whole table exists to remove.
+			name: "a yield that resumed nothing and went quiet is stuck",
+			evidence: Evidence{
+				BackgroundWork: true,
+				TurnEverOpened: true,
+				LastMovement:   now.Add(-91 * time.Second),
+			},
+			wantState:  protocol.SessionStateUnknown,
+			wantReason: ReasonStuck,
+		},
+
+		{
+			// The at-prompt clause claims the agent has never taken a turn, and a
+			// classification is proof that it has: it only runs when one ended. A
+			// daemon restarted mid-turn or a lost UserPromptSubmit leaves exactly
+			// this shape — judged, with no bracket to show for it — and reading it
+			// as a fresh prompt publishes idle over the verdict.
+			name: "a judged turn is not a fresh prompt, whatever the brackets say",
+			evidence: Evidence{
+				Heartbeat:      seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastClassifier: seen(SourceClassifier, ClaimNeedsInput, time.Second),
+				LastBusyAt:     now.Add(-5 * time.Second),
+			},
+			wantState:  protocol.SessionStateWaitingInput,
+			wantReason: ReasonClassifierVerdict,
+		},
+		{
+			// And the same for a classification still in flight: the settle it is
+			// holding must not be resolved as a session that never started.
+			name: "a turn being judged right now is not a fresh prompt either",
+			evidence: Evidence{
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
+				ClassifyingSince: now.Add(-time.Second),
+				LastBusyAt:       now.Add(-5 * time.Second),
+			},
+			wantHold:   true,
+			wantReason: ReasonAwaitingVerdict,
+		},
+
+		// --- a question the harness announced --------------------------------
+
+		{
+			// Claude's AskUserQuestion hook. Its brackets close — nothing is
+			// running while the question sits there — so without an edge of its
+			// own the question would settle to idle and the one thing the user
+			// needs to see would be the thing that disappears.
+			name: "an announced question waits on the user",
+			evidence: Evidence{
+				TurnEverOpened:   true,
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimNeedsInput, 2*time.Second),
+				LastBusyAt:       now.Add(-3 * time.Second),
+			},
+			wantState:  protocol.SessionStateWaitingInput,
+			wantReason: ReasonQuestionOpen,
+		},
+		{
+			// Answered: the agent is running again. Retired exactly like an
+			// approval, by the agent painting a busy frame past the edge, so a
+			// lost closing hook cannot leave the question standing forever.
+			name: "a question the agent has gone busy past was answered",
+			evidence: Evidence{
+				TurnEverOpened:   true,
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimNeedsInput, 10*time.Second),
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt:       now.Add(-2 * time.Second),
+				LastClassifier:   seen(SourceClassifier, ClaimIdle, time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonClassifierVerdict,
+		},
+
+		// --- a long run nobody has read yet ---------------------------------
+
+		{
+			// The deferral: a turn worth minutes of work ended and attn is holding
+			// the verdict until someone opens the session. Calling it idle would
+			// file that result away as seen, which is what happened while this was
+			// a state the deferral applied and the resolver overwrote.
+			name: "a long run awaiting review waits on the user",
+			evidence: Evidence{
+				AwaitingLongRunReview: true,
+				TurnEverOpened:        true,
+				Heartbeat:             seen(SourceHeartbeat, ClaimSettled, time.Second),
+				LastBusyAt:            now.Add(-time.Minute),
+			},
+			wantState:  protocol.SessionStateWaitingInput,
+			wantReason: ReasonLongRunReview,
+		},
+		{
+			// It describes a turn that has ended. A session that has started
+			// another one is working, whatever is still owed on the last.
+			name: "a long run awaiting review does not outrank a new turn",
+			evidence: Evidence{
+				AwaitingLongRunReview: true,
+				TurnOpen:              true,
+				TurnEverOpened:        true,
+				Heartbeat:             seen(SourceHeartbeat, ClaimBusy, 100*time.Millisecond),
+				LastBusyAt:            now.Add(-100 * time.Millisecond),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonHeartbeatFresh,
+		},
 
 		// --- settled turns --------------------------------------------------
 
@@ -443,30 +573,6 @@ func TestResolve(t *testing.T) {
 				LastClassifier: seen(SourceClassifier, ClaimNeedsInput, time.Second),
 			},
 			wantState:  protocol.SessionStateWaitingInput,
-			wantReason: ReasonClassifierVerdict,
-		},
-
-		// --- screen (copilot only) ------------------------------------------
-
-		{
-			// Copilot has no harness signals, so the scrape is all there is —
-			// but it ranks below every source that does have one.
-			name: "the screen resolves when nothing better exists",
-			evidence: Evidence{
-				Screen: seen(SourceScreen, ClaimNeedsInput, time.Second),
-			},
-			wantState:  protocol.SessionStateWaitingInput,
-			wantReason: ReasonScreen,
-		},
-		{
-			// The scrape manufactures approvals from ordinary prose, which is why
-			// it must never outrank the harness's own account of itself.
-			name: "the classifier beats the screen",
-			evidence: Evidence{
-				Screen:         seen(SourceScreen, ClaimApprovalPending, 100*time.Millisecond),
-				LastClassifier: seen(SourceClassifier, ClaimIdle, time.Second),
-			},
-			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonClassifierVerdict,
 		},
 
@@ -495,6 +601,38 @@ func TestResolve(t *testing.T) {
 			},
 			wantState:  protocol.SessionStateUnknown,
 			wantReason: ReasonNoEvidence,
+		},
+		{
+			// The hole an open bracket used to leave. heartbeatSilentFor answers "not
+			// silent" for an agent that has never painted a busy frame — it has
+			// nothing to have gone quiet from — so the bracket was believed on every
+			// tick and the stuck clause below it was unreachable. An agent with hooks
+			// and no title, or either agent whose title breaks, pinned itself green
+			// for the rest of its life: exactly the stuck color this plan removes,
+			// only with a reason to believe it.
+			name: "an open bracket stops outranking stuck once everything goes quiet",
+			evidence: Evidence{
+				TurnOpen:       true,
+				TurnEverOpened: true,
+				LastMovement:   now.Add(-91 * time.Second),
+			},
+			wantState:  protocol.SessionStateUnknown,
+			wantReason: ReasonStuck,
+		},
+		{
+			// The bracket still wins while anything is arriving. This is the case that
+			// keeps the fix above from settling healthy long turns: a tool call that
+			// runs for minutes keeps its hooks and frames coming, and total silence is
+			// a much stronger claim than "the spinner paused".
+			name: "an open bracket still outranks stuck while evidence keeps arriving",
+			evidence: Evidence{
+				TurnOpen:       true,
+				TurnEverOpened: true,
+				LastBusyAt:     now.Add(-time.Second),
+				LastMovement:   now.Add(-time.Second),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonBracketOpen,
 		},
 		{
 			name: "recent silence is not yet stuck",

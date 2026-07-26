@@ -213,7 +213,7 @@ func TestNotifyDefersPendingApprovalThenFlushesOnWorking(t *testing.T) {
 	d.applyState(sessionStateChange{
 		sessionID: agentID,
 		state:     protocol.StateWorking,
-		cause:     daemonObservation{},
+		cause:     resolverObservation{},
 	})
 	deadline := time.Now().Add(time.Second)
 	for currentNudgeTimer(d, agentID) == nil && time.Now().Before(deadline) {

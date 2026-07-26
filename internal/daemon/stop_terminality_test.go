@@ -10,75 +10,78 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// TestNonTerminalStopState locks the non-terminal-Stop precedence: running
-// background work outranks a parked schedule, and either outranks classification.
-// The relax cases lock the chief-of-staff relaxation: background work no longer
-// pegs "working", but a parked schedule still parks "scheduled".
+// TestStopIsNonTerminal locks which Stops leave the turn able to resume itself,
+// and therefore which ones skip the end-of-turn work. The relax cases lock the
+// chief-of-staff relaxation: a chief's background work no longer defers the end
+// of its turn, while a parked schedule still does.
+//
+// What color the session shows while it waits is not decided here any more; the
+// resolver decides it from the facts recorded alongside this call, and
+// TestResolve covers the precedence between them.
 //
 // The status strings are the agent harness's, captured from live Claude Code Stop
 // payloads; cmd/attn's TestStopFacts covers extracting them from those payloads.
-func TestNonTerminalStopState(t *testing.T) {
+func TestStopIsNonTerminal(t *testing.T) {
 	cases := []struct {
 		name     string
 		statuses []string
 		crons    int
 		relax    bool
-		want     string
+		want     bool
 	}{
 		{
-			name:     "background running and cron pending -> working wins",
+			name:     "background work still running",
 			statuses: []string{"running"},
-			crons:    1,
-			want:     protocol.StateWorking,
+			want:     true,
 		},
 		{
-			name:  "cron pending, no background -> scheduled",
+			name:  "parked on a scheduled wakeup",
 			crons: 1,
-			want:  protocol.StateScheduled,
+			want:  true,
 		},
 		{
-			name:     "background running, no cron -> working",
+			name:     "both outstanding",
 			statuses: []string{"running"},
-			want:     protocol.StateWorking,
+			crons:    1,
+			want:     true,
 		},
 		{
-			name:     "completed background and cron pending -> scheduled (completed is not running)",
+			name:     "a finished background task is not outstanding work",
 			statuses: []string{"completed"},
-			crons:    1,
-			want:     protocol.StateScheduled,
+			want:     false,
 		},
 		{
 			name:     "mixed statuses count as running if any is",
 			statuses: []string{"completed", "running"},
-			want:     protocol.StateWorking,
+			want:     true,
 		},
 		{
 			name:     "status casing is the harness's, not ours",
 			statuses: []string{"Running"},
-			want:     protocol.StateWorking,
+			want:     true,
 		},
 		{
-			name: "nothing pending -> classify (empty)",
-			want: "",
+			name: "nothing outstanding: the turn ended",
+			want: false,
 		},
 		{
-			name:     "chief relax: background running, no cron -> classify (empty), not working",
+			name:     "chief relax: its background work does not defer the end of the turn",
 			statuses: []string{"running"},
 			relax:    true,
-			want:     "",
+			want:     false,
 		},
 		{
-			name:     "chief relax: background running + cron pending -> scheduled, not working",
+			name:     "chief relax: a parked schedule still does",
 			statuses: []string{"running"},
 			crons:    1,
 			relax:    true,
-			want:     protocol.StateScheduled,
+			want:     true,
 		},
 		{
-			name:  "chief relax: cron only -> scheduled (unchanged by relax)",
+			name:  "chief relax: cron only, unchanged by relax",
 			crons: 1,
 			relax: true,
-			want:  protocol.StateScheduled,
+			want:  true,
 		},
 	}
 	for _, tc := range cases {
@@ -91,29 +94,30 @@ func TestNonTerminalStopState(t *testing.T) {
 			if tc.crons > 0 {
 				msg.PendingSessionCrons = protocol.Ptr(tc.crons)
 			}
-			if got := nonTerminalStopState(msg, tc.relax); got != tc.want {
-				t.Fatalf("nonTerminalStopState() = %q, want %q", got, tc.want)
+			if got := stopIsNonTerminal(msg, tc.relax); got != tc.want {
+				t.Fatalf("stopIsNonTerminal() = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-// TestNonTerminalStopState_LegacyHookClassifies covers the version skew the
+// TestStopIsNonTerminal_LegacyHookClassifies covers the version skew the
 // optional fields buy: a hook binary predating them reports neither fact, and the
 // stop must read as terminal rather than parking the session in a state the
 // daemon cannot see a reason for.
-func TestNonTerminalStopState_LegacyHookClassifies(t *testing.T) {
+func TestStopIsNonTerminal_LegacyHookClassifies(t *testing.T) {
 	msg := &protocol.StopMessage{Cmd: protocol.CmdStop, ID: "sess", TranscriptPath: "/tmp/t.jsonl"}
-	if got := nonTerminalStopState(msg, false); got != "" {
-		t.Fatalf("nonTerminalStopState(legacy) = %q, want the terminal path", got)
+	if stopIsNonTerminal(msg, false) {
+		t.Fatal("a legacy hook reports neither fact; the stop must read as terminal")
 	}
 }
 
 // TestDaemon_StopCommand_BackgroundWork_StaysWorking is the wiring test: the hook
-// now reports facts rather than a state, so handleStop must apply the non-terminal
-// state itself. It also pins that the stop does not fall through to the
-// end-of-turn path — classification on a yield reads a not-yet-flushed transcript
-// and is what used to mis-detect these sessions as idle/unknown.
+// reports facts rather than a state, handleStop files them, and the resolver's
+// next tick is what colors the session. It also pins that the stop does not fall
+// through to the end-of-turn path — classification on a yield reads a
+// not-yet-flushed transcript and is what used to mis-detect these sessions as
+// idle/unknown.
 func TestDaemon_StopCommand_BackgroundWork_StaysWorking(t *testing.T) {
 	useFreeWSPort(t)
 
@@ -142,16 +146,7 @@ func TestDaemon_StopCommand_BackgroundWork_StaysWorking(t *testing.T) {
 		t.Fatalf("SendStop error: %v", err)
 	}
 
-	sessions, err := c.Query("")
-	if err != nil {
-		t.Fatalf("Query error: %v", err)
-	}
-	if len(sessions) != 1 {
-		t.Fatalf("expected 1 session, got %d", len(sessions))
-	}
-	if sessions[0].State != protocol.SessionStateWorking {
-		t.Fatalf("state = %s, want %s", sessions[0].State, protocol.SessionStateWorking)
-	}
+	waitForResolvedState(t, d, "bg-session", protocol.SessionStateWorking)
 }
 
 // TestDaemon_StopCommand_PendingCron_Parks covers the other non-terminal branch:
@@ -180,14 +175,30 @@ func TestDaemon_StopCommand_PendingCron_Parks(t *testing.T) {
 		t.Fatalf("SendStop error: %v", err)
 	}
 
-	sessions, err := c.Query("")
-	if err != nil {
-		t.Fatalf("Query error: %v", err)
+	waitForResolvedState(t, d, "cron-session", protocol.SessionStateScheduled)
+}
+
+// waitForResolvedState waits out the resolve tick. Nothing applies a state at the
+// moment a source speaks any more, so a state assertion that reads the store
+// straight after the socket call is asserting on the tick's timing rather than on
+// the rule under test.
+//
+// Waiting here is also what surfaced the startup-recovery gap these tests used to
+// out-run: both register while the listener is up but the startup prune has not
+// run, and until pruneSessionsWithoutPTY took a cutoff it marked such a session
+// `recoverable` — a state the resolver does not own and so never takes back.
+func waitForResolvedState(t *testing.T, d *Daemon, sessionID string, want protocol.SessionState) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var last protocol.SessionState
+	for time.Now().Before(deadline) {
+		if session := d.store.Get(sessionID); session != nil {
+			last = session.State
+			if last == want {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	if len(sessions) != 1 {
-		t.Fatalf("expected 1 session, got %d", len(sessions))
-	}
-	if sessions[0].State != protocol.SessionStateScheduled {
-		t.Fatalf("state = %s, want %s", sessions[0].State, protocol.SessionStateScheduled)
-	}
+	t.Fatalf("session %s state = %s, want %s", sessionID, last, want)
 }

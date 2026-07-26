@@ -24,16 +24,6 @@ type RecoveredStatePolicyProvider interface {
 	RecoveredRunningState(ptyState string) protocol.SessionState
 }
 
-// PTYStateFilterProvider filters live PTY state updates for an agent.
-//
-// Only agents whose state still reaches the store straight off the rendered
-// screen need it. An agent with harness signals is resolved from its evidence
-// instead, and a filter there would be arbitrating against the resolver rather
-// than for it.
-type PTYStateFilterProvider interface {
-	ShouldApplyPTYState(current protocol.SessionState, incoming string) bool
-}
-
 // ResumePolicyProvider customizes resume ID lifecycle behavior.
 type ResumePolicyProvider interface {
 	ResolveSpawnResumeSessionID(existingSessionID, requestedResumeID, storedResumeID string) string
@@ -94,13 +84,6 @@ func RecoveredRunningSessionState(d Driver, ptyState string) protocol.SessionSta
 		// runtime evidence that the session is waiting for input/approval.
 		return protocol.SessionStateLaunching
 	}
-}
-
-func ShouldApplyPTYState(d Driver, current protocol.SessionState, incoming string) bool {
-	if p, ok := d.(PTYStateFilterProvider); ok {
-		return p.ShouldApplyPTYState(current, incoming)
-	}
-	return true
 }
 
 func ResolveSpawnResumeSessionID(d Driver, existingSessionID, requestedResumeID, storedResumeID string) string {
