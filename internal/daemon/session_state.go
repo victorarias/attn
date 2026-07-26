@@ -3,6 +3,7 @@ package daemon
 import (
 	"time"
 
+	"github.com/victorarias/attn/internal/attention"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/statetrace"
 )
@@ -141,6 +142,15 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 		return false
 	}
 	d.traceStateChange(change, statetrace.OutcomeApplied, "")
+
+	// A turn opens on a state and closes only when the user settles it, so this
+	// is the one place a turn ever opens. It runs for every cause, including
+	// startup recovery: a session that comes back in a state that wants the user
+	// wants the user regardless of what moved it there. Opening is guarded in the
+	// store, so a state re-reported while a turn is already open changes nothing.
+	if attention.OpensTurn(protocol.SessionState(change.state)) {
+		d.store.OpenTurnIfClosed(change.sessionID, time.Now())
+	}
 
 	if profile.touch {
 		d.store.Touch(change.sessionID)

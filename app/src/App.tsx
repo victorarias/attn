@@ -54,7 +54,7 @@ import {
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo, type FsIndexResult, type NotebookEntry } from './hooks/useDaemonSocket';
 import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
-import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
+import { isAttentionSessionState, normalizeSessionState, type UISessionState } from './types/sessionState';
 import { GridView, type GridSessionTile } from './components/grid/GridView';
 import {
   type GridLayout,
@@ -90,6 +90,7 @@ import {
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
 import { boundTicketForSession } from './utils/tickets';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
+import { buildQueueBands, isQueueModeEnabled, QUEUE_MODE_SETTING } from './utils/queueBands';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import { hideBootSplash } from './utils/bootSplash';
 import { getTerminalTheme } from './utils/terminalSizing';
@@ -644,6 +645,7 @@ function App() {
     sendUnsubscribeGitStatus,
     sendSessionSelected,
     sendTriggerNudge,
+    sendSettleTurn,
     sendWorkspaceSelected,
     sendSessionVisualized,
     sendWorkspaceAddSessionPane,
@@ -863,6 +865,7 @@ function App() {
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
         sendSessionSelected={sendSessionSelected}
         sendTriggerNudge={sendTriggerNudge}
+        sendSettleTurn={sendSettleTurn}
         sendWorkspaceSelected={sendWorkspaceSelected}
         sendSessionVisualized={sendSessionVisualized}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
@@ -989,6 +992,7 @@ interface AppContentProps {
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
   sendSessionSelected: ReturnType<typeof useDaemonSocket>['sendSessionSelected'];
   sendTriggerNudge: ReturnType<typeof useDaemonSocket>['sendTriggerNudge'];
+  sendSettleTurn: ReturnType<typeof useDaemonSocket>['sendSettleTurn'];
   sendWorkspaceSelected: ReturnType<typeof useDaemonSocket>['sendWorkspaceSelected'];
   sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
@@ -1109,6 +1113,7 @@ sendFetchPRDetails,
   sendUnsubscribeGitStatus,
   sendSessionSelected,
   sendTriggerNudge,
+  sendSettleTurn,
   sendWorkspaceSelected,
   sendSessionVisualized,
   sendWorkspaceAddSessionPane,
@@ -1487,6 +1492,8 @@ sendFetchPRDetails,
       delegatedFromChief: daemonSession?.delegated_from_chief ?? false,
       ticketUnread: daemonSession?.ticket_unread ?? false,
       nudgeFiresAt: daemonSession?.nudge_fires_at,
+      turnOwed: daemonSession?.turn_owed ?? false,
+      turnOpenedAt: daemonSession?.turn_opened_at,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
       state_reason: paneState ? undefined : daemonSession?.state_reason,
@@ -2146,6 +2153,18 @@ sendFetchPRDetails,
       run: () => openBoardSurface(),
     },
     {
+      // Settings is the right home for a setting and the wrong home for something
+      // flipped ten times a day — and while the arrangement is being evaluated,
+      // flipping it back and forth is the evaluation. Both entries write the same
+      // setting, so they can never disagree.
+      id: 'toggle-queue-mode',
+      title: isQueueModeEnabled(settings) ? 'Turn off the agent queue' : 'Turn on the agent queue',
+      description: 'Show the turns you owe above the workspace tree',
+      keywords: ['queue', 'turn', 'settle', 'attention', 'sidebar'],
+      icon: <AttentionActionIcon />,
+      run: () => sendSetSetting(QUEUE_MODE_SETTING, isQueueModeEnabled(settings) ? 'false' : 'true'),
+    },
+    {
       id: 'customize-shortcuts',
       title: 'Customize keyboard shortcuts',
       description: 'Rebind shortcuts and restore defaults',
@@ -2153,7 +2172,7 @@ sendFetchPRDetails,
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openBoardSurface]);
+  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openBoardSurface, settings, sendSetSetting]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
@@ -2804,6 +2823,27 @@ sendFetchPRDetails,
     [unmutedWorkspaceViews],
   );
 
+  // The sidebar arrangement in effect. The daemon stamps turns and broadcasts
+  // turn_owed either way; this only selects what the sidebar draws and which
+  // notion of "wants me" the attention surfaces follow.
+  const queueModeEnabled = isQueueModeEnabled(settings);
+  const queueBands = useMemo(
+    () => (queueModeEnabled ? buildQueueBands(unmutedWorkspaceViews) : null),
+    [queueModeEnabled, unmutedWorkspaceViews],
+  );
+
+  // Each arrangement has one notion of what wants the user, and the mode selects
+  // it. In the queue arrangement that is the daemon's turn_owed — which honours
+  // settle, and the shell/chief/pinned/muted exclusions a client cannot see. With
+  // the queue off it stays the state predicate, so pinned agents keep their badge
+  // in the arrangement where pinning means kept in view.
+  const wantsAttention = useCallback(
+    (session: { state: UISessionState; turnOwed?: boolean }) => (
+      queueModeEnabled ? Boolean(session.turnOwed) : isAttentionSessionState(session.state)
+    ),
+    [queueModeEnabled],
+  );
+
   // Global grid tiles: one per live agent pane across all (unmuted) workspaces,
   // keyed by the PTY runtimeId that grid mode feeds from / routes input to.
   const gridSessionTiles = useMemo<GridSessionTile[]>(() => {
@@ -2817,11 +2857,11 @@ sendFetchPRDetails,
         sessionId: s.id,
         title: pane.title,
         state,
-        attention: isAttentionSessionState(state),
+        attention: wantsAttention(s),
       });
     }
     return result;
-  }, [unmutedEnrichedSessions]);
+  }, [unmutedEnrichedSessions, wantsAttention]);
 
   // Grid shape: a manual rows×cols picked from the sidebar square-picker, or Auto
   // (a near-square that fits every tile — today's default). Persists across
@@ -2881,20 +2921,30 @@ sendFetchPRDetails,
   const gridOffBoardCount = gridMembers.length - visibleGridTiles.length;
 
   // Calculate attention count for drawer badge (muted workspaces excluded)
-  const waitingLocalSessions = unmutedEnrichedSessions
-    .filter((s) => isAttentionSessionState(s.state));
+  const waitingLocalSessions = unmutedEnrichedSessions.filter(wantsAttention);
   const { needsAttention: prsNeedingAttention } = usePRsNeedingAttention(prs);
   const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
+  // Settle the selected session's turn. Undefined while the queue arrangement is
+  // off so the shortcut is not registered at all.
+  const handleSettleActiveTurn = useMemo(
+    () => (queueModeEnabled
+      ? () => {
+        if (activeSessionId) {
+          sendSettleTurn(activeSessionId);
+        }
+      }
+      : undefined),
+    [queueModeEnabled, activeSessionId, sendSettleTurn],
+  );
+
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
-    const waiting = unmutedEnrichedSessions.find((s) =>
-      isAttentionSessionState(s.state)
-    );
+    const waiting = unmutedEnrichedSessions.find(wantsAttention);
     if (waiting) {
       handleSelectSession(waiting.id);
     }
-  }, [unmutedEnrichedSessions, handleSelectSession]);
+  }, [unmutedEnrichedSessions, handleSelectSession, wantsAttention]);
 
   // Sessionless (tile-only) workspaces are revealed via the sidebar display
   // popover; the preference is the single source of truth for every derived list
@@ -3516,6 +3566,7 @@ sendFetchPRDetails,
     onGoToDashboard: goToDashboard,
     onToggleGridMode: toggleGridMode,
     onJumpToWaiting: handleJumpToWaiting,
+    onSettleTurn: handleSettleActiveTurn,
     onSelectWorkspaceByIndex: handleSelectWorkspaceByIndex,
     onPrevSession: handlePrevWorkspace,
     onNextSession: handleNextWorkspace,
@@ -3711,6 +3762,8 @@ sendFetchPRDetails,
           onSessionDragStart={handleLeafDragStart}
           onSessionDragEnd={handleLeafDragEnd}
           onWorkspaceReorder={handleWorkspaceReorder}
+          queue={queueBands}
+          onSettleTurn={sendSettleTurn}
           onSelectSession={handleSelectSession}
           onTriggerNudge={sendTriggerNudge}
           onSelectWorkspace={handleSelectWorkspace}

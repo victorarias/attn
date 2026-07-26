@@ -995,6 +995,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleSessionVisualizedWS(msg.(*protocol.SessionVisualizedMessage))
 	case protocol.CmdSessionSelected:
 	case protocol.CmdWorkspaceSelected:
+	case protocol.CmdSettleTurn:
+		d.handleSettleTurn(msg.(*protocol.SettleTurnMessage))
 	case protocol.CmdTriggerNudge:
 		go d.handleTriggerNudge(msg.(*protocol.TriggerNudgeMessage))
 	case protocol.CmdPRVisited:

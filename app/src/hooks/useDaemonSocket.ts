@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '195';
+export const PROTOCOL_VERSION = '196';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -5272,6 +5272,16 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'trigger_nudge', session_id: sessionId }));
   }, []);
 
+  // Close the turn a session opened. It is the only way a turn ends: no state
+  // transition takes a session out of the queue, so this is also the ordinary
+  // move on an agent that is still running. Fire and forget — the daemon stamps
+  // and re-broadcasts the session.
+  const sendSettleTurn = useCallback((sessionId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'settle_turn', session_id: sessionId }));
+  }, []);
+
   // Get file diff
   // Options: staged (deprecated), baseRef (for PR-like branch diffs), headRef
   // (pins the modified side to a commit instead of the working tree — used by
@@ -5827,6 +5837,7 @@ export function useDaemonSocket({
     sendUnsubscribeGitStatus,
     sendSessionSelected,
     sendTriggerNudge,
+    sendSettleTurn,
     sendWorkspaceSelected,
     sendSessionVisualized,
     sendWorkspaceGet,

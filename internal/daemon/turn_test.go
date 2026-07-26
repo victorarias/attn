@@ -1,0 +1,191 @@
+package daemon
+
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/victorarias/attn/internal/protocol"
+)
+
+func newTurnDaemon(t *testing.T) *Daemon {
+	t.Helper()
+	return NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+}
+
+func addTurnSession(t *testing.T, d *Daemon, id string, agent protocol.SessionAgent, workspaceID string) {
+	t.Helper()
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID:             id,
+		Agent:          agent,
+		Label:          id,
+		Directory:      "/tmp/" + id,
+		WorkspaceID:    workspaceID,
+		State:          protocol.StateLaunching,
+		StateSince:     now,
+		StateUpdatedAt: now,
+		LastSeen:       now,
+	})
+}
+
+func moveTo(d *Daemon, id, state string) {
+	d.applyState(sessionStateChange{sessionID: id, state: state, cause: liveSignal{}})
+}
+
+func owed(t *testing.T, d *Daemon, id string) bool {
+	t.Helper()
+	session := d.sessionForBroadcast(d.store.Get(id))
+	if session == nil {
+		t.Fatalf("session %s not found", id)
+	}
+	return protocol.Deref(session.TurnOwed)
+}
+
+// The core rule: prompting an agent does not settle it. Only the user does.
+func TestTurnSurvivesTheAgentGoingBackToWork(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+
+	if owed(t, d, "s1") {
+		t.Fatal("a launching session owes a turn")
+	}
+
+	moveTo(d, "s1", protocol.StateWaitingInput)
+	if !owed(t, d, "s1") {
+		t.Fatal("a session waiting for input owes no turn")
+	}
+	openedAt := protocol.Deref(d.sessionForBroadcast(d.store.Get("s1")).TurnOpenedAt)
+
+	// The user prompts it. It is still theirs.
+	moveTo(d, "s1", protocol.StateWorking)
+	if !owed(t, d, "s1") {
+		t.Fatal("prompting the agent settled its turn; only the user settles")
+	}
+
+	// It stops again. The turn keeps the age it opened at, so the row does not
+	// move in the queue while the user works with it.
+	moveTo(d, "s1", protocol.StateWaitingInput)
+	if got := protocol.Deref(d.sessionForBroadcast(d.store.Get("s1")).TurnOpenedAt); got != openedAt {
+		t.Errorf("turn_opened_at = %q, want %q (unchanged across the run)", got, openedAt)
+	}
+}
+
+func TestSettleIsTheOnlyExit(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+
+	moveTo(d, "s1", protocol.StateWaitingInput)
+	if !owed(t, d, "s1") {
+		t.Fatal("no turn to settle")
+	}
+
+	d.handleSettleTurn(&protocol.SettleTurnMessage{Cmd: protocol.CmdSettleTurn, SessionID: "s1"})
+	if owed(t, d, "s1") {
+		t.Fatal("settle did not close the turn")
+	}
+
+	// A later turn-opening state brings it back, at a new age.
+	moveTo(d, "s1", protocol.StateWorking)
+	if owed(t, d, "s1") {
+		t.Fatal("working re-opened a turn; only turn-opening states do")
+	}
+	moveTo(d, "s1", protocol.StatePendingApproval)
+	if !owed(t, d, "s1") {
+		t.Fatal("a session waiting for approval after being settled owes no turn")
+	}
+}
+
+// Settling an agent that is still running is the ordinary move — it is what
+// keeps an empty queue reachable while agents work.
+func TestSettleWhileWorking(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+
+	moveTo(d, "s1", protocol.StateWaitingInput)
+	moveTo(d, "s1", protocol.StateWorking)
+	d.handleSettleTurn(&protocol.SettleTurnMessage{Cmd: protocol.CmdSettleTurn, SessionID: "s1"})
+
+	if owed(t, d, "s1") {
+		t.Fatal("settling a running agent left the turn open")
+	}
+}
+
+func TestSettleBroadcastsTheSession(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+	moveTo(d, "s1", protocol.StateWaitingInput)
+
+	capture := captureBroadcasts(d)
+	d.handleSettleTurn(&protocol.SettleTurnMessage{Cmd: protocol.CmdSettleTurn, SessionID: "s1"})
+
+	events := capture.snapshot()
+	if len(events) == 0 {
+		t.Fatal("settle broadcast nothing; a second client would still show the row")
+	}
+	last := events[len(events)-1]
+	if last.Session == nil || protocol.Deref(last.Session.TurnOwed) {
+		t.Errorf("broadcast session = %+v, want turn_owed absent", last.Session)
+	}
+}
+
+func TestShellSessionsNeverOweATurn(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "shell1", protocol.SessionAgentShell, "ws1")
+
+	// A shell that somehow reaches a turn-opening state still never queues:
+	// nothing would ever settle a terminal pane.
+	moveTo(d, "shell1", protocol.StateWaitingInput)
+	if owed(t, d, "shell1") {
+		t.Fatal("a shell pane owes a turn")
+	}
+	if d.store.TurnStamps("shell1").OpenedAt.IsZero() {
+		t.Fatal("no turn was opened at all; the case proves nothing about the exclusion")
+	}
+}
+
+func TestChiefOfStaffNeverOwesATurn(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "chief", protocol.SessionAgentClaude, "ws1")
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "chief"); err != nil {
+		t.Fatalf("set chief: %v", err)
+	}
+
+	moveTo(d, "chief", protocol.StateWaitingInput)
+	if owed(t, d, "chief") {
+		t.Fatal("the chief queues; it has its own anchored slot instead")
+	}
+	if d.store.TurnStamps("chief").OpenedAt.IsZero() {
+		t.Fatal("no turn was opened at all; the case proves nothing about the exclusion")
+	}
+	if !protocol.Deref(d.sessionForBroadcast(d.store.Get("chief")).ChiefOfStaff) {
+		t.Fatal("the session is not decorated as the chief; the case proves nothing")
+	}
+}
+
+func TestPinnedAndMutedWorkspacesAreFilteredAtRead(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(d *Daemon, workspaceID string)
+	}{
+		{"pinned", func(d *Daemon, id string) { d.store.SetWorkspacePinned(id, true) }},
+		{"muted", func(d *Daemon, id string) { d.store.SetWorkspaceMuted(id, true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newTurnDaemon(t)
+			d.store.AddWorkspace(&protocol.Workspace{ID: "ws1", Title: "ws1", Directory: "/tmp/ws1"})
+			addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+
+			tc.set(d, "ws1")
+			moveTo(d, "s1", protocol.StateWaitingInput)
+			if owed(t, d, "s1") {
+				t.Fatalf("a session in a %s workspace owes a turn", tc.name)
+			}
+
+			// The stamp was still taken, so lifting the exclusion surfaces what
+			// was outstanding at its true age rather than starting from nothing.
+			if d.store.TurnStamps("s1").OpenedAt.IsZero() {
+				t.Fatal("the exclusion suppressed the stamp; it must filter at read")
+			}
+		})
+	}
+}

@@ -1832,6 +1832,32 @@ export function useUiAutomationBridge({
         });
         return session ? serializeSession(session, getActivePaneIdForSession) : null;
       }
+      case 'queue_get_state': {
+        // Read the rendered band, not the model behind it: ordering, membership,
+        // and the live state dot are the whole claim of the queue arrangement,
+        // and only the DOM can testify that what the user sees matches it.
+        const band = document.querySelector('[data-testid="sidebar-queue"]');
+        const readRow = (row: Element, prefix: string) => ({
+          id: (row.getAttribute('data-testid') || '').slice(prefix.length),
+          label: row.querySelector('.session-label')?.textContent?.trim() || '',
+          state: row.getAttribute('data-state') || '',
+          workspace: row.querySelector('.queue-row-workspace')?.textContent?.trim() || '',
+          age: row.querySelector('.queue-row-age')?.textContent?.trim() || '',
+          selected: row.classList.contains('selected'),
+        });
+        const chiefRow = band?.querySelector('[data-testid^="queue-chief-"]');
+        return {
+          present: Boolean(band),
+          empty: Boolean(band?.querySelector('[data-testid="queue-empty"]')),
+          chief: chiefRow ? readRow(chiefRow, 'queue-chief-') : null,
+          turns: Array.from(band?.querySelectorAll('[data-testid^="queue-turn-"]') || [])
+            .map((row) => readRow(row, 'queue-turn-')),
+          // The tree is additive, never filtered — the scenario asserts every
+          // session still has its own row below the band.
+          treeSessionIds: Array.from(document.querySelectorAll('.session-list [data-testid^="sidebar-session-"]'))
+            .map((row) => (row.getAttribute('data-testid') || '').slice('sidebar-session-'.length)),
+        };
+      }
       case 'chief_of_staff_get_state':
         return {
           sessions: sessions.map((session) => {

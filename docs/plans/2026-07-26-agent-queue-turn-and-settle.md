@@ -55,7 +55,7 @@ said you are done with it.
 ### Two stamps, and the rule between them
 
 ```sql
--- migration 81 (80 is the current max; confirm against a real DB before numbering)
+-- migration 81 (confirmed: 80 is MAX(version) across every local profile DB)
 ALTER TABLE sessions ADD COLUMN turn_opened_at  TEXT NOT NULL DEFAULT '';
 ALTER TABLE sessions ADD COLUMN turn_settled_at TEXT NOT NULL DEFAULT '';
 ```
@@ -324,39 +324,39 @@ into `working` with an initial prompt — finishes without asking for you. Agent
 you prompted from the queue are unaffected: their turn was already open and stays
 open through the run. That gap is slice 2.
 
-- [ ] Rebuild `internal/attention` to `OpensTurn`/`Owed`/`Input`. Table tests:
+- [x] Rebuild `internal/attention` to `OpensTurn`/`Owed`/`Input`. Table tests:
       the state vocabulary; the stamp comparison; every exclusion, including a
       shell sitting in `idle` — the case slice 2 turns live.
-- [ ] Delete the aggregator, its adapters, `daemon.aggregateAttention`, and
+- [x] Delete the aggregator, its adapters, `daemon.aggregateAttention`, and
       `recomputeWorkflowAttention`.
-- [ ] Migration 81: both columns, plus the `turn_opened_at` backfill from
+- [x] Migration 81: both columns, plus the `turn_opened_at` backfill from
       `state_since` for sessions currently in a turn-opening state.
-- [ ] `store.OpenTurnIfClosed` and `store.SettleTurn`, both branches (SQLite and
+- [x] `store.OpenTurnIfClosed` and `store.SettleTurn`, both branches (SQLite and
       in-memory). Store tests: opening twice does not move the stamp; settling
       then re-opening does.
-- [ ] Stamp from `applyState` after a successful commit.
-- [ ] Protocol: `Session.turn_owed`, `Session.turn_opened_at`, `settle_turn`;
+- [x] Stamp from `applyState` after a successful commit.
+- [x] Protocol: `Session.turn_owed`, `Session.turn_opened_at`, `settle_turn`;
       regenerate; bump `ProtocolVersion` (constants.go **and**
       `useDaemonSocket.ts`).
-- [ ] `decorateSessionWithTurn`, unconditional on the mode; `settle_turn` handler
+- [x] `decorateSessionWithTurn`, unconditional on the mode; `settle_turn` handler
       → `SettleTurn` → statetrace entry → broadcast.
-- [ ] `SettingQueueModeEnabled`, defaulting off.
-- [ ] Daemon tests: a prompted agent stays owed across `working`; settle removes
+- [x] `SettingQueueModeEnabled`, defaulting off.
+- [x] Daemon tests: a prompted agent stays owed across `working`; settle removes
       it; a later turn-opening state re-adds it at a new age; shell, pinned,
       muted, and chief sessions are never owed.
-- [ ] Carry `turn_owed` and `turn_opened_at` into the app's enriched session
+- [x] Carry `turn_owed` and `turn_opened_at` into the app's enriched session
       model. The frontend has never read `state_since` — zero consumers today —
       so do not assume timestamps survive into the local model.
-- [ ] `buildQueueBands` + unit tests: oldest `turn_opened_at` first; a new
+- [x] `buildQueueBands` + unit tests: oldest `turn_opened_at` first; a new
       arrival lands at the bottom; a row whose state changes does not move; a row
       leaving moves only the rows below it; the workspace tree the builder
       returns is identical to queue-mode-off.
-- [ ] Sidebar: the anchored chief row, the *Your turn* band with live state
+- [x] Sidebar: the anchored chief row, the *Your turn* band with live state
       indicators, agent label + workspace title, above the unchanged tree.
-- [ ] `session.settle` shortcut (registry + cheatsheet + `Menu::default`
+- [x] `session.settle` shortcut (registry + cheatsheet + `Menu::default`
       accelerator check), registered only while the mode is on, and a row
       affordance.
-- [ ] Point every session-attention surface at `turn_owed` while the mode is on,
+- [x] Point every session-attention surface at `turn_owed` while the mode is on,
       leaving each on `isAttentionSessionState` while it is off. There are four,
       not one: ⌘J (`handleJumpToWaiting`, `App.tsx:2890`), the collapsed-rail
       per-workspace dot (`Sidebar.tsx:785`), the grid tile's attention glow
@@ -364,10 +364,10 @@ open through the run. That gap is slice 2.
       section plus its badge count (`waitingLocalSessions`, `App.tsx:2884`). The
       drawer keeps its PR sections either way — PRs are out of scope for the
       queue and are the drawer's reason to exist.
-- [ ] Settings block in General, plus the ⌘K action, plus a test that flipping it
+- [x] Settings block in General, plus the ⌘K action, plus a test that flipping it
       on and back off leaves the tree, the selected session, and terminal focus
       untouched.
-- [ ] Live verification: full `make install PROFILE=<throwaway>`. Agents across
+- [x] Live verification: full `make install PROFILE=<throwaway>`. Agents across
       two workspaces; band ordered oldest-first; clicking a row lands in the agent
       with the keyboard already in its terminal; **prompting an agent leaves it in
       place, in the same position, with its indicator turning green**; settle
@@ -375,6 +375,9 @@ open through the run. That gap is slice 2.
       returns at the bottom; a blocked chief shows in its own slot and never in
       the band; toggling the mode off and on mid-session returns the same queue
       with the same agent still focused.
+      Automated as `real-app:scenario-agent-queue`, which drives two live Claude
+      agents through all of it and asserts against the rendered band via a new
+      `queue_get_state` bridge verb.
 
 ### Slice 2 — a finished run opens a turn
 
@@ -448,6 +451,12 @@ if it still feels heavy the flip is one predicate entry to revert.
   window, because only one arrangement is in effect at a time. Collapsing
   everything onto `turn_owed` would instead drop pinned agents out of the badge in
   the arrangement where pinning means kept in view.
+- **`turn_settled_at` stays off the wire.** Only `turn_owed` and
+  `turn_opened_at` are broadcast; the daemon reads both stamps through
+  `store.TurnStamps` in the decoration seam. Publishing the settle stamp would
+  hand a client everything it needs to recompute membership itself, and any
+  client that did would get a different answer — it cannot see the shell, chief,
+  pinned, or muted exclusions.
 - **Enabling the mode settles nothing.** A flip that pre-settled the board would
   start the queue empty and fill it as agents stop, which reads better on the
   first screen and hides live turns at the moment the user is least able to
@@ -455,10 +464,10 @@ if it still feels heavy the flip is one predicate entry to revert.
 
 ## Open questions
 
-- **The settle keybinding.** Recommend `session.settle` = ⌘E — unbound, not a
-  `Menu::default` accelerator, and easy enough to press constantly. ⌘⇧J is the
-  alternative, pairing with ⌘J (jump to waiting) as a queue family, at the cost
-  of a two-modifier chord for the most-pressed verb in the product.
+- **The settle keybinding.** Settled on `session.settle` = ⌘⇧E. ⌘E was the first
+  choice and is wrong: plain ⌘E toggles inline code in the Notebook editor, and
+  the shortcut editor's chord tests record it as an exclusive leader. ⌘⇧J is the
+  alternative, pairing with ⌘J (jump to waiting) as a queue family.
 - **What a promoted row looks like in the tree below.** Dimmed, marked, or
   untouched. Untouched is the safe default and is what slice 1 does; living with
   it is what decides.
@@ -477,6 +486,10 @@ if it still feels heavy the flip is one predicate entry to revert.
   whole is not.
 
 ## Follow-ups
+
+- `sessionsMatch` in `internal/hub/manager.go` gained both turn fields. Without
+  them a remote agent settled on its own daemon changed nothing the hub compared,
+  so the hub would suppress the re-broadcast and the row would stay in the queue.
 
 - `Dashboard.tsx:77` filters on `state === 'waiting_input'` alone, so its "waiting"
   list silently omits `pending_approval` and `unknown`. Out of scope here, but it
