@@ -31,18 +31,25 @@ don't — a todo list that writes and clears itself, where the only work left on
 is work only you can do.
 
 The unit is not the agent. It is **the turn you owe.** Every state we detect
-already answers that question: waiting for input, waiting for approval, stuck,
-crashed, finished — your turn. Working, scheduled — its turn. The queue is just
-that question, asked continuously and answered out loud.
+answers when one begins: waiting for input, waiting for approval, stuck, crashed,
+finished — your turn. What no state can answer is when it ends, because an agent
+that went back to work went there because you sent it. A turn opens on a state
+and closes only when you close it.
 
 The vocabulary is one word in two forms. An agent that owes you nothing is
-**settled**, and that is the name of the band it sits in — working, snoozed, and
-muted agents are all settled, differing only in why. Most agents settle
-themselves: the moment one starts working, the turn is no longer yours. **Settle**
-is also the verb you press, the single intentional act that takes a turn off your
-plate. It covers both reasons you would ever want that — you are done with this
-one, or the queue was wrong about it — because from your side those are the same
-gesture, and nothing downstream needs to tell them apart.
+**settled**, and that is the name of the band it sits in — snoozed and muted
+agents are settled, differing only in why. **Settle** is also the verb you press,
+and it is the only way a turn ever ends. It covers both reasons you would ever
+want one gone — you are done with this agent for now, or the queue was wrong
+about it — because from your side those are the same gesture, and nothing
+downstream needs to tell them apart. A settled agent is not dismissed forever: it
+comes back the next time it wants you.
+
+So the queue holds agents that are still running, and that is the point. You read
+what one did, steer it, and it keeps its place until you say you are finished
+with it. Nothing decides on your behalf that sending a message discharged what
+you owed — sometimes it did, sometimes you meant to watch the first thirty
+seconds, and only you know which.
 
 ## North-star principles
 
@@ -228,7 +235,8 @@ should be possible to live in the queue without ever turning it on.
   harness-owned hook/heartbeat signals. Without near-perfect states the queue is
   a lie, and this is what makes "your turn" mechanically knowable.
 - [ ] **The queue itself.** The sidebar rendered as *Your turn* / *Settled*, one row
-  per agent that wants you, oldest unsettled first, behind a toggle. Whose turn it
+  per agent that wants you, oldest unsettled first, behind a toggle, with the chief
+  anchored above it. Whose turn it
   is becomes daemon-owned and broadcast rather than recomputed in the app. The
   single collapse of today's several competing notions of "needs attention" into
   one — including its earliest ancestor, the long run flagged for review, which this
@@ -236,10 +244,11 @@ should be possible to live in the queue without ever turning it on.
 - [ ] **Settle.** One keystroke that takes a turn off your plate, on any agent, for
   either reason — done with it, or the queue was wrong. The act that makes the
   whole thing safe to trust, because it makes being wrong cheap.
-- [ ] **The standing order.** Chief anchored on top and able to say it is blocked
-  without leaving its slot, pinned workspaces as a place to work rather than a queue
-  band, muted pushed out of sight — the user-controlled bands the queue lives
+- [ ] **The standing order.** Pinned workspaces as a place to work rather than a
+  queue band, muted pushed out of sight — the user-controlled bands the queue lives
   between, and the guarantee that anything not in your face is still one click away.
+  The chief's anchored slot ships earlier, with the queue: it never queues, so it
+  needs somewhere to be blocked in view from the first day.
   Carries the two ways an agent leaves the queue for good: dragged onto a pinned
   workspace, or born there from the new-workspace flow.
 - [ ] **Move on.** A shortcut that takes you from the agent you just steered to the
