@@ -599,7 +599,9 @@ func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage)
 			strings.TrimSpace(protocol.Deref(msg.Source)),
 		)
 	}
-	if err := d.ptyBackend.Input(context.Background(), msg.ID, []byte(msg.Data)); err != nil {
+	// Under the session's write fence: a keystroke that races a doorbell's
+	// paste-then-Enter pair lands after it, never inside it.
+	if err := d.writePTY(msg.ID, []byte(msg.Data)); err != nil {
 		if shouldLogPtyCommandError(err) {
 			d.logf("pty_input failed for %s: %v", msg.ID, err)
 		}

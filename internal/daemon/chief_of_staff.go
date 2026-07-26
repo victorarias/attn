@@ -149,10 +149,12 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 // boundary, so the prompt lands in the composer as one pasted block — and
 // then, after doorbellSubmitDelay, sends Enter as its own write.
 //
-// Both writes happen under doorbellMu, so the approval-state fence still holds
-// across the pair: a pending_approval report cannot commit between the prompt
-// and its Enter. Always a bounded, user-initiated delivery — never arbitrary
-// streamed content.
+// Two fences cover the pair. doorbellMu keeps a pending_approval report from
+// committing between the prompt and its Enter. The session's PTY write fence
+// keeps anything else — the user typing — out of the gap: a keystroke racing
+// the delay is written after the Enter, so the doorbell submits what it
+// composed and never the user's half-typed line. Always a bounded,
+// user-initiated delivery — never arbitrary streamed content.
 func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 	d.doorbellMu.Lock()
 	defer d.doorbellMu.Unlock()
@@ -167,11 +169,13 @@ func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 	input = append(input, bracketedPasteStart...)
 	input = append(input, prompt...)
 	input = append(input, bracketedPasteEnd...)
-	if err := d.ptyBackend.Input(context.Background(), sessionID, input); err != nil {
-		return err
-	}
-	time.Sleep(doorbellSubmitDelay)
-	return d.ptyBackend.Input(context.Background(), sessionID, []byte("\r"))
+	return d.withPTYWriteFence(sessionID, func() error {
+		if err := d.ptyBackend.Input(context.Background(), sessionID, input); err != nil {
+			return err
+		}
+		time.Sleep(doorbellSubmitDelay)
+		return d.ptyBackend.Input(context.Background(), sessionID, []byte("\r"))
+	})
 }
 
 // maybeAssignChiefOnSpawn assigns the chief-of-staff role at a session's first
