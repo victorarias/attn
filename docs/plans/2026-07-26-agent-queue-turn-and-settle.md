@@ -61,14 +61,14 @@ type Input struct {
     State           protocol.SessionState
     StateSince      time.Time
     SettledAt       time.Time // zero => never settled
+    IsShell         bool
     WorkspacePinned bool
     WorkspaceMuted  bool
-    ChiefOfStaff    bool
 }
 
 func Owed(in Input) bool {
-    if in.WorkspacePinned || in.WorkspaceMuted || in.ChiefOfStaff {
-        return false // outside the queue by explicit intent, or by standing order
+    if in.IsShell || in.WorkspacePinned || in.WorkspaceMuted {
+        return false
     }
     if !turnState(in.State) {
         return false
@@ -83,6 +83,21 @@ func Owed(in Input) bool {
 `idle` is a turn — the vision's largest deliberate consequence, and the last
 thing the slices below turn on. `recoverable` is not: the daemon revives it
 unattended.
+
+**Shells are excluded by agent, not by state, and it is load-bearing.** A shell
+pane is a real store session and is registered `idle` at birth
+(`internal/daemon/ws_pty.go:218-220`), where it stays forever. Without the
+exclusion, slice 3 would put every ⌘\` terminal in the queue permanently, and none
+of them could ever settle themselves. The vision already says shells are not in
+the queue; this is where that is enforced. The exclusion goes in from slice 1
+even though it only bites in slice 3, so that the slice-3 flip really is one line.
+
+**The chief is not excluded.** The vision anchors it at the top of the sidebar,
+outside the queue, saying it is blocked where it stands — but that slot is the
+standing-order rock, and it does not exist yet. Excluding the chief before it has
+a home would make a blocked chief a turn that never enters the queue, which is
+the one failure the vision calls unrecoverable. Until rock 4 gives it a slot, the
+chief queues like anything else.
 
 ### Settle — one column, no lifecycle
 
@@ -282,7 +297,8 @@ only survivable once settle exists.
 
 - [ ] Rebuild `internal/attention` to `Input`/`Owed`, with `turnState` =
       `waiting_input`, `pending_approval`, `unknown`. `SettledAt` is in the
-      struct and always zero. Table test over states × pinned/muted/chief.
+      struct and always zero. Table test over states × shell/pinned/muted,
+      including a shell sitting in `idle` — the case slice 3 turns live.
 - [ ] Delete the aggregator, its adapters, `daemon.aggregateAttention`, and
       `recomputeWorkflowAttention`.
 - [ ] `store.UpdateState`: move `state_since` only when `state` actually
@@ -297,9 +313,15 @@ only survivable once settle exists.
 - [ ] `decorateSessionWithTurn` in `sessionForBroadcastWithChiefOfStaff`,
       unconditional on the mode.
 - [ ] `SettingQueueModeEnabled`, defaulting off.
+- [ ] Carry `state_since` into the app's enriched session model. The frontend has
+      never read the field — there are zero consumers today — so the queue's sort
+      key may not survive into the local model at all. Check before assuming.
 - [ ] `buildQueueBands` + unit tests: oldest `state_since` first, a new arrival
       lands at the bottom, a row leaving moves only the rows below it, and the
       workspace tree the builder returns is identical to queue-mode-off.
+- [ ] Point ⌘J (`handleJumpToWaiting`) and the collapsed-rail badge
+      (`Sidebar.tsx:785`) at `turn_owed` while the mode is on, leaving both on
+      `isAttentionSessionState` while it is off.
 - [ ] Sidebar: the *Your turn* band above the unchanged tree, rows carrying
       agent label + workspace title. Pinned workspaces stay where they are in the
       tree; their own band is the standing-order rock.
@@ -397,9 +419,21 @@ if it still feels wrong the slice is one predicate entry to revert.
   promoted agent appears in both the band and its workspace group. The
   duplication is the point: the tree stays complete and stable, which is the only
   defence against an agent that needs you and never enters the queue.
-- **Pinned, muted, and chief are excluded daemon-side.** They are policy about
+- **Shell, pinned, and muted are excluded daemon-side.** They are policy about
   queue membership, not rendering preferences, and a second client must see the
   same queue.
+- **The chief queues until it has a slot of its own.** Excluding it now would be
+  building half of the standing-order rock, and the wrong half: the half that
+  removes an agent from the queue without giving it anywhere else to be seen.
+- **Each arrangement has one notion of what wants you, and the mode selects it.**
+  In queue mode ⌘J and the collapsed-rail badge follow `turn_owed`; with the mode
+  off they keep following `isAttentionSessionState`. The epic's standing
+  constraint was that phase 4 must not introduce a second competing notion of
+  "needs attention", and this honours it: the two notions never disagree inside
+  one window, because only one arrangement is in effect at a time. The
+  alternative — collapsing everything onto `turn_owed` — would silently drop
+  pinned agents out of the badge and ⌘J in the scan arrangement, where "pinned"
+  means kept in view and emphatically not "out of a queue".
 - **Enabling the mode settles nothing.** A flip that pre-settled the board would
   start the queue empty and fill it as agents stop, which reads better on the
   first screen and hides live turns at the moment the user is least able to
@@ -418,6 +452,12 @@ if it still feels wrong the slice is one predicate entry to revert.
 - **What a promoted row looks like in the tree below.** Dimmed, marked, or
   untouched. Untouched is the safe default and is what slice 1 does; living with
   it is what decides.
+- **A newly created agent enters the queue while you are typing into it.** ⌘T
+  spawns an agent, it boots to its prompt in `waiting_input`, and it is a turn you
+  owe — correctly, since it wants your first message. It leaves the moment you
+  send one. Expected, not a bug; named here so it does not get "fixed" mid-slice
+  with a special case for the focused agent, which "looking is never acting"
+  forbids.
 - **Ordering across endpoints.** Remote sessions sort by their own daemon's
   clock. Skew is small in practice and the queue is not a ledger, so this plan
   ignores it; revisit if a remote agent visibly lands in the wrong place.
