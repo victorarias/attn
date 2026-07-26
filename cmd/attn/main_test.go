@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -817,38 +818,61 @@ func TestParseOpenArgs(t *testing.T) {
 	}
 }
 
-func TestHasActiveBackgroundTask(t *testing.T) {
+// TestStopFacts locks what the Stop hook reports to the daemon. The payloads are
+// real Claude Code Stop-hook stdin bodies (trimmed to the fields attn parses),
+// captured from live background Workflow runs and CronCreate/CronDelete probes.
+// Statuses pass through verbatim — the rule that reads them lives in the daemon
+// (see nonTerminalStopState there), so the hook's job is extraction only.
+func TestStopFacts(t *testing.T) {
 	cases := []struct {
-		name string
-		// payload is a real Claude Code 2.1.177 Stop-hook stdin body (trimmed to
-		// the fields attn parses), captured from a live background Workflow run.
-		payload string
-		want    bool
+		name         string
+		payload      string
+		wantStatuses []string
+		wantCrons    int
 	}{
 		{
-			name:    "workflow running (parent yields mid-run)",
-			payload: `{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[{"id":"wv9p74ip7","type":"workflow","status":"running","name":"hello-parallel"}],"session_crons":[]}`,
-			want:    true,
+			name:         "workflow running (parent yields mid-run)",
+			payload:      `{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[{"id":"wv9p74ip7","type":"workflow","status":"running","name":"hello-parallel"}],"session_crons":[]}`,
+			wantStatuses: []string{"running"},
 		},
 		{
-			name:    "workflow plus background shells running",
-			payload: `{"background_tasks":[{"type":"workflow","status":"running"},{"type":"shell","status":"running"},{"type":"shell","status":"running"}]}`,
-			want:    true,
+			name:         "workflow plus background shells running",
+			payload:      `{"background_tasks":[{"type":"workflow","status":"running"},{"type":"shell","status":"running"},{"type":"shell","status":"running"}]}`,
+			wantStatuses: []string{"running", "running", "running"},
 		},
 		{
 			name:    "empty background_tasks (workflow finished)",
 			payload: `{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[],"session_crons":[]}`,
-			want:    false,
 		},
 		{
-			name:    "field absent (e.g. another agent)",
+			name:    "fields absent (e.g. another agent)",
 			payload: `{"hook_event_name":"Stop","stop_hook_active":false}`,
-			want:    false,
 		},
 		{
-			name:    "task present but not running",
-			payload: `{"background_tasks":[{"type":"workflow","status":"completed"}]}`,
-			want:    false,
+			name:         "task present but not running is still reported",
+			payload:      `{"background_tasks":[{"type":"workflow","status":"completed"}]}`,
+			wantStatuses: []string{"completed"},
+		},
+		{
+			name:      "recurring cron pending",
+			payload:   `{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[],"session_crons":[{"id":"d0055050","schedule":"*/30 * * * *","recurring":true,"prompt":"echo persist-probe"}]}`,
+			wantCrons: 1,
+		},
+		{
+			name:      "one-shot reminder pending",
+			payload:   `{"hook_event_name":"Stop","stop_hook_active":false,"session_crons":[{"id":"5e9a0f21","schedule":"18 14 * * *","recurring":false,"prompt":"echo oneshot-fired"}]}`,
+			wantCrons: 1,
+		},
+		{
+			name:      "recurring plus one-shot pending",
+			payload:   `{"session_crons":[{"id":"43f0809f","schedule":"*/30 * * * *","recurring":true,"prompt":"echo recurring-probe"},{"id":"2b1dec68","schedule":"15 9 20 6 *","recurring":false,"prompt":"echo oneshot-probe"}]}`,
+			wantCrons: 2,
+		},
+		{
+			name:         "background running and cron pending are reported together",
+			payload:      `{"background_tasks":[{"type":"shell","status":"running"}],"session_crons":[{"id":"d0055050","schedule":"*/30 * * * *","recurring":true,"prompt":"echo x"}]}`,
+			wantStatuses: []string{"running"},
+			wantCrons:    1,
 		},
 	}
 	for _, tc := range cases {
@@ -857,128 +881,12 @@ func TestHasActiveBackgroundTask(t *testing.T) {
 			if err := json.Unmarshal([]byte(tc.payload), &input); err != nil {
 				t.Fatalf("unmarshal payload: %v", err)
 			}
-			if got := hasActiveBackgroundTask(input); got != tc.want {
-				t.Fatalf("hasActiveBackgroundTask() = %v, want %v", got, tc.want)
+			facts := stopFacts(input)
+			if !slices.Equal(facts.BackgroundTaskStatuses, tc.wantStatuses) {
+				t.Fatalf("BackgroundTaskStatuses = %q, want %q", facts.BackgroundTaskStatuses, tc.wantStatuses)
 			}
-		})
-	}
-}
-
-func TestHasPendingSessionCron(t *testing.T) {
-	cases := []struct {
-		name string
-		// payload is a real Claude Code 2.1.177 Stop-hook stdin body, captured
-		// from live CronCreate/CronDelete and one-shot-fire probes.
-		payload string
-		want    bool
-	}{
-		{
-			name:    "recurring cron pending",
-			payload: `{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[],"session_crons":[{"id":"d0055050","schedule":"*/30 * * * *","recurring":true,"prompt":"echo persist-probe"}]}`,
-			want:    true,
-		},
-		{
-			name:    "one-shot reminder pending",
-			payload: `{"hook_event_name":"Stop","stop_hook_active":false,"session_crons":[{"id":"5e9a0f21","schedule":"18 14 * * *","recurring":false,"prompt":"echo oneshot-fired"}]}`,
-			want:    true,
-		},
-		{
-			name:    "recurring plus one-shot pending",
-			payload: `{"session_crons":[{"id":"43f0809f","schedule":"*/30 * * * *","recurring":true,"prompt":"echo recurring-probe"},{"id":"2b1dec68","schedule":"15 9 20 6 *","recurring":false,"prompt":"echo oneshot-probe"}]}`,
-			want:    true,
-		},
-		{
-			name:    "empty session_crons (nothing scheduled, or all crons fired/deleted)",
-			payload: `{"hook_event_name":"Stop","stop_hook_active":false,"background_tasks":[],"session_crons":[]}`,
-			want:    false,
-		},
-		{
-			name:    "field absent (e.g. another agent)",
-			payload: `{"hook_event_name":"Stop","stop_hook_active":false}`,
-			want:    false,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var input hookInput
-			if err := json.Unmarshal([]byte(tc.payload), &input); err != nil {
-				t.Fatalf("unmarshal payload: %v", err)
-			}
-			if got := hasPendingSessionCron(input); got != tc.want {
-				t.Fatalf("hasPendingSessionCron() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-// TestNonTerminalStopState locks the non-terminal-Stop precedence: running
-// background work outranks a parked schedule, and either outranks classification.
-// The relax cases lock the chief-of-staff relaxation: background work no longer
-// pegs "working", but a parked schedule still parks "scheduled".
-func TestNonTerminalStopState(t *testing.T) {
-	cases := []struct {
-		name    string
-		payload string
-		relax   bool
-		want    string
-	}{
-		{
-			name:    "background running and cron pending -> working wins",
-			payload: `{"background_tasks":[{"type":"shell","status":"running"}],"session_crons":[{"id":"d0055050","schedule":"*/30 * * * *","recurring":true,"prompt":"echo x"}]}`,
-			want:    protocol.StateWorking,
-		},
-		{
-			name:    "cron pending, no background -> scheduled",
-			payload: `{"background_tasks":[],"session_crons":[{"id":"5e9a0f21","schedule":"18 14 * * *","recurring":false,"prompt":"echo x"}]}`,
-			want:    protocol.StateScheduled,
-		},
-		{
-			name:    "background running, no cron -> working",
-			payload: `{"background_tasks":[{"type":"workflow","status":"running"}],"session_crons":[]}`,
-			want:    protocol.StateWorking,
-		},
-		{
-			name:    "completed background and cron pending -> scheduled (completed is not running)",
-			payload: `{"background_tasks":[{"type":"workflow","status":"completed"}],"session_crons":[{"id":"d0055050","schedule":"*/30 * * * *","recurring":true,"prompt":"echo x"}]}`,
-			want:    protocol.StateScheduled,
-		},
-		{
-			name:    "nothing pending -> classify (empty)",
-			payload: `{"background_tasks":[],"session_crons":[]}`,
-			want:    "",
-		},
-		{
-			name:    "fields absent -> classify (empty)",
-			payload: `{"hook_event_name":"Stop","stop_hook_active":false}`,
-			want:    "",
-		},
-		{
-			name:    "chief relax: background running, no cron -> classify (empty), not working",
-			payload: `{"background_tasks":[{"type":"shell","status":"running"}],"session_crons":[]}`,
-			relax:   true,
-			want:    "",
-		},
-		{
-			name:    "chief relax: background running + cron pending -> scheduled, not working",
-			payload: `{"background_tasks":[{"type":"shell","status":"running"}],"session_crons":[{"id":"d0055050","schedule":"*/30 * * * *","recurring":true,"prompt":"echo x"}]}`,
-			relax:   true,
-			want:    protocol.StateScheduled,
-		},
-		{
-			name:    "chief relax: cron only -> scheduled (unchanged by relax)",
-			payload: `{"background_tasks":[],"session_crons":[{"id":"5e9a0f21","schedule":"18 14 * * *","recurring":false,"prompt":"echo x"}]}`,
-			relax:   true,
-			want:    protocol.StateScheduled,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var input hookInput
-			if err := json.Unmarshal([]byte(tc.payload), &input); err != nil {
-				t.Fatalf("unmarshal payload: %v", err)
-			}
-			if got := nonTerminalStopState(input, tc.relax); got != tc.want {
-				t.Fatalf("nonTerminalStopState() = %q, want %q", got, tc.want)
+			if facts.PendingSessionCrons != tc.wantCrons {
+				t.Fatalf("PendingSessionCrons = %d, want %d", facts.PendingSessionCrons, tc.wantCrons)
 			}
 		})
 	}

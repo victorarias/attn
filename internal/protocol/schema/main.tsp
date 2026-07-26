@@ -131,6 +131,7 @@ model Session {
   state: SessionState;
   state_since: string;          // ISO timestamp, always set
   state_updated_at: string;     // ISO timestamp, always set
+  state_reason?: string;        // Why the resolver reached this state (e.g. "stuck", "classifier_verdict"); absent for states it does not own
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
@@ -610,6 +611,26 @@ model StateMessage {
   cmd: "state";
   id: string;
   state: string;
+  // permission_mode is the agent's *resolved* approval mode at the moment the
+  // hook fired ("default", "auto", "acceptEdits", …). attn's own launch flags
+  // cannot be trusted for this: a user's global agent settings can put a
+  // guardian in the loop for a session attn launched without asking for one,
+  // and Shift+Tab changes it mid-session. Absent from agents that do not
+  // report it.
+  permission_mode?: string;
+}
+
+// HookNotificationMessage carries Claude's `Notification` hook. The hook is
+// harness-owned and typed — notification_type is "permission_prompt" when the
+// agent is blocked on approval and "idle_prompt" when it has been waiting on
+// the user for 60s — so it needs no message-string parsing. It arrives ~6s
+// after the underlying event, which makes it a corroborator rather than a
+// low-latency trigger.
+model HookNotificationMessage {
+  cmd: "hook_notification";
+  id: string;
+  notification_type: string;
+  message?: string;
 }
 
 model SetSessionResumeIDMessage {
@@ -632,10 +653,31 @@ model SessionTranscriptMessage {
   after_cursor?: string;
 }
 
+// Replays the daemon's per-session ring of state observations so a wrong color
+// can be explained: which sources spoke, what each claimed, and what happened to
+// each claim. Diagnostic only — reading it changes nothing.
+model StateExplainMessage {
+  cmd: "state_explain";
+  target_session_id: string;
+}
+
+// A Stop is not always terminal: the turn may yield with background work still
+// in flight (it auto-resumes on completion) or park on a pending scheduled
+// wakeup. These carry that as FACTS observed by the hook — the statuses of the
+// agent's background tasks, and how many scheduled wakeups are pending — and the
+// daemon decides what they mean. The hook used to decide and report a state
+// instead, which hid the facts from the daemon and forced the hook to query the
+// daemon back for the chief-of-staff role it needed to decide.
+//
+// Both are optional: a hook binary predating them reports neither, and the
+// daemon then classifies the stop as terminal, which is what such a hook already
+// caused by omitting the state update.
 model StopMessage {
   cmd: "stop";
   id: string;
   transcript_path: string;
+  background_task_statuses?: string[];
+  pending_session_crons?: int32;
 }
 
 model TodosMessage {
@@ -3046,6 +3088,39 @@ model Response {
   present_feedback_result?: PresentFeedbackResult;
   session_instructions_result?: SessionInstructionsResult;
   session_transcript_result?: SessionTranscriptResult;
+  state_explain_result?: StateExplainResult;
+}
+
+// One recorded state observation and its fate. Outcome separates the ways an
+// observation can fail to reach the store: "vetoed" is a driver transition
+// filter refusing it before the store door, "discarded" is the store's own
+// commit rule refusing it, "skipped" is the source deciding it had nothing to
+// say. A stuck color is a session whose observations are all non-applied.
+model StateExplainEntry {
+  source: string;
+  claim: string;
+  outcome: string; // "applied" | "discarded" | "vetoed" | "skipped"
+  detail?: string;
+  cause?: string;
+  reason?: string;
+  observed_at: string;
+  recorded_at: string;
+  // repeats counts identical consecutive observations collapsed into this one.
+  // A level source (the OSC 0 title heartbeat) restates itself continuously;
+  // without collapsing, it would evict every other kind of evidence from the
+  // bounded ring within a minute.
+  repeats?: int32;
+}
+
+model StateExplainResult {
+  session_id: string;
+  agent: string;
+  state: string;
+  state_since?: string;
+  observations: StateExplainEntry[];
+  // capacity is the ring size, so a full ring can be reported as truncated
+  // rather than read as the whole history.
+  capacity: int32;
 }
 
 model EvidenceExcerpt {

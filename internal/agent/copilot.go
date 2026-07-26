@@ -17,7 +17,7 @@ var _ Driver = (*Copilot)(nil)
 var _ TranscriptFinder = (*Copilot)(nil)
 var _ TranscriptWatcherBehaviorProvider = (*Copilot)(nil)
 var _ ClassifierProvider = (*Copilot)(nil)
-var _ PTYStatePolicyProvider = (*Copilot)(nil)
+var _ RecoveredStatePolicyProvider = (*Copilot)(nil)
 
 func init() {
 	Register(&Copilot{})
@@ -38,7 +38,6 @@ func (c *Copilot) Capabilities() Capabilities {
 		HasTranscript:        true,
 		HasTranscriptWatcher: true,
 		HasClassifier:        true,
-		HasStateDetector:     true,
 		HasResume:            true,
 		HasYolo:              true,
 		HasInitialPrompt:     true,
@@ -99,16 +98,6 @@ func (c *Copilot) RecoveredRunningState(ptyState string) protocol.SessionState {
 	default:
 		return protocol.SessionStateLaunching
 	}
-}
-
-func (c *Copilot) ShouldApplyPTYState(current protocol.SessionState, incoming string) bool {
-	if incoming != protocol.StateWorking && incoming != protocol.StatePendingApproval {
-		return false
-	}
-	if current == protocol.SessionStatePendingApproval && incoming == protocol.StateWorking {
-		return false
-	}
-	return true
 }
 
 // --- ClassifierProvider ---

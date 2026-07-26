@@ -56,7 +56,12 @@ var verdictLineRegex = regexp.MustCompile(`(?i)^\s*(?:VERDICT\s*[:=]\s*)?(WAITIN
 const classifierLogSnippetMaxChars = 600
 
 const (
-	defaultCodexClassifierModel   = "gpt-5.4-mini"
+	// The classification is a one-word verdict over a short transcript slice, so
+	// the cheapest tier of the current family is the right pick — the cost here
+	// is latency, not tokens, and latency is user-visible: the resolver holds the
+	// pre-settle color until the verdict lands. Measured end to end through the
+	// CLI, low effort: gpt-5.6-luna 3.9s against 9.3s for the claude/haiku path.
+	defaultCodexClassifierModel   = "gpt-5.6-luna"
 	defaultCodexReasoningEffort   = "low"
 	defaultCodexClassifierTimeout = 30 * time.Second
 	defaultCodexExecutable        = "codex"

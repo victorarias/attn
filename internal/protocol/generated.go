@@ -1999,6 +1999,20 @@ const HeatStateCold HeatState = "cold"
 const HeatStateHot HeatState = "hot"
 const HeatStateWarm HeatState = "warm"
 
+type HookNotificationMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Message corresponds to the JSON schema field "message".
+	Message *string `json:"message,omitempty,omitzero"`
+
+	// NotificationType corresponds to the JSON schema field "notification_type".
+	NotificationType string `json:"notification_type"`
+}
+
 type InitialStateMessage struct {
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
@@ -3783,6 +3797,9 @@ type Response struct {
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
+	// StateExplainResult corresponds to the JSON schema field "state_explain_result".
+	StateExplainResult *StateExplainResult `json:"state_explain_result,omitempty,omitzero"`
+
 	// TicketAttachResult corresponds to the JSON schema field "ticket_attach_result".
 	TicketAttachResult *TicketAttachResult `json:"ticket_attach_result,omitempty,omitzero"`
 
@@ -3917,6 +3934,9 @@ type Session struct {
 
 	// State corresponds to the JSON schema field "state".
 	State SessionState `json:"state"`
+
+	// StateReason corresponds to the JSON schema field "state_reason".
+	StateReason *string `json:"state_reason,omitempty,omitzero"`
 
 	// StateSince corresponds to the JSON schema field "state_since".
 	StateSince string `json:"state_since"`
@@ -4297,6 +4317,63 @@ type SpawnSessionMessage struct {
 	YoloMode *bool `json:"yolo_mode,omitempty,omitzero"`
 }
 
+type StateExplainEntry struct {
+	// Cause corresponds to the JSON schema field "cause".
+	Cause *string `json:"cause,omitempty,omitzero"`
+
+	// Claim corresponds to the JSON schema field "claim".
+	Claim string `json:"claim"`
+
+	// Detail corresponds to the JSON schema field "detail".
+	Detail *string `json:"detail,omitempty,omitzero"`
+
+	// ObservedAt corresponds to the JSON schema field "observed_at".
+	ObservedAt string `json:"observed_at"`
+
+	// Outcome corresponds to the JSON schema field "outcome".
+	Outcome string `json:"outcome"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason *string `json:"reason,omitempty,omitzero"`
+
+	// RecordedAt corresponds to the JSON schema field "recorded_at".
+	RecordedAt string `json:"recorded_at"`
+
+	// Repeats corresponds to the JSON schema field "repeats".
+	Repeats *int `json:"repeats,omitempty,omitzero"`
+
+	// Source corresponds to the JSON schema field "source".
+	Source string `json:"source"`
+}
+
+type StateExplainMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// TargetSessionID corresponds to the JSON schema field "target_session_id".
+	TargetSessionID string `json:"target_session_id"`
+}
+
+type StateExplainResult struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent string `json:"agent"`
+
+	// Capacity corresponds to the JSON schema field "capacity".
+	Capacity int `json:"capacity"`
+
+	// Observations corresponds to the JSON schema field "observations".
+	Observations []StateExplainEntry `json:"observations"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// State corresponds to the JSON schema field "state".
+	State string `json:"state"`
+
+	// StateSince corresponds to the JSON schema field "state_since".
+	StateSince *string `json:"state_since,omitempty,omitzero"`
+}
+
 type StateMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -4304,16 +4381,27 @@ type StateMessage struct {
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
+	// PermissionMode corresponds to the JSON schema field "permission_mode".
+	PermissionMode *string `json:"permission_mode,omitempty,omitzero"`
+
 	// State corresponds to the JSON schema field "state".
 	State string `json:"state"`
 }
 
 type StopMessage struct {
+	// BackgroundTaskStatuses corresponds to the JSON schema field
+	// "background_task_statuses".
+	BackgroundTaskStatuses []string `json:"background_task_statuses,omitempty,omitzero"`
+
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+
+	// PendingSessionCrons corresponds to the JSON schema field
+	// "pending_session_crons".
+	PendingSessionCrons *int `json:"pending_session_crons,omitempty,omitzero"`
 
 	// TranscriptPath corresponds to the JSON schema field "transcript_path".
 	TranscriptPath string `json:"transcript_path"`

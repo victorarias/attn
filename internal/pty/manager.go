@@ -131,7 +131,6 @@ type SessionInfo struct {
 	CWD       string
 
 	Running bool
-	State   string
 
 	Cols    uint16
 	Rows    uint16
@@ -148,7 +147,7 @@ type Manager struct {
 	pendingSpawns map[string]struct{}
 	logf          LogFunc
 	onExit        func(ExitInfo)
-	onState       func(sessionID, state string)
+	onState       func(sessionID string, obs Observation)
 
 	// testHookAfterSpawnReserve, when non-nil, runs after Spawn reserves its
 	// session ID and releases the mutex. Test-only seam for deterministic
@@ -173,7 +172,7 @@ func (m *Manager) SetExitHandler(handler func(ExitInfo)) {
 	m.onExit = handler
 }
 
-func (m *Manager) SetStateHandler(handler func(sessionID, state string)) {
+func (m *Manager) SetStateHandler(handler func(sessionID string, obs Observation)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.onState = handler
@@ -328,27 +327,15 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	onState := m.onState
 	m.mu.Unlock()
 
-	detectorEnabled := true
-	approvalResolverEnabled := false
+	// The driver names which observers this agent gets; this only builds them.
+	harnessSignalKind := agentdriver.HarnessSignalsNone
 	if d := agentdriver.Get(agent); d != nil {
-		caps := agentdriver.EffectiveCapabilities(d)
-		detectorEnabled = caps.HasStateDetector
-		approvalResolverEnabled = caps.HasApprovalResolver
+		harnessSignalKind = agentdriver.EffectiveCapabilities(d).HarnessSignals
 	}
-	if detectorEnabled {
-		switch agent {
-		case "copilot":
-			session.detector = newCopilotStateDetector()
-		case "claude":
-			session.detector = newClaudeWorkingDetector()
-		}
-	}
-	if approvalResolverEnabled {
-		session.approvalResolver = &approvalResolver{}
-	}
-	if (session.detector != nil || session.approvalResolver != nil) && onState != nil {
-		session.onState = func(state string) {
-			onState(opts.ID, state)
+	session.harnessSignals = newHarnessSignalObserver(harnessSignalKind)
+	if session.harnessSignals != nil && onState != nil {
+		session.onState = func(obs Observation) {
+			onState(opts.ID, obs)
 		}
 	}
 
@@ -450,7 +437,6 @@ func (m *Manager) SessionInfo(sessionID string) (SessionInfo, error) {
 		Agent:      session.agent,
 		CWD:        session.cwd,
 		Running:    info.Running,
-		State:      session.state(),
 		Cols:       info.Cols,
 		Rows:       info.Rows,
 		PID:        info.PID,

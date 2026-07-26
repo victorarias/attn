@@ -131,7 +131,7 @@ type WorkerBackend struct {
 
 	hooksMu sync.RWMutex
 	onExit  func(ExitInfo)
-	onState func(sessionID, state string)
+	onState func(sessionID string, obs pty.Observation)
 
 	reqSeq atomic.Uint64
 }
@@ -312,7 +312,7 @@ func (b *WorkerBackend) SetExitHandler(handler func(ExitInfo)) {
 	b.onExit = handler
 }
 
-func (b *WorkerBackend) SetStateHandler(handler func(sessionID, state string)) {
+func (b *WorkerBackend) SetStateHandler(handler func(sessionID string, obs pty.Observation)) {
 	b.hooksMu.Lock()
 	defer b.hooksMu.Unlock()
 	b.onState = handler
@@ -1988,7 +1988,14 @@ func (b *WorkerBackend) startPoller(session *workerSession) {
 					onState := b.onState
 					b.hooksMu.RUnlock()
 					if onState != nil {
-						onState(session.SessionID, newState)
+						// The poll reports the worker's own last known state, not a
+						// fresh terminal observation.
+						onState(session.SessionID, pty.Observation{
+							Source: pty.SourceWorkerInfo,
+							Claim:  newState,
+							Detail: "worker info poll",
+							At:     now,
+						})
 					}
 				}
 
@@ -2143,20 +2150,19 @@ func (b *WorkerBackend) handleLifecycleEvent(session *workerSession, evt ptywork
 			return
 		}
 		now := time.Now()
-		session.mu.Lock()
-		if !shouldForwardStateLocked(session, state, now) {
-			session.mu.Unlock()
-			return
-		}
-		session.lastState = state
-		session.lastStateSentAt = now
-		session.mu.Unlock()
+		// Forwarded as-is. The worker already broadcasts a lifecycle state event
+		// only when the state changes, so deduping the stream again here could
+		// only drop a genuine refresh — and what a repeat means is the resolver's
+		// question now, not this layer's. shouldForwardStateLocked still guards
+		// the poll fallback below, which does re-report an unchanged state every
+		// tick.
+		observation := ptyworker.ObservationFromEvent(evt, state, now)
 
 		b.hooksMu.RLock()
 		onState := b.onState
 		b.hooksMu.RUnlock()
 		if onState != nil {
-			onState(session.SessionID, state)
+			onState(session.SessionID, observation)
 		}
 	case ptyworker.EventExit:
 		session.mu.Lock()

@@ -35,6 +35,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/statetrace"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/tasks"
 	"github.com/victorarias/attn/internal/transcript"
@@ -199,7 +200,23 @@ type Daemon struct {
 	// doorbellMu serializes authoritative session-state commits with a complete
 	// doorbell write. This keeps a pending_approval report from interleaving
 	// between the prompt and its trailing Enter.
-	doorbellMu                 sync.Mutex
+	doorbellMu sync.Mutex
+	// stateTrace is the diagnostic ring of state observations behind
+	// `attn state explain`. Lazily built so a directly-constructed test daemon
+	// traces without an init site.
+	stateTraceOnce sync.Once
+	stateTrace     *statetrace.Recorder
+	// sessionEvidence is the per-session evidence table the resolver reads.
+	sessionEvidenceOnce sync.Once
+	sessionEvidence     *sessionEvidenceTable
+	// sessionDwell holds transitions that have been resolved but not yet held
+	// long enough to publish.
+	sessionDwellOnce sync.Once
+	sessionDwell     *dwellGate
+	// sessionStateReason is the resolver clause behind each session's current
+	// state, carried to clients beside the state itself.
+	sessionStateReasonOnce     sync.Once
+	sessionStateReason         *sessionStateReasons
 	nudgeMu                    sync.Mutex
 	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
 	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
@@ -930,6 +947,7 @@ func (d *Daemon) Start() error {
 	// piggybacking the schedule-observation tick — that tick's cadence is
 	// driven by cron granularity, not retention policy.
 	go d.runAutomationRetentionSweep()
+	go d.runEvidenceResolveLoop()
 
 	// Ticket TTL sweep: hard-deletes terminal tickets past their retention
 	// window. This is also what actually bounds a bound continuity thread's
@@ -985,7 +1003,16 @@ func (d *Daemon) Start() error {
 	}
 }
 
-func (d *Daemon) pruneSessionsWithoutPTY() int {
+// pruneSessionsWithoutPTY decides what to do with sessions the store carries over
+// from a previous daemon run: recover the ones that can resume, drop the rest.
+//
+// Sessions that moved after cutoff are left alone. This prune races the listener,
+// which is already accepting connections when it runs, so a session registered in
+// the gap belongs to this run and has no PTY yet — and every verdict here is
+// terminal for the resolver, which owns neither `recoverable` nor a removed row.
+// The worker-backend reconciler skips recent sessions for the same reason. Pass a
+// zero cutoff to consider every session.
+func (d *Daemon) pruneSessionsWithoutPTY(cutoff time.Time) int {
 	if d.store == nil {
 		return 0
 	}
@@ -1002,6 +1029,9 @@ func (d *Daemon) pruneSessionsWithoutPTY() int {
 	recoverable := 0
 	for _, session := range sessions {
 		if _, ok := liveIDs[session.ID]; ok {
+			continue
+		}
+		if sessionUpdatedAfter(session, cutoff) {
 			continue
 		}
 		if d.recoverOnMissingPTY(session) {
@@ -1082,7 +1112,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 		return
 	}
 
-	removedSessions := d.pruneSessionsWithoutPTY()
+	removedSessions := d.pruneSessionsWithoutPTY(recoveryStartedAt)
 	if removedSessions > 0 {
 		d.logf("pruned %d stale sessions without live PTY on startup", removedSessions)
 		d.addWarning(
@@ -1584,17 +1614,16 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		}
 	}
 
+	// An exited process is the resolver's first and only unconditional clause, so
+	// recording it is all this needs to do: the session settles on the next tick,
+	// including when the process dies by a route this one never reaches.
+	d.recordProcessEvidence(info.ID, true)
 	if session := d.store.Get(info.ID); session != nil {
-		// Reconcile bound tickets against the pre-clobber state: the idle-clobber
-		// just below erases whether the agent was mid-flight (a crash or kill) or at
-		// a clean rest when its process exited — the signal that decides between the
-		// Crashed stamp and the orphaned-ticket classifier (ticket_reconcile.go).
+		// Read the state before that tick lands: it is the difference between an
+		// agent that was mid-flight (a crash or a kill) and one at a clean rest, and
+		// therefore between the Crashed stamp and the orphaned-ticket classifier
+		// (ticket_reconcile.go). The settle erases it.
 		d.reconcileTicketsOnSessionEnd(info.ID, string(session.State))
-		d.applyState(sessionStateChange{
-			sessionID: info.ID,
-			state:     protocol.StateIdle,
-			cause:     processExit{},
-		})
 	}
 
 	event := &protocol.WebSocketEvent{
@@ -1745,28 +1774,51 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	}
 	d.clearNudgeState(sessionID)
 	d.store.Remove(sessionID)
+	// After the row is gone, not before: recordStateObservation gates on the row,
+	// so forgetting first would leave a window where a concurrent observation
+	// rebuilds the ring for an id nothing will ever clean up again.
+	d.forgetStateTrace(sessionID)
+	d.evidenceTable().forget(sessionID)
+	d.stateReasons().forget(sessionID)
+	// The dwell gate has to be cleared here rather than left to the resolve
+	// loop's own cleanup: that loop walks the evidence table, so forgetting the
+	// evidence row is exactly what stops it from ever visiting this session
+	// again. A session closed mid-dwell would otherwise leave its pending
+	// transition behind for the daemon's lifetime.
+	d.dwellGate().clear(sessionID)
 }
 
-func (d *Daemon) handlePTYState(sessionID, state string) {
+// handlePTYState files one PTY-layer observation, and for the worker poll —
+// which names a state rather than a level, and is how a session leaves
+// `launching` — applies it directly. See Source.ClaimsProtocolState.
+func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
+	state := obs.Claim
+	origin := stateOrigin{source: string(obs.Source), detail: obs.Detail, observedAt: obs.At}
+	d.recordPTYEvidence(sessionID, obs)
+	if !obs.Source.ClaimsProtocolState() {
+		d.traceStateEvidence(sessionID, origin, state)
+		return
+	}
 	session := d.store.Get(sessionID)
 	if session == nil {
+		d.traceStateVeto(sessionID, origin, state, "session_not_found")
 		return
 	}
 	if run := d.store.GetAgentDriverRun(sessionID); run.RunID != "" && d.pluginDriverReportsState(session.Agent) {
 		// External drivers own state through sequenced session.report_* calls.
+		d.traceStateVeto(sessionID, origin, state, "plugin_driver_owns_state")
 		return
 	}
 	agent := session.Agent
-	driver := agentdriver.Get(string(agent))
-	if !agentdriver.ShouldApplyPTYState(driver, session.State, state) {
-		return
-	}
-
-	d.logf("pty state update: session=%s agent=%s state=%s", sessionID, agent, state)
+	d.logf(
+		"pty state update: session=%s agent=%s state=%s source=%s detail=%q observed_at=%s",
+		sessionID, agent, state, obs.Source, obs.Detail, obs.At.Format(time.RFC3339Nano),
+	)
 	d.applyState(sessionStateChange{
 		sessionID: sessionID,
 		state:     state,
 		cause:     liveSignal{},
+		origin:    origin,
 	})
 }
 
@@ -2164,12 +2216,16 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
 	case protocol.CmdState:
 		d.handleState(conn, msg.(*protocol.StateMessage))
+	case protocol.CmdHookNotification:
+		d.handleHookNotification(conn, msg.(*protocol.HookNotificationMessage))
 	case protocol.CmdSetSessionResumeID:
 		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
 	case protocol.CmdSessionInstructions:
 		d.handleSessionInstructions(conn, msg.(*protocol.SessionInstructionsMessage))
 	case protocol.CmdSessionTranscript:
 		d.handleSessionTranscript(conn, msg.(*protocol.SessionTranscriptMessage))
+	case protocol.CmdStateExplain:
+		d.handleStateExplain(conn, msg.(*protocol.StateExplainMessage))
 	case protocol.CmdStop:
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos:
@@ -2349,13 +2405,26 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 	}
 }
 
+// handleState files what a hook saw. It does not apply a state, deliberately:
+// the hook is one witness among several, and the resolver is what weighs them.
+//
+// It used to do both, and that was the last place two writers raced. The trace
+// of a codex approval showed the hook painting `pending_approval` ten seconds
+// before the resolver reached the same conclusion — which sounds harmless until
+// you notice the guardian dwell lives in the resolver, so an approval a robot
+// was about to answer flashed for attention anyway. Every gate the resolver
+// applies — the dwell, the ordering, the expiry of evidence that stopped
+// refreshing — was reachable only by a source that did not write state itself.
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
-	d.logf("state update: id=%s state=%s", msg.ID, msg.State)
-	d.applyState(sessionStateChange{
-		sessionID: msg.ID,
-		state:     msg.State,
-		cause:     liveSignal{},
-	})
+	d.logf("hook evidence: id=%s state=%s", msg.ID, msg.State)
+	d.tracePermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
+	d.recordReviewerEvidenceFromPermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
+	d.recordBracketEvidence(msg.ID, msg.State)
+	// A hook firing is proof the session is alive, which is a separate fact from
+	// what state it is in and the one thing the reaper reads. It rode on the
+	// applied state until now.
+	d.store.Touch(msg.ID)
+	d.traceStateEvidence(msg.ID, stateOrigin{source: stateSourceHook}, msg.State)
 	d.sendOK(conn)
 }
 
@@ -2413,6 +2482,43 @@ func (d *Daemon) persistResumeSessionID(sessionID, resumeSessionID string) {
 
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
+
+	// A non-terminal stop is a yield, not an end: do none of the end-of-turn work
+	// below (no resume-id capture, no narration enqueue, no classification), and
+	// leave the color to the facts recorded here. The turn resumes on its own.
+	//
+	// The facts are recorded as the rules read them, not raw. A background task
+	// the agent has already finished is present in the payload and means nothing,
+	// and a chief's background work is deliberately not work — filing either as
+	// "something will resume this turn" pins the session green with nothing left
+	// to unpin it.
+	relaxBackgroundWork := d.isChiefOfStaffSession(msg.ID)
+	d.recordStopFacts(
+		msg.ID,
+		!relaxBackgroundWork && hasActiveBackgroundTask(msg),
+		hasPendingSessionCron(msg),
+	)
+	if stopIsNonTerminal(msg, relaxBackgroundWork) {
+		d.logf(
+			"handleStop: non-terminal stop session=%s background_tasks=%d pending_crons=%d",
+			msg.ID, len(msg.BackgroundTaskStatuses), protocol.Deref(msg.PendingSessionCrons),
+		)
+		d.traceStateEvidence(
+			msg.ID,
+			stateOrigin{source: stateSourceStopHook, detail: "non-terminal stop"},
+			"",
+		)
+		d.sendOK(conn)
+		return
+	}
+
+	// A terminal stop *is* the closing bracket. Recording it here rather than
+	// relying on a separate hook state message matters for codex, which sends no
+	// such message: its bracket stayed open past the end of the turn, so the
+	// resolver asserted working over the classifier's verdict until the heartbeat
+	// went stale.
+	d.recordBracketEvidence(msg.ID, protocol.StateIdle)
+
 	if session := d.store.Get(msg.ID); session != nil {
 		if resumeSessionID := agentdriver.ResumeSessionIDFromStopTranscriptPath(
 			agentdriver.Get(string(session.Agent)),
@@ -2479,15 +2585,17 @@ func (d *Daemon) classifyOrDeferAfterStop(sessionID, transcriptPath string) {
 			sessionID,
 			runDuration.Round(time.Second),
 		)
-		if session.State == protocol.SessionStatePendingApproval || session.State == protocol.SessionStateWaitingInput {
-			d.broadcastSessionStateChanged(sessionID)
-		} else {
-			d.applyState(sessionStateChange{
-				sessionID: sessionID,
-				state:     protocol.StateWaitingInput,
-				cause:     daemonObservation{},
-			})
-		}
+		// The deferral itself is the evidence: a turn worth minutes of work ended
+		// and attn is holding the verdict until someone reads it, which the resolver
+		// reports as waiting on the user rather than settling the result away as
+		// seen. Applying that state here is what this used to do, in a write the
+		// resolver's next tick undid — the review flag was invisible to it, so the
+		// same settled evidence resolved to idle a second later.
+		//
+		// The broadcast stays for the case where the state does not move: the flag
+		// rides on session broadcasts, and a long run that ended on an approval or a
+		// question is already the state the deferral would ask for.
+		d.broadcastSessionStateChanged(sessionID)
 		return
 	}
 
@@ -2508,9 +2616,15 @@ func (d *Daemon) handleSessionVisualized(sessionID string) {
 	go d.classifySessionState(sessionID, transcriptPath)
 }
 
+// classifySessionState decides what a settled turn means and applies the result.
+// It is the IO shell around the rules in classify_decision.go: it gathers inputs,
+// performs the transcript read and the classifier call between rules, and owns the
+// single store write. The rules themselves make no decision about when to pay for
+// IO — they say what is still needed.
 func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
-	// Capture timestamp BEFORE starting classification
-	// This prevents slow classifier results from overwriting newer state updates
+	// Capture the timestamp BEFORE any classification work: applyState rejects a
+	// classifierObservation older than the state it would overwrite, so a slow
+	// classifier cannot clobber a newer live signal.
 	classificationStartTime := time.Now()
 	d.logf("classifySessionState: starting for session=%s, transcript=%s", sessionID, transcriptPath)
 
@@ -2518,6 +2632,39 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	if session == nil {
 		d.logf("classifySessionState: session %s not found, aborting", sessionID)
 		return
+	}
+
+	// Tell the resolver a verdict is coming, so its tick holds the pre-settle
+	// state instead of publishing idle and being corrected seconds later. The
+	// deferred clear covers every exit, including the early returns below: a
+	// classification that ends without a verdict is precisely when the session
+	// must be free to settle on its own.
+	d.recordClassifierStarted(sessionID, classificationStartTime)
+	defer d.recordClassifierFinished(sessionID)
+
+	apply := func(decision classifyDecision) {
+		if decision.action != classifyApply {
+			d.logf("classifySessionState: session=%s no state applied reason=%s", sessionID, decision.reason)
+			d.traceStateSkip(sessionID, stateSourceClassifier, decision.reason)
+			return
+		}
+		d.logf("classifySessionState: session=%s state=%s reason=%s", sessionID, decision.state, decision.reason)
+		// Filed, not applied. The verdict is one witness to how a turn ended and
+		// the weakest-timed of them: it describes the transcript as of
+		// classificationStartTime and lands seconds later, which is why it used to
+		// need a timestamp guard to stop it overwriting a newer state. As evidence
+		// it gets a stronger version of the same guard for free — the resolver drops
+		// a verdict the agent has since gone busy past, whatever the clock says.
+		d.recordClassifierEvidence(sessionID, decision.state, classificationStartTime)
+		d.traceStateEvidence(
+			sessionID,
+			stateOrigin{
+				source:     stateSourceClassifier,
+				detail:     decision.reason,
+				observedAt: classificationStartTime,
+			},
+			decision.state,
+		)
 	}
 
 	// Capability gates: agents can independently disable transcript parsing and
@@ -2530,42 +2677,19 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		classifierEnabled = caps.HasClassifier
 	}
 
-	// Check pending todos first (fast path)
-	// Todos are stored as "[✓] task" (completed), "[→] task" (in_progress), "[ ] task" (pending)
-	pendingCount := 0
+	// Todos are stored as "[✓] task" (completed), "[→] task" (in_progress),
+	// "[ ] task" (pending).
+	pendingTodos := 0
 	for _, todo := range session.Todos {
 		if !strings.HasPrefix(todo, "[✓]") {
-			pendingCount++
+			pendingTodos++
 		}
 	}
-	d.logf("classifySessionState: session %s has %d total todos, %d pending", sessionID, len(session.Todos), pendingCount)
-	if pendingCount > 0 {
-		d.logf("classifySessionState: session %s has pending todos, setting waiting_input", sessionID)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateWaitingInput,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
-		return
-	}
+	d.logf("classifySessionState: session %s has %d total todos, %d pending", sessionID, len(session.Todos), pendingTodos)
 
-	if !transcriptEnabled {
-		d.logf("classifySessionState: transcript disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateIdle,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
-		return
-	}
-
-	if !classifierEnabled {
-		d.logf("classifySessionState: classifier disabled for agent=%s session=%s, setting idle", session.Agent, sessionID)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateIdle,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
+	decision := classifyPreTranscript(pendingTodos, transcriptEnabled, classifierEnabled)
+	if decision.action != classifyReadTranscript {
+		apply(decision)
 		return
 	}
 
@@ -2579,7 +2703,6 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		)
 	}
 
-	// Parse transcript for last assistant message
 	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
 	extract := d.extractLastAssistantMessage
 	if d.classificationTranscriptExtractor != nil {
@@ -2587,62 +2710,36 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	}
 	lastMessage, assistantTurnID, err := extract(session, resolvedTranscriptPath, 500, classificationStartTime)
 	if err != nil {
-		if errors.Is(err, agentdriver.ErrNoNewAssistantTurn) {
-			d.logf("classifySessionState: no new assistant turn for session %s, skipping classification", sessionID)
-			return
-		}
-		d.logf("classifySessionState: transcript parse error for %s: %v", sessionID, err)
-		d.logf("classifySessionState: unknown reason=transcript_parse_error session=%s transcript=%s", sessionID, resolvedTranscriptPath)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateUnknown,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
-		return
+		d.logf("classifySessionState: transcript read failed for %s: %v (transcript=%s)", sessionID, err, resolvedTranscriptPath)
 	}
-	if strings.TrimSpace(assistantTurnID) != "" {
+	if strings.TrimSpace(assistantTurnID) != "" && err == nil {
 		defer d.clearClassifyingTurn(sessionID)
 	}
 
-	lastMessage = strings.TrimSpace(lastMessage)
-	if lastMessage == "" {
-		d.logf("classifySessionState: empty last message for session %s, setting idle", sessionID)
-		d.applyState(sessionStateChange{
-			sessionID: sessionID,
-			state:     protocol.StateIdle,
-			cause:     classifierObservation{observedAt: classificationStartTime},
-		})
+	decision = classifyPostTranscript(lastMessage, err)
+	if decision.action != classifyRunClassifier {
+		apply(decision)
 		return
 	}
+	lastMessage = strings.TrimSpace(lastMessage)
 
-	// Log truncated message
 	logMsg := lastMessage
 	if len(logMsg) > 100 {
 		logMsg = logMsg[:100] + "..."
 	}
 	d.logf("classifySessionState: last message for session %s: %s", sessionID, logMsg)
 
-	// Classify with LLM (can be slow - 30+ seconds)
+	// Can be slow — 30+ seconds.
 	d.logf("classifySessionState: calling classifier for session %s", sessionID)
 	state, err := d.runClassifier(session, lastMessage, 30*time.Second)
 	if err != nil {
 		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
-		d.logf("classifySessionState: unknown reason=classifier_error session=%s err=%v", sessionID, err)
-		state = protocol.StateUnknown
 	}
-	if err == nil && state == protocol.StateUnknown {
-		d.logf("classifySessionState: unknown reason=classifier_unknown_response session=%s", sessionID)
-	}
-
-	d.logf("classifySessionState: session %s classified as %s", sessionID, state)
+	decision = classifyVerdict(state, err)
 	if strings.TrimSpace(assistantTurnID) != "" {
 		d.setClassifiedTurnID(sessionID, assistantTurnID)
 	}
-	d.applyState(sessionStateChange{
-		sessionID: sessionID,
-		state:     state,
-		cause:     classifierObservation{observedAt: classificationStartTime},
-	})
+	apply(decision)
 }
 
 func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout time.Duration) (string, error) {
@@ -2958,6 +3055,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	} else {
 		clone.NeedsReviewAfterLongRun = nil
 	}
+	d.decorateSessionWithStateReason(clone)
 	d.decorateSessionWithNudge(clone)
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)

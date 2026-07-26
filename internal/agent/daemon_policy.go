@@ -18,11 +18,10 @@ type SessionRecoveryPolicyProvider interface {
 	RecoverOnMissingPTY() bool
 }
 
-// PTYStatePolicyProvider customizes recovered-state mapping and live PTY state
-// update filtering for an agent.
-type PTYStatePolicyProvider interface {
+// RecoveredStatePolicyProvider customizes how a recovered session's PTY state
+// maps onto a session state at startup.
+type RecoveredStatePolicyProvider interface {
 	RecoveredRunningState(ptyState string) protocol.SessionState
-	ShouldApplyPTYState(current protocol.SessionState, incoming string) bool
 }
 
 // ResumePolicyProvider customizes resume ID lifecycle behavior.
@@ -72,7 +71,7 @@ func RecoverOnMissingPTY(d Driver) bool {
 }
 
 func RecoveredRunningSessionState(d Driver, ptyState string) protocol.SessionState {
-	if p, ok := d.(PTYStatePolicyProvider); ok {
+	if p, ok := d.(RecoveredStatePolicyProvider); ok {
 		return p.RecoveredRunningState(ptyState)
 	}
 	switch ptyState {
@@ -85,13 +84,6 @@ func RecoveredRunningSessionState(d Driver, ptyState string) protocol.SessionSta
 		// runtime evidence that the session is waiting for input/approval.
 		return protocol.SessionStateLaunching
 	}
-}
-
-func ShouldApplyPTYState(d Driver, current protocol.SessionState, incoming string) bool {
-	if p, ok := d.(PTYStatePolicyProvider); ok {
-		return p.ShouldApplyPTYState(current, incoming)
-	}
-	return true
 }
 
 func ResolveSpawnResumeSessionID(d Driver, existingSessionID, requestedResumeID, storedResumeID string) string {

@@ -495,57 +495,6 @@ func (s *Store) UpdateState(id, state string) bool {
 	return err == nil && updated == 1
 }
 
-// UpdateStateWithTimestamp updates a session's state only if the provided timestamp
-// is newer than the current StateUpdatedAt. Returns true if updated, false if rejected.
-func (s *Store) UpdateStateWithTimestamp(id, state string, updatedAt time.Time) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.db == nil {
-		session := s.sessions[id]
-		if session == nil {
-			return false
-		}
-		current, err := time.Parse(time.RFC3339Nano, session.StateUpdatedAt)
-		if err != nil {
-			current, _ = time.Parse(time.RFC3339, session.StateUpdatedAt)
-		}
-		if !updatedAt.After(current) {
-			return false
-		}
-		ts := updatedAt.Format(time.RFC3339Nano)
-		session.State = protocol.SessionState(state)
-		session.StateSince = ts
-		session.StateUpdatedAt = ts
-		return true
-	}
-
-	// Get current state_updated_at
-	var currentUpdatedAt string
-	err := s.db.QueryRow("SELECT state_updated_at FROM sessions WHERE id = ?", id).Scan(&currentUpdatedAt)
-	if err != nil {
-		return false
-	}
-
-	current, err := time.Parse(time.RFC3339Nano, currentUpdatedAt)
-	if err != nil {
-		// Fall back to RFC3339 for timestamps written before the Nano switch.
-		current, err = time.Parse(time.RFC3339, currentUpdatedAt)
-		if err != nil {
-			log.Printf("[store] UpdateStateWithTimestamp: failed to parse timestamp for session %s: %v", id, err)
-			current = time.Time{}
-		}
-	}
-	if !updatedAt.After(current) {
-		return false
-	}
-
-	ts := updatedAt.Format(time.RFC3339Nano)
-	_, err = s.db.Exec(`UPDATE sessions SET state = ?, state_since = ?, state_updated_at = ? WHERE id = ?`,
-		state, ts, ts, id)
-	return err == nil
-}
-
 // UpdateTodos updates a session's todo list
 func (s *Store) UpdateTodos(id string, todos []string) {
 	s.mu.Lock()

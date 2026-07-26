@@ -220,7 +220,7 @@ func TestNudgeCountdownSurvivesEligibleStateChange(t *testing.T) {
 	d.applyState(sessionStateChange{
 		sessionID: agentID,
 		state:     protocol.StateWorking,
-		cause:     daemonObservation{},
+		cause:     resolverObservation{},
 	})
 
 	if currentNudgeTimer(d, agentID) == nil {
@@ -237,7 +237,7 @@ func TestNudgeCountdownCancelsOnPendingApproval(t *testing.T) {
 	d.applyState(sessionStateChange{
 		sessionID: agentID,
 		state:     protocol.StatePendingApproval,
-		cause:     daemonObservation{},
+		cause:     resolverObservation{},
 	})
 
 	if currentNudgeTimer(d, agentID) != nil {
@@ -278,7 +278,7 @@ func TestDoorbellWriteDoesNotInterleaveWithPendingApproval(t *testing.T) {
 		d.applyState(sessionStateChange{
 			sessionID: sessionID,
 			state:     protocol.StatePendingApproval,
-			cause:     daemonObservation{},
+			cause:     resolverObservation{},
 		})
 		close(stateDone)
 	}()

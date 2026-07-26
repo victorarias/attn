@@ -74,10 +74,6 @@ type terminalQueries struct {
 	da1BeforeCPR bool
 }
 
-type stateDetector interface {
-	Observe(chunk []byte) (string, bool)
-}
-
 type Session struct {
 	id    string
 	cwd   string
@@ -131,21 +127,10 @@ type Session struct {
 	themeMu sync.RWMutex
 	theme   TerminalTheme
 
-	// CLI state detection based on PTY output.
-	detector      stateDetector
-	onState       func(state string)
-	stateMu       sync.RWMutex
-	detectorState string
-
-	// approvalResolver clears pending_approval->working off the rendered screen
-	// when the user resolves an approval prompt (no hook fires at that moment).
-	// Sampled from readLoop (throttled by lastApprovalEval) and from an
-	// independent approvalTimer so the clear completes even when the approved
-	// command produces no further output. approvalMu serializes the two paths.
-	approvalResolver *approvalResolver
-	approvalMu       sync.Mutex
-	lastApprovalEval time.Time
-	approvalTimer    *time.Timer
+	// harnessSignals reads the agent's own OSC state signals off the PTY stream.
+	// Read-only: it never alters the bytes.
+	harnessSignals *harnessSignalObserver
+	onState        func(obs Observation)
 
 	exitMu     sync.RWMutex
 	running    bool
@@ -357,16 +342,12 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 					}
 				}
 				s.fanOut(data, seq)
-				if s.detector != nil && s.onState != nil {
-					if state, changed := s.detector.Observe(data); changed {
-						s.stateMu.Lock()
-						s.detectorState = state
-						s.stateMu.Unlock()
-						s.onState(state)
+				if s.harnessSignals != nil && s.onState != nil {
+					for _, obs := range s.harnessSignals.Observe(data, time.Now()) {
+						s.onState(obs)
 					}
 				}
 				if len(data) > 0 {
-					s.evaluateApproval(time.Now(), true)
 				}
 			}
 		}
@@ -501,99 +482,6 @@ func isOSCColorReport(seq []byte) bool {
 	return (seq[3] == '0' || seq[3] == '1' || seq[3] == '2') && seq[4] == ';'
 }
 
-// approvalEvalInterval throttles how often the readLoop path inspects the
-// rendered screen. Rendering is cheap but the output stream is dominated by many
-// tiny cursor-addressed frames; sampling at this cadence keeps cost bounded while
-// staying well below approvalClearDebounce.
-const approvalEvalInterval = 100 * time.Millisecond
-
-// evaluateApproval samples the rendered terminal and applies any approval-state
-// transition the resolver reports. It runs on two paths: the readLoop output path
-// (throttle=true, so high-frequency frames don't re-render constantly) and a
-// scheduled recheck (throttle=false). The scheduled recheck is what lets the
-// pending_approval->working clear complete even when the approved command goes
-// quiet and emits no further PTY output.
-func (s *Session) evaluateApproval(now time.Time, throttle bool) {
-	if s.approvalResolver == nil || s.onState == nil {
-		return
-	}
-	// Never emit a transition for a session that has already exited; a late
-	// timer firing after exit must not resurrect a "working" state.
-	s.exitMu.RLock()
-	running := s.running
-	s.exitMu.RUnlock()
-	if !running {
-		return
-	}
-
-	s.approvalMu.Lock()
-	if throttle && !s.lastApprovalEval.IsZero() && now.Sub(s.lastApprovalEval) < approvalEvalInterval {
-		s.approvalMu.Unlock()
-		return
-	}
-	s.lastApprovalEval = now
-	// Render under replayMu — teardown nils the terminal under that lock, so an
-	// unlocked read could render a freed handle. A torn-down session has nothing
-	// to observe and reports no transition.
-	s.replayMu.Lock()
-	var viewport string
-	haveTerminal := s.ghostty != nil
-	if haveTerminal {
-		viewport = s.ghostty.ViewportText()
-	}
-	s.replayMu.Unlock()
-	if !haveTerminal {
-		s.approvalMu.Unlock()
-		return
-	}
-	signal := s.approvalResolver.observe(viewport, now)
-	switch signal {
-	case approvalClearStarted:
-		s.scheduleApprovalRecheckLocked()
-	case approvalCleared:
-		s.stopApprovalTimerLocked()
-	}
-	s.approvalMu.Unlock()
-
-	switch signal {
-	case approvalArmedPending:
-		s.applyApprovalState(statePendingApproval)
-	case approvalCleared:
-		s.applyApprovalState(stateWorking)
-	}
-}
-
-func (s *Session) applyApprovalState(state string) {
-	s.stateMu.Lock()
-	s.detectorState = state
-	s.stateMu.Unlock()
-	s.onState(state)
-}
-
-// scheduleApprovalRecheckLocked arms a one-shot recheck a little past the
-// debounce window so the prompt-gone -> working clear fires without depending on
-// further PTY output. Caller holds approvalMu. The small extra margin guarantees
-// the recheck's now.Sub(clearedSince) has crossed approvalClearDebounce.
-func (s *Session) scheduleApprovalRecheckLocked() {
-	s.stopApprovalTimerLocked()
-	s.approvalTimer = time.AfterFunc(approvalClearDebounce+approvalEvalInterval, func() {
-		s.evaluateApproval(time.Now(), false)
-	})
-}
-
-func (s *Session) stopApprovalTimerLocked() {
-	if s.approvalTimer != nil {
-		s.approvalTimer.Stop()
-		s.approvalTimer = nil
-	}
-}
-
-func (s *Session) stopApprovalTimer() {
-	s.approvalMu.Lock()
-	s.stopApprovalTimerLocked()
-	s.approvalMu.Unlock()
-}
-
 func parseExitStatus(waitErr error) (int, string) {
 	if waitErr == nil {
 		return 0, ""
@@ -616,10 +504,6 @@ func parseExitStatus(waitErr error) (int, string) {
 }
 
 func (s *Session) markExited(exitCode int, signal string) {
-	// Cancel any pending approval recheck before flipping running=false so a
-	// timer cannot fire a stale "working" against an exited session.
-	s.stopApprovalTimer()
-
 	s.exitMu.Lock()
 	defer s.exitMu.Unlock()
 
@@ -756,12 +640,6 @@ func (s *Session) screenSnapshot() SnapshotInfo {
 	info.LastSeq = s.lastReplaySeq
 	s.replayMu.Unlock()
 	return info
-}
-
-func (s *Session) state() string {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
-	return s.detectorState
 }
 
 func (s *Session) input(data []byte) error {

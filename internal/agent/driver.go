@@ -14,7 +14,8 @@
 //	ClassifierProvider              — custom classification backend
 //	LaunchPreparer                  — best-effort setup before launch (e.g. resume copy)
 //	SessionRecoveryPolicyProvider   — startup missing-PTY recovery policy
-//	PTYStatePolicyProvider          — PTY state filtering/recovered-state policy
+//	RecoveredStatePolicyProvider    — recovered-state mapping at startup
+//	PTYStateFilterProvider          — live PTY state filtering
 //	ResumePolicyProvider            — resume ID lifecycle policy
 //	TranscriptClassificationExtractor — stop-time transcript extraction policy
 //	ExecutableClassifierProvider    — classifier hook with explicit executable path
@@ -95,14 +96,13 @@ type Capabilities struct {
 	// backend via ClassifierProvider.
 	HasClassifier bool
 
-	// HasStateDetector indicates PTY state detection is enabled for this agent.
-	HasStateDetector bool
-
-	// HasApprovalResolver indicates the daemon should clear pending_approval ->
-	// working off the rendered PTY screen for this agent. Needed by hook-driven
-	// agents that fire no hook when an approval is granted, so the only signal
-	// the tool is now running is the approval prompt leaving the screen.
-	HasApprovalResolver bool
+	// HarnessSignals names which harness-owned PTY signals this agent emits (the
+	// OSC 0 title heartbeat, OSC 777 notifications), or HarnessSignalsNone. They
+	// come from the agent itself rather than from reading its rendered TUI, which
+	// is why they are the only PTY state signals left: the scrapers they replaced
+	// broke on every redraw change and, for copilot, were confirmed silent
+	// through a whole live turn before being deleted.
+	HarnessSignals HarnessSignalKind
 
 	// HasResume indicates the agent supports resuming previous sessions.
 	HasResume bool
@@ -133,6 +133,21 @@ type Capabilities struct {
 	HasEffortPin bool
 }
 
+// HarnessSignalKind identifies a set of harness-owned PTY signals. The parsing
+// lives in internal/pty; this names which agent's dialect to read.
+type HarnessSignalKind string
+
+const (
+	// HarnessSignalsNone is an agent that emits no harness state signals.
+	HarnessSignalsNone HarnessSignalKind = ""
+	// HarnessSignalsClaude is Claude Code: a braille/U+2733 title heartbeat plus
+	// OSC 777 notifications.
+	HarnessSignalsClaude HarnessSignalKind = "claude"
+	// HarnessSignalsCodex is Codex: a braille title heartbeat, no notification
+	// OSC.
+	HarnessSignalsCodex HarnessSignalKind = "codex"
+)
+
 var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
 // EffectiveCapabilities returns driver capabilities after applying env overrides.
@@ -142,8 +157,7 @@ var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 //   - ATTN_AGENT_<AGENT>_TRANSCRIPT=0|1
 //   - ATTN_AGENT_<AGENT>_TRANSCRIPT_WATCHER=0|1
 //   - ATTN_AGENT_<AGENT>_CLASSIFIER=0|1
-//   - ATTN_AGENT_<AGENT>_STATE_DETECTOR=0|1
-//   - ATTN_AGENT_<AGENT>_APPROVAL_RESOLVER=0|1
+//   - ATTN_AGENT_<AGENT>_HARNESS_SIGNALS=0|1
 //   - ATTN_AGENT_<AGENT>_RESUME=0|1
 //   - ATTN_AGENT_<AGENT>_YOLO=0|1
 //   - ATTN_AGENT_<AGENT>_INITIAL_PROMPT=0|1
@@ -173,11 +187,10 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	if v, ok := boolEnv(prefix + "CLASSIFIER"); ok {
 		caps.HasClassifier = v
 	}
-	if v, ok := boolEnv(prefix + "STATE_DETECTOR"); ok {
-		caps.HasStateDetector = v
-	}
-	if v, ok := boolEnv(prefix + "APPROVAL_RESOLVER"); ok {
-		caps.HasApprovalResolver = v
+	// HARNESS_SIGNALS=0 disables them; =1 keeps the driver's kind: there is no
+	// dialect for =1 to invent for an agent whose driver declares none.
+	if v, ok := boolEnv(prefix + "HARNESS_SIGNALS"); ok && !v {
+		caps.HarnessSignals = HarnessSignalsNone
 	}
 	if v, ok := boolEnv(prefix + "RESUME"); ok {
 		caps.HasResume = v

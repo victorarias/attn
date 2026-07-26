@@ -13,6 +13,7 @@ interface AttentionDrawerProps {
     id: string;
     label: string;
     state: UISessionState;
+    state_reason?: string;
   }>;
   prs: DaemonPR[];
   onSelectSession: (id: string) => void;
@@ -53,7 +54,7 @@ export function AttentionDrawer({
                   data-state={s.state}
                   onClick={() => onSelectSession(s.id)}
                 >
-                  <StateIndicator state={s.state} size="sm" kind="session" seed={s.id} />
+                  <StateIndicator state={s.state} size="sm" kind="session" seed={s.id} reason={s.state_reason} />
                   <span className="item-name">{s.label}</span>
                 </div>
               );

@@ -8,7 +8,43 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-26]
 
+### Added
+- **`attn state explain <session>` (`--json`)** replays a session's recent state
+  observations and shows which rule produced the color it is showing, and why.
+  Intermittent color bugs previously had no evidence trail at all.
+
 ### Changed
+- **Session colors are now decided from what the agent says about itself, not
+  from reading its screen.** Claude Code and Codex both broadcast what they are
+  doing — a spinner glyph in the terminal title, repainted about once a second,
+  plus hooks that bracket a turn and announce permission requests — and attn now
+  resolves a session's state from that evidence instead of pattern-matching the
+  rendered TUI. Screen scraping produced the failures this replaces: a session
+  stuck yellow after an approval was granted, a session left green after it had
+  stopped, and prose in the terminal inventing an approval request that was never
+  made. One ordered set of rules decides every color, so a state can no longer
+  depend on which subsystem wrote last. Copilot, which has no such signals yet,
+  keeps the old screen reading.
+- **Unattended runs no longer flash yellow on every tool call.** When a guardian
+  is answering permission prompts on your behalf, an approval is only shown if it
+  is still unanswered a minute later — long past the guardian's real response time
+  (measured in milliseconds for Claude, low seconds for Codex), so a genuine
+  request you need to see still surfaces while the automated round trip stays
+  invisible. With no guardian in the loop there is no delay at all.
+- **A session whose signals are lost now recovers instead of freezing.** If a
+  hook goes missing, the turn settles on its own once the agent has been quiet
+  long enough to be sure, and a session that has gone completely silent for 90
+  seconds is reported as stuck rather than left showing a color nobody should
+  trust. Previously a single lost hook could strand a session in the wrong state
+  for the rest of its life.
+- **A finished result you have not looked at stops counting as fresh after ten
+  minutes.** The session is still idle — the state does not change — but work you
+  asked for is no longer quietly indistinguishable from work you have already
+  read.
+- **Codex sessions settle about twice as fast.** Their stop-time classification
+  now runs on the cheapest model of the current family, measured end to end at
+  3.9s against the previous path's 9.3s. The session holds its pre-settle color
+  until that verdict lands, so the latency was visible.
 - **Stop-time classification for Claude sessions now runs through the same
   isolated headless path as attn's other background Claude runs**, instead of a
   separate Go SDK wrapper. The judgment call is unchanged (same prompt, same

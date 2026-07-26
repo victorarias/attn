@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
@@ -284,6 +285,7 @@ func TestHandleSpawnSession_PluginDriverClosesRunThatExitsDuringSpawn(t *testing
 	if run := d.store.GetAgentDriverRun("snipe-early-exit"); run.RunID != "" {
 		t.Fatalf("active run=%+v after early exit, want closed run", run)
 	}
+	d.resolveAllSessions(time.Now())
 	if session := d.store.Get("snipe-early-exit"); session == nil || session.State != protocol.SessionStateIdle {
 		t.Fatalf("stored session=%+v after early exit, want idle session", session)
 	}
@@ -777,7 +779,14 @@ func TestPluginDriverRun_IgnoresGenericPTYState(t *testing.T) {
 		t.Fatal("failed to begin plugin-owned state run")
 	}
 
-	d.handlePTYState("plugin-state-owner", protocol.StateWorking)
+	// The worker poll, i.e. the one PTY source that may still apply a state: the
+	// point is that the plugin's ownership outranks even that.
+	d.handlePTYState("plugin-state-owner", pty.Observation{
+		Source: pty.SourceWorkerInfo,
+		Claim:  protocol.StateWorking,
+		Detail: "worker info",
+		At:     time.Now(),
+	})
 	if got := d.store.Get("plugin-state-owner").State; got != protocol.SessionStateWaitingInput {
 		t.Fatalf("state=%q after generic PTY event, want plugin-owned waiting_input", got)
 	}

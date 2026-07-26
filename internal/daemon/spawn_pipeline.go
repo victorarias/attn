@@ -348,6 +348,11 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 		plan.rollback(d, msg.ID)
 		return &spawnOutcome{err: err}
 	}
+	// Who answers this session's approval requests is decided here and nowhere
+	// else, so it is filed here. Codex reports no permission mode to the daemon at
+	// any point in its life, and without this its guardian would be invisible —
+	// which is the arrangement the dwell exists for.
+	d.recordReviewerEvidence(msg.ID, reviewerInLoop(plan.spawnOpts))
 	if plan.spawnOpts.InitialPromptFile != "" {
 		// The spawned wrapper removes the file after reading it. Keep a fallback
 		// for failures between PTY spawn and wrapper startup.

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/statetrace"
 )
 
 // sessionStateCause is a package-private sum type. Each variant identifies one
@@ -12,18 +13,26 @@ type sessionStateCause interface {
 	isSessionStateCause()
 }
 
-// liveSignal is an authoritative hook or trusted PTY observation.
+// liveSignal is the worker poll reporting the state a worker was spawned into.
+// It is what takes a session out of `launching`, and the only claim from outside
+// the resolver about what an agent is doing that still commits — see
+// pty.Source.AppliesState.
+//
+// It used to be the vocabulary of every hook and PTY observation. Those are
+// evidence now: they record what they saw, and the resolver decides what it
+// means. The causes that went with them (a synchronous daemon observation, a
+// timestamped classifier verdict, a process exit) went with them.
 type liveSignal struct{}
 
-// daemonObservation is a synchronous daemon-derived observation, such as the
-// transcript watcher or the immediate long-run-review handoff.
-type daemonObservation struct{}
-
-// classifierObservation is captured before slow classification work so its
-// eventual result cannot overwrite a newer state transition.
-type classifierObservation struct {
-	observedAt time.Time
-}
+// resolverObservation is the evidence resolver's verdict on its tick. Unlike
+// every other cause it is not an edge reported by a source: it is a re-reading
+// of all the evidence at once, which is what lets it move a session no source
+// spoke about.
+//
+// It carries no timestamp. A resolution is a statement about now, computed from
+// evidence whose own ages the resolver has already weighed, so there is nothing
+// for the store to compare it against.
+type resolverObservation struct{}
 
 // pluginReport carries the active driver run cursor used for ordered state CAS.
 type pluginReport struct {
@@ -35,21 +44,30 @@ type pluginReport struct {
 // barrier. It deliberately produces no per-session effects or broadcasts.
 type startupRecovery struct{}
 
-// processExit records the terminal idle state after exit-specific teardown and
-// pre-clobber ticket reconciliation have already run.
-type processExit struct{}
-
-func (liveSignal) isSessionStateCause()            {}
-func (daemonObservation) isSessionStateCause()     {}
-func (classifierObservation) isSessionStateCause() {}
-func (pluginReport) isSessionStateCause()          {}
-func (startupRecovery) isSessionStateCause()       {}
-func (processExit) isSessionStateCause()           {}
+func (liveSignal) isSessionStateCause()          {}
+func (resolverObservation) isSessionStateCause() {}
+func (pluginReport) isSessionStateCause()        {}
+func (startupRecovery) isSessionStateCause()     {}
 
 type sessionStateChange struct {
 	sessionID string
 	state     string
 	cause     sessionStateCause
+	// origin describes the evidence behind the change for the diagnostic trace.
+	// It is optional: a caller that leaves it zero is traced under its cause
+	// name, which is all a daemon-internal transition has to say about itself.
+	// It never affects whether the change commits.
+	origin stateOrigin
+}
+
+// stateOrigin is where a state claim came from, as distinct from the commit rule
+// it travels under. Several sources share one cause — every trusted PTY
+// observation is a liveSignal — so the cause alone cannot tell a screen scrape
+// from an approval edge when a color turns out wrong.
+type stateOrigin struct {
+	source     string
+	detail     string
+	observedAt time.Time
 }
 
 // stateEffectProfile is internal policy derived from a closed cause. Callers do
@@ -65,14 +83,12 @@ func stateEffectProfileFor(cause sessionStateCause) (stateEffectProfile, bool) {
 	switch cause.(type) {
 	case liveSignal:
 		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
-	case daemonObservation, classifierObservation:
+	case resolverObservation:
 		return stateEffectProfile{trackRun: true, syncNudge: true, broadcast: true}, true
 	case pluginReport:
 		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
 	case startupRecovery:
 		return stateEffectProfile{}, true
-	case processExit:
-		return stateEffectProfile{touch: true, broadcast: true}, true
 	default:
 		return stateEffectProfile{}, false
 	}
@@ -82,16 +98,12 @@ func sessionStateCauseName(cause sessionStateCause) string {
 	switch cause.(type) {
 	case liveSignal:
 		return "live_signal"
-	case daemonObservation:
-		return "daemon_observation"
-	case classifierObservation:
-		return "classifier_observation"
+	case resolverObservation:
+		return "resolver_observation"
 	case pluginReport:
 		return "plugin_report"
 	case startupRecovery:
 		return "startup_recovery"
-	case processExit:
-		return "process_exit"
 	default:
 		return "unknown"
 	}
@@ -107,6 +119,7 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	profile, ok := stateEffectProfileFor(change.cause)
 	if !ok {
 		d.logf("state update discarded: session=%s state=%s cause=unknown", change.sessionID, change.state)
+		d.traceStateChange(change, statetrace.OutcomeDiscarded, "unknown_cause")
 		return false
 	}
 
@@ -124,8 +137,10 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 			change.state,
 			sessionStateCauseName(change.cause),
 		)
+		d.traceStateChange(change, statetrace.OutcomeDiscarded, "store_rejected")
 		return false
 	}
+	d.traceStateChange(change, statetrace.OutcomeApplied, "")
 
 	if profile.touch {
 		d.store.Touch(change.sessionID)
@@ -149,10 +164,8 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 
 func (d *Daemon) commitSessionState(change sessionStateChange) bool {
 	switch cause := change.cause.(type) {
-	case liveSignal, daemonObservation, startupRecovery, processExit:
+	case liveSignal, startupRecovery, resolverObservation:
 		return d.store.UpdateState(change.sessionID, change.state)
-	case classifierObservation:
-		return d.store.UpdateStateWithTimestamp(change.sessionID, change.state, cause.observedAt)
 	case pluginReport:
 		return d.store.ApplyAgentDriverState(change.sessionID, cause.runID, cause.seq, change.state)
 	default:

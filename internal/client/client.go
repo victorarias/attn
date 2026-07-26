@@ -222,10 +222,34 @@ func (c *Client) Unregister(id string) error {
 
 // UpdateState updates a session's state
 func (c *Client) UpdateState(id, state string) error {
+	return c.UpdateStateFromHook(id, state, "")
+}
+
+// UpdateStateFromHook is UpdateState plus the agent's resolved permission mode,
+// which only a hook payload knows. An empty mode is simply not reported.
+func (c *Client) UpdateStateFromHook(id, state, permissionMode string) error {
 	msg := protocol.StateMessage{
 		Cmd:   protocol.CmdState,
 		ID:    id,
 		State: state,
+	}
+	if strings.TrimSpace(permissionMode) != "" {
+		msg.PermissionMode = protocol.Ptr(permissionMode)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// RecordNotification reports the agent's own notification event (Claude's
+// Notification hook) as state evidence.
+func (c *Client) RecordNotification(id, notificationType, message string) error {
+	msg := protocol.HookNotificationMessage{
+		Cmd:              protocol.CmdHookNotification,
+		ID:               id,
+		NotificationType: notificationType,
+	}
+	if strings.TrimSpace(message) != "" {
+		msg.Message = protocol.Ptr(message)
 	}
 	_, err := c.send(msg)
 	return err
@@ -280,12 +304,43 @@ func (c *Client) SessionTranscript(targetSessionID, afterCursor string) (*protoc
 	return resp.SessionTranscriptResult, nil
 }
 
+// StateExplain replays the daemon's per-session ring of state observations. It
+// is a read-only diagnostic: it reports what each source claimed and what
+// happened to the claim, and changes nothing.
+func (c *Client) StateExplain(targetSessionID string) (*protocol.StateExplainResult, error) {
+	resp, err := c.send(protocol.StateExplainMessage{
+		Cmd:             protocol.CmdStateExplain,
+		TargetSessionID: targetSessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.StateExplainResult == nil {
+		return nil, errors.New("daemon returned no state explain result")
+	}
+	return resp.StateExplainResult, nil
+}
+
 // SendStop sends a stop signal with transcript path for classification
-func (c *Client) SendStop(id, transcriptPath string) error {
+// StopFacts carries what the Stop hook observed about whether the turn actually
+// finished. The daemon decides what it means; see nonTerminalStopState there. A
+// caller with nothing to report (a hookless agent's process exit) passes the zero
+// value, which reads as a terminal stop.
+type StopFacts struct {
+	// BackgroundTaskStatuses is one status string per background task the agent
+	// reported, verbatim from the harness.
+	BackgroundTaskStatuses []string
+	// PendingSessionCrons counts the scheduled wakeups still pending.
+	PendingSessionCrons int
+}
+
+func (c *Client) SendStop(id, transcriptPath string, facts StopFacts) error {
 	msg := protocol.StopMessage{
-		Cmd:            protocol.CmdStop,
-		ID:             id,
-		TranscriptPath: transcriptPath,
+		Cmd:                    protocol.CmdStop,
+		ID:                     id,
+		TranscriptPath:         transcriptPath,
+		BackgroundTaskStatuses: facts.BackgroundTaskStatuses,
+		PendingSessionCrons:    protocol.Ptr(facts.PendingSessionCrons),
 	}
 	_, err := c.send(msg)
 	return err
