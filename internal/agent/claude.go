@@ -28,6 +28,7 @@ var _ HookProvider = (*Claude)(nil)
 var _ TranscriptFinder = (*Claude)(nil)
 var _ TranscriptWatcherBehaviorProvider = (*Claude)(nil)
 var _ ClassifierProvider = (*Claude)(nil)
+var _ ExecutableClassifierProvider = (*Claude)(nil)
 var _ LaunchPreparer = (*Claude)(nil)
 var _ SessionRecoveryPolicyProvider = (*Claude)(nil)
 var _ PTYStatePolicyProvider = (*Claude)(nil)
@@ -674,7 +675,78 @@ func (c *Claude) extractLastAssistantForClassification(
 // --- ClassifierProvider ---
 
 func (c *Claude) Classify(text string, timeout time.Duration) (string, error) {
-	return classifier.ClassifyWithClaude(text, timeout)
+	return c.ClassifyWithExecutable(text, "", "", timeout)
+}
+
+// ClassifyWithExecutable classifies a stop-time assistant message through a
+// bounded headless `claude -p` run: no tools, capped turns, and a JSON Schema the
+// verdict must validate against. It shares the headless seam with every other
+// non-interactive Claude run in the daemon, so it inherits the same isolation
+// posture (no MCP servers, no user settings, no session transcript, scrubbed
+// environment) instead of the interactive CLI's ambient configuration.
+//
+// workDir is ignored: the run reads nothing from disk, so it executes in a
+// throwaway scratch dir rather than the session's directory. It stays in the
+// signature to satisfy ExecutableClassifierProvider, which Codex needs (its CLI
+// refuses to run outside a trusted repo).
+func (c *Claude) ClassifyWithExecutable(text, executable, workDir string, timeout time.Duration) (string, error) {
+	if strings.TrimSpace(text) == "" {
+		classifier.DefaultLogger("classifier: empty text, returning idle")
+		return "idle", nil
+	}
+	classifier.DefaultLogger("classifier: input text (%d chars): %q", len(text), text)
+
+	resolved, err := exec.LookPath(c.ResolveExecutable(executable))
+	if err != nil {
+		classifier.DefaultLogger("classifier: claude executable unresolved: %v", err)
+		return "unknown", fmt.Errorf("resolve claude executable: %w", err)
+	}
+
+	scratchDir, err := os.MkdirTemp("", "attn-claude-classifier-*")
+	if err != nil {
+		return "unknown", fmt.Errorf("create classifier scratch dir: %w", err)
+	}
+	defer os.RemoveAll(scratchDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	model := classifier.ClaudeClassifierModel()
+	classifier.DefaultLogger(
+		"classifier: calling claude CLI executable=%s model=%s timeout=%d seconds",
+		resolved,
+		model,
+		int(timeout.Seconds()),
+	)
+
+	result, err := c.RunHeadlessTask(ctx, HeadlessTaskRequest{
+		Executable:   resolved,
+		Model:        model,
+		Prompt:       classifier.BuildPrompt(text),
+		WorkDir:      scratchDir,
+		DisableTools: true,
+		MaxTurns:     classifier.ClaudeMaxTurns,
+		OutputSchema: json.RawMessage(classifier.ClaudeVerdictSchema),
+	})
+	if err != nil {
+		classifier.DefaultLogger("classifier: claude CLI failed model=%s err=%v output=%s",
+			model, err, classifier.TruncateForLog(result.FailureOutput))
+		return "unknown", fmt.Errorf("claude cli: %w", err)
+	}
+
+	classifier.DefaultLogger(
+		"classifier: claude CLI run num_turns=%d cost_usd=%.4f structured_output=%s text=%s",
+		result.NumTurns,
+		result.TotalCostUSD,
+		classifier.TruncateForLog(string(result.StructuredOutput)),
+		classifier.TruncateForLog(result.Text),
+	)
+
+	if state, ok := classifier.ParseVerdict(result.StructuredOutput, result.Text); ok {
+		return state, nil
+	}
+	classifier.DefaultLogger("classifier: claude response missing explicit WAITING/DONE verdict, returning unknown")
+	return "unknown", nil
 }
 
 func copyTranscriptForResume(resumeSessionID, cwd string) error {

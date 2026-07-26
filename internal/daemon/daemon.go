@@ -2661,8 +2661,19 @@ func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout t
 			return state, err
 		}
 	}
-	// Use Claude SDK for Claude sessions and fallback.
-	return classifier.ClassifyWithClaude(text, timeout)
+	// Fallback for a session whose driver has no classifier (and for a nil
+	// session): judge with headless Claude, the same backend Claude sessions use.
+	claude := agentdriver.Get("claude")
+	if state, err, ok := agentdriver.ClassifyWithDriver(
+		claude,
+		text,
+		d.store.GetSetting(canonicalExecutableSettingKey("claude")),
+		"",
+		timeout,
+	); ok {
+		return state, err
+	}
+	return protocol.StateUnknown, errors.New("no classifier backend available")
 }
 
 func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
