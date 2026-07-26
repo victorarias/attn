@@ -851,6 +851,7 @@ export interface SessionElement {
     directory:                    string;
     endpoint_id?:                 string;
     id:                           string;
+    idle_stale?:                  boolean;
     is_worktree?:                 boolean;
     label:                        string;
     last_seen:                    string;
@@ -4107,6 +4108,7 @@ export interface Session {
     directory:                    string;
     endpoint_id?:                 string;
     id:                           string;
+    idle_stale?:                  boolean;
     is_worktree?:                 boolean;
     label:                        string;
     last_seen:                    string;
@@ -9254,6 +9256,7 @@ const typeMap: any = {
         { json: "directory", js: "directory", typ: "" },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
+        { json: "idle_stale", js: "idle_stale", typ: u(undefined, true) },
         { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
         { json: "label", js: "label", typ: "" },
         { json: "last_seen", js: "last_seen", typ: "" },
@@ -11206,6 +11209,7 @@ const typeMap: any = {
         { json: "directory", js: "directory", typ: "" },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
+        { json: "idle_stale", js: "idle_stale", typ: u(undefined, true) },
         { json: "is_worktree", js: "is_worktree", typ: u(undefined, true) },
         { json: "label", js: "label", typ: "" },
         { json: "last_seen", js: "last_seen", typ: "" },

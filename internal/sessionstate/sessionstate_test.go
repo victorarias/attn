@@ -644,3 +644,45 @@ func TestPolicyForUsesTheMeasuredPerAgentTTL(t *testing.T) {
 		}
 	}
 }
+
+// IdleStale is the rule behind the mark: a finished result nobody has looked at
+// stops counting as done. The cases that matter are the ones where it must stay
+// quiet — a session that is still running has produced nothing to miss, and a
+// result already read is not something to be reminded about twice.
+func TestIdleStaleOnlyFiresForAnUnreadFinishedResult(t *testing.T) {
+	policy := PolicyFor(string(protocol.SessionAgentClaude))
+	settled := time.Now()
+	past := settled.Add(policy.IdleStaleAfter + time.Second)
+
+	cases := []struct {
+		name       string
+		state      protocol.SessionState
+		stateSince time.Time
+		lastRead   time.Time
+		now        time.Time
+		want       bool
+	}{
+		{"unread past the window", protocol.SessionStateIdle, settled, time.Time{}, past, true},
+		{"read before it finished", protocol.SessionStateIdle, settled, settled.Add(-time.Hour), past, true},
+		{"still inside the window", protocol.SessionStateIdle, settled, time.Time{}, settled.Add(time.Minute), false},
+		{"read after it finished", protocol.SessionStateIdle, settled, settled.Add(time.Second), past, false},
+		{"read at the same instant", protocol.SessionStateIdle, settled, settled, past, false},
+		{"still working", protocol.SessionStateWorking, settled, time.Time{}, past, false},
+		{"waiting on the user", protocol.SessionStateWaitingInput, settled, time.Time{}, past, false},
+		{"never had a state", protocol.SessionStateIdle, time.Time{}, time.Time{}, past, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IdleStale(tc.state, tc.stateSince, tc.lastRead, policy, tc.now); got != tc.want {
+				t.Fatalf("IdleStale = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// A policy with no window turns the whole thing off rather than firing
+	// instantly, which is what an agent with no measured numbers would get if the
+	// default were ever dropped.
+	if IdleStale(protocol.SessionStateIdle, settled, time.Time{}, Policy{}, past) {
+		t.Fatal("a zero window marked a session stale instead of disabling the rule")
+	}
+}

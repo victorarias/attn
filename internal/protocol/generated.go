@@ -3913,6 +3913,9 @@ type Session struct {
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
+	// IdleStale corresponds to the JSON schema field "idle_stale".
+	IdleStale *bool `json:"idle_stale,omitempty,omitzero"`
+
 	// IsWorktree corresponds to the JSON schema field "is_worktree".
 	IsWorktree *bool `json:"is_worktree,omitempty,omitzero"`
 
