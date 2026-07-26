@@ -795,6 +795,7 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 		if strings.TrimSpace(review.BodyText) != "" && !isTrackedReviewerVerdict(review.Author.Login, state, opts) {
 			result.Comments = appendPRComment(result.Comments, prGraphQLComment{
 				ID: review.ID, CreatedAt: review.SubmittedAt, Author: review.Author,
+				BodyText: review.BodyText,
 			}, "review", opts)
 		}
 		if review.Comments.PageInfo.HasNextPage {

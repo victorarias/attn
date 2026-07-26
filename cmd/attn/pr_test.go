@@ -162,6 +162,14 @@ func TestParsePRSnapshotTagsBotCommentsAndDropsIgnoredAuthors(t *testing.T) {
 	if readiness.ReviewState != "waiting" {
 		t.Fatalf("COMMENTED review changed review state: %#v", readiness)
 	}
+	// A prose review is reported as a remark, so it has to carry its prose: a
+	// header with no body sends the caller back to GitHub for the one thing the
+	// event was about.
+	for _, comment := range readiness.Comments {
+		if comment.ID == "r1" && comment.Body != "a real review remark" {
+			t.Fatalf("review comment lost its body: %#v", comment)
+		}
+	}
 }
 
 // GitHub wraps a standalone inline comment in a bodyless COMMENTED review.
