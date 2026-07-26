@@ -523,6 +523,15 @@ being fixed as part of the current step.
   mode genuinely governs approval routing. The general shape — a field that means
   something for one agent and is filler for another, read without asking which
   agent sent it — is worth a sweep in phase 3.5.
+- **A session that has never taken a turn reads as `working` forever.** Visible
+  in the same live run that produced the stuck fix: a claude session created and
+  left alone sat at `working` for fourteen minutes with no reason attached. It
+  comes from the `worker_info` replay applying `working` at spawn, and no clause
+  can retire it — the settle clauses all require a turn to have opened, on
+  purpose. Not fixed with the stuck guard, which only stops the wrong colour from
+  getting worse. The honest answer for a launched-and-quiet agent is probably
+  `idle`, but saying so means deciding what evidence proves an agent has finished
+  booting, which is a phase 3.5 question.
 - **"Read" is coarser than it sounds.** The staleness mark clears when the
   daemon is told a session was visualized, or while it is the selected session.
   Both mean "this session was on screen", not "Victor read the result" — an app
