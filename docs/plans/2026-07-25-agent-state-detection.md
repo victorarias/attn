@@ -845,15 +845,19 @@ and predict the colors.
       the dead `pty.SourceApproval` plumbing, and `Source.AppliesState` (which
       became identical to `ClaimsProtocolState` once the scrapers went).
 
-### Phase 4 — attention mode (opt-in working mode)
+### Phase 4 — the agent queue (opt-in working mode)
 
-**Not planned yet — deliberately.** Victor's call, 2026-07-25: phases 0–3 are the
-groundwork and are judged on colors alone, and phase 4 needs his full vision
-written down before it is worth designing. The only constraint phases 0–3 must
-respect: the projection is derived from `Resolve`'s output, so nothing below phase
-4 may introduce a second notion of "needs attention". Sketch of what exists today
-so far (`Resolution.Unsettles` on the wire, a setting, sidebar grouping) is
-placeholder only; do not implement against it.
+Phases 0–3 are the groundwork and are judged on colors alone. Phase 4 is now its
+own initiative with a north star of its own —
+[the agent queue vision](../vision/agent-queue.md) — and its first chunk is
+planned in
+[turn ownership and settle](2026-07-26-agent-queue-turn-and-settle.md). Two
+things resolved there overturn sketches left in this document: a finished run
+owes the user a turn immediately, so `IdleStale`/`IdleStaleAfter` are deleted
+rather than consumed, and `needs_review_after_long_run` is retired rather than
+generalized. The constraint this phase kept from phases 0–3 holds: turn ownership
+is derived from `Resolve`'s output, and there is no second notion of "needs
+attention".
 
 ## Decisions
 
