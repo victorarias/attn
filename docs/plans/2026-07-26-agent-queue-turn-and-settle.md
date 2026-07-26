@@ -123,10 +123,59 @@ No `turn_since`: it *is* `state_since`, which is already on the wire and is what
 the queue sorts by, ascending. `needs_review_after_long_run` is removed from
 `Session`.
 
-Mode: `queue_mode_enabled`, a daemon setting (`internal/daemon/ws_settings.go`),
-default `false`, broadcast through the existing `settings_updated` event. Only
-rendering consumes it in this chunk; it lives in the daemon because later rocks
-(snooze, move-on) make it change what a turn is.
+## The mode, and moving between the two arrangements
+
+`SettingQueueModeEnabled = "queue_mode_enabled"`
+(`internal/daemon/ws_settings.go`), default `false`, read and written through the
+existing `get_settings` / `set_setting` / `settings_updated` path. It lives in
+the daemon because the vision makes the arrangement in effect policy rather than
+a rendering preference, and because later rocks (snooze, move-on) make it change
+what a turn is. In this chunk only rendering consumes it.
+
+**`turn_owed` is computed and broadcast whether the mode is on or off.** The mode
+gates the band, not the daemon. That is what makes both transitions free, and it
+means a hub renders a remote agent's turn correctly regardless of what the remote
+daemon's own setting says.
+
+### The UI
+
+A `settings-block` in **General**, following the `workflows_enabled` block
+(`SettingsModal.tsx:1954-1982`) exactly: intro copy, a `settings-row-card`, and
+an Enable/Disable `settings-action` button, `data-testid="settings-queue-toggle"`.
+Heading: **Agent queue**. The copy has to say the one thing a user cannot infer —
+that agents are handed to you oldest-first and leave when they no longer want
+you, and that everything stays exactly where it is in the sidebar below.
+
+The settle shortcut is registered only while the mode is on: with the band gone
+the keystroke has nothing visible to do, and an invisible verb that silently
+stamps state is worse than no verb. The daemon accepts `settle_turn` either way —
+it is just a stamp.
+
+### Turning it on
+
+Nothing is backfilled and nothing is pre-settled. The queue shows the true
+present: every agent currently in a turn state, oldest `state_since` first. If
+that is twenty rows, that is the honest state of the board.
+
+The tempting alternative — stamp `turn_settled_at = now` on everything at flip
+time so the queue starts empty and fills as agents actually stop — is rejected.
+It hides live turns at the exact moment the user is least equipped to notice
+they are missing, which is the one failure mode the vision says is unrecoverable.
+It is also not a first-run problem worth special-casing: once slice 3 lands, a
+full queue on open is what every morning looks like, and settle is one keystroke
+per row.
+
+### Turning it off
+
+A pure rendering revert. The band disappears and the tree below it was never
+modified, so there is nothing to restore, re-sort, or re-home. `turn_settled_at`
+stamps persist untouched and the daemon keeps computing `turn_owed`, so flipping
+back on is instant and lands on the same queue — no resync, no recompute, no
+migration in either direction.
+
+Selection survives both flips: it is addressed by session id and the tree is
+unchanged, so the agent you were in stays the agent you are in, focus included.
+⌘1–9 and ⌘↑/⌘↓ keep addressing the workspace tree in both modes.
 
 ## Architecture
 
@@ -239,19 +288,23 @@ only survivable once settle exists.
       both the resolver-shaped and plugin-report-shaped paths.
 - [ ] Protocol: `Session.turn_owed`; regenerate; bump `ProtocolVersion`
       (constants.go **and** `useDaemonSocket.ts`).
-- [ ] `decorateSessionWithTurn` in `sessionForBroadcastWithChiefOfStaff`;
-      `queue_mode_enabled` setting.
+- [ ] `decorateSessionWithTurn` in `sessionForBroadcastWithChiefOfStaff`,
+      unconditional on the mode.
+- [ ] `SettingQueueModeEnabled`, defaulting off.
 - [ ] `buildQueueBands` + unit tests: oldest `state_since` first, a new arrival
       lands at the bottom, a row leaving moves only the rows below it, and the
       workspace tree the builder returns is identical to queue-mode-off.
 - [ ] Sidebar: the *Your turn* band above the unchanged tree, rows carrying
-      agent label + workspace title, and the settings toggle. Pinned workspaces
-      stay where they are in the tree; their own band is the standing-order rock.
+      agent label + workspace title. Pinned workspaces stay where they are in the
+      tree; their own band is the standing-order rock.
+- [ ] Settings block in General + a test that flipping it on and back off leaves
+      the tree, the selected session, and terminal focus untouched.
 - [ ] Live verification: full `make install PROFILE=<throwaway>`; agents across
       two workspaces into `waiting_input`, band ordered oldest-first, clicking a
       row lands in the agent with the keyboard already in its terminal, steering
       one removes it without moving the others, pinning a workspace keeps its
-      agents out of the band.
+      agents out of the band, and toggling the mode off and on mid-session
+      returns the same queue with the same agent still focused.
 
 ### Slice 2 — settle
 
@@ -271,7 +324,8 @@ keystroke is genuinely enough to make being wrong cheap.
 - [ ] Handler → `SettleTurn` → statetrace entry (state + `state_reason`) →
       broadcast.
 - [ ] `session.settle` shortcut (registry + cheatsheet + `Menu::default`
-      accelerator check) and a row affordance.
+      accelerator check), registered only while the mode is on, and a row
+      affordance.
 - [ ] Tests: settle clears `turn_owed`; a following real state change restores
       it; a same-state re-report does not; settle on a not-owed session is a
       no-op.
@@ -339,6 +393,14 @@ if it still feels wrong the slice is one predicate entry to revert.
 - **Pinned, muted, and chief are excluded daemon-side.** They are policy about
   queue membership, not rendering preferences, and a second client must see the
   same queue.
+- **Enabling the mode settles nothing.** A flip that pre-settled the board would
+  start the queue empty and fill it as agents stop, which reads better on the
+  first screen and hides live turns at the moment the user is least able to
+  notice. The queue is a live picture of the present or it is not trustworthy.
+- **The mode gates the band, not the daemon.** `turn_owed` is computed and
+  broadcast either way. It costs nothing, it makes both transitions a pure
+  rendering change with no state to migrate, and it is what lets a hub queue a
+  remote agent whose own daemon has the mode off.
 
 ## Open questions
 
@@ -353,7 +415,16 @@ if it still feels wrong the slice is one predicate entry to revert.
   clock. Skew is small in practice and the queue is not a ledger, so this plan
   ignores it; revisit if a remote agent visibly lands in the wrong place.
 
+- **What the settings block is called.** "Agent queue" is a placeholder: the
+  vision leaves the feature unnamed and says so explicitly. The band headers
+  (*Your turn* / *Settled*) are settled vocabulary; the name of the thing as a
+  whole is not.
+
 ## Follow-ups
+
+- If flipping the mode turns out to be frequent while it is being evaluated, put
+  it in the ⌘K action menu (`ActionMenu.tsx`). Settings-only is the right home
+  for a setting; it is the wrong home for something toggled ten times a day.
 
 - Settle events are labelled detection failures when the settled state was one we
   could not explain (`state_reason` "stuck"/unknown). This chunk writes them to
