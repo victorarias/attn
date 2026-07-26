@@ -693,6 +693,41 @@ func TestHeartbeatFreshnessBoundary(t *testing.T) {
 	}
 }
 
+// The heartbeat TTL is a settle-latency dial, not a safety margin, and this is
+// the property that makes it safe to keep it short.
+//
+// The TTL was measured on an idle machine, so the standing worry was a PTY under
+// backpressure batching its reads and stretching the gap between title frames
+// past it. That cannot settle a session on its own: expiring the TTL only stops
+// the heartbeat from *overriding* the brackets, and an open bracket is then
+// governed by StaleAfter, which is an order of magnitude larger. A stretched gap
+// therefore needs a second, independent fault — a lost turn-open hook, leaving
+// the heartbeat as the only evidence — before it can show a wrong color, and the
+// next title frame corrects it.
+//
+// Coupling the two windows would silently retire that margin, which is why the
+// sweep runs across the whole span between them rather than at one point.
+func TestHeartbeatTTLExpiryCannotSettleAnOpenBracket(t *testing.T) {
+	policy := testPolicy()
+	for _, age := range []time.Duration{
+		policy.HeartbeatTTL + time.Millisecond,
+		2 * policy.HeartbeatTTL,
+		policy.StaleAfter - time.Millisecond,
+		policy.StaleAfter,
+	} {
+		e := Evidence{
+			TurnOpen:   true,
+			Heartbeat:  seen(SourceHeartbeat, ClaimBusy, age),
+			LastBusyAt: now.Add(-age),
+		}
+		got := Resolve(e, policy, now)
+		if got.State != protocol.SessionStateWorking || got.Reason != ReasonBracketOpen {
+			t.Fatalf("a %s gap past the %s TTL resolved %s/%s, want working/%s: the TTL must not close a bracket",
+				age, policy.HeartbeatTTL, got.State, got.Reason, ReasonBracketOpen)
+		}
+	}
+}
+
 // Same for the stale window: a bracket holds until the silence passes it.
 func TestBracketStalenessBoundary(t *testing.T) {
 	policy := testPolicy()

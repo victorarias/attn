@@ -896,6 +896,24 @@ placeholder only; do not implement against it.
   *costs* 1.5pp. At 5% hook loss it cuts the worst stuck streak from 60.0s to
   3.8s. That trade is the whole point — the reported bug is stuck colors, not
   average error.
+- **`HeartbeatTTL` is a settle-latency dial, not a safety margin, and stays
+  short.** The TTL was measured on an idle machine, so the standing worry was a
+  loaded PTY batching reads and stretching the gap between title frames past it.
+  It cannot: expiring the TTL only stops the heartbeat from *overriding* the
+  brackets, and an open bracket is then governed by `StaleAfter`, which since
+  moving to 60s is 40x claude's TTL. A stretched gap needs a second, independent fault
+  — a lost turn-open hook, leaving the heartbeat as the only evidence — before it
+  shows a wrong color, and the next title frame corrects it. Raising the TTL to
+  buy margin would be the wrong trade in any case: a stale-but-within-TTL busy
+  glyph holds a session green for up to the TTL after a turn genuinely ends, so
+  every millisecond added is settle latency paid on *every* turn to soften a blip
+  that requires two simultaneous faults.
+  `TestHeartbeatTTLExpiryCannotSettleAnOpenBracket` sweeps the whole span between
+  the two windows so a change that couples them fails rather than silently
+  retiring the margin. Adaptive TTLs were
+  rejected: deriving one from the session's own repaint interval lets a stalling
+  agent stretch its own deadline, delaying exactly the detection the heartbeat
+  exists to provide.
 - **Approvals depend on hooks, with no fallback.** Victor's call, 2026-07-25. The
   heartbeat structurally cannot corroborate an approval (the agent genuinely is
   not running), which is why the hybrid's residual 27.6s/43.4s worst streaks are
@@ -925,10 +943,10 @@ placeholder only; do not implement against it.
 - Codex has no notification OSC. Its `notify` program config
   (`agent-turn-complete`) is the analogue; confirm it fires for approval requests
   too, or accept hooks-only for Codex settle detection.
-- Heartbeat TTL was measured on an idle machine (claude 0.97s frame interval,
-  codex 0.102s). A busy PTY under backpressure may batch chunks and stretch the
-  gap. The per-agent TTLs above carry ~55% and ~5x margin respectively; confirm
-  under a loaded matrix run before locking them in.
+- ~~Heartbeat TTL was measured on an idle machine (claude 0.97s frame interval,
+  codex 0.102s); a busy PTY under backpressure may batch chunks and stretch the
+  gap past it.~~ Answered without a load run, because the premise moved. See the
+  decision below.
 
 ## Follow-ups
 
