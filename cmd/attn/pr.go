@@ -9,12 +9,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/automation"
+	"github.com/victorarias/attn/internal/config"
 )
 
 const (
@@ -24,6 +26,7 @@ const (
 	prWaitExitChangesRequested = 3
 	prWaitExitComment          = 4
 	prWaitExitError            = 5
+	prWaitExitBotComment       = 6
 	prWaitExitTimeout          = 124
 
 	checksNone    = "none"
@@ -42,9 +45,56 @@ const (
 	outcomeChecksFailed     prOutcome = "checks_failed"
 	outcomeChangesRequested prOutcome = "changes_requested"
 	outcomeComment          prOutcome = "comment"
+	outcomeBotComment       prOutcome = "bot_comment"
 	outcomeClosed           prOutcome = "closed"
 	outcomeTimeout          prOutcome = "timeout"
 )
+
+// prOutcomeRanking is the whole precedence order, in one place. One poll can see
+// several events at once — CI can fail in the same 20 seconds someone comments —
+// and the exit code can only carry one, so the ranking decides which. It reads
+// by who is waiting on whom: the pull request being gone or broken first, then a
+// verdict, then a human who asked something and is waiting for an answer.
+//
+// Approval ranks below a human comment because approval says nothing needs doing
+// and reporting it over a fresh question would bury the question. It ranks above
+// a bot comment for the mirror-image reason: a bot is not waiting for an answer,
+// its findings usually arrive as a check as well, and it comments on nearly every
+// push — ranking it higher would report "a bot said something" instead of "you
+// can merge" in the ordinary case.
+//
+// Nothing is lost to the ranking: every event the ending poll saw is reported,
+// so a caller that gets `comment` still sees the approval that came with it.
+var prOutcomeRanking = []prOutcome{
+	outcomeClosed,
+	outcomeChecksFailed,
+	outcomeChangesRequested,
+	outcomeComment,
+	outcomeApproved,
+	outcomeBotComment,
+}
+
+// rankPROutcomes returns the highest-ranked event, and the events sorted by that
+// same ranking so the report reads in the order the operator should read it.
+func rankPROutcomes(events []prOutcome) (prOutcome, []prOutcome) {
+	if len(events) == 0 {
+		return "", nil
+	}
+	present := make(map[prOutcome]bool, len(events))
+	for _, event := range events {
+		present[event] = true
+	}
+	ranked := make([]prOutcome, 0, len(events))
+	for _, candidate := range prOutcomeRanking {
+		if present[candidate] {
+			ranked = append(ranked, candidate)
+		}
+	}
+	if len(ranked) == 0 {
+		return events[0], events
+	}
+	return ranked[0], ranked
+}
 
 func (o prOutcome) exitCode() int {
 	switch o {
@@ -56,6 +106,8 @@ func (o prOutcome) exitCode() int {
 		return prWaitExitChangesRequested
 	case outcomeComment:
 		return prWaitExitComment
+	case outcomeBotComment:
+		return prWaitExitBotComment
 	case outcomeTimeout:
 		return prWaitExitTimeout
 	default:
@@ -66,15 +118,57 @@ func (o prOutcome) exitCode() int {
 type prCheck struct {
 	Name  string `json:"name"`
 	State string `json:"state"`
+	// URL is where the run's logs are. A failed check whose logs the caller has to
+	// go hunting for is a follow-up query in everything but name.
+	URL string `json:"url,omitempty"`
 }
 
 // prComment is any commentary surface: a standalone PR comment, an inline
 // review-thread comment, or a review submitted without a verdict.
+//
+// A review that carries a verdict is not commentary. Its body is the verdict's
+// explanation, and reporting it here as well would turn one review into two
+// events — which is how an approval used to end the wait as "a new comment".
 type prComment struct {
 	ID        string    `json:"-"`
 	Author    string    `json:"author"`
 	Kind      string    `json:"kind"`
+	Bot       bool      `json:"bot"`
 	CreatedAt time.Time `json:"created_at"`
+	// Body is what the comment actually says, and Location is `path:line` for an
+	// inline comment. Both are carried so the caller can act on the remark instead
+	// of going back to GitHub to read it.
+	Body     string `json:"body,omitempty"`
+	Location string `json:"location,omitempty"`
+}
+
+// isTrackedReviewerVerdict reports whether a review is the one the waiter reads
+// as the reviewer's answer. Only those reviews are exempt from being reported as
+// commentary; a `COMMENTED` review from the same person is a remark like any
+// other, and is what the reviewer uses to say something without answering yet.
+func isTrackedReviewerVerdict(author, state string, opts prWaitOptions) bool {
+	if !strings.EqualFold(author, opts.Reviewer) {
+		return false
+	}
+	return state == "APPROVED" || state == "CHANGES_REQUESTED"
+}
+
+func humanPRComments(comments []prComment) []prComment {
+	return filterPRComments(comments, false)
+}
+
+func botPRComments(comments []prComment) []prComment {
+	return filterPRComments(comments, true)
+}
+
+func filterPRComments(comments []prComment, bot bool) []prComment {
+	result := make([]prComment, 0, len(comments))
+	for _, comment := range comments {
+		if comment.Bot == bot {
+			result = append(result, comment)
+		}
+	}
+	return result
 }
 
 type prReadiness struct {
@@ -92,6 +186,13 @@ type prReadiness struct {
 	// baseline the waiter records at start to recognize a stale verdict.
 	ReviewSubmittedAt time.Time
 	LatestReviewAt    time.Time
+	// ReviewBody is the verdict's own text — for changes_requested, the thing the
+	// caller has to act on. It was already being fetched and dropped, which meant
+	// every caller learning "changes requested" had to ask GitHub what was said.
+	ReviewBody string
+	// URL is the pull request's web address, so a caller reporting the outcome
+	// does not have to assemble one from host, owner, name and number.
+	URL string
 }
 
 func (r *prReadiness) ready() bool {
@@ -109,6 +210,15 @@ type prWaitOptions struct {
 	IgnoreAuthors     []string
 	Timeout, Interval time.Duration
 	JSON              bool
+	// CursorDir is where waits remember what they have already reported, so a
+	// second call resumes instead of re-baselining. Empty disables the memory
+	// entirely, which is what tests use; the CLI resolves it once at entry.
+	CursorDir string
+	// Since overrides the remembered position: report anything after this instant
+	// and ignore the cursor. Reset discards the cursor and baselines from the
+	// pull request's current state, as a first-ever call would.
+	Since time.Time
+	Reset bool
 }
 
 func (o prWaitOptions) ignored(author string) bool {
@@ -167,41 +277,78 @@ func executePRCommand(args []string, stdout, stderr io.Writer) int {
 		progress = stderr
 	}
 
+	// Resolve the cursor directory here and pass it down, so nothing below this
+	// line can reach a data dir on its own.
+	opts.CursorDir = filepath.Join(config.DataDir(), "pr-wait")
+
+	var cursor prWaitCursor
+	if !opts.Reset {
+		loaded, err := loadPRWaitCursor(opts.CursorDir, opts)
+		if err != nil {
+			// A cursor that cannot be read costs history, not correctness: the wait
+			// falls back to baselining from the PR's current state.
+			fmt.Fprintf(stderr, "pr wait-ready: %v; starting from the current state\n", err)
+		}
+		cursor = loaded
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
 	defer cancel()
-	result, outcome, err := waitForPRActionable(ctx, ghPRReadinessSource{}, opts, progress)
+	result, err := waitForPRActionable(ctx, ghPRReadinessSource{}, opts, cursor, progress)
 	if err != nil {
 		fmt.Fprintf(stderr, "pr wait-ready: %v\n", err)
 		return prWaitExitError
 	}
-	return reportPROutcome(result, outcome, opts, stdout)
+	if err := savePRWaitCursor(opts.CursorDir, opts, result.Cursor, time.Now()); err != nil {
+		// Losing the cursor means the next wait re-baselines, which is the old
+		// behavior — worth a warning, not worth discarding this wait's answer.
+		fmt.Fprintf(stderr, "pr wait-ready: could not save cursor: %v\n", err)
+	}
+	return reportPROutcome(result, opts, stdout)
 }
 
-func reportPROutcome(result *prReadiness, outcome prOutcome, opts prWaitOptions, stdout io.Writer) int {
+func reportPROutcome(wait prWaitResult, opts prWaitOptions, stdout io.Writer) int {
+	result, outcome, events := wait.Observation, wait.Outcome, wait.Events
 	detail := describePROutcome(result, outcome, opts)
 	if opts.JSON {
-		// "comments" reports what arrived during the wait. On any other outcome
-		// the observation still carries the baseline, which is not news.
-		fresh := []prComment{}
-		if outcome == outcomeComment {
-			fresh = result.Comments
+		// "comments" is everything that arrived during the wait, whichever event
+		// won: the exit code can only name one, and a caller that has to re-query
+		// for the rest is being made to fetch what this poll already saw. The
+		// waiter has already reduced Comments to the unseen ones.
+		fresh := result.Comments
+		if fresh == nil {
+			fresh = []prComment{}
+		}
+		reported := make([]string, 0, len(events))
+		for _, event := range events {
+			reported = append(reported, string(event))
 		}
 		payload := map[string]any{
 			"outcome": string(outcome),
+			"events":  reported,
 			"pr":      result.Number,
+			"url":     result.URL,
 			"head":    result.HeadSHA,
 			"state":   result.State,
 			"draft":   result.Draft,
 			"detail":  detail,
 			"checks": map[string]any{
-				"state": result.CheckState,
-				"items": result.Checks,
+				"state":  result.CheckState,
+				"items":  result.Checks,
+				"failed": failedChecks(result.Checks),
 			},
 			"review": map[string]any{
 				"state":    result.ReviewState,
 				"reviewer": result.Reviewer,
+				// The verdict's own text. On changes_requested it is the whole
+				// point: what to fix.
+				"body": result.ReviewBody,
 			},
 			"comments": fresh,
+			// The position this wait leaves behind. Echoing it makes the memory
+			// inspectable, and it is what a caller passes back as --since to replay
+			// from a known point.
+			"cursor": wait.Cursor,
 		}
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
@@ -211,7 +358,66 @@ func reportPROutcome(result *prReadiness, outcome prOutcome, opts prWaitOptions,
 		return outcome.exitCode()
 	}
 	fmt.Fprintf(stdout, "%s: %s\n", outcome, detail)
+	// Plain text gets the same completeness as JSON: the events the ranking did
+	// not pick are still things that happened, and a reader who only sees the
+	// winner will go looking for them.
+	for _, event := range events {
+		if event == outcome {
+			continue
+		}
+		fmt.Fprintf(stdout, "also %s: %s\n", event, describePROutcome(result, event, opts))
+	}
+	writePRContent(stdout, result, events)
 	return outcome.exitCode()
+}
+
+// writePRContent prints what was actually said. Without it the caller knows a
+// remark exists and has to go read it, which is the follow-up query this command
+// exists to remove — and stdout is the only surface a shell caller has.
+func writePRContent(stdout io.Writer, result *prReadiness, events []prOutcome) {
+	reported := make(map[prOutcome]bool, len(events))
+	for _, event := range events {
+		reported[event] = true
+	}
+	if failed := failedChecks(result.Checks); reported[outcomeChecksFailed] && len(failed) > 0 {
+		for _, check := range failed {
+			if check.URL != "" {
+				fmt.Fprintf(stdout, "  %s %s\n", check.Name, check.URL)
+				continue
+			}
+			fmt.Fprintf(stdout, "  %s\n", check.Name)
+		}
+	}
+	if (reported[outcomeChangesRequested] || reported[outcomeApproved]) && result.ReviewBody != "" {
+		fmt.Fprintf(stdout, "  --- %s ---\n%s\n", result.Reviewer, indentPRBody(result.ReviewBody))
+	}
+	for _, comment := range result.Comments {
+		if comment.Bot && !reported[outcomeBotComment] {
+			continue
+		}
+		if !comment.Bot && !reported[outcomeComment] {
+			continue
+		}
+		where := comment.Author
+		if comment.Location != "" {
+			where += " on " + comment.Location
+		}
+		fmt.Fprintf(stdout, "  --- %s ---\n", where)
+		if comment.Body != "" {
+			fmt.Fprintln(stdout, indentPRBody(comment.Body))
+		}
+	}
+	if result.URL != "" {
+		fmt.Fprintf(stdout, "%s\n", result.URL)
+	}
+}
+
+func indentPRBody(body string) string {
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = "  " + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func describePROutcome(result *prReadiness, outcome prOutcome, opts prWaitOptions) string {
@@ -224,7 +430,9 @@ func describePROutcome(result *prReadiness, outcome prOutcome, opts prWaitOption
 	case outcomeChecksFailed:
 		return fmt.Sprintf("%s failed on %s", strings.Join(failedCheckNames(result.Checks), ", "), head)
 	case outcomeComment:
-		return describePRComments(result.Comments)
+		return describePRComments(humanPRComments(result.Comments))
+	case outcomeBotComment:
+		return describePRComments(botPRComments(result.Comments))
 	case outcomeClosed:
 		return fmt.Sprintf("pull request is %s", result.State)
 	case outcomeTimeout:
@@ -254,6 +462,18 @@ func describePRComments(comments []prComment) string {
 	return fmt.Sprintf("%d new %s from %s", len(comments), noun, strings.Join(authors, ", "))
 }
 
+// failedChecks is the failing subset with its log URLs, reported separately so a
+// caller does not have to filter a hundred green rows to find what broke.
+func failedChecks(checks []prCheck) []prCheck {
+	failed := make([]prCheck, 0)
+	for _, check := range checks {
+		if check.State == checksFailed {
+			failed = append(failed, check)
+		}
+	}
+	return failed
+}
+
 func failedCheckNames(checks []prCheck) []string {
 	var names []string
 	for _, check := range checks {
@@ -274,6 +494,8 @@ func parsePRWaitArgs(args []string) (prWaitOptions, error) {
 	timeout := fs.Duration("timeout", 30*time.Minute, "maximum wait")
 	interval := fs.Duration("interval", 20*time.Second, "poll interval")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
+	reset := fs.Bool("reset", false, "forget what earlier waits reported and baseline from the current state")
+	since := fs.String("since", "", "report anything after this RFC3339 instant instead of resuming")
 	var ignore stringSliceFlag
 	fs.Var(&ignore, "ignore-author", "comment author to ignore (repeatable)")
 
@@ -302,6 +524,14 @@ func parsePRWaitArgs(args []string) (prWaitOptions, error) {
 		Timeout:       *timeout,
 		Interval:      *interval,
 		JSON:          *asJSON,
+		Reset:         *reset,
+	}
+	if strings.TrimSpace(*since) != "" {
+		at, err := time.Parse(time.RFC3339, strings.TrimSpace(*since))
+		if err != nil {
+			return prWaitOptions{}, fmt.Errorf("--since must be an RFC3339 timestamp: %w", err)
+		}
+		opts.Since = at
 	}
 	if strings.HasPrefix(target, "https://") {
 		host, owner, repository, number, err := automation.ParsePullRequestURL(target)
@@ -347,19 +577,25 @@ func parseRepoFlag(repo string) (host, owner, name string, err error) {
 // bot authorship is authoritative. `gh pr view --json comments` strips the
 // "[bot]" suffix and omits the author type, which makes bots indistinguishable
 // from humans; GraphQL's __typename does not.
+//
+// It asks for the text too — review bodies, comment bodies, an inline comment's
+// file and line, a failing check's URL. A caller that has to fetch the words
+// after being told a comment exists is making the second round trip this command
+// exists to remove, and it is the same round trip either way: these are fields on
+// objects the query already walks.
 const prSnapshotQuery = `
 query($owner:String!,$name:String!,$number:Int!){
   repository(owner:$owner,name:$name){
     pullRequest(number:$number){
-      number state isDraft headRefOid
+      number state isDraft headRefOid url
       commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){
         pageInfo{hasNextPage}
-        nodes{__typename ... on CheckRun{name status conclusion} ... on StatusContext{context state}}
+        nodes{__typename ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}
       }}}}}
       reviewRequests(first:100){nodes{requestedReviewer{__typename ... on User{login}}}}
       reviews(last:100){nodes{id state bodyText submittedAt author{__typename login} commit{oid}
-        comments(first:100){pageInfo{hasNextPage} nodes{id createdAt author{__typename login}}}}}
-      comments(last:100){nodes{id createdAt author{__typename login}}}
+        comments(first:100){pageInfo{hasNextPage} nodes{id createdAt bodyText path line originalLine author{__typename login}}}}}
+      comments(last:100){nodes{id createdAt bodyText author{__typename login}}}
     }}}`
 
 func (ghPRReadinessSource) Fetch(ctx context.Context, opts prWaitOptions) (*prReadiness, error) {
@@ -388,9 +624,29 @@ type prGraphQLAuthor struct {
 }
 
 type prGraphQLComment struct {
-	ID        string          `json:"id"`
-	CreatedAt time.Time       `json:"createdAt"`
-	Author    prGraphQLAuthor `json:"author"`
+	ID           string          `json:"id"`
+	CreatedAt    time.Time       `json:"createdAt"`
+	BodyText     string          `json:"bodyText"`
+	Path         string          `json:"path"`
+	Line         *int            `json:"line"`
+	OriginalLine *int            `json:"originalLine"`
+	Author       prGraphQLAuthor `json:"author"`
+}
+
+// location renders where an inline comment sits. GitHub nulls `line` once the
+// comment's hunk is outdated, and then `originalLine` is the only anchor left.
+func (c prGraphQLComment) location() string {
+	if c.Path == "" {
+		return ""
+	}
+	line := c.Line
+	if line == nil {
+		line = c.OriginalLine
+	}
+	if line == nil {
+		return c.Path
+	}
+	return fmt.Sprintf("%s:%d", c.Path, *line)
 }
 
 func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
@@ -402,6 +658,7 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 					State          string      `json:"state"`
 					IsDraft        bool        `json:"isDraft"`
 					HeadRefOID     string      `json:"headRefOid"`
+					URL            string      `json:"url"`
 					ReviewRequests struct {
 						Nodes []struct {
 							RequestedReviewer prGraphQLAuthor `json:"requestedReviewer"`
@@ -422,6 +679,8 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 											Status     string `json:"status"`
 											Conclusion string `json:"conclusion"`
 											State      string `json:"state"`
+											DetailsURL string `json:"detailsUrl"`
+											TargetURL  string `json:"targetUrl"`
 										} `json:"nodes"`
 									} `json:"contexts"`
 								} `json:"statusCheckRollup"`
@@ -477,6 +736,7 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 	result := &prReadiness{
 		Number: pr.Number.String(), State: strings.ToLower(pr.State), Draft: pr.IsDraft,
 		HeadSHA: pr.HeadRefOID, Reviewer: opts.Reviewer, ReviewState: "waiting",
+		URL: pr.URL,
 	}
 
 	for _, request := range pr.ReviewRequests.Nodes {
@@ -494,11 +754,11 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 				return nil, errors.New("PR has more than 100 checks; readiness cannot be verified without truncation")
 			}
 			for _, check := range rollup.Contexts.Nodes {
-				name, state := "status:"+check.Context, statusState(check.State)
+				name, state, url := "status:"+check.Context, statusState(check.State), check.TargetURL
 				if check.TypeName == "CheckRun" {
-					name, state = "check:"+check.Name, checkRunState(check.Status, check.Conclusion)
+					name, state, url = "check:"+check.Name, checkRunState(check.Status, check.Conclusion), check.DetailsURL
 				}
-				result.Checks = append(result.Checks, prCheck{Name: name, State: state})
+				result.Checks = append(result.Checks, prCheck{Name: name, State: state, URL: url})
 			}
 		}
 	}
@@ -526,9 +786,16 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 		// A review with no text of its own is just the wrapper GitHub creates
 		// around an inline comment; its comments are reported below, so
 		// counting the wrapper too would report one remark twice.
-		if strings.TrimSpace(review.BodyText) != "" {
+		//
+		// The tracked reviewer's verdict is skipped for the same reason from the
+		// other direction: its body is the verdict's own explanation, and the
+		// verdict event already sends the caller to read it. Another author's
+		// approval is not tracked as a verdict at all, so their prose is
+		// commentary and stays reported.
+		if strings.TrimSpace(review.BodyText) != "" && !isTrackedReviewerVerdict(review.Author.Login, state, opts) {
 			result.Comments = appendPRComment(result.Comments, prGraphQLComment{
 				ID: review.ID, CreatedAt: review.SubmittedAt, Author: review.Author,
+				BodyText: review.BodyText,
 			}, "review", opts)
 		}
 		if review.Comments.PageInfo.HasNextPage {
@@ -546,6 +813,7 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 		}
 		latest = review.SubmittedAt
 		result.ReviewSubmittedAt = review.SubmittedAt
+		result.ReviewBody = strings.TrimSpace(review.BodyText)
 		if state == "APPROVED" {
 			result.ReviewState = "approved"
 		} else {
@@ -561,17 +829,28 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 	return result, nil
 }
 
-// appendPRComment keeps only comments a human needs to answer. Bot authorship
-// comes from __typename; the token owner is deliberately NOT filtered, because
-// the operator and the agent share one token and the operator's own comment is
-// the most actionable event there is. Self-waking is prevented by the baseline
-// instead: anything present when the wait starts is never reported.
+// appendPRComment records a comment and who wrote it. Bot authorship comes from
+// __typename and separates the two comment events rather than dropping one: a
+// bot's remark is real news (a doctor report, a coverage regression) but it is
+// ranked below a human's and carries its own exit code, so a caller can act on
+// one and ignore the other. `--ignore-author` drops either kind.
+//
+// The token owner is deliberately NOT filtered, because the operator and the
+// agent share one token and the operator's own comment is the most actionable
+// event there is. Self-waking is prevented by the baseline instead: anything
+// present when the wait starts is never reported.
 func appendPRComment(comments []prComment, node prGraphQLComment, kind string, opts prWaitOptions) []prComment {
-	if node.ID == "" || node.Author.TypeName != "User" || opts.ignored(node.Author.Login) {
+	if node.ID == "" || opts.ignored(node.Author.Login) {
 		return comments
 	}
 	return append(comments, prComment{
-		ID: node.ID, Author: node.Author.Login, Kind: kind, CreatedAt: node.CreatedAt,
+		ID:        node.ID,
+		Author:    node.Author.Login,
+		Kind:      kind,
+		Bot:       node.Author.TypeName != "User",
+		CreatedAt: node.CreatedAt,
+		Body:      strings.TrimSpace(node.BodyText),
+		Location:  node.location(),
 	})
 }
 
@@ -616,23 +895,50 @@ func summarizePRChecks(checks []prCheck) string {
 	return result
 }
 
-// waitForPRActionable returns on the first actionable update. The error return
-// is reserved for the waiter itself failing; every product outcome, including a
-// timeout, comes back as a prOutcome so the caller can report it uniformly.
-func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prWaitOptions, progress io.Writer) (*prReadiness, prOutcome, error) {
+// prWaitResult is one wait's answer: what happened, everything that happened,
+// and the cursor the next wait should start from.
+type prWaitResult struct {
+	Observation *prReadiness
+	Outcome     prOutcome
+	Events      []prOutcome
+	Cursor      prWaitCursor
+}
+
+// waitForPRActionable returns on the first poll that sees an actionable update.
+// It returns every event that poll saw, ranked, plus the winner the exit code
+// reports; a caller that only wants the winner can ignore the rest. The error
+// return is reserved for the waiter itself failing; every product outcome,
+// including a timeout, comes back as a prOutcome so the caller can report it
+// uniformly.
+//
+// `cursor` is what a previous wait already reported, and starting from it is what
+// closes the window between two calls. Zero means "baseline from the pull
+// request's current state", which is right for a first call: nothing that
+// happened before the agent started watching is news.
+func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prWaitOptions, cursor prWaitCursor, progress io.Writer) (prWaitResult, error) {
 	var lastLine, lastHead string
 	var baseline map[string]bool
 	var reviewBaseline time.Time
 	var notedStaleVerdict bool
 	last := &prReadiness{Number: strconv.Itoa(opts.Number), Reviewer: opts.Reviewer, CheckState: checksNone, ReviewState: "waiting"}
+	if !opts.Since.IsZero() {
+		// --since is the manual override: report everything after this instant and
+		// forget what any previous wait recorded.
+		cursor = prWaitCursor{VerdictAt: opts.Since}
+		baseline = map[string]bool{}
+		reviewBaseline = opts.Since
+	} else if !cursor.empty() {
+		baseline = cursor.seenComments()
+		reviewBaseline = cursor.VerdictAt
+	}
 
 	for {
 		observation, err := source.Fetch(ctx, opts)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				return last, outcomeTimeout, nil
+				return prWaitResult{Observation: last, Outcome: outcomeTimeout, Events: []prOutcome{outcomeTimeout}, Cursor: cursor}, nil
 			}
-			return last, "", err
+			return prWaitResult{Observation: last}, err
 		}
 		last = observation
 
@@ -653,13 +959,23 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 			for _, comment := range observation.Comments {
 				baseline[comment.ID] = true
 			}
+			// The baseline is also what the next wait must not be told again, so
+			// it goes straight into the cursor: a wait that ends in a timeout
+			// reports nothing, and without this the following call would rebuild
+			// the same baseline from a later state and swallow whatever landed in
+			// between.
+			cursor.CommentIDs = append(cursor.CommentIDs, prCommentIDs(observation.Comments)...)
 			// Mirror the comment baseline for reviews: the reviewer's newest
 			// review at wait start is stale context, so a verdict returns only
 			// when it (or a re-review) is newer than this.
 			reviewBaseline = observation.LatestReviewAt
-		} else if fresh := unseenPRComments(observation.Comments, baseline); len(fresh) > 0 {
-			observation.Comments = fresh
-			return observation, outcomeComment, nil
+			// Nothing already on the PR is news, so this poll contributes no
+			// comment event. Dropping them here rather than skipping the event
+			// tests below also keeps the report honest if some other event ends
+			// the wait on this very poll: no comment arrived during it.
+			observation.Comments = nil
+		} else {
+			observation.Comments = unseenPRComments(observation.Comments, baseline, opts.Since)
 		}
 
 		// An existing verdict that a pending re-review holds back is not a return
@@ -670,19 +986,46 @@ func waitForPRActionable(ctx context.Context, source prReadinessSource, opts prW
 			notedStaleVerdict = true
 		}
 
-		switch {
-		case observation.State != "open":
-			return observation, outcomeClosed, nil
-		case observation.CheckState == checksFailed:
-			return observation, outcomeChecksFailed, nil
-		case observation.ReviewState == "changes_requested" && freshReviewVerdict(observation, reviewBaseline):
-			return observation, outcomeChangesRequested, nil
-		case observation.ready() && freshReviewVerdict(observation, reviewBaseline):
-			return observation, outcomeApproved, nil
+		// Collect the whole poll before deciding anything. Every branch here used
+		// to return the moment it matched, in two separate places, so whichever
+		// event the code happened to test first won and the others were never
+		// looked at. The ranking is the only thing that chooses now.
+		var events []prOutcome
+		if observation.State != "open" {
+			events = append(events, outcomeClosed)
+		}
+		// A failing check is a condition, not an occurrence: it stays true until
+		// someone pushes. Reporting it again for the same checks on the same commit
+		// would turn a second wait into an instant return with nothing new in it,
+		// which is the hot loop a caller uses this command to avoid.
+		if observation.CheckState == checksFailed && !cursor.sameFailure(observation.HeadSHA, observation.Checks) {
+			events = append(events, outcomeChecksFailed)
+		}
+		if freshReviewVerdict(observation, reviewBaseline) {
+			switch {
+			case observation.ReviewState == "changes_requested":
+				events = append(events, outcomeChangesRequested)
+			case observation.ready():
+				events = append(events, outcomeApproved)
+			}
+		}
+		if len(humanPRComments(observation.Comments)) > 0 {
+			events = append(events, outcomeComment)
+		}
+		if len(botPRComments(observation.Comments)) > 0 {
+			events = append(events, outcomeBotComment)
+		}
+		if winner, ranked := rankPROutcomes(events); winner != "" {
+			return prWaitResult{
+				Observation: observation,
+				Outcome:     winner,
+				Events:      ranked,
+				Cursor:      advancePRWaitCursor(cursor, observation, ranked),
+			}, nil
 		}
 
 		if err := waitPRPoll(ctx, opts.Interval); err != nil {
-			return observation, outcomeTimeout, nil
+			return prWaitResult{Observation: observation, Outcome: outcomeTimeout, Events: []prOutcome{outcomeTimeout}, Cursor: cursor}, nil
 		}
 	}
 }
@@ -700,14 +1043,53 @@ func freshReviewVerdict(observation *prReadiness, baseline time.Time) bool {
 	return observation.ReviewSubmittedAt.After(baseline)
 }
 
-func unseenPRComments(comments []prComment, baseline map[string]bool) []prComment {
+// unseenPRComments keeps the comments the caller has not been told about. `since`
+// is the --since override: it selects by arrival time instead of by identity, so
+// a caller can replay a window without knowing any comment IDs.
+func unseenPRComments(comments []prComment, baseline map[string]bool, since time.Time) []prComment {
 	var fresh []prComment
 	for _, comment := range comments {
-		if !baseline[comment.ID] {
-			fresh = append(fresh, comment)
+		if baseline[comment.ID] {
+			continue
 		}
+		if !since.IsZero() && !comment.CreatedAt.After(since) {
+			continue
+		}
+		fresh = append(fresh, comment)
 	}
 	return fresh
+}
+
+func prCommentIDs(comments []prComment) []string {
+	ids := make([]string, 0, len(comments))
+	for _, comment := range comments {
+		ids = append(ids, comment.ID)
+	}
+	return ids
+}
+
+// advancePRWaitCursor records what this wait reported, and nothing more. A poll
+// sees more than it returns — a failure it recognized as already-reported, a
+// verdict held back by a pending re-review — and folding those in would mark them
+// seen without anyone having been told.
+func advancePRWaitCursor(cursor prWaitCursor, observation *prReadiness, events []prOutcome) prWaitCursor {
+	reported := make(map[prOutcome]bool, len(events))
+	for _, event := range events {
+		reported[event] = true
+	}
+	// observation.Comments is already reduced to the ones being reported, and a
+	// poll carrying both human and bot remarks reports them together.
+	if reported[outcomeComment] || reported[outcomeBotComment] {
+		cursor.CommentIDs = append(cursor.CommentIDs, prCommentIDs(observation.Comments)...)
+	}
+	if reported[outcomeApproved] || reported[outcomeChangesRequested] {
+		cursor.VerdictAt = observation.ReviewSubmittedAt
+	}
+	if reported[outcomeChecksFailed] {
+		cursor.FailureHead = observation.HeadSHA
+		cursor.FailureChecks = failedCheckNames(observation.Checks)
+	}
+	return cursor
 }
 
 func waitPRPoll(ctx context.Context, interval time.Duration) error {
@@ -764,8 +1146,9 @@ func shortSHA(sha string) string {
 func writePRHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn pr wait-ready <number-or-url> --reviewer <login> [options]
 
-Wait until a pull request has an actionable update: a failing check, a review
-requesting changes, a new human comment, or approval on a green exact head.
+Wait until a pull request has an actionable update: it closes, a check fails, the
+reviewer requests changes, a human comments, a bot comments, or the reviewer
+approves a green exact head.
 
 options:
   --repo [host/]owner/repository  required with a pull request number
@@ -774,15 +1157,41 @@ options:
   --interval duration             poll interval (default 20s)
   --ignore-author login           comment author to ignore (repeatable)
   --json                          emit the result as JSON on stdout
+  --reset                         forget earlier waits; baseline from now
+  --since RFC3339                 report anything after this instant instead
 
-Bot comments are ignored. Comments already present when the wait starts are the
-baseline and never reported; only comments posted during the wait are. A review
-verdict present at wait start is likewise baselined: while the reviewer is
-re-requested (a re-review is pending) the pre-existing verdict is stale and does
-not end the wait; only a review submitted after the baseline does. When the
-reviewer is not re-requested, an existing verdict returns immediately.
+One poll can see several of these at once. The exit code reports the highest
+ranked: closed, checks failed, changes requested, human comment, approved, bot
+comment. A human comment outranks approval because someone is waiting for an
+answer; a bot comment ranks last because nobody is. Every event that poll saw is
+still reported — "also <event>: ..." on stdout, "events" in --json — so an
+approval that arrives alongside a comment is never lost to the one the exit code
+names. The reviewer's own approval or changes-requested is one event, not two:
+its body is the verdict's explanation, not a separate comment.
 
-exit: 0 approved; 1 checks failed; 2 usage; 3 changes requested; 4 new comment;
-      5 error; 124 timeout
+A bot comment ends the wait with its own exit code, so a caller can act on a
+human's remark and skip a doctor report; --ignore-author drops either kind.
+Comments already present when the wait starts are the baseline and never
+reported; only comments posted during the wait are. A review verdict present at
+wait start is likewise baselined: while the reviewer is re-requested (a re-review
+is pending) the pre-existing verdict is stale and does not end the wait; only a
+review submitted after the baseline does. When the reviewer is not re-requested,
+an existing verdict returns immediately.
+
+Successive waits on the same pull request resume rather than re-baseline. Each
+wait records what it reported under the data dir, so a remark that lands while the
+caller is answering the previous one is still reported by the next wait instead of
+being absorbed into a fresh baseline. The same memory keeps a failing check from
+returning instantly a second time for the same checks on the same commit; a
+different failure, or the same one on a new commit, is reported again. --json
+echoes the recorded position; --reset discards it and --since replays from an
+instant of your choosing.
+
+Also printed on stdout: comment bodies with their file:line when inline, the
+verdict's own text, failing check names with their URLs, and the pull request URL
+— so acting on the result needs no second query.
+
+exit: 0 approved; 1 checks failed; 2 usage; 3 changes requested; 4 human comment;
+      5 error; 6 bot comment; 124 timeout
 `)
 }
