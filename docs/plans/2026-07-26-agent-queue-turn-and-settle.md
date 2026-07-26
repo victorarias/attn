@@ -80,8 +80,9 @@ func Owed(in Input) bool {
 // Not a turn:  launching, working, scheduled, recoverable.
 ```
 
-`idle` is a turn — the vision's largest deliberate consequence. `recoverable` is
-not: the daemon revives it unattended.
+`idle` is a turn — the vision's largest deliberate consequence, and the last
+thing the slices below turn on. `recoverable` is not: the daemon revives it
+unattended.
 
 ### Settle — one column, no lifecycle
 
@@ -201,60 +202,120 @@ was always `state_since`, and the old aggregator already sorted oldest-first.
 
 ## Implementation steps
 
-### PR 1 — foundations (no user-visible change)
+Three slices, each one usable end to end the day it lands. The order is chosen so
+that each slice puts exactly one unproven design decision into daily use, and so
+that a slice that turns out to be wrong can be reverted or rethought without
+stranding the ones before it. Every slice touches the store, the daemon, the
+protocol, and the sidebar.
 
-- [ ] `store.UpdateState`: move `state_since` only when `state` actually changes;
-      `state_updated_at` always moves. Same for the in-memory branch and
-      `ApplyAgentDriverState`.
-- [ ] Regression test: a same-state write leaves `state_since` untouched, from
-      both the resolver-shaped and plugin-report-shaped paths.
-- [ ] Migration 81 + `store.SettleTurn(id)` and `turn_settled_at` on the session
-      read path.
-- [ ] Rebuild `internal/attention` to `Input`/`Owed` with a table test over
-      states × pinned/muted/chief/settled.
+Each slice also names what is **deliberately still wrong** when it ships, so that
+living with it does not get mistaken for a design failure and quietly patched in
+the wrong layer.
+
+### Slice 1 — a queue you can look at
+
+Ships the whole arrangement for turns that settle themselves: an agent enters the
+queue when it stops for you and leaves the moment it starts working again.
+
+*Puts into use:* whether a flat, cross-workspace, oldest-first list is a better
+thing to live in than the tree. That is the vision's own unanswered question, and
+this is the cheapest possible way to ask it.
+
+*Deliberately still wrong:* a finished run leaves the queue by itself, which is
+the behaviour the vision rejects. Do not fix that here — it is slice 3, and it is
+only survivable once settle exists.
+
+- [ ] Rebuild `internal/attention` to `Input`/`Owed`, with `turnState` =
+      `waiting_input`, `pending_approval`, `unknown`. `SettledAt` is in the
+      struct and always zero. Table test over states × pinned/muted/chief.
 - [ ] Delete the aggregator, its adapters, `daemon.aggregateAttention`, and
       `recomputeWorkflowAttention`.
+- [ ] `store.UpdateState`: move `state_since` only when `state` actually
+      changes; `state_updated_at` always moves. Same for the in-memory branch
+      and `ApplyAgentDriverState`. The queue sorts by `state_since`, so without
+      this a plugin driver re-reporting the state it is already in keeps
+      resetting its own age and sinks to the bottom of the list.
+- [ ] Regression test: a same-state write leaves `state_since` untouched, from
+      both the resolver-shaped and plugin-report-shaped paths.
+- [ ] Protocol: `Session.turn_owed`; regenerate; bump `ProtocolVersion`
+      (constants.go **and** `useDaemonSocket.ts`).
+- [ ] `decorateSessionWithTurn` in `sessionForBroadcastWithChiefOfStaff`;
+      `queue_mode_enabled` setting.
+- [ ] `buildQueueBands` + unit tests: oldest `state_since` first, a new arrival
+      lands at the bottom, a row leaving moves only the rows below it, and the
+      workspace tree the builder returns is identical to queue-mode-off.
+- [ ] Sidebar: the *Your turn* band above the unchanged tree, rows carrying
+      agent label + workspace title, and the settings toggle. Pinned workspaces
+      stay where they are in the tree; their own band is the standing-order rock.
+- [ ] Live verification: full `make install PROFILE=<throwaway>`; agents across
+      two workspaces into `waiting_input`, band ordered oldest-first, clicking a
+      row lands in the agent with the keyboard already in its terminal, steering
+      one removes it without moving the others, pinning a workspace keeps its
+      agents out of the band.
 
-### PR 2 — retire the long-run review flag
+### Slice 2 — settle
 
-- [ ] Delete the deferral, the visualization command, the dwell timer, and the
-      `longRun` tracking listed above.
-- [ ] Delete `sessionstate.IdleStale` and `IdleStaleAfter`.
-- [ ] Protocol: drop `needs_review_after_long_run` and `session_visualized`;
-      regenerate; bump `ProtocolVersion` (constants.go **and**
-      `useDaemonSocket.ts`).
-- [ ] Confirm a 5m+ run now publishes its verdict immediately rather than on
-      view.
+Ships the verb, on the states that already queue. Now a turn the queue was wrong
+about can be dismissed, and the dismissal survives a daemon restart and a state
+re-report.
 
-### PR 3 — daemon owns the turn
+*Puts into use:* the settle stamp itself — whether "settled iff the stamp is not
+older than `state_since`" holds up against real transitions, and whether one
+keystroke is genuinely enough to make being wrong cheap.
 
-- [ ] Protocol: `Session.turn_owed`, `settle_turn`; regenerate; bump.
-- [ ] `decorateSessionWithTurn` in `sessionForBroadcastWithChiefOfStaff`.
-- [ ] `settle_turn` handler → `SettleTurn` → statetrace entry → broadcast.
-- [ ] `queue_mode_enabled` setting.
-- [ ] Daemon tests: pinned/muted/chief agents are never owed; settle clears
-      `turn_owed` and a following state change restores it; settle on a
-      not-owed session is a no-op.
+*Deliberately still wrong:* nothing new. Slice 1's gap stands.
 
-### PR 4 — the sidebar renders the queue
-
-- [ ] `buildQueueBands` + unit tests: ordering is oldest `state_since` first, a
-      new arrival lands at the bottom, settling row 1 moves nothing but row 1,
-      and the workspace tree the builder returns is identical to queue-mode-off.
-- [ ] Sidebar bands, turn rows carrying agent label + workspace title, and the
-      settings toggle.
+- [ ] Migration 81 + `store.SettleTurn(id)` and `turn_settled_at` on the read
+      path; `Owed` starts consulting `SettledAt`.
+- [ ] Protocol: `settle_turn`; regenerate; bump.
+- [ ] Handler → `SettleTurn` → statetrace entry (state + `state_reason`) →
+      broadcast.
 - [ ] `session.settle` shortcut (registry + cheatsheet + `Menu::default`
       accelerator check) and a row affordance.
-- [ ] Live verification: full `make install PROFILE=<throwaway>`; two agents to
-      `idle`, both in the band oldest-first, settle one, it leaves and the other
-      does not move; steer the settled one and confirm it re-enters when it
-      finishes; pin a workspace and confirm its agents never appear.
+- [ ] Tests: settle clears `turn_owed`; a following real state change restores
+      it; a same-state re-report does not; settle on a not-owed session is a
+      no-op.
+- [ ] Live verification: settle a waiting agent, it leaves the band; restart the
+      daemon, it stays gone; steer it and let it stop again, it comes back.
+
+### Slice 3 — a finished run is a turn
+
+Flips `idle` into the queue and retires the machinery that existed only because a
+finished run was invisible.
+
+*Puts into use:* the vision's largest consequence — nothing that ever ran leaves
+your plate by itself, so the queue at the start of a day holds every agent you
+did not settle the day before. This is the change most likely to feel heavy, and
+it is last on purpose: by the time it lands, settle is already muscle memory, and
+if it still feels wrong the slice is one predicate entry to revert.
+
+- [ ] Add `idle` to `turnState`.
+- [ ] Delete the long-run deferral, `handleSessionVisualized`, the
+      `session_visualized` command, the app's 5s dwell timer, the `longRun`
+      tracking and its call sites, and `longRunReviewThreshold`.
+- [ ] Delete `sessionstate.IdleStale`, `Policy.IdleStaleAfter`,
+      `defaultIdleStaleAfter`, and their tests.
+- [ ] Protocol: drop `needs_review_after_long_run` and `session_visualized`;
+      regenerate; bump. Drop the hub's equality check for the flag.
+- [ ] Confirm a 5m+ run publishes its verdict immediately rather than on view.
+- [ ] Live verification: a finished agent stays in the band until settled, and a
+      day's worth of finished agents is a list you can actually drain.
 
 ## Decisions
 
 - **Settle ships with the queue rather than after it.** The vision's own
   consequence — nothing that ever ran leaves your plate by itself — makes a
-  settle-less queue un-drainable within one day of use.
+  settle-less queue un-drainable within one day of use. Inside the chunk the
+  order is settle first, `idle`-as-a-turn second, so the exit exists before the
+  thing that needs it.
+- **The chunk is sliced vertically, and `idle` goes last.** Every slice crosses
+  store, daemon, protocol, and sidebar, and each is usable the day it lands. The
+  alternative — a store PR, a daemon PR, a protocol PR, a UI PR — is faster to
+  write and cannot tell you anything until the last one merges, which is the
+  worst possible time to learn the arrangement reads badly. The slice order is
+  chosen so each one puts a single unproven decision into daily use: the flat
+  list (1), the settle stamp (2), then the consequence most likely to feel heavy
+  (3), which by then is one predicate entry to revert.
 - **`turn_owed` is derived at broadcast, never stored.** It depends on session
   state, workspace pin, workspace mute, and the chief role; storing it would
   create an invalidation graph over four inputs. Deriving it inside the existing
@@ -264,7 +325,8 @@ was always `state_since`, and the old aggregator already sorted oldest-first.
   clearing at every transition — one missed clear and a live turn is invisible,
   the failure the vision says the user cannot recover from. A stamp compared
   against `state_since` has no clear path at all. It buys that by depending on
-  `state_since` being truthful, which is why the store guard is in the same PR.
+  `state_since` being truthful, which the store does not currently guarantee —
+  hence the guard, which slice 1 already needs for ordering.
 - **The long-run flag is deleted in both arrangements, not made conditional.**
   It renders nothing in the sidebar today; its only effect is holding a finished
   run's classification back until someone looks at the session. Removing it
@@ -285,8 +347,8 @@ was always `state_since`, and the old aggregator already sorted oldest-first.
   alternative, pairing with ⌘J (jump to waiting) as a queue family, at the cost
   of a two-modifier chord for the most-pressed verb in the product.
 - **What a promoted row looks like in the tree below.** Dimmed, marked, or
-  untouched. Untouched is the safe default and is what PR 4 does unless it reads
-  badly in use.
+  untouched. Untouched is the safe default and is what slice 1 does; living with
+  it is what decides.
 - **Ordering across endpoints.** Remote sessions sort by their own daemon's
   clock. Skew is small in practice and the queue is not a ledger, so this plan
   ignores it; revisit if a remote agent visibly lands in the wrong place.
