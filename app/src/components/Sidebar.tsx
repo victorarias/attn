@@ -8,12 +8,14 @@ import { SessionActionsPopover } from './SessionActionsPopover';
 import { GridLayoutControl } from './grid/GridLayoutControl';
 import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
+import { QueueBands } from './QueueBands';
 import { SidebarNudgeBar, deriveNudgeMode } from './NudgeIndicator';
 import { formatShortcut } from '../shortcuts';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
 import { tileContentKey, type TileContentState, type TileLeaf } from '../types/workspace';
 import { deriveTileTitle } from '../utils/tilePresentation';
 import type { WorkspaceWithSessions } from '../utils/workspaceViewModels';
+import type { QueueBands as QueueBandsModel } from '../utils/queueBands';
 
 interface LocalSession {
   id: string;
@@ -31,6 +33,8 @@ interface LocalSession {
   ticketUnread?: boolean;
   nudgeFiresAt?: string;
   state_reason?: string;
+  turnOwed?: boolean;
+  turnOpenedAt?: string;
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
@@ -129,6 +133,10 @@ interface SidebarProps {
   dockItems?: DockItem[];
   dockCollapsed?: boolean;
   onToggleDockCollapsed?: () => void;
+  // The queue arrangement's bands, or null when the arrangement is off. The
+  // workspace tree below is identical either way — the queue only adds rows.
+  queue?: QueueBandsModel<LocalSession> | null;
+  onSettleTurn?: (id: string) => void;
   mutedWorkspaces?: SidebarWorkspace[];
   mutedExpanded?: boolean;
   onMutedExpandedChange?: (expanded: boolean) => void;
@@ -317,6 +325,8 @@ export function Sidebar({
   dockItems = [],
   dockCollapsed = false,
   onToggleDockCollapsed,
+  queue = null,
+  onSettleTurn,
   mutedWorkspaces = [],
   mutedExpanded: mutedExpandedProp,
   onMutedExpandedChange,
@@ -348,6 +358,13 @@ export function Sidebar({
   onGoToDashboard,
   onToggleCollapse,
 }: SidebarProps) {
+  // Each arrangement has one notion of what wants the user, and the mode selects
+  // it: the daemon's turn_owed while the queue is on (it honours settle and the
+  // exclusions), the state predicate while it is off.
+  const sessionWantsAttention = (session: LocalSession) => (
+    queue ? Boolean(session.turnOwed) : isAttentionSessionState(session.state)
+  );
+
   const [mutedExpandedLocal, setMutedExpandedLocal] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [displayMode, setDisplayMode] = useState<'open' | 'tight' | 'boxed'>('boxed');
@@ -782,7 +799,7 @@ export function Sidebar({
               title={`${workspace.title} (⌘${visualIndexOfWorkspace(workspace.id) + 1})`}
             >
               ▸
-              {workspace.sessions.some((session) => isAttentionSessionState(session.state)) && (
+              {workspace.sessions.some(sessionWantsAttention) && (
                 <span className={`mini-badge ${workspace.status === 'pending_approval' ? 'pending' : ''} ${workspace.status === 'unknown' ? 'unknown' : ''}`} />
               )}
             </button>
@@ -876,6 +893,15 @@ export function Sidebar({
           </div>
         </div>
       </div>
+
+      {queue && (
+        <QueueBands
+          bands={queue}
+          selectedId={selectedId}
+          onSelectSession={onSelectSession}
+          onSettleTurn={(id) => onSettleTurn?.(id)}
+        />
+      )}
 
       <div className={`session-list ${reorderDrag ? 'session-list--reordering' : ''}`.trim()}>
         {visibleWorkspaces.map((workspace) => {

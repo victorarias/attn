@@ -12,6 +12,8 @@ interface KeyboardShortcutsConfig {
   onGoToDashboard: () => void;
   onToggleGridMode?: () => void;
   onJumpToWaiting: () => void;
+  /** Undefined while the queue arrangement is off; the keystroke is then unbound. */
+  onSettleTurn?: () => void;
   onSelectWorkspaceByIndex: (index: number) => void;
   onPrevSession: () => void;
   onNextSession: () => void;
@@ -40,6 +42,7 @@ export function useKeyboardShortcuts({
   onGoToDashboard,
   onToggleGridMode,
   onJumpToWaiting,
+  onSettleTurn,
   onSelectWorkspaceByIndex,
   onPrevSession,
   onNextSession,
@@ -70,6 +73,10 @@ export function useKeyboardShortcuts({
   useShortcut('session.goToDashboard', onGoToDashboard, enabled);
   useShortcut('view.toggleGrid', onToggleGridMode ?? (() => {}), enabled && !!onToggleGridMode);
   useShortcut('session.jumpToWaiting', onJumpToWaiting, enabled);
+  // Registered only while the queue arrangement is on: with the band hidden the
+  // keystroke has nothing visible to act on, and an invisible verb that silently
+  // stamps state is worse than no verb.
+  useShortcut('session.settle', onSettleTurn ?? (() => {}), enabled && !!onSettleTurn);
   useShortcut('session.toggleSidebar', onToggleSidebar ?? (() => {}), enabled && !!onToggleSidebar);
   useShortcut('session.refreshPRs', onRefreshPRs ?? (() => {}), enabled && !!onRefreshPRs);
   useShortcut('workspace.select1', () => onSelectWorkspaceByIndex(0), enabled);

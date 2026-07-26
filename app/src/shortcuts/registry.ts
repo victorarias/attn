@@ -69,6 +69,11 @@ export const SHORTCUTS = {
   'session.goToDashboard': { key: 'h', meta: true, shift: true },
   'view.toggleGrid': { key: 'g', meta: true },
   'session.jumpToWaiting': { key: 'j', meta: true },
+  // Close the turn on the selected session. Only bound while the queue
+  // arrangement is on: with the band hidden the keystroke has nothing visible
+  // to act on, and an invisible verb that silently stamps state is worse than
+  // no verb at all.
+  'session.settle': { key: 'e', meta: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.refreshPRs': { key: 'r', meta: true },
 
