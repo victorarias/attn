@@ -73,7 +73,10 @@ export const SHORTCUTS = {
   // arrangement is on: with the band hidden the keystroke has nothing visible
   // to act on, and an invisible verb that silently stamps state is worse than
   // no verb at all.
-  'session.settle': { key: 'e', meta: true },
+  // ⌘⇧E rather than ⌘E: plain ⌘E toggles inline code in the Notebook editor,
+  // and the shortcut editor's chord tests lean on ⌘E being free to record as an
+  // exclusive leader.
+  'session.settle': { key: 'e', meta: true, shift: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.refreshPRs': { key: 'r', meta: true },
 

@@ -43,6 +43,7 @@ import {
   relaunchAppAndConnect,
 } from './common.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
+import { MacOSDriver } from './macosDriver.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { currentHarnessProfile } from './harnessProfile.mjs';
@@ -171,6 +172,7 @@ async function main() {
 
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
+  const driver = new MacOSDriver({ appPath: options.appPath });
   const profile = currentHarnessProfile();
   const attnBin = resolveAttnBin();
   const daemonEnv = { ...process.env, ATTN_PROFILE: profile };
@@ -336,8 +338,14 @@ async function main() {
     });
 
     await runner.step('a_settle_survives_a_daemon_restart', async () => {
-      await client.request('dom_click', { selector: `[data-testid="queue-settle-${beta.sessionId}"]` });
-      await waitForTurns(client, [alpha.sessionId], 'beta settled before the restart');
+      // Settle with the real key combo this time: the packaged app's native menu
+      // can swallow an accelerator before the DOM ever sees it, which no unit or
+      // e2e test can catch.
+      await client.request('select_session', { sessionId: beta.sessionId });
+      await driver.activateApp();
+      await driver.clickWindow(0.5, 0.5);
+      await driver.pressKey('e', { command: true, shift: true });
+      await waitForTurns(client, [alpha.sessionId], 'beta settled by shortcut before the restart');
 
       // The app respawns the daemon, so it has to be down for the restart to be
       // a restart.

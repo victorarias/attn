@@ -464,10 +464,10 @@ if it still feels heavy the flip is one predicate entry to revert.
 
 ## Open questions
 
-- **The settle keybinding.** Recommend `session.settle` = ⌘E — unbound, not a
-  `Menu::default` accelerator, and easy enough to press constantly. ⌘⇧J is the
-  alternative, pairing with ⌘J (jump to waiting) as a queue family, at the cost
-  of a two-modifier chord for the most-pressed verb in the product.
+- **The settle keybinding.** Settled on `session.settle` = ⌘⇧E. ⌘E was the first
+  choice and is wrong: plain ⌘E toggles inline code in the Notebook editor, and
+  the shortcut editor's chord tests record it as an exclusive leader. ⌘⇧J is the
+  alternative, pairing with ⌘J (jump to waiting) as a queue family.
 - **What a promoted row looks like in the tree below.** Dimmed, marked, or
   untouched. Untouched is the safe default and is what slice 1 does; living with
   it is what decides.

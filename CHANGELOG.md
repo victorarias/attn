@@ -17,7 +17,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   slot above the list rather than competing with the work it dispatched. Your
   workspaces stay exactly where they are underneath: the queue only adds rows, so
   an agent that never makes it into the list is still where you left it.
-- **Settle (⌘E) is how a turn ends, and the only way it ends.** Prompting an
+- **Settle (⌘⇧E) is how a turn ends, and the only way it ends.** Prompting an
   agent does not take it off your list — you sent it back to work, and only you
   know whether that finished what you owed it. Settling an agent that is still
   running is the ordinary move: it means "done with this for now", and the agent

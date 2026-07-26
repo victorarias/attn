@@ -1219,7 +1219,7 @@ export function SettingsModal({
               <p className="settings-row-title">Show the queue</p>
               <p className="settings-row-copy">
                 An agent joins the queue when it wants you and stays there until you settle it
-                (⌘E) — running or not, because you are the only one who knows whether you are
+                (⌘⇧E) — running or not, because you are the only one who knows whether you are
                 done with it. Everything stays exactly where it is in the sidebar below; the
                 queue only adds rows.
               </p>
