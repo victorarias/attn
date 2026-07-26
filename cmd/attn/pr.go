@@ -219,9 +219,21 @@ type prWaitOptions struct {
 	// pull request's current state, as a first-ever call would.
 	Since time.Time
 	Reset bool
+	// SelfLogin is the account this wait is running as, and its comments are not
+	// news to it. IncludeSelf turns that off, and is also why SelfLogin is a
+	// resolved value rather than a flag: leaving it empty is how the caller says
+	// "report everyone", and is what an unresolvable login falls back to.
+	SelfLogin   string
+	IncludeSelf bool
 }
 
+// ignored reports whether a comment by this author should never be reported. The
+// caller's own login and --ignore-author share this one path, so the two compose:
+// suppressing yourself is the same operation as suppressing anyone else.
 func (o prWaitOptions) ignored(author string) bool {
+	if o.SelfLogin != "" && strings.EqualFold(o.SelfLogin, author) {
+		return true
+	}
 	for _, ignored := range o.IgnoreAuthors {
 		if strings.EqualFold(ignored, author) {
 			return true
@@ -231,6 +243,49 @@ func (o prWaitOptions) ignored(author string) bool {
 }
 
 type ghPRReadinessSource struct{}
+
+// prSelfLoginTimeout bounds the identity lookup. It is one small API call that
+// the wait cannot start without, so a hung network must degrade to "we do not
+// know who we are" rather than spend the caller's whole budget before the first
+// poll. It is a ceiling, never an extension: the lookup runs under the wait's
+// own deadline, so a --timeout shorter than this cuts it short instead.
+const prSelfLoginTimeout = 15 * time.Second
+
+// ghSelfLogin is the seam over `gh api user`. A variable so tests can drive both
+// answers without a GitHub account.
+var ghSelfLogin = func(ctx context.Context, host string) (string, error) {
+	args := []string{"api", "user", "--jq", ".login"}
+	if host != "" {
+		args = append(args, "--hostname", host)
+	}
+	output, err := exec.CommandContext(ctx, "gh", args...).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// resolvePRSelfLogin answers "who is this wait running as", and is allowed to
+// fail. The login only ever removes an event, so not knowing it costs the caller
+// one spurious wake-up, while erroring out would cost them the wait entirely —
+// the command has to keep working on a machine whose `gh` cannot reach the API.
+//
+// It takes the wait's context rather than making its own, so the lookup spends
+// the caller's budget instead of adding to it: whichever of the two deadlines
+// comes first wins.
+func resolvePRSelfLogin(ctx context.Context, opts prWaitOptions, stderr io.Writer) string {
+	if opts.IncludeSelf {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, prSelfLoginTimeout)
+	defer cancel()
+	login, err := ghSelfLogin(ctx, opts.Host)
+	if err != nil || login == "" {
+		fmt.Fprintln(stderr, "pr wait-ready: could not resolve the authenticated GitHub user; your own comments will be reported")
+		return ""
+	}
+	return login
+}
 
 type stringSliceFlag []string
 
@@ -281,6 +336,17 @@ func executePRCommand(args []string, stdout, stderr io.Writer) int {
 	// line can reach a data dir on its own.
 	opts.CursorDir = filepath.Join(config.DataDir(), "pr-wait")
 
+	// The deadline covers everything the caller is waiting through, not just the
+	// polling. --timeout is a promise about when this command returns, so any
+	// network call made on the way to the first poll has to run inside it.
+	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
+	defer cancel()
+
+	// Resolve who we are once, here, for the same reason the cursor dir is
+	// resolved here: one `gh` call for the whole wait, made only when a wait is
+	// actually about to run, and never reachable from the polling loop.
+	opts.SelfLogin = resolvePRSelfLogin(ctx, opts, stderr)
+
 	var cursor prWaitCursor
 	if !opts.Reset {
 		loaded, err := loadPRWaitCursor(opts.CursorDir, opts)
@@ -292,8 +358,6 @@ func executePRCommand(args []string, stdout, stderr io.Writer) int {
 		cursor = loaded
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
-	defer cancel()
 	result, err := waitForPRActionable(ctx, ghPRReadinessSource{}, opts, cursor, progress)
 	if err != nil {
 		fmt.Fprintf(stderr, "pr wait-ready: %v\n", err)
@@ -496,6 +560,7 @@ func parsePRWaitArgs(args []string) (prWaitOptions, error) {
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	reset := fs.Bool("reset", false, "forget what earlier waits reported and baseline from the current state")
 	since := fs.String("since", "", "report anything after this RFC3339 instant instead of resuming")
+	includeSelf := fs.Bool("include-self", false, "report your own comments as events")
 	var ignore stringSliceFlag
 	fs.Var(&ignore, "ignore-author", "comment author to ignore (repeatable)")
 
@@ -525,6 +590,7 @@ func parsePRWaitArgs(args []string) (prWaitOptions, error) {
 		Interval:      *interval,
 		JSON:          *asJSON,
 		Reset:         *reset,
+		IncludeSelf:   *includeSelf,
 	}
 	if strings.TrimSpace(*since) != "" {
 		at, err := time.Parse(time.RFC3339, strings.TrimSpace(*since))
@@ -835,10 +901,13 @@ func parsePRSnapshot(output []byte, opts prWaitOptions) (*prReadiness, error) {
 // ranked below a human's and carries its own exit code, so a caller can act on
 // one and ignore the other. `--ignore-author` drops either kind.
 //
-// The token owner is deliberately NOT filtered, because the operator and the
-// agent share one token and the operator's own comment is the most actionable
-// event there is. Self-waking is prevented by the baseline instead: anything
-// present when the wait starts is never reported.
+// The account running the wait is dropped too, because a wait is something its
+// caller starts after acting, and its own remark is never the update it is
+// waiting for. The baseline alone does not cover this: a comment posted between
+// one wait returning and the next one starting is genuinely new to the cursor,
+// so a caller that answers a reviewer and waits again is woken by its own reply.
+// `--include-self` puts those comments back for a caller watching a pull request
+// it does not act on.
 func appendPRComment(comments []prComment, node prGraphQLComment, kind string, opts prWaitOptions) []prComment {
 	if node.ID == "" || opts.ignored(node.Author.Login) {
 		return comments
@@ -1159,6 +1228,7 @@ options:
   --json                          emit the result as JSON on stdout
   --reset                         forget earlier waits; baseline from now
   --since RFC3339                 report anything after this instant instead
+  --include-self                  report your own comments as events
 
 One poll can see several of these at once. The exit code reports the highest
 ranked: closed, checks failed, changes requested, human comment, approved, bot
@@ -1171,6 +1241,15 @@ its body is the verdict's explanation, not a separate comment.
 
 A bot comment ends the wait with its own exit code, so a caller can act on a
 human's remark and skip a doctor report; --ignore-author drops either kind.
+
+Your own comments are not events. The account gh is authenticated as is resolved
+once per run and its remarks are dropped, because the caller of a wait is the one
+who just acted and being told about your own comment is never the update you were
+waiting for. The baseline does not cover this on its own: a comment posted
+between two waits is new to the second one. Pass --include-self to watch a pull
+request you also comment on. If the login cannot be resolved, the wait runs
+exactly as it would without this, reporting everyone.
+
 Comments already present when the wait starts are the baseline and never
 reported; only comments posted during the wait are. A review verdict present at
 wait start is likewise baselined: while the reviewer is re-requested (a re-review
