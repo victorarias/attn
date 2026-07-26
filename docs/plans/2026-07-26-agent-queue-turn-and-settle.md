@@ -146,6 +146,12 @@ Heading: **Agent queue**. The copy has to say the one thing a user cannot infer 
 that agents are handed to you oldest-first and leave when they no longer want
 you, and that everything stays exactly where it is in the sidebar below.
 
+The toggle is also a ⌘K action (`actionMenuItems` in `App.tsx:2103`), titled by
+the state it moves to and carrying the same `set_setting` call. Settings is the
+right home for a setting and the wrong home for something flipped ten times a day
+— and while the mode is being evaluated, flipping it back and forth *is* the
+evaluation. Both entries read the same setting, so they can never disagree.
+
 The settle shortcut is registered only while the mode is on: with the band gone
 the keystroke has nothing visible to do, and an invisible verb that silently
 stamps state is worse than no verb. The daemon accepts `settle_turn` either way —
@@ -297,8 +303,9 @@ only survivable once settle exists.
 - [ ] Sidebar: the *Your turn* band above the unchanged tree, rows carrying
       agent label + workspace title. Pinned workspaces stay where they are in the
       tree; their own band is the standing-order rock.
-- [ ] Settings block in General + a test that flipping it on and back off leaves
-      the tree, the selected session, and terminal focus untouched.
+- [ ] Settings block in General, plus the ⌘K action, plus a test that flipping
+      it on and back off leaves the tree, the selected session, and terminal
+      focus untouched.
 - [ ] Live verification: full `make install PROFILE=<throwaway>`; agents across
       two workspaces into `waiting_input`, band ordered oldest-first, clicking a
       row lands in the agent with the keyboard already in its terminal, steering
@@ -421,10 +428,6 @@ if it still feels wrong the slice is one predicate entry to revert.
   whole is not.
 
 ## Follow-ups
-
-- If flipping the mode turns out to be frequent while it is being evaluated, put
-  it in the ⌘K action menu (`ActionMenu.tsx`). Settings-only is the right home
-  for a setting; it is the wrong home for something toggled ten times a day.
 
 - Settle events are labelled detection failures when the settled state was one we
   could not explain (`state_reason` "stuck"/unknown). This chunk writes them to
