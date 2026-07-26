@@ -131,7 +131,6 @@ type SessionInfo struct {
 	CWD       string
 
 	Running bool
-	State   string
 
 	Cols    uint16
 	Rows    uint16
@@ -329,16 +328,12 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	m.mu.Unlock()
 
 	// The driver names which observers this agent gets; this only builds them.
-	detectorKind := agentdriver.ScreenDetectorNone
 	harnessSignalKind := agentdriver.HarnessSignalsNone
 	if d := agentdriver.Get(agent); d != nil {
-		caps := agentdriver.EffectiveCapabilities(d)
-		detectorKind = caps.ScreenDetector
-		harnessSignalKind = caps.HarnessSignals
+		harnessSignalKind = agentdriver.EffectiveCapabilities(d).HarnessSignals
 	}
-	session.detector = newScreenDetector(detectorKind)
 	session.harnessSignals = newHarnessSignalObserver(harnessSignalKind)
-	if (session.detector != nil || session.harnessSignals != nil) && onState != nil {
+	if session.harnessSignals != nil && onState != nil {
 		session.onState = func(obs Observation) {
 			onState(opts.ID, obs)
 		}
@@ -442,7 +437,6 @@ func (m *Manager) SessionInfo(sessionID string) (SessionInfo, error) {
 		Agent:      session.agent,
 		CWD:        session.cwd,
 		Running:    info.Running,
-		State:      session.state(),
 		Cols:       info.Cols,
 		Rows:       info.Rows,
 		PID:        info.PID,

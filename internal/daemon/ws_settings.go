@@ -242,7 +242,6 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		settings[capabilitySettingKey(name, "transcript_watcher")] = strconv.FormatBool(caps.HasTranscriptWatcher)
 		settings[capabilitySettingKey(name, "classifier")] = strconv.FormatBool(caps.HasClassifier)
 		settings[capabilitySettingKey(name, "initial_prompt")] = strconv.FormatBool(caps.HasInitialPrompt)
-		settings[capabilitySettingKey(name, "state_detector")] = strconv.FormatBool(caps.ScreenDetector != agentdriver.ScreenDetectorNone)
 		settings[capabilitySettingKey(name, "resume")] = strconv.FormatBool(caps.HasResume)
 		settings[capabilitySettingKey(name, "yolo")] = strconv.FormatBool(caps.HasYolo)
 		hasHeadlessTask, _ := agentdriver.HeadlessTaskAvailability(driver)

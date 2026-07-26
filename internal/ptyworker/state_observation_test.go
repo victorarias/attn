@@ -15,9 +15,9 @@ import (
 func TestStateObservationSurvivesWire(t *testing.T) {
 	observedAt := time.Date(2026, 7, 25, 10, 30, 0, 123456789, time.UTC)
 	want := pty.Observation{
-		Source: pty.SourceApproval,
-		Claim:  "working",
-		Detail: "approval prompt gone for debounce",
+		Source: pty.SourceWorkerInfo,
+		Claim:  "pending_approval",
+		Detail: "watch subscribe replay",
 		At:     observedAt,
 	}
 

@@ -84,72 +84,97 @@ func assertCharacterizationLiveEffects(t *testing.T, d *Daemon, capture *broadca
 	}
 }
 
-func TestSessionStateCharacterization_LiveSignalsShareEffects(t *testing.T) {
-	for _, tc := range []struct {
-		name         string
-		agent        protocol.SessionAgent
-		initialState protocol.SessionState
-		apply        func(*Daemon, string)
-	}{
-		{
-			name:         "hook",
-			agent:        protocol.SessionAgentCodex,
-			initialState: protocol.SessionStateIdle,
-			apply: func(d *Daemon, id string) {
-				d.handleState(&syncConn{}, &protocol.StateMessage{ID: id, State: protocol.StateWorking})
-			},
-		},
-		{
-			name:         "trusted PTY",
-			agent:        protocol.SessionAgentClaude,
-			initialState: protocol.SessionStateWaitingInput,
-			apply: func(d *Daemon, id string) {
-				d.handlePTYState(id, screenObs(protocol.StateWorking))
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			d := NewForTesting(filepath.Join(t.TempDir(), "state.sock"))
-			sessionID := "session-" + tc.name
-			addCharacterizationSession(t, d, sessionID, tc.agent, tc.initialState)
-			capture := captureBroadcasts(d)
+// The worker poll is the last live signal: the one claim from outside the
+// resolver that still commits, because it is what ends `launching`.
+func TestSessionStateCharacterization_TheWorkerPollIsTheLastLiveSignal(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "state.sock"))
+	sessionID := "session-worker-poll"
+	addCharacterizationSession(t, d, sessionID, protocol.SessionAgentClaude, protocol.SessionStateLaunching)
+	capture := captureBroadcasts(d)
 
-			tc.apply(d, sessionID)
+	d.handlePTYState(sessionID, pty.Observation{
+		Source: pty.SourceWorkerInfo,
+		Claim:  protocol.StateWorking,
+		Detail: "test",
+		At:     time.Now(),
+	})
 
-			assertCharacterizationLiveEffects(t, d, capture, sessionID)
-		})
+	assertCharacterizationLiveEffects(t, d, capture, sessionID)
+}
+
+// A hook reports evidence. It refreshes LastSeen — a hook firing is proof the
+// session is alive, which is the one thing the reaper reads — and changes nothing
+// else until the resolver's tick.
+func TestSessionStateCharacterization_AHookOnlyFilesEvidence(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "state.sock"))
+	sessionID := "session-hook"
+	addCharacterizationSession(t, d, sessionID, protocol.SessionAgentCodex, protocol.SessionStateIdle)
+	capture := captureBroadcasts(d)
+
+	d.handleState(&syncConn{}, &protocol.StateMessage{ID: sessionID, State: protocol.StateWorking})
+
+	session := d.store.Get(sessionID)
+	if session == nil {
+		t.Fatal("session missing")
+	}
+	if session.State != protocol.SessionStateIdle {
+		t.Fatalf("state=%q: the hook applied a state instead of filing it", session.State)
+	}
+	if session.LastSeen == characterizationOldTimestamp {
+		t.Fatal("a hook firing did not Touch the session")
+	}
+	if events := capture.snapshot(); characterizationEventCount(events, protocol.EventSessionStateChanged, sessionID) != 0 {
+		t.Fatalf("filing evidence broadcast a state change: %+v", events)
+	}
+
+	// And the resolver is what turns it into a color.
+	d.resolveAllSessions(time.Now())
+	if state := d.store.Get(sessionID).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state=%q after the tick, want working", state)
 	}
 }
 
-func TestSessionStateCharacterization_DaemonObservationDoesNotTouch(t *testing.T) {
+func TestSessionStateCharacterization_LongRunReviewDoesNotTouch(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "state.sock"))
 	sessionID := "long-run-handoff"
 	addCharacterizationSession(t, d, sessionID, protocol.SessionAgentCodex, protocol.SessionStateWorking)
 	d.longRun[sessionID] = longRunSession{workingSince: time.Now().Add(-longRunReviewThreshold - time.Minute)}
+	// The turn that ran long, and ended.
+	d.recordBracketEvidence(sessionID, protocol.StateWorking)
+	d.recordPTYEvidence(sessionID, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: time.Now()})
+	d.recordBracketEvidence(sessionID, protocol.StateIdle)
+	d.recordPTYEvidence(sessionID, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: time.Now()})
 	capture := captureBroadcasts(d)
 
 	d.classifyOrDeferAfterStop(sessionID, "/tmp/characterization-transcript.jsonl")
+	d.resolveAllSessions(time.Now())
 
 	session := d.store.Get(sessionID)
 	if session == nil || session.State != protocol.SessionStateWaitingInput {
 		t.Fatalf("session=%+v, want waiting_input", session)
 	}
 	if session.LastSeen != characterizationOldTimestamp {
-		t.Fatalf("daemon observation touched LastSeen=%q, want %q", session.LastSeen, characterizationOldTimestamp)
+		t.Fatalf("the resolver touched LastSeen=%q, want %q", session.LastSeen, characterizationOldTimestamp)
 	}
 	if !d.sessionNeedsReviewAfterLongRun(sessionID) {
 		t.Fatal("long-run handoff did not preserve needs-review tracking")
 	}
+	// At least one: the deferral broadcasts so the review flag reaches clients even
+	// when the state does not move, and the resolver broadcasts the state that does.
 	events := capture.snapshot()
-	if got := characterizationEventCount(events, protocol.EventSessionStateChanged, sessionID); got != 1 {
-		t.Fatalf("session_state_changed events=%d, want 1; events=%+v", got, events)
+	if got := characterizationEventCount(events, protocol.EventSessionStateChanged, sessionID); got < 1 {
+		t.Fatalf("session_state_changed events=%d, want at least 1; events=%+v", got, events)
 	}
-	if got := characterizationEventCount(events, protocol.EventWorkspaceStateChanged, ""); got != 1 {
-		t.Fatalf("workspace_state_changed events=%d, want 1; events=%+v", got, events)
+	if got := characterizationEventCount(events, protocol.EventWorkspaceStateChanged, ""); got < 1 {
+		t.Fatalf("workspace_state_changed events=%d, want at least 1; events=%+v", got, events)
 	}
 }
 
-func TestSessionStateCharacterization_StaleClassifierHasNoEffects(t *testing.T) {
+// The user-visible property the classifier's timestamp guard used to buy: a late
+// verdict must not overwrite an approval that arrived while it was running. The
+// guard is gone with the write — it is clause order now. An open approval outranks
+// a verdict, so the verdict landing changes nothing.
+func TestSessionStateCharacterization_ALateVerdictDoesNotOverwriteAnApproval(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "state.sock"))
 	sessionID := "stale-classifier"
 	addCharacterizationSession(t, d, sessionID, protocol.SessionAgentCodex, protocol.SessionStateWorking)
@@ -182,7 +207,11 @@ func TestSessionStateCharacterization_StaleClassifierHasNoEffects(t *testing.T) 
 	}
 
 	d.handleState(&syncConn{}, &protocol.StateMessage{ID: sessionID, State: protocol.StatePendingApproval})
+	d.resolveAllSessions(time.Now())
 	fresh := d.store.Get(sessionID)
+	if fresh.State != protocol.SessionStatePendingApproval {
+		t.Fatalf("state=%q before the verdict lands; the rest proves nothing", fresh.State)
+	}
 	stateEventsBeforeRelease := characterizationEventCount(capture.snapshot(), protocol.EventSessionStateChanged, sessionID)
 	close(classifier.release)
 	select {
@@ -191,9 +220,11 @@ func TestSessionStateCharacterization_StaleClassifierHasNoEffects(t *testing.T) 
 		t.Fatal("classifier did not finish")
 	}
 
+	d.resolveAllSessions(time.Now())
+
 	after := d.store.Get(sessionID)
 	if after == nil || after.State != protocol.SessionStatePendingApproval {
-		t.Fatalf("session=%+v, stale classifier overwrote pending_approval", after)
+		t.Fatalf("session=%+v, the late verdict overwrote pending_approval", after)
 	}
 	if after.StateUpdatedAt != fresh.StateUpdatedAt || after.LastSeen != fresh.LastSeen {
 		t.Fatalf("stale classifier changed timestamps: fresh=%+v after=%+v", fresh, after)
@@ -264,13 +295,11 @@ func TestSessionStateCharacterization_ProcessExitEffects(t *testing.T) {
 	capture := captureBroadcasts(d)
 
 	d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 0})
+	d.resolveAllSessions(time.Now())
 
 	session := d.store.Get(sessionID)
 	if session == nil || session.State != protocol.SessionStateIdle {
 		t.Fatalf("session=%+v, want idle after exit", session)
-	}
-	if session.LastSeen == characterizationOldTimestamp {
-		t.Fatal("process exit did not Touch the session")
 	}
 	d.longRunMu.Lock()
 	_, tracked := d.longRun[sessionID]
@@ -290,13 +319,14 @@ func TestSessionStateCharacterization_ProcessExitEffects(t *testing.T) {
 	}
 }
 
-// screenObs builds the observation the screen detector would send for state.
-// These tests exercise the daemon's handling of a PTY observation, not the
-// observation's own construction.
-func screenObs(state string) pty.Observation {
+// evidenceObs builds a title-glyph observation. The heartbeat is the only PTY
+// source that is evidence rather than a writer, so it is what these tests use to
+// exercise the daemon's handling of one; its claims are levels in its own
+// vocabulary ("busy"), not protocol state names.
+func evidenceObs(claim string) pty.Observation {
 	return pty.Observation{
-		Source: pty.SourceScreen,
-		Claim:  state,
+		Source: pty.SourceHeartbeat,
+		Claim:  claim,
 		Detail: "test",
 		At:     time.Now(),
 	}

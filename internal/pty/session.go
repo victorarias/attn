@@ -74,10 +74,6 @@ type terminalQueries struct {
 	da1BeforeCPR bool
 }
 
-type stateDetector interface {
-	Observe(chunk []byte) (string, bool)
-}
-
 type Session struct {
 	id    string
 	cwd   string
@@ -131,14 +127,10 @@ type Session struct {
 	themeMu sync.RWMutex
 	theme   TerminalTheme
 
-	// CLI state detection based on PTY output.
-	detector stateDetector
-	// harnessSignals reads the agent's own OSC state signals off the same stream
-	// the detector scrapes. Read-only: it never alters the bytes.
+	// harnessSignals reads the agent's own OSC state signals off the PTY stream.
+	// Read-only: it never alters the bytes.
 	harnessSignals *harnessSignalObserver
 	onState        func(obs Observation)
-	stateMu        sync.RWMutex
-	detectorState  string
 
 	exitMu     sync.RWMutex
 	running    bool
@@ -350,14 +342,6 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 					}
 				}
 				s.fanOut(data, seq)
-				if s.detector != nil && s.onState != nil {
-					if state, changed := s.detector.Observe(data); changed {
-						s.stateMu.Lock()
-						s.detectorState = state
-						s.stateMu.Unlock()
-						s.onState(newObservation(SourceScreen, state, "screen scrape", time.Now()))
-					}
-				}
 				if s.harnessSignals != nil && s.onState != nil {
 					for _, obs := range s.harnessSignals.Observe(data, time.Now()) {
 						s.onState(obs)
@@ -498,10 +482,6 @@ func isOSCColorReport(seq []byte) bool {
 	return (seq[3] == '0' || seq[3] == '1' || seq[3] == '2') && seq[4] == ';'
 }
 
-// approvalEvalInterval throttles how often the readLoop path inspects the
-// rendered screen. Rendering is cheap but the output stream is dominated by many
-// tiny cursor-addressed frames; sampling at this cadence keeps cost bounded while
-
 func parseExitStatus(waitErr error) (int, string) {
 	if waitErr == nil {
 		return 0, ""
@@ -524,9 +504,6 @@ func parseExitStatus(waitErr error) (int, string) {
 }
 
 func (s *Session) markExited(exitCode int, signal string) {
-	// Cancel any pending approval recheck before flipping running=false so a
-	// timer cannot fire a stale "working" against an exited session.
-
 	s.exitMu.Lock()
 	defer s.exitMu.Unlock()
 
@@ -663,12 +640,6 @@ func (s *Session) screenSnapshot() SnapshotInfo {
 	info.LastSeq = s.lastReplaySeq
 	s.replayMu.Unlock()
 	return info
-}
-
-func (s *Session) state() string {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
-	return s.detectorState
 }
 
 func (s *Session) input(data []byte) error {

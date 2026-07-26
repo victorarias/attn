@@ -8,11 +8,6 @@ import "time"
 type Source string
 
 const (
-	// SourceScreen is the rendered-screen scrape in state_detector.go.
-	SourceScreen Source = "screen"
-	// SourceApproval is approvalResolver, watching the approval prompt appear
-	// and leave the rendered screen.
-	SourceApproval Source = "approval"
 	// SourceWorkerInfo is the daemon's periodic worker `info` poll reporting the
 	// worker's last known state, not a fresh terminal observation.
 	SourceWorkerInfo Source = "worker_info"
@@ -25,21 +20,22 @@ const (
 	SourceUnknown Source = "unknown"
 )
 
-// EvidenceOnly reports whether a source records evidence without claiming a
-// protocol state. Such an observation's Claim is in the source's own vocabulary
-// ("busy"), so applying it as a state name would be meaningless — the
-// daemon records it and moves on.
+// ClaimsProtocolState reports whether an observation's Claim is a protocol state
+// name at all. The heartbeat's is not — it is a level in the source's own
+// vocabulary ("busy") — so it cannot be cached, deduped, compared against a
+// state, or applied as one. It is recorded, and the resolver decides what it
+// means.
 //
-// This exists because the harness signals are wired ahead of the resolver that
-// will weigh them: their traces are being compared against the current behavior
-// before anything arbitrates on them. It goes away when the resolver lands.
-func (s Source) EvidenceOnly() bool {
-	switch s {
-	case SourceHeartbeat:
-		return true
-	default:
-		return false
-	}
+// It answers authority as well as vocabulary, because the two now coincide: the
+// only sources left that name a state are the worker poll and a pre-source
+// worker's bare state, and both are how a session leaves `launching`, which the
+// resolver deliberately does not own — it holds until the agent first speaks, and
+// no evidence bears on it. Every source that describes what the agent is *doing*
+// is a level or an edge in the evidence table, arbitrated with the rest. A future
+// source that names a state without that authority is what would split this back
+// into two predicates.
+func (s Source) ClaimsProtocolState() bool {
+	return s != SourceHeartbeat
 }
 
 // Observation is one piece of state evidence from the PTY layer. Claim is what

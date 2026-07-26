@@ -132,7 +132,6 @@ model Session {
   state_since: string;          // ISO timestamp, always set
   state_updated_at: string;     // ISO timestamp, always set
   state_reason?: string;        // Why the resolver reached this state (e.g. "stuck", "classifier_verdict"); absent for states it does not own
-  idle_stale?: boolean;         // True when an idle result has sat unread past the staleness window; absent otherwise
   needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)

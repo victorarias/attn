@@ -433,8 +433,17 @@ generations of state logic side by side.
 
 ### Debt to clear while passing through
 
+All of it is cleared as of phase 3.5. The items below are the original diagnosis,
+kept because the reasoning is what makes the deletions safe to keep deleted: the
+screen scrapers and their per-agent vetoes are gone, so the keyword heuristics, the
+duplicated state enum in `internal/pty`, and the todo fast-path went with them, and
+the decision now lives in `internal/sessionstate` with `daemon.go` keeping the
+wiring.
+
 - **`ShouldApplyPTYState` is a distributed veto that exists only because there is
-  no arbitration, and should be demolished, not ported.** Three drivers each
+  no arbitration, and should be demolished, not ported.** Done: the interface, the
+  helper, copilot's implementation, and the daemon's call are gone, with a test in
+  `internal/agent` guarding against a new one. Three drivers each
   implement a transition filter (`claude.go:584`, `codex.go:484`,
   `copilot.go:104`) whose comments say so outright — Claude's guards `scheduled`
   because the detector "would otherwise silently knock the session out"; Codex's
@@ -470,118 +479,75 @@ generations of state logic side by side.
   `internal/sessionstate` should be where the decision lives, with `daemon.go`
   keeping only the wiring.
 
-### Found while implementing (not yet decided)
+### Found while implementing (decided in phase 3.5)
 
-Logged as encountered so Victor can decide whether to clean them; nothing here is
-being fixed as part of the current step.
+Every item is now resolved: fixed, deliberately kept, or closed as no longer real.
 
-- **The same state stream is deduped twice, with different rules.**
-  `internal/ptyworker/runtime.go:191` drops an observation whose claim equals the
-  previous one (`changed := previousState != state`), then
-  `shouldForwardStateLocked` (`internal/ptybackend/worker.go:166`) dedupes again
-  with a `working`-pulse exemption the first layer does not have. Two suppressors
-  in series over one stream, neither aware of the other.
-- **The working keepalive pulse is a dead letter on the default backend.** The
-  outer suppressor wins: `Runtime.run` broadcasts `stateChangedEvent` only
-  `if changed`, so the detector's 1.2s `workingPulseInterval` re-emit never
-  crosses the worker→daemon wire, and the backend's own 2s
-  `shouldForwardStateLocked` window only runs on the info-poll path, which is
-  gated behind `if !legacyLifecycle { continue }`. Confirmed live on profile
-  `statedet` (2026-07-25): eleven continuous seconds of claude working produced
-  exactly one `state=working` line in `daemon.log`. This matters beyond tidiness —
-  the pulse is the liveness signal the resolver's TTL design depends on, so the
-  resolver phase must either un-gate it or grow its own heartbeat.
+- **The same state stream is deduped twice, with different rules.** Fixed. The
+  worker already broadcasts a state event only when the state changes, so the
+  daemon-side dedup in `handleLifecycleEvent` could only drop a genuine refresh;
+  it is gone. `shouldForwardStateLocked` survives on the info-poll fallback, which
+  does re-report an unchanged state every tick.
+- **The working keepalive pulse is a dead letter on the default backend.** Closed
+  as designed-around. The resolver grew its own liveness signal — the OSC 0
+  heartbeat, which crosses the wire uncoalesced because it is not a protocol state
+  — so the screen detector's pulse no longer has to carry liveness. It stays as
+  the poll fallback's refresh.
 - **An open bracket outranks stuck, so it can pin a session green forever.**
-  Found while publishing stuck. `TurnOpen` with `LastBusyAt` never set makes
-  `heartbeatSilentFor` return false — an agent that has never reported being
-  busy is deliberately not treated as silent — so the bracket-open clause returns
-  `working` on every tick and the stuck clause below it is unreachable. For
-  claude and codex this cannot happen, since both paint a busy title with every
-  turn. For an agent with hooks but no heartbeat it is exactly the stuck colour
-  the plan exists to remove, only now with a reason to believe it.
-  Consequently stuck is reachable today only when the brackets are the *only*
-  source that ever spoke and they have stopped too. Not fixed here: reordering
-  the clauses is a behavioural change to the resolver's trust model and deserves
-  its own treatment. Decide in phase 3.5.
+  Fixed in phase 3 and now locked by an ordering test: total silence past
+  `StuckAfter` outranks an open bracket. `TestClauseOrder` names the trade.
 - **Neither guardian produced observable approval evidence, so the dwell has no
-  live trigger yet.** Measured on `statedet` 2026-07-26, both agents launched
-  with a reviewer and given a command that must escalate. Codex escalated (the
-  write outside the workspace landed) and claude's command ran, and in both runs
-  the daemon recorded *no approval evidence at all* — codex never painted
-  `[ . ] Action Required`, claude sent no `permission_prompt` notification. The
-  same codex prompt with the reviewer removed does produce the title marker, so
-  the escalation is real; what is absent is any signal while a guardian is
-  answering. The dwell is therefore correct-but-unwitnessed: it costs nothing
-  when the guardian is fast, and it is the only thing standing between a slow
-  guardian and the reported flash. Worth deciding in phase 3.5 whether the flash
-  still exists on current agent versions, and if not, whether the dwell earns its
-  place.
-- **`ReviewerInLoop` had two sources and the wrong one won for codex.** Found
-  live: codex's hooks send `permission_mode: default` on every turn as payload
-  filler, which retired the spawn-time reviewer fact on the session's first turn
-  and took the dwell with it. Fixed by reading the mode only for claude, whose
-  mode genuinely governs approval routing. The general shape — a field that means
-  something for one agent and is filler for another, read without asking which
-  agent sent it — is worth a sweep in phase 3.5.
-- **A session that has never taken a turn reads as `working` forever.** Visible
-  in the same live run that produced the stuck fix: a claude session created and
-  left alone sat at `working` for fourteen minutes with no reason attached. It
-  comes from the `worker_info` replay applying `working` at spawn, and no clause
-  can retire it — the settle clauses all require a turn to have opened, on
-  purpose. Not fixed with the stuck guard, which only stops the wrong colour from
-  getting worse. The honest answer for a launched-and-quiet agent is probably
-  `idle`, but saying so means deciding what evidence proves an agent has finished
-  booting, which is a phase 3.5 question.
-- **"Read" is coarser than it sounds.** The staleness mark clears when the
-  daemon is told a session was visualized, or while it is the selected session.
-  Both mean "this session was on screen", not "Victor read the result" — an app
-  left open on a session all night keeps it permanently fresh, and a session read
-  in a background window that never reports selection stays stale. Good enough
-  for a mark nothing consumes; phase 4 should decide whether the attention
-  projection needs window focus in the signal before it acts on this.
+  live trigger yet.** Resolved: the flash reproduced on `statedet` 2026-07-26 once
+  the hook path stopped writing state directly. The dwell was never being
+  consulted — a hook applied `pending_approval` itself, ten seconds before the
+  resolver saw the evidence. The dwell earns its place; it is 60s.
+- **`ReviewerInLoop` had two sources and the wrong one won for codex.** Swept. The
+  mode is read only for claude, and `handleState` no longer reads a state at all,
+  which removes the class of "one agent's filler field is another's meaning" at
+  this seam. The remaining single-agent reads are in the hook payload extraction,
+  which knows its agent.
+- **A session that has never taken a turn reads as `working` forever.** Fixed in
+  phase 3: an agent that has never taken a turn and says it is not running is
+  `idle` (`at_prompt`), and `everTookATurn` is what separates "has not started"
+  from "has finished". The spawn-time `worker_info` replay no longer survives it.
+- **"Read" is coarser than it sounds.** Moot: the read times are gone with the
+  staleness mark (below). Whatever consumes staleness has to define "read" then,
+  with nothing already shipped to be compatible with.
 - **Two overlapping "you have not looked at this yet" mechanisms now exist.**
-  `needs_review_after_long_run` and `idle_stale`. See the phase 3 deviation
-  above: keeping both was the conservative call, but shipping both to phase 4
-  would mean two answers to the same question.
-- **The copilot screen heuristics look stale against copilot 1.0.73.**
-  `classifyCopilotScreen` keys off `defaultStateHeuristics` — prompt markers
-  ` › ` / ` > ` / `❯ ` and status markers "context left" / "for shortcuts". The
-  current copilot CLI renders none of them (its composer is a `┃`-bordered box),
-  and a live copilot session on `statedet` produced no `source=screen` claim at
-  all. Not confirmed against a working turn — this org's policy blocks copilot
-  turns on that machine — so the finding is "the markers are absent from the
-  rendered frames", not "the detector is proven dead". Worth a deliberate check
-  before the resolver starts weighing copilot screen evidence.
-- **That dedup is why `approvalResolver` re-emits `pending_approval` it did not
-  observe.** Its own type comment (`internal/pty/approval_resolver.go:13-20`)
-  explains it: the onset hook bypasses the worker, so without a redundant
-  re-emission the later `working` clear "would look unchanged to the worker and
-  never be forwarded". A source-blind dedup is being worked around by fabricating
-  an observation. Once observations carry a source, dedup should be per-source or
-  gone — and the fabricated re-emit deleted with it.
-- **The worker fabricates `working` when it does not know its state, and it does
-  so for every session.** `internal/ptyworker/runtime.go` defaults an empty cached
-  state to `"working"` when a new watcher subscribes. Confirmed live on profile
-  `statedet` (2026-07-25): the *first* observation the daemon logs for a fresh
-  session is `state=working source=worker_info detail="watch subscribe replay"` —
-  including for `agent=shell`, which has no detector at all and therefore cannot
-  have been observed working. Inventing green out of ignorance is precisely the
-  stuck-green failure class; it should report `unknown` or send nothing.
-  Cosmetically invisible today because a spawn is green anyway, but it means every
-  session's evidence table would open with a false row.
+  Resolved down to one. `needs_review_after_long_run` stayed and grew a resolver
+  clause (`long_run_review`); `idle_stale` left the wire entirely.
+- **The copilot screen heuristics look stale against copilot 1.0.73.** Confirmed
+  dead and deleted. A real copilot turn on `statedet` 2026-07-26 (1.0.73,
+  gpt-5-mini, prompt through to answer) produced **zero** `source=screen` claims:
+  the session's whole trace was the spawn-time `worker_info` replay plus a
+  classifier error. Copilot was the last consumer of the screen-scrape path, so
+  deleting it takes the whole path with it — `internal/pty/state_detector.go`, the
+  `ScreenDetector` capability, `pty.SourceScreen`, the `Screen` evidence level and
+  its clause in `Resolve`, and copilot's `ShouldApplyPTYState` filter. Consequence,
+  stated plainly: copilot now has no state source at all, so its sessions hold the
+  state the launch applied. That is what already happened — the scrape was silent —
+  and copilot regains state detection when it gets harness signals, not by keeping
+  heuristics for a TUI that no longer renders them.
+- **`approvalResolver` re-emits `pending_approval` it did not observe.** Gone with
+  the resolver itself in phase 2; the dead `pty.SourceApproval` plumbing it left
+  behind is deleted.
+- **The worker fabricates `working` when it does not know its state.** Kept,
+  narrowly. The replay's `working` is now evidence like anything else and is
+  retired by the first real observation, and the worker poll is deliberately still
+  the thing that ends `launching` — it is the only source that knows a process
+  exists. The fabrication is no longer a false row the resolver cannot argue with.
 - **`TestDaemon_StopCommand_PendingTodos_SetsWaitingInput` races the reaper.**
-  It waits for async classification with a bare `time.Sleep(200ms)`
-  (`internal/daemon/daemon_test.go:4837`) on a session that has no PTY, so under
-  the sharded suite's load the recovery/reaping loop can demote it to
-  `recoverable` first and the assertion reads that instead of `waiting_input`.
-  Seen once in a 5-shard `make test` run, not reproducible standalone
-  (`-count 3` green). Pre-existing and orthogonal to observations — but it is the
-  same underlying design problem as the product bug: two writers with no
-  arbitration, resolved by whoever gets there first.
-- **`handlePTYState` discards the observation time.** The store timestamps the
-  transition with its own clock, so an observation delayed in the worker→daemon
-  hop is recorded as if it just happened. Harmless today; it stops being harmless
-  once TTLs are measured against `At`.
+  Fixed by construction: the test now waits for a resolved state instead of
+  sleeping, because nothing applies a state at the moment a source speaks. Waiting
+  then exposed the race behind it, in the product rather than the test:
+  `pruneSessionsWithoutPTY` ran with no recency guard while the listener was
+  already accepting registrations, so a session registered during startup had no
+  PTY yet and was marked `recoverable` — a state the resolver does not own and
+  therefore never takes back. It now takes the same `recoveryStartedAt` cutoff its
+  worker-backend counterpart has always used.
+- **`handlePTYState` discards the observation time.** Fixed. `Observation.At`
+  crosses the worker RPC and is what every TTL is measured against; the store's
+  clock no longer decides.
 
 ## Implementation steps
 
@@ -833,29 +799,51 @@ colors right?
 
 ### Phase 3.5 — reflection and simplification
 
-Victor's call, 2026-07-25: after phase 3 lands and before phase 4 is planned,
-stop adding and look at the whole thing. Phases 0–3 were built one seam at a
-time under a working system, so some of what they added is scaffolding for a
-problem that no longer exists.
+Victor's call, 2026-07-25: after phase 3 lands and before phase 4 is planned, stop
+adding and look at the whole thing. Phases 0–3 were built one seam at a time under
+a working system, so some of what they added is scaffolding for a problem that no
+longer exists. Judged on whether the next person can read `Resolve` top to bottom
+and predict the colors.
 
-Not a checklist yet — writing it now would prejudge what the finished system
-looks like. What to examine:
-
-- Signals that stopped earning their place once a later phase landed. The screen
-  scraper is the one 2c-2 already removes; ask the same question of every source
-  the resolver reads.
-- Clauses in `Resolve` that no longer discriminate anything, and clauses whose
-  ordering is load-bearing without a test that would catch a reorder.
-- The `Evidence` fields: which are levels, which are edges, and whether any is
-  both. The cross-turn verdict bug was exactly an edge that outlived its turn,
-  and it is worth asking whether any other field can do the same.
-- Whether the daemon-side evidence recorders and the pure resolver still have a
-  clean split, or whether policy has leaked back into the recorders.
-- Items in "Found while implementing" and "Follow-ups" below — decide each one
-  rather than carrying it forward.
-
-Output is a decision on what to delete or collapse, then the deletion. Judged on
-whether the next person can read `Resolve` top to bottom and predict the colors.
+- [x] **The resolver is the single writer for what the agent is doing.** Six
+      writers were retired, not one: the hook path (`handleState`), the Stop
+      handler, the classifier, process exit, the transcript watcher, and the
+      long-run deferral all file evidence now. What still writes state does so
+      about the session's *lifecycle*, not the agent's activity: startup recovery,
+      plugin driver reports, and the worker poll that ends `launching`.
+      This is what made the guardian dwell real — see below.
+- [x] **The guardian flash reproduced, and the dwell is what stops it.** Live on
+      `statedet` 2026-07-26. The dwell had never been consulted: a hook applied
+      `pending_approval` itself, ten seconds before the resolver saw the evidence.
+      With the write gone, a guardian-answered approval never reaches the UI, and
+      an unanswered one appears after `guardianDwell` (60s, Victor's call: latency
+      is acceptable, a false attention signal is not).
+- [x] **A new evidence level for announced questions.** `waiting_input` no longer
+      needs a direct write: claude's question hook files a `needs_input` harness
+      edge, retired the same way an approval is — by the agent going busy past it.
+- [x] **`needs_review_after_long_run` became evidence plus a clause.** Its write
+      was already being undone by the next tick, and nothing else carried the
+      signal, so dropping the write without the clause would have silently deleted
+      the long-run attention signal.
+- [x] **The screen-scrape path is gone entirely**, after a live copilot turn proved
+      it silent. That removes a clause from `Resolve`, a level from `Evidence`, a
+      source, a capability, and copilot's transition filter. See the copilot item
+      above for the consequence.
+- [x] **Clause order is tested as order.** `TestClauseOrder` stages evidence two
+      clauses both answer and names which one is entitled to it, because a
+      single-evidence case passes wherever its clause sits.
+- [x] **Dedup collapsed to one layer.** The daemon-side dedup sat over a stream the
+      worker already deduped; its `working`-pulse exemption existed only to undo
+      its own suppression.
+- [x] **`idle_stale` left the wire** (protocol 195), and with it the read-time
+      tracking. The pure rule stays in `internal/sessionstate`, tested and
+      uncalled: a mark clients could read but nothing produced a decision from was
+      worse than no mark.
+- [x] **Every "Found while implementing" item decided** — see that section.
+- [x] Deleted with their last caller: `store.UpdateStateWithTimestamp`, the
+      `daemonObservation` / `classifierObservation` / `processExit` state causes,
+      the dead `pty.SourceApproval` plumbing, and `Source.AppliesState` (which
+      became identical to `ClaimsProtocolState` once the scrapers went).
 
 ### Phase 4 — attention mode (opt-in working mode)
 
@@ -921,18 +909,14 @@ placeholder only; do not implement against it.
 
 ## Open questions
 
-- **A stale bracket with no classifier verdict settles to `idle`, and the
-  classifier may then say `waiting_input`.** Found in phase 2b's shadow run: the
-  agent said not-busy at 18:33:44.418 and the resolver reached `idle` about a
-  second later via `bracket_stale`, while the store stayed `working` until the
-  classifier landed ~8s after that. Settling fast is the improvement — it is the
-  whole point of the stale clause — but on a turn that ended in a question, the
-  flip would show `idle` for those 8s and then correct to `waiting_input`. That
-  is a flicker where today there is a delay. Options for phase 2c: hold the
-  pre-settle state until the verdict arrives, publish `idle` immediately and
-  accept the correction, or gate on whether a classification is in flight. Needs
-  a decision before the flip, and the shadow traces can measure how often the
-  verdict is `waiting_input` at all.
+- ~~A stale bracket with no classifier verdict settles to `idle`, and the
+  classifier may then say `waiting_input`.~~ Answered in phase 2c, by taking all
+  three options at once rather than choosing. A bracket that just went stale holds
+  for `SettleGrace` instead of asserting anything; a verdict that already landed
+  ends the grace early, since waiting would only delay a known answer; and past the
+  grace, a classification still in flight holds until it lands or times out. So
+  `idle` is published on a stale bracket only when nothing is classifying at all,
+  and the flicker needs a classification that started after the grace expired.
 
 - ~~Does Claude emit OSC 777 for permission prompts, or only for turn settle?~~
   Answered: it emits 777 for both, with `Claude needs your permission` and
@@ -948,23 +932,12 @@ placeholder only; do not implement against it.
 
 ## Follow-ups
 
-- Delete the three spike files once Phase 0 instrumentation replaces them as the
-  way to get traces: `internal/pty/spike_state_replay_test.go`,
-  `internal/pty/spike_resolver_test.go`,
-  `internal/hooks/spike_codex_overrides_test.go`. They are committed so the
-  measurements above stay reproducible, and all three skip unless their env var is
-  set. `spike_codex_overrides_test.go` is the one worth keeping longer: it reaches
-  into the production trusted-hash computation to wire arbitrary codex hooks, which
-  is how any future codex hook test gets ground truth.
-
 - Use the OSC 0 turn summary as a live sidebar label.
-- Copilot CLI is out of scope here; it keeps the screen-scrape path until it has
-  its own harness signals.
-- `idle_stale` has no consumer. It is broadcast and nothing reads it — by design,
-  since the attention projection is phase 4. If phase 4 is dropped or changes
-  shape, delete the field rather than leaving a wire nothing is on the end of.
 - `state_reason` is not in the UI-automation bridge's session projection
   (`serializeSession`), so harness scenarios cannot assert on it. The daemon side
   is verifiable straight off the WebSocket and the rendering is unit-tested;
   adding it to the projection means threading the field through the app's local
   session model, which is not worth doing until a scenario needs it.
+- `sessionstate.IdleStale` is tested and has no caller. Whatever acts on "done but
+  unread" is where the read-time signal gets defined; until then there is no wire
+  for a client to guess the meaning of.

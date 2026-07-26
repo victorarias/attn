@@ -78,6 +78,9 @@ func buildAttnBinaryForWorkerTest(t *testing.T) string {
 	return binary
 }
 
+// shouldForwardStateLocked now guards only the poll fallback, where an old worker
+// re-reports the same state on every tick. The pulse window is what keeps a long
+// `working` run refreshed there without forwarding it at the poll rate.
 func TestShouldForwardStateLocked(t *testing.T) {
 	now := time.Now()
 	session := &workerSession{}

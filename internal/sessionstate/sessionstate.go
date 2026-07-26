@@ -40,10 +40,6 @@ const (
 	SourceHarnessEvent Source = "harness_event"
 	// SourceClassifier is the stop-time verdict on a settled turn.
 	SourceClassifier Source = "classifier"
-	// SourceScreen is the rendered-screen scrape. Copilot only: it has no
-	// harness signals to read. It is deleted for claude and codex, not demoted
-	// to a fallback, because it manufactures approvals from ordinary prose.
-	SourceScreen Source = "screen"
 	// SourceProcess is the PTY process itself. A level with no expiry: an exited
 	// process does not become un-exited.
 	SourceProcess Source = "process"
@@ -84,7 +80,7 @@ type Observation struct {
 // Evidence is everything the resolver may read about one session. The daemon
 // owns it and mutates it as observations arrive; the resolver only reads.
 //
-// Levels (Heartbeat, TurnOpen, ToolOpen, Screen, Process) describe a condition
+// Levels (Heartbeat, TurnOpen, ToolOpen, Process) describe a condition
 // that holds until it changes. Edges (LastHarnessEvent, LastClassifier) are
 // one-shot facts that stay until superseded.
 type Evidence struct {
@@ -95,8 +91,6 @@ type Evidence struct {
 	LastHarnessEvent *Observation
 	// LastClassifier is the most recent stop-time verdict.
 	LastClassifier *Observation
-	// Screen is the scraped-screen level. Copilot only.
-	Screen *Observation
 	// Process is the PTY lifecycle level.
 	Process *Observation
 
@@ -114,6 +108,10 @@ type Evidence struct {
 	BackgroundWork bool
 	// PendingCron: the turn yielded with a scheduled wakeup that will resume it.
 	PendingCron bool
+	// AwaitingLongRunReview: the turn ran long enough that attn deferred judging
+	// how it ended until someone looks at it. It is a fact about a turn that is
+	// over, so it only ever refines a settle — never outranks live work.
+	AwaitingLongRunReview bool
 	// ReviewerInLoop: something other than the user answers approval requests —
 	// claude's permission classifier, codex's auto_review guardian. It does not
 	// suppress an approval state; it decides how long that state must hold
@@ -194,22 +192,42 @@ type Policy struct {
 const (
 	claudeHeartbeatTTL = 1500 * time.Millisecond
 	codexHeartbeatTTL  = 500 * time.Millisecond
-	defaultStaleAfter  = 4 * time.Second
-	defaultStuckAfter  = 90 * time.Second
+	// defaultStaleAfter is the heartbeat silence after which an open bracket stops
+	// being believed. It is consulted only when a closing hook was lost — a turn
+	// whose Stop arrives settles immediately regardless — so the whole trade is
+	// "how long a lost hook shows the wrong color" against "how sure we are the
+	// turn really ended".
+	//
+	// It was 4 seconds, which sat directly on top of claude's measured ~3.5s
+	// mid-tool title silence: one slow foreground tool call away from settling a
+	// turn that was still running, and a false settle is a wrong color on a session
+	// that is genuinely working. A minute is far past any silence either agent
+	// produces mid-turn, and Victor's call (2026-07-26) is that a lost hook showing
+	// green for up to a minute is the cheaper failure. Stuck detection at 90s is the
+	// real backstop.
+	defaultStaleAfter = 60 * time.Second
+	defaultStuckAfter = 90 * time.Second
 	// guardianDwell is the round trip a guardian needs to answer in the user's
 	// place. Measured: 90ms for claude's permission classifier, low seconds for
 	// codex's auto_review. 60s is deliberately far above both — the cost of
 	// waiting is a late notification, the cost of not waiting is a yellow flash
 	// on every tool call of an unattended run.
+	//
+	// Witnessed working on 2026-07-26 only after the hook path stopped writing
+	// state directly: the dwell lives in the resolver, so for as long as a hook
+	// could apply `pending_approval` itself the flash happened ten seconds before
+	// the dwell was ever consulted. See publishResolution.
 	guardianDwell = 60 * time.Second
 	// defaultSettleGrace is the window past StaleAfter in which a stale bracket
 	// holds rather than asserting idle.
 	//
-	// Sized from claude's approval lag: its prompt renders at 14.6s and its
-	// Notification hook lands at 20.6s, so the bracket goes stale (14.6 + 4) at
-	// 18.6s with the approval still two seconds from being announced. Without the
-	// grace the resolver paints idle across that gap, in the middle of a live
-	// approval.
+	// It was sized from claude's approval lag — prompt at 14.6s, Notification hook
+	// at 20.6s, bracket stale at 18.6s with the approval two seconds from being
+	// announced — and raising StaleAfter to a minute retires that specific overlap:
+	// nothing goes stale until 60s, by which time an approval has long since been
+	// announced and handled by the clause above. What is left is the general case,
+	// which is the same shape: the instant a bracket stops being believed is a bad
+	// moment to assert idle, because a late explanation is still possible.
 	//
 	// The hold is bounded on purpose. Holding forever would reproduce the stuck
 	// color it exists to avoid: codex has no idle_prompt equivalent, so a lost
@@ -256,6 +274,8 @@ const (
 	ReasonProcessExited     Reason = "process_exited"
 	ReasonHeartbeatFresh    Reason = "heartbeat_fresh"
 	ReasonApprovalOpen      Reason = "approval_open"
+	ReasonQuestionOpen      Reason = "question_open"
+	ReasonLongRunReview     Reason = "long_run_review"
 	ReasonCronPending       Reason = "cron_pending"
 	ReasonBracketOpen       Reason = "bracket_open"
 	ReasonPromptIdle        Reason = "prompt_idle"
@@ -265,7 +285,7 @@ const (
 	ReasonAwaitingVerdict   Reason = "awaiting_verdict"
 	ReasonBackgroundWork    Reason = "background_work"
 	ReasonClassifierVerdict Reason = "classifier_verdict"
-	ReasonScreen            Reason = "screen"
+	ReasonAtPrompt          Reason = "at_prompt"
 	ReasonStuck             Reason = "stuck"
 	ReasonNoEvidence        Reason = "no_evidence"
 )
@@ -308,28 +328,43 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 		return Resolution{State: protocol.SessionStateWorking, Reason: ReasonHeartbeatFresh, Detail: e.Heartbeat.Detail}
 	}
 
-	// An approval the agent has gone busy past was answered. Nothing announces
-	// an answer — claude has no counterpart to its permission_prompt
+	// The harness said in so many words that the agent is blocked on a person:
+	// an approval request, or a question put to the user. Both outrank every
+	// bracket below, because both are announced precisely when the turn stops
+	// looking like it is running.
+	//
+	// Both are retired the same way, by the agent going busy past them. Nothing
+	// announces an answer — claude has no counterpart to its permission_prompt
 	// notification, codex has no approval hook at all — so the agent painting a
 	// spinner frame again is the signal, and it is a reliable one: an agent
 	// blocked on a prompt is not running, which is exactly why the bracket goes
-	// stale during an approval in the first place.
+	// stale while it waits.
 	//
-	// Without this the edge has no expiry. The screen scrape used to retire it by
-	// watching the prompt leave the display; that is the thing being deleted here,
-	// and an approval with nothing left to clear it is a permanent color.
-	if e.LastHarnessEvent != nil && e.LastHarnessEvent.Claim == ClaimApprovalPending &&
-		!supersededByBusy(e.LastHarnessEvent, e) {
-		return Resolution{
-			State:  protocol.SessionStatePendingApproval,
-			Reason: ReasonApprovalOpen,
-			Detail: e.LastHarnessEvent.Detail,
-		}
+	// Without that expiry the edge is forever. The screen scrape used to retire an
+	// approval by watching the prompt leave the display; that is the thing this
+	// plan deleted, and an approval with nothing left to clear it is a permanent
+	// color.
+	if r, ok := harnessEdge(e); ok {
+		return r
 	}
 
-	// A scheduled wakeup will resume this session without anyone doing
-	// anything, so it is parked rather than waiting on a person.
-	if e.PendingCron {
+	// The turn yielded with something outstanding that will resume it, so nobody
+	// is being waited on. Both facts arrive together on the Stop payload and the
+	// order between them is the interesting part: work still running means the
+	// session is working, and only once nothing is running does a parked schedule
+	// get to describe it.
+	//
+	// Bounded by total silence like the brackets below, and for the same reason: a
+	// fact about how the last turn yielded is believed while the session is still
+	// producing evidence, and a session that resumed nothing and then went quiet
+	// forever is stuck rather than busy.
+	if e.BackgroundWork || e.PendingCron {
+		if evidenceStoppedMoving(e, now, policy.StuckAfter) {
+			return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
+		}
+		if e.BackgroundWork {
+			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundWork}
+		}
 		return Resolution{State: protocol.SessionStateScheduled, Reason: ReasonCronPending}
 	}
 
@@ -351,6 +386,20 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// what the heartbeat is for: a bracket whose closing hook was lost would
 	// otherwise hold the session working for the rest of its life.
 	if e.TurnOpen || e.ToolOpen {
+		// A bracket only outranks stuck while something is still arriving. Believing
+		// it unconditionally is how an agent with hooks but no heartbeat pins itself
+		// green for the rest of its life: heartbeatSilentFor answers "not silent" for
+		// an agent that has never reported being busy — deliberately, since it has
+		// nothing to have gone quiet from — so the check below cannot retire the
+		// bracket and the stuck clause at the bottom is unreachable.
+		//
+		// Total silence is the one thing that settles it. Note this is not the same
+		// question as the heartbeat's: StaleAfter asks whether the agent stopped
+		// painting spinner frames, which happens routinely mid-turn, while this asks
+		// whether *any* source has said anything at all.
+		if evidenceStoppedMoving(e, now, policy.StuckAfter) {
+			return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
+		}
 		if !heartbeatSilentFor(e, now, policy.StaleAfter) {
 			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBracketOpen}
 		}
@@ -375,11 +424,20 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 		return settled(e, ReasonBracketStale, policy, now)
 	}
 
-	// Background work auto-resumes the turn, so the session is still working
-	// even though the turn yielded. Deliberate: the alternative flickers a
-	// session to idle and back for every backgrounded command.
-	if e.BackgroundWork {
-		return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundWork}
+	// A turn ran long enough that attn deferred judging how it ended until someone
+	// looks at it. There is no verdict to wait for and none is coming — the point
+	// of the deferral is that the classification happens when the session is
+	// opened — so every settle clause below would call it idle and file a result
+	// worth minutes of work away as seen.
+	//
+	// Below the brackets, because a session that has started another turn is
+	// working whatever is still owed on the last one, and above every settle so it
+	// wins the case it exists for. It is the state the deferral used to apply
+	// directly, in a write the resolver undid on its next tick: the review flag was
+	// invisible to the table, so the same settled evidence resolved to idle a
+	// second later.
+	if e.AwaitingLongRunReview {
+		return Resolution{State: protocol.SessionStateWaitingInput, Reason: ReasonLongRunReview}
 	}
 
 	// Brackets closed, and the agent is not painting busy frames: the turn is
@@ -392,23 +450,32 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// was in. Reading the heartbeat here means a settle no longer depends on any
 	// particular source having spoken.
 	//
-	// It needs a turn to have *opened*, not merely a busy frame to have been
+	// It needs a turn to have happened, not merely a busy frame to have been
 	// painted. A booting agent paints title frames before its prompt is ready —
 	// codex flickers a busy one — and settling on those reports a turn finished
 	// before the agent has taken one, which showed up live as an idle blip
 	// seconds after launch.
-	if e.Heartbeat != nil && e.TurnEverOpened && !e.TurnOpen && !e.ToolOpen {
+	if e.Heartbeat != nil && everTookATurn(e) && !e.TurnOpen && !e.ToolOpen {
 		return settled(e, ReasonHeartbeatSettled, policy, now)
+	}
+
+	// An agent that has never taken a turn and says it is not running is sitting at
+	// its prompt. That is idle, and saying so is the only thing that retires the
+	// `working` a session is handed at spawn — every clause above requires a turn to
+	// have opened, on purpose, so a session launched and left alone used to keep
+	// that spawn-time color for the rest of its life. Witnessed live on 2026-07-26:
+	// fourteen minutes green on a session nobody had prompted.
+	//
+	// The agent's own title is the evidence, not an absence of evidence: claude
+	// paints a not-busy glyph once its prompt is ready, and codex paints one after
+	// the busy flicker it emits while booting. A fresh busy frame is already handled
+	// far above, so reaching here means the latest frame says nothing is running.
+	if e.Heartbeat != nil && e.Heartbeat.Claim == ClaimSettled && !everTookATurn(e) {
+		return Resolution{State: protocol.SessionStateIdle, Reason: ReasonAtPrompt}
 	}
 
 	if r, ok := classifierVerdict(e); ok {
 		return r
-	}
-
-	if e.Screen != nil {
-		if state, ok := screenState(e.Screen.Claim); ok {
-			return Resolution{State: state, Reason: ReasonScreen, Detail: e.Screen.Detail}
-		}
 	}
 
 	// Nothing has moved at all. That is its own diagnosis, and reporting it is
@@ -421,7 +488,7 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// at an empty prompt, with no Stop and no idle_prompt notification to
 	// contradict a stuck verdict. Witnessed live on 2026-07-26 — a session
 	// created and never prompted turned `unknown` ninety seconds later.
-	if e.TurnEverOpened && !e.LastMovement.IsZero() && now.Sub(e.LastMovement) > policy.StuckAfter {
+	if e.TurnEverOpened && evidenceStoppedMoving(e, now, policy.StuckAfter) {
 		return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
 	}
 
@@ -453,6 +520,35 @@ func verdictPending(e Evidence, policy Policy, now time.Time) bool {
 		return false
 	}
 	return now.Sub(e.ClassifyingSince) <= policy.ClassifierTimeout
+}
+
+// harnessEdge reads the harness's own announcement that the agent is blocked on
+// a person, if one is still outstanding.
+//
+// The two edges differ only in what they say and what answers them, so they
+// share a clause rather than being ordered against each other: a turn cannot be
+// blocked on an approval and on a question at the same time, and whichever
+// arrived last is the one still outstanding.
+func harnessEdge(e Evidence) (Resolution, bool) {
+	if e.LastHarnessEvent == nil || supersededByBusy(e.LastHarnessEvent, e) {
+		return Resolution{}, false
+	}
+	switch e.LastHarnessEvent.Claim {
+	case ClaimApprovalPending:
+		return Resolution{
+			State:  protocol.SessionStatePendingApproval,
+			Reason: ReasonApprovalOpen,
+			Detail: e.LastHarnessEvent.Detail,
+		}, true
+	case ClaimNeedsInput:
+		return Resolution{
+			State:  protocol.SessionStateWaitingInput,
+			Reason: ReasonQuestionOpen,
+			Detail: e.LastHarnessEvent.Detail,
+		}, true
+	default:
+		return Resolution{}, false
+	}
 }
 
 // classifierVerdict reads the stop-time verdict, if one belongs to the current
@@ -489,21 +585,6 @@ func classifierVerdict(e Evidence) (Resolution, bool) {
 	}
 }
 
-func screenState(claim Claim) (protocol.SessionState, bool) {
-	switch claim {
-	case ClaimBusy:
-		return protocol.SessionStateWorking, true
-	case ClaimApprovalPending:
-		return protocol.SessionStatePendingApproval, true
-	case ClaimNeedsInput:
-		return protocol.SessionStateWaitingInput, true
-	case ClaimIdle, ClaimSettled:
-		return protocol.SessionStateIdle, true
-	default:
-		return "", false
-	}
-}
-
 // DwellFor is how long a transition into state must hold before it is published.
 //
 // It is keyed on who is being asked first. With a guardian in the loop, an
@@ -520,6 +601,11 @@ func DwellFor(state protocol.SessionState, e Evidence, policy Policy) time.Durat
 
 // IdleStale reports whether a settled result has gone unread long enough to stop
 // counting as done.
+//
+// Nothing calls it. It is the rule the attention projection needs, kept here
+// tested and unwired: it was on the session wire for a while, and a mark clients
+// could read but nothing produced a decision from was worse than no mark — it
+// invited a client to invent the meaning.
 //
 // It is not part of Resolve and deliberately so. Resolve answers what the agent
 // is doing, and the agent is doing nothing — the session is idle either way.
@@ -572,6 +658,36 @@ func fresh(o *Observation, claim Claim, now time.Time, ttl time.Duration) bool {
 //
 // An agent that has never reported being busy is not silent: an agent with no
 // harness signals must not have its brackets closed out from under it.
+// everTookATurn reports whether this session has been seen doing anything at all.
+//
+// The brackets are the direct answer and the classifier is the indirect one: a
+// verdict, or a classification still running, only exists because a turn ended,
+// and both outlive the brackets that produced them. A daemon restarted mid-turn
+// or a lost UserPromptSubmit leaves exactly that shape — judged, with no bracket
+// to show for it — and reading it as "this agent has never run" is how a settled
+// turn gets reported as a fresh prompt.
+func everTookATurn(e Evidence) bool {
+	if e.TurnOpen || e.ToolOpen || e.TurnEverOpened {
+		return true
+	}
+	return e.LastClassifier != nil || !e.ClassifyingSince.IsZero()
+}
+
+// evidenceStoppedMoving reports whether every source has gone quiet for d.
+//
+// This is the strongest statement the table can make about silence, and it is
+// deliberately not the heartbeat's question: the heartbeat asks whether the agent
+// is painting spinner frames, which stops routinely mid-turn, while this asks
+// whether anything at all — hook, title, classifier, process — has been heard
+// from. A session whose whole table has frozen is not in whatever state it last
+// showed; it is a session attn has lost track of.
+func evidenceStoppedMoving(e Evidence, now time.Time, d time.Duration) bool {
+	if e.LastMovement.IsZero() {
+		return false
+	}
+	return now.Sub(e.LastMovement) > d
+}
+
 func heartbeatSilentFor(e Evidence, now time.Time, d time.Duration) bool {
 	if e.LastBusyAt.IsZero() {
 		return false

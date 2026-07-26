@@ -135,15 +135,18 @@ func TestHeartbeatAlwaysReportsAChange(t *testing.T) {
 	}
 }
 
-// These sources speak their own vocabulary rather than protocol state names, so
-// nothing may try to apply their claims as states.
-func TestHarnessSignalSourcesAreEvidenceOnly(t *testing.T) {
-	if !SourceHeartbeat.EvidenceOnly() {
-		t.Fatalf("%s must be evidence-only", SourceHeartbeat)
+// The heartbeat speaks its own vocabulary rather than protocol state names, so
+// nothing may cache, dedup, or apply its claim as a state. Everything else names
+// a state — and, since the screen scrapers were deleted, everything else is also
+// entitled to apply one, because all that is left is the worker poll ending
+// `launching`.
+func TestOnlyTheHeartbeatSpeaksItsOwnVocabulary(t *testing.T) {
+	if SourceHeartbeat.ClaimsProtocolState() {
+		t.Fatalf("%s claims a level, not a state", SourceHeartbeat)
 	}
-	for _, source := range []Source{SourceScreen, SourceApproval, SourceWorkerInfo, SourceUnknown} {
-		if source.EvidenceOnly() {
-			t.Fatalf("%s must not be evidence-only", source)
+	for _, source := range []Source{SourceWorkerInfo, SourceUnknown} {
+		if !source.ClaimsProtocolState() {
+			t.Fatalf("%s claims a protocol state", source)
 		}
 	}
 }

@@ -38,25 +38,26 @@ func hasPendingSessionCron(msg *protocol.StopMessage) bool {
 	return protocol.Deref(msg.PendingSessionCrons) > 0
 }
 
-// nonTerminalStopState returns the runtime state to hold the session in for a
-// Stop that is not terminal, or "" when the stop should fall through to normal
-// classification. Running background work outranks a parked schedule, so a stop
-// with both stays "working"; once both drain, the next stop classifies normally.
+// stopIsNonTerminal reports whether this Stop leaves the turn able to resume on
+// its own, in which case none of the end-of-turn work applies: classifying reads
+// a transcript the agent has not finished writing, and the resume id and
+// narration belong to a turn that has not ended.
 //
-// relaxBackgroundWork drops the background-work -> "working" rule. It is set for
-// the chief of staff: a chief that has merely armed a Monitor to watch its
-// delegations (or a poll loop) is async-waiting, not working, and pegging it
-// green makes the at-a-glance "is the chief actually working?" signal
-// meaningless. With it set, background work no longer forces "working" (the stop
-// falls through to normal classification, settling idle/waiting), while a pending
-// scheduled wakeup still parks "scheduled" (quiet/blue, not green).
-func nonTerminalStopState(msg *protocol.StopMessage, relaxBackgroundWork bool) string {
-	switch {
-	case !relaxBackgroundWork && hasActiveBackgroundTask(msg):
-		return protocol.StateWorking
-	case hasPendingSessionCron(msg):
-		return protocol.StateScheduled
-	default:
-		return ""
+// It says nothing about what color the session should be. That used to be its
+// return value, and the state it named was applied here — the second writer this
+// phase removed. What the session looks like while it waits follows from the
+// facts recorded alongside this call, where the precedence between outstanding
+// background work and a parked schedule now lives.
+//
+// relaxBackgroundWork drops the background-work rule. It is set for the chief of
+// staff: a chief that has merely armed a Monitor to watch its delegations (or a
+// poll loop) is async-waiting, not working, and pegging it green makes the
+// at-a-glance "is the chief actually working?" signal meaningless. With it set a
+// chief's background work no longer defers the end of its turn, while a pending
+// scheduled wakeup still does.
+func stopIsNonTerminal(msg *protocol.StopMessage, relaxBackgroundWork bool) bool {
+	if !relaxBackgroundWork && hasActiveBackgroundTask(msg) {
+		return true
 	}
+	return hasPendingSessionCron(msg)
 }

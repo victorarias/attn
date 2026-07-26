@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -31,18 +30,9 @@ func TestSessionStateDoor_AcceptedCauseProfiles(t *testing.T) {
 			wantBroadcast: true,
 		},
 		{
-			name:          "daemon observation",
+			name:          "resolver observation",
 			state:         protocol.StateWorking,
-			cause:         func(*testing.T, *Daemon, string) sessionStateCause { return daemonObservation{} },
-			wantTracking:  true,
-			wantBroadcast: true,
-		},
-		{
-			name:  "classifier observation",
-			state: protocol.StateWorking,
-			cause: func(*testing.T, *Daemon, string) sessionStateCause {
-				return classifierObservation{observedAt: time.Now()}
-			},
+			cause:         func(*testing.T, *Daemon, string) sessionStateCause { return resolverObservation{} },
 			wantTracking:  true,
 			wantBroadcast: true,
 		},
@@ -63,13 +53,6 @@ func TestSessionStateDoor_AcceptedCauseProfiles(t *testing.T) {
 			name:  "startup recovery",
 			state: protocol.StateWorking,
 			cause: func(*testing.T, *Daemon, string) sessionStateCause { return startupRecovery{} },
-		},
-		{
-			name:          "process exit",
-			state:         protocol.StateIdle,
-			cause:         func(*testing.T, *Daemon, string) sessionStateCause { return processExit{} },
-			wantTouch:     true,
-			wantBroadcast: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -139,9 +122,8 @@ func TestSessionStateDoor_MissingSessionHasNoEffects(t *testing.T) {
 
 func TestSessionStateDoor_IsOnlyDaemonStoreStateWriter(t *testing.T) {
 	stateMethods := map[string]bool{
-		"UpdateState":              true,
-		"UpdateStateWithTimestamp": true,
-		"ApplyAgentDriverState":    true,
+		"UpdateState":           true,
+		"ApplyAgentDriverState": true,
 	}
 	entries, err := os.ReadDir(".")
 	if err != nil {

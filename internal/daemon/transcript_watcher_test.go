@@ -8,31 +8,6 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// Copilot is the only agent whose state still arrives from the rendered screen.
-// Claude and codex build no screen observer at all, so handlePTYState has nothing
-// to filter for them — their states come from the evidence resolver, which is
-// covered in internal/sessionstate and session_evidence_test.go.
-func TestHandlePTYState_CopilotKeepsPendingAgainstWorkingNoise(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "sock"))
-
-	nowStr := string(protocol.TimestampNow())
-	d.store.Add(&protocol.Session{
-		ID:             "copilot-sess",
-		Label:          "copilot",
-		Agent:          protocol.SessionAgentCopilot,
-		Directory:      "/tmp",
-		State:          protocol.SessionStatePendingApproval,
-		StateSince:     nowStr,
-		StateUpdatedAt: nowStr,
-		LastSeen:       nowStr,
-	})
-
-	d.handlePTYState("copilot-sess", screenObs(protocol.StateWorking))
-	if got := d.store.Get("copilot-sess"); got.State != protocol.SessionStatePendingApproval {
-		t.Fatalf("copilot working should not override pending_approval, got=%s", got.State)
-	}
-}
-
 func TestReadTranscriptDelta(t *testing.T) {
 	tmpDir := t.TempDir()
 	path := filepath.Join(tmpDir, "events.jsonl")

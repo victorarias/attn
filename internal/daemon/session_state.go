@@ -13,18 +13,16 @@ type sessionStateCause interface {
 	isSessionStateCause()
 }
 
-// liveSignal is an authoritative hook or trusted PTY observation.
+// liveSignal is the worker poll reporting the state a worker was spawned into.
+// It is what takes a session out of `launching`, and the only claim from outside
+// the resolver about what an agent is doing that still commits — see
+// pty.Source.AppliesState.
+//
+// It used to be the vocabulary of every hook and PTY observation. Those are
+// evidence now: they record what they saw, and the resolver decides what it
+// means. The causes that went with them (a synchronous daemon observation, a
+// timestamped classifier verdict, a process exit) went with them.
 type liveSignal struct{}
-
-// daemonObservation is a synchronous daemon-derived observation, such as the
-// transcript watcher or the immediate long-run-review handoff.
-type daemonObservation struct{}
-
-// classifierObservation is captured before slow classification work so its
-// eventual result cannot overwrite a newer state transition.
-type classifierObservation struct {
-	observedAt time.Time
-}
 
 // resolverObservation is the evidence resolver's verdict on its tick. Unlike
 // every other cause it is not an edge reported by a source: it is a re-reading
@@ -46,17 +44,10 @@ type pluginReport struct {
 // barrier. It deliberately produces no per-session effects or broadcasts.
 type startupRecovery struct{}
 
-// processExit records the terminal idle state after exit-specific teardown and
-// pre-clobber ticket reconciliation have already run.
-type processExit struct{}
-
-func (liveSignal) isSessionStateCause()            {}
-func (daemonObservation) isSessionStateCause()     {}
-func (classifierObservation) isSessionStateCause() {}
-func (resolverObservation) isSessionStateCause()   {}
-func (pluginReport) isSessionStateCause()          {}
-func (startupRecovery) isSessionStateCause()       {}
-func (processExit) isSessionStateCause()           {}
+func (liveSignal) isSessionStateCause()          {}
+func (resolverObservation) isSessionStateCause() {}
+func (pluginReport) isSessionStateCause()        {}
+func (startupRecovery) isSessionStateCause()     {}
 
 type sessionStateChange struct {
 	sessionID string
@@ -92,14 +83,12 @@ func stateEffectProfileFor(cause sessionStateCause) (stateEffectProfile, bool) {
 	switch cause.(type) {
 	case liveSignal:
 		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
-	case daemonObservation, classifierObservation, resolverObservation:
+	case resolverObservation:
 		return stateEffectProfile{trackRun: true, syncNudge: true, broadcast: true}, true
 	case pluginReport:
 		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
 	case startupRecovery:
 		return stateEffectProfile{}, true
-	case processExit:
-		return stateEffectProfile{touch: true, broadcast: true}, true
 	default:
 		return stateEffectProfile{}, false
 	}
@@ -109,18 +98,12 @@ func sessionStateCauseName(cause sessionStateCause) string {
 	switch cause.(type) {
 	case liveSignal:
 		return "live_signal"
-	case daemonObservation:
-		return "daemon_observation"
-	case classifierObservation:
-		return "classifier_observation"
 	case resolverObservation:
 		return "resolver_observation"
 	case pluginReport:
 		return "plugin_report"
 	case startupRecovery:
 		return "startup_recovery"
-	case processExit:
-		return "process_exit"
 	default:
 		return "unknown"
 	}
@@ -181,10 +164,8 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 
 func (d *Daemon) commitSessionState(change sessionStateChange) bool {
 	switch cause := change.cause.(type) {
-	case liveSignal, daemonObservation, startupRecovery, processExit, resolverObservation:
+	case liveSignal, startupRecovery, resolverObservation:
 		return d.store.UpdateState(change.sessionID, change.state)
-	case classifierObservation:
-		return d.store.UpdateStateWithTimestamp(change.sessionID, change.state, cause.observedAt)
 	case pluginReport:
 		return d.store.ApplyAgentDriverState(change.sessionID, cause.runID, cause.seq, change.state)
 	default:
