@@ -21,6 +21,18 @@ const (
 	bracketedPasteEnd   = "\x1b[201~"
 )
 
+// doorbellSubmitDelay is how long Enter waits after the paste terminator.
+//
+// Agent composers finalize a paste on a timing boundary, not on the terminator
+// alone: Claude Code folds a CR that arrives in the same PTY read as the
+// paste-end marker into the pasted text, so the payload sits in the composer
+// and never submits. An immediate second write is coalesced into that same
+// read and fails the same way — the gap, not the write split, is what makes
+// Enter a keypress. Measured against Claude Code 2.1.x (0ms fails, 50ms
+// submits) and Codex; 150ms carries margin for a loaded machine. It is a
+// package var only so tests can drop it to zero.
+var doorbellSubmitDelay = 150 * time.Millisecond
+
 func (d *Daemon) chiefOfStaffSessionID() string {
 	if d.store == nil {
 		return ""
@@ -133,11 +145,14 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 // driver run declares the message_delivery capability, the prompt is relayed
 // in-band via the plugin (no PTY fallback on failure — see
 // deliverDoorbellViaPluginDriver). Otherwise it types the prompt as an
-// explicit bracketed-paste event followed by Enter in the same PTY write: the
-// paste terminator gives Codex a semantic boundary before Enter (so the
-// prompt submits instead of remaining in the composer), while the single
-// write keeps the approval-state fence atomic. Always a bounded,
-// user-initiated single write — never arbitrary streamed content.
+// explicit bracketed-paste event — the terminator gives the agent a semantic
+// boundary, so the prompt lands in the composer as one pasted block — and
+// then, after doorbellSubmitDelay, sends Enter as its own write.
+//
+// Both writes happen under doorbellMu, so the approval-state fence still holds
+// across the pair: a pending_approval report cannot commit between the prompt
+// and its Enter. Always a bounded, user-initiated delivery — never arbitrary
+// streamed content.
 func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 	d.doorbellMu.Lock()
 	defer d.doorbellMu.Unlock()
@@ -148,12 +163,15 @@ func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 	if delivered, err := d.deliverDoorbellViaPluginDriver(session, prompt); delivered {
 		return err
 	}
-	input := make([]byte, 0, len(bracketedPasteStart)+len(prompt)+len(bracketedPasteEnd)+1)
+	input := make([]byte, 0, len(bracketedPasteStart)+len(prompt)+len(bracketedPasteEnd))
 	input = append(input, bracketedPasteStart...)
 	input = append(input, prompt...)
 	input = append(input, bracketedPasteEnd...)
-	input = append(input, '\r')
-	return d.ptyBackend.Input(context.Background(), sessionID, input)
+	if err := d.ptyBackend.Input(context.Background(), sessionID, input); err != nil {
+		return err
+	}
+	time.Sleep(doorbellSubmitDelay)
+	return d.ptyBackend.Input(context.Background(), sessionID, []byte("\r"))
 }
 
 // maybeAssignChiefOnSpawn assigns the chief-of-staff role at a session's first

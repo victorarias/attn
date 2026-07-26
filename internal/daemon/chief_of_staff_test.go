@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,5 +112,44 @@ func TestClearChiefOfStaffKeepsTransferredRole(t *testing.T) {
 	}
 	if got := d.chiefOfStaffSessionID(); got != "session-b" {
 		t.Fatalf("role after stale clear = %q, want session-b", got)
+	}
+}
+
+// Enter must reach the PTY as its own write, a real interval after the paste
+// terminator. Claude Code folds a CR arriving in the same read as the paste end
+// into the pasted text — the payload then sits unsent in the composer — and an
+// undelayed second write lands in that same read.
+func TestTypeDoorbellDelaysEnterAfterThePaste(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(func() { _ = d.store.Close() })
+	addChiefOfStaffTestSession(d, "delayed-enter", "target")
+
+	const gap = 40 * time.Millisecond
+	previous := doorbellSubmitDelay
+	doorbellSubmitDelay = gap
+	t.Cleanup(func() { doorbellSubmitDelay = previous })
+
+	var mu sync.Mutex
+	var writes []string
+	var at []time.Time
+	d.ptyBackend = &fakeSpawnBackend{onInput: func(_ string, data []byte) {
+		mu.Lock()
+		defer mu.Unlock()
+		writes = append(writes, string(data))
+		at = append(at, time.Now())
+	}}
+
+	if err := d.typeDoorbell("delayed-enter", "ping"); err != nil {
+		t.Fatalf("typeDoorbell() error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	wantPaste := bracketedPasteStart + "ping" + bracketedPasteEnd
+	if len(writes) != 2 || writes[0] != wantPaste || writes[1] != "\r" {
+		t.Fatalf("PTY writes = %q, want [%q, %q]", writes, wantPaste, "\r")
+	}
+	if elapsed := at[1].Sub(at[0]); elapsed < gap {
+		t.Fatalf("Enter followed the paste after %v, want at least %v", elapsed, gap)
 	}
 }

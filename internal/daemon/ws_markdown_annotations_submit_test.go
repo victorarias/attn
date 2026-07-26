@@ -68,9 +68,9 @@ func storedSubmitDraftCount(t *testing.T, d *Daemon) int {
 	return len(anns)
 }
 
-// Delivered: exactly one PTY write of paste-start + payload + paste-end + \r,
-// the draft is tombstone-cleared, and the result carries the new generation
-// floor so the client can seed its counter without a round-trip.
+// Delivered: the payload goes out as a bracketed paste and Enter follows as a
+// second write, the draft is tombstone-cleared, and the result carries the new
+// generation floor so the client can seed its counter without a round-trip.
 func TestMarkdownAnnotationsSubmitDelivered(t *testing.T) {
 	d := newSubmitDaemon(t)
 	var mu sync.Mutex
@@ -89,12 +89,12 @@ func TestMarkdownAnnotationsSubmitDelivered(t *testing.T) {
 		t.Fatalf("generation = %v, want floor 5", res.Generation)
 	}
 	wantPayload := formatMarkdownAnnotationPayload(submitTestPath, anns, map[string]bool{})
-	wantInput := bracketedPasteStart + wantPayload + bracketedPasteEnd + "\r"
+	wantPaste := bracketedPasteStart + wantPayload + bracketedPasteEnd
 	mu.Lock()
 	got := append([]string(nil), inputs...)
 	mu.Unlock()
-	if len(got) != 1 || got[0] != wantInput {
-		t.Fatalf("PTY inputs = %q, want exactly [%q]", got, wantInput)
+	if len(got) != 2 || got[0] != wantPaste || got[1] != "\r" {
+		t.Fatalf("PTY inputs = %q, want [%q, %q]", got, wantPaste, "\r")
 	}
 	if n := storedSubmitDraftCount(t, d); n != 0 {
 		t.Fatalf("draft not cleared after delivery: %d annotations remain", n)
@@ -121,7 +121,7 @@ func TestMarkdownAnnotationsSubmitCarriesOrphanedIds(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(inputs) != 1 || !strings.Contains(inputs[0], "(~line 3, moved)") {
+	if len(inputs) != 2 || !strings.Contains(inputs[0], "(~line 3, moved)") {
 		t.Fatalf("payload should label orphaned c1, got %q", inputs)
 	}
 }
