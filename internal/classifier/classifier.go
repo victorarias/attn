@@ -12,9 +12,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/victorarias/claude-agent-sdk-go/sdk"
-	"github.com/victorarias/claude-agent-sdk-go/types"
 )
 
 const promptTemplate = `Classify whether this assistant message is waiting for user input.
@@ -40,20 +37,19 @@ Text to analyze:
 """
 `
 
-var classifierOutputFormat = map[string]any{
-	"type": "json_schema",
-	"schema": map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"verdict": map[string]any{
-				"type": "string",
-				"enum": []string{"WAITING", "DONE"},
-			},
-		},
-		"required":             []string{"verdict"},
-		"additionalProperties": false,
-	},
-}
+// ClaudeVerdictSchema is the JSON Schema the Claude backend's final answer must
+// validate against (passed to the CLI as --json-schema). The validated object
+// comes back as the run's structured output; ParseVerdict reads it.
+const ClaudeVerdictSchema = `{"type":"object","properties":{"verdict":{"type":"string","enum":["WAITING","DONE"]}},"required":["verdict"],"additionalProperties":false}`
+
+// ClaudeMaxTurns caps the Claude backend's agentic turns. The run is a tool-less
+// single-shot judgment; the cap is a runaway backstop, and 2 leaves room for the
+// structured-output turn after the answer.
+const ClaudeMaxTurns = 2
+
+// DefaultClaudeClassifierModel is the model the Claude backend classifies with
+// when ATTN_CLAUDE_CLASSIFIER_MODEL is unset.
+const DefaultClaudeClassifierModel = "haiku"
 
 var verdictLineRegex = regexp.MustCompile(`(?i)^\s*(?:VERDICT\s*[:=]\s*)?(WAITING_INPUT|WAITING|DONE|IDLE)(?:\s*(?:[-:]\s+.*|\([^)]*\)|[.!?]))?\s*$`)
 
@@ -179,108 +175,36 @@ func truncateForLog(value string, maxChars int) string {
 	return value[:maxChars] + "...(truncated)"
 }
 
-func logClaudeMessageDump(messages []types.Message) {
-	if len(messages) == 0 {
-		DefaultLogger("classifier: claude SDK message dump: empty messages slice")
-		return
+// ClaudeClassifierModel resolves the model the Claude backend classifies with.
+func ClaudeClassifierModel() string {
+	if model := strings.TrimSpace(os.Getenv("ATTN_CLAUDE_CLASSIFIER_MODEL")); model != "" {
+		return model
 	}
-	for i, msg := range messages {
-		switch typed := msg.(type) {
-		case *types.SystemMessage:
-			dataJSON, _ := json.Marshal(typed.Data)
-			DefaultLogger(
-				"classifier: claude SDK message[%d/%d] system subtype=%q session_id=%q version=%q data=%s",
-				i+1,
-				len(messages),
-				typed.Subtype,
-				typed.SessionID,
-				typed.Version,
-				truncateForLog(string(dataJSON), classifierLogSnippetMaxChars),
-			)
-		case *types.AssistantMessage:
-			toolNames := make([]string, 0, len(typed.ToolCalls()))
-			for _, call := range typed.ToolCalls() {
-				if call != nil {
-					toolNames = append(toolNames, call.Name)
-				}
-			}
-			DefaultLogger(
-				"classifier: claude SDK message[%d/%d] assistant model=%q stop_reason=%q error=%v text=%q thinking_chars=%d tool_calls=%d tool_names=%q",
-				i+1,
-				len(messages),
-				typed.Model,
-				typed.StopReason,
-				typed.Error,
-				truncateForLog(typed.Text(), classifierLogSnippetMaxChars),
-				len(typed.Thinking()),
-				len(toolNames),
-				toolNames,
-			)
-		case *types.ResultMessage:
-			resultText := ""
-			if typed.Result != nil {
-				resultText = *typed.Result
-			}
-			structuredJSON, _ := json.Marshal(typed.StructuredOutput)
-			DefaultLogger(
-				"classifier: claude SDK message[%d/%d] result subtype=%q is_error=%v num_turns=%d duration_ms=%d duration_api_ms=%d result=%q structured_output=%s",
-				i+1,
-				len(messages),
-				typed.Subtype,
-				typed.IsError,
-				typed.NumTurns,
-				typed.DurationMS,
-				typed.DurationAPI,
-				truncateForLog(resultText, classifierLogSnippetMaxChars),
-				truncateForLog(string(structuredJSON), classifierLogSnippetMaxChars),
-			)
-		default:
-			payload, _ := json.Marshal(msg)
-			DefaultLogger(
-				"classifier: claude SDK message[%d/%d] type=%T payload=%s",
-				i+1,
-				len(messages),
-				msg,
-				truncateForLog(string(payload), classifierLogSnippetMaxChars),
-			)
-		}
-	}
+	return DefaultClaudeClassifierModel
 }
 
-func classifyClaudeMessages(messages []types.Message) (result string, ok bool, lastAssistantResponse string) {
-	var lastAssistantVerdict string
-
-	for _, msg := range messages {
-		switch typed := msg.(type) {
-		case *types.AssistantMessage:
-			assistantText := strings.TrimSpace(typed.Text())
-			if assistantText == "" {
-				continue
-			}
-			lastAssistantResponse = assistantText
-			if parsed, parsedOK := parseVerdictFromResponse(assistantText); parsedOK {
-				lastAssistantVerdict = parsed
-			}
-		case *types.ResultMessage:
-			if parsed, parsedOK := parseVerdictFromValue(typed.StructuredOutput); parsedOK {
-				DefaultLogger("classifier: parsed result from structured output: %s", parsed)
-				return parsed, true, lastAssistantResponse
-			}
-			if typed.Result != nil {
-				if parsed, parsedOK := parseVerdictFromResponse(*typed.Result); parsedOK {
-					DefaultLogger("classifier: parsed result from result payload: %s", parsed)
-					return parsed, true, lastAssistantResponse
-				}
-			}
+// ParseVerdict maps one headless Claude run's output to a state. The
+// schema-validated structured output wins when it carries a verdict; the final
+// assistant text is the fallback for a run that answered in prose (or ended
+// before the structured-output turn). Returns ok=false when neither carries an
+// explicit verdict — callers report "unknown" rather than guessing.
+func ParseVerdict(structuredOutput json.RawMessage, finalText string) (string, bool) {
+	if len(structuredOutput) > 0 {
+		if result, ok := parseVerdictFromJSONResponse(string(structuredOutput)); ok {
+			DefaultLogger("classifier: parsed result from structured output: %s", result)
+			return result, true
 		}
 	}
-
-	if lastAssistantVerdict != "" {
-		DefaultLogger("classifier: parsed result from assistant message: %s", lastAssistantVerdict)
-		return lastAssistantVerdict, true, lastAssistantResponse
+	if result, ok := parseVerdictFromResponse(finalText); ok {
+		DefaultLogger("classifier: parsed result from final text: %s", result)
+		return result, true
 	}
+	return "", false
+}
 
-	return "", false, lastAssistantResponse
+// TruncateForLog bounds a value echoed into the daemon log.
+func TruncateForLog(value string) string {
+	return truncateForLog(value, classifierLogSnippetMaxChars)
 }
 
 func resolveCodexExecutable(configuredExecutable string) string {
@@ -413,66 +337,6 @@ var DefaultLogger LogFunc = func(format string, args ...interface{}) {}
 // SetLogger sets the logger function
 func SetLogger(fn LogFunc) {
 	DefaultLogger = fn
-}
-
-// Classify uses the default classifier backend (Claude SDK).
-// Returns "waiting_input", "idle", or "unknown".
-func Classify(text string, timeout time.Duration) (string, error) {
-	return ClassifyWithClaude(text, timeout)
-}
-
-// ClassifyWithClaude uses Claude SDK (Haiku) to classify text.
-// Returns "waiting_input", "idle", or "unknown".
-func ClassifyWithClaude(text string, timeout time.Duration) (string, error) {
-	if text == "" {
-		DefaultLogger("classifier: empty text, returning idle")
-		return "idle", nil
-	}
-	DefaultLogger("classifier: input text (%d chars): %q", len(text), text)
-
-	prompt := BuildPrompt(text)
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	model := strings.TrimSpace(os.Getenv("ATTN_CLAUDE_CLASSIFIER_MODEL"))
-	if model == "" {
-		model = "haiku"
-	}
-
-	DefaultLogger("classifier: calling claude SDK model=%s timeout=%d seconds", model, int(timeout.Seconds()))
-	messages, err := sdk.RunQuery(
-		ctx,
-		prompt,
-		types.WithModel(model),
-		types.WithOutputFormat(classifierOutputFormat),
-		types.WithMaxTurns(2),
-		// Headless one-shot: do not leave a session transcript on disk. The SDK
-		// only adds --no-session-persistence when PersistSession is explicitly
-		// false; leaving it nil falls back to the CLI default, which persists.
-		types.WithPersistSession(false),
-	)
-	if err != nil {
-		DefaultLogger("classifier: claude SDK error: %v", err)
-		return "unknown", fmt.Errorf("claude sdk: %w", err)
-	}
-
-	result, ok, lastAssistantResponse := classifyClaudeMessages(messages)
-	if ok {
-		return result, nil
-	}
-
-	if lastAssistantResponse != "" {
-		DefaultLogger("classifier: claude SDK response (%d chars): %q", len(lastAssistantResponse), lastAssistantResponse)
-		DefaultLogger("classifier: response missing explicit WAITING/DONE verdict, returning unknown")
-		logClaudeMessageDump(messages)
-		return "unknown", nil
-	}
-
-	// No usable response found
-	DefaultLogger("classifier: no assistant or structured result in claude response")
-	logClaudeMessageDump(messages)
-	return "unknown", nil
 }
 
 // ClassifyWithCopilot uses Copilot CLI (Haiku model) to classify text.

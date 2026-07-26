@@ -11,7 +11,10 @@ This policy applies to stop-time assistant-message classification in this module
 
 - Do not add deterministic state classification using hard-coded string matching lists.
 - Do not add regex or keyword heuristics that map assistant text directly to `idle`, `waiting_input`, or `unknown`.
-- Classifier outcomes must come from LLM outputs (Claude SDK, Copilot CLI, Codex CLI) and parser logic for those LLM responses.
+- Classifier outcomes must come from LLM outputs (Claude CLI, Copilot CLI, Codex CLI) and parser logic for those LLM responses.
+- This package owns prompt building and verdict parsing. The Claude backend's
+  process invocation lives in `internal/agent` (the Claude driver runs it through
+  the shared headless seam); Copilot and Codex still invoke their CLIs here.
 
 ## Notes
 
