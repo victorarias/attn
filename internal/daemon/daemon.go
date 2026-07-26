@@ -215,8 +215,12 @@ type Daemon struct {
 	sessionDwell     *dwellGate
 	// sessionStateReason is the resolver clause behind each session's current
 	// state, carried to clients beside the state itself.
-	sessionStateReasonOnce     sync.Once
-	sessionStateReason         *sessionStateReasons
+	sessionStateReasonOnce sync.Once
+	sessionStateReason     *sessionStateReasons
+	// sessionReadTimes is when the user last saw each session's output, and the
+	// idle-staleness mark derived from it.
+	sessionReadTimesOnce       sync.Once
+	sessionReadTimes           *sessionReadTimes
 	nudgeMu                    sync.Mutex
 	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
 	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
@@ -1770,6 +1774,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	d.forgetStateTrace(sessionID)
 	d.evidenceTable().forget(sessionID)
 	d.stateReasons().forget(sessionID)
+	d.readTimes().forget(sessionID)
 	// The dwell gate has to be cleared here rather than left to the resolve
 	// loop's own cleanup: that loop walks the evidence table, so forgetting the
 	// evidence row is exactly what stops it from ever visiting this session
@@ -2584,8 +2589,12 @@ func (d *Daemon) classifyOrDeferAfterStop(sessionID, transcriptPath string) {
 
 func (d *Daemon) handleSessionVisualized(sessionID string) {
 	// The frontend reports the focused session here, so this doubles as our
-	// signal for "currently selected session" (used by `attn open`).
+	// signal for "currently selected session" (used by `attn open`) and as the
+	// moment attn can say a session's output has been seen. The tick keeps the
+	// selected session read while it stays on screen; this is what survives the
+	// user switching away from it.
 	d.setSelectedSession(sessionID)
+	d.markSessionRead(sessionID, time.Now())
 
 	transcriptPath, shouldClassify := d.consumeNeedsReviewAfterLongRun(sessionID)
 	if !shouldClassify {
@@ -3019,6 +3028,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 		clone.NeedsReviewAfterLongRun = nil
 	}
 	d.decorateSessionWithStateReason(clone)
+	d.decorateSessionWithIdleStale(clone)
 	d.decorateSessionWithNudge(clone)
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)

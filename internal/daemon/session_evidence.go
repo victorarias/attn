@@ -436,6 +436,10 @@ func (d *Daemon) resolveAllSessions(now time.Time) {
 		policy := sessionstate.PolicyFor(string(session.Agent))
 		resolution := sessionstate.Resolve(evidence, policy, now)
 		d.publishResolution(sessionID, session.State, resolution, sessionstate.DwellFor(resolution.State, evidence, policy), now)
+		// After publication, and re-read from the store: staleness is a question
+		// about the state the session actually ended up in, which the line above
+		// may have just changed.
+		d.refreshIdleStaleness(d.store.Get(sessionID), policy, now)
 	}
 }
 

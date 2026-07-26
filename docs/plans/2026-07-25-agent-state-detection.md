@@ -523,6 +523,26 @@ being fixed as part of the current step.
   mode genuinely governs approval routing. The general shape — a field that means
   something for one agent and is filler for another, read without asking which
   agent sent it — is worth a sweep in phase 3.5.
+- **A session that has never taken a turn reads as `working` forever.** Visible
+  in the same live run that produced the stuck fix: a claude session created and
+  left alone sat at `working` for fourteen minutes with no reason attached. It
+  comes from the `worker_info` replay applying `working` at spawn, and no clause
+  can retire it — the settle clauses all require a turn to have opened, on
+  purpose. Not fixed with the stuck guard, which only stops the wrong colour from
+  getting worse. The honest answer for a launched-and-quiet agent is probably
+  `idle`, but saying so means deciding what evidence proves an agent has finished
+  booting, which is a phase 3.5 question.
+- **"Read" is coarser than it sounds.** The staleness mark clears when the
+  daemon is told a session was visualized, or while it is the selected session.
+  Both mean "this session was on screen", not "Victor read the result" — an app
+  left open on a session all night keeps it permanently fresh, and a session read
+  in a background window that never reports selection stays stale. Good enough
+  for a mark nothing consumes; phase 4 should decide whether the attention
+  projection needs window focus in the signal before it acts on this.
+- **Two overlapping "you have not looked at this yet" mechanisms now exist.**
+  `needs_review_after_long_run` and `idle_stale`. See the phase 3 deviation
+  above: keeping both was the conservative call, but shipping both to phase 4
+  would mean two answers to the same question.
 - **The copilot screen heuristics look stale against copilot 1.0.73.**
   `classifyCopilotScreen` keys off `defaultStateHeuristics` — prompt markers
   ` › ` / ` > ` / `❯ ` and status markers "context left" / "for shortcuts". The
@@ -776,9 +796,37 @@ its whitelist moved into the resolver, or stays screen-driven on purpose.
       tooltip for `unknown` only. See the two findings above: stuck is reachable
       today only when the brackets are the sole source that ever spoke, and an
       open bracket outranks it.
-- [ ] `idleStaleAfter` staleness marking, folding in
-      `needs_review_after_long_run`. Marked in phase 3; only *consumed* as an
-      unsettle trigger by phase 4.
+      **Corrected 2026-07-26.** As shipped it also fired on a session that had
+      been launched and never prompted. Witnessed live on `statedet`: a claude
+      session painted one `not_busy` title frame at launch and nothing after, and
+      turned `unknown` ninety seconds later while sitting at a healthy empty
+      prompt. Claude paints its title on activity, and a session that has taken
+      no turn has no Stop and no `idle_prompt` notification to contradict the
+      verdict — the settled ones are unstickable only because that notification
+      arrives. Stuck now requires a turn to have opened: silence before the first
+      turn is nothing to report, not a stopped report.
+- [x] `idleStaleAfter` staleness marking. Sessions carry `idle_stale`
+      (protocol 194) when an idle result has sat past `IdleStaleAfter` with
+      nobody looking at it; nothing consumes it yet.
+      **Deviation — the fold is deferred, not done.** The item said "folding in
+      `needs_review_after_long_run`". That mechanism is live and user-visible (a
+      5m+ run defers its classification until the session is viewed), and its
+      replacement has no consumer until phase 4, so folding it in now would
+      delete working behaviour and put nothing in its place. Both exist; phase
+      3.5 or 4 decides which survives. They are not duplicates: the existing one
+      measures how long the *run* took, the new one measures how long the
+      *result* has gone unread.
+      **Deviation — the window is a judgement, not a measurement.** The plan
+      names no duration. `defaultIdleStaleAfter` is 10 minutes, picked so that
+      stepping away from a session is not treated as forgetting it while a result
+      Victor asked for is not lost for a working day. Nothing depends on the
+      exact number until phase 4 gives it a consumer.
+      **Deviation — staleness is not a `Resolve` clause.** `IdleStale` is a
+      separate pure function taking the read time, and the daemon tick applies
+      it. The resolver answers what the agent is doing, and the agent is doing
+      nothing either way; staleness is a fact about who has looked, which the
+      evidence table does not and should not know. Same reasoning that put the
+      dwell in the daemon.
 
 Phases 0–3 are shippable on their own and are judged on one question: are the
 colors right?
@@ -912,6 +960,9 @@ placeholder only; do not implement against it.
 - Use the OSC 0 turn summary as a live sidebar label.
 - Copilot CLI is out of scope here; it keeps the screen-scrape path until it has
   its own harness signals.
+- `idle_stale` has no consumer. It is broadcast and nothing reads it — by design,
+  since the attention projection is phase 4. If phase 4 is dropped or changes
+  shape, delete the field rather than leaving a wire nothing is on the end of.
 - `state_reason` is not in the UI-automation bridge's session projection
   (`serializeSession`), so harness scenarios cannot assert on it. The daemon side
   is verifiable straight off the WebSocket and the rendering is unit-tested;

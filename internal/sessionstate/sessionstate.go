@@ -180,6 +180,10 @@ type Policy struct {
 	// when a reviewer is in the loop. It is not a delay on genuine approval
 	// requests: with no reviewer the dwell is zero.
 	GuardianDwell time.Duration
+	// IdleStaleAfter is how long a settled result may sit unread before it stops
+	// counting as done. It does not change the state — an idle session is still
+	// idle — only whether that idle result is still fresh.
+	IdleStaleAfter time.Duration
 }
 
 // Measured on claude 2.1.220 and codex 0.145.0 driven through a real PTY.
@@ -215,6 +219,13 @@ const (
 	// visible settle that a late verdict then corrects; undershooting it
 	// reintroduces the flicker the gate exists to prevent.
 	defaultClassifierTimeout = 30 * time.Second
+	// defaultIdleStaleAfter is how long a finished turn nobody has looked at stays
+	// fresh. It is not measured from anything the agent does — the agent is done —
+	// so it is a judgement about attention rather than about an agent's timing:
+	// long enough that stepping away from a session for a few minutes is not
+	// treated as forgetting it, short enough that a result Victor asked for is not
+	// silently lost for the rest of a working day.
+	defaultIdleStaleAfter = 10 * time.Minute
 )
 
 // PolicyFor returns the timing for an agent. An agent with no measured numbers
@@ -229,6 +240,7 @@ func PolicyFor(agent string) Policy {
 		GuardianDwell:     guardianDwell,
 		SettleGrace:       defaultSettleGrace,
 		ClassifierTimeout: defaultClassifierTimeout,
+		IdleStaleAfter:    defaultIdleStaleAfter,
 	}
 	if agent == string(protocol.SessionAgentClaude) {
 		policy.HeartbeatTTL = claudeHeartbeatTTL
@@ -402,7 +414,14 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// Nothing has moved at all. That is its own diagnosis, and reporting it is
 	// the whole point: a stuck session used to be indistinguishable from a
 	// correctly-quiet one.
-	if !e.LastMovement.IsZero() && now.Sub(e.LastMovement) > policy.StuckAfter {
+	//
+	// It needs a turn to have opened first. An agent that has been launched and
+	// left alone is silent because there is nothing to report, not because it
+	// stopped reporting: claude paints its title on activity and then goes quiet
+	// at an empty prompt, with no Stop and no idle_prompt notification to
+	// contradict a stuck verdict. Witnessed live on 2026-07-26 — a session
+	// created and never prompted turned `unknown` ninety seconds later.
+	if e.TurnEverOpened && !e.LastMovement.IsZero() && now.Sub(e.LastMovement) > policy.StuckAfter {
 		return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
 	}
 
@@ -497,6 +516,31 @@ func DwellFor(state protocol.SessionState, e Evidence, policy Policy) time.Durat
 		return policy.GuardianDwell
 	}
 	return 0
+}
+
+// IdleStale reports whether a settled result has gone unread long enough to stop
+// counting as done.
+//
+// It is not part of Resolve and deliberately so. Resolve answers what the agent
+// is doing, and the agent is doing nothing — the session is idle either way.
+// Staleness is a fact about the *user*: how long an answer has sat there with
+// nobody looking at it. That is why it takes the read time rather than the
+// evidence table, which knows everything about the agent and nothing about who
+// has seen its output.
+func IdleStale(state protocol.SessionState, stateSince, lastReadAt time.Time, policy Policy, now time.Time) bool {
+	if state != protocol.SessionStateIdle || policy.IdleStaleAfter <= 0 {
+		return false
+	}
+	// A session that has never been in a state has nothing to have gone stale.
+	if stateSince.IsZero() {
+		return false
+	}
+	// Read after the result arrived: it has been seen, and re-reading the same
+	// finished turn is not something to be reminded about again.
+	if !lastReadAt.Before(stateSince) {
+		return false
+	}
+	return now.Sub(stateSince) > policy.IdleStaleAfter
 }
 
 // supersededByBusy reports whether the agent has painted a busy frame since o
