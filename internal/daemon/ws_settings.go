@@ -38,6 +38,13 @@ const (
 	SettingKeeperCompact     = "workspace_keeper_compact"
 	SettingTailscaleEnabled  = "tailscale_enabled"
 	SettingWorkflowsEnabled  = "workflows_enabled"
+	// SettingQueueModeEnabled selects the sidebar arrangement: off (the default)
+	// is the workspace tree alone; on adds the anchored chief slot and the "Your
+	// turn" band above it. It is daemon-owned because which arrangement is in
+	// effect is policy, not a rendering preference — later it changes what a turn
+	// is, not just how one is drawn. The daemon stamps turns and broadcasts
+	// turn_owed either way; only the app's rendering reads this.
+	SettingQueueModeEnabled = "queue_mode_enabled"
 	// SettingAutoApproveEnabled, when true, launches interactive agents in their
 	// native auto-approve mode (Claude `--permission-mode auto`, Codex
 	// `approvals_reviewer=auto_review`) so they can run unattended without
@@ -275,6 +282,7 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	}
 	settings[SettingTailscaleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingTailscaleEnabled]))
 	settings[SettingWorkflowsEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingWorkflowsEnabled]))
+	settings[SettingQueueModeEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingQueueModeEnabled]))
 	settings[SettingAutoApproveEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingAutoApproveEnabled]))
 	// Normalize the keeper master switch to its EFFECTIVE value so the UI toggle
 	// reflects the default-ON semantics (blank/unset => "true") rather than an
@@ -427,7 +435,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingQueueModeEnabled:
 		return validateBooleanSetting(value)
 	case SettingChiefContextWindowCap, SettingHeadlessContextWindowCap:
 		return validateContextWindowCap(value)

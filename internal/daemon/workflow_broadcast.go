@@ -62,31 +62,6 @@ func (d *Daemon) flushWorkflowBroadcasts() {
 		}
 		d.broadcastWorkflowRunUpdated(run)
 	}
-
-	// A workflow run just changed, so the unified attention view may have too.
-	// Recompute it through the aggregator (the daemon's production Aggregate
-	// caller) so a finished run surfaces in the same needs-attention read-model
-	// as a waiting session or PR, rather than only as a raw run broadcast.
-	d.recomputeWorkflowAttention()
-}
-
-// recomputeWorkflowAttention derives the unified attention view via
-// aggregateAttention and surfaces its workflow contribution. It is invoked from
-// the workflow flush path so finished runs reach a live, server-authoritative
-// attention surface on every workflow change. An optional hook lets tests
-// observe the derived result deterministically without inspecting the log.
-func (d *Daemon) recomputeWorkflowAttention() {
-	if d == nil {
-		return
-	}
-	result := d.aggregateAttention()
-	if d.workflowAttentionHook != nil {
-		d.workflowAttentionHook(result)
-	}
-	if result.WorkflowCount > 0 {
-		d.logf("attention: %d finished workflow run(s) need attention (%d total items needing attention)",
-			result.WorkflowCount, result.TotalCount)
-	}
 }
 
 // broadcastWorkflowRunUpdated emits a single full-run snapshot to all WS clients.

@@ -20,7 +20,6 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
-	"github.com/victorarias/attn/internal/attention"
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
@@ -332,7 +331,6 @@ type Daemon struct {
 	workflowEngineMu      sync.Mutex
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
-	workflowAttentionHook func(attention.Result)                    // optional, tests only
 	ticketsBroadcastHook  func([]protocol.Ticket)                   // optional, tests only
 
 	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
@@ -3061,6 +3059,9 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
 	d.decorateSessionWithWorkspace(clone)
 	d.decorateSessionWithWorkspaceMute(clone)
+	// Last: turn ownership reads the chief flag and the workspace the earlier
+	// decorations resolved.
+	d.decorateSessionWithTurn(clone)
 	return clone
 }
 

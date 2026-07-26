@@ -3950,6 +3950,12 @@ type Session struct {
 	// Todos corresponds to the JSON schema field "todos".
 	Todos []string `json:"todos,omitempty,omitzero"`
 
+	// TurnOpenedAt corresponds to the JSON schema field "turn_opened_at".
+	TurnOpenedAt *string `json:"turn_opened_at,omitempty,omitzero"`
+
+	// TurnOwed corresponds to the JSON schema field "turn_owed".
+	TurnOwed *bool `json:"turn_owed,omitempty,omitzero"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
 
@@ -4239,6 +4245,14 @@ type SettingsUpdatedMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success *bool `json:"success,omitempty,omitzero"`
+}
+
+type SettleTurnMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
 }
 
 type SpawnResultMessage struct {

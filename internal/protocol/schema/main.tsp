@@ -137,6 +137,8 @@ model Session {
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
   ticket_unread?: boolean;      // True when this session has unread ticket events (drives the incoming-nudge indicator)
   nudge_fires_at?: string;      // ISO timestamp a pending ticket-nudge countdown will fire; absent when paused (active session) or no countdown
+  turn_owed?: boolean;          // True when the user owes this session a turn. Derived at broadcast from the turn stamps plus the queue's exclusions (shell, chief, pinned, muted); never stored, and never recomputed by a client.
+  turn_opened_at?: string;      // ISO timestamp the outstanding turn opened; the queue's sort key. Absent when nothing is owed.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -1342,6 +1344,15 @@ model WorkspaceSelectedMessage {
 // the pending ticket doorbell immediately, bypassing the countdown. Fire-and-forget.
 model TriggerNudgeMessage {
   cmd: "trigger_nudge";
+  session_id: string;
+}
+
+// SettleTurnMessage closes the turn a session opened. It is the only way a turn
+// ever ends: no state transition removes a session from the queue, so an agent
+// stays there — running or not — until the user says they are done with it.
+// Fire-and-forget; the daemon broadcasts the session afterwards.
+model SettleTurnMessage {
+  cmd: "settle_turn";
   session_id: string;
 }
 

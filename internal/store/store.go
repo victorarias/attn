@@ -36,6 +36,7 @@ type Store struct {
 	durable bool
 
 	sessions        map[string]*protocol.Session
+	turnStamps      map[string]TurnStamps
 	agentDriverRuns map[string]AgentDriverReportCursor
 	agentMetadata   map[string]string
 	profileRoles    map[string]string
@@ -291,6 +292,7 @@ func (s *Store) Remove(id string) {
 
 	if s.db == nil {
 		delete(s.sessions, id)
+		delete(s.turnStamps, id)
 		delete(s.agentDriverRuns, id)
 		delete(s.agentMetadata, id)
 		return

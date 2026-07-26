@@ -786,6 +786,11 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 		PRIMARY KEY(path, source)
 	);
 	CREATE INDEX IF NOT EXISTS idx_file_activity_last_at ON file_activity(last_at DESC);`},
+	// A session owes the user a turn iff turn_opened_at > turn_settled_at. The
+	// backfill stamps sessions already sitting in a turn-opening state so the
+	// first queue is the honest outstanding board at sensible ages, rather than
+	// starting empty and hiding live turns.
+	{81, "add turn stamps to sessions", ""}, // see applyMigration81
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1041,6 +1046,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 79 {
 			if err := applyMigration79(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 81 {
+			if err := applyMigration81(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -1944,6 +1954,36 @@ func applyMigration41(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// applyMigration81 adds the turn stamps and backfills the open ones. It is
+// guarded on the columns already existing so a rewound schema_migrations table
+// re-runs it harmlessly — and, crucially, so the backfill does not overwrite
+// live stamps with state_since on a re-run.
+func applyMigration81(tx *sql.Tx) error {
+	hasOpened, err := columnExists(tx, "sessions", "turn_opened_at")
+	if err != nil {
+		return err
+	}
+	hasSettled, err := columnExists(tx, "sessions", "turn_settled_at")
+	if err != nil {
+		return err
+	}
+	if !hasSettled {
+		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN turn_settled_at TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if hasOpened {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN turn_opened_at TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`
+		UPDATE sessions SET turn_opened_at = state_since
+		 WHERE state IN ('waiting_input', 'pending_approval', 'unknown')`)
+	return err
 }
 
 func columnExists(tx *sql.Tx, table, column string) (bool, error) {
