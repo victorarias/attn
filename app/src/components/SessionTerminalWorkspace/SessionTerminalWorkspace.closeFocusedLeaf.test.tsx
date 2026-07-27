@@ -59,6 +59,14 @@ function paneAndTileWorkspace(): TerminalWorkspaceState {
   };
 }
 
+// The same workspace with the tile undocked — one terminal pane, no split.
+function paneOnlyWorkspace(): TerminalWorkspaceState {
+  return {
+    agents: [{ id: 'pane-term', runtimeId: 'rt-1', sessionId: 'sess-1', title: 'shell' }],
+    layoutTree: { type: 'pane', paneId: 'pane-term' },
+  };
+}
+
 function renderSplit(overrides: {
   onClosePane?: () => void;
   onUndockTile?: (tileId: string) => void;
@@ -67,16 +75,17 @@ function renderSplit(overrides: {
   const onClosePane = overrides.onClosePane ?? vi.fn();
   const onUndockTile = overrides.onUndockTile ?? vi.fn();
   const onFocusPane = overrides.onFocusPane ?? vi.fn();
-  const utils = render(
+  const eventRouter = createPaneRuntimeEventRouterController();
+  const element = (workspace: TerminalWorkspaceState) => (
     <SessionTerminalWorkspace
       workspaceId="workspace-split"
       workspaceSessions={[{ id: 'sess-1', label: 'shell', agent: 'shell', cwd: '/tmp/project' }]}
-      workspace={paneAndTileWorkspace()}
+      workspace={workspace}
       activePaneId="pane-term"
       fontSize={13}
       enabled
       isActiveSession
-      eventRouter={createPaneRuntimeEventRouterController()}
+      eventRouter={eventRouter}
       onSplitPane={vi.fn()}
       onClosePane={onClosePane}
       onFocusPane={onFocusPane}
@@ -89,10 +98,11 @@ function renderSplit(overrides: {
         },
       }}
       onRequestTileContent={vi.fn()}
-    />,
-    { wrapper: NotebookSurfaceTestWrapper },
+    />
   );
-  return { ...utils, onClosePane, onUndockTile, onFocusPane };
+  const utils = render(element(paneAndTileWorkspace()), { wrapper: NotebookSurfaceTestWrapper });
+  const setWorkspace = (workspace: TerminalWorkspaceState) => utils.rerender(element(workspace));
+  return { ...utils, setWorkspace, onClosePane, onUndockTile, onFocusPane };
 }
 
 function tileEl(container: HTMLElement): HTMLElement {
@@ -140,6 +150,25 @@ describe('SessionTerminalWorkspace leaf focus', () => {
     // The maximized tile renders alone, keeping its identity as a tile leaf.
     expect(container.querySelector('[data-pane-kind="agent"]')).toBeNull();
     expect(tileEl(container).getAttribute('data-pane-id')).toBe('tile-notes');
+  });
+
+  // A markdown tile's id is derived from its file path, so closing one and
+  // reopening the same file produces the SAME leaf id. A maximized leaf that
+  // leaves the layout must therefore be forgotten, or reopening the file would
+  // silently come back maximized.
+  it('forgets a maximized tile once it leaves the layout', () => {
+    const { container, setWorkspace } = renderSplit();
+    const surface = () => container.querySelector('.session-terminal-workspace') as HTMLElement;
+
+    fireEvent.mouseDown(tileEl(container));
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Enter', metaKey: true, shiftKey: true });
+    expect(surface().getAttribute('data-maximized-pane-id')).toBe('tile-notes');
+
+    setWorkspace(paneOnlyWorkspace());
+    setWorkspace(paneAndTileWorkspace());
+
+    expect(surface().getAttribute('data-maximized-pane-id')).toBe('');
+    expect(container.querySelector('[data-pane-kind="agent"]')).not.toBeNull();
   });
 
   // Clicking back onto the terminal returns the focus display to the pane. The
