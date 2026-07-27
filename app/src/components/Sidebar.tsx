@@ -391,8 +391,10 @@ export function Sidebar({
     const rect = event.currentTarget.getBoundingClientRect();
     setRenameTarget({ kind, id, name, anchor: { top: rect.bottom + 4, left: rect.left } });
   };
+  // Takes the fields it reads rather than a whole LocalSession, so the queue
+  // rows — which carry a narrower session view — can open the same menu.
   const openSessionActions = (
-    session: LocalSession,
+    session: { id: string; label: string; chiefOfStaff?: boolean },
     event: ReactMouseEvent,
   ) => {
     event.stopPropagation();
@@ -910,6 +912,7 @@ export function Sidebar({
           onSelectSession={onSelectSession}
           onSettleTurn={(id) => onSettleTurn?.(id)}
           onPinWorkspace={onPinWorkspace}
+          onOpenActions={openSessionActions}
         />
       )}
 

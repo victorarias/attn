@@ -150,6 +150,15 @@ describe('the queue arrangement', () => {
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 
+  it('keeps the per-session menu reachable from every band', () => {
+    // Chief of staff, close and reload live on this menu, which the workspace
+    // tree row owns when the queue is off. Queue mode stops drawing that row.
+    renderSidebar(sessions, true);
+    for (const id of ['chief', 'older', 'settled']) {
+      expect(screen.getByTestId(`session-actions-${id}`)).toBeTruthy();
+    }
+  });
+
   it('offers no settle affordance on a settled row, which has nothing to discharge', () => {
     renderSidebar(sessions, true);
     expect(screen.getByTestId('queue-settled-settled')).toBeTruthy();

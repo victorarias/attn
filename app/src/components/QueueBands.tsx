@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { StateIndicator } from './StateIndicator';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { formatShortcut } from '../shortcuts';
@@ -27,6 +27,13 @@ interface QueueBandsProps {
    * workspaces these rows come from.
    */
   onPinWorkspace?: (workspaceId: string, pinned: boolean) => void;
+  /**
+   * The per-session menu — chief of staff, close, reload — which the workspace
+   * tree row owns when the queue is off. Queue mode does not draw that row for
+   * these agents, so without it here everything on that menu would be out of
+   * reach for anything in a band.
+   */
+  onOpenActions?: (session: { id: string; label: string; chiefOfStaff?: boolean }, event: ReactMouseEvent) => void;
 }
 
 /**
@@ -65,6 +72,7 @@ function QueueRowView({
   onSelect,
   onSettle,
   onPin,
+  onOpenActions,
   testIdPrefix,
 }: {
   row: QueueRow<QueueBandSessionView>;
@@ -73,6 +81,7 @@ function QueueRowView({
   onSelect: () => void;
   onSettle?: () => void;
   onPin?: () => void;
+  onOpenActions?: (event: ReactMouseEvent) => void;
   testIdPrefix: string;
 }) {
   const { session } = row;
@@ -89,6 +98,20 @@ function QueueRowView({
       {session.chiefOfStaff && <ChiefOfStaffBadge />}
       <span className="queue-row-workspace">{row.workspaceTitle}</span>
       {age && <span className="queue-row-age">{age}</span>}
+      {onOpenActions && (
+        <div className="session-actions">
+          <button
+            type="button"
+            className="session-action-btn session-more-btn"
+            data-testid={`session-actions-${session.id}`}
+            onClick={onOpenActions}
+            title="Session actions"
+            aria-label={`Actions for ${session.label}`}
+          >
+            •••
+          </button>
+        </div>
+      )}
       {onPin && (
         <button
           type="button"
@@ -135,7 +158,7 @@ function QueueRowView({
  * Only pinned and muted workspaces still render as groups, below; they are
  * places you go and get work rather than a list handed to you.
  */
-export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, onPinWorkspace }: QueueBandsProps) {
+export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, onPinWorkspace, onOpenActions }: QueueBandsProps) {
   const now = useNow(AGE_TICK_MS);
 
   return (
@@ -145,6 +168,7 @@ export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, o
           row={bands.chief}
           selected={selectedId === bands.chief.session.id}
           onSelect={() => onSelectSession(bands.chief!.session.id)}
+          onOpenActions={onOpenActions && ((event) => onOpenActions(bands.chief!.session, event))}
           testIdPrefix="queue-chief"
         />
       )}
@@ -164,6 +188,7 @@ export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, o
             onSelect={() => onSelectSession(row.session.id)}
             onSettle={() => onSettleTurn(row.session.id)}
             onPin={onPinWorkspace && (() => onPinWorkspace(row.workspaceId, true))}
+            onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
             testIdPrefix="queue-turn"
           />
         ))
@@ -182,6 +207,7 @@ export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, o
               selected={selectedId === row.session.id}
               onSelect={() => onSelectSession(row.session.id)}
               onPin={onPinWorkspace && (() => onPinWorkspace(row.workspaceId, true))}
+              onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
               testIdPrefix="queue-settled"
             />
           ))}
