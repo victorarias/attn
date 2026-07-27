@@ -3,10 +3,12 @@ import { WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus } from './generated'
 import {
   applyRatioOverrides,
   collectSplitRatios,
+  findLeafInDirection,
   findPaneInDirection,
   findTileByKind,
   getNormalizedPaneBounds,
   getSplitDividers,
+  hasLeaf,
   hasPane,
   localWorkspaceDirectory,
   soleWorkspaceForId,
@@ -209,9 +211,21 @@ describe('docked tiles', () => {
     expect(findPaneInDirection(paneWithTile, 'md', 'left')).toBeNull();
   });
 
-  it('hasPane never matches a tile id', () => {
+  it('navigates into and out of a tile as a focus target', () => {
+    // Focus navigation treats a docked tile as a leaf like any other: right from
+    // 'a' lands on the tile, and moving on from the tile reaches 'b'.
+    expect(findLeafInDirection(paneWithTile, 'a', 'right')).toBe('md');
+    expect(findLeafInDirection(paneWithTile, 'md', 'right')).toBe('b');
+    expect(findLeafInDirection(paneWithTile, 'md', 'left')).toBe('a');
+    expect(findLeafInDirection(paneWithTile, 'b', 'left')).toBe('md');
+  });
+
+  it('hasPane never matches a tile id, hasLeaf does', () => {
     expect(hasPane(paneWithTile, 'md')).toBe(false);
     expect(hasPane(paneWithTile, 'a')).toBe(true);
+    expect(hasLeaf(paneWithTile, 'md')).toBe(true);
+    expect(hasLeaf(paneWithTile, 'a')).toBe(true);
+    expect(hasLeaf(paneWithTile, 'missing')).toBe(false);
   });
 
   it('findTileByKind locates a docked tile', () => {

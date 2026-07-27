@@ -144,6 +144,16 @@ export function hasPane(node: TerminalLayoutNode, paneId: string): boolean {
   return hasPane(node.children[0], paneId) || hasPane(node.children[1], paneId);
 }
 
+// hasLeaf is hasPane widened to the whole focus model: any leaf slot, terminal
+// pane or docked tile. Callers that must resolve to a session-bearing pane
+// (daemon active pane, close-pane focus fallback) keep using hasPane.
+export function hasLeaf(node: TerminalLayoutNode, leafId: string): boolean {
+  if (node.type !== 'split') {
+    return leafSlotId(node) === leafId;
+  }
+  return hasLeaf(node.children[0], leafId) || hasLeaf(node.children[1], leafId);
+}
+
 function paneBounds(
   left: number,
   top: number,
@@ -290,18 +300,39 @@ function overlapSize(aStart: number, aEnd: number, bStart: number, bEnd: number)
   return Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
 }
 
+// findLeafInDirection moves focus between any two leaf slots — terminal panes
+// and docked tiles alike. This is the workspace's focus navigation: a docked
+// markdown tile is a focus target like any pane.
+export function findLeafInDirection(
+  node: TerminalLayoutNode,
+  fromLeafId: string,
+  direction: TerminalNavigationDirection
+): string | null {
+  return findInDirection(node, fromLeafId, direction, null);
+}
+
+// findPaneInDirection is the pane-only variant, for callers that must resolve
+// to a session-bearing terminal (e.g. picking the next active pane after a
+// close) rather than to whatever leaf sits next to it.
 export function findPaneInDirection(
   node: TerminalLayoutNode,
   fromPaneId: string,
   direction: TerminalNavigationDirection
 ): string | null {
+  return findInDirection(node, fromPaneId, direction, 'pane');
+}
+
+function findInDirection(
+  node: TerminalLayoutNode,
+  fromPaneId: string,
+  direction: TerminalNavigationDirection,
+  onlyKind: LeafKind | null
+): string | null {
   const leaves = new Map<string, LeafBounds>();
   collectLeafBounds(node, paneBounds(0, 0, 1, 1), leaves);
-  // Navigation only moves between terminal panes — docked tiles are not focus
-  // targets.
   const rects = new Map<string, PaneBounds>();
   for (const [slotId, { bounds, kind }] of leaves) {
-    if (kind === 'pane') {
+    if (!onlyKind || kind === onlyKind) {
       rects.set(slotId, bounds);
     }
   }

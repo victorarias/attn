@@ -6,6 +6,28 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-27]
+
+### Fixed
+- **A docked markdown file can now be focused like any terminal pane.** Focus in
+  a workspace used to belong to terminals only, so a markdown or notebook tile —
+  the surface an agent opens when it shows you a file — could never be the
+  focused thing. Clicking it did nothing you could see, ⌘W acted on whichever
+  terminal was focused before, ⌘⌥arrows skipped over it, ⌘⇧Enter could not
+  zoom it, and ⌘Enter (send annotations) only worked if focus had happened to
+  land inside. Docked tiles are now first-class focus targets: click one, or
+  navigate into it with ⌘⌥arrows, and it becomes the focused leaf — ⌘W closes
+  that tile, ⌘⇧Enter zooms it, and the annotation shortcut is armed.
+
+### Changed
+- **The focused pane or tile is now marked, not just brightened.** The focused
+  leaf carries an accent ring and an accented header, applied the same way to
+  terminals and docked tiles, so which one has the keyboard is readable at a
+  glance. Tiles stay at full brightness whether focused or not — a docked
+  document is there to be read while you type in the terminal.
+
+---
+
 ## [2026-07-26]
 
 ### Fixed

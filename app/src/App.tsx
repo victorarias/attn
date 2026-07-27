@@ -3247,10 +3247,18 @@ sendFetchPRDetails,
     // must close THAT tile here, not the active session's terminal pane. Without
     // this, Cmd+W while reading a note kills the previously-focused terminal/session.
     // (Native browser tiles are handled natively before session.close ever fires.)
-    const focused = document.activeElement;
-    const tileEl = focused instanceof HTMLElement ? focused.closest('[data-pane-kind="tile"]') : null;
-    const tileId = tileEl?.getAttribute('data-pane-id');
-    if (tileId && activeWorkspaceId) {
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Inside a tile's own subtree the tile is unambiguous. Otherwise, while focus
+    // is anywhere in the workspace, the workspace's own focus model decides —
+    // data-active-leaf-id names a tile whenever a tile is the focused leaf, so a
+    // click that landed on the workspace frame rather than the tile body still
+    // closes the leaf the user sees as focused.
+    const tileId = focused?.closest('[data-pane-kind="tile"]')?.getAttribute('data-pane-id')
+      ?? focused?.closest('.session-terminal-workspace')?.getAttribute('data-active-leaf-id')
+      ?? '';
+    const isTile = !!tileId
+      && !!document.querySelector(`[data-pane-kind="tile"][data-pane-id="${CSS.escape(tileId)}"]`);
+    if (isTile && activeWorkspaceId) {
       handleCloseTile(activeWorkspaceId, tileId);
       return;
     }
