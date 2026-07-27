@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -262,11 +263,16 @@ func TestDoorbellWriteDoesNotInterleaveWithPendingApproval(t *testing.T) {
 
 	inputStarted := make(chan struct{})
 	releaseInput := make(chan struct{})
-	inputs := make(chan string, 1)
+	inputs := make(chan string, 2)
+	var firstWrite sync.Once
 	d.ptyBackend = &fakeSpawnBackend{onInput: func(_ string, data []byte) {
 		inputs <- string(data)
-		close(inputStarted)
-		<-releaseInput
+		// Hold the paste write open: the fence has to survive the whole
+		// paste-then-Enter pair, not just a single write.
+		firstWrite.Do(func() {
+			close(inputStarted)
+			<-releaseInput
+		})
 	}}
 
 	doorbellDone := make(chan error, 1)
@@ -294,9 +300,12 @@ func TestDoorbellWriteDoesNotInterleaveWithPendingApproval(t *testing.T) {
 		t.Fatalf("typeDoorbell() error = %v", err)
 	}
 	<-stateDone
-	want := bracketedPasteStart + ticketNudgePrompt + bracketedPasteEnd + "\r"
-	if got := <-inputs; got != want {
-		t.Fatalf("doorbell input = %q, want atomic bracketed prompt+Enter %q", got, want)
+	wantPaste := bracketedPasteStart + ticketNudgePrompt + bracketedPasteEnd
+	if got := <-inputs; got != wantPaste {
+		t.Fatalf("doorbell paste = %q, want %q", got, wantPaste)
+	}
+	if got := <-inputs; got != "\r" {
+		t.Fatalf("doorbell submit = %q, want a lone Enter", got)
 	}
 }
 

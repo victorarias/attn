@@ -104,6 +104,11 @@ func TestMain(m *testing.M) {
 	_ = os.Setenv("ATTN_PTY_BACKEND", "embedded")
 	_ = os.Setenv("ATTN_PTY_SKIP_STARTUP_PROBE", "1")
 
+	// Doorbell delivery waits out a real composer's paste-settle window before
+	// sending Enter. No fake PTY needs that wait, so tests run without it —
+	// TestTypeDoorbellDelaysEnterAfterThePaste restores a delay to pin the gap.
+	doorbellSubmitDelay = 0
+
 	// Plugin-process helper subprocesses (TestDaemonPluginProcessHelper,
 	// TestPluginDriverFixtureProcess) re-exec this same test binary with a
 	// single -test.run and rely on ATTN_SOCKET_PATH being the exact value

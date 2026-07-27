@@ -146,7 +146,10 @@ requested, human comment, approved, bot comment) and the rest are still reported
 the whole answer when you need to know everything that happened. The reviewer's
 own verdict is one event, not a verdict plus a comment. Comments already present
 when the wait starts are the baseline; `--ignore-author` drops an author of
-either kind.
+either kind. Your own comments are never events: the account `gh` is
+authenticated as is resolved once per run and its remarks are dropped, so posting
+a reply and then waiting does not wake you with your own text. Pass
+`--include-self` to watch a PR you also comment on.
 
 The output carries what was said — comment bodies with `file:line` when inline,
 the verdict's text, failing check names with URLs, the PR URL — so act on it
