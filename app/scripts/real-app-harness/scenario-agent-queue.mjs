@@ -438,6 +438,32 @@ async function main() {
       const promoted = await waitForTurns(client, [alpha.sessionId], 'beta out of the band once it is chief', 20_000);
       runner.assert(promoted.chief?.id === beta.sessionId, `beta occupies the chief slot: ${JSON.stringify(promoted.chief)}`);
 
+      // Pin reaches the chief's workspace like any other, and the chief keeps its
+      // anchored slot regardless — so the group that survives in the tree must
+      // not draw it a second time. Pin it from the tree with the arrangement off,
+      // which is the affordance a user has for a workspace holding only the chief.
+      const chiefWorkspaceId = promoted.chief.workspaceId;
+      await client.request('set_setting', { key: 'queue_mode_enabled', value: 'false' });
+      await pollFor(async () => {
+        const state = await queueState(client);
+        return state.present ? null : state;
+      }, 'the tree back before pinning the chief workspace', 15_000);
+      await client.request('dom_click', { selector: `[data-testid="pin-workspace-${chiefWorkspaceId}"]` });
+      await client.request('set_setting', { key: 'queue_mode_enabled', value: 'true' });
+      const chiefPinned = await pollFor(async () => {
+        const state = await queueState(client);
+        return state.present && state.chief ? state : null;
+      }, 'the band back with the chief workspace pinned', 15_000);
+      runner.assert(
+        chiefPinned.chief.id === beta.sessionId,
+        `the chief keeps its slot while its workspace is pinned: ${JSON.stringify(chiefPinned.chief)}`,
+      );
+      runner.assert(
+        !chiefPinned.treeSessionIds.includes(beta.sessionId),
+        `the pinned group does not draw the chief again: ${JSON.stringify(chiefPinned.treeSessionIds)}`,
+      );
+      await client.request('dom_click', { selector: `[data-testid="pin-workspace-${chiefWorkspaceId}"]` });
+
       await client.request('chief_of_staff_open_actions', { sessionId: beta.sessionId });
       await client.request('chief_of_staff_toggle');
       const demoted = await waitForTurns(

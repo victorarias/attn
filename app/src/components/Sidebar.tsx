@@ -133,8 +133,9 @@ interface SidebarProps {
   dockItems?: DockItem[];
   dockCollapsed?: boolean;
   onToggleDockCollapsed?: () => void;
-  // The queue arrangement's bands, or null when the arrangement is off. The
-  // workspace tree below is identical either way — the queue only adds rows.
+  // The queue arrangement's bands, or null when the arrangement is off. While it
+  // is on the tree below is reduced to what the bands exclude: pinned and
+  // tile-only workspaces.
   queue?: QueueBandsModel<LocalSession> | null;
   onSettleTurn?: (id: string) => void;
   mutedWorkspaces?: SidebarWorkspace[];
@@ -412,6 +413,21 @@ export function Sidebar({
     onMutedExpandedChange?.(v);
   };
 
+  // The chief holds its anchored slot whatever its workspace is, so a workspace
+  // that survives in the tree — pinned, or muted — must not draw it a second
+  // time. This is the one session the bands claim from a workspace they
+  // otherwise leave alone.
+  const withoutChiefRow = (workspace: SidebarWorkspace): SidebarWorkspace => {
+    if (!queue || !workspace.sessions.some((session) => session.chiefOfStaff)) {
+      return workspace;
+    }
+    return {
+      ...workspace,
+      sessions: workspace.sessions.filter((session) => !session.chiefOfStaff),
+      children: workspace.children.filter((child) => child.kind === 'tile' || !child.session.chiefOfStaff),
+    };
+  };
+
   const isWorkspaceVisible = (workspace: SidebarWorkspace) => workspace.pinned || !isSessionless(workspace) || showSessionless;
   // Queue mode renders every ordinary agent as a flat row in a band, so drawing
   // its workspace group as well would show the same agent twice and make it look
@@ -422,7 +438,9 @@ export function Sidebar({
   const isTreeWorkspace = (workspace: SidebarWorkspace) => (
     !queue || workspace.pinned || isSessionless(workspace)
   );
-  const visibleWorkspaces = workspaces.filter((workspace) => isWorkspaceVisible(workspace) && isTreeWorkspace(workspace));
+  const visibleWorkspaces = workspaces
+    .map(withoutChiefRow)
+    .filter((workspace) => isWorkspaceVisible(workspace) && isTreeWorkspace(workspace));
   const visibleVisualOrder = visualOrder.filter(isWorkspaceVisible);
   const visibleVisualIndexByWorkspaceId = new Map(
     visibleVisualOrder.map((workspace, index) => [workspace.id, index]),
@@ -1136,7 +1154,7 @@ export function Sidebar({
           </button>
           {mutedExpanded && (
             <div className="muted-sessions-list">
-              {mutedWorkspaces.map((workspace) => (
+              {mutedWorkspaces.map(withoutChiefRow).map((workspace) => (
                 <div
                   key={`${workspace.endpointId || 'local'}:${workspace.id}`}
                   className={`workspace-group muted-workspace ${selectedWorkspaceId === workspace.id ? 'selected' : ''}${workspaceDragClass(workspace)}`}

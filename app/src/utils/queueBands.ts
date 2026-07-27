@@ -43,6 +43,11 @@ export interface QueueBands<TSession extends QueueBandSession> {
  * and get work rather than a list handed to you, and a muted one is out of
  * sight by definition.
  *
+ * The chief is the one exception: it holds its anchored slot whatever its
+ * workspace is, since it is the seat you always want to reach rather than a
+ * piece of work you filed away. The tree drops it from a workspace it still
+ * draws, so it is never in two places at once either.
+ *
  * Membership is read, never derived: `turnOwed` is the daemon's answer, which
  * already accounts for the exclusions a client cannot see. Turn ordering is by
  * `turnOpenedAt` ascending — how long the turn has been owed, which does not

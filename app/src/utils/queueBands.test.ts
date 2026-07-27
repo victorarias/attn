@@ -136,6 +136,19 @@ describe('buildQueueBands', () => {
     expect(bands.settled).toEqual([]);
   });
 
+  it('anchors the chief even when its workspace is pinned or muted', () => {
+    // The chief is the seat you always want to reach, not a piece of work you
+    // filed away, so neither pin nor mute takes its slot from it.
+    for (const flag of [{ pinned: true }, { muted: true }]) {
+      const bands = buildQueueBands(buildWorkspaceViewModels(
+        [{ id: 'ws-a', title: 'A', directory: '/repo/a', rank: 'a', ...flag }],
+        [{ id: 'chief', label: 'chief', workspaceId: 'ws-a', chiefOfStaff: true }],
+      ));
+
+      expect(bands.chief?.session.id).toBe('chief');
+    }
+  });
+
   it('leaves the workspace tree untouched — it is not an output of the queue', () => {
     const sessions: QueueBandSession[] = [
       { id: 'a', label: 'a', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T09:00:00Z' },
