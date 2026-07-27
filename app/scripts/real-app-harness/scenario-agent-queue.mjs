@@ -14,21 +14,23 @@
  * the rendered DOM (`queue_get_state`), that:
  *
  *   1. an agent queues from the moment it boots to its prompt, and both owed
- *      turns are in the band, oldest first, and both are still in the workspace
- *      tree below it — the queue is additive, never a filter,
+ *      turns are in the band, oldest first, and in exactly one place — the bands
+ *      replace the workspace tree rather than sitting on top of it,
  *   2. clicking a row hands the agent over with the keyboard in its terminal,
  *   3. steering that agent leaves it exactly where it was, showing its live
  *      (working) state rather than dropping out of the queue,
- *   4. settling removes it, and only settling does,
+ *   4. settling moves it to the Settled band, and only settling does,
  *   5. a settled agent that wants the user again returns at the bottom, behind
  *      the turn that has been owed longer,
  *   6. a settled agent whose run finishes without asking anything returns too —
  *      a result nobody has read is still the user's — while a shell pane, which
  *      reaches the same `idle` state, never queues at all,
- *   7. the chief of staff occupies its own slot and never the band,
- *   8. turning the arrangement off and back on mid-session returns the same
- *      queue with the same agent still selected,
- *   9. a settle survives a daemon restart.
+ *   7. pinning a workspace from its queue row takes the agent out of both bands
+ *      and back into the tree, so the queue is never a one-way door,
+ *   8. the chief of staff occupies its own slot and never the band,
+ *   9. turning the arrangement off and back on mid-session restores the whole
+ *      workspace tree, then returns the same queue with the same agent selected,
+ *  10. a settle survives a daemon restart.
  *
  * Prereqs: `claude` on PATH; a non-production profile install with the
  * automation layer; a built `./attn` (or ATTN_HARNESS_BIN) for the restart step.
@@ -96,6 +98,10 @@ async function queueState(client) {
 
 function turnIds(queue) {
   return (queue.turns || []).map((row) => row.id);
+}
+
+function settledIds(queue) {
+  return (queue.settled || []).map((row) => row.id);
 }
 
 // Claude treats a fast multi-line write as a paste, so the submit has to be a
@@ -242,16 +248,23 @@ async function main() {
       runner.log('beta opened a turn', { state });
     });
 
-    await runner.step('band_is_oldest_first_and_additive', async () => {
+    await runner.step('band_is_oldest_first_and_each_agent_appears_once', async () => {
       const queue = await waitForTurns(client, [alpha.sessionId, beta.sessionId], 'both turns, oldest first');
       runner.assert(
         queue.turns[0].workspace !== queue.turns[1].workspace,
         `the two turns come from different workspaces: ${JSON.stringify(queue.turns.map((row) => row.workspace))}`,
       );
+      // The bands replace the tree rather than sitting on top of it. An agent
+      // drawn in both places is what made a row look like it moved when only one
+      // of its copies did.
       for (const sessionId of [alpha.sessionId, beta.sessionId]) {
         runner.assert(
-          queue.treeSessionIds.includes(sessionId),
-          `${sessionId} still has its own row in the workspace tree: ${JSON.stringify(queue.treeSessionIds)}`,
+          !queue.treeSessionIds.includes(sessionId),
+          `${sessionId} is in the band and nowhere else: ${JSON.stringify(queue.treeSessionIds)}`,
+        );
+        runner.assert(
+          !(queue.settled || []).some((row) => row.id === sessionId),
+          `${sessionId} is owed, so it is not also in Settled: ${JSON.stringify((queue.settled || []).map((row) => row.id))}`,
         );
       }
     });
@@ -298,10 +311,10 @@ async function main() {
       );
 
       await client.request('dom_click', { selector: `[data-testid="queue-settle-${alpha.sessionId}"]` });
-      const settled = await waitForTurns(client, [beta.sessionId], 'alpha gone from the band after settling');
+      const settled = await waitForTurns(client, [beta.sessionId], 'alpha gone from Your turn after settling');
       runner.assert(
-        settled.treeSessionIds.includes(alpha.sessionId),
-        'settling removes the turn, not the session',
+        settledIds(settled).includes(alpha.sessionId),
+        `settling moves the agent to Settled, it does not remove it: ${JSON.stringify(settledIds(settled))}`,
       );
     });
 
@@ -392,11 +405,64 @@ async function main() {
       await client.request('close_pane', { sessionId: alpha.sessionId, paneId: shellPaneId }).catch(() => {});
     });
 
+    await runner.step('pinning_from_a_row_takes_the_agent_out_of_the_queue', async () => {
+      // The workspace group header owns pin in the tree, and the tree does not
+      // draw ordinary workspaces while the queue is on. Without this affordance
+      // turning the queue on would be a one-way door, so the row's own button is
+      // the claim under test — pressed through the DOM, as the user would.
+      const before = await queueState(client);
+      const alphaWorkspaceId = (before.turns.find((row) => row.id === alpha.sessionId) || {}).workspaceId;
+      runner.assert(Boolean(alphaWorkspaceId), 'the row carries the workspace its pin button acts on');
+
+      await client.request('dom_click', { selector: `[data-testid="queue-pin-${alpha.sessionId}"]` });
+      const pinned = await waitForTurns(client, [beta.sessionId], 'alpha out of the band once its workspace is pinned', 20_000);
+      runner.assert(
+        !settledIds(pinned).includes(alpha.sessionId),
+        `a pinned agent is in neither band: ${JSON.stringify(settledIds(pinned))}`,
+      );
+      runner.assert(
+        pinned.treeSessionIds.includes(alpha.sessionId),
+        `a pinned workspace keeps its group in the tree: ${JSON.stringify(pinned.treeSessionIds)}`,
+      );
+
+      // Put it back through the group header's own pin button — the tree affordance
+      // that queue mode leaves in place for exactly this — so the steps below see
+      // the queue they expect.
+      await client.request('dom_click', { selector: `[data-testid="pin-workspace-${alphaWorkspaceId}"]` });
+      await waitForTurns(client, [beta.sessionId, alpha.sessionId], 'alpha back in the band once unpinned', 20_000);
+    });
+
     await runner.step('the_chief_never_queues', async () => {
       await client.request('chief_of_staff_open_actions', { sessionId: beta.sessionId });
       await client.request('chief_of_staff_toggle');
       const promoted = await waitForTurns(client, [alpha.sessionId], 'beta out of the band once it is chief', 20_000);
       runner.assert(promoted.chief?.id === beta.sessionId, `beta occupies the chief slot: ${JSON.stringify(promoted.chief)}`);
+
+      // Pin reaches the chief's workspace like any other, and the chief keeps its
+      // anchored slot regardless — so the group that survives in the tree must
+      // not draw it a second time. Pin it from the tree with the arrangement off,
+      // which is the affordance a user has for a workspace holding only the chief.
+      const chiefWorkspaceId = promoted.chief.workspaceId;
+      await client.request('set_setting', { key: 'queue_mode_enabled', value: 'false' });
+      await pollFor(async () => {
+        const state = await queueState(client);
+        return state.present ? null : state;
+      }, 'the tree back before pinning the chief workspace', 15_000);
+      await client.request('dom_click', { selector: `[data-testid="pin-workspace-${chiefWorkspaceId}"]` });
+      await client.request('set_setting', { key: 'queue_mode_enabled', value: 'true' });
+      const chiefPinned = await pollFor(async () => {
+        const state = await queueState(client);
+        return state.present && state.chief ? state : null;
+      }, 'the band back with the chief workspace pinned', 15_000);
+      runner.assert(
+        chiefPinned.chief.id === beta.sessionId,
+        `the chief keeps its slot while its workspace is pinned: ${JSON.stringify(chiefPinned.chief)}`,
+      );
+      runner.assert(
+        !chiefPinned.treeSessionIds.includes(beta.sessionId),
+        `the pinned group does not draw the chief again: ${JSON.stringify(chiefPinned.treeSessionIds)}`,
+      );
+      await client.request('dom_click', { selector: `[data-testid="pin-workspace-${chiefWorkspaceId}"]` });
 
       await client.request('chief_of_staff_open_actions', { sessionId: beta.sessionId });
       await client.request('chief_of_staff_toggle');
@@ -420,7 +486,7 @@ async function main() {
       }, 'the band to disappear with the arrangement off', 15_000);
       runner.assert(
         off.treeSessionIds.includes(alpha.sessionId) && off.treeSessionIds.includes(beta.sessionId),
-        `the workspace tree is untouched by the arrangement: ${JSON.stringify(off.treeSessionIds)}`,
+        `turning the arrangement off restores the whole workspace tree: ${JSON.stringify(off.treeSessionIds)}`,
       );
 
       await client.request('set_setting', { key: 'queue_mode_enabled', value: 'true' });
@@ -452,8 +518,8 @@ async function main() {
       await relaunchAppAndConnect(client, observer);
       const queue = await waitForTurns(client, [alpha.sessionId], 'the queue rebuilt from persisted stamps', 60_000);
       runner.assert(
-        queue.treeSessionIds.includes(beta.sessionId),
-        'beta came back as a session, just not as a turn',
+        settledIds(queue).includes(beta.sessionId),
+        `beta came back as a session, just not as a turn: ${JSON.stringify(settledIds(queue))}`,
       );
     });
 

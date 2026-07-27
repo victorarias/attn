@@ -29,11 +29,13 @@ const baseProps = {
   onToggleCollapse: () => {},
 };
 
-function sidebarData(sessions: TestSession[]) {
+type WorkspaceFlags = { pinned?: boolean; muted?: boolean };
+
+function sidebarData(sessions: TestSession[], flags: Record<string, WorkspaceFlags> = {}) {
   const workspaces = buildWorkspaceViewModels(
     [
-      { id: 'ws-a', title: 'alpha', directory: '/repo/a', rank: 'a' },
-      { id: 'ws-b', title: 'beta', directory: '/repo/b', rank: 'b' },
+      { id: 'ws-a', title: 'alpha', directory: '/repo/a', rank: 'a', ...flags['ws-a'] },
+      { id: 'ws-b', title: 'beta', directory: '/repo/b', rank: 'b', ...flags['ws-b'] },
     ],
     sessions,
   );
@@ -44,8 +46,13 @@ function sidebarData(sessions: TestSession[]) {
   };
 }
 
-function renderSidebar(sessions: TestSession[], queueMode: boolean, overrides = {}) {
-  const data = sidebarData(sessions);
+function renderSidebar(
+  sessions: TestSession[],
+  queueMode: boolean,
+  overrides = {},
+  workspaceFlags: Record<string, WorkspaceFlags> = {},
+) {
+  const data = sidebarData(sessions, workspaceFlags);
   return render(
     <Sidebar
       {...baseProps}
@@ -69,26 +76,39 @@ describe('the queue arrangement', () => {
     expect(screen.queryByTestId('sidebar-queue')).toBeNull();
   });
 
-  it('lists owed turns oldest first, with the chief anchored above them', () => {
+  it('lists owed turns oldest first, then the settled rest, with the chief anchored above both', () => {
     const { container } = renderSidebar(sessions, true);
 
     const rows = Array.from(container.querySelectorAll('.queue-bands .queue-row'))
       .map((row) => row.getAttribute('data-testid'));
-    expect(rows).toEqual(['queue-chief-chief', 'queue-turn-older', 'queue-turn-newer']);
+    expect(rows).toEqual(['queue-chief-chief', 'queue-turn-older', 'queue-turn-newer', 'queue-settled-settled']);
   });
 
-  it('keeps the workspace tree complete and unchanged — the queue only adds rows', () => {
-    const off = renderSidebar(sessions, false);
-    const treeOff = Array.from(off.container.querySelectorAll('.session-list [data-testid^="sidebar-session-"]'))
-      .map((row) => row.getAttribute('data-testid'));
-    off.unmount();
+  it('draws each agent exactly once — the bands replace the tree, they do not sit on top of it', () => {
+    // The duplication this replaces made a row look like it moved when only one
+    // of an agent's two copies did.
+    const { container } = renderSidebar(sessions, true);
 
-    const on = renderSidebar(sessions, true);
-    const treeOn = Array.from(on.container.querySelectorAll('.session-list [data-testid^="sidebar-session-"]'))
+    const tree = Array.from(container.querySelectorAll('.session-list [data-testid^="sidebar-session-"]'))
       .map((row) => row.getAttribute('data-testid'));
+    expect(tree).toEqual([]);
+    expect(container.querySelectorAll(
+      '[data-testid="queue-turn-older"], [data-testid="sidebar-session-older"]',
+    )).toHaveLength(1);
+  });
 
-    expect(treeOn).toEqual(treeOff);
-    expect(treeOn).toContain('sidebar-session-older');
+  it('keeps pinned workspaces as groups, and their agents out of both bands', () => {
+    // Pinned is the way out of the queue, so a pinned agent must not be in it —
+    // and the group has to survive, because it is where you go and get that work.
+    const { container } = renderSidebar(sessions, true, {}, { 'ws-b': { pinned: true } });
+
+    const bandRows = Array.from(container.querySelectorAll('.queue-bands .queue-row'))
+      .map((row) => row.getAttribute('data-testid'));
+    expect(bandRows).toEqual(['queue-chief-chief', 'queue-turn-newer']);
+
+    const tree = Array.from(container.querySelectorAll('.session-list [data-testid^="sidebar-session-"]'))
+      .map((row) => row.getAttribute('data-testid'));
+    expect(tree).toEqual(['sidebar-session-older', 'sidebar-session-settled']);
   });
 
   it('shows the live state of a queued agent, because being queued no longer means stopped', () => {
@@ -112,6 +132,62 @@ describe('the queue arrangement', () => {
     fireEvent.click(screen.getByTestId('queue-settle-older'));
     expect(onSettleTurn).toHaveBeenCalledWith('older');
     expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('pins a row\'s workspace without selecting it, from either band', () => {
+    // The workspace group header owns pin in the tree, and queue mode does not
+    // draw the group for these workspaces. Without this the queue would be a
+    // one-way door: pinning is how an agent leaves it for good.
+    const onPinWorkspace = vi.fn();
+    const onSelectSession = vi.fn();
+    renderSidebar(sessions, true, { onPinWorkspace, onSelectSession });
+
+    fireEvent.click(screen.getByTestId('queue-pin-older'));
+    expect(onPinWorkspace).toHaveBeenCalledWith('ws-b', true);
+
+    fireEvent.click(screen.getByTestId('queue-pin-settled'));
+    expect(onPinWorkspace).toHaveBeenLastCalledWith('ws-b', true);
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('draws the chief once when its own workspace stays in the tree', () => {
+    // The chief keeps its anchored slot whatever its workspace is, and pin and
+    // mute are both reachable for it, so the surviving group must not draw it
+    // again.
+    const pinned = renderSidebar(sessions, true, {}, { 'ws-a': { pinned: true } });
+    expect(pinned.getByTestId('queue-chief-chief')).toBeTruthy();
+    expect(pinned.queryByTestId('sidebar-session-chief')).toBeNull();
+    pinned.unmount();
+
+    const data = sidebarData(sessions, { 'ws-a': { muted: true } });
+    const muted = render(
+      <Sidebar
+        {...baseProps}
+        {...data}
+        workspaces={data.workspaces.filter((workspace) => !workspace.muted)}
+        mutedWorkspaces={data.workspaces.filter((workspace) => workspace.muted)}
+        mutedExpanded
+        queue={buildQueueBands(data.workspaces)}
+      />
+    );
+    expect(muted.getByTestId('queue-chief-chief')).toBeTruthy();
+    expect(muted.queryByTestId('sidebar-session-chief')).toBeNull();
+    expect(muted.getByTestId('sidebar-muted-workspace-ws-a')).toBeTruthy();
+  });
+
+  it('keeps the per-session menu reachable from every band', () => {
+    // Chief of staff, close and reload live on this menu, which the workspace
+    // tree row owns when the queue is off. Queue mode stops drawing that row.
+    renderSidebar(sessions, true);
+    for (const id of ['chief', 'older', 'settled']) {
+      expect(screen.getByTestId(`session-actions-${id}`)).toBeTruthy();
+    }
+  });
+
+  it('offers no settle affordance on a settled row, which has nothing to discharge', () => {
+    renderSidebar(sessions, true);
+    expect(screen.getByTestId('queue-settled-settled')).toBeTruthy();
+    expect(screen.queryByTestId('queue-settle-settled')).toBeNull();
   });
 
   it('offers no settle affordance on the chief, which never queues', () => {

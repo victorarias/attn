@@ -95,6 +95,60 @@ describe('buildQueueBands', () => {
     expect(bands.turns).toEqual([]);
   });
 
+  it('puts everything not owed into settled, so no agent is in both bands', () => {
+    const bands = buildQueueBands(views([
+      { id: 'owed', label: 'owed', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T09:00:00Z' },
+      { id: 'quiet', label: 'quiet', workspaceId: 'ws-a' },
+      { id: 'busy', label: 'busy', workspaceId: 'ws-b', state: 'working' },
+    ]));
+
+    expect(bands.turns.map((row) => row.session.id)).toEqual(['owed']);
+    expect(bands.settled.map((row) => row.session.id)).toEqual(['quiet', 'busy']);
+  });
+
+  it('settling moves a row from one band to the other rather than out of the sidebar', () => {
+    const session: QueueBandSession = {
+      id: 'a', label: 'a', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T09:00:00Z',
+    };
+    const before = buildQueueBands(views([session]));
+    const after = buildQueueBands(views([{ ...session, turnOwed: false }]));
+
+    expect(before.turns.map((row) => row.session.id)).toEqual(['a']);
+    expect(before.settled).toEqual([]);
+    expect(after.turns).toEqual([]);
+    expect(after.settled.map((row) => row.session.id)).toEqual(['a']);
+  });
+
+  it('keeps pinned and muted workspaces out of both bands — they stay in the tree', () => {
+    // Pinning is the way out of the queue entirely, and muting is its absolute
+    // sibling. Either one landing in Settled would put it back in the list it
+    // was taken out of.
+    const pinnedAndMuted = [
+      { id: 'ws-a', title: 'A', directory: '/repo/a', rank: 'a', pinned: true },
+      { id: 'ws-b', title: 'B', directory: '/repo/b', rank: 'b', muted: true },
+    ];
+    const bands = buildQueueBands(buildWorkspaceViewModels(pinnedAndMuted, [
+      { id: 'pinned-owed', label: 'a', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T09:00:00Z' },
+      { id: 'muted-quiet', label: 'b', workspaceId: 'ws-b' },
+    ]));
+
+    expect(bands.turns).toEqual([]);
+    expect(bands.settled).toEqual([]);
+  });
+
+  it('anchors the chief even when its workspace is pinned or muted', () => {
+    // The chief is the seat you always want to reach, not a piece of work you
+    // filed away, so neither pin nor mute takes its slot from it.
+    for (const flag of [{ pinned: true }, { muted: true }]) {
+      const bands = buildQueueBands(buildWorkspaceViewModels(
+        [{ id: 'ws-a', title: 'A', directory: '/repo/a', rank: 'a', ...flag }],
+        [{ id: 'chief', label: 'chief', workspaceId: 'ws-a', chiefOfStaff: true }],
+      ));
+
+      expect(bands.chief?.session.id).toBe('chief');
+    }
+  });
+
   it('leaves the workspace tree untouched — it is not an output of the queue', () => {
     const sessions: QueueBandSession[] = [
       { id: 'a', label: 'a', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T09:00:00Z' },

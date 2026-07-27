@@ -2759,6 +2759,50 @@ sendFetchPRDetails,
     [queueModeEnabled, unmutedWorkspaceViews],
   );
 
+  // The workspace the pin/mute commands act on: the one holding the agent you
+  // are looking at, since that is what "this workspace" means from inside a
+  // session. Muted workspaces are searched too — unmuting has to be reachable
+  // from the thing it was applied to.
+  const activeWorkspaceForCommands = useMemo(
+    () => workspaceViews.find((workspace) => workspace.sessions.some((session) => session.id === activeSessionId)) ?? null,
+    [workspaceViews, activeSessionId],
+  );
+
+  // Pin and mute reach the command menu because the workspace group header, the
+  // only other place that offers them, is not drawn for ordinary workspaces
+  // while the queue is on. Pinning is how an agent leaves the queue for good, so
+  // without an entry here turning the queue on would be a one-way door. They are
+  // appended rather than declared with the rest because they need the workspace
+  // views, which are built further down.
+  const actionMenuItemsWithWorkspaceActions = useMemo<ActionMenuItem[]>(() => {
+    const workspace = activeWorkspaceForCommands;
+    if (!workspace) return actionMenuItems;
+    return [
+      ...actionMenuItems,
+      {
+        id: 'pin-active-workspace',
+        title: workspace.pinned ? `Unpin ${workspace.title}` : `Pin ${workspace.title}`,
+        description: workspace.pinned
+          ? 'Put this workspace back in the queue'
+          : 'Take this workspace out of the queue and keep it in view',
+        keywords: ['pin', 'unpin', 'workspace', 'queue'],
+        icon: <AttentionActionIcon />,
+        run: () => sendPinWorkspace(workspace.id, !workspace.pinned),
+      },
+      {
+        id: 'mute-active-workspace',
+        title: workspace.muted ? `Unmute ${workspace.title}` : `Mute ${workspace.title}`,
+        description: workspace.muted
+          ? 'Let this workspace ask for you again'
+          : 'Nothing from this workspace reaches you',
+        keywords: ['mute', 'unmute', 'workspace', 'silence'],
+        icon: <AttentionActionIcon />,
+        // mute_workspace toggles; the title is what says which way it will go.
+        run: () => sendMuteWorkspace(workspace.id, workspace.endpointId),
+      },
+    ];
+  }, [actionMenuItems, activeWorkspaceForCommands, sendPinWorkspace, sendMuteWorkspace]);
+
   // Each arrangement has one notion of what wants the user, and the mode selects
   // it. In the queue arrangement that is the daemon's turn_owed — which honours
   // settle, and the shell/chief/pinned/muted exclusions a client cannot see. With
@@ -4075,7 +4119,7 @@ sendFetchPRDetails,
       )}
       <ActionMenu
         isOpen={actionMenuOpen}
-        actions={actionMenuItems}
+        actions={actionMenuItemsWithWorkspaceActions}
         onClose={() => setActionMenuOpen(false)}
       />
       <ShortcutsModal

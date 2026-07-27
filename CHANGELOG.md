@@ -31,6 +31,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   to yet: nothing will happen in it until you type, which makes it a turn you owe
   like any other.
 
+- **The sidebar in queue mode is now the whole standing order.** *Your turn* is
+  followed by *Settled*, and an agent is drawn in exactly one of them — one row
+  per agent, no workspace groups. Previously the band sat on top of the unchanged
+  workspace tree, so every queued agent appeared twice and looked like it moved
+  when only one of its two copies did. Settling now moves an agent to *Settled*
+  rather than back into a group. Pinned workspaces keep their groups below, which
+  is where a pinned agent lives instead of the queue; muted workspaces are
+  unchanged. Turning the queue off restores the full tree exactly as before.
+- **Pin and mute a workspace from anywhere.** Every queue row has a pin button
+  that takes its workspace out of the queue, and ⌘K can pin or mute the workspace
+  of the agent you are in. Pinning used to be reachable only from a workspace
+  group header, which queue mode no longer draws. The per-session menu — chief of
+  staff, close, reload — is on the queue rows for the same reason.
+
 ### Removed
 - **The long-run review gate is gone.** Runs over five minutes used to hold their
   final color back until you looked at the session. A finished run now publishes

@@ -1842,6 +1842,7 @@ export function useUiAutomationBridge({
           label: row.querySelector('.session-label')?.textContent?.trim() || '',
           state: row.getAttribute('data-state') || '',
           workspace: row.querySelector('.queue-row-workspace')?.textContent?.trim() || '',
+          workspaceId: row.getAttribute('data-workspace-id') || '',
           age: row.querySelector('.queue-row-age')?.textContent?.trim() || '',
           selected: row.classList.contains('selected'),
         });
@@ -1852,8 +1853,11 @@ export function useUiAutomationBridge({
           chief: chiefRow ? readRow(chiefRow, 'queue-chief-') : null,
           turns: Array.from(band?.querySelectorAll('[data-testid^="queue-turn-"]') || [])
             .map((row) => readRow(row, 'queue-turn-')),
-          // The tree is additive, never filtered — the scenario asserts every
-          // session still has its own row below the band.
+          settled: Array.from(band?.querySelectorAll('[data-testid^="queue-settled-"]') || [])
+            .map((row) => readRow(row, 'queue-settled-')),
+          // What is left of the tree while the queue is on: pinned and tile-only
+          // workspaces. An agent in a band must not also be here — appearing
+          // twice is what made a row look like it moved.
           treeSessionIds: Array.from(document.querySelectorAll('.session-list [data-testid^="sidebar-session-"]'))
             .map((row) => (row.getAttribute('data-testid') || '').slice('sidebar-session-'.length)),
         };

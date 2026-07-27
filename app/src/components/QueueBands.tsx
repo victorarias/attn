@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { StateIndicator } from './StateIndicator';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { formatShortcut } from '../shortcuts';
@@ -20,6 +20,20 @@ interface QueueBandsProps {
   selectedId: string | null;
   onSelectSession: (id: string) => void;
   onSettleTurn: (id: string) => void;
+  /**
+   * Pinning a row's workspace is how an agent leaves the queue for good. The
+   * band rows are the only place it can be asked for while queue mode is on:
+   * the workspace group header, which owns it in the tree, is not drawn for the
+   * workspaces these rows come from.
+   */
+  onPinWorkspace?: (workspaceId: string, pinned: boolean) => void;
+  /**
+   * The per-session menu — chief of staff, close, reload — which the workspace
+   * tree row owns when the queue is off. Queue mode does not draw that row for
+   * these agents, so without it here everything on that menu would be out of
+   * reach for anything in a band.
+   */
+  onOpenActions?: (session: { id: string; label: string; chiefOfStaff?: boolean }, event: ReactMouseEvent) => void;
 }
 
 /**
@@ -57,6 +71,8 @@ function QueueRowView({
   age,
   onSelect,
   onSettle,
+  onPin,
+  onOpenActions,
   testIdPrefix,
 }: {
   row: QueueRow<QueueBandSessionView>;
@@ -64,6 +80,8 @@ function QueueRowView({
   age?: string;
   onSelect: () => void;
   onSettle?: () => void;
+  onPin?: () => void;
+  onOpenActions?: (event: ReactMouseEvent) => void;
   testIdPrefix: string;
 }) {
   const { session } = row;
@@ -72,6 +90,7 @@ function QueueRowView({
       className={`session-item queue-row ${selected ? 'selected' : ''}`.trim()}
       data-testid={`${testIdPrefix}-${session.id}`}
       data-state={session.state}
+      data-workspace-id={row.workspaceId}
       onClick={onSelect}
     >
       <StateIndicator state={session.state} size="md" seed={session.id} reason={session.state_reason} />
@@ -79,6 +98,35 @@ function QueueRowView({
       {session.chiefOfStaff && <ChiefOfStaffBadge />}
       <span className="queue-row-workspace">{row.workspaceTitle}</span>
       {age && <span className="queue-row-age">{age}</span>}
+      {onOpenActions && (
+        <div className="session-actions">
+          <button
+            type="button"
+            className="session-action-btn session-more-btn"
+            data-testid={`session-actions-${session.id}`}
+            onClick={onOpenActions}
+            title="Session actions"
+            aria-label={`Actions for ${session.label}`}
+          >
+            •••
+          </button>
+        </div>
+      )}
+      {onPin && (
+        <button
+          type="button"
+          className="queue-row-pin"
+          data-testid={`queue-pin-${session.id}`}
+          title={`Pin ${row.workspaceTitle} — take it out of the queue`}
+          aria-label={`Pin workspace ${row.workspaceTitle}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onPin();
+          }}
+        >
+          📍
+        </button>
+      )}
       {onSettle && (
         <button
           type="button"
@@ -99,15 +147,18 @@ function QueueRowView({
 }
 
 /**
- * The queue arrangement's two bands, rendered above the workspace tree: the
- * chief in its own anchored slot, then the turns the user owes, oldest first.
+ * The sidebar's standing order: the chief in its own anchored slot, the turns
+ * the user owes oldest first, then the settled rest.
  *
- * The tree below is untouched, so an agent the daemon never promoted is still
- * exactly where it has always been. Rows carry their live state because being
- * in the queue no longer implies being stopped — an agent you steered is still
- * yours until you settle it.
+ * An agent appears in exactly one of these, which is what lets its position
+ * carry meaning. Rows carry their live state in both bands, because neither
+ * band is about whether an agent is running — an agent you steered is still
+ * yours until you settle it, and a settled one may well be working.
+ *
+ * Only pinned and muted workspaces still render as groups, below; they are
+ * places you go and get work rather than a list handed to you.
  */
-export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn }: QueueBandsProps) {
+export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, onPinWorkspace, onOpenActions }: QueueBandsProps) {
   const now = useNow(AGE_TICK_MS);
 
   return (
@@ -117,6 +168,7 @@ export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn }:
           row={bands.chief}
           selected={selectedId === bands.chief.session.id}
           onSelect={() => onSelectSession(bands.chief!.session.id)}
+          onOpenActions={onOpenActions && ((event) => onOpenActions(bands.chief!.session, event))}
           testIdPrefix="queue-chief"
         />
       )}
@@ -135,9 +187,31 @@ export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn }:
             age={formatTurnAge(row.session.turnOpenedAt, now)}
             onSelect={() => onSelectSession(row.session.id)}
             onSettle={() => onSettleTurn(row.session.id)}
+            onPin={onPinWorkspace && (() => onPinWorkspace(row.workspaceId, true))}
+            onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
             testIdPrefix="queue-turn"
           />
         ))
+      )}
+      {bands.settled.length > 0 && (
+        <>
+          <div className="queue-band-header">
+            <span>Settled</span>
+          </div>
+          {bands.settled.map((row) => (
+            // No settle button: it is already settled, and offering the act
+            // again would suggest there is something here to discharge.
+            <QueueRowView
+              key={row.session.id}
+              row={row}
+              selected={selectedId === row.session.id}
+              onSelect={() => onSelectSession(row.session.id)}
+              onPin={onPinWorkspace && (() => onPinWorkspace(row.workspaceId, true))}
+              onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
+              testIdPrefix="queue-settled"
+            />
+          ))}
+        </>
       )}
     </div>
   );
