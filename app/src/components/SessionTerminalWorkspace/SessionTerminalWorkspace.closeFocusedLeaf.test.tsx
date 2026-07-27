@@ -205,6 +205,28 @@ describe('SessionTerminalWorkspace Cmd+W closes the focused leaf', () => {
     expect(onClosePane).not.toHaveBeenCalled();
   });
 
+  // Focus utility terminal (⌘`) focuses the pane without changing activePaneId —
+  // the pane was already the session's active one. The focused tile has to be
+  // released anyway, or the active leaf stays the tile and Cmd+W undocks the
+  // document you just typed away from.
+  it('closes the terminal pane after Focus utility terminal takes focus back from a tile', () => {
+    const { container, onClosePane, onUndockTile } = renderSplit();
+
+    fireEvent.mouseDown(tileEl(container));
+    expect(tileEl(container).className).toContain('active');
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: '`', metaKey: true });
+
+    expect(tileEl(container).className).not.toContain('active');
+    expect(paneEl(container).className).toContain('active');
+
+    fireEvent.keyDown(paneEl(container), { key: 'w', metaKey: true });
+
+    expect(onClosePane).toHaveBeenCalledTimes(1);
+    expect(onClosePane).toHaveBeenCalledWith('pane-term');
+    expect(onUndockTile).not.toHaveBeenCalled();
+  });
+
   // The terminal-pane path is unchanged: Cmd+W with the pane focused closes that
   // pane, never the tile — including after a tile visit.
   it('closes the active terminal pane when the pane is the focused leaf', () => {

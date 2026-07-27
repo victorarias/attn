@@ -264,9 +264,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     const activePaneIdRef = useRef(activePaneId);
     const isActiveSessionRef = useRef(isActiveSession);
     const sessionViewVisibleRef = useRef(isSessionViewVisible);
+    const activeLeafIsTileRef = useRef(false);
 
     activePaneIdRef.current = activePaneId;
     isActiveSessionRef.current = isActiveSession;
+    // Read by callbacks that fire outside render (terminal ready) to avoid
+    // stealing focus from a focused tile.
     sessionViewVisibleRef.current = isSessionViewVisible;
 
     const paneIds = useMemo(() => {
@@ -362,6 +365,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       : null;
     const activeLeafId = focusedTileId || activePaneId || firstTileId || '';
     const activeLeafIsTile = tileLeafById.has(activeLeafId);
+    activeLeafIsTileRef.current = activeLeafIsTile;
 
     const runtimePanes = useMemo(() => ([
       ...agentPanes.filter((pane) => !pane.status || pane.status === 'ready').map((pane) => {
@@ -557,7 +561,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onZoomModeChange?.(Boolean(effectiveZoomedPaneId));
     }, [effectiveZoomedPaneId, onZoomModeChange]);
 
+    // Focusing the terminal is a leaf handoff, not just a DOM focus call: it
+    // has to release any focused tile. `activePaneId` does not change here (the
+    // pane was already the session's active one), so without the release the
+    // tile would stay the active leaf and Cmd+W would undock it while you are
+    // typing in the terminal.
     const focusActivePane = useCallback(() => {
+      setActiveTile(null);
       // Single attempt — terminal is already mounted in every case this fires.
       runtime.focusPane(activePaneId, 0);
     }, [activePaneId, runtime]);
@@ -752,8 +762,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onNavigateOutOfSession(direction);
     }, [activeLeafId, focusLeaf, onNavigateOutOfSession, renderedLayoutTree]);
 
+    // A terminal mounting must not pull focus out of a tile the user is reading:
+    // it would leave DOM focus and the active leaf disagreeing, which is exactly
+    // what makes Cmd+W act on the wrong leaf.
     const focusPaneIfCurrentlyActive = useCallback((paneId: string) => {
       if (!isActiveSessionRef.current || !sessionViewVisibleRef.current || activePaneIdRef.current !== paneId) {
+        return;
+      }
+      if (activeLeafIsTileRef.current) {
         return;
       }
       runtime.focusPane(paneId);
