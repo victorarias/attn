@@ -179,6 +179,16 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			msg:  &protocol.MarkdownAnnotationsSubmitMessage{Path: "/tmp/notes.md", TargetSessionID: "sess-md-submit"},
 			want: "sess-md-submit",
 		},
+		{
+			// Hub→remote regression: a turn's stamps are written by the daemon
+			// that owns the session. Settled locally, a hub would write nothing
+			// the remote knows about, and the endpoint's next snapshot would
+			// report the turn still owed and put the row back.
+			name: "settle_turn",
+			cmd:  protocol.CmdSettleTurn,
+			msg:  &protocol.SettleTurnMessage{SessionID: "sess-settle"},
+			want: "sess-settle",
+		},
 	}
 
 	for _, tc := range cases {

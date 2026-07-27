@@ -1299,6 +1299,14 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.MarkdownAnnotationsSubmitMessage); ok {
 			return typed.TargetSessionID
 		}
+	case protocol.CmdSettleTurn:
+		// The turn's stamps live in the store of the daemon that owns the
+		// session, so settling a remote row has to reach that daemon. Handled
+		// locally it would write nothing the remote knows about, and the next
+		// snapshot from the endpoint would put the row straight back.
+		if typed, ok := msg.(*protocol.SettleTurnMessage); ok {
+			return typed.SessionID
+		}
 	}
 	return ""
 }
