@@ -523,19 +523,19 @@ if it still feels heavy the flip is one predicate entry to revert.
 
 ### Simplification opportunities found while implementing
 
-- `handleStop` now does nothing but `go d.classifySessionState(...)` behind a
-  forced-stop check. With the deferral gone, `classifyOrDeferAfterStop` is no
-  longer a seam and the two remaining callers (`handleStop`, the transcript
-  watcher) could share one narrower entry point.
-- `stateEffectProfile` is down to three booleans that vary together for every
-  cause but `startupRecovery`. If no fourth axis arrives, the profile could
-  collapse to a single `silent` flag on the cause.
+- [x] `classifySessionState` and `runClassifier` moved out of `daemon.go` into
+      `classify_decision.go`, whose own header already described the first as the
+      IO shell around the rules in that file. Pure code move; `daemon.go` is 3650
+      lines rather than 3807.
+- Deleting the deferral collapsed `classifyOrDeferAfterStop` entirely: both
+  callers (`handleStop`, the transcript watcher) now call `classifySessionState`
+  directly, so there is nothing further to narrow there.
 - `sessionStateChange.atPrompt` is a second, narrower channel for something the
   resolver already knows (`resolution.Reason`). Carrying the reason itself
   through the door would let `applyState` ask the question directly instead of
-  having the answer precomputed for it — worth doing if a second reason-dependent
-  effect ever appears.
-- `internal/daemon/daemon.go` is ~5k lines and lost several clusters here. The
-  turn/attention surface (`turn.go`, `session_evidence.go`, `session_state.go`)
-  is now coherent enough that the remaining session-state helpers still in
-  `daemon.go` could move beside it.
+  having the answer precomputed for it. Not worth it for one consumer; revisit if
+  a second reason-dependent effect appears.
+- `stateEffectProfile` does *not* collapse to a single flag, despite looking like
+  it should: `touch` is what separates `resolverObservation` (a re-reading of
+  evidence, which is not itself proof the session is alive) from every other
+  cause. Recorded so the next reader does not try.
