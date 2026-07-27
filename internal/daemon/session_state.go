@@ -59,11 +59,6 @@ type sessionStateChange struct {
 	// name, which is all a daemon-internal transition has to say about itself.
 	// It never affects whether the change commits.
 	origin stateOrigin
-	// atPrompt marks a state the agent reached without ever having taken a turn:
-	// a freshly launched session sitting at its prompt, which resolves to `idle`
-	// exactly as a finished run does. It commits identically; it only must not
-	// open a turn, because there is no result behind it for the user to read.
-	atPrompt bool
 }
 
 // stateOrigin is where a state claim came from, as distinct from the commit rule
@@ -152,7 +147,7 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	// startup recovery: a session that comes back in a state that wants the user
 	// wants the user regardless of what moved it there. Opening is guarded in the
 	// store, so a state re-reported while a turn is already open changes nothing.
-	if !change.atPrompt && attention.OpensTurn(protocol.SessionState(change.state)) {
+	if attention.OpensTurn(protocol.SessionState(change.state)) {
 		d.store.OpenTurnIfClosed(change.sessionID, time.Now())
 	}
 

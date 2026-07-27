@@ -86,10 +86,11 @@ func TestAFinishedRunOwesATurn(t *testing.T) {
 	}
 }
 
-// A session that never ran resolves to idle sitting at its prompt, which looks
-// identical to a finished run. There is no result behind it, so it must not
-// queue — otherwise every launch would land in the queue.
-func TestASessionAtItsPromptOwesNothing(t *testing.T) {
+// A session you launched and have not spoken to resolves to idle sitting at its
+// prompt. Nothing will ever happen in it until you type, so it owes a turn — the
+// same one a finished run owes, which is why the resolver need not distinguish
+// them.
+func TestASessionAtItsPromptOwesATurn(t *testing.T) {
 	d := newTurnDaemon(t)
 	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
 
@@ -97,14 +98,10 @@ func TestASessionAtItsPromptOwesNothing(t *testing.T) {
 		sessionID: "s1",
 		state:     protocol.StateIdle,
 		cause:     resolverObservation{},
-		atPrompt:  true,
 	})
 
-	if d.store.Get("s1").State != protocol.StateIdle {
-		t.Fatal("the state did not commit; the case proves nothing about the turn")
-	}
-	if owed(t, d, "s1") {
-		t.Fatal("a session that never took a turn owes one")
+	if !owed(t, d, "s1") {
+		t.Fatal("a launched session sitting at its prompt owes no turn")
 	}
 }
 

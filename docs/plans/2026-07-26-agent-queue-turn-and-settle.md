@@ -385,8 +385,8 @@ open through the run. That gap is slice 2.
 your plate by itself. It is last on purpose: by then settle is muscle memory, and
 if it still feels heavy the flip is one predicate entry to revert.
 
-- [x] Add `idle` to `OpensTurn`, guarded by `sessionStateChange.atPrompt` so a
-      session that never ran does not queue (see Decisions).
+- [x] Add `idle` to `OpensTurn`. A session launched and never spoken to reaches
+      the same state and queues too (see Decisions).
 - [x] Delete the long-run deferral, `handleSessionVisualized`, the
       `session_visualized` command, the app's 5s dwell timer, the `longRun`
       tracking and its call sites, and `longRunReviewThreshold`.
@@ -400,9 +400,8 @@ if it still feels heavy the flip is one predicate entry to revert.
       list you can actually drain.
       Folded into `real-app:scenario-agent-queue` as two steps: a settled agent
       whose run ends `idle` returns at the bottom, and a split shell pane —
-      registered `idle`, the same state — changes nothing in the band. The
-      pre-existing empty-band assertion on a freshly booted agent is what covers
-      the `atPrompt` guard.
+      registered `idle`, the same state — changes nothing in the band. The first
+      step also asserts an agent queues from the moment it boots to its prompt.
 
 ## Decisions
 
@@ -463,15 +462,19 @@ if it still feels heavy the flip is one predicate entry to revert.
   hand a client everything it needs to recompute membership itself, and any
   client that did would get a different answer — it cannot see the shell, chief,
   pinned, or muted exclusions.
-- **A session sitting at its prompt does not open a turn, even though it
-  resolves to `idle`.** Found in slice 2: `sessionstate` resolves a never-run
-  session at its prompt to `idle` with `ReasonAtPrompt`, indistinguishable at the
-  state level from a finished run. Unguarded, `idle → OpensTurn` would queue every
-  freshly launched agent from the moment it booted. `sessionStateChange.atPrompt`
-  carries the distinction through the state door: the state commits identically,
-  it only skips the open, because there is no result behind it for the user to
-  read. The alternative — letting it queue — was rejected as the same "queue fills
-  with things you did not ask for" failure the exclusions exist to prevent.
+- **A session sitting at its prompt opens a turn like any other.** Victor's call,
+  2026-07-27, reversing the guard slice 2 shipped with. `sessionstate` resolves a
+  never-run session at its prompt to `idle` with `ReasonAtPrompt`,
+  indistinguishable at the state level from a finished run, and slice 2 carried
+  that distinction through the state door on `sessionStateChange.atPrompt` so the
+  launch would not queue — reading the queue as results waiting to be read. The
+  queue is turns you owe, and an agent you launched and have not spoken to is the
+  purest one there is: nothing will ever happen in it until you type. The guard
+  is gone, so `idle` opening a turn needs no exception. Its removal also retires a
+  sharper edge: the guard read `everTookATurn`, which is in-memory evidence scoped
+  to the daemon's lifetime rather than the session's, so after a daemon restart
+  every quiet session resolved `at_prompt` and a run finishing inside the restart
+  gap could be swallowed.
 - **Enabling the mode settles nothing.** A flip that pre-settled the board would
   start the queue empty and fill it as agents stop, which reads better on the
   first screen and hides live turns at the moment the user is least able to
@@ -530,11 +533,8 @@ if it still feels heavy the flip is one predicate entry to revert.
 - Deleting the deferral collapsed `classifyOrDeferAfterStop` entirely: both
   callers (`handleStop`, the transcript watcher) now call `classifySessionState`
   directly, so there is nothing further to narrow there.
-- `sessionStateChange.atPrompt` is a second, narrower channel for something the
-  resolver already knows (`resolution.Reason`). Carrying the reason itself
-  through the door would let `applyState` ask the question directly instead of
-  having the answer precomputed for it. Not worth it for one consumer; revisit if
-  a second reason-dependent effect appears.
+- ~~`sessionStateChange.atPrompt` is a second, narrower channel for something the
+  resolver already knows.~~ Moot: the field is gone with the guard it carried.
 - `stateEffectProfile` does *not* collapse to a single flag, despite looking like
   it should: `touch` is what separates `resolverObservation` (a re-reading of
   evidence, which is not itself proof the session is alive) from every other

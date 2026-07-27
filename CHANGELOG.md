@@ -27,8 +27,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ### Changed
 - **An agent that finishes its run joins the queue too.** A run you asked for
   that ended without a question is still a result nobody has read, so it lands at
-  the bottom of the list. A freshly launched agent sitting at its prompt is
-  unaffected — it has nothing behind it to read yet.
+  the bottom of the list. So does an agent you just launched and have not spoken
+  to yet: nothing will happen in it until you type, which makes it a turn you owe
+  like any other.
 
 ### Removed
 - **The long-run review gate is gone.** Runs over five minutes used to hold their
