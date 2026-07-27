@@ -360,11 +360,16 @@ async function main() {
       const workspace = await client.request('get_workspace', { sessionId: alpha.sessionId });
       const targetPaneId = workspace.activePaneId || workspace.panes?.[0]?.paneId;
       await client.request('split_pane', { sessionId: alpha.sessionId, targetPaneId, direction: 'vertical' });
+      // Waiting for `idle` specifically, not merely for the session to exist: a
+      // pane is registered in the spawn-time `working` color and the resolver
+      // settles it a beat later, so asserting on first sight reads the wrong
+      // state. Idle is the state under test — it is what opens a turn — so the
+      // exclusion is only proved once the shell is actually in it.
       const shell = await pollFor(async () => {
         const state = await client.request('get_state');
-        return (state.sessions || []).find((session) => session.agent === 'shell') || null;
-      }, 'the shell pane to register as a session', 30_000);
-      runner.assert(shell.state === 'idle', `the shell sits in idle, the state that opens a turn: got ${shell.state}`);
+        const session = (state.sessions || []).find((entry) => entry.agent === 'shell');
+        return session?.state === 'idle' ? session : null;
+      }, 'the shell pane to register and settle into idle', 30_000);
       await delay(3000);
       const after = await queueState(client);
       runner.assert(
