@@ -14,9 +14,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   the queue when it wants you — waiting for input, waiting for approval, or in a
   state attn cannot explain — and the queue is ordered by how long you have owed
   it, oldest first, across every workspace. The chief of staff sits in its own
-  slot above the list rather than competing with the work it dispatched. Your
-  workspaces stay exactly where they are underneath: the queue only adds rows, so
-  an agent that never makes it into the list is still where you left it.
+  slot above the list rather than competing with the work it dispatched. An agent
+  that owes you nothing is still right there below, under *Settled*.
 - **Settle (⌘⇧E) is how a turn ends, and the only way it ends.** Prompting an
   agent does not take it off your list — you sent it back to work, and only you
   know whether that finished what you owed it. Settling an agent that is still
