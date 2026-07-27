@@ -9,6 +9,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-27]
 
 ### Fixed
+- **The focus ring around a terminal pane is whole again.** On an agent or shell
+  pane the accent ring flashed on open and then collapsed to a single line above
+  the header, because the terminal's own background painted over it. The ring
+  now draws over pane content, so a focused terminal is outlined on all four
+  sides exactly like a focused markdown tile.
 - **A docked markdown file can now be focused like any terminal pane.** Focus in
   a workspace used to belong to terminals only, so a markdown or notebook tile —
   the surface an agent opens when it shows you a file — could never be the
