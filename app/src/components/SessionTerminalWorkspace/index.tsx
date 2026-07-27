@@ -227,12 +227,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onRequestTileContent,
   }, ref) {
     const [maximizedLeafId, setMaximizedLeafId] = useState<string | null>(null);
-    const [zoomedLeafId, setZoomedLeafId] = useState<string | null>(null);
+    // Zoom is a mode, not a target: it always widens whichever leaf is focused,
+    // so it is a flag rather than a leaf id that has to chase focus.
+    const [zoomActive, setZoomActive] = useState(false);
     // The docked tile that currently owns workspace focus, or null when a
     // terminal pane does. `activePaneId` is derived from the focused session, so
     // it can only ever name an agent pane; this is the other half of the focus
     // model, and the two combine into `activeLeafId` below.
-    const [activeTileId, setActiveTileId] = useState<string | null>(null);
+    const [activeTile, setActiveTile] = useState<{ tileId: string; whileActivePaneId: string } | null>(null);
     // The agent pane whose bound-ticket overlay is open (one per workspace at a
     // time), or null. Pane-scoped and non-modal — not part of blockingOverlayOpen.
     const [ticketOverlayPaneId, setTicketOverlayPaneId] = useState<string | null>(null);
@@ -349,15 +351,17 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     // session-derived active pane; otherwise (a tile-only workspace) the first
     // tile. Every leaf-scoped action — close, zoom, maximize, directional
     // navigation — and the `active` focus chrome key off this, not activePaneId.
-    const focusedTileId = activeTileId && tileLeafById.has(activeTileId) ? activeTileId : null;
+    // A focused tile is recorded against the pane that was active when it took
+    // focus, so session-derived pane focus moving (sidebar select, pane click,
+    // close) takes focus back from the tile by simply no longer matching — no
+    // reset effect, and no frame where the stale tile still reads as focused.
+    const focusedTileId = activeTile
+      && activeTile.whileActivePaneId === activePaneId
+      && tileLeafById.has(activeTile.tileId)
+      ? activeTile.tileId
+      : null;
     const activeLeafId = focusedTileId || activePaneId || firstTileId || '';
     const activeLeafIsTile = tileLeafById.has(activeLeafId);
-
-    // Session-derived pane focus moving (sidebar select, pane click, close)
-    // takes focus back from any tile.
-    useEffect(() => {
-      setActiveTileId(null);
-    }, [activePaneId]);
 
     const runtimePanes = useMemo(() => ([
       ...agentPanes.filter((pane) => !pane.status || pane.status === 'ready').map((pane) => {
@@ -417,7 +421,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       [paneIds, tileLeafById],
     );
     const effectivePaneId = maximizedLeafId && leafIds.includes(maximizedLeafId) ? maximizedLeafId : null;
-    const effectiveZoomedPaneId = zoomedLeafId && leafIds.includes(zoomedLeafId) ? zoomedLeafId : null;
+    // Zoom follows focus by construction: the widened leaf is the focused one,
+    // and it stops zooming on its own once that leaf leaves the layout.
+    const effectiveZoomedPaneId = zoomActive && leafIds.includes(activeLeafId) ? activeLeafId : null;
     const baseLayoutTree = useMemo(() => (
       workspace.layoutTree ? applyRatioOverrides(workspace.layoutTree, ratioOverrides) : null
     ), [workspace.layoutTree, ratioOverrides]);
@@ -536,15 +542,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       }
     }, [maximizedLeafId, leafIds]);
 
-    useEffect(() => {
-      if (!zoomedLeafId) {
-        return;
-      }
-      if (!leafIds.includes(zoomedLeafId)) {
-        setZoomedLeafId(null);
-      }
-    }, [leafIds, zoomedLeafId]);
-
     // Close the ticket overlay if its pane leaves the layout (e.g. the pane was
     // closed while the overlay was open), mirroring the maximizedPaneId cleanup.
     useEffect(() => {
@@ -555,15 +552,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         setTicketOverlayPaneId(null);
       }
     }, [paneIds, ticketOverlayPaneId]);
-
-    useEffect(() => {
-      if (!effectiveZoomedPaneId || effectivePaneId) {
-        return;
-      }
-      if (effectiveZoomedPaneId !== activeLeafId) {
-        setZoomedLeafId(activeLeafId);
-      }
-    }, [activeLeafId, effectivePaneId, effectiveZoomedPaneId]);
 
     useEffect(() => {
       onZoomModeChange?.(Boolean(effectiveZoomedPaneId));
@@ -728,27 +716,27 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [activeLeafId, activeLeafIsTile, handleClosePane, onUndockTile]);
 
     const toggleMaximizeActivePane = useCallback(() => {
-      setZoomedLeafId(null);
+      setZoomActive(false);
       setMaximizedLeafId((current) => (current ? null : activeLeafId));
     }, [activeLeafId]);
 
     const toggleZoomActivePane = useCallback(() => {
       setMaximizedLeafId(null);
-      setZoomedLeafId((current) => (current === activeLeafId ? null : activeLeafId));
-    }, [activeLeafId]);
+      setZoomActive((current) => !current);
+    }, []);
 
     // Focus a leaf by id: a tile takes DOM focus in place (the session's pane
     // focus is left alone), a pane goes through the session-level focus path.
     const focusLeaf = useCallback((leafId: string) => {
       if (tileLeafById.has(leafId)) {
-        setActiveTileId(leafId);
+        setActiveTile({ tileId: leafId, whileActivePaneId: activePaneId });
         focusTile(leafId);
         return;
       }
-      setActiveTileId(null);
+      setActiveTile(null);
       onFocusPane(leafId);
       runtime.focusPane(leafId);
-    }, [focusTile, onFocusPane, runtime, tileLeafById]);
+    }, [activePaneId, focusTile, onFocusPane, runtime, tileLeafById]);
 
     const handleMovePane = useCallback((direction: TerminalNavigationDirection) => {
       // In maximize mode renderedLayoutTree is already the lone visible leaf, so

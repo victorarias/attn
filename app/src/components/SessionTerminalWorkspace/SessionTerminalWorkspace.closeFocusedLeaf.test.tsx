@@ -124,6 +124,24 @@ describe('SessionTerminalWorkspace leaf focus', () => {
     expect(document.activeElement).toBe(tileBody);
   });
 
+  // Zoom and maximize follow the focused leaf, so they land on a tile too —
+  // ⌘⇧Z used to be able to target only a terminal pane.
+  it('zooms and maximizes the focused tile', () => {
+    const { container } = renderSplit();
+    const surface = container.querySelector('.session-terminal-workspace') as HTMLElement;
+
+    fireEvent.mouseDown(tileEl(container));
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'z', metaKey: true, shiftKey: true });
+    expect(surface.getAttribute('data-zoomed-pane-id')).toBe('tile-notes');
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Enter', metaKey: true, shiftKey: true });
+    expect(surface.getAttribute('data-maximized-pane-id')).toBe('tile-notes');
+    expect(surface.getAttribute('data-zoomed-pane-id')).toBe('');
+    // The maximized tile renders alone, keeping its identity as a tile leaf.
+    expect(container.querySelector('[data-pane-kind="agent"]')).toBeNull();
+    expect(tileEl(container).getAttribute('data-pane-id')).toBe('tile-notes');
+  });
+
   // Clicking back onto the terminal returns the focus display to the pane. The
   // pane's own focus goes through onFocusPane (activePaneId is owned upstream),
   // so the assertion here is the callback plus the chrome.
