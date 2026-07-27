@@ -1860,6 +1860,10 @@ export function useUiAutomationBridge({
           // twice is what made a row look like it moved.
           treeSessionIds: Array.from(document.querySelectorAll('.session-list [data-testid^="sidebar-session-"]'))
             .map((row) => (row.getAttribute('data-testid') || '').slice('sidebar-session-'.length)),
+          // The groups themselves, which is what lets a caller tell "this group
+          // does not draw that agent" apart from "this group is not drawn yet".
+          treeWorkspaceIds: Array.from(document.querySelectorAll('.session-list [data-testid^="sidebar-workspace-"]'))
+            .map((group) => (group.getAttribute('data-testid') || '').slice('sidebar-workspace-'.length)),
         };
       }
       case 'chief_of_staff_get_state':

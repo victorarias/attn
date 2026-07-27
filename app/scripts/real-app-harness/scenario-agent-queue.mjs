@@ -450,10 +450,14 @@ async function main() {
       }, 'the tree back before pinning the chief workspace', 15_000);
       await client.request('dom_click', { selector: `[data-testid="pin-workspace-${chiefWorkspaceId}"]` });
       await client.request('set_setting', { key: 'queue_mode_enabled', value: 'true' });
+      // Wait for the pinned group to be drawn, not merely for the band to come
+      // back: the pin travels to the daemon and returns as a broadcast, and
+      // reading the tree before it lands would let "the group does not draw the
+      // chief" pass because nothing is drawn at all.
       const chiefPinned = await pollFor(async () => {
         const state = await queueState(client);
-        return state.present && state.chief ? state : null;
-      }, 'the band back with the chief workspace pinned', 15_000);
+        return state.present && state.chief && state.treeWorkspaceIds.includes(chiefWorkspaceId) ? state : null;
+      }, 'the band back with the chief workspace pinned and its group drawn', 15_000);
       runner.assert(
         chiefPinned.chief.id === beta.sessionId,
         `the chief keeps its slot while its workspace is pinned: ${JSON.stringify(chiefPinned.chief)}`,
