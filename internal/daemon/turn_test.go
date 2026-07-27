@@ -3,6 +3,9 @@ package daemon
 import (
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/victorarias/attn/internal/pty"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
@@ -222,5 +225,57 @@ func TestPinnedAndMutedWorkspacesAreFilteredAtRead(t *testing.T) {
 				t.Fatal("the exclusion suppressed the stamp; it must filter at read")
 			}
 		})
+	}
+}
+
+// A settle must survive the agent working on with no bracket open.
+//
+// This is the live failure that produced the resolver's settle window, stated
+// where it was felt. Claude repaints its title every ~1.92s while a `/compact`
+// runs, and a compaction runs between turns, so the previous turn's bracket is
+// closed and the title is the only evidence left. Reading a gap past the 1.5s
+// heartbeat TTL as a settle made the resolver publish idle whenever a frame aged
+// out and working when the next one landed — and every one of those idle edges
+// opens a turn. The session the user had just settled was back in the queue a
+// second later, with no way to get it out for as long as the compaction ran.
+func TestASettleSurvivesAnAgentRepaintingSlowerThanTheHeartbeatTTL(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "s1", protocol.SessionAgentClaude, "ws1")
+
+	// A turn ran and ended: the bracket opened and closed, which is the state a
+	// compaction starts from.
+	d.recordBracketEvidence("s1", protocol.StateWorking)
+	d.recordBracketEvidence("s1", protocol.StateIdle)
+	moveTo(d, "s1", protocol.StateIdle)
+	if !owed(t, d, "s1") {
+		t.Fatal("a finished turn owes nothing; nothing to settle")
+	}
+
+	d.handleSettleTurn(&protocol.SettleTurnMessage{Cmd: protocol.CmdSettleTurn, SessionID: "s1"})
+	if owed(t, d, "s1") {
+		t.Fatal("settle did not close the turn")
+	}
+
+	// The compaction: title frames at the measured cadence, resolver ticks once
+	// a second, so the same frame is read at several ages.
+	const repaint = 1920 * time.Millisecond
+	base := time.Now()
+	for tick := 1; tick <= 30; tick++ {
+		at := base.Add(time.Duration(tick) * time.Second)
+		d.recordPTYEvidence("s1", pty.Observation{
+			Source: pty.SourceHeartbeat,
+			Claim:  "busy",
+			Detail: "⠐ compacting",
+			At:     base.Add((at.Sub(base) / repaint) * repaint),
+		})
+		d.resolveAllSessions(at)
+
+		if owed(t, d, "s1") {
+			t.Fatalf("tick %d (%s in): the settled turn re-opened while the agent was still working",
+				tick, at.Sub(base))
+		}
+	}
+	if state := d.store.Get("s1").State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working: the agent was painting busy frames throughout", state)
 	}
 }

@@ -13,7 +13,9 @@ var now = time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 
 func testPolicy() Policy {
 	return Policy{
-		HeartbeatTTL:      time.Second,
+		HeartbeatTTL:         time.Second,
+		HeartbeatSettleAfter: 3 * time.Second,
+
 		StaleAfter:        4 * time.Second,
 		StuckAfter:        90 * time.Second,
 		GuardianDwell:     60 * time.Second,
@@ -642,11 +644,15 @@ func TestHeartbeatFreshnessBoundary(t *testing.T) {
 	}{
 		{age: policy.HeartbeatTTL - time.Millisecond, want: protocol.SessionStateWorking},
 		{age: policy.HeartbeatTTL, want: protocol.SessionStateWorking},
-		// Past the TTL the agent is no longer visibly running, and with no bracket
-		// open there is nothing outstanding: the turn is over. It resolves idle
-		// rather than unknown because the heartbeat is real evidence of a settle,
-		// not an absence of evidence.
-		{age: policy.HeartbeatTTL + time.Millisecond, want: protocol.SessionStateIdle},
+		// Past the TTL the frame stops outranking the edges below it, but a busy
+		// frame going quiet is not yet a settle: the agent is held working until
+		// the silence passes HeartbeatSettleAfter.
+		{age: policy.HeartbeatTTL + time.Millisecond, want: protocol.SessionStateWorking},
+		{age: policy.HeartbeatSettleAfter, want: protocol.SessionStateWorking},
+		// Only a silence past the settle window says the turn is over. It resolves
+		// idle rather than unknown because the heartbeat is real evidence of a
+		// settle, not an absence of evidence.
+		{age: policy.HeartbeatSettleAfter + time.Millisecond, want: protocol.SessionStateIdle},
 	} {
 		// LastBusyAt travels with a busy frame — the daemon stamps both — and a
 		// settle needs a turn to have run.
@@ -657,6 +663,48 @@ func TestHeartbeatFreshnessBoundary(t *testing.T) {
 		}
 		if got := Resolve(e, policy, now); got.State != tc.want {
 			t.Fatalf("heartbeat aged %s resolved %s, want %s", tc.age, got.State, tc.want)
+		}
+	}
+}
+
+// A repaint cadence wider than the TTL must not make the session flap.
+//
+// This is the shape of the live failure that produced the settle window. Claude
+// repaints its title every ~1.92s while a `/compact` runs, and a compaction runs
+// between turns, so the previous turn's bracket is already closed and the
+// heartbeat is the only level in the table. Reading a gap past the TTL as a
+// settle therefore produced a state change every second: idle when the frame
+// aged out, working when the next one landed, for as long as the compaction ran.
+//
+// The cost was not the color. Every one of those idle edges opens a turn the
+// user owes, so settling the session put it back in the queue a second later and
+// there was no way to get it out.
+func TestARepaintGapWiderThanTheTTLDoesNotFlapTheSession(t *testing.T) {
+	policy := testPolicy()
+	// Measured on claude 2.1.220 during a compaction, and periodic to the
+	// millisecond. The property under test is that it sits between the two
+	// windows, which is where every flap lives.
+	const repaint = 1920 * time.Millisecond
+	if repaint <= policy.HeartbeatTTL || repaint >= policy.HeartbeatSettleAfter {
+		t.Fatalf("repaint %s must fall between the TTL %s and the settle window %s for this test to mean anything",
+			repaint, policy.HeartbeatTTL, policy.HeartbeatSettleAfter)
+	}
+
+	// The resolver ticks once a second against evidence that only advances every
+	// repaint, which is what makes the same evidence resolve twice at different
+	// ages.
+	for tick := 1; tick <= 30; tick++ {
+		at := now.Add(time.Duration(tick) * time.Second)
+		lastFrame := now.Add((at.Sub(now) / repaint) * repaint)
+		e := Evidence{
+			TurnEverOpened: true,
+			Heartbeat:      &Observation{Source: SourceHeartbeat, Claim: ClaimBusy, ObservedAt: lastFrame},
+			LastBusyAt:     lastFrame,
+			LastMovement:   lastFrame,
+		}
+		if got := Resolve(e, policy, at); got.State != protocol.SessionStateWorking {
+			t.Fatalf("tick %d: a busy frame %s old resolved %s/%s, want working: a repaint gap is not a settle",
+				tick, at.Sub(lastFrame), got.State, got.Reason)
 		}
 	}
 }
@@ -796,6 +844,13 @@ func TestPolicyForUsesTheMeasuredPerAgentTTL(t *testing.T) {
 		// considers live, which is self-contradictory.
 		if policy.StaleAfter <= policy.HeartbeatTTL {
 			t.Fatalf("StaleAfter %s must exceed HeartbeatTTL %s", policy.StaleAfter, policy.HeartbeatTTL)
+		}
+		// The whole point of the settle window is that it is the wider of the two.
+		// Collapsed onto the TTL, every repaint gap past the TTL settles the
+		// session and the next frame revives it.
+		if policy.HeartbeatSettleAfter <= policy.HeartbeatTTL {
+			t.Fatalf("HeartbeatSettleAfter %s must exceed HeartbeatTTL %s",
+				policy.HeartbeatSettleAfter, policy.HeartbeatTTL)
 		}
 	}
 }

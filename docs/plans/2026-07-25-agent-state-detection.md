@@ -918,6 +918,26 @@ attention".
   rejected: deriving one from the session's own repaint interval lets a stalling
   agent stretch its own deadline, delaying exactly the detection the heartbeat
   exists to provide.
+- **Settling on heartbeat silence needs its own window, wider than the TTL
+  (`HeartbeatSettleAfter`, 5s).** The entry above is still right that the TTL
+  must stay short, and this is what it missed: the TTL was also being used to
+  decide the opposite question. `heartbeat_settled` fires when no bracket is open
+  and the last busy frame has aged out, so a repaint gap wider than the TTL
+  settled the session and the next frame revived it — a state change every
+  second, indefinitely, with no second fault required.
+  Witnessed live on 2026-07-27: a claude session running `/compact` repaints its
+  title every ~1.92s, and a compaction runs *between* turns, so the previous
+  turn's bracket is already closed and the title is the only evidence left. The
+  session alternated working/idle at 1Hz for the length of the compaction. The
+  cost was not the color — every idle edge opens a turn, so the queue refilled a
+  second after each settle and could not be emptied.
+  The two questions are now sized separately: the TTL for "is it running right
+  now", which precedence needs and which stays at 1.5s, and
+  `HeartbeatSettleAfter` for "has it stopped for good", which must clear the
+  agent's *worst* repaint gap. The latency is paid only where the classifier
+  declined to publish a verdict, since a normal turn end settles on its Stop hook
+  and its verdict. An explicit not-busy frame still settles immediately — the
+  window applies only to a busy frame that has gone quiet.
 - **Approvals depend on hooks, with no fallback.** Victor's call, 2026-07-25. The
   heartbeat structurally cannot corroborate an approval (the agent genuinely is
   not running), which is why the hybrid's residual 27.6s/43.4s worst streaks are

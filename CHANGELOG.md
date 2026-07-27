@@ -44,6 +44,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   group header, which queue mode no longer draws. The per-session menu — chief of
   staff, close, reload — is on the queue rows for the same reason.
 
+### Fixed
+- **A settled agent no longer comes straight back while it is compacting.** A
+  Claude session running `/compact` repaints its terminal title more slowly than
+  it does mid-turn, and attn read each of those pauses as the turn ending: the
+  session flickered between green and settled once a second, and every one of
+  those flickers put it back in the queue a second after you settled it. attn now
+  waits for the title to stay quiet before calling a turn over, so a pause in the
+  repaint is no longer mistaken for the end of the work.
+
 ### Removed
 - **The long-run review gate is gone.** Runs over five minutes used to hold their
   final color back until you looked at the session. A finished run now publishes

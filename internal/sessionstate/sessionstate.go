@@ -153,9 +153,17 @@ type Evidence struct {
 // is testing instead of inheriting it.
 type Policy struct {
 	// HeartbeatTTL is how long a busy heartbeat keeps a session working on its
-	// own. It must exceed the agent's title repaint interval by enough margin to
-	// survive a PTY read that batches chunks under load.
+	// own, outranking every edge below it. It is a precedence window, not a
+	// liveness one: it has to be short, because a busy frame that stays
+	// authoritative too long suppresses the approval and question edges that are
+	// announced precisely when the agent stops painting frames.
 	HeartbeatTTL time.Duration
+	// HeartbeatSettleAfter is how long busy frames must have stopped before their
+	// absence is read as the turn having ended. It answers a different question
+	// from HeartbeatTTL — "has it stopped for good" rather than "is it running
+	// right now" — and so it must be sized against the agent's worst repaint gap
+	// rather than its typical one.
+	HeartbeatSettleAfter time.Duration
 	// StaleAfter is the heartbeat silence that closes a bracket whose closing
 	// hook never arrived. It must exceed the longest silence the agent produces
 	// mid-turn, or a slow tool call reads as a finished turn.
@@ -184,6 +192,24 @@ type Policy struct {
 const (
 	claudeHeartbeatTTL = 1500 * time.Millisecond
 	codexHeartbeatTTL  = 500 * time.Millisecond
+	// defaultHeartbeatSettleAfter is how long busy title frames must have stopped
+	// before their absence settles a session that has no bracket open.
+	//
+	// It is separate from HeartbeatTTL because the two windows answer different
+	// questions, and the settle used to borrow the TTL's answer. That is wrong in
+	// both directions: the TTL is sized to stay out of the way of approval edges,
+	// which pushes it down, while a settle needs to survive the agent's worst
+	// repaint gap, which pushes it up. Measured on claude 2.1.220 during a
+	// `/compact`, where the title repaints every ~1.92s — comfortably past the
+	// 1.5s TTL — with the previous turn's bracket already closed: the resolver
+	// alternated working/idle once a second for as long as the compaction ran.
+	//
+	// Five seconds clears that gap with margin for a PTY read batching under
+	// load, and the latency it adds is bounded to one case. A turn that ends
+	// normally settles on its Stop hook and its classifier verdict; this clause
+	// is the fallback for when the classifier declines, and being five seconds
+	// late there is far cheaper than a session that cannot be settled at all.
+	defaultHeartbeatSettleAfter = 5 * time.Second
 	// defaultStaleAfter is the heartbeat silence after which an open bracket stops
 	// being believed. It is consulted only when a closing hook was lost — a turn
 	// whose Stop arrives settles immediately regardless — so the whole trade is
@@ -237,7 +263,9 @@ const (
 // bracket early.
 func PolicyFor(agent string) Policy {
 	policy := Policy{
-		HeartbeatTTL:      codexHeartbeatTTL,
+		HeartbeatTTL:         codexHeartbeatTTL,
+		HeartbeatSettleAfter: defaultHeartbeatSettleAfter,
+
 		StaleAfter:        defaultStaleAfter,
 		StuckAfter:        defaultStuckAfter,
 		GuardianDwell:     guardianDwell,
@@ -264,6 +292,7 @@ const (
 	ReasonPromptIdle        Reason = "prompt_idle"
 	ReasonBracketStale      Reason = "bracket_stale"
 	ReasonHeartbeatSettled  Reason = "heartbeat_settled"
+	ReasonHeartbeatGap      Reason = "heartbeat_gap"
 	ReasonSettleGrace       Reason = "settle_grace"
 	ReasonAwaitingVerdict   Reason = "awaiting_verdict"
 	ReasonBackgroundWork    Reason = "background_work"
@@ -423,6 +452,21 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// before the agent has taken one, which showed up live as an idle blip
 	// seconds after launch.
 	if e.Heartbeat != nil && everTookATurn(e) && !e.TurnOpen && !e.ToolOpen {
+		// The latest frame still says busy; it has only gone quiet for longer
+		// than the TTL. That is a repaint gap, not a settle, and the two are
+		// distinguishable: an agent whose turn is over stops painting busy frames
+		// for good, so waiting out HeartbeatSettleAfter separates them at the cost
+		// of settling that much later in the fallback case.
+		//
+		// Without this, a gap wider than the TTL settles the session and the next
+		// frame un-settles it, once per gap, for as long as the agent keeps
+		// working with no bracket open — which is exactly what a `/compact`
+		// between turns produces. Each of those idle edges opens a turn the user
+		// owes, so a queue the user had just settled refilled itself a second
+		// later.
+		if e.Heartbeat.Claim == ClaimBusy && !heartbeatSilentFor(e, now, policy.HeartbeatSettleAfter) {
+			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonHeartbeatGap, Detail: e.Heartbeat.Detail}
+		}
 		return settled(e, ReasonHeartbeatSettled, policy, now)
 	}
 
