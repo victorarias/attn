@@ -29,27 +29,34 @@ export interface QueueBands<TSession extends QueueBandSession> {
   chief: QueueRow<TSession> | null;
   /** Turns the user owes, oldest first. */
   turns: QueueRow<TSession>[];
+  /** Everything else you could go and look at, in a stable order. */
+  settled: QueueRow<TSession>[];
 }
 
 /**
- * Derive the queue bands that sit above the workspace tree.
+ * Derive the sidebar's standing order: the chief, the turns you owe, and the
+ * settled rest.
  *
- * The tree itself is not an input to this: the queue is additive, so a promoted
- * agent appears in both the band and its workspace group and the tree below is
- * left exactly as queue-mode-off renders it. That duplication is the point — it
- * is the only defence against an agent that needs the user and never enters the
- * queue.
+ * Every agent lands in exactly one band, which is what makes a row's position
+ * mean something. Pinned and muted workspaces are in none of them — they keep
+ * the tree's grouped rendering, because a pinned workspace is a place you go
+ * and get work rather than a list handed to you, and a muted one is out of
+ * sight by definition.
  *
  * Membership is read, never derived: `turnOwed` is the daemon's answer, which
- * already accounts for the exclusions a client cannot see. Ordering is by
+ * already accounts for the exclusions a client cannot see. Turn ordering is by
  * `turnOpenedAt` ascending — how long the turn has been owed, which does not
- * move when the agent changes state under the user.
+ * move when the agent changes state under the user. Settled keeps the tree's
+ * own order — workspace rank, then the workspace's session order — which is
+ * deliberately not a state order: an agent nobody is asking you about should
+ * not jump around the list as it works.
  */
 export function buildQueueBands<TSession extends QueueBandSession>(
   workspaces: WorkspaceWithSessions<TSession>[],
 ): QueueBands<TSession> {
   let chief: QueueRow<TSession> | null = null;
   const turns: QueueRow<TSession>[] = [];
+  const settled: QueueRow<TSession>[] = [];
 
   for (const workspace of workspaces) {
     for (const session of workspace.sessions) {
@@ -64,8 +71,13 @@ export function buildQueueBands<TSession extends QueueBandSession>(
         }
         continue;
       }
+      if (workspace.pinned || workspace.muted) {
+        continue;
+      }
       if (session.turnOwed) {
         turns.push(row);
+      } else {
+        settled.push(row);
       }
     }
   }
@@ -79,5 +91,5 @@ export function buildQueueBands<TSession extends QueueBandSession>(
     return a.session.id < b.session.id ? -1 : 1;
   });
 
-  return { chief, turns };
+  return { chief, turns, settled };
 }

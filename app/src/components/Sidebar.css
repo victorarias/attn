@@ -1194,7 +1194,8 @@
   font-variant-numeric: tabular-nums;
 }
 
-.queue-row-settle {
+.queue-row-settle,
+.queue-row-pin {
   flex: 0 0 auto;
   background: none;
   border: none;
@@ -1206,10 +1207,13 @@
 }
 
 .queue-row:hover .queue-row-settle,
-.queue-row-settle:focus-visible {
+.queue-row:hover .queue-row-pin,
+.queue-row-settle:focus-visible,
+.queue-row-pin:focus-visible {
   opacity: 1;
 }
 
-.queue-row-settle:hover {
+.queue-row-settle:hover,
+.queue-row-pin:hover {
   color: var(--color-text-primary);
 }

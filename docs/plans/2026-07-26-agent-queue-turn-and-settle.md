@@ -26,11 +26,10 @@ workspaces as their own band, a designed empty state, and default-on.
 
 ## The shape
 
-Queue mode is **today's sidebar plus a band on top**. The workspace tree below is
-untouched and complete, so an agent the daemon fails to promote is still exactly
-where it has always been — that is the vision's "reorders, never hides", taken
-literally. The daemon decides who owes a turn and stamps it on every session it
-broadcasts; the app renders and sorts.
+Queue mode is **the vision's standing order**: chief, then the turns you owe,
+then pinned workspaces, then the settled rest, then muted. An agent appears in
+exactly one place. The daemon decides who owes a turn and stamps it on every
+session it broadcasts; the app renders and sorts.
 
 ```text
 Sidebar, queue mode on               Sidebar, queue mode off (unchanged)
@@ -39,8 +38,11 @@ Sidebar, queue mode on               Sidebar, queue mode off (unchanged)
     api-refactor  working    12m         session row
     docs-pass     waiting     4m       workspace group
     flaky-tests   idle        1m         ...
-  ── (the tree, unchanged) ──          ── Muted ──
-    workspace group                      workspace group
+  ── Settled ──                        ── Muted ──
+    exo-main      idle                   workspace group
+    md-focus      working
+  ── Pinned ──
+    workspace group
       session row
   ── Muted ──
     workspace group
@@ -48,7 +50,18 @@ Sidebar, queue mode on               Sidebar, queue mode off (unchanged)
 
 A queued row shows its live state, because being in the queue no longer implies
 being stopped. `api-refactor` above is running: you steered it and have not yet
-said you are done with it.
+said you are done with it. So does a settled row: settling says you are finished
+with an agent, not that it stopped.
+
+*Your turn* and *Settled* are flat — one agent is one row, never a workspace and
+never a group with a count. Pinned and muted workspaces keep the tree's grouped
+rendering, because those are places you go and get work rather than a list handed
+to you.
+
+Slices 1 and 2 shipped a narrower shape — a band on top of the untouched
+workspace tree — which drew every queued agent twice, gave settled agents no band
+of their own, and made a row look like it moved when only one of its two copies
+did. Slice 3 is what makes the sidebar the standing order. See Decisions.
 
 ## Data model
 
@@ -402,6 +415,47 @@ if it still feels heavy the flip is one predicate entry to revert.
       whose run ends `idle` returns at the bottom, and a split shell pane —
       registered `idle`, the same state — changes nothing in the band. The first
       step also asserts an agent queues from the moment it boots to its prompt.
+
+### Slice 3 — the standing order
+
+*Puts into use:* the vision's sidebar, rather than a band bolted onto the old
+one. Slices 1 and 2 rendered queue mode as *Your turn* over the untouched
+workspace tree, so a queued agent was drawn twice, settled agents had no band,
+and a row appeared to move when only one of its copies did. This makes an agent
+appear exactly once, in the band that says what it is.
+
+Nothing here is daemon work: `turn_owed` and the exclusions already say
+everything the app needs. It is entirely a rendering and reachability change.
+
+```text
+buildQueueBands(workspaces) -> { chief, turns, settled }
+  turns    = turnOwed, oldest turnOpenedAt first          (flat, as today)
+  settled  = the rest, from workspaces that are neither pinned nor muted
+             (flat; excludes the chief, which has its own slot)
+  pinned + muted workspaces are not in the bands at all — the tree renders them
+```
+
+- [x] `buildQueueBands` gains `settled`, ordered by workspace then label so it
+      does not shuffle as states change. Pinned and muted workspaces contribute
+      to neither band.
+- [x] `QueueBands` renders a *Settled* header and its rows. A settled row shows
+      live state and has no settle button; it is already settled.
+- [x] `Sidebar` renders only pinned workspaces as groups while queue mode is on.
+      The muted section is unchanged — it is already its own collapsible section
+      below, not part of the tree.
+- [x] Reachability, because the group header is the only place `onPinWorkspace`
+      and `onMuteWorkspace` exist today and pinning is the vision's way *out* of
+      the queue: a right-click menu on any flat row pins or mutes its workspace,
+      plus a ⌘K command for both. Without this, turning the queue on is a
+      one-way door.
+- [x] Tile-only workspaces have no agent and so no row. They are already hidden
+      unless pinned or `showSessionless` is on; when it is on, they render in the
+      pinned-style tree so the toggle keeps meaning something.
+- [x] Live verification: extend `real-app:scenario-agent-queue` — a queued agent
+      appears exactly once (in the band, not in the tree), settling moves it to
+      *Settled* rather than into a workspace group, a pinned workspace keeps its
+      group and its agent stays out of both bands, and pin from the row menu
+      moves an agent out of the queue.
 
 ## Decisions
 

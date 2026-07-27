@@ -411,7 +411,16 @@ export function Sidebar({
   };
 
   const isWorkspaceVisible = (workspace: SidebarWorkspace) => workspace.pinned || !isSessionless(workspace) || showSessionless;
-  const visibleWorkspaces = workspaces.filter(isWorkspaceVisible);
+  // Queue mode renders every ordinary agent as a flat row in a band, so drawing
+  // its workspace group as well would show the same agent twice and make it look
+  // like a row moved when only one of the two copies did. What is left in the
+  // tree is what the bands deliberately exclude: pinned workspaces, and — when
+  // the toggle asks for them — tile-only ones, which have no agent and so no row
+  // anywhere else.
+  const isTreeWorkspace = (workspace: SidebarWorkspace) => (
+    !queue || workspace.pinned || isSessionless(workspace)
+  );
+  const visibleWorkspaces = workspaces.filter((workspace) => isWorkspaceVisible(workspace) && isTreeWorkspace(workspace));
   const visibleVisualOrder = visualOrder.filter(isWorkspaceVisible);
   const visibleVisualIndexByWorkspaceId = new Map(
     visibleVisualOrder.map((workspace, index) => [workspace.id, index]),
@@ -900,6 +909,7 @@ export function Sidebar({
           selectedId={selectedId}
           onSelectSession={onSelectSession}
           onSettleTurn={(id) => onSettleTurn?.(id)}
+          onPinWorkspace={onPinWorkspace}
         />
       )}
 
