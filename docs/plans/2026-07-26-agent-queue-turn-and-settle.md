@@ -395,9 +395,14 @@ if it still feels heavy the flip is one predicate entry to revert.
 - [x] Protocol: drop `needs_review_after_long_run` and `session_visualized`;
       regenerate; bump. Drop the hub's equality check for the flag.
 - [x] Confirm a 5m+ run publishes its verdict immediately rather than on view.
-- [ ] Live verification: an agent settled while working reappears when it
+- [x] Live verification: an agent settled while working reappears when it
       finishes; a shell pane never appears; a day's worth of finished agents is a
       list you can actually drain.
+      Folded into `real-app:scenario-agent-queue` as two steps: a settled agent
+      whose run ends `idle` returns at the bottom, and a split shell pane —
+      registered `idle`, the same state — changes nothing in the band. The
+      pre-existing empty-band assertion on a freshly booted agent is what covers
+      the `atPrompt` guard.
 
 ## Decisions
 

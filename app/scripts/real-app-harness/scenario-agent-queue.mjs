@@ -21,10 +21,13 @@
  *   4. settling removes it, and only settling does,
  *   5. a settled agent that wants the user again returns at the bottom, behind
  *      the turn that has been owed longer,
- *   6. the chief of staff occupies its own slot and never the band,
- *   7. turning the arrangement off and back on mid-session returns the same
+ *   6. a settled agent whose run finishes without asking anything returns too —
+ *      a result nobody has read is still the user's — while a shell pane and an
+ *      agent sitting at its prompt, which reach the same `idle` state, never do,
+ *   7. the chief of staff occupies its own slot and never the band,
+ *   8. turning the arrangement off and back on mid-session returns the same
  *      queue with the same agent still selected,
- *   8. a settle survives a daemon restart.
+ *   9. a settle survives a daemon restart.
  *
  * Prereqs: `claude` on PATH; a non-production profile install with the
  * automation layer; a built `./attn` (or ATTN_HARNESS_BIN) for the restart step.
@@ -205,6 +208,11 @@ async function main() {
       createdSessionIds.push(alpha.sessionId);
       // The sidebar only exists once there is something to list, so the band's
       // empty state is checked here rather than against a sessionless app.
+      //
+      // An agent that has booted to its prompt resolves to `idle`, the same
+      // state a finished run resolves to, and `idle` opens a turn. It must not
+      // queue anyway: there is no result behind it to read. This is the only
+      // place that distinction is observable end to end.
       const empty = await pollFor(async () => {
         const state = await queueState(client);
         return state.present ? state : null;
@@ -295,6 +303,77 @@ async function main() {
         'alpha behind beta, whose turn has been owed longer',
         60_000,
       );
+    });
+
+    await runner.step('a_finished_run_returns_the_agent_to_the_queue', async () => {
+      // Settle alpha first, so nothing but the finish itself can bring it back.
+      await client.request('dom_click', { selector: `[data-testid="queue-settle-${alpha.sessionId}"]` });
+      await waitForTurns(client, [beta.sessionId], 'alpha settled again');
+
+      await submitPrompt(
+        client,
+        alpha.sessionId,
+        alpha.paneId,
+        'Reply with the single word: done. Do not ask me anything and do not use any tools.',
+      );
+      await pollFor(
+        () => (observer.getSession(alpha.sessionId)?.state === 'working' ? 'working' : null),
+        'alpha to start the run',
+        60_000,
+      );
+      const duringRun = await queueState(client);
+      runner.assert(
+        !turnIds(duringRun).includes(alpha.sessionId),
+        `a settled agent stays out of the band while it works: ${JSON.stringify(turnIds(duringRun))}`,
+      );
+
+      const finished = await pollFor(
+        () => {
+          const state = observer.getSession(alpha.sessionId)?.state;
+          return state && state !== 'working' ? state : null;
+        },
+        'alpha to finish the run',
+        180_000,
+      );
+      runner.log('alpha finished', { state: finished });
+      runner.assert(
+        finished === 'idle',
+        `the run ended without a question, so it resolves to idle: got ${finished}`,
+      );
+      await waitForTurns(
+        client,
+        [beta.sessionId, alpha.sessionId],
+        'alpha back at the bottom because its run finished',
+        60_000,
+      );
+    });
+
+    await runner.step('a_shell_pane_never_queues', async () => {
+      // A shell pane is a real store session, registered idle at birth and left
+      // there. Now that idle opens a turn, only the shell exclusion keeps every
+      // ⌘` terminal out of a queue nothing could ever settle.
+      const before = turnIds(await queueState(client));
+      const workspace = await client.request('get_workspace', { sessionId: alpha.sessionId });
+      const targetPaneId = workspace.activePaneId || workspace.panes?.[0]?.paneId;
+      await client.request('split_pane', { sessionId: alpha.sessionId, targetPaneId, direction: 'vertical' });
+      const shell = await pollFor(async () => {
+        const state = await client.request('get_state');
+        return (state.sessions || []).find((session) => session.agent === 'shell') || null;
+      }, 'the shell pane to register as a session', 30_000);
+      runner.assert(shell.state === 'idle', `the shell sits in idle, the state that opens a turn: got ${shell.state}`);
+      await delay(3000);
+      const after = await queueState(client);
+      runner.assert(
+        !turnIds(after).includes(shell.id),
+        `the shell pane is not a turn: ${JSON.stringify(turnIds(after))}`,
+      );
+      runner.assert(
+        JSON.stringify(turnIds(after)) === JSON.stringify(before),
+        `opening a terminal changed nothing in the band: ${JSON.stringify(before)} -> ${JSON.stringify(turnIds(after))}`,
+      );
+      const paneWithShell = await client.request('get_workspace', { sessionId: alpha.sessionId });
+      const shellPaneId = (paneWithShell.paneIds || []).find((paneId) => paneId.includes(shell.id));
+      await client.request('close_pane', { sessionId: alpha.sessionId, paneId: shellPaneId }).catch(() => {});
     });
 
     await runner.step('the_chief_never_queues', async () => {
