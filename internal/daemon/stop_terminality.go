@@ -46,18 +46,21 @@ func hasPendingSessionCron(msg *protocol.StopMessage) bool {
 // It says nothing about what color the session should be. That used to be its
 // return value, and the state it named was applied here — the second writer this
 // phase removed. What the session looks like while it waits follows from the
-// facts recorded alongside this call, where the precedence between outstanding
-// background work and a parked schedule now lives.
+// facts recorded alongside this call.
+//
+// A parked cron is deliberately not one of these. It reads like one — something
+// will resume this session later — but the reason above does not hold for it:
+// the turn is over, the transcript is flushed, and the wakeup may be hours away.
+// Treating it as a yield meant a cron-parked session was never classified at
+// all, so a turn that ended by asking the user something was never discovered to
+// have asked. The schedule is recorded as a fact either way, and what it earns
+// is a name for the *outcome* of the settle — see sessionstate.parked — not a
+// reason to skip finding out what the outcome was.
 //
 // relaxBackgroundWork drops the background-work rule. It is set for the chief of
 // staff: a chief that has merely armed a Monitor to watch its delegations (or a
 // poll loop) is async-waiting, not working, and pegging it green makes the
-// at-a-glance "is the chief actually working?" signal meaningless. With it set a
-// chief's background work no longer defers the end of its turn, while a pending
-// scheduled wakeup still does.
+// at-a-glance "is the chief actually working?" signal meaningless.
 func stopIsNonTerminal(msg *protocol.StopMessage, relaxBackgroundWork bool) bool {
-	if !relaxBackgroundWork && hasActiveBackgroundTask(msg) {
-		return true
-	}
-	return hasPendingSessionCron(msg)
+	return !relaxBackgroundWork && hasActiveBackgroundTask(msg)
 }

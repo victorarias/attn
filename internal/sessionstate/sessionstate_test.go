@@ -765,27 +765,44 @@ func TestAPromptIdleConfirmationRetiresAnOutstandingBackgroundTask(t *testing.T)
 	}
 }
 
-// A parked schedule is a promise to come back at a known time, so the agent
-// sitting at its prompt does not contradict it. Only the background half is
-// retired by the confirmation, and this pins that the two are not fixed together.
-func TestAPromptIdleConfirmationDoesNotRetireAParkedCron(t *testing.T) {
+// What `scheduled` is worth is the window before the agent has been sitting
+// there long enough to be worth a look.
+//
+// A wakeup on the calendar is a claim about the future, and it was never a
+// reason to leave the user out of the present: the turn that just ended produced
+// a result nobody has read, and the next run being scheduled does not read it
+// for them. But a tight `/loop` picks itself up in seconds, and putting that in
+// front of the user every cycle would be noise. Claude's confirmation, 60s after
+// a settle nobody answered, separates the two — and it is the same thing the
+// user would act on themselves.
+func TestAParkedWakeupStopsExcusingTheAgentOnceItIsVisiblyIdling(t *testing.T) {
 	policy := testPolicy()
 	e := Evidence{
 		TurnEverOpened: true,
 		PendingCron:    true,
-		PromptIdleAt:   now.Add(-time.Minute),
 		LastBusyAt:     now.Add(-2 * time.Minute),
 		LastMovement:   now.Add(-time.Minute),
 	}
-	if got := Resolve(e, policy, now); got.State != protocol.SessionStateScheduled {
-		t.Fatalf("resolved %s/%s, want scheduled: a wakeup outlives the prompt confirmation", got.State, got.Reason)
+
+	// Before the confirmation: the wakeup is the better description, and the
+	// session stays out of the queue.
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateScheduled || got.Reason != ReasonCronPending {
+		t.Fatalf("resolved %s/%s before the confirmation, want scheduled/cron_pending", got.State, got.Reason)
 	}
 
-	// And with both outstanding, retiring the background half leaves the wakeup
-	// describing the session rather than falling through to a settle.
+	// After it: the agent is sitting at its prompt with a finished turn behind
+	// it, which is a turn the user owes whatever the calendar says.
+	e.PromptIdleAt = now.Add(-time.Second)
+	got := Resolve(e, policy, now)
+	if got.State != protocol.SessionStateIdle || got.Reason != ReasonPromptIdle {
+		t.Fatalf("resolved %s/%s after the confirmation, want idle/prompt_idle", got.State, got.Reason)
+	}
+
+	// And with a background task also outstanding, the confirmation retires both
+	// facts at once rather than one of them handing off to the other.
 	e.BackgroundWork = true
-	if got := Resolve(e, policy, now); got.State != protocol.SessionStateScheduled {
-		t.Fatalf("resolved %s/%s with both facts set, want scheduled", got.State, got.Reason)
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateIdle {
+		t.Fatalf("resolved %s/%s with both facts set, want idle", got.State, got.Reason)
 	}
 }
 

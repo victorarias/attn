@@ -902,6 +902,26 @@ attention".
   because nothing is claimed to be running. A dead worker is still caught, by the
   clauses that actually detect one — process exit above, and an open bracket that
   went silent. The cron expression is not needed and is not read.
+  The same category error had a second home, in `stopIsNonTerminal`: a
+  cron-parked Stop was treated as a yield, so the end-of-turn work — including
+  classification — was skipped entirely. The stated reason (the transcript is not
+  flushed yet) is true of background work and false of a wakeup hours away, and
+  the effect was that a cron-parked session was never asked how its turn ended,
+  which made the clause fix above unreachable from the classifier. Removed;
+  measured live, `scheduled` now lands 7s after the Stop instead of 60.
+- **A parked cron excuses the agent only until it is visibly idling.** Victor's
+  call, 2026-07-28, on seeing the first fix land `scheduled` on the same tick as
+  the `idle_prompt` notification: a wakeup on the calendar is a claim about the
+  future and was never a reason to leave the user out of the present — the turn
+  that just ended produced a result nobody has read, and the next run being
+  scheduled does not read it for them. What `scheduled` is worth is the window
+  before that: a tight `/loop` picks itself up in seconds, and queueing it every
+  cycle would be noise. Claude's confirmation, 60s after a settle nobody
+  answered, separates the two and is the same signal the user would act on
+  themselves. So `parked` also yields to `promptIdleConfirmed`.
+  This narrows `scheduled` to wakeups that fire inside a minute, which is the
+  case it should cover. Codex has no session crons, so the absence of a
+  counterpart notification there costs nothing.
 - **`StopFailure`, `PreCompact`/`PostCompact`, and `agent_id` are the hooks worth
   wiring; the rest of the 30 are not.** Surveyed by logging every hook claude
   fires (2.1.220) over a live session. `StopFailure` is the only report that a

@@ -581,13 +581,23 @@ func settled(e Evidence, fallback Reason, policy Policy, now time.Time) Resoluti
 }
 
 // parked renames a settle that asks nothing of anyone after the wakeup that will
-// end it.
+// end it, for as long as the wakeup is the better description.
 //
 // Only that outcome. A turn that stopped on a question is still stopped on a
 // question with a cron registered, and saying `scheduled` there would hide the
 // one thing the user needs to know behind a fact about the calendar.
+//
+// And only until the harness says the agent is sitting at its prompt. A wakeup
+// on the calendar is a claim about the future, and it was never a reason to
+// leave the user out of the present: the turn that just ended produced a result
+// nobody has read, and the next run being scheduled does not read it for them.
+// What `scheduled` is worth is the window before that — a tight `/loop` picks
+// itself up in seconds, and putting it in front of the user every cycle would be
+// noise. Claude's confirmation, 60s after a settle nobody answered, is what
+// separates the two, and it is the same signal the user would act on themselves:
+// the agent has been sitting there long enough to be worth a look.
 func parked(r Resolution, e Evidence) Resolution {
-	if !e.PendingCron || r.State != protocol.SessionStateIdle {
+	if !e.PendingCron || r.State != protocol.SessionStateIdle || promptIdleConfirmed(e) {
 		return r
 	}
 	return Resolution{State: protocol.SessionStateScheduled, Reason: ReasonCronPending, Detail: r.Detail}
