@@ -113,7 +113,20 @@ authoritative.
   can't reproduce the same configuration across clients/screen sizes. Dragging a
   tile shows a transient ghost + target highlight and always lands docked; a
   drop outside any pane is a no-op (the tile stays where it was).
-- **Terminal arrow-key navigation skips tiles.** A tile is not a focus target.
+- **A docked tile is a focus target, like a terminal pane.** Focus is a property
+  of a *leaf*, not of a session: the workspace's focused leaf is whichever
+  pane or tile the user last clicked or navigated to, and every leaf-scoped
+  action — ⌘W close, ⌘⇧Enter zoom/maximize, ⌘⌥arrow navigation, the focus
+  chrome — targets it. Focusing a tile does not change which session is active
+  (a tile has no session of its own; markdown tiles only carry a Send binding),
+  so `activePaneId` stays session-derived and agent-pane-only, and the frontend
+  combines the two into the workspace's active leaf. Splitting (⌘D) stays
+  terminal-only: the daemon splits beside an agent pane, so the shortcut is
+  inert while a tile is focused rather than acting on some other terminal.
+  (Revises the original rule, which excluded tiles from navigation and focus
+  entirely. That made a docked file unclosable by ⌘W — the key acted on the
+  terminal focused before it — and left no way to tell which leaf had the
+  keyboard.)
 - Dropping onto a terminal docks on that terminal's nearest edge; dropping near
   the border between two terminals slots the tile between them.
 

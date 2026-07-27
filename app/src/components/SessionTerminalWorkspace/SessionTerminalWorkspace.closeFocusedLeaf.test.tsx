@@ -59,9 +59,14 @@ function paneAndTileWorkspace(): TerminalWorkspaceState {
   };
 }
 
-function renderSplit(overrides: { onClosePane?: () => void; onUndockTile?: (tileId: string) => void } = {}) {
+function renderSplit(overrides: {
+  onClosePane?: () => void;
+  onUndockTile?: (tileId: string) => void;
+  onFocusPane?: (paneId: string) => void;
+} = {}) {
   const onClosePane = overrides.onClosePane ?? vi.fn();
   const onUndockTile = overrides.onUndockTile ?? vi.fn();
+  const onFocusPane = overrides.onFocusPane ?? vi.fn();
   const utils = render(
     <SessionTerminalWorkspace
       workspaceId="workspace-split"
@@ -74,7 +79,7 @@ function renderSplit(overrides: { onClosePane?: () => void; onUndockTile?: (tile
       eventRouter={createPaneRuntimeEventRouterController()}
       onSplitPane={vi.fn()}
       onClosePane={onClosePane}
-      onFocusPane={vi.fn()}
+      onFocusPane={onFocusPane}
       onNavigateOutOfSession={vi.fn()}
       onUndockTile={onUndockTile}
       tileContents={{
@@ -87,8 +92,54 @@ function renderSplit(overrides: { onClosePane?: () => void; onUndockTile?: (tile
     />,
     { wrapper: NotebookSurfaceTestWrapper },
   );
-  return { ...utils, onClosePane, onUndockTile };
+  return { ...utils, onClosePane, onUndockTile, onFocusPane };
 }
+
+function tileEl(container: HTMLElement): HTMLElement {
+  return container.querySelector('[data-pane-kind="tile"]') as HTMLElement;
+}
+
+function paneEl(container: HTMLElement): HTMLElement {
+  return container.querySelector('[data-pane-kind="agent"]') as HTMLElement;
+}
+
+describe('SessionTerminalWorkspace leaf focus', () => {
+  // Clicking a tile must be enough — no programmatic focus() — for the tile to
+  // become the focused leaf and take real DOM focus. Everything else here
+  // (Cmd+W routing, the ⌘Enter send gate, keyboard scrolling) rides on it.
+  it('makes a clicked tile the active leaf and gives its body DOM focus', () => {
+    const { container } = renderSplit();
+
+    const tile = tileEl(container);
+    expect(tile.getAttribute('data-pane-id')).toBe('tile-notes');
+    expect(tile.className).not.toContain('active');
+
+    fireEvent.mouseDown(tile);
+
+    expect(tile.className).toContain('active');
+    expect(paneEl(container).className).not.toContain('active');
+    expect(container.querySelector('.session-terminal-workspace')
+      ?.getAttribute('data-active-leaf-id')).toBe('tile-notes');
+    const tileBody = tile.querySelector('.workspace-dock-tile-body') as HTMLElement;
+    expect(document.activeElement).toBe(tileBody);
+  });
+
+  // Clicking back onto the terminal returns the focus display to the pane. The
+  // pane's own focus goes through onFocusPane (activePaneId is owned upstream),
+  // so the assertion here is the callback plus the chrome.
+  it('returns the active leaf to the terminal pane when it is clicked', () => {
+    const { container, onFocusPane } = renderSplit();
+
+    fireEvent.mouseDown(tileEl(container));
+    expect(tileEl(container).className).toContain('active');
+
+    fireEvent.mouseDown(paneEl(container));
+
+    expect(onFocusPane).toHaveBeenCalledWith('pane-term');
+    expect(tileEl(container).className).not.toContain('active');
+    expect(paneEl(container).className).toContain('active');
+  });
+});
 
 describe('SessionTerminalWorkspace Cmd+W closes the focused leaf', () => {
   // Regression: Cmd+W from inside a docked notebook tile used to close the
@@ -97,26 +148,25 @@ describe('SessionTerminalWorkspace Cmd+W closes the focused leaf', () => {
   it('undocks the focused tile instead of closing the active terminal pane', () => {
     const { container, onClosePane, onUndockTile } = renderSplit();
 
-    const tile = container.querySelector('[data-pane-kind="tile"]');
-    expect(tile?.getAttribute('data-pane-id')).toBe('tile-notes');
-    const tileBody = tile?.querySelector('.workspace-dock-tile-body') as HTMLElement;
-    expect(tileBody).toBeTruthy();
-    tileBody.focus();
+    const tile = tileEl(container);
+    fireEvent.mouseDown(tile);
 
-    fireEvent.keyDown(tileBody, { key: 'w', metaKey: true });
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'w', metaKey: true });
 
     expect(onUndockTile).toHaveBeenCalledTimes(1);
     expect(onUndockTile).toHaveBeenCalledWith('tile-notes');
     expect(onClosePane).not.toHaveBeenCalled();
   });
 
-  // The terminal-pane path is unchanged: Cmd+W with focus on a terminal pane
-  // closes that pane (activePaneId), never the tile.
-  it('closes the active terminal pane when focus is not inside a tile', () => {
+  // The terminal-pane path is unchanged: Cmd+W with the pane focused closes that
+  // pane, never the tile — including after a tile visit.
+  it('closes the active terminal pane when the pane is the focused leaf', () => {
     const { container, onClosePane, onUndockTile } = renderSplit();
 
-    const pane = container.querySelector('[data-pane-kind="agent"]') as HTMLElement;
-    expect(pane?.getAttribute('data-pane-id')).toBe('pane-term');
+    const pane = paneEl(container);
+    expect(pane.getAttribute('data-pane-id')).toBe('pane-term');
+    fireEvent.mouseDown(tileEl(container));
+    fireEvent.mouseDown(pane);
 
     fireEvent.keyDown(pane, { key: 'w', metaKey: true });
 
