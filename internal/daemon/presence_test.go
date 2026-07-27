@@ -93,7 +93,6 @@ func TestIsUserPresenceCommandAllowlist(t *testing.T) {
 	present := []string{
 		protocol.CmdSessionSelected,
 		protocol.CmdWorkspaceSelected,
-		protocol.CmdSessionVisualized,
 		protocol.CmdPRVisited,
 		protocol.CmdPtyInput,
 		protocol.CmdPtyResize,

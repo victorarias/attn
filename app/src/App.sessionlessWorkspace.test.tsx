@@ -243,7 +243,7 @@ describe('tile-only (sessionless) workspace selection and render', () => {
       sendFetchPRDetails: vi.fn(async () => ({ success: true })),
       sendEnsureRepo: vi.fn(async () => ({ success: true, path: '/tmp/repo' })),
       sendSubscribeGitStatus: fn, sendUnsubscribeGitStatus: fn,
-      sendSessionSelected: fn, sendWorkspaceSelected: mockSendWorkspaceSelected, sendSessionVisualized: fn,
+      sendSessionSelected: fn, sendWorkspaceSelected: mockSendWorkspaceSelected,
       sendWorkspaceClosePane: vi.fn(async () => ({ success: true })),
       sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
       requestTileContent: fn,

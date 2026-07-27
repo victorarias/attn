@@ -372,7 +372,6 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 		session.StateSince = current.StateSince
 		session.StateUpdatedAt = current.StateUpdatedAt
 	}
-	d.clearLongRunTracking(msg.ID)
 	if err := d.store.AddChecked(session); err != nil {
 		if req.hasPluginDriver {
 			d.abortPluginSessionLaunch(msg.ID, "launch_failed")

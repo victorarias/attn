@@ -3925,10 +3925,6 @@ type Session struct {
 	// MainRepo corresponds to the JSON schema field "main_repo".
 	MainRepo *string `json:"main_repo,omitempty,omitzero"`
 
-	// NeedsReviewAfterLongRun corresponds to the JSON schema field
-	// "needs_review_after_long_run".
-	NeedsReviewAfterLongRun *bool `json:"needs_review_after_long_run,omitempty,omitzero"`
-
 	// NudgeFiresAt corresponds to the JSON schema field "nudge_fires_at".
 	NudgeFiresAt *string `json:"nudge_fires_at,omitempty,omitzero"`
 
@@ -4112,14 +4108,6 @@ type SessionUnregisteredMessage struct {
 
 	// Session corresponds to the JSON schema field "session".
 	Session Session `json:"session"`
-}
-
-type SessionVisualizedMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// ID corresponds to the JSON schema field "id".
-	ID string `json:"id"`
 }
 
 type SessionsUpdatedMessage struct {

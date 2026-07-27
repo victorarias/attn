@@ -385,18 +385,24 @@ open through the run. That gap is slice 2.
 your plate by itself. It is last on purpose: by then settle is muscle memory, and
 if it still feels heavy the flip is one predicate entry to revert.
 
-- [ ] Add `idle` to `OpensTurn`.
-- [ ] Delete the long-run deferral, `handleSessionVisualized`, the
+- [x] Add `idle` to `OpensTurn`, guarded by `sessionStateChange.atPrompt` so a
+      session that never ran does not queue (see Decisions).
+- [x] Delete the long-run deferral, `handleSessionVisualized`, the
       `session_visualized` command, the app's 5s dwell timer, the `longRun`
       tracking and its call sites, and `longRunReviewThreshold`.
-- [ ] Delete `sessionstate.IdleStale`, `Policy.IdleStaleAfter`,
+- [x] Delete `sessionstate.IdleStale`, `Policy.IdleStaleAfter`,
       `defaultIdleStaleAfter`, and their tests.
-- [ ] Protocol: drop `needs_review_after_long_run` and `session_visualized`;
+- [x] Protocol: drop `needs_review_after_long_run` and `session_visualized`;
       regenerate; bump. Drop the hub's equality check for the flag.
-- [ ] Confirm a 5m+ run publishes its verdict immediately rather than on view.
-- [ ] Live verification: an agent settled while working reappears when it
+- [x] Confirm a 5m+ run publishes its verdict immediately rather than on view.
+- [x] Live verification: an agent settled while working reappears when it
       finishes; a shell pane never appears; a day's worth of finished agents is a
       list you can actually drain.
+      Folded into `real-app:scenario-agent-queue` as two steps: a settled agent
+      whose run ends `idle` returns at the bottom, and a split shell pane —
+      registered `idle`, the same state — changes nothing in the band. The
+      pre-existing empty-band assertion on a freshly booted agent is what covers
+      the `atPrompt` guard.
 
 ## Decisions
 
@@ -457,6 +463,15 @@ if it still feels heavy the flip is one predicate entry to revert.
   hand a client everything it needs to recompute membership itself, and any
   client that did would get a different answer — it cannot see the shell, chief,
   pinned, or muted exclusions.
+- **A session sitting at its prompt does not open a turn, even though it
+  resolves to `idle`.** Found in slice 2: `sessionstate` resolves a never-run
+  session at its prompt to `idle` with `ReasonAtPrompt`, indistinguishable at the
+  state level from a finished run. Unguarded, `idle → OpensTurn` would queue every
+  freshly launched agent from the moment it booted. `sessionStateChange.atPrompt`
+  carries the distinction through the state door: the state commits identically,
+  it only skips the open, because there is no result behind it for the user to
+  read. The alternative — letting it queue — was rejected as the same "queue fills
+  with things you did not ask for" failure the exclusions exist to prevent.
 - **Enabling the mode settles nothing.** A flip that pre-settled the board would
   start the queue empty and fill it as agents stop, which reads better on the
   first screen and hides live turns at the moment the user is least able to
@@ -505,3 +520,22 @@ if it still feels heavy the flip is one predicate entry to revert.
   as the only exit, the two verbs are almost always pressed together.
 - ⌘1–9 and ⌘↑/⌘↓ still address the workspace tree in queue mode. Whether they
   should address the bands instead is a question for the standing-order rock.
+
+### Simplification opportunities found while implementing
+
+- `handleStop` now does nothing but `go d.classifySessionState(...)` behind a
+  forced-stop check. With the deferral gone, `classifyOrDeferAfterStop` is no
+  longer a seam and the two remaining callers (`handleStop`, the transcript
+  watcher) could share one narrower entry point.
+- `stateEffectProfile` is down to three booleans that vary together for every
+  cause but `startupRecovery`. If no fourth axis arrives, the profile could
+  collapse to a single `silent` flag on the cause.
+- `sessionStateChange.atPrompt` is a second, narrower channel for something the
+  resolver already knows (`resolution.Reason`). Carrying the reason itself
+  through the door would let `applyState` ask the question directly instead of
+  having the answer precomputed for it — worth doing if a second reason-dependent
+  effect ever appears.
+- `internal/daemon/daemon.go` is ~5k lines and lost several clusters here. The
+  turn/attention surface (`turn.go`, `session_evidence.go`, `session_state.go`)
+  is now coherent enough that the remaining session-state helpers still in
+  `daemon.go` could move beside it.

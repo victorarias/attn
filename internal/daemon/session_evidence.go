@@ -462,11 +462,6 @@ func (d *Daemon) resolveAllSessions(now time.Time) {
 		if !ok {
 			continue
 		}
-		// Read live rather than mirrored into the table on every mutation. The
-		// deferral is set and consumed from five places, and a copy that drifts from
-		// the flag the UI reads would show a review as pending in one and done in the
-		// other.
-		evidence.AwaitingLongRunReview = d.sessionNeedsReviewAfterLongRun(sessionID)
 		policy := sessionstate.PolicyFor(string(session.Agent))
 		resolution := sessionstate.Resolve(evidence, policy, now)
 		d.publishResolution(sessionID, session.State, resolution, sessionstate.DwellFor(resolution.State, evidence, policy), now)
@@ -580,6 +575,7 @@ func (d *Daemon) publishResolution(sessionID string, current protocol.SessionSta
 			source: stateSourceResolver,
 			detail: resolutionDetail(resolution),
 		},
+		atPrompt: resolution.Reason == sessionstate.ReasonAtPrompt,
 	})
 }
 

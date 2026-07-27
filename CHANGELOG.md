@@ -24,6 +24,17 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   comes back the next time it wants you. Everything you have not settled is still
   there after a restart.
 
+### Changed
+- **An agent that finishes its run joins the queue too.** A run you asked for
+  that ended without a question is still a result nobody has read, so it lands at
+  the bottom of the list. A freshly launched agent sitting at its prompt is
+  unaffected — it has nothing behind it to read yet.
+
+### Removed
+- **The long-run review gate is gone.** Runs over five minutes used to hold their
+  final color back until you looked at the session. A finished run now publishes
+  what it actually is straight away, and the queue is what carries it to you.
+
 ## [2026-07-26]
 
 ### Added

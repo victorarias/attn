@@ -19,7 +19,6 @@ func TestCommandMetaCoversAllCommands(t *testing.T) {
 		protocol.CmdFilesEdited,
 		protocol.CmdQuery,
 		protocol.CmdHeartbeat,
-		protocol.CmdSessionVisualized,
 		protocol.CmdSessionSelected,
 		protocol.CmdTriggerNudge,
 		protocol.CmdMuteWorkspace,
@@ -143,12 +142,6 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			cmd:  protocol.CmdUnregister,
 			msg:  &protocol.UnregisterMessage{ID: "sess-unregister"},
 			want: "",
-		},
-		{
-			name: "session_visualized",
-			cmd:  protocol.CmdSessionVisualized,
-			msg:  &protocol.SessionVisualizedMessage{ID: "sess-visualized"},
-			want: "sess-visualized",
 		},
 		{
 			name: "session_selected",

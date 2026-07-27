@@ -16,7 +16,6 @@ func isUserPresenceCommand(cmd string) bool {
 	switch cmd {
 	case protocol.CmdSessionSelected,
 		protocol.CmdWorkspaceSelected,
-		protocol.CmdSessionVisualized,
 		protocol.CmdPRVisited,
 		protocol.CmdPtyInput,
 		protocol.CmdPtyResize:
