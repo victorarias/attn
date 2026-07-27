@@ -22,6 +22,28 @@ Three faults on record in `$APPLOCALDATA/debug/terminal-diagnostics.jsonl`
 | 19:09:33 | `write` | `Unreachable code should not be executed` in `ghostty_terminal_write` (wasm 510→219→213→328→460) | first PTY write after fit resize 59→60 @58 rows |
 | 19:09:56 | `write` | same trap, same stack | 23s after recovery: remount at 60 → drag resizes 75…93→73→66→67→133→134 → first write → trap |
 
+A fourth fault mode was found synthetically (fuzz sweep, 2026-07-27, verified
+2/2 deterministic): an **infinite loop** — `resize()` never returns, 100% CPU,
+no trap. Frozen as `app/scripts/repro-ghostty-vt-resize-hang.mjs`:
+
+- 59x58 terminal, one 153-char write mixing truncated OSC 8 fragments,
+  box-drawing, and a 104-char overflowing `w` run (plain ASCII of the same
+  length does **not** reproduce — the content is load-bearing), then
+  `resize(69)` → `resize(68)` → `resize(67)`. The second consecutive narrow
+  hangs.
+- Boundary-bisected requirements: widen ≥ +10 cols (59→69 hangs, 59→68
+  doesn't), then two further resize calls (one narrow alone doesn't hang;
+  narrow-then-widen also hangs).
+- Reproduces identically through **both** app resize call sites: plain
+  `resize()` (reflow) and the mode-7 no-reflow wrapper. The app's
+  `resizeGhosttyWithoutReflow` dance is **not** the enabler.
+- The production trap signatures (`write` unreachable, render OOB) were *not*
+  synthetically reproduced in ~1500 seeded iterations across five content/
+  resize strategies. The hang is a sibling finding in the same
+  resize/reflow+OSC-8 territory (hyperlinks again — same family as the June
+  `startHyperlink` fix), but equating it with the production traps is
+  unproven.
+
 Key facts established:
 
 - Both write traps land on the **first content write after a burst of
@@ -92,17 +114,15 @@ trap → recoverFromModelFault → noteRecovery(modelFault) → remount epoch
 
 ## Phase 1 — Deterministic repro (gates everything)
 
-- [ ] Land a fuzz/replay harness that loads the real vendored wasm through the
-      real ghostty-web wrapper (pattern: `app/src/utils/ghosttyHyperlinks.test.ts`),
-      generates codex-TUI-like content (alt-screen repaints, OSC 8 hyperlinks,
-      wide chars, soft-wrapped primary scrollback), and replays production's
-      exact resize semantics: mixed `resizeGhosttyWithoutReflow` and plain
-      `resize()`, single-column bursts up and down, stale-width writes after
-      resize. Seeded and minimizing. (A first version exists in the session
-      scratchpad, `fuzz.mjs`; sweep was still running when this plan was
-      written — fold its result in here.)
-- [ ] If fuzzing does not reproduce: add **capture-on-fault** instrumentation
-      and wait for the next real fault (this class recurs; 3 faults today).
+- [x] Fuzz/replay harness against the real vendored wasm through the real
+      ghostty-web wrapper (pattern: `app/src/utils/ghosttyHyperlinks.test.ts`),
+      codex-TUI-like content, production resize semantics. **Outcome: found
+      and minimized the resize-hang repro** (see Evidence), frozen as
+      `app/scripts/repro-ghostty-vt-resize-hang.mjs` (exit 0 = fixed build,
+      1 = hang, 2 = trap — it is the bisect test). The production trap
+      signatures did not fall out of ~1500 iterations.
+- [ ] Add **capture-on-fault** instrumentation for the *trap* fault modes and
+      wait for the next real fault (this class recurs; 3 faults today).
       Per-pane bounded ring of raw model inputs, dumped into the existing
       `ghostty_model_fault` diagnostics record:
 
@@ -125,19 +145,25 @@ type ModelOpRing = Array<
 
 ## Phase 2 — Root-cause discrimination (with repro in hand)
 
-```text
-repro crashes with plain resize() substituted for the no-reflow wrapper?
-├─ yes → pure core bug at 29d4aba
-│        └─ bisect ghostty 29d4aba..<last old-C-API commit>, wasm-build each
-│           step (zig 0.15.2 while it works), find fixing commit → Phase 3A/3B
-└─ no  → the mode-7 no-reflow dance is the enabler
-         ├─ still bisect (the fix may exist upstream regardless)
-         └─ evaluate 3C alongside
-```
+**Answered for the hang** (2026-07-27): it reproduces with plain `resize()`
+and with the mode-7 wrapper alike → pure core bug at `29d4aba`, not enabled by
+the app's resize dance. Option 3C is off the table as a primary fix.
 
-Note the bisect ceiling: the old ghostty-web wasm-api patch only applies up to
-the commit where upstream landed the new Terminal C API. Find that boundary
-commit first; it caps how far forward 3B can go.
+Remaining Phase 2 work:
+
+- [ ] Bisect ghostty `29d4aba..<last old-C-API commit>` using
+      `repro-ghostty-vt-resize-hang.mjs` as the test (wasm-build each step;
+      zig 0.15.2 while the range allows). Find the first commit where the
+      hang disappears — or learn it is unfixed upstream even at the boundary.
+- [ ] Find the bisect ceiling first: the commit where upstream landed the new
+      Terminal C API is where the old ghostty-web wasm-api patch stops
+      applying; it caps how far forward 3B can go.
+- [ ] Hang vs. traps: the hang repro is the bisect vehicle, but the
+      production faults are traps. After building a hang-fixed wasm, run a
+      long fuzz soak + the live divider-drag soak (Phase 4) to test whether
+      the trap family disappears with it. If traps persist, the
+      capture-on-fault ring (Phase 1) produces their own repro and the bisect
+      repeats with that fixture.
 
 ## Phase 3 — Fix options, ranked
 
@@ -150,14 +176,11 @@ commit first; it caps how far forward 3B can go.
 - **3B. Bump the WASM pin forward** to the newest pre-API-redesign commit, if
   the fixing commit lies within the patchable range and the patch still
   applies. Same build/README mechanics as 3A.
-- **3C. Client-side avoidance** — only if Phase 2 shows the mode-7 dance is
-  required for the trap and no upstream fix is cherry-pickable. Constraint:
-  no-reflow semantics must survive (block store correctness + replay at
-  historical geometry). Candidate shapes, in order: reorder the dance so mode
-  writes and resize cannot straddle corrupt state (e.g. drop the mode-7 trick
-  for live fit and instead re-request the server snapshot after a resize
-  burst, which the server-authoritative restore makes cheap); or gate
-  no-reflow to replay-only where it originated.
+- **3C. Client-side avoidance** — *demoted by Phase 2*: the hang reproduces
+  through both resize call sites, so changing the mode-7 dance cannot be the
+  fix for this bug. Retained only as a shape for any future fault that Phase 2
+  shows to be call-site-specific. Constraint if ever used: no-reflow semantics
+  must survive (block store correctness + replay at historical geometry).
 - **3D. If no repro materializes** even via capture-on-fault: ship the
   capture instrumentation permanently and stop — recovery already contains
   the damage; do not fix blind.
@@ -197,12 +220,18 @@ commit first; it caps how far forward 3B can go.
 
 ## Open questions
 
-- Fuzz sweep outcome (running at time of writing) — determines whether Phase 1
-  finishes synthetically or via capture-on-fault.
+- Does fixing the hang also fix the production traps? Same
+  resize/reflow+OSC-8 territory, but unproven — Phase 2's post-fix soak and
+  the capture-on-fault ring answer this empirically.
 - Is the render-OOB fault (11:52) the same corruption observed at a different
   entry point, or a second bug (upstream #139's page-boundary shape is
   column-width dependent — 120/130 repro, 80/140 don't — suspicious for our
-  134-col pane)? The repro/bisect should try to answer both with one fixture.
+  134-col pane)?
+- Why does a synchronous wasm infinite loop in production manifest as a trap
+  instead of a frozen UI? (Or does it — are there unexplained UI freezes?) If
+  the hang can fire in production, the write chain never drains and the pane
+  wedges without a `model_fault` record; worth checking whether any
+  `blank_after_resize` incidents are actually this hang.
 
 ## Follow-ups
 
@@ -210,8 +239,9 @@ commit first; it caps how far forward 3B can go.
   wasm-api shim against ghostty's new Terminal C API, dropping the
   ghostty-web patch dependency; zig 0.16; `-Demit-lib-vt=true` build form.
   Deserves its own plan; the trial-build mapping table is the starting point.
-- Report the repro upstream to coder/ghostty-web (and ghostty-org if the
-  fixing commit is identified) — also nudges #137 (stable release).
+- Report the resize-hang repro upstream to coder/ghostty-web (and ghostty-org
+  once the culprit/fixing commit is identified) — also nudges #137 (stable
+  release). The frozen repro is self-contained and ready to attach.
 - The chronic `bottom_clip` / `blank_after_resize` incident families (44 on
   record since 2026-07-08) are adjacent but distinct geometry bugs — not in
   scope here; ticket separately if they persist after this fix.
