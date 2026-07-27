@@ -135,6 +135,13 @@ function questionPrompt(token) {
   ].join(' ');
 }
 
+// The budget is generous because it is not what is under test. The prompt asks
+// for one short question and no tools, but a live agent may go exploring anyway,
+// and how long it takes to stop says nothing about whether the queue reacts to
+// the state it stops in. A tight bound here just turns agent discretion into a
+// failure that reads like a product regression.
+const OWED_TURN_TIMEOUT_MS = 240_000;
+
 async function driveToOwedTurn(client, observer, agent, token, description) {
   await submitPrompt(client, agent.sessionId, agent.paneId, questionPrompt(token));
   return pollFor(
@@ -143,7 +150,7 @@ async function driveToOwedTurn(client, observer, agent, token, description) {
       return TURN_OPENING_STATES.has(state) ? state : null;
     },
     description,
-    120_000,
+    OWED_TURN_TIMEOUT_MS,
   );
 }
 
