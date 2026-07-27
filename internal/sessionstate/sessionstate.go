@@ -108,10 +108,6 @@ type Evidence struct {
 	BackgroundWork bool
 	// PendingCron: the turn yielded with a scheduled wakeup that will resume it.
 	PendingCron bool
-	// AwaitingLongRunReview: the turn ran long enough that attn deferred judging
-	// how it ended until someone looks at it. It is a fact about a turn that is
-	// over, so it only ever refines a settle — never outranks live work.
-	AwaitingLongRunReview bool
 	// ReviewerInLoop: something other than the user answers approval requests —
 	// claude's permission classifier, codex's auto_review guardian. It does not
 	// suppress an approval state; it decides how long that state must hold
@@ -178,10 +174,6 @@ type Policy struct {
 	// when a reviewer is in the loop. It is not a delay on genuine approval
 	// requests: with no reviewer the dwell is zero.
 	GuardianDwell time.Duration
-	// IdleStaleAfter is how long a settled result may sit unread before it stops
-	// counting as done. It does not change the state — an idle session is still
-	// idle — only whether that idle result is still fresh.
-	IdleStaleAfter time.Duration
 }
 
 // Measured on claude 2.1.220 and codex 0.145.0 driven through a real PTY.
@@ -237,13 +229,6 @@ const (
 	// visible settle that a late verdict then corrects; undershooting it
 	// reintroduces the flicker the gate exists to prevent.
 	defaultClassifierTimeout = 30 * time.Second
-	// defaultIdleStaleAfter is how long a finished turn nobody has looked at stays
-	// fresh. It is not measured from anything the agent does — the agent is done —
-	// so it is a judgement about attention rather than about an agent's timing:
-	// long enough that stepping away from a session for a few minutes is not
-	// treated as forgetting it, short enough that a result Victor asked for is not
-	// silently lost for the rest of a working day.
-	defaultIdleStaleAfter = 10 * time.Minute
 )
 
 // PolicyFor returns the timing for an agent. An agent with no measured numbers
@@ -258,7 +243,6 @@ func PolicyFor(agent string) Policy {
 		GuardianDwell:     guardianDwell,
 		SettleGrace:       defaultSettleGrace,
 		ClassifierTimeout: defaultClassifierTimeout,
-		IdleStaleAfter:    defaultIdleStaleAfter,
 	}
 	if agent == string(protocol.SessionAgentClaude) {
 		policy.HeartbeatTTL = claudeHeartbeatTTL
@@ -275,7 +259,6 @@ const (
 	ReasonHeartbeatFresh    Reason = "heartbeat_fresh"
 	ReasonApprovalOpen      Reason = "approval_open"
 	ReasonQuestionOpen      Reason = "question_open"
-	ReasonLongRunReview     Reason = "long_run_review"
 	ReasonCronPending       Reason = "cron_pending"
 	ReasonBracketOpen       Reason = "bracket_open"
 	ReasonPromptIdle        Reason = "prompt_idle"
@@ -422,22 +405,6 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 			return Resolution{Hold: true, Reason: ReasonSettleGrace}
 		}
 		return settled(e, ReasonBracketStale, policy, now)
-	}
-
-	// A turn ran long enough that attn deferred judging how it ended until someone
-	// looks at it. There is no verdict to wait for and none is coming — the point
-	// of the deferral is that the classification happens when the session is
-	// opened — so every settle clause below would call it idle and file a result
-	// worth minutes of work away as seen.
-	//
-	// Below the brackets, because a session that has started another turn is
-	// working whatever is still owed on the last one, and above every settle so it
-	// wins the case it exists for. It is the state the deferral used to apply
-	// directly, in a write the resolver undid on its next tick: the review flag was
-	// invisible to the table, so the same settled evidence resolved to idle a
-	// second later.
-	if e.AwaitingLongRunReview {
-		return Resolution{State: protocol.SessionStateWaitingInput, Reason: ReasonLongRunReview}
 	}
 
 	// Brackets closed, and the agent is not painting busy frames: the turn is
@@ -597,36 +564,6 @@ func DwellFor(state protocol.SessionState, e Evidence, policy Policy) time.Durat
 		return policy.GuardianDwell
 	}
 	return 0
-}
-
-// IdleStale reports whether a settled result has gone unread long enough to stop
-// counting as done.
-//
-// Nothing calls it. It is the rule the attention projection needs, kept here
-// tested and unwired: it was on the session wire for a while, and a mark clients
-// could read but nothing produced a decision from was worse than no mark — it
-// invited a client to invent the meaning.
-//
-// It is not part of Resolve and deliberately so. Resolve answers what the agent
-// is doing, and the agent is doing nothing — the session is idle either way.
-// Staleness is a fact about the *user*: how long an answer has sat there with
-// nobody looking at it. That is why it takes the read time rather than the
-// evidence table, which knows everything about the agent and nothing about who
-// has seen its output.
-func IdleStale(state protocol.SessionState, stateSince, lastReadAt time.Time, policy Policy, now time.Time) bool {
-	if state != protocol.SessionStateIdle || policy.IdleStaleAfter <= 0 {
-		return false
-	}
-	// A session that has never been in a state has nothing to have gone stale.
-	if stateSince.IsZero() {
-		return false
-	}
-	// Read after the result arrived: it has been seen, and re-reading the same
-	// finished turn is not something to be reminded about again.
-	if !lastReadAt.Before(stateSince) {
-		return false
-	}
-	return now.Sub(stateSince) > policy.IdleStaleAfter
 }
 
 // supersededByBusy reports whether the agent has painted a busy frame since o

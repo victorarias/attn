@@ -197,8 +197,10 @@ See [docs/plans/2026-07-18-db-loss-mitigation.md](docs/plans/2026-07-18-db-loss-
 - `app`: Tauri frontend; WebSocket `ws://localhost:9849`
 
 States: `launching`, `working`, `pending_approval`, `waiting_input`, `idle`,
-`unknown`. `needs_review_after_long_run` is a separate flag: a 5+ minute run
-defers final classification until viewed, then clears the flag.
+`unknown`, `scheduled`, `recoverable`. A turn opens when a session reaches a
+state that wants the user (`internal/attention`) and closes only when the user
+settles it; `turn_owed` is derived at broadcast from the persisted
+`turn_opened_at`/`turn_settled_at` stamps, never stored.
 
 IPC: `~/.attn/attn.sock`. WebSocket clients buffer 256 messages; sustained
 over-send may drop messages or disconnect slow clients.

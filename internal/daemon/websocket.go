@@ -991,8 +991,6 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleClearSessionsWS()
 	case protocol.CmdClearWarnings:
 		d.handleClearWarningsWS()
-	case protocol.CmdSessionVisualized:
-		d.handleSessionVisualizedWS(msg.(*protocol.SessionVisualizedMessage))
 	case protocol.CmdSessionSelected:
 	case protocol.CmdWorkspaceSelected:
 	case protocol.CmdSettleTurn:
@@ -1281,10 +1279,6 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 
 func remoteCommandSessionID(cmd string, msg interface{}) string {
 	switch cmd {
-	case protocol.CmdSessionVisualized:
-		if typed, ok := msg.(*protocol.SessionVisualizedMessage); ok {
-			return typed.ID
-		}
 	case protocol.CmdSessionSelected:
 		if typed, ok := msg.(*protocol.SessionSelectedMessage); ok {
 			return typed.ID

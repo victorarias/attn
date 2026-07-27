@@ -18,7 +18,6 @@ func TestSessionStateDoor_AcceptedCauseProfiles(t *testing.T) {
 		state         string
 		cause         func(*testing.T, *Daemon, string) sessionStateCause
 		wantTouch     bool
-		wantTracking  bool
 		wantBroadcast bool
 	}{
 		{
@@ -26,14 +25,12 @@ func TestSessionStateDoor_AcceptedCauseProfiles(t *testing.T) {
 			state:         protocol.StateWorking,
 			cause:         func(*testing.T, *Daemon, string) sessionStateCause { return liveSignal{} },
 			wantTouch:     true,
-			wantTracking:  true,
 			wantBroadcast: true,
 		},
 		{
 			name:          "resolver observation",
 			state:         protocol.StateWorking,
 			cause:         func(*testing.T, *Daemon, string) sessionStateCause { return resolverObservation{} },
-			wantTracking:  true,
 			wantBroadcast: true,
 		},
 		{
@@ -46,7 +43,6 @@ func TestSessionStateDoor_AcceptedCauseProfiles(t *testing.T) {
 				return pluginReport{runID: "run", seq: 1}
 			},
 			wantTouch:     true,
-			wantTracking:  true,
 			wantBroadcast: true,
 		},
 		{
@@ -84,12 +80,6 @@ func TestSessionStateDoor_AcceptedCauseProfiles(t *testing.T) {
 			if touched := session.LastSeen != characterizationOldTimestamp; touched != tc.wantTouch {
 				t.Fatalf("Touch=%v, want %v; LastSeen=%q", touched, tc.wantTouch, session.LastSeen)
 			}
-			d.longRunMu.Lock()
-			tracked := !d.longRun[id].workingSince.IsZero()
-			d.longRunMu.Unlock()
-			if tracked != tc.wantTracking {
-				t.Fatalf("long-run tracked=%v, want %v", tracked, tc.wantTracking)
-			}
 			broadcasts := characterizationEventCount(capture.snapshot(), protocol.EventSessionStateChanged, id)
 			if got := broadcasts > 0; got != tc.wantBroadcast {
 				t.Fatalf("state broadcast=%v (%d events), want %v", got, broadcasts, tc.wantBroadcast)
@@ -108,12 +98,6 @@ func TestSessionStateDoor_MissingSessionHasNoEffects(t *testing.T) {
 		cause:     liveSignal{},
 	}) {
 		t.Fatal("applyState(missing) = true, want false")
-	}
-	d.longRunMu.Lock()
-	_, tracked := d.longRun["missing"]
-	d.longRunMu.Unlock()
-	if tracked {
-		t.Fatal("missing-session transition created long-run tracking")
 	}
 	if events := capture.snapshot(); len(events) != 0 {
 		t.Fatalf("missing-session transition broadcast events: %+v", events)

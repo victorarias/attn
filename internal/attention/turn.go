@@ -25,6 +25,11 @@ import (
 //   - waiting_input, pending_approval, unknown open a turn. The first two are
 //     the agent asking; unknown is the daemon admitting it cannot tell, which is
 //     equally the user's problem.
+//   - idle opens one too. A run you asked for finished and nobody has read the
+//     result; that it ended without a question makes it no less yours. This is
+//     what retired the long-run review deferral, which tried to approximate the
+//     same thing by holding a verdict back on runs over five minutes and
+//     publishing it when the session was looked at.
 //   - launching, working, scheduled never open one: the agent is busy or waiting
 //     on a clock.
 //   - recoverable never opens one either. The daemon revives it unattended, so
@@ -33,7 +38,8 @@ func OpensTurn(state protocol.SessionState) bool {
 	switch state {
 	case protocol.SessionStateWaitingInput,
 		protocol.SessionStatePendingApproval,
-		protocol.SessionStateUnknown:
+		protocol.SessionStateUnknown,
+		protocol.SessionStateIdle:
 		return true
 	default:
 		return false

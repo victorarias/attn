@@ -124,20 +124,6 @@ func TestClauseOrder(t *testing.T) {
 			wantReason: ReasonBracketOpen,
 		},
 		{
-			why: "a deferred long-run review outranks every settle below it: the " +
-				"settles all resolve to idle, and idle is the one answer that " +
-				"files an unread result away as seen",
-			evidence: Evidence{
-				AwaitingLongRunReview: true,
-				TurnEverOpened:        true,
-				Heartbeat:             seen(SourceHeartbeat, ClaimSettled, time.Second),
-				LastClassifier:        seen(SourceClassifier, ClaimIdle, time.Second),
-				LastBusyAt:            now.Add(-time.Minute),
-			},
-			wantState:  protocol.SessionStateWaitingInput,
-			wantReason: ReasonLongRunReview,
-		},
-		{
 			why: "total silence outranks an open bracket: the bracket is the one " +
 				"level with no expiry of its own, so an agent with hooks and no " +
 				"heartbeat would otherwise pin itself green for good",

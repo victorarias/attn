@@ -19,9 +19,8 @@ func TestOpensTurn(t *testing.T) {
 		{protocol.SessionStateWorking, false},
 		{protocol.SessionStateScheduled, false},
 		{protocol.SessionStateRecoverable, false},
-		// idle joins the vocabulary in slice 2; until then a finished run that
-		// has no turn open leaves without asking for anyone.
-		{protocol.SessionStateIdle, false},
+		// A finished run is the user's to read, so idle opens a turn too.
+		{protocol.SessionStateIdle, true},
 	}
 
 	for _, tt := range tests {
@@ -86,9 +85,8 @@ func TestOwedExclusions(t *testing.T) {
 	}
 }
 
-// A shell sitting in idle is the case slice 2 turns live: once idle opens a
-// turn, the exclusion is the only thing keeping every terminal pane out of the
-// queue forever.
+// A shell is registered idle at birth and left there, so the exclusion is the
+// only thing keeping every terminal pane out of the queue forever.
 func TestOwedExcludesIdleShell(t *testing.T) {
 	opened := time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
 	if Owed(Input{OpenedAt: opened, IsShell: true}) {

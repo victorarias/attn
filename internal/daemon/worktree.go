@@ -325,7 +325,6 @@ func (d *Daemon) cleanupDeletedWorktreeSessions(path string) {
 		d.terminateSession(session.ID, syscall.SIGTERM)
 		d.dropSessionRecord(session.ID)
 		d.clearChiefOfStaffIfSession(session.ID)
-		d.clearLongRunTracking(session.ID)
 		d.wsHub.Broadcast(&protocol.WebSocketEvent{
 			Event:   protocol.EventSessionUnregistered,
 			Session: d.sessionForBroadcast(session),

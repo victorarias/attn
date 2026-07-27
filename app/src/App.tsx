@@ -647,7 +647,6 @@ function App() {
     sendTriggerNudge,
     sendSettleTurn,
     sendWorkspaceSelected,
-    sendSessionVisualized,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceSetSplitRatio,
@@ -867,7 +866,6 @@ function App() {
         sendTriggerNudge={sendTriggerNudge}
         sendSettleTurn={sendSettleTurn}
         sendWorkspaceSelected={sendWorkspaceSelected}
-        sendSessionVisualized={sendSessionVisualized}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
@@ -994,7 +992,6 @@ interface AppContentProps {
   sendTriggerNudge: ReturnType<typeof useDaemonSocket>['sendTriggerNudge'];
   sendSettleTurn: ReturnType<typeof useDaemonSocket>['sendSettleTurn'];
   sendWorkspaceSelected: ReturnType<typeof useDaemonSocket>['sendWorkspaceSelected'];
-  sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
@@ -1115,7 +1112,6 @@ sendFetchPRDetails,
   sendTriggerNudge,
   sendSettleTurn,
   sendWorkspaceSelected,
-  sendSessionVisualized,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
   sendWorkspaceSetSplitRatio,
@@ -1568,11 +1564,6 @@ sendFetchPRDetails,
   );
   const dockPanelCloseTimersRef = useRef<Partial<Record<DockPanelId, number>>>({});
   const gitStatusSubscribedDirRef = useRef<string | null>(null);
-  const activeSessionVisibleSinceRef = useRef<{ id: string; at: number } | null>(null);
-  const pendingSessionVisualizedRef = useRef<{ key: string | null; timeoutId: number | null }>({
-    key: null,
-    timeoutId: null,
-  });
 
   // When activeSessionId changes, update view
   useEffect(() => {
@@ -1592,70 +1583,6 @@ sendFetchPRDetails,
       sendSessionSelected(activeSessionId);
     }
   }, [activeSessionId, sendSessionSelected, view]);
-
-  // Track when the currently-selected session became visible.
-  useEffect(() => {
-    if (view !== 'session' || !activeSessionId) {
-      activeSessionVisibleSinceRef.current = null;
-      return;
-    }
-    const current = activeSessionVisibleSinceRef.current;
-    if (!current || current.id !== activeSessionId) {
-      activeSessionVisibleSinceRef.current = { id: activeSessionId, at: Date.now() };
-    }
-  }, [activeSessionId, view]);
-
-  // For long runs, defer classification until the user has visualized the session long enough.
-  useEffect(() => {
-    const tracker = pendingSessionVisualizedRef.current;
-    const activeSession =
-      view === 'session' && activeSessionId
-        ? daemonSessions.find((session) => session.id === activeSessionId)
-        : undefined;
-    const needsReview = Boolean(activeSession?.needs_review_after_long_run);
-    const key = needsReview && activeSession ? `${activeSession.id}:${activeSession.state_updated_at}` : null;
-
-    if (tracker.key === key) {
-      return;
-    }
-
-    if (tracker.timeoutId !== null) {
-      clearTimeout(tracker.timeoutId);
-      tracker.timeoutId = null;
-    }
-    tracker.key = key;
-
-    if (!activeSession || !needsReview || !key) {
-      return;
-    }
-
-    let delayMs = 5000;
-    const visibleSince = activeSessionVisibleSinceRef.current;
-    const stateUpdatedAtMs = Date.parse(activeSession.state_updated_at);
-    const userAlreadyViewingWhenFinished =
-      visibleSince?.id === activeSession.id &&
-      Number.isFinite(stateUpdatedAtMs) &&
-      visibleSince.at <= stateUpdatedAtMs;
-    if (userAlreadyViewingWhenFinished) {
-      delayMs = 0;
-    }
-
-    tracker.timeoutId = window.setTimeout(() => {
-      sendSessionVisualized(activeSession.id);
-      tracker.timeoutId = null;
-    }, delayMs);
-  }, [activeSessionId, daemonSessions, sendSessionVisualized, view]);
-
-  useEffect(() => {
-    return () => {
-      const tracker = pendingSessionVisualizedRef.current;
-      if (tracker.timeoutId !== null) {
-        clearTimeout(tracker.timeoutId);
-        tracker.timeoutId = null;
-      }
-      tracker.key = null;
-    };
-  }, []);
 
   // Subscribe to git status for active session
   useEffect(() => {

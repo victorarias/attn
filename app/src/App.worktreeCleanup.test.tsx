@@ -335,7 +335,6 @@ describe('worktree cleanup prompt', () => {
       sendUnsubscribeGitStatus: fn,
       sendSessionSelected: fn,
       sendWorkspaceSelected: fn,
-      sendSessionVisualized: fn,
       sendWorkspaceClosePane: mockSendWorkspaceClosePane,
       sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
@@ -608,118 +607,6 @@ describe('worktree cleanup prompt', () => {
       expect(sendDeleteWorktree).toHaveBeenLastCalledWith('/tmp/repo/.worktrees/feature-a', undefined, { force: true });
     });
     consoleError.mockRestore();
-  });
-
-  it('marks remote long-run sessions as visualized after the visibility delay', async () => {
-    vi.useFakeTimers();
-    const sendSessionVisualized = vi.fn();
-    const sendSessionSelected = vi.fn();
-    const fn = vi.fn();
-
-    mockUseSessionStore.mockReturnValue({
-      sessions: [
-        {
-          id: 'remote-1',
-          label: 'remote-session',
-          state: 'waiting_input',
-          cwd: '/srv/repo',
-          workspaceId: 'workspace-remote-1',
-          agent: 'claude',
-          transcriptMatched: true,
-          branch: 'main',
-          daemonActivePaneId: 'main',
-          endpointId: 'ep-1',
-          workspace: {
-            agents: [{ id: 'pane-session', runtimeId: 'remote-1', sessionId: 'remote-1', title: 'remote-session' }],
-            layoutTree: { type: 'pane', paneId: 'pane-session' },
-          },
-        },
-      ],
-      activeSessionId: 'remote-1',
-      connect: vi.fn(async () => {}),
-      connected: true,
-      launcherConfig: { executables: {} },
-      createSession: vi.fn(async () => 'remote-1'),
-      closeSession: mockCloseSession,
-      setActiveSession: vi.fn(),
-      takeSessionSpawnArgs: vi.fn(() => null),
-      reloadSession: vi.fn(async () => {}),
-      setLauncherConfig: vi.fn(),
-      syncFromDaemonSessions: vi.fn(),
-      syncFromDaemonWorkspaces: vi.fn(),
-    });
-
-    mockUseDaemonStore.mockReturnValue({
-      daemonSessions: [
-        {
-          id: 'remote-1',
-          label: 'remote-session',
-          directory: '/srv/repo',
-          state: 'waiting_input',
-          endpoint_id: 'ep-1',
-          needs_review_after_long_run: true,
-          state_updated_at: '2026-04-03T12:00:00Z',
-        },
-      ],
-      setDaemonSessions: vi.fn(),
-      prs: [],
-      setPRs: vi.fn(),
-      repoStates: [],
-      setRepoStates: vi.fn(),
-      authorStates: [],
-      setAuthorStates: vi.fn(),
-    });
-
-    mockUseDaemonSocket.mockReturnValue({
-      sendPRAction: fn,
-      sendMutePR: fn,
-      sendMuteRepo: fn,
-      sendMuteAuthor: fn,
-      sendPRVisited: fn,
-      sendRefreshPRs: vi.fn(async () => ({ success: true })),
-      sendUnregisterSession: mockSendUnregisterSession,
-      sendRegisterWorkspace: mockSendRegisterWorkspace,
-      sendUnregisterWorkspace: mockSendUnregisterWorkspace,
-      sendSetSetting: fn,
-      sendCreateWorktree: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
-      sendDeleteWorktree: vi.fn(async () => ({ success: true })),
-      sendGetRecentLocations: vi.fn(async () => ({ success: true, locations: [] })),
-      sendCreateWorktreeFromBranch: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
-      sendFetchRemotes: vi.fn(async () => ({ success: true })),
-      sendFetchPRDetails: vi.fn(async () => ({ success: true })),
-      sendEnsureRepo: vi.fn(async () => ({ success: true, path: '/tmp/repo' })),
-      sendSubscribeGitStatus: fn,
-      sendUnsubscribeGitStatus: fn,
-      sendSessionSelected,
-      sendWorkspaceSelected: vi.fn(),
-      sendSessionVisualized,
-      sendWorkspaceClosePane: mockSendWorkspaceClosePane,
-      sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
-      sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
-      getRepoInfo: vi.fn(async () => ({ success: true, is_git_repo: true, branch: 'main' })),
-      listWorkflowRuns: vi.fn(async () => ({ success: true, runs: [] })),
-      getPresentations: vi.fn(async () => []),
-      connectionError: null,
-      hasReceivedInitialState: true,
-      sendNotificationList: vi.fn(async () => ({ notifications: [], unreadCount: 0 })),
-      sendNotificationMarkRead: vi.fn(async () => 0),
-      rateLimit: null,
-      warnings: [],
-      clearWarnings: fn,
-      sendSetTerminalTheme: fn,
-    });
-
-    await act(async () => {
-      render(<App />);
-      await Promise.resolve();
-    });
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5000);
-    });
-
-    expect(sendSessionSelected).toHaveBeenCalledWith('remote-1');
-    expect(sendSessionVisualized).toHaveBeenCalledWith('remote-1');
   });
 
   it('only lets the active PR launcher request update or clear progress', async () => {

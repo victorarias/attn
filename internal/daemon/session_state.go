@@ -59,6 +59,11 @@ type sessionStateChange struct {
 	// name, which is all a daemon-internal transition has to say about itself.
 	// It never affects whether the change commits.
 	origin stateOrigin
+	// atPrompt marks a state the agent reached without ever having taken a turn:
+	// a freshly launched session sitting at its prompt, which resolves to `idle`
+	// exactly as a finished run does. It commits identically; it only must not
+	// open a turn, because there is no result behind it for the user to read.
+	atPrompt bool
 }
 
 // stateOrigin is where a state claim came from, as distinct from the commit rule
@@ -75,7 +80,6 @@ type stateOrigin struct {
 // not assemble these flags themselves.
 type stateEffectProfile struct {
 	touch     bool
-	trackRun  bool
 	syncNudge bool
 	broadcast bool
 }
@@ -83,11 +87,11 @@ type stateEffectProfile struct {
 func stateEffectProfileFor(cause sessionStateCause) (stateEffectProfile, bool) {
 	switch cause.(type) {
 	case liveSignal:
-		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
+		return stateEffectProfile{touch: true, syncNudge: true, broadcast: true}, true
 	case resolverObservation:
-		return stateEffectProfile{trackRun: true, syncNudge: true, broadcast: true}, true
+		return stateEffectProfile{syncNudge: true, broadcast: true}, true
 	case pluginReport:
-		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
+		return stateEffectProfile{touch: true, syncNudge: true, broadcast: true}, true
 	case startupRecovery:
 		return stateEffectProfile{}, true
 	default:
@@ -148,20 +152,12 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	// startup recovery: a session that comes back in a state that wants the user
 	// wants the user regardless of what moved it there. Opening is guarded in the
 	// store, so a state re-reported while a turn is already open changes nothing.
-	if attention.OpensTurn(protocol.SessionState(change.state)) {
+	if !change.atPrompt && attention.OpensTurn(protocol.SessionState(change.state)) {
 		d.store.OpenTurnIfClosed(change.sessionID, time.Now())
 	}
 
 	if profile.touch {
 		d.store.Touch(change.sessionID)
-	}
-	if profile.trackRun {
-		switch change.state {
-		case protocol.StateWorking:
-			d.markRunStartedIfNeeded(change.sessionID)
-		case protocol.StateIdle, protocol.StateScheduled:
-			d.clearLongRunTracking(change.sessionID)
-		}
 	}
 	if profile.syncNudge {
 		d.syncNudgeForState(change.sessionID, change.state)

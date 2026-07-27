@@ -254,7 +254,6 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 		startedCh:        make(chan struct{}),
 		classifiedTurn:   make(map[string]string),
 		classifyingTurn:  make(map[string]string),
-		longRun:          make(map[string]longRunSession),
 		pendingResumeID:  make(map[string]string),
 		plugins:          newPluginRegistry(),
 	}

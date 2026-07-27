@@ -70,6 +70,44 @@ func TestTurnSurvivesTheAgentGoingBackToWork(t *testing.T) {
 	}
 }
 
+// A run you asked for that finished without a question is still yours to read.
+func TestAFinishedRunOwesATurn(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+
+	moveTo(d, "s1", protocol.StateWorking)
+	if owed(t, d, "s1") {
+		t.Fatal("a working session owes a turn")
+	}
+
+	moveTo(d, "s1", protocol.StateIdle)
+	if !owed(t, d, "s1") {
+		t.Fatal("a finished run owes no turn; nobody has read its result")
+	}
+}
+
+// A session that never ran resolves to idle sitting at its prompt, which looks
+// identical to a finished run. There is no result behind it, so it must not
+// queue — otherwise every launch would land in the queue.
+func TestASessionAtItsPromptOwesNothing(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+
+	d.applyState(sessionStateChange{
+		sessionID: "s1",
+		state:     protocol.StateIdle,
+		cause:     resolverObservation{},
+		atPrompt:  true,
+	})
+
+	if d.store.Get("s1").State != protocol.StateIdle {
+		t.Fatal("the state did not commit; the case proves nothing about the turn")
+	}
+	if owed(t, d, "s1") {
+		t.Fatal("a session that never took a turn owes one")
+	}
+}
+
 func TestSettleIsTheOnlyExit(t *testing.T) {
 	d := newTurnDaemon(t)
 	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")

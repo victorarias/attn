@@ -312,7 +312,7 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				transcriptPath,
 				quietSince.Format(time.RFC3339Nano),
 			)
-			go d.classifyOrDeferAfterStop(w.sessionID, transcriptPath)
+			go d.classifySessionState(w.sessionID, transcriptPath)
 		}
 	}
 }
