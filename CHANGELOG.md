@@ -42,7 +42,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Pin and mute a workspace from anywhere.** Every queue row has a pin button
   that takes its workspace out of the queue, and ⌘K can pin or mute the workspace
   of the agent you are in. Pinning used to be reachable only from a workspace
-  group header, which queue mode no longer draws.
+  group header, which queue mode no longer draws. The per-session menu — chief of
+  staff, close, reload — is on the queue rows for the same reason.
 
 ### Removed
 - **The long-run review gate is gone.** Runs over five minutes used to hold their
