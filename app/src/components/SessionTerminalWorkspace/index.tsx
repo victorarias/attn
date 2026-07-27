@@ -235,6 +235,9 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     // it can only ever name an agent pane; this is the other half of the focus
     // model, and the two combine into `activeLeafId` below.
     const [activeTile, setActiveTile] = useState<{ tileId: string; whileActivePaneId: string } | null>(null);
+    // Bumped when a terminal announces readiness; re-runs the leaf focus effect so
+    // the committed active leaf, not the mounting terminal, decides where focus goes.
+    const [paneReadyFocusRequest, setPaneReadyFocusRequest] = useState(0);
     // The agent pane whose bound-ticket overlay is open (one per workspace at a
     // time), or null. Pane-scoped and non-modal — not part of blockingOverlayOpen.
     const [ticketOverlayPaneId, setTicketOverlayPaneId] = useState<string | null>(null);
@@ -264,7 +267,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     const activePaneIdRef = useRef(activePaneId);
     const isActiveSessionRef = useRef(isActiveSession);
     const sessionViewVisibleRef = useRef(isSessionViewVisible);
-    const activeLeafIsTileRef = useRef(false);
 
     activePaneIdRef.current = activePaneId;
     isActiveSessionRef.current = isActiveSession;
@@ -365,7 +367,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       : null;
     const activeLeafId = focusedTileId || activePaneId || firstTileId || '';
     const activeLeafIsTile = tileLeafById.has(activeLeafId);
-    activeLeafIsTileRef.current = activeLeafIsTile;
 
     const runtimePanes = useMemo(() => ([
       ...agentPanes.filter((pane) => !pane.status || pane.status === 'ready').map((pane) => {
@@ -619,7 +620,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       if (activePaneId) {
         focusActivePane();
       }
-    }, [activeLeafId, activeLeafIsTile, activePaneId, focusActivePane, focusTile, focusRequestToken, isActiveSession, isSessionViewVisible, workspaceId, sessionVisible]);
+    }, [activeLeafId, activeLeafIsTile, activePaneId, focusActivePane, focusTile, focusRequestToken, isActiveSession, isSessionViewVisible, paneReadyFocusRequest, workspaceId, sessionVisible]);
 
     // After relaunch, first-show, or split topology changes, the terminal can briefly keep
     // stale narrow geometry from the previous layout. Re-fitting immediately and then
@@ -762,23 +763,24 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onNavigateOutOfSession(direction);
     }, [activeLeafId, focusLeaf, onNavigateOutOfSession, renderedLayoutTree]);
 
-    // A terminal mounting must not pull focus out of a tile the user is reading:
-    // it would leave DOM focus and the active leaf disagreeing, which is exactly
-    // what makes Cmd+W act on the wrong leaf.
-    const focusPaneIfCurrentlyActive = useCallback((paneId: string) => {
+    // A mounting terminal asks for focus, it does not take it: the leaf effect
+    // above owns the decision and reads committed state, so a terminal that comes
+    // back while a tile is the focused leaf leaves the tile alone. Deciding here
+    // instead would mean reading leaf state from a ref that a child's ready
+    // callback can observe before the parent has mirrored it, leaving DOM focus
+    // and the active leaf disagreeing — which is what makes Cmd+W act on the
+    // wrong leaf.
+    const requestFocusForReadyPane = useCallback((paneId: string) => {
       if (!isActiveSessionRef.current || !sessionViewVisibleRef.current || activePaneIdRef.current !== paneId) {
         return;
       }
-      if (activeLeafIsTileRef.current) {
-        return;
-      }
-      runtime.focusPane(paneId);
-    }, [runtime]);
+      setPaneReadyFocusRequest((token) => token + 1);
+    }, []);
 
     const handleGhosttyTerminalReady = useCallback((paneId: string) => (terminal: GhosttyTerminalHandle) => {
       void runtime.handleTerminalReady(paneId)(terminal);
-      focusPaneIfCurrentlyActive(paneId);
-    }, [focusPaneIfCurrentlyActive, runtime]);
+      requestFocusForReadyPane(paneId);
+    }, [requestFocusForReadyPane, runtime]);
 
     useShortcut('terminal.open', focusActivePane, sessionVisible);
     useShortcut('terminal.find', () => { runtime.openFindInActivePane(); }, sessionVisible);

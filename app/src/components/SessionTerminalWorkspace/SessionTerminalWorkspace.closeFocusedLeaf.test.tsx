@@ -30,12 +30,37 @@ function NotebookSurfaceTestWrapper({ children }: { children: ReactNode }) {
 }
 
 // The terminal surface pulls in the Ghostty WASM model; stub it so the import
-// graph stays light in jsdom (this spec only cares about Cmd+W routing).
+// graph stays light in jsdom. The stub still announces readiness and takes real
+// DOM focus, because when a mounting terminal grabs focus is exactly what this
+// spec is about.
+const terminalFocusCalls = vi.hoisted(() => [] as string[]);
 vi.mock('../GhosttyTerminal', async () => {
   const React = await import('react');
   return {
-    GhosttyTerminal: React.forwardRef(function MockTerminal() {
-      return null;
+    GhosttyTerminal: React.forwardRef(function MockTerminal(
+      props: { onReady?: (handle: unknown) => void; runtimeLogMeta?: { paneId?: string } },
+      ref,
+    ) {
+      const nodeRef = React.useRef<HTMLDivElement | null>(null);
+      const paneId = props.runtimeLogMeta?.paneId ?? 'pane';
+      const handle = React.useMemo(() => ({
+        focus: () => {
+          terminalFocusCalls.push(paneId);
+          nodeRef.current?.focus();
+          return true;
+        },
+        getSize: () => null,
+        fit: () => {},
+      }), [paneId]);
+      React.useImperativeHandle(ref, () => handle, [handle]);
+      // Once per mount, like the real terminal: onReady's identity changes every
+      // parent render, so firing on its identity would announce readiness forever.
+      const onReadyRef = React.useRef(props.onReady);
+      onReadyRef.current = props.onReady;
+      React.useEffect(() => {
+        onReadyRef.current?.(handle);
+      }, [handle]);
+      return <div ref={nodeRef} tabIndex={-1} data-testid={`mock-terminal-${paneId}`} />;
     }),
   };
 });
@@ -225,6 +250,30 @@ describe('SessionTerminalWorkspace Cmd+W closes the focused leaf', () => {
     expect(onClosePane).toHaveBeenCalledTimes(1);
     expect(onClosePane).toHaveBeenCalledWith('pane-term');
     expect(onUndockTile).not.toHaveBeenCalled();
+  });
+
+  // A terminal that mounts while a tile holds focus must leave it alone. Maximizing
+  // the tile unmounts the terminal and restoring remounts it, so its ready callback
+  // fires with the tile still the focused leaf — if it grabbed focus there, DOM
+  // focus and the active leaf would disagree, which is the state the Cmd+W cases
+  // above are protecting against.
+  it('leaves a focused tile alone when a terminal remounts and announces readiness', () => {
+    const { container } = renderSplit();
+    terminalFocusCalls.length = 0;
+
+    fireEvent.mouseDown(tileEl(container));
+    const tileBody = tileEl(container).querySelector('.workspace-dock-tile-body') as HTMLElement;
+    expect(document.activeElement).toBe(tileBody);
+
+    // Maximize the tile (terminal unmounts), then restore it (terminal remounts).
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Enter', metaKey: true, shiftKey: true });
+    expect(container.querySelector('[data-pane-kind="agent"]')).toBeNull();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Enter', metaKey: true, shiftKey: true });
+    expect(container.querySelector('[data-pane-kind="agent"]')).not.toBeNull();
+
+    expect(terminalFocusCalls).toEqual([]);
+    expect(tileEl(container).className).toContain('active');
+    expect(document.activeElement).toBe(tileEl(container).querySelector('.workspace-dock-tile-body'));
   });
 
   // The terminal-pane path is unchanged: Cmd+W with the pane focused closes that
