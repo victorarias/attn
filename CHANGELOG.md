@@ -52,6 +52,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   those flickers put it back in the queue a second after you settled it. attn now
   waits for the title to stay quiet before calling a turn over, so a pause in the
   repaint is no longer mistaken for the end of the work.
+- **An agent that ran a background task no longer turns purple while waiting for
+  you.** Anything left running in the background — a build, a watcher, a
+  background shell — kept its agent green after the turn ended, and once that
+  green ran out of evidence the agent went to *unknown* instead of asking for
+  you. It happened to every agent that used a background task, and the agent
+  stayed purple until it next did some work. Claude announces when it is sitting
+  at its prompt waiting for input, and attn now believes that over an
+  unfinished background task, so the agent joins your queue as what it is.
 
 ### Removed
 - **The long-run review gate is gone.** Runs over five minutes used to hold their

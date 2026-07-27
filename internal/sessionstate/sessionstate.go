@@ -360,6 +360,20 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 		return r
 	}
 
+	// A background task keeps the session working only until the harness says
+	// otherwise. The confirmation below is the harness stating where the session
+	// is — parked at its prompt, nothing running — and that is a direct answer to
+	// the question the background-work fact only guesses at, so it retires the
+	// guess.
+	//
+	// Only the background half. A parked schedule is a promise to come back at a
+	// known time, which the agent sitting at its prompt does not contradict; a
+	// background task carries no such promise, and the notification is the only
+	// thing that ever reports it stopped mattering. Claude fires the notification
+	// on a flat prompt-idle timer that reads neither fact — measured on both, and
+	// the reason it can be trusted to arrive.
+	backgroundWork := e.BackgroundWork && !promptIdleConfirmed(e)
+
 	// The turn yielded with something outstanding that will resume it, so nobody
 	// is being waited on. Both facts arrive together on the Stop payload and the
 	// order between them is the interesting part: work still running means the
@@ -370,11 +384,11 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// fact about how the last turn yielded is believed while the session is still
 	// producing evidence, and a session that resumed nothing and then went quiet
 	// forever is stuck rather than busy.
-	if e.BackgroundWork || e.PendingCron {
+	if backgroundWork || e.PendingCron {
 		if evidenceStoppedMoving(e, now, policy.StuckAfter) {
 			return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
 		}
-		if e.BackgroundWork {
+		if backgroundWork {
 			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundWork}
 		}
 		return Resolution{State: protocol.SessionStateScheduled, Reason: ReasonCronPending}
@@ -385,12 +399,9 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// and this is a second hook on a different trigger saying the same turn is
 	// over.
 	//
-	// LastBusyAt is the guard, not the 60s the notification happens to use: if
-	// the agent painted a spinner after the confirmation, a new turn started and
-	// the confirmation is spent. Nothing here breaks if claude retunes the timer.
 	// It sits below the approval clause on purpose — an unanswered approval is
 	// also "parked at the prompt", and approval is the more useful thing to say.
-	if !e.PromptIdleAt.IsZero() && e.PromptIdleAt.After(e.LastBusyAt) {
+	if promptIdleConfirmed(e) {
 		return settled(e, ReasonPromptIdle, policy, now)
 	}
 
@@ -667,6 +678,16 @@ func evidenceStoppedMoving(e Evidence, now time.Time, d time.Duration) bool {
 		return false
 	}
 	return now.Sub(e.LastMovement) > d
+}
+
+// promptIdleConfirmed reports whether the harness has confirmed the agent is
+// sitting at its prompt, and nothing has happened since to spend that.
+//
+// LastBusyAt is the guard, not the 60s the notification happens to use: if the
+// agent painted a spinner after the confirmation, a new turn started and the
+// confirmation is spent. Nothing here breaks if claude retunes the timer.
+func promptIdleConfirmed(e Evidence) bool {
+	return !e.PromptIdleAt.IsZero() && e.PromptIdleAt.After(e.LastBusyAt)
 }
 
 func heartbeatSilentFor(e Evidence, now time.Time, d time.Duration) bool {

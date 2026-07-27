@@ -866,6 +866,24 @@ attention".
   protocol unchanged, and under the attention projection it is settled either way,
   so the extra state would buy only a color distinction. Revisit if a long
   `attn wait-pr` reads as misleadingly active in practice.
+- **…but only until the harness says the agent is parked at its prompt.** The
+  entry above stands for a session that is otherwise quiet; what it missed is
+  that the background-work fact had no way to expire, so the resolver retired it
+  by declaring the session `unknown`/`stuck` ninety seconds later instead of
+  reading the confirmation it already held. Every `unknown` observed on
+  2026-07-27 — ten of them, across three sessions — was this, and in each one the
+  user resumed the turn, not the task.
+  Claude fires the `idle_prompt` notification on a flat prompt-idle timer that
+  reads neither `background_tasks` nor `session_crons`: measured at exactly 60s
+  across seven live background-task cases, and confirmed for a pending cron with
+  a `CronCreate` probe on claude 2.1.220. That is what makes it dependable enough
+  to outrank the guess. `LastBusyAt` spends the confirmation, so a task that does
+  resume the turn takes the session back to `working` on its next title frame.
+  Scoped to the background half: a cron is a promise to return at a known time,
+  which an idle prompt does not contradict, so `scheduled` still wins. A quiet
+  cron-parked session therefore still decays to `unknown` after `StuckAfter` —
+  known gap, and the Stop payload carries the cron expression needed to fix it
+  properly by holding `scheduled` until the wakeup is actually due.
 - **Done is settled, but goes stale.** An unread idle result unsettles past
   `idleStaleAfter` so work Victor drove is never silently forgotten. Strict
   "always settled" was rejected for that reason.

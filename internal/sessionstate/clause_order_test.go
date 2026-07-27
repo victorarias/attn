@@ -81,12 +81,32 @@ func TestClauseOrder(t *testing.T) {
 			wantReason: ReasonQuestionOpen,
 		},
 		{
-			why: "work that will resume the turn outranks the harness saying the " +
-				"agent is parked at its prompt: it is parked, and it is going to " +
-				"un-park itself without anyone doing anything",
+			// This clause used to run the other way, on the reasoning that the
+			// background task would un-park the turn without anyone doing anything.
+			// Two things retired that. It was not what the code delivered — the
+			// belief had no way to persist, so it expired into `unknown` ninety
+			// seconds later rather than holding the session working. And it was not
+			// what happened: on 2026-07-27 three sessions produced ten of those
+			// unknowns, and in every one the confirmation was right and the user,
+			// not the task, resumed the turn.
+			why: "the harness saying the agent is parked at its prompt outranks an " +
+				"outstanding background task: the task is a guess about whether " +
+				"anyone is waited on, and this is the harness answering it directly",
 			evidence: Evidence{
 				BackgroundWork: true,
 				PromptIdleAt:   now.Add(-time.Second),
+				LastBusyAt:     now.Add(-30 * time.Second),
+				LastMovement:   now.Add(-time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonPromptIdle,
+		},
+		{
+			why: "an outstanding background task still outranks everything below " +
+				"while the harness has said nothing: without a confirmation the " +
+				"task is the best account of why the session went quiet",
+			evidence: Evidence{
+				BackgroundWork: true,
 				LastBusyAt:     now.Add(-30 * time.Second),
 				LastMovement:   now.Add(-time.Second),
 			},

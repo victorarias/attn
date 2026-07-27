@@ -709,6 +709,86 @@ func TestARepaintGapWiderThanTheTTLDoesNotFlapTheSession(t *testing.T) {
 	}
 }
 
+// Replays the shape behind every `unknown` observed on 2026-07-27: a turn that
+// yielded with a background task, the harness confirming sixty seconds later
+// that the agent is parked at its prompt, and then nothing at all.
+//
+// Three sessions produced ten of these in one day, each one ninety seconds after
+// a confirmation the resolver had already recorded. The confirmation is the whole
+// point — a session attn has been *told* the location of is not a session it has
+// lost track of, so `stuck` is the one verdict this timeline must never reach.
+func TestAPromptIdleConfirmationRetiresAnOutstandingBackgroundTask(t *testing.T) {
+	policy := testPolicy()
+
+	// The Stop payload that opens the timeline: a background task outstanding, and
+	// a title frame that has already gone quiet because the turn is over.
+	yielded := now
+	at := func(d time.Duration) Evidence {
+		e := Evidence{
+			TurnEverOpened: true,
+			BackgroundWork: true,
+			Heartbeat:      &Observation{Source: SourceHeartbeat, Claim: ClaimSettled, ObservedAt: yielded},
+			LastBusyAt:     yielded.Add(-time.Second),
+			LastMovement:   yielded,
+		}
+		// The notification lands a minute in and moves the table with it.
+		if d >= time.Minute {
+			e.PromptIdleAt = yielded.Add(time.Minute)
+			e.LastMovement = yielded.Add(time.Minute)
+		}
+		return e
+	}
+
+	// Before the confirmation the background task is all attn has, and it holds.
+	if got := Resolve(at(30*time.Second), policy, yielded.Add(30*time.Second)); got.State != protocol.SessionStateWorking {
+		t.Fatalf("30s in: resolved %s/%s, want working: an outstanding background task is the only fact so far",
+			got.State, got.Reason)
+	}
+
+	// From the confirmation on, the session owes the user a turn and keeps owing
+	// it. The sweep runs well past StuckAfter measured from the confirmation,
+	// which is where every observed `unknown` landed.
+	for _, d := range []time.Duration{
+		time.Minute,
+		time.Minute + 30*time.Second,
+		time.Minute + policy.StuckAfter,
+		time.Minute + policy.StuckAfter + time.Second,
+		10 * time.Minute,
+	} {
+		got := Resolve(at(d), policy, yielded.Add(d))
+		if got.State == protocol.SessionStateUnknown {
+			t.Fatalf("%s in: resolved unknown/%s after the harness said the agent is at its prompt", d, got.Reason)
+		}
+		if got.State != protocol.SessionStateIdle || got.Reason != ReasonPromptIdle {
+			t.Fatalf("%s in: resolved %s/%s, want idle/%s", d, got.State, got.Reason, ReasonPromptIdle)
+		}
+	}
+}
+
+// A parked schedule is a promise to come back at a known time, so the agent
+// sitting at its prompt does not contradict it. Only the background half is
+// retired by the confirmation, and this pins that the two are not fixed together.
+func TestAPromptIdleConfirmationDoesNotRetireAParkedCron(t *testing.T) {
+	policy := testPolicy()
+	e := Evidence{
+		TurnEverOpened: true,
+		PendingCron:    true,
+		PromptIdleAt:   now.Add(-time.Minute),
+		LastBusyAt:     now.Add(-2 * time.Minute),
+		LastMovement:   now.Add(-time.Minute),
+	}
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateScheduled {
+		t.Fatalf("resolved %s/%s, want scheduled: a wakeup outlives the prompt confirmation", got.State, got.Reason)
+	}
+
+	// And with both outstanding, retiring the background half leaves the wakeup
+	// describing the session rather than falling through to a settle.
+	e.BackgroundWork = true
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateScheduled {
+		t.Fatalf("resolved %s/%s with both facts set, want scheduled", got.State, got.Reason)
+	}
+}
+
 // The heartbeat TTL is a settle-latency dial, not a safety margin, and this is
 // the property that makes it safe to keep it short.
 //
