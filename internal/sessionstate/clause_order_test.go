@@ -68,6 +68,25 @@ func TestClauseOrder(t *testing.T) {
 			wantReason: ReasonApprovalOpen,
 		},
 		{
+			// A parked wakeup used to be read as a state and sat above the
+			// classifier, so a turn that ended by asking the user something was
+			// reported as `scheduled` and never opened a turn. A registered
+			// wakeup is not an answer to whether the agent needs a person — it
+			// is as true of an agent mid-turn as of one waiting on a reply — so
+			// it only gets to name the outcome where nothing was asked.
+			why: "a question the classifier read out of the transcript outranks a " +
+				"parked wakeup: the wakeup will resume the session, but not with " +
+				"the answer the turn stopped for",
+			evidence: Evidence{
+				LastClassifier: seen(SourceClassifier, ClaimNeedsInput, time.Second),
+				PendingCron:    true,
+				TurnEverOpened: true,
+				LastBusyAt:     now.Add(-2 * time.Second),
+			},
+			wantState:  protocol.SessionStateWaitingInput,
+			wantReason: ReasonClassifierVerdict,
+		},
+		{
 			why: "an announced question outranks the classifier's guess about how " +
 				"the turn ended: the harness said what it is waiting for, and the " +
 				"classifier is inferring it from a transcript",

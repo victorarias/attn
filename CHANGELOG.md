@@ -60,6 +60,29 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   stayed purple until it next did some work. Claude announces when it is sitting
   at its prompt waiting for input, and attn now believes that over an
   unfinished background task, so the agent joins your queue as what it is.
+- **An agent with a scheduled wakeup can still ask you for something.** A session
+  parked on a cron or a `/loop` was drawn as *scheduled* no matter how its turn
+  actually ended, so a question it asked on the way to its next run never reached
+  your queue — and the same session turned purple a minute and a half later, as
+  though being quiet between runs were a fault. A wakeup on the calendar says
+  nothing about whether the agent needs you, so it no longer decides: the agent
+  is drawn as waiting for you when it is, and *scheduled* now means what it
+  sounds like — the turn ended, nothing is outstanding, and it will pick itself
+  up on schedule.
+- **An agent stopped by a rate limit or a billing problem now asks for you.**
+  When Claude's API cuts a turn short, the agent produces nothing and cannot
+  continue until you act. It used to be indistinguishable from an agent that
+  finished and went quiet, so it sat there looking done. It now joins your queue,
+  and the reason — rate limit, expired login, unpaid bill — is on the session.
+- **Compacting no longer flickers an agent between working and finished.** An
+  agent rewriting its context does so silently for half a minute, which read as a
+  finished turn; the agent dropped into your queue and pulled itself back out a
+  moment later. Claude reports when compaction starts and ends, and attn now
+  waits it out.
+- **A background subagent's work no longer clears an approval you have not
+  answered.** Anything an agent ran in the background reported its progress as
+  the main conversation's, so a tool finishing back there wiped out the
+  permission prompt sitting in front of you and drew the agent as busy.
 
 ### Removed
 - **The long-run review gate is gone.** Runs over five minutes used to hold their

@@ -789,6 +789,41 @@ func TestAPromptIdleConfirmationDoesNotRetireAParkedCron(t *testing.T) {
 	}
 }
 
+// A session parked on a wakeup hours away is quiet because there is nothing to
+// say, not because it stopped saying it — so silence is what being parked looks
+// like, and diagnosing it as stuck was reporting the schedule working correctly
+// as a fault.
+//
+// This was the second half of one root cause. Treating the wakeup as work
+// outstanding forced the pairing: a clause that claims something is running has
+// to expire, because a claim that never expires pins a color for the life of the
+// session. Nothing is running here. A cron is a promise about the future, the
+// process is alive to keep it, and the clauses that do diagnose a dead session —
+// process exit above, an open bracket that went silent — are untouched by this.
+func TestAParkedWakeupDoesNotRotIntoUnknown(t *testing.T) {
+	policy := testPolicy()
+	parked := now.Add(-time.Minute)
+	e := Evidence{
+		TurnEverOpened: true,
+		PendingCron:    true,
+		LastBusyAt:     parked,
+		LastMovement:   parked,
+	}
+
+	for _, quiet := range []time.Duration{
+		policy.StuckAfter - time.Second,
+		policy.StuckAfter,
+		policy.StuckAfter + time.Second,
+		10 * policy.StuckAfter,
+	} {
+		at := parked.Add(quiet)
+		got := Resolve(e, policy, at)
+		if got.State != protocol.SessionStateScheduled {
+			t.Fatalf("resolved %s/%s after %s of silence, want scheduled", got.State, got.Reason, quiet)
+		}
+	}
+}
+
 // The heartbeat TTL is a settle-latency dial, not a safety margin, and this is
 // the property that makes it safe to keep it short.
 //
@@ -932,5 +967,74 @@ func TestPolicyForUsesTheMeasuredPerAgentTTL(t *testing.T) {
 			t.Fatalf("HeartbeatSettleAfter %s must exceed HeartbeatTTL %s",
 				policy.HeartbeatSettleAfter, policy.HeartbeatTTL)
 		}
+	}
+}
+
+// The gap a compaction leaves is wide enough to look like a finished turn, and
+// between turns there is no bracket left to say otherwise.
+//
+// The fallback that covers it today is HeartbeatSettleAfter, which infers the
+// gap from the shape of the title frames. That inference stays — codex has no
+// compaction hook, and nothing rules out another source of wide gaps — but where
+// claude reports the fact, the fact should win: the heuristic settles a real
+// end-of-turn that much later, and this does not.
+func TestCompactionIsWorkNothingElseCanSee(t *testing.T) {
+	policy := testPolicy()
+	e := Evidence{
+		TurnEverOpened: true,
+		Compacting:     true,
+		// Every other source says the turn is over: no bracket, and title frames
+		// that stopped long enough to settle on their own.
+		Heartbeat:    seen(SourceHeartbeat, ClaimSettled, 10*time.Second),
+		LastBusyAt:   now.Add(-10 * time.Second),
+		LastMovement: now.Add(-time.Second),
+	}
+
+	got := Resolve(e, policy, now)
+	if got.State != protocol.SessionStateWorking || got.Reason != ReasonCompacting {
+		t.Fatalf("resolved %s/%s while compacting, want working/compacting", got.State, got.Reason)
+	}
+
+	// And it is a claim that something is running, so it expires like every other
+	// one: a PostCompact that never arrives must not pin the session green.
+	e.LastMovement = now.Add(-policy.StuckAfter - time.Second)
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateUnknown {
+		t.Fatalf("resolved %s/%s after total silence, want unknown: a lost PostCompact must not hold working forever", got.State, got.Reason)
+	}
+}
+
+// A turn cut off by the API produced nothing and cannot resume until a person
+// acts — waits out a rate limit, pays a bill, renews a login. Every other signal
+// makes that indistinguishable from an agent that finished and went quiet, which
+// is the reading that leaves the user waiting on a session that is not coming
+// back.
+func TestATurnKilledByTheAPIAsksForTheUser(t *testing.T) {
+	policy := testPolicy()
+	e := Evidence{
+		TurnEverOpened: true,
+		LastHarnessEvent: &Observation{
+			Source:     SourceHarnessEvent,
+			Claim:      ClaimStopFailed,
+			Detail:     "rate_limit: usage limit reached",
+			ObservedAt: now.Add(-time.Second),
+		},
+		LastBusyAt:   now.Add(-5 * time.Second),
+		LastMovement: now.Add(-time.Second),
+	}
+
+	got := Resolve(e, policy, now)
+	if got.State != protocol.SessionStateWaitingInput || got.Reason != ReasonStopFailed {
+		t.Fatalf("resolved %s/%s, want waiting_input/stop_failed", got.State, got.Reason)
+	}
+	if got.Detail != "rate_limit: usage limit reached" {
+		t.Fatalf("detail = %q, want the error carried through: which failure it was is the part worth reading", got.Detail)
+	}
+
+	// Retired by the agent running again, which is the right edge whether the
+	// user fixed the cause or simply re-prompted.
+	e.Heartbeat = seen(SourceHeartbeat, ClaimBusy, 100*time.Millisecond)
+	e.LastBusyAt = now.Add(-100 * time.Millisecond)
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateWorking {
+		t.Fatalf("resolved %s/%s once the agent ran again, want working", got.State, got.Reason)
 	}
 }

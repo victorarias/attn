@@ -67,6 +67,11 @@ const (
 	ClaimIdle Claim = "idle"
 	// ClaimExited: the process is gone.
 	ClaimExited Claim = "exited"
+	// ClaimStopFailed: the turn ended on an API error rather than on an answer.
+	// Distinct from ClaimNeedsInput because the agent did not ask anything — it
+	// was cut off — and a diagnosis that says so is worth more than one that
+	// reports a question nobody asked.
+	ClaimStopFailed Claim = "stop_failed"
 )
 
 // Observation is one recorded piece of evidence.
@@ -108,6 +113,11 @@ type Evidence struct {
 	BackgroundWork bool
 	// PendingCron: the turn yielded with a scheduled wakeup that will resume it.
 	PendingCron bool
+	// Compacting: the agent is rewriting its own context, between PreCompact and
+	// PostCompact. It is work that paints no spinner frames and opens no turn, so
+	// nothing else in this table can see it. Measured at 26s, which is long enough
+	// that a compaction between turns reads as a session that finished.
+	Compacting bool
 	// ReviewerInLoop: something other than the user answers approval requests —
 	// claude's permission classifier, codex's auto_review guardian. It does not
 	// suppress an approval state; it decides how long that state must hold
@@ -296,6 +306,8 @@ const (
 	ReasonSettleGrace       Reason = "settle_grace"
 	ReasonAwaitingVerdict   Reason = "awaiting_verdict"
 	ReasonBackgroundWork    Reason = "background_work"
+	ReasonCompacting        Reason = "compacting"
+	ReasonStopFailed        Reason = "stop_failed"
 	ReasonClassifierVerdict Reason = "classifier_verdict"
 	ReasonAtPrompt          Reason = "at_prompt"
 	ReasonStuck             Reason = "stuck"
@@ -364,34 +376,45 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// otherwise. The confirmation below is the harness stating where the session
 	// is — parked at its prompt, nothing running — and that is a direct answer to
 	// the question the background-work fact only guesses at, so it retires the
-	// guess.
+	// guess. Claude fires that notification on a flat prompt-idle timer that reads
+	// neither fact — measured, and the reason it can be trusted to arrive.
 	//
-	// Only the background half. A parked schedule is a promise to come back at a
-	// known time, which the agent sitting at its prompt does not contradict; a
-	// background task carries no such promise, and the notification is the only
-	// thing that ever reports it stopped mattering. Claude fires the notification
-	// on a flat prompt-idle timer that reads neither fact — measured on both, and
-	// the reason it can be trusted to arrive.
-	backgroundWork := e.BackgroundWork && !promptIdleConfirmed(e)
-
-	// The turn yielded with something outstanding that will resume it, so nobody
-	// is being waited on. Both facts arrive together on the Stop payload and the
-	// order between them is the interesting part: work still running means the
-	// session is working, and only once nothing is running does a parked schedule
-	// get to describe it.
-	//
-	// Bounded by total silence like the brackets below, and for the same reason: a
+	// The turn yielded with work still running, so nobody is being waited on.
+	// Bounded by total silence, and for the same reason as the brackets below: a
 	// fact about how the last turn yielded is believed while the session is still
 	// producing evidence, and a session that resumed nothing and then went quiet
 	// forever is stuck rather than busy.
-	if backgroundWork || e.PendingCron {
+	//
+	// A parked cron is deliberately not here. It is not a claim about what the
+	// session is doing — it says a wakeup is registered, which is as true of an
+	// agent mid-turn as of one waiting on an answer. Reading it as a state let it
+	// outrank the classifier, so a turn that ended by asking the user something
+	// was painted `scheduled` and never opened a turn; and, being read as work
+	// outstanding, it had to rot into `unknown` once the session went quiet. It
+	// belongs on the settle instead, where it decides what a finished turn with
+	// nothing asked of anyone is called. See settled.
+	// The agent is rewriting its own context. That is work, and it is work no
+	// other clause can see: compaction opens no turn and no tool call, and the
+	// title frames it paints have gaps wide enough to read as a finished turn.
+	// Between turns — a manual `/compact` — there is no open bracket to hold the
+	// session either, so without this the settle clauses below call it idle and
+	// the next frame calls it working again, once per gap.
+	//
+	// Bounded by total silence, like every other clause that claims something is
+	// running: PostCompact is a hook and hooks get lost, and a compaction that
+	// never reported finishing must not pin the session green for good.
+	if e.Compacting {
 		if evidenceStoppedMoving(e, now, policy.StuckAfter) {
 			return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
 		}
-		if backgroundWork {
-			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundWork}
+		return Resolution{State: protocol.SessionStateWorking, Reason: ReasonCompacting}
+	}
+
+	if e.BackgroundWork && !promptIdleConfirmed(e) {
+		if evidenceStoppedMoving(e, now, policy.StuckAfter) {
+			return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
 		}
-		return Resolution{State: protocol.SessionStateScheduled, Reason: ReasonCronPending}
+		return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundWork}
 	}
 
 	// The harness says the agent is parked at its prompt. That outranks an open
@@ -492,6 +515,20 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// paints a not-busy glyph once its prompt is ready, and codex paints one after
 	// the busy flicker it emits while booting. A fresh busy frame is already handled
 	// far above, so reaching here means the latest frame says nothing is running.
+	// A parked wakeup is only ever learned from a Stop, so reaching here with one
+	// recorded means a turn ended and no bracket has reopened one. That is a
+	// settle on its own evidence, which matters because the clause above needs a
+	// heartbeat and this does not: an agent reporting hooks without a title — a
+	// headless or remote session — would otherwise park on nothing at all and
+	// resolve as though it had never spoken.
+	//
+	// It sits below the heartbeat rather than beside it so a wakeup that already
+	// fired is described by the agent that is visibly running, not by the schedule
+	// that started it.
+	if e.PendingCron && !e.TurnOpen && !e.ToolOpen {
+		return settled(e, ReasonCronPending, policy, now)
+	}
+
 	if e.Heartbeat != nil && e.Heartbeat.Claim == ClaimSettled && !everTookATurn(e) {
 		return Resolution{State: protocol.SessionStateIdle, Reason: ReasonAtPrompt}
 	}
@@ -525,14 +562,35 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 // idle first and correcting it on arrival turns every question-ending turn into
 // a visible green-then-yellow flicker. Holding is bounded by ClassifierTimeout,
 // so a classifier that dies still settles the session.
+//
+// A parked cron only ever colors the passive outcome. The question this whole
+// table exists to answer is whether the agent needs the user, and a registered
+// wakeup does not answer it either way — so a turn that ended by asking for
+// something is reported as asking, cron or no cron, and only a turn that ended
+// with nothing outstanding gets described by the wakeup instead of by its
+// silence. Every caller reaches here having decided the turn is over, which is
+// exactly when "it will come back on its own" is worth saying.
 func settled(e Evidence, fallback Reason, policy Policy, now time.Time) Resolution {
 	if r, ok := classifierVerdict(e); ok {
-		return r
+		return parked(r, e)
 	}
 	if verdictPending(e, policy, now) {
 		return Resolution{Hold: true, Reason: ReasonAwaitingVerdict}
 	}
-	return Resolution{State: protocol.SessionStateIdle, Reason: fallback}
+	return parked(Resolution{State: protocol.SessionStateIdle, Reason: fallback}, e)
+}
+
+// parked renames a settle that asks nothing of anyone after the wakeup that will
+// end it.
+//
+// Only that outcome. A turn that stopped on a question is still stopped on a
+// question with a cron registered, and saying `scheduled` there would hide the
+// one thing the user needs to know behind a fact about the calendar.
+func parked(r Resolution, e Evidence) Resolution {
+	if !e.PendingCron || r.State != protocol.SessionStateIdle {
+		return r
+	}
+	return Resolution{State: protocol.SessionStateScheduled, Reason: ReasonCronPending, Detail: r.Detail}
 }
 
 // verdictPending reports whether a classification is running and still worth
@@ -566,6 +624,20 @@ func harnessEdge(e Evidence) (Resolution, bool) {
 		return Resolution{
 			State:  protocol.SessionStateWaitingInput,
 			Reason: ReasonQuestionOpen,
+			Detail: e.LastHarnessEvent.Detail,
+		}, true
+	case ClaimStopFailed:
+		// A turn cut off by the API is blocked on a person as surely as a question
+		// is: the error is a rate limit to wait out, a bill to pay, or a login to
+		// renew, and the agent will not produce anything until one of those
+		// happens. Reported as waiting on the user because that is what it is —
+		// the detail carries which error, which is the part worth reading.
+		//
+		// Retired like the others, by the agent going busy again. That is the right
+		// edge whether the user fixed the cause or simply re-prompted.
+		return Resolution{
+			State:  protocol.SessionStateWaitingInput,
+			Reason: ReasonStopFailed,
 			Detail: e.LastHarnessEvent.Detail,
 		}, true
 	default:

@@ -2204,6 +2204,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleState(conn, msg.(*protocol.StateMessage))
 	case protocol.CmdHookNotification:
 		d.handleHookNotification(conn, msg.(*protocol.HookNotificationMessage))
+	case protocol.CmdHookStopFailure:
+		d.handleHookStopFailure(conn, msg.(*protocol.HookStopFailureMessage))
+	case protocol.CmdHookCompaction:
+		d.handleHookCompaction(conn, msg.(*protocol.HookCompactionMessage))
 	case protocol.CmdSetSessionResumeID:
 		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
 	case protocol.CmdSessionInstructions:

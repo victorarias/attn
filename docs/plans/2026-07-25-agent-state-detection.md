@@ -882,8 +882,44 @@ attention".
   Scoped to the background half: a cron is a promise to return at a known time,
   which an idle prompt does not contradict, so `scheduled` still wins. A quiet
   cron-parked session therefore still decays to `unknown` after `StuckAfter` —
-  known gap, and the Stop payload carries the cron expression needed to fix it
-  properly by holding `scheduled` until the wakeup is actually due.
+  see the entry below, which closed that gap by a different route than the one
+  guessed at here.
+- **A parked cron is not a state, so it stopped being a clause.** The gap above
+  suggested reading the cron expression and holding `scheduled` until the wakeup
+  was due. That would have been the wrong fix for the wrong problem. The table
+  answers one question — does the agent need the user — and a registered wakeup
+  does not answer it: it is as true of an agent mid-turn as of one waiting on a
+  reply. Reading it as a state produced both observed faults at once. Sitting
+  above the classifier, it painted a turn that *ended by asking the user
+  something* as `scheduled`, which never opens a turn — so the queue silently
+  dropped exactly the sessions most likely to be waiting. And being phrased as a
+  claim that work was outstanding, it inherited the expiry every such claim needs
+  and rotted into `unknown`/`stuck` once the session went quiet, which is to say
+  it diagnosed the schedule working correctly as a fault.
+  `PendingCron` now names the *outcome of a settle* instead: `parked` renames a
+  resolution that asks nothing of anyone, and only that one. A question outranks
+  it wherever the question came from, and nothing about being parked expires,
+  because nothing is claimed to be running. A dead worker is still caught, by the
+  clauses that actually detect one — process exit above, and an open bracket that
+  went silent. The cron expression is not needed and is not read.
+- **`StopFailure`, `PreCompact`/`PostCompact`, and `agent_id` are the hooks worth
+  wiring; the rest of the 30 are not.** Surveyed by logging every hook claude
+  fires (2.1.220) over a live session. `StopFailure` is the only report that a
+  turn died on an API error — a rate limit, an expired login, an unpaid bill —
+  and without it that is indistinguishable from a turn that finished quietly,
+  which is the reading that leaves the user waiting on a session that is not
+  coming back; it is filed as a harness edge, so the agent going busy again
+  retires it. `PreCompact`/`PostCompact` bracket work no other source can see:
+  compaction opens no turn and no tool call, and the title frames it paints have
+  gaps wide enough to read as a settle. `agent_id` is empty on the main thread
+  and set on subagent tool events, which is what makes it possible to stop a
+  background subagent's tool completions from reporting on the main thread's turn
+  — they were retiring unanswered approvals.
+  `HeartbeatSettleAfter` stays as the backstop rather than being retired by the
+  compaction hooks: codex has no counterpart, and nothing rules out another
+  source of wide title gaps. The compaction level is a claim that something is
+  running, so it expires like every other one, and a turn going to work clears it
+  in case `PostCompact` is lost.
 - **Done is settled, but goes stale.** An unread idle result unsettles past
   `idleStaleAfter` so work Victor drove is never silently forgotten. Strict
   "always settled" was rejected for that reason.

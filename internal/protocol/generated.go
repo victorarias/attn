@@ -1999,6 +1999,20 @@ const HeatStateCold HeatState = "cold"
 const HeatStateHot HeatState = "hot"
 const HeatStateWarm HeatState = "warm"
 
+type HookCompactionMessage struct {
+	// Active corresponds to the JSON schema field "active".
+	Active bool `json:"active"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Trigger corresponds to the JSON schema field "trigger".
+	Trigger *string `json:"trigger,omitempty,omitzero"`
+}
+
 type HookNotificationMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2011,6 +2025,20 @@ type HookNotificationMessage struct {
 
 	// NotificationType corresponds to the JSON schema field "notification_type".
 	NotificationType string `json:"notification_type"`
+}
+
+type HookStopFailureMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ErrorMessage corresponds to the JSON schema field "error_message".
+	ErrorMessage *string `json:"error_message,omitempty,omitzero"`
+
+	// ErrorType corresponds to the JSON schema field "error_type".
+	ErrorType string `json:"error_type"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 }
 
 type InitialStateMessage struct {

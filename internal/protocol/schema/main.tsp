@@ -634,6 +634,34 @@ model HookNotificationMessage {
   message?: string;
 }
 
+// HookStopFailureMessage carries Claude's `StopFailure` hook, which replaces
+// `Stop` when a turn ends on an API error rather than on an answer. Without it
+// an agent that died on a rate limit or an unpaid bill is indistinguishable
+// from one that finished quietly, which is the opposite of the truth: the turn
+// produced nothing and cannot resume until a person does something.
+//
+// error_type is the harness's own classification ("rate_limit", "overloaded",
+// "billing_error", "authentication_failed", …) and error_message is its
+// human-readable form.
+model HookStopFailureMessage {
+  cmd: "hook_stop_failure";
+  id: string;
+  error_type: string;
+  error_message?: string;
+}
+
+// HookCompactionMessage carries Claude's `PreCompact`/`PostCompact` pair, which
+// bracket the agent rewriting its own context. Compaction is work — measured at
+// 26s — but it paints no spinner frames and opens no turn, so between turns it
+// reads as a session that went quiet and settles. active is true on PreCompact
+// and false on PostCompact; trigger is "manual" or "auto".
+model HookCompactionMessage {
+  cmd: "hook_compaction";
+  id: string;
+  active: boolean;
+  trigger?: string;
+}
+
 model SetSessionResumeIDMessage {
   cmd: "set_session_resume_id";
   id: string;

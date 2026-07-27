@@ -213,10 +213,16 @@ func (d *Daemon) recordBracketEvidence(sessionID, state string) {
 			// the user picks an option.
 			if e.LastHarnessEvent != nil {
 				switch e.LastHarnessEvent.Claim {
-				case sessionstate.ClaimApprovalPending, sessionstate.ClaimNeedsInput:
+				case sessionstate.ClaimApprovalPending, sessionstate.ClaimNeedsInput, sessionstate.ClaimStopFailed:
 					e.LastHarnessEvent = nil
 				}
 			}
+			// Compaction cannot still be running while a turn is being worked:
+			// nothing else in the session moves until it finishes. So this is the
+			// backstop for a lost PostCompact, which would otherwise leave the
+			// session claiming to be compacting with only total silence left to
+			// contradict it.
+			e.Compacting = false
 			// And for how the last turn yielded. These describe a turn that has
 			// ended; a turn is open again, so whatever was going to resume it did.
 			// Left behind, outstanding background work pins the session working
@@ -396,6 +402,38 @@ func (d *Daemon) recordNotificationEvidence(sessionID, notificationType, message
 			e.PromptIdleAt = at
 		})
 	}
+}
+
+// recordStopFailureEvidence files claude's StopFailure hook: the turn ended on
+// an API error instead of on an answer.
+//
+// It is filed as a harness edge rather than a stop, because it is not one. No
+// turn ended in the sense the Stop path means — there is no transcript worth
+// classifying and no result to report — and the session cannot make progress
+// until a person acts on the error. Filing it here also means the agent going
+// busy again retires it, which is exactly the edge that says the problem is over.
+func (d *Daemon) recordStopFailureEvidence(sessionID, errorType, message string) {
+	at := time.Now()
+	detail := strings.TrimSpace(errorType)
+	if message = strings.TrimSpace(message); message != "" {
+		detail = detail + ": " + message
+	}
+	d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
+		e.LastHarnessEvent = &sessionstate.Observation{
+			Source:     sessionstate.SourceHarnessEvent,
+			Claim:      sessionstate.ClaimStopFailed,
+			Detail:     detail,
+			ObservedAt: at,
+		}
+	})
+}
+
+// recordCompactionEvidence files claude's PreCompact/PostCompact pair as a level:
+// the agent is rewriting its own context, and no other source reports it.
+func (d *Daemon) recordCompactionEvidence(sessionID string, active bool) {
+	d.recordEvidence(sessionID, time.Now(), func(e *sessionstate.Evidence) {
+		e.Compacting = active
+	})
 }
 
 // recordProcessEvidence files the PTY lifecycle. An exited process is terminal

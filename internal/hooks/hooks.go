@@ -226,6 +226,47 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 					},
 				},
 			},
+			// StopFailure replaces Stop when the turn ends on an API error. It is
+			// the only report that a session died on a rate limit, an expired
+			// login, or an unpaid bill — every other signal makes that look
+			// identical to an agent that finished and went quiet.
+			"StopFailure": {
+				{
+					Matcher: "*",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-stop-failure "%s"`, socketCmd, wrapperCmd, sessionID),
+						},
+					},
+				},
+			},
+			// Compaction is work that nothing else reports: it opens no turn and
+			// no tool call, and the title frames it paints have gaps wide enough
+			// to read as a finished turn. The two hooks carry identical payloads,
+			// so the edge is named on the command line rather than read from one.
+			"PreCompact": {
+				{
+					Matcher: "*",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-compact "%s" start`, socketCmd, wrapperCmd, sessionID),
+						},
+					},
+				},
+			},
+			"PostCompact": {
+				{
+					Matcher: "*",
+					Hooks: []Hook{
+						{
+							Type:    "command",
+							Command: fmt.Sprintf(`ATTN_SOCKET_PATH=%s %s _hook-compact "%s" end`, socketCmd, wrapperCmd, sessionID),
+						},
+					},
+				},
+			},
 			"PermissionRequest": {
 				{
 					// PermissionRequest fires when Claude needs user approval for a tool

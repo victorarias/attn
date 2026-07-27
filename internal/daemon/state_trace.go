@@ -42,6 +42,12 @@ const (
 	// out loud that it is blocked on the user. It reports a notification_type,
 	// not a state.
 	stateSourceHookNotify = "hook_notify"
+	// stateSourceHookStopFailure is Claude's StopFailure hook — the turn ended on
+	// an API error rather than on an answer. It reports an error_type.
+	stateSourceHookStopFailure = "hook_stop_failure"
+	// stateSourceHookCompaction is Claude's PreCompact/PostCompact pair bracketing
+	// the agent rewriting its own context.
+	stateSourceHookCompaction = "hook_compaction"
 	// stateSourceReviewer is the agent's resolved permission mode, reported as a
 	// fact on the state hook. It says who answers an approval request, which is
 	// what separates a real approval stall from a guardian's brief round trip.
@@ -229,6 +235,38 @@ func (d *Daemon) handleHookNotification(conn net.Conn, msg *protocol.HookNotific
 		detail: message,
 	}, kind)
 	d.recordNotificationEvidence(msg.ID, kind, message)
+	d.sendOK(conn)
+}
+
+// handleHookStopFailure records Claude's StopFailure hook, which replaces Stop
+// when a turn ends on an API error. None of the end-of-turn work applies: there
+// is no finished turn to classify, narrate, or resume from.
+func (d *Daemon) handleHookStopFailure(conn net.Conn, msg *protocol.HookStopFailureMessage) {
+	errorType := strings.TrimSpace(msg.ErrorType)
+	if errorType == "" {
+		d.sendError(conn, "missing error_type")
+		return
+	}
+	message := strings.TrimSpace(protocol.Deref(msg.ErrorMessage))
+	d.traceStateEvidence(msg.ID, stateOrigin{
+		source: stateSourceHookStopFailure,
+		detail: message,
+	}, errorType)
+	d.recordStopFailureEvidence(msg.ID, errorType, message)
+	d.sendOK(conn)
+}
+
+// handleHookCompaction records Claude's PreCompact/PostCompact pair.
+func (d *Daemon) handleHookCompaction(conn net.Conn, msg *protocol.HookCompactionMessage) {
+	phase := "finished"
+	if msg.Active {
+		phase = "started"
+	}
+	d.traceStateEvidence(msg.ID, stateOrigin{
+		source: stateSourceHookCompaction,
+		detail: strings.TrimSpace(protocol.Deref(msg.Trigger)),
+	}, phase)
+	d.recordCompactionEvidence(msg.ID, msg.Active)
 	d.sendOK(conn)
 }
 

@@ -74,6 +74,19 @@ type hookInput struct {
 	// Message is its human-readable form.
 	Message          string `json:"message"`
 	NotificationType string `json:"notification_type"`
+	// AgentID names the subagent a tool event belongs to, and is empty for the
+	// main thread. Claude runs subagents concurrently with the conversation, so
+	// without it every tool a background subagent completes is indistinguishable
+	// from the main thread getting on with its turn.
+	AgentID string `json:"agent_id"`
+	// ErrorType and ErrorMessage come from Claude's StopFailure hook, which
+	// replaces Stop when the turn ends on an API error. ErrorType is the
+	// classification ("rate_limit", "billing_error", "overloaded", …);
+	// ErrorMessage is its human-readable form.
+	ErrorType    string `json:"error_type"`
+	ErrorMessage string `json:"error_message"`
+	// Trigger is "manual" or "auto" on Claude's PreCompact/PostCompact hooks.
+	Trigger string `json:"trigger"`
 }
 
 // backgroundTask is one entry of hookInput.BackgroundTasks. Only Status is
@@ -251,6 +264,10 @@ func main() {
 		runHookSessionStart()
 	case "_hook-notification":
 		runHookNotification()
+	case "_hook-stop-failure":
+		runHookStopFailure()
+	case "_hook-compact":
+		runHookCompact()
 	case "_hook-state":
 		runHookState()
 	case "_hook-todo":
@@ -3302,6 +3319,55 @@ func runHookNotification() {
 	}
 }
 
+// runHookStopFailure handles Claude's StopFailure hook, which replaces Stop when
+// a turn ends on an API error. None of the end-of-turn work applies — there is
+// no finished turn to classify or narrate — so this reports the error and stops.
+func runHookStopFailure() {
+	sessionID := hookSessionIDFromArgOrEnv(2)
+	if sessionID == "" {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-stop-failure [session_id]\n")
+		os.Exit(1)
+	}
+
+	var input hookInput
+	_ = json.NewDecoder(os.Stdin).Decode(&input)
+	errorType := strings.TrimSpace(input.ErrorType)
+	if errorType == "" {
+		// The classification is the load-bearing half. Without it there is
+		// nothing to tell the user beyond "something went wrong", and the turn
+		// bracket the resolver already holds is the better description.
+		return
+	}
+
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	syncSessionResumeID(c, sessionID, input.SessionID)
+	if err := c.RecordStopFailure(sessionID, errorType, input.ErrorMessage); err != nil {
+		fmt.Fprintf(os.Stderr, "error recording stop failure: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// runHookCompact handles Claude's PreCompact and PostCompact hooks, which
+// bracket the agent rewriting its own context. active distinguishes them: the
+// two hooks carry identical payloads, so the caller names the edge.
+func runHookCompact() {
+	sessionID := hookSessionIDFromArgOrEnv(2)
+	if sessionID == "" || len(os.Args) < 4 {
+		fmt.Fprintf(os.Stderr, "usage: attn _hook-compact <session_id> <start|end>\n")
+		os.Exit(1)
+	}
+	active := strings.TrimSpace(os.Args[3]) == "start"
+
+	var input hookInput
+	_ = json.NewDecoder(os.Stdin).Decode(&input)
+
+	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	if err := c.RecordCompaction(sessionID, active, input.Trigger); err != nil {
+		fmt.Fprintf(os.Stderr, "error recording compaction: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 // runHookToolUse handles the catch-all PostToolUse hook for both agents. A
 // completed tool call means the agent is working again (this is what resets
 // pending_approval), and if that call wrote markdown, the same payload names
@@ -3319,9 +3385,18 @@ func runHookToolUse() {
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
 	syncSessionResumeID(c, sessionID, input.SessionID)
-	if err := c.UpdateState(sessionID, protocol.StateWorking); err != nil {
-		fmt.Fprintf(os.Stderr, "error updating state: %v\n", err)
-		os.Exit(1)
+	// Only the main thread's tool calls report on the main thread's turn. A
+	// subagent runs concurrently with the conversation that spawned it, so its
+	// tool completions say nothing about whether the agent is still blocked —
+	// and reporting them as working retires the approval or question the user is
+	// being asked to answer, which is the one state that must survive until the
+	// user acts. The edits below are still worth recording: a subagent's writes
+	// are the session's writes.
+	if strings.TrimSpace(input.AgentID) == "" {
+		if err := c.UpdateState(sessionID, protocol.StateWorking); err != nil {
+			fmt.Fprintf(os.Stderr, "error updating state: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Recording an edit is a ranking nicety, not part of the state contract:
