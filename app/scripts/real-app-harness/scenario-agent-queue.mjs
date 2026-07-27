@@ -13,8 +13,9 @@
  * The run drives two real Claude agents in two workspaces and asserts, against
  * the rendered DOM (`queue_get_state`), that:
  *
- *   1. both owed turns are in the band, oldest first, and both are still in the
- *      workspace tree below it — the queue is additive, never a filter,
+ *   1. an agent queues from the moment it boots to its prompt, and both owed
+ *      turns are in the band, oldest first, and both are still in the workspace
+ *      tree below it — the queue is additive, never a filter,
  *   2. clicking a row hands the agent over with the keyboard in its terminal,
  *   3. steering that agent leaves it exactly where it was, showing its live
  *      (working) state rather than dropping out of the queue,
@@ -22,8 +23,8 @@
  *   5. a settled agent that wants the user again returns at the bottom, behind
  *      the turn that has been owed longer,
  *   6. a settled agent whose run finishes without asking anything returns too —
- *      a result nobody has read is still the user's — while a shell pane and an
- *      agent sitting at its prompt, which reach the same `idle` state, never do,
+ *      a result nobody has read is still the user's — while a shell pane, which
+ *      reaches the same `idle` state, never queues at all,
  *   7. the chief of staff occupies its own slot and never the band,
  *   8. turning the arrangement off and back on mid-session returns the same
  *      queue with the same agent still selected,
@@ -206,22 +207,25 @@ async function main() {
     await runner.step('open_first_turn', async () => {
       alpha = await createAgent(client, observer, runner, 'alpha', `queue-alpha-${runner.runId}`);
       createdSessionIds.push(alpha.sessionId);
-      // The sidebar only exists once there is something to list, so the band's
-      // empty state is checked here rather than against a sessionless app.
+      // The sidebar only exists once there is something to list, so the band is
+      // checked here rather than against a sessionless app.
       //
-      // An agent that has booted to its prompt resolves to `idle`, the same
-      // state a finished run resolves to, and `idle` opens a turn. It must not
-      // queue anyway: there is no result behind it to read. This is the only
-      // place that distinction is observable end to end.
-      const empty = await pollFor(async () => {
+      // An agent you launched and have not spoken to boots to its prompt and
+      // resolves to `idle`, the same state a finished run resolves to, and idle
+      // opens a turn. Nothing will happen in it until you type, so it queues
+      // from the moment it boots — no prompt required. This is the only place
+      // the launch case is observable end to end.
+      await pollFor(async () => {
         const state = await queueState(client);
         return state.present ? state : null;
       }, 'the queue band to render once the arrangement is on', 15_000);
-      runner.assert(empty.empty, `a freshly launched agent owes nothing: ${JSON.stringify(empty.turns)}`);
+      await waitForTurns(client, [alpha.sessionId], 'alpha queued from the moment it booted');
 
+      // Steering it into a real ask keeps the same turn — the later steps settle
+      // and re-open against an agent that has actually run something.
       const state = await driveToOwedTurn(client, observer, alpha, 'QUEUE_ALPHA', 'alpha to want the user');
       runner.log('alpha opened a turn', { state });
-      await waitForTurns(client, [alpha.sessionId], 'alpha in the band');
+      await waitForTurns(client, [alpha.sessionId], 'alpha still in the band');
     });
 
     await runner.step('open_second_turn', async () => {

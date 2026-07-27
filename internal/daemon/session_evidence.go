@@ -575,7 +575,6 @@ func (d *Daemon) publishResolution(sessionID string, current protocol.SessionSta
 			source: stateSourceResolver,
 			detail: resolutionDetail(resolution),
 		},
-		atPrompt: resolution.Reason == sessionstate.ReasonAtPrompt,
 	})
 }
 

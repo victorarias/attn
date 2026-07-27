@@ -25,11 +25,15 @@ import (
 //   - waiting_input, pending_approval, unknown open a turn. The first two are
 //     the agent asking; unknown is the daemon admitting it cannot tell, which is
 //     equally the user's problem.
-//   - idle opens one too. A run you asked for finished and nobody has read the
-//     result; that it ended without a question makes it no less yours. This is
-//     what retired the long-run review deferral, which tried to approximate the
-//     same thing by holding a verdict back on runs over five minutes and
-//     publishing it when the session was looked at.
+//   - idle opens one too, and it covers two cases that are indistinguishable
+//     here on purpose. A run you asked for finished and nobody has read the
+//     result; that it ended without a question makes it no less yours. And a
+//     session you launched and have not yet spoken to sits at its prompt in the
+//     same state — the purest turn there is, since nothing will ever happen in
+//     it until you type. Idle opening a turn is also what retired the long-run
+//     review deferral, which tried to approximate the first case by holding a
+//     verdict back on runs over five minutes and publishing it when the session
+//     was looked at.
 //   - launching, working, scheduled never open one: the agent is busy or waiting
 //     on a clock.
 //   - recoverable never opens one either. The daemon revives it unattended, so
