@@ -111,8 +111,14 @@
    disambiguate. Tile bodies deliberately stay at full opacity: a docked doc is
    read while typing in the terminal, so dimming its prose would be a bad focus
    signal. */
-.session-terminal-workspace.multi-leaf .workspace-pane.active {
-  box-shadow: inset 0 0 0 1px rgba(255, 107, 53, 0.45);
+.session-terminal-workspace.multi-leaf .workspace-pane.active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 107, 53, 0.45);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .session-terminal-workspace.multi-leaf .workspace-pane.active .workspace-pane-header,
