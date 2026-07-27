@@ -110,7 +110,12 @@
    more than one leaf is on screen — with a single leaf there is nothing to
    disambiguate. Tile bodies deliberately stay at full opacity: a docked doc is
    read while typing in the terminal, so dimming its prose would be a bad focus
-   signal. */
+   signal.
+
+   z-index sits above every pane-local overlay (currently just
+   .workspace-pane-ticket-overlay at z-index: 5) so the ring stays the single,
+   unambiguous focus signal regardless of what a pane is showing internally —
+   raise this again if a future overlay needs to sit higher than 5. */
 .session-terminal-workspace.multi-leaf .workspace-pane.active::after {
   content: '';
   position: absolute;
@@ -118,7 +123,7 @@
   border: 1px solid rgba(255, 107, 53, 0.45);
   border-radius: inherit;
   pointer-events: none;
-  z-index: 1;
+  z-index: 10;
 }
 
 .session-terminal-workspace.multi-leaf .workspace-pane.active .workspace-pane-header,
@@ -336,7 +341,9 @@
 /* The bound-ticket overlay: TicketDetailPanel laid over the terminal inside the
    pane body (which is position:relative). Absolute inset:0 above the terminal
    canvas; the header stays above it so the chip and drag handle remain clickable.
-   Pane-scoped and non-modal — no backdrop, no FocusTrap. */
+   Pane-scoped and non-modal — no backdrop, no FocusTrap. Stays below the active-pane
+   focus ring's z-index: 10 (see .workspace-pane.active::after) so opening the
+   overlay never hides the focus signal on a multi-leaf workspace. */
 .workspace-pane-ticket-overlay {
   position: absolute;
   inset: 0;

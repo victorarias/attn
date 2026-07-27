@@ -9,6 +9,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-27]
 
 ### Fixed
+- **The focus ring around a terminal pane is visible on all four sides again,
+  even with a ticket open.** It was painted as an inset box-shadow, which draws
+  beneath a pane's children — so the terminal's opaque background covered the
+  ring's left, right, and bottom edges, leaving only the header's accent border
+  visible. It is now a `::after` overlay layered above everything in the pane,
+  including the bound-ticket detail overlay, so focus always has one visible
+  owner regardless of what the pane is showing.
 - **A docked markdown file can now be focused like any terminal pane.** Focus in
   a workspace used to belong to terminals only, so a markdown or notebook tile —
   the surface an agent opens when it shows you a file — could never be the
