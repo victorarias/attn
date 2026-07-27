@@ -5178,7 +5178,6 @@ func TestClassifySessionState_PublishesImmediatelyAfterALongRun(t *testing.T) {
 	}
 }
 
-
 func TestHandleStop_SkipsClassificationForForcedStopSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
