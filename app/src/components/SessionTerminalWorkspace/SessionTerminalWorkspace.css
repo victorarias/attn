@@ -117,15 +117,17 @@
    it. A terminal fills the pane body with an opaque background and used to leave
    only the segment behind the translucent header visible, while a tile — whose
    background happened to be transparent — showed the whole ring. The overlay
-   stacks above pane content (the bound-ticket overlay is z-index 5) and takes no
-   pointer events. */
+   stacks above every pane-local overlay (the bound-ticket overlay is z-index 5,
+   so opening a ticket never hides the focus signal) and takes no pointer events.
+   Raise this again if a future overlay needs to sit above 5. */
 .session-terminal-workspace.multi-leaf .workspace-pane.active::after {
   content: '';
   position: absolute;
   inset: 0;
   z-index: 10;
   pointer-events: none;
-  box-shadow: inset 0 0 0 1px rgba(255, 107, 53, 0.45);
+  border: 1px solid rgba(255, 107, 53, 0.45);
+  border-radius: inherit;
 }
 
 .session-terminal-workspace.multi-leaf .workspace-pane.active .workspace-pane-header,
@@ -343,7 +345,9 @@
 /* The bound-ticket overlay: TicketDetailPanel laid over the terminal inside the
    pane body (which is position:relative). Absolute inset:0 above the terminal
    canvas; the header stays above it so the chip and drag handle remain clickable.
-   Pane-scoped and non-modal — no backdrop, no FocusTrap. */
+   Pane-scoped and non-modal — no backdrop, no FocusTrap. Stays below the
+   active-pane focus ring's z-index: 10 (see .workspace-pane.active::after) so
+   opening the overlay never hides the focus signal on a multi-leaf workspace. */
 .workspace-pane-ticket-overlay {
   position: absolute;
   inset: 0;
