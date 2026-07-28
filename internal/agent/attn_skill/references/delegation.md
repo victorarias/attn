@@ -79,6 +79,13 @@ these flags.
 
 ## Placement
 
+For work involving a Git repository, start each delegation in a new worktree by
+default—even for read-only investigation or discussion. Base it on the branch
+relevant to the task, or the repository's default branch when none is specified.
+Reuse the current checkout only when the user asks or the delegation clearly
+continues work already happening there; more specific repository or agent
+guidance takes precedence.
+
 Before creating a new workspace, check whether an existing one already fits the
 work. `attn list` returns sessions grouped by `workspace_id`; use the session
 labels, directories, and workspace IDs to identify domain workspaces the user
