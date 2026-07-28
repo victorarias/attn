@@ -869,6 +869,7 @@ export function Sidebar({
                 <div className="sidebar-display-toggle sidebar-display-toggle--selection" role="group" aria-label="Tile focus style">
                   {(['rail', 'spotlight'] as const).map((style) => (
                     <button
+                      type="button"
                       key={style}
                       className={workspaceSelectionStyle === style ? 'active' : ''}
                       aria-pressed={workspaceSelectionStyle === style}
