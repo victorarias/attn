@@ -155,10 +155,10 @@ func TestDaemon_StopCommand_BackgroundWork_StaysWorking(t *testing.T) {
 	waitForResolvedState(t, d, "bg-session", protocol.SessionStateWorking)
 }
 
-// TestDaemon_StopCommand_PendingCron_Parks pins that a cron-parked stop still
-// reads as scheduled — now by way of the settle rather than by short-circuiting
-// it, so the classifier gets its say about whether the turn asked for anything.
-func TestDaemon_StopCommand_PendingCron_Parks(t *testing.T) {
+// TestDaemon_StopCommand_PendingCron_Settles pins that a cron-parked stop runs
+// the end-of-turn path like any other: the classifier gets its say, and the
+// session settles into the user's queue instead of being excused from it.
+func TestDaemon_StopCommand_PendingCron_Settles(t *testing.T) {
 	useFreeWSPort(t)
 
 	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
@@ -182,7 +182,7 @@ func TestDaemon_StopCommand_PendingCron_Parks(t *testing.T) {
 		t.Fatalf("SendStop error: %v", err)
 	}
 
-	waitForResolvedState(t, d, "cron-session", protocol.SessionStateScheduled)
+	waitForResolvedState(t, d, "cron-session", protocol.SessionStateIdle)
 }
 
 // waitForResolvedState waits out the resolve tick. Nothing applies a state at the

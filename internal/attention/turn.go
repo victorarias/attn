@@ -30,12 +30,11 @@ import (
 //     result; that it ended without a question makes it no less yours. And a
 //     session you launched and have not yet spoken to sits at its prompt in the
 //     same state — the purest turn there is, since nothing will ever happen in
-//     it until you type. Idle opening a turn is also what retired the long-run
-//     review deferral, which tried to approximate the first case by holding a
-//     verdict back on runs over five minutes and publishing it when the session
-//     was looked at.
+//     it until you type.
 //   - launching, working, scheduled never open one: the agent is busy or waiting
-//     on a clock.
+//     on a clock. A session parked on a cron is not among them — see
+//     sessionstate.settled — so a loop you want left alone is silenced by pinning
+//     its workspace, which is filtered below.
 //   - recoverable never opens one either. The daemon revives it unattended, so
 //     surfacing it would hand the user work the daemon is already doing.
 func OpensTurn(state protocol.SessionState) bool {

@@ -60,18 +60,18 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   stayed purple until it next did some work. Claude announces when it is sitting
   at its prompt waiting for input, and attn now believes that over an
   unfinished background task, so the agent joins your queue as what it is.
-- **An agent with a scheduled wakeup can still ask you for something.** A session
-  parked on a cron or a `/loop` was drawn as *scheduled* no matter how its turn
-  actually ended — attn never even looked at how it ended — so a question it
-  asked on the way to its next run never reached your queue, and the same session
-  turned purple a minute and a half later, as though being quiet between runs
-  were a fault. A wakeup on the calendar says nothing about whether the agent
-  needs you, so it no longer decides. An agent that stopped to ask you something
-  is drawn as waiting for you, and one that simply finished shows *scheduled* —
-  until it has been sitting at its prompt for a minute, at which point it joins
-  your queue like any other agent with a result you have not read. A fast `/loop`
-  that picks itself back up stays out of your way; one that is really just
-  waiting does not get to hide behind its calendar.
+- **A scheduled wakeup no longer hides an agent from you.** A session parked on a
+  cron or a `/loop` was drawn as *scheduled* no matter how its turn actually
+  ended — attn never even looked at how it ended — so a question it asked on the
+  way to its next run never reached your queue, and the same session turned
+  purple a minute and a half later, as though being quiet between runs were a
+  fault. A wakeup on the calendar says nothing about whether the agent needs you,
+  so it no longer decides anything: an agent that stopped to ask you something is
+  drawn as waiting for you, and one that simply finished joins your queue like
+  any other agent with a result nobody has read. If you want a loop to run
+  without ever being asked about it, pin its workspace — that has always kept a
+  workspace out of the queue, and it says what you mean instead of being inferred
+  from a schedule.
 - **An agent stopped by a rate limit or a billing problem now asks for you.**
   When Claude's API cuts a turn short, the agent produces nothing and cannot
   continue until you act. It used to be indistinguishable from an agent that

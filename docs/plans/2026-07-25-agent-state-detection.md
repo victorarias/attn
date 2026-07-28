@@ -909,19 +909,34 @@ attention".
   the effect was that a cron-parked session was never asked how its turn ended,
   which made the clause fix above unreachable from the classifier. Removed;
   measured live, `scheduled` now lands 7s after the Stop instead of 60.
-- **A parked cron excuses the agent only until it is visibly idling.** Victor's
-  call, 2026-07-28, on seeing the first fix land `scheduled` on the same tick as
-  the `idle_prompt` notification: a wakeup on the calendar is a claim about the
-  future and was never a reason to leave the user out of the present — the turn
-  that just ended produced a result nobody has read, and the next run being
-  scheduled does not read it for them. What `scheduled` is worth is the window
-  before that: a tight `/loop` picks itself up in seconds, and queueing it every
-  cycle would be noise. Claude's confirmation, 60s after a settle nobody
-  answered, separates the two and is the same signal the user would act on
-  themselves. So `parked` also yields to `promptIdleConfirmed`.
-  This narrows `scheduled` to wakeups that fire inside a minute, which is the
-  case it should cover. Codex has no session crons, so the absence of a
-  counterpart notification there costs nothing.
+- **A parked cron does not excuse the agent from the queue at all.** Victor's
+  call, 2026-07-28, arrived in two steps. First, on seeing the fix land
+  `scheduled` on the same tick as the `idle_prompt` notification: a wakeup on the
+  calendar is a claim about the future and was never a reason to leave the user
+  out of the present — the turn that just ended produced a result nobody has
+  read, and the next run being scheduled does not read it for them. That narrowed
+  `scheduled` to a ~53-second window, which made the remaining question whether it
+  was worth having at all.
+
+  It was not. Suppressing the queue is a user's decision, and attn already has
+  the control that says so: a pinned workspace is excluded at read in
+  `internal/attention.turn.go`, with the turn stamps still accumulating
+  underneath. Inferring the same thing from a cron guesses at intent the user can
+  state directly. So `parked` is gone; `PendingCron` now only names why a settle
+  happened (`cron_pending`), and the settle itself resolves like any other.
+
+  Measured before deciding (isolated claude 2.1.220 session, every hook logged,
+  real cron): a wakeup arrives as an ordinary `UserPromptSubmit` carrying the
+  cron's own prompt, and the turn closes with the usual `Stop`. So the running
+  iteration is `working` for the ordinary reason, and the between-runs state is
+  the only thing this decision governs. The same probe corrected a claim made
+  earlier in this plan: `session_crons` does carry `schedule` (a 5-field
+  local-time expression, already decoded into `sessionCron.Schedule`), so the
+  next fire time *is* computable — see the snooze follow-up.
+
+  `protocol.SessionStateScheduled` is now unreachable from the resolver. It is
+  left defined, and left in `resolverOwnedStates` so a row persisted by an older
+  daemon can still be moved off it.
 - **`StopFailure`, `PreCompact`/`PostCompact`, and `agent_id` are the hooks worth
   wiring; the rest of the 30 are not.** Surveyed by logging every hook claude
   fires (2.1.220) over a live session. `StopFailure` is the only report that a
@@ -1057,3 +1072,10 @@ attention".
 - `sessionstate.IdleStale` is tested and has no caller. Whatever acts on "done but
   unread" is where the read-time signal gets defined; until then there is no wire
   for a client to guess the meaning of.
+- Snooze-until-due for scheduled wakeups. `session_crons[].schedule` is a full
+  5-field local-time expression, so the next fire time is computable at Stop: a
+  session could stay out of the queue until its wakeup is due and open a turn only
+  if the wakeup passes without a `UserPromptSubmit` — which is a better signal
+  than any of the current ones, because it means the loop is broken. This belongs
+  with the queue's snooze primitive rather than in the resolver, since it is the
+  same behavior with a different trigger.

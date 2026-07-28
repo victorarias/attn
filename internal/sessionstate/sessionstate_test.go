@@ -390,26 +390,29 @@ func TestResolve(t *testing.T) {
 		{
 			// A pending wakeup resumes the session with nobody doing anything, so
 			// it is parked, not waiting on a person.
-			name: "a pending cron parks the session",
+			// A wakeup on the calendar says nothing about whether the turn that
+			// just ended left something for the user, so it does not get to
+			// describe the outcome the classifier read out of the transcript.
+			name: "a pending cron does not rename what the turn settled to",
 			evidence: Evidence{
 				PendingCron:    true,
 				LastClassifier: seen(SourceClassifier, ClaimIdle, time.Second),
 			},
-			wantState:  protocol.SessionStateScheduled,
-			wantReason: ReasonCronPending,
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonClassifierVerdict,
 		},
 		{
-			// The park used to be defended by a per-driver veto against the
-			// screen scraper knocking it to idle. The scraper is gone and the
-			// defense is now clause order: a settled turn is what a parked
-			// session looks like, so settling must not outrank the wakeup.
-			name: "a parked session stays parked once its turn settles",
+			// And with no verdict to describe it, the wakeup names why the
+			// session settled — still idle, still the user's to pick up. A user
+			// who wants a loop to run unwatched pins the workspace, which is
+			// filtered at read in internal/attention.
+			name: "a pending cron names the settle without suppressing it",
 			evidence: Evidence{
 				PendingCron: true,
 				Heartbeat:   seen(SourceHeartbeat, ClaimSettled, time.Second),
 				LastBusyAt:  now.Add(-30 * time.Second),
 			},
-			wantState:  protocol.SessionStateScheduled,
+			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonCronPending,
 		},
 		{
@@ -765,17 +768,11 @@ func TestAPromptIdleConfirmationRetiresAnOutstandingBackgroundTask(t *testing.T)
 	}
 }
 
-// What `scheduled` is worth is the window before the agent has been sitting
-// there long enough to be worth a look.
-//
-// A wakeup on the calendar is a claim about the future, and it was never a
-// reason to leave the user out of the present: the turn that just ended produced
-// a result nobody has read, and the next run being scheduled does not read it
-// for them. But a tight `/loop` picks itself up in seconds, and putting that in
-// front of the user every cycle would be noise. Claude's confirmation, 60s after
-// a settle nobody answered, separates the two — and it is the same thing the
-// user would act on themselves.
-func TestAParkedWakeupStopsExcusingTheAgentOnceItIsVisiblyIdling(t *testing.T) {
+// A finished turn is the user's to pick up whatever the calendar says. The
+// wakeup names why the session settled and changes nothing else — suppressing
+// the queue is a user control (a pinned workspace), not something the resolver
+// infers from a schedule.
+func TestAParkedWakeupDoesNotExcuseTheAgentFromTheQueue(t *testing.T) {
 	policy := testPolicy()
 	e := Evidence{
 		TurnEverOpened: true,
@@ -784,22 +781,19 @@ func TestAParkedWakeupStopsExcusingTheAgentOnceItIsVisiblyIdling(t *testing.T) {
 		LastMovement:   now.Add(-time.Minute),
 	}
 
-	// Before the confirmation: the wakeup is the better description, and the
-	// session stays out of the queue.
-	if got := Resolve(e, policy, now); got.State != protocol.SessionStateScheduled || got.Reason != ReasonCronPending {
-		t.Fatalf("resolved %s/%s before the confirmation, want scheduled/cron_pending", got.State, got.Reason)
+	got := Resolve(e, policy, now)
+	if got.State != protocol.SessionStateIdle || got.Reason != ReasonCronPending {
+		t.Fatalf("resolved %s/%s, want idle/cron_pending", got.State, got.Reason)
 	}
 
-	// After it: the agent is sitting at its prompt with a finished turn behind
-	// it, which is a turn the user owes whatever the calendar says.
+	// The harness confirming it is at its prompt is the same answer, said twice.
 	e.PromptIdleAt = now.Add(-time.Second)
-	got := Resolve(e, policy, now)
-	if got.State != protocol.SessionStateIdle || got.Reason != ReasonPromptIdle {
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateIdle || got.Reason != ReasonPromptIdle {
 		t.Fatalf("resolved %s/%s after the confirmation, want idle/prompt_idle", got.State, got.Reason)
 	}
 
-	// And with a background task also outstanding, the confirmation retires both
-	// facts at once rather than one of them handing off to the other.
+	// And a background task outstanding alongside it is retired by the same
+	// confirmation rather than reopening the settle.
 	e.BackgroundWork = true
 	if got := Resolve(e, policy, now); got.State != protocol.SessionStateIdle {
 		t.Fatalf("resolved %s/%s with both facts set, want idle", got.State, got.Reason)
@@ -807,16 +801,9 @@ func TestAParkedWakeupStopsExcusingTheAgentOnceItIsVisiblyIdling(t *testing.T) {
 }
 
 // A session parked on a wakeup hours away is quiet because there is nothing to
-// say, not because it stopped saying it — so silence is what being parked looks
-// like, and diagnosing it as stuck was reporting the schedule working correctly
-// as a fault.
-//
-// This was the second half of one root cause. Treating the wakeup as work
-// outstanding forced the pairing: a clause that claims something is running has
-// to expire, because a claim that never expires pins a color for the life of the
-// session. Nothing is running here. A cron is a promise about the future, the
-// process is alive to keep it, and the clauses that do diagnose a dead session —
-// process exit above, an open bracket that went silent — are untouched by this.
+// say, not because it stopped saying it — so silence must not decay into
+// `unknown` here. The clauses that do diagnose a dead session (process exit, an
+// open bracket gone silent) sit above this one and are untouched.
 func TestAParkedWakeupDoesNotRotIntoUnknown(t *testing.T) {
 	policy := testPolicy()
 	parked := now.Add(-time.Minute)
@@ -835,8 +822,8 @@ func TestAParkedWakeupDoesNotRotIntoUnknown(t *testing.T) {
 	} {
 		at := parked.Add(quiet)
 		got := Resolve(e, policy, at)
-		if got.State != protocol.SessionStateScheduled {
-			t.Fatalf("resolved %s/%s after %s of silence, want scheduled", got.State, got.Reason, quiet)
+		if got.State != protocol.SessionStateIdle || got.Reason != ReasonCronPending {
+			t.Fatalf("resolved %s/%s after %s of silence, want idle/cron_pending", got.State, got.Reason, quiet)
 		}
 	}
 }
