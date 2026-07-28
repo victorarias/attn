@@ -126,7 +126,12 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	if profile.syncNudge {
 		d.doorbellMu.Lock()
 	}
+	// Unconditional, unlike the nudge lock above: syncAutoSettle runs for every
+	// cause, so every state write has to be ordered against a timer that may be
+	// deciding to settle right now. See autoSettleFireMu.
+	d.autoSettleFireMu.Lock()
 	applied := d.commitSessionState(change)
+	d.autoSettleFireMu.Unlock()
 	if profile.syncNudge {
 		d.doorbellMu.Unlock()
 	}

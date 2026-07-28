@@ -414,6 +414,12 @@ export function SettingsModal({
     setReviewerModel(actualReviewerModel);
     setChiefContextCap(actualChiefContextCap);
     setHeadlessContextCap(actualHeadlessContextCap);
+    // The modal mounts before the daemon's settings broadcast arrives, so these
+    // two start on the built-in defaults. Without this resync a saved 60/20
+    // policy would still be displayed as 30/15, and the commit-on-blur would
+    // then write those defaults back over it.
+    setAutoSettleArm(actualAutoSettleArm);
+    setAutoSettleCountdown(actualAutoSettleCountdown);
     setKeeperDrafts({
       summarize: initialKeeperDraft(KEEPER_DUTY_BY_KEY.summarize, actualKeeperConfigs.summarize, keeperAgents),
       narrate: initialKeeperDraft(KEEPER_DUTY_BY_KEY.narrate, actualKeeperConfigs.narrate, keeperAgents),
@@ -429,7 +435,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualDefaultModels, actualDefaultEfforts, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualKeeperConfigs, keeperAgents]);
+  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualDefaultModels, actualDefaultEfforts, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualAutoSettleArm, actualAutoSettleCountdown, actualKeeperConfigs, keeperAgents]);
 
   useEscapeStack(onClose, isOpen);
 

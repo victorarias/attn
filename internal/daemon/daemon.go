@@ -222,12 +222,23 @@ type Daemon struct {
 	ticketRebuildBeforeArmHook func(sessionID string, deadline time.Time) // tests only: invoked while deliveryMu is held
 	lastInputMu                sync.Mutex
 	lastUserInputAt            map[string]time.Time // per-session keystroke recency — the fire-time splice guard
+	// autoSettleFireMu serializes the auto-settle timer's fire-time decision
+	// against the state write in applyState. Without it the timer can read a
+	// `working`, owed turn, have a transition into waiting_input commit
+	// underneath it, and then settle the turn that transition just opened —
+	// syncAutoSettle runs after the write, so its cancel arrives too late.
+	// Always taken before autoSettleMu; never the other way round.
+	autoSettleFireMu sync.Mutex
+
 	// autoSettleMu guards both auto-settle maps: the pending timers and the
 	// standing user cancels. See auto_settle.go.
 	autoSettleMu         sync.Mutex
 	autoSettleTimers     map[string]*autoSettleTimer // presence == an arm delay or countdown is pending
 	autoSettleSuppressed map[string]bool             // sessions whose countdown the user cancelled, until they leave `working`
 	autoSettleFireHook   func(sessionID, outcome string)
+	// Called inside the fire-time decision, between confirming the turn is still
+	// owed and settling it. Tests only; nil in production. See auto_settle.go.
+	autoSettlePreSettleHook func()
 	recoveryMu           sync.RWMutex
 	recovering           bool
 	notebookMu           sync.Mutex

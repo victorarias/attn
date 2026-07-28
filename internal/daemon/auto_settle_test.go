@@ -390,3 +390,67 @@ func TestAutoSettleSettingsSurfaceEffectiveDefaults(t *testing.T) {
 		}
 	}
 }
+
+// A turn the user has not dealt with must survive the timer firing at the same
+// instant the session demands them again.
+//
+// The window this pins: runAutoSettle reads `working` and confirms the turn is
+// owed, and only then settles. If a transition into pending_approval commits
+// between those two steps, the timer goes on to settle a turn the user is being
+// asked to act on right now — and syncAutoSettle's cancel, which runs after the
+// state write, arrives too late to stop it. The session would drop off the queue
+// while the agent sits waiting for an answer.
+//
+// The test stands in that exact instant via autoSettlePreSettleHook, because the
+// window is far too narrow to hit by racing goroutines: a version of this test
+// that simply ran the fire and the transition concurrently passed just as
+// happily without the lock as with it.
+//
+// Both orderings are acceptable, and both end the same way. If the timer wins it
+// settles the `working` turn and the pending_approval transition immediately
+// opens a fresh one; if the transition wins the timer sees a non-working session
+// and declines. Either way the user still owes this session a turn, which is why
+// that is the invariant asserted rather than a particular interleaving.
+func TestAutoSettle_ConcurrentApprovalKeepsTheTurn(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	// Into the visible countdown: the settle is the very next fire.
+	fireAutoSettleNow(t, d, id)
+
+	entry, ok := autoSettlePending(d, id)
+	if !ok {
+		t.Fatal("no countdown to race against")
+	}
+
+	approvalDone := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		defer close(approvalDone)
+		<-release
+		d.applyState(sessionStateChange{
+			sessionID: id,
+			state:     protocol.StatePendingApproval,
+			cause:     liveSignal{},
+		})
+	}()
+
+	d.autoSettlePreSettleHook = func() {
+		// Turn the approval loose and give it every chance to commit before this
+		// settle proceeds. Serialized correctly, it cannot: it blocks on the
+		// state-transition gate until the settle is done.
+		close(release)
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	d.autoSettleFire(id, entry.timer)
+	<-approvalDone
+
+	if state := string(d.store.Get(id).State); state != protocol.StatePendingApproval {
+		t.Fatalf("state = %s, want pending_approval", state)
+	}
+	if !d.turnOwed(id) {
+		t.Fatal("the turn was settled while the session was asking for approval")
+	}
+}

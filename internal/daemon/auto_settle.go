@@ -267,6 +267,15 @@ func (d *Daemon) autoSettleFire(sessionID string, self *time.Timer) {
 // runAutoSettle is the fire-time decision, separated so its outcome is a single
 // string a test hook can assert.
 func (d *Daemon) runAutoSettle(sessionID string, phase autoSettlePhase) string {
+	// Held across the whole decision — reading the state, confirming the turn is
+	// still owed, and settling it — so no state write can land between the check
+	// and the settle. Without this the timer could settle a turn that a
+	// transition committed microseconds earlier had just opened: exactly the
+	// turn the user has not dealt with yet. applyState takes the same lock
+	// around its store write.
+	d.autoSettleFireMu.Lock()
+	defer d.autoSettleFireMu.Unlock()
+
 	cfg := d.autoSettleConfig()
 	if !cfg.enabled {
 		// Turned off during the window. Dropping it is the honest reading of
@@ -298,6 +307,14 @@ func (d *Daemon) runAutoSettle(sessionID string, phase autoSettlePhase) string {
 		d.startAutoSettleLocked(sessionID, autoSettleCounting, cfg.countdown)
 		d.autoSettleMu.Unlock()
 		return "counting"
+	}
+
+	// Test seam: the instant between "this turn is still owed" and the settle.
+	// Nil in production. It exists because the interleaving that makes this
+	// function dangerous is far too narrow to hit by chance, so the regression
+	// test has to stand in it deliberately.
+	if d.autoSettlePreSettleHook != nil {
+		d.autoSettlePreSettleHook()
 	}
 
 	if !d.store.SettleTurn(sessionID, time.Now()) {
