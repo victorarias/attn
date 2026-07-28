@@ -5,6 +5,7 @@ import { SessionTerminalWorkspace } from './index';
 import { createPaneRuntimeEventRouterController } from './paneRuntimeEventRouter';
 import { tileContentKey, type TerminalWorkspaceState } from '../../types/workspace';
 import { NotebookSurfaceProvider, type NotebookSurfaceContextValue } from '../../contexts/NotebookSurfaceContext';
+import type { WorkspaceSelectionStyle } from '../../utils/workspaceSelectionStyle';
 
 // The docked markdown tile below reads effectiveNotebookRoot unconditionally
 // via useNotebookSurfaceContext — real usage is always under App's provider.
@@ -96,6 +97,7 @@ function renderSplit(overrides: {
   onClosePane?: () => void;
   onUndockTile?: (tileId: string) => void;
   onFocusPane?: (paneId: string) => void;
+  workspaceSelectionStyle?: WorkspaceSelectionStyle;
 } = {}) {
   const onClosePane = overrides.onClosePane ?? vi.fn();
   const onUndockTile = overrides.onUndockTile ?? vi.fn();
@@ -106,6 +108,7 @@ function renderSplit(overrides: {
       workspaceId="workspace-split"
       workspaceSessions={[{ id: 'sess-1', label: 'shell', agent: 'shell', cwd: '/tmp/project' }]}
       workspace={workspace}
+      workspaceSelectionStyle={overrides.workspaceSelectionStyle}
       activePaneId="pane-term"
       fontSize={13}
       enabled
@@ -137,6 +140,14 @@ function tileEl(container: HTMLElement): HTMLElement {
 function paneEl(container: HTMLElement): HTMLElement {
   return container.querySelector('[data-pane-kind="agent"]') as HTMLElement;
 }
+
+describe('SessionTerminalWorkspace selection style', () => {
+  it('marks the workspace with the selected treatment', () => {
+    const { container } = renderSplit({ workspaceSelectionStyle: 'spotlight' });
+
+    expect(container.querySelector('.session-terminal-workspace')).toHaveClass('workspace-selection--spotlight');
+  });
+});
 
 describe('SessionTerminalWorkspace leaf focus', () => {
   // Clicking a tile must be enough — no programmatic focus() — for the tile to

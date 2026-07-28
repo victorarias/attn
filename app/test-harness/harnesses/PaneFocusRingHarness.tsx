@@ -1,14 +1,13 @@
 /**
- * PaneFocusRing Test Harness
+ * Pane focus treatment test harness
  *
  * Reproduces the exact DOM shape SessionTerminalWorkspace renders for a
- * multi-leaf pane with a bound ticket open — a `.workspace-pane.active` whose
- * `::after` paints the accent focus ring, with a `.workspace-pane-ticket-overlay`
- * covering the pane body underneath. Loads the real stylesheet so the actual
- * cascade/stacking is under test, not a re-description of it. GhosttyTerminal
- * (WASM/canvas) plays no role in this stacking question, so it is not mounted —
- * this harness exists to pin the invariant a real browser can uniquely verify:
- * the ring paints on top of any pane-local overlay, however opaque.
+ * multi-leaf pane with a bound ticket open. The selected leaf's pseudo-elements
+ * paint the edge rail or spotlight corner marks, with a
+ * `.workspace-pane-ticket-overlay` covering the pane body underneath. Loads the
+ * real stylesheet so the actual cascade/stacking is under test, not a
+ * re-description of it. GhosttyTerminal (WASM/canvas) plays no role in this
+ * stacking question, so it is not mounted.
  */
 import { useEffect } from 'react';
 import '../../src/components/SessionTerminalWorkspace/SessionTerminalWorkspace.css';
@@ -22,7 +21,8 @@ export function PaneFocusRingHarness({ onReady, setTriggerRerender }: HarnessPro
 
   return (
     <div
-      className="session-terminal-workspace multi-leaf"
+      className="session-terminal-workspace workspace-selection--rail multi-leaf"
+      data-testid="workspace"
       style={{ position: 'relative', width: 400, height: 300 }}
     >
       <div

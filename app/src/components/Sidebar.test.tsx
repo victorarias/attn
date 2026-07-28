@@ -546,6 +546,25 @@ describe('Sidebar', () => {
     expect(screen.getByRole('dialog', { name: 'Sidebar settings' })).toBeInTheDocument();
   });
 
+  it('selects the workspace tile-focus treatment from display settings', () => {
+    const onWorkspaceSelectionStyleChange = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData([])}
+        workspaceSelectionStyle="rail"
+        onWorkspaceSelectionStyleChange={onWorkspaceSelectionStyleChange}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sidebar settings' }));
+
+    expect(screen.getByRole('button', { name: 'rail' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'spotlight' }));
+
+    expect(onWorkspaceSelectionStyleChange).toHaveBeenCalledWith('spotlight');
+  });
+
   it('renders config-driven dock items, marks active ones, and fires actions on click', () => {
     const onAttention = vi.fn();
     render(
