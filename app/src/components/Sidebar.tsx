@@ -10,7 +10,7 @@ import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
 import { QueueBands } from './QueueBands';
 import { SidebarNudgeBar, deriveNudgeMode } from './NudgeIndicator';
-import { formatShortcut } from '../shortcuts';
+import { formatShortcut } from '../shortcuts/formatShortcut';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
 import { tileContentKey, type TileContentState, type TileLeaf } from '../types/workspace';
 import { deriveTileTitle } from '../utils/tilePresentation';
@@ -443,9 +443,10 @@ export function Sidebar({
   const isTreeWorkspace = (workspace: SidebarWorkspace) => (
     !queue || workspace.pinned || isSessionless(workspace)
   );
-  const visibleWorkspaces = workspaces
-    .map(withoutChiefRow)
-    .filter((workspace) => isWorkspaceVisible(workspace) && isTreeWorkspace(workspace));
+  const visibleWorkspaces = workspaces.flatMap((candidate) => {
+    const workspace = withoutChiefRow(candidate);
+    return isWorkspaceVisible(workspace) && isTreeWorkspace(workspace) ? [workspace] : [];
+  });
   const visibleVisualOrder = visualOrder.filter(isWorkspaceVisible);
   const visibleVisualIndexByWorkspaceId = new Map(
     visibleVisualOrder.map((workspace, index) => [workspace.id, index]),
@@ -1173,7 +1174,9 @@ export function Sidebar({
           </button>
           {mutedExpanded && (
             <div className="muted-sessions-list">
-              {mutedWorkspaces.map(withoutChiefRow).map((workspace) => (
+              {mutedWorkspaces.map((mutedWorkspace) => {
+                const workspace = withoutChiefRow(mutedWorkspace);
+                return (
                 <div
                   key={`${workspace.endpointId || 'local'}:${workspace.id}`}
                   className={`workspace-group muted-workspace ${selectedWorkspaceId === workspace.id ? 'selected' : ''}${workspaceDragClass(workspace)}`}
@@ -1265,7 +1268,8 @@ export function Sidebar({
                     })}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

@@ -8,6 +8,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-28]
 
+### Fixed
+- **Queue rows can be opened from the keyboard.** Each row in the agent queue
+  now offers a real, focusable control for opening its agent, with a visible
+  focus ring and a name screen readers announce. Previously the row responded
+  only to a mouse click. Clicking anywhere on the row still opens it, and the
+  settle, pin, and actions buttons are unchanged.
+
 ### Changed
 - **Delegated Git work starts isolated by default.** `attn delegate` now creates
   a new worktree automatically when its target is in a Git repository, including

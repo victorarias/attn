@@ -1,8 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { Sidebar } from './Sidebar';
-import { formatTurnAge } from './QueueBands';
-import { buildQueueBands } from '../utils/queueBands';
+import { buildQueueBands, formatTurnAge } from '../utils/queueBands';
 import { buildWorkspaceViewModels } from '../utils/workspaceViewModels';
 
 interface TestSession {
@@ -120,8 +119,23 @@ describe('the queue arrangement', () => {
     const onSelectSession = vi.fn();
     renderSidebar(sessions, true, { onSelectSession });
 
-    fireEvent.click(screen.getByTestId('queue-turn-older'));
+    fireEvent.click(screen.getByTestId('queue-select-older'));
     expect(onSelectSession).toHaveBeenCalledWith('older');
+  });
+
+  it('hands the agent over from the keyboard, so the queue is not mouse-only', () => {
+    // The row opens through a real button rather than a click handler on the
+    // row div, which is what makes it reachable by Tab and pressed by Enter or
+    // Space without the component handling either key itself.
+    const onSelectSession = vi.fn();
+    renderSidebar(sessions, true, { onSelectSession });
+
+    const open = screen.getByTestId('queue-select-older');
+    expect(open.tagName).toBe('BUTTON');
+    expect(open.getAttribute('aria-label')).toBe('Open older');
+
+    open.focus();
+    expect(document.activeElement).toBe(open);
   });
 
   it('settles a row without selecting it', () => {

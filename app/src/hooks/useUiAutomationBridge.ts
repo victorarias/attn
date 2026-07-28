@@ -7,7 +7,8 @@ import type { Presentation } from '../types/generated';
 import type { Ticket } from './useDaemonSocket';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
-import { SHORTCUTS, type ShortcutId, type Combo, isChord, resolveBinding } from '../shortcuts';
+import { SHORTCUTS, type ShortcutId, type Combo, isChord } from '../shortcuts/registry';
+import { resolveBinding } from '../shortcuts/resolver';
 import { getGridAutomationHandle, INACTIVE_GRID_STATE } from '../components/grid/gridAutomation';
 import {
   getAutomationFormAutomationHandle,
@@ -1774,6 +1775,24 @@ export function useUiAutomationBridge({
         await settleUi(2);
         return { clicked: true, bounds: rectSnapshot(element) };
       }
+      case 'dom_focus': {
+        // Focus without clicking, so a scenario can put the keyboard on a
+        // control and then press real keys at it. Fails loudly when the target
+        // refuses focus, which is the interesting answer for anything claiming
+        // to be keyboard-reachable.
+        const selector = typeof payload.selector === 'string' ? payload.selector : null;
+        if (!selector) throw new Error('dom_focus requires selector');
+        const element = document.querySelector(selector);
+        if (!(element instanceof HTMLElement)) {
+          throw new Error(`dom_focus selector not found in DOM: ${selector}`);
+        }
+        element.focus();
+        await settleUi(2);
+        if (document.activeElement !== element) {
+          throw new Error(`dom_focus target did not take focus: ${selector}`);
+        }
+        return { focused: true, tag: element.tagName };
+      }
       case 'dom_type': {
         const selector = typeof payload.selector === 'string' ? payload.selector : null;
         const text = typeof payload.text === 'string' ? payload.text : null;
@@ -1837,15 +1856,29 @@ export function useUiAutomationBridge({
         // and the live state dot are the whole claim of the queue arrangement,
         // and only the DOM can testify that what the user sees matches it.
         const band = document.querySelector('[data-testid="sidebar-queue"]');
-        const readRow = (row: Element, prefix: string) => ({
-          id: (row.getAttribute('data-testid') || '').slice(prefix.length),
-          label: row.querySelector('.session-label')?.textContent?.trim() || '',
-          state: row.getAttribute('data-state') || '',
-          workspace: row.querySelector('.queue-row-workspace')?.textContent?.trim() || '',
-          workspaceId: row.getAttribute('data-workspace-id') || '',
-          age: row.querySelector('.queue-row-age')?.textContent?.trim() || '',
-          selected: row.classList.contains('selected'),
-        });
+        const readRow = (row: Element, prefix: string) => {
+          // The control that opens the row. Reported as its own element rather
+          // than folded into the row so a caller can testify that opening an
+          // agent is reachable by keyboard — a real button, focusable, with an
+          // accessible name — and not a click handler the keyboard cannot see.
+          const open = row.querySelector('.queue-row-select');
+          return {
+            id: (row.getAttribute('data-testid') || '').slice(prefix.length),
+            label: row.querySelector('.session-label')?.textContent?.trim() || '',
+            state: row.getAttribute('data-state') || '',
+            workspace: row.querySelector('.queue-row-workspace')?.textContent?.trim() || '',
+            workspaceId: row.getAttribute('data-workspace-id') || '',
+            age: row.querySelector('.queue-row-age')?.textContent?.trim() || '',
+            selected: row.classList.contains('selected'),
+            open: open
+              ? {
+                tag: open.tagName,
+                label: open.getAttribute('aria-label') || '',
+                focused: document.activeElement === open,
+              }
+              : null,
+          };
+        };
         const chiefRow = band?.querySelector('[data-testid^="queue-chief-"]');
         return {
           present: Boolean(band),

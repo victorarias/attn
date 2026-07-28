@@ -56,7 +56,7 @@ import {
   readWorkspaceSelectionStyle,
   type WorkspaceSelectionStyle,
 } from './utils/workspaceSelectionStyle';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo, type FsIndexResult, type NotebookEntry } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo } from './hooks/useDaemonSocket';
 import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState, type UISessionState } from './types/sessionState';
@@ -75,8 +75,19 @@ import { useDaemonStore } from './store/daemonSessions';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useWhatsNew } from './hooks/useWhatsNew';
-import { shortcutTokens, formatShortcut, dockShortcutLabel } from './shortcuts';
-import type { ShortcutId } from './shortcuts';
+import { shortcutTokens, formatShortcut } from './shortcuts/formatShortcut';
+import { dockShortcutLabel } from './shortcuts/metadata';
+import type { ShortcutId } from './shortcuts/registry';
+import {
+  latestPresentationBySessionId,
+  seedPresentationNotices,
+  upsertPresentationNotice,
+} from './utils/presentationNotices';
+import {
+  bumpFsChangeSignal,
+  fsChangeSignalKey,
+  fsIndexToNotebookEntries,
+} from './utils/fsChangeSignals';
 import { useUIScale } from './hooks/useUIScale';
 import { useTicketBoardScale } from './hooks/useTicketBoardScale';
 import { useTheme } from './hooks/useTheme';
@@ -110,73 +121,6 @@ const DOCK_PANEL_EXIT_MS = 260;
 // from accidental close. ⌘W and the close action no-op on it; this hint tells the
 // user how to close it deliberately (demote it first).
 const CHIEF_OF_STAFF_CLOSE_HINT = 'Chief of staff is protected — unset the chief role to close it.';
-
-// A presentation is worth a notice (surfaced as a chip in its triggering
-// session's pane header) while its latest round is open for review (status
-// "open") and hasn't been submitted yet.
-export function presentationNeedsNotice(presentation: Presentation): boolean {
-  return presentation.status === 'open' && !presentation.latest_round_submitted;
-}
-
-// Pure reducer for the presentation-notice list, shared by the initial
-// getPresentations() seed and the presentation_added/updated broadcasts.
-// Keeps at most one entry per presentation id; a presentation that stops
-// needing a notice (submitted or closed) is dropped.
-export function upsertPresentationNotice(notices: Presentation[], updated: Presentation): Presentation[] {
-  const withoutExisting = notices.filter((n) => n.id !== updated.id);
-  return presentationNeedsNotice(updated) ? [...withoutExisting, updated] : withoutExisting;
-}
-
-export function seedPresentationNotices(all: Presentation[]): Presentation[] {
-  return all.filter(presentationNeedsNotice);
-}
-
-// A session can trigger more than one presentation over time; the pane
-// header chip only ever shows the newest one that still needs review.
-export function latestPresentationBySessionId(notices: Presentation[]): Map<string, Presentation> {
-  const bySessionId = new Map<string, Presentation>();
-  for (const p of notices) {
-    const existing = bySessionId.get(p.session_id);
-    if (!existing || p.created_at > existing.created_at) {
-      bySessionId.set(p.session_id, p);
-    }
-  }
-  return bySessionId;
-}
-// The per-root fs_changed signal key: the daemon-resolved root verbatim, or
-// `effectiveNotebookRoot` when the event carries no root (the daemon's
-// notebook-root events, and — as a safety fallback — any malformed event
-// missing the field). A rootless tile and the fullscreen browser look
-// themselves up with the same normalization (root='' → effectiveNotebookRoot),
-// so they land on this key too.
-export function fsChangeSignalKey(root: string, effectiveNotebookRoot: string): string {
-  return root || effectiveNotebookRoot;
-}
-
-// Pure reducer for the per-root fs_changed signal map: bumps only the key the
-// event resolves to, leaving every other root's counter untouched so a tile
-// bound to root A never re-renders for a change under root B.
-export function bumpFsChangeSignal(
-  signals: Record<string, number>,
-  root: string,
-  effectiveNotebookRoot: string,
-): Record<string, number> {
-  const key = fsChangeSignalKey(root, effectiveNotebookRoot);
-  return { ...signals, [key]: (signals[key] || 0) + 1 };
-}
-
-// Adapts fs_index (a flat, root-scoped file listing) to the shape the ⌘P
-// finder and NotebookBrowser already expect from notebook_list. size is
-// always 0: fs_index deliberately omits stat() per entry to stay fast over
-// large repos, and nothing downstream of the finder reads it. A truncated
-// result still renders — an incomplete list beats none — but is flagged to
-// the console so a silently-cut-off finder doesn't look like a bug report.
-export function fsIndexToNotebookEntries(result: FsIndexResult): NotebookEntry[] {
-  if (result.truncated) {
-    console.warn('[App] fs_index truncated for', result.root, '— finder list is incomplete');
-  }
-  return result.files.map((path) => ({ path, size: 0 }));
-}
 
 const TERMINAL_AGENT: SessionAgent = 'shell';
 
@@ -3664,12 +3608,14 @@ sendFetchPRDetails,
             Version {updateAvailableVersion} is available on GitHub.
           </span>
           <button
+            type="button"
             className="update-install"
             onClick={() => void onOpenLatestRelease()}
           >
             View Release
           </button>
           <button
+            type="button"
             className="update-dismiss"
             onClick={onDismissLatestRelease}
             title="Dismiss"
