@@ -51,6 +51,11 @@ import {
   readWarmWorkspaceLimit,
   writeWarmWorkspaceLimit,
 } from './utils/terminalVirtualization';
+import {
+  persistWorkspaceSelectionStyle,
+  readWorkspaceSelectionStyle,
+  type WorkspaceSelectionStyle,
+} from './utils/workspaceSelectionStyle';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo, type FsIndexResult, type NotebookEntry } from './hooks/useDaemonSocket';
 import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
@@ -2923,6 +2928,11 @@ sendFetchPRDetails,
   // consistent. They never contribute to unmutedWorkspaceViews, which feeds
   // session/attention counts.
   const [showSessionlessWorkspaces, setShowSessionlessWorkspaces] = useState<boolean>(readShowSessionlessWorkspaces);
+  const [workspaceSelectionStyle, setWorkspaceSelectionStyle] = useState<WorkspaceSelectionStyle>(readWorkspaceSelectionStyle);
+  const handleWorkspaceSelectionStyleChange = useCallback((style: WorkspaceSelectionStyle) => {
+    persistWorkspaceSelectionStyle(style);
+    setWorkspaceSelectionStyle(style);
+  }, []);
   const handleToggleShowSessionlessWorkspaces = useCallback(() => {
     setShowSessionlessWorkspaces((prev) => {
       const next = !prev;
@@ -3268,10 +3278,18 @@ sendFetchPRDetails,
     // must close THAT tile here, not the active session's terminal pane. Without
     // this, Cmd+W while reading a note kills the previously-focused terminal/session.
     // (Native browser tiles are handled natively before session.close ever fires.)
-    const focused = document.activeElement;
-    const tileEl = focused instanceof HTMLElement ? focused.closest('[data-pane-kind="tile"]') : null;
-    const tileId = tileEl?.getAttribute('data-pane-id');
-    if (tileId && activeWorkspaceId) {
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Inside a tile's own subtree the tile is unambiguous. Otherwise, while focus
+    // is anywhere in the workspace, the workspace's own focus model decides —
+    // data-active-leaf-id names a tile whenever a tile is the focused leaf, so a
+    // click that landed on the workspace frame rather than the tile body still
+    // closes the leaf the user sees as focused.
+    const tileId = focused?.closest('[data-pane-kind="tile"]')?.getAttribute('data-pane-id')
+      ?? focused?.closest('.session-terminal-workspace')?.getAttribute('data-active-leaf-id')
+      ?? '';
+    const isTile = !!tileId
+      && !!document.querySelector(`[data-pane-kind="tile"][data-pane-id="${CSS.escape(tileId)}"]`);
+    if (isTile && activeWorkspaceId) {
       handleCloseTile(activeWorkspaceId, tileId);
       return;
     }
@@ -3721,6 +3739,8 @@ sendFetchPRDetails,
           onChangeChiefOfStaff={handleChangeChiefOfStaff}
           showSessionless={showSessionlessWorkspaces}
           onToggleShowSessionless={handleToggleShowSessionlessWorkspaces}
+          workspaceSelectionStyle={workspaceSelectionStyle}
+          onWorkspaceSelectionStyleChange={handleWorkspaceSelectionStyleChange}
           leafDrag={leafWorkspaceDrag ? {
             sourceWorkspaceId: leafWorkspaceDrag.sourceWorkspaceId,
             endpointId: leafWorkspaceDrag.sourceEndpointId,
@@ -3810,6 +3830,7 @@ sendFetchPRDetails,
                     }}
                     onTerminalModelRecovered={handleTerminalModelRecovered}
                     workspace={workspaceState}
+                    workspaceSelectionStyle={workspaceSelectionStyle}
                     activePaneId={activePaneId}
                     fontSize={terminalFontSize}
                     resolvedTheme={resolvedTheme}

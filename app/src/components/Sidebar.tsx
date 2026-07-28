@@ -16,6 +16,7 @@ import { tileContentKey, type TileContentState, type TileLeaf } from '../types/w
 import { deriveTileTitle } from '../utils/tilePresentation';
 import type { WorkspaceWithSessions } from '../utils/workspaceViewModels';
 import type { QueueBands as QueueBandsModel } from '../utils/queueBands';
+import type { WorkspaceSelectionStyle } from '../utils/workspaceSelectionStyle';
 
 interface LocalSession {
   id: string;
@@ -148,6 +149,8 @@ interface SidebarProps {
   onChangeChiefOfStaff?: (sessionId: string, enabled: boolean) => void;
   showSessionless?: boolean;
   onToggleShowSessionless?: () => void;
+  workspaceSelectionStyle?: WorkspaceSelectionStyle;
+  onWorkspaceSelectionStyleChange?: (style: WorkspaceSelectionStyle) => void;
   leafDrag?: { sourceWorkspaceId: string; endpointId?: string } | null;
   dragHoverWorkspaceId?: string | null;
   onWorkspaceDragEnter?: (workspace: SidebarWorkspace) => void;
@@ -338,6 +341,8 @@ export function Sidebar({
   onChangeChiefOfStaff,
   showSessionless = false,
   onToggleShowSessionless,
+  workspaceSelectionStyle = 'rail',
+  onWorkspaceSelectionStyleChange,
   leafDrag = null,
   dragHoverWorkspaceId = null,
   onWorkspaceDragEnter,
@@ -903,6 +908,20 @@ export function Sidebar({
                       }}
                     >
                       {mode}
+                    </button>
+                  ))}
+                </div>
+                <span className="sidebar-settings-sub-label">Tile focus</span>
+                <div className="sidebar-display-toggle sidebar-display-toggle--selection" role="group" aria-label="Tile focus style">
+                  {(['dim', 'rail', 'spotlight'] as const).map((style) => (
+                    <button
+                      type="button"
+                      key={style}
+                      className={workspaceSelectionStyle === style ? 'active' : ''}
+                      aria-pressed={workspaceSelectionStyle === style}
+                      onClick={() => onWorkspaceSelectionStyleChange?.(style)}
+                    >
+                      {style}
                     </button>
                   ))}
                 </div>

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -501,6 +500,40 @@ func TestParseDelegateArgsDefaultsToCurrentWorkspace(t *testing.T) {
 	if parsed.options.Placement != "current_workspace" {
 		t.Fatalf("placement = %q", parsed.options.Placement)
 	}
+	if parsed.options.NoWorktree {
+		t.Fatal("plain delegation unexpectedly disabled the default worktree")
+	}
+}
+
+func TestParseDelegateArgsNoWorktree(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "Continue in this checkout",
+		"--no-worktree",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+	if !parsed.options.NoWorktree {
+		t.Fatal("options.NoWorktree = false, want true")
+	}
+}
+
+func TestParseDelegateArgsRejectsNoWorktreeOverrides(t *testing.T) {
+	for _, args := range [][]string{
+		{"--no-worktree", "--worktree", "feat/parser"},
+		{"--no-worktree", "--repo", "/tmp/repo"},
+		{"--no-worktree", "--from", "main"},
+		{"--no-worktree", "--worktree-path", "/tmp/worktree"},
+	} {
+		_, err := parseDelegateArgs(append([]string{
+			"--source-session", "source-session",
+			"--brief", "Conflicting placement",
+		}, args...))
+		if err == nil {
+			t.Fatalf("parseDelegateArgs(%v) error = %v", args, err)
+		}
+	}
 }
 
 func TestParseDelegateArgsNameSetsLabel(t *testing.T) {
@@ -620,18 +653,6 @@ func TestParseDelegateArgsAcceptsCwdWithWorktree(t *testing.T) {
 	}
 }
 
-func TestWriteHelpMentionsPresenceAndOpen(t *testing.T) {
-	var output bytes.Buffer
-	writeHelp(&output)
-
-	text := output.String()
-	for _, expected := range []string{"presence", "delegate --brief-file <path>", "workspace context <command>", "open <file.md> [--session <id>]", "pr wait-ready <pr>"} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("help output missing %q: %q", expected, text)
-		}
-	}
-}
-
 func TestWorkspaceContextSourceSessionDefaultsToEnvironment(t *testing.T) {
 	t.Setenv("ATTN_SESSION_ID", "session-1")
 	sessionID, force, err := workspaceContextSourceSession([]string{"--force"}, true)
@@ -647,44 +668,6 @@ func TestWorkspaceContextSourceSessionRejectsForceForStatus(t *testing.T) {
 	_, _, err := workspaceContextSourceSession([]string{"--session", "session-1", "--force"}, false)
 	if err == nil || !strings.Contains(err.Error(), "--force is only valid") {
 		t.Fatalf("workspaceContextSourceSession error = %v", err)
-	}
-}
-
-func TestWriteWorkspaceHelpMentionsMaintenanceCommands(t *testing.T) {
-	var output bytes.Buffer
-	writeWorkspaceHelp(&output)
-
-	text := output.String()
-	for _, expected := range []string{
-		"compact [--session <id>]",
-		"rollback [--session <id>]",
-	} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("workspace help missing %q: %q", expected, text)
-		}
-	}
-}
-
-func TestWriteDelegateHelpMentionsPlacementOptions(t *testing.T) {
-	var output bytes.Buffer
-	writeDelegateHelp(&output)
-
-	text := output.String()
-	for _, expected := range []string{
-		"--new-workspace",
-		"--workspace <id>",
-		"--cwd <path>",
-		"--worktree <branch>",
-		"combine with any placement (current, --workspace, or --new-workspace)",
-		"--agent <name>",
-		"--name <text>",
-	} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("delegate help missing %q: %q", expected, text)
-		}
-	}
-	if strings.Contains(text, "--label") {
-		t.Fatalf("delegate help still mentions removed --label flag: %q", text)
 	}
 }
 

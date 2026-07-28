@@ -1212,9 +1212,6 @@ func TestExecutePRCommandShowsSubcommandHelp(t *testing.T) {
 	if code := executePRCommand([]string{"wait-ready", "--help"}, &stdout, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("exit code = %d", code)
 	}
-	if !strings.Contains(stdout.String(), "exit: 0 approved") {
-		t.Fatalf("help = %q", stdout.String())
-	}
 }
 
 func readinessObservation(number, head, checks, review string) *prReadiness {

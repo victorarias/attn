@@ -46,6 +46,11 @@
   --color-scrollbar-thumb: #2a2a2d;
   --color-scrollbar-hover: #3a3a3d;
 
+  /* A docked tile sits in the same workspace frame as a terminal pane, so it
+     shares the editor surface. Declared once: every theme override below rewrites
+     --color-bg-editor on this same element, so the alias follows them. */
+  --color-bg-tile: var(--color-bg-editor);
+
   /* Fenced-code syntax highlighting (classHighlighter tok-* classes). */
   --syntax-keyword: #c678dd;
   --syntax-string: #98c379;

@@ -685,11 +685,13 @@ func writeDelegateHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path>) [options]
 
 placement:
-  (no flags)                 add a pane to the source session's workspace
+  (no flags)                 add a pane to the source workspace; Git repositories
+                             get a new worktree automatically
   --new-workspace            create a workspace using the source directory
   --workspace <id>           add a pane to an existing workspace
   --cwd <path>               create a workspace at an existing directory
-  --worktree <branch>        create a worktree for the delegated session
+  --worktree <branch>        choose the new worktree's branch
+  --no-worktree              reuse the resolved checkout instead
 
 worktree options:
   combine with any placement (current, --workspace, or --new-workspace);
@@ -2304,6 +2306,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	worktreeRepo := fs.String("repo", "", "main repository for --worktree (defaults to the target's session repository)")
 	worktreeStart := fs.String("from", "", "starting ref for --worktree")
 	worktreePath := fs.String("worktree-path", "", "custom path for --worktree")
+	noWorktree := fs.Bool("no-worktree", false, "reuse the resolved checkout instead of creating a worktree")
 	requestID := fs.String("request-id", "", "stable delegation request id")
 	allowWorktreeReuse := fs.Bool("allow-worktree-reuse", false, "allow active sessions to share a worktree")
 	if err := fs.Parse(args); err != nil {
@@ -2347,8 +2350,8 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	if explicitWorkspace != "" && (*newWorkspace || customCWD != "") {
 		return delegateCLIArgs{}, errors.New("--workspace cannot be combined with --new-workspace or --cwd")
 	}
-	if branch == "" && (repo != "" || startingFrom != "" || customWorktreePath != "") {
-		return delegateCLIArgs{}, errors.New("--repo, --from, and --worktree-path require --worktree")
+	if *noWorktree && (branch != "" || repo != "" || startingFrom != "" || customWorktreePath != "") {
+		return delegateCLIArgs{}, errors.New("--no-worktree cannot be combined with --worktree, --repo, --from, or --worktree-path")
 	}
 
 	placement := "current_workspace"
@@ -2375,6 +2378,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 			Worktree:           branch,
 			WorktreePath:       customWorktreePath,
 			StartingFrom:       startingFrom,
+			NoWorktree:         *noWorktree,
 			AllowWorktreeReuse: *allowWorktreeReuse,
 		},
 	}, nil

@@ -6,6 +6,23 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-28]
+
+### Changed
+- **Delegated Git work starts isolated by default.** `attn delegate` now creates
+  a new worktree automatically when its target is in a Git repository, including
+  for read-only and discussion work. Use `--no-worktree` to deliberately continue
+  in the resolved checkout; explicit branch, base, repository, and path options
+  still customize the new worktree.
+- **Choose how the focused workspace tile is shown.** Sidebar display settings
+  now offer dimming alone, an edge rail, or a depth spotlight for the selected
+  terminal, markdown file, browser, or other tile, and remember the choice across
+  launches. The selected tile stays fully opaque while every unselected tile is
+  dimmed to the same level in all three modes. Spotlight depth and corner marks
+  are static so they do not keep consuming animation work.
+
+---
+
 ## [2026-07-27]
 
 ### Added
@@ -24,6 +41,10 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   there after a restart.
 
 ### Changed
+- **The focused pane or tile is now marked, not just brightened.** The focused
+  leaf carries an accent ring and an accented header, applied the same way to
+  terminals and docked tiles, so which one has the keyboard is readable at a
+  glance.
 - **An agent that finishes its run joins the queue too.** A run you asked for
   that ended without a question is still a result nobody has read, so it lands at
   the bottom of the list. So does an agent you just launched and have not spoken
@@ -45,6 +66,21 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   staff, close, reload — is on the queue rows for the same reason.
 
 ### Fixed
+- **The focus ring around a terminal pane is whole again.** On an agent or shell
+  pane the accent ring flashed on open and then collapsed to a single line above
+  the header, because the terminal's own background painted over it. The ring
+  now draws over pane content — including a bound ticket's detail overlay — so a
+  focused terminal is outlined on all four sides exactly like a focused markdown
+  tile, whatever the pane is showing.
+- **A docked markdown file can now be focused like any terminal pane.** Focus in
+  a workspace used to belong to terminals only, so a markdown or notebook tile —
+  the surface an agent opens when it shows you a file — could never be the
+  focused thing. Clicking it did nothing you could see, ⌘W acted on whichever
+  terminal was focused before, ⌘⌥arrows skipped over it, ⌘⇧Enter could not
+  zoom it, and ⌘Enter (send annotations) only worked if focus had happened to
+  land inside. Docked tiles are now first-class focus targets: click one, or
+  navigate into it with ⌘⌥arrows, and it becomes the focused leaf — ⌘W closes
+  that tile, ⌘⇧Enter zooms it, and the annotation shortcut is armed.
 - **A settled agent no longer comes straight back while it is compacting.** A
   Claude session running `/compact` repaints its terminal title more slowly than
   it does mid-turn, and attn read each of those pauses as the turn ending: the
@@ -91,6 +127,8 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **The long-run review gate is gone.** Runs over five minutes used to hold their
   final color back until you looked at the session. A finished run now publishes
   what it actually is straight away, and the queue is what carries it to you.
+
+---
 
 ## [2026-07-26]
 

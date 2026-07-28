@@ -100,8 +100,79 @@
   opacity: 1;
 }
 
-.workspace-pane.workspace-pane--tile {
+/* The selected-leaf treatment applies only when there is another visible leaf
+   to disambiguate. Edge rail is the default: one strong edge without boxing in
+   terminal or document content. The overlay sits above pane-local overlays but
+   never takes pointer input. */
+.session-terminal-workspace.workspace-selection--rail.multi-leaf .workspace-pane.active::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 10;
+  width: 3px;
+  pointer-events: none;
+  background: var(--accent);
+}
+
+.session-terminal-workspace.workspace-selection--rail.multi-leaf .workspace-pane.active .workspace-pane-title,
+.session-terminal-workspace.workspace-selection--rail.multi-leaf .workspace-pane.active .workspace-dock-tile-title {
+  color: var(--color-text-primary);
+}
+
+/* Spotlight adds static depth and corner marks while preserving the same
+   selected/unselected opacity contrast as the rail. Selection changes animate
+   opacity only, which compositors can handle without repainting pane contents.
+   The shadow and marks never animate; filters, backdrop blur, and permanent
+   will-change layers are intentionally avoided to keep WebGL terminal GPU
+   memory stable. */
+.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active {
+  z-index: 4;
   opacity: 1;
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+}
+
+.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active .workspace-pane-header,
+.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active .workspace-dock-tile-header {
+  background: color-mix(
+    in srgb,
+    var(--color-bg-elevated, var(--color-bg-editor)) 92%,
+    var(--color-text-primary)
+  );
+}
+
+.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active .workspace-pane-title,
+.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active .workspace-dock-tile-title {
+  color: var(--color-text-primary);
+}
+
+.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active::before,
+.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active::after {
+  content: '';
+  position: absolute;
+  z-index: 10;
+  width: 13px;
+  height: 13px;
+  pointer-events: none;
+}
+
+.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active::before {
+  inset: 0 auto auto 0;
+  border-top: 2px solid var(--accent);
+  border-left: 2px solid var(--accent);
+}
+
+.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active::after {
+  inset: auto 0 0 auto;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-pane {
+    transition: none;
+  }
 }
 
 .session-terminal-panes > .workspace-pane {
@@ -306,7 +377,9 @@
 /* The bound-ticket overlay: TicketDetailPanel laid over the terminal inside the
    pane body (which is position:relative). Absolute inset:0 above the terminal
    canvas; the header stays above it so the chip and drag handle remain clickable.
-   Pane-scoped and non-modal — no backdrop, no FocusTrap. */
+   Pane-scoped and non-modal — no backdrop, no FocusTrap. Stays below the
+   selected-leaf markers' z-index: 10 so opening the overlay never hides the
+   focus signal on a multi-leaf workspace. */
 .workspace-pane-ticket-overlay {
   position: absolute;
   inset: 0;
