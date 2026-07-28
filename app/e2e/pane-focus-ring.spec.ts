@@ -9,6 +9,7 @@ test('active-pane selection markers paint above the ticket overlay', async ({ pa
 
   const workspace = page.locator('[data-testid="workspace"]');
   const pane = page.locator('[data-testid="pane-active"]');
+  const inactiveTile = page.locator('[data-testid="tile-inactive"]');
   const overlay = page.locator('[data-testid="ticket-overlay"]');
   await expect(overlay).toBeVisible();
 
@@ -24,5 +25,7 @@ test('active-pane selection markers paint above the ticket overlay', async ({ pa
       await pane.evaluate((el) => getComputedStyle(el, '::after').zIndex),
     );
     expect(markerZ, `${style} marker z-index`).toBeGreaterThan(overlayZ);
+    await expect(inactiveTile, `${style} inactive tile opacity`).toHaveCSS('opacity', '0.58');
+    await expect(pane, `${style} active pane opacity`).toHaveCSS('opacity', '1');
   }
 });

@@ -12,8 +12,9 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **Choose how the focused workspace tile is marked.** Sidebar display settings
   now offer an edge rail or a depth spotlight for the selected terminal, markdown
   file, browser, or other tile, and remember the choice across launches. The
-  spotlight fades only tile opacity during focus changes; its depth and corner
-  marks are static so it does not keep consuming animation work.
+  selected tile stays fully opaque while every unselected tile is dimmed to the
+  same level in both modes. Spotlight depth and corner marks are static so they
+  do not keep consuming animation work.
 
 ---
 
@@ -40,8 +41,7 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 - **The focused pane or tile is now marked, not just brightened.** The focused
   leaf carries an accent ring and an accented header, applied the same way to
   terminals and docked tiles, so which one has the keyboard is readable at a
-  glance. Tiles stay at full brightness whether focused or not — a docked
-  document is there to be read while you type in the terminal.
+  glance.
 
 ---
 
