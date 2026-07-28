@@ -79,12 +79,12 @@ these flags.
 
 ## Placement
 
-For work involving a Git repository, start each delegation in a new worktree by
-default—even for read-only investigation or discussion. Base it on the branch
-relevant to the task, or the repository's default branch when none is specified.
-Reuse the current checkout only when the user asks or the delegation clearly
-continues work already happening there; more specific repository or agent
-guidance takes precedence.
+For work involving a Git repository, `attn delegate` creates a new worktree by
+default—even for read-only investigation or discussion. Use `--from` when the
+task needs a particular starting branch; otherwise attn uses the repository's
+default branch. Pass `--no-worktree` only when the user asks to reuse the current
+checkout, the delegation clearly continues work already happening there, or more
+specific repository or agent guidance requires it.
 
 Before creating a new workspace, check whether an existing one already fits the
 work. `attn list` returns sessions grouped by `workspace_id`; use the session
@@ -116,8 +116,9 @@ When the source session is the chief of staff, delegating into a muted existing
 workspace automatically unmutes it so the new agent is visible in the sidebar.
 Ordinary delegation preserves the workspace's current mute state.
 
-`--worktree` creates an isolated git worktree for branch isolation. It combines
-with any placement:
+Git repositories get an isolated worktree with an automatically generated branch.
+Use `--worktree` to choose the branch name explicitly. It combines with any
+placement:
 
     # worktree in the current workspace
     attn delegate --brief-file "$brief_file" \

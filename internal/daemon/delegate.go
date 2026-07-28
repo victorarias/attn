@@ -324,10 +324,9 @@ func (d *Daemon) delegationWorktreeRepo(workspaceID string) (string, error) {
 	}
 }
 
-// delegationDefaultStartRef names the ref a delegated worktree starts from when
-// no working directory supplies a defensible starting point. It returns "" when
-// the repository's default branch cannot be resolved at all, leaving the caller
-// with git's own current-HEAD behaviour as a last resort.
+// delegationDefaultStartRef names the ref an automatically created delegated
+// worktree starts from. It returns "" when the repository's default branch
+// cannot be resolved, so the caller can ask for an explicit --from value.
 //
 // Prefers the remote-tracking ref, matching how the app's own new-worktree flow
 // defaults (RepoOptions.tsx), so a delegated branch starts from what upstream
@@ -350,6 +349,67 @@ func delegationDefaultStartRef(repo string) string {
 		return branch
 	}
 	return ""
+}
+
+func automaticDelegationBranch(label, sessionID string) string {
+	slug := ticketSlug(label)
+	if slug == "ticket" {
+		slug = "work"
+	}
+	suffix := strings.ReplaceAll(sessionID, "-", "")
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	return "delegate/" + slug + "-" + suffix
+}
+
+// applyDefaultDelegationWorktree resolves an empty worktree request into the
+// automatic Git-repository default. A nil request is the caller's explicit
+// opt-out, while a named branch preserves the existing explicit behavior.
+func (d *Daemon) applyDefaultDelegationWorktree(msg *protocol.DelegateMessage, placement, workspaceID, directory, sessionID, label string) error {
+	if msg.Worktree == nil {
+		return nil
+	}
+	if strings.TrimSpace(msg.Worktree.Branch) != "" {
+		return nil
+	}
+
+	request := msg.Worktree
+	configuredWorktree := strings.TrimSpace(protocol.Deref(request.Repo)) != "" ||
+		strings.TrimSpace(protocol.Deref(request.Path)) != "" ||
+		strings.TrimSpace(protocol.Deref(request.StartingFrom)) != ""
+	repo := strings.TrimSpace(protocol.Deref(request.Repo))
+	if repo == "" && placement == delegationPlacementExisting {
+		resolvedRepo, err := d.delegationWorktreeRepo(workspaceID)
+		if err != nil {
+			return err
+		}
+		repo = resolvedRepo
+	}
+	if repo == "" {
+		root, err := git.GetRepoRoot(directory)
+		if err != nil {
+			if configuredWorktree {
+				return fmt.Errorf("workspace directory is not in a git repository; pass --repo")
+			}
+			msg.Worktree = nil
+			return nil
+		}
+		repo = root
+	}
+	repo = git.ResolveMainRepoPath(repo)
+
+	request.Repo = protocol.Ptr(repo)
+	request.Branch = automaticDelegationBranch(label, sessionID)
+	if strings.TrimSpace(protocol.Deref(request.StartingFrom)) == "" {
+		startingFrom := delegationDefaultStartRef(repo)
+		if startingFrom == "" {
+			return fmt.Errorf("cannot determine the repository's default branch; pass --from or --no-worktree")
+		}
+		request.StartingFrom = protocol.Ptr(startingFrom)
+	}
+	msg.Worktree = request
+	return nil
 }
 
 // createDelegationWorktree creates the worktree. inferredRepo, when non-empty,
@@ -634,6 +694,10 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		}
 	default:
 		return nil, fmt.Errorf("unsupported placement %q", placement)
+	}
+
+	if err := d.applyDefaultDelegationWorktree(msg, placement, workspaceID, directory, sessionID, name); err != nil {
+		return nil, err
 	}
 
 	// Naming scope: a new workspace must take a globally-unique name; a session

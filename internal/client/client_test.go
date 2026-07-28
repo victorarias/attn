@@ -373,6 +373,7 @@ func TestClient_Delegate(t *testing.T) {
 		Worktree:     "feat/parser",
 		WorktreePath: "/tmp/repo--feat-parser",
 		StartingFrom: "main",
+		NoWorktree:   false,
 	})
 	if err != nil {
 		t.Fatalf("Delegate error: %v", err)
@@ -403,6 +404,75 @@ func TestClient_Delegate(t *testing.T) {
 		protocol.Deref(request.Worktree.Path) != "/tmp/repo--feat-parser" ||
 		protocol.Deref(request.Worktree.StartingFrom) != "main" {
 		t.Fatalf("Delegate request worktree = %+v", request.Worktree)
+	}
+}
+
+func TestClientDelegateNoWorktree(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "test.sock")
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	defer listener.Close()
+
+	requests := make(chan *protocol.DelegateMessage, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var raw json.RawMessage
+		if err := json.NewDecoder(conn).Decode(&raw); err != nil {
+			return
+		}
+		_, msg, err := protocol.ParseMessage(raw)
+		if err != nil {
+			return
+		}
+		requests <- msg.(*protocol.DelegateMessage)
+		_ = json.NewEncoder(conn).Encode(protocol.Response{
+			Ok: true,
+			DelegationOperation: &protocol.DelegationOperation{
+				OperationID: "operation-1",
+				RequestID:   "request-1",
+				SessionID:   "delegated-session",
+				State:       protocol.DelegationOperationStateCompleted,
+				Result: &protocol.DelegateResult{
+					SessionID:   "delegated-session",
+					WorkspaceID: "workspace-1",
+					Directory:   "/tmp/project",
+					Placement:   "current_workspace",
+				},
+			},
+		})
+	}()
+
+	_, err = New(sockPath).Delegate("source-session", "Continue here", DelegateOptions{
+		RequestID:  "request-1",
+		NoWorktree: true,
+	})
+	if err != nil {
+		t.Fatalf("Delegate error: %v", err)
+	}
+	request := <-requests
+	if request.Worktree != nil {
+		t.Fatalf("Delegate request = %+v, want no worktree request", request)
+	}
+}
+
+func TestClientDelegateRejectsNoWorktreeWithOverrides(t *testing.T) {
+	_, err := New(filepath.Join(t.TempDir(), "missing.sock")).StartDelegation(
+		"source-session",
+		"Conflicting worktree options",
+		DelegateOptions{
+			NoWorktree:   true,
+			StartingFrom: "main",
+		},
+	)
+	if err == nil {
+		t.Fatalf("StartDelegation() error = %v", err)
 	}
 }
 

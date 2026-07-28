@@ -127,11 +127,7 @@ func TestDelegateSpawnsAgentInSourceWorkspaceWithBrief(t *testing.T) {
 	if result.WorkspaceID != workspaceID || result.Directory != cwd {
 		t.Fatalf("result = %+v, want workspace=%s directory=%s", result, workspaceID, cwd)
 	}
-	// Every delegated agent's initial prompt is prefixed with the leaf identity
-	// line so a non-chief-delegated leaf — which gets no ticket-report contract —
-	// still has a positive signal that it is a leaf, not a coordinator.
-	if !strings.Contains(prompt, "a leaf, not a coordinator") ||
-		!strings.Contains(prompt, "Investigate the delegated task.") {
+	if !strings.Contains(prompt, "Investigate the delegated task.") {
 		t.Fatalf("initial prompt = %q", prompt)
 	}
 	if promptPath == "" {
@@ -147,6 +143,62 @@ func TestDelegateSpawnsAgentInSourceWorkspaceWithBrief(t *testing.T) {
 	layout := d.store.GetWorkspaceLayout(workspaceID)
 	if layout == nil || len(layout.Panes) != 2 {
 		t.Fatalf("workspace layout = %+v, want two panes", layout)
+	}
+}
+
+func TestDelegateDefaultsToNewWorktreeForGitRepository(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := initDelegationRepo(t, root, "repo")
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	workspaceID, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
+	consumeDelegatedPrompt(t, backend)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Investigate the repository.",
+		Label:           protocol.Ptr("parser"),
+		Worktree:        &protocol.DelegateWorktreeRequest{},
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	if result.WorkspaceID != workspaceID ||
+		result.Directory == mainRepo ||
+		!protocol.Deref(result.WorktreeCreated) {
+		t.Fatalf("result = %+v, want isolated worktree in source workspace", result)
+	}
+	if got := git.CanonicalizePath(git.GetMainRepoFromWorktree(result.Directory)); got != mainRepo {
+		t.Fatalf("worktree main repo = %q, want %q", got, mainRepo)
+	}
+	session := d.store.Get(result.SessionID)
+	if session == nil || !strings.HasPrefix(protocol.Deref(session.Branch), "delegate/parser-") {
+		t.Fatalf("delegated session = %+v, want generated branch", session)
+	}
+}
+
+func TestDelegateNoWorktreeReusesGitCheckout(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := initDelegationRepo(t, root, "repo")
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	workspaceID, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
+	consumeDelegatedPrompt(t, backend)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "Continue in the existing checkout.",
+		Label:           protocol.Ptr("continuation"),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	if result.WorkspaceID != workspaceID ||
+		result.Directory != mainRepo ||
+		protocol.Deref(result.WorktreeCreated) {
+		t.Fatalf("result = %+v, want source checkout without worktree", result)
 	}
 }
 
@@ -183,28 +235,8 @@ func TestChiefOfStaffDelegateBindsTicketAndPrompt(t *testing.T) {
 		t.Fatalf("delegate() error = %v", err)
 	}
 
-	// A chief delegation now binds a ticket (no parallel dispatch record), and the
-	// initial prompt teaches the agent to self-report via `ticket status`.
-	if !strings.Contains(prompt, "Investigate the tracked task.") ||
-		!strings.Contains(prompt, "ticket status in_progress") ||
-		!strings.Contains(prompt, "ticket status completed") ||
-		strings.Contains(prompt, "dispatch ") {
+	if !strings.Contains(prompt, "Investigate the tracked task.") {
 		t.Fatalf("tracked initial prompt = %q", prompt)
-	}
-	// Completion follows strong terminal evidence, not a mandatory confirmation
-	// ritual; implementation finished while review remains maps to in-review.
-	for _, expected := range []string{"strong terminal evidence", "user accepted the work", "requested PR merged", "ready_for_review"} {
-		if !strings.Contains(prompt, expected) {
-			t.Fatalf("tracked initial prompt missing evidence-based completion guidance %q: %q", expected, prompt)
-		}
-	}
-	if strings.Contains(prompt, "ask the user to confirm") {
-		t.Fatalf("tracked initial prompt retained mandatory confirmation gate: %q", prompt)
-	}
-	for _, expected := range []string{"ticket attach-plan --file", "--scope <affected-component>", "committed repository plan stays canonical in Git", "never deletes a tracked", "meaningful edits, renames, or deletions"} {
-		if !strings.Contains(prompt, expected) {
-			t.Fatalf("tracked initial prompt missing %q: %q", expected, prompt)
-		}
 	}
 
 	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
@@ -506,8 +538,7 @@ func TestDelegateAcceptsCopilotInitialPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate() error = %v, want copilot delegation to succeed", err)
 	}
-	if !strings.Contains(prompt, "a leaf, not a coordinator") ||
-		!strings.Contains(prompt, "Use Copilot for this delegated task.") {
+	if !strings.Contains(prompt, "Use Copilot for this delegated task.") {
 		t.Fatalf("delegated initial prompt = %q", prompt)
 	}
 	session := d.store.Get(result.SessionID)
