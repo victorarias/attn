@@ -239,10 +239,10 @@ type Daemon struct {
 	// Called inside the fire-time decision, between confirming the turn is still
 	// owed and settling it. Tests only; nil in production. See auto_settle.go.
 	autoSettlePreSettleHook func()
-	recoveryMu           sync.RWMutex
-	recovering           bool
-	notebookMu           sync.Mutex
-	notebookStore        *notebook.Store
+	recoveryMu              sync.RWMutex
+	recovering              bool
+	notebookMu              sync.Mutex
+	notebookStore           *notebook.Store
 	// notebookWatcher observes notebook.root for external edits; guarded by its
 	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
 	// without nesting locks. Lazily started on first notebook use.
