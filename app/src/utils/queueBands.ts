@@ -98,3 +98,31 @@ export function buildQueueBands<TSession extends QueueBandSession>(
 
   return { chief, turns, settled };
 }
+
+/**
+ * The agent to land on once `settledSessionId`'s turn is closed: the next row in
+ * queue order, wrapping to the top, and never the row just settled.
+ *
+ * The target is read from the queue as it stands *before* the settle. The settle
+ * is a round trip to the daemon and the band only loses the row when the
+ * broadcast comes back, so anything read after the call still contains the row
+ * that was settled — deciding here keeps the jump off that race entirely.
+ *
+ * A session that is not in the band (already settled, pinned, muted, the chief)
+ * has no position to move on from, so the scan simply starts at the top. Null
+ * means nothing is left to go to and selection should stay where it is.
+ */
+export function nextTurnAfterSettle<TSession extends QueueBandSession>(
+  turns: QueueRow<TSession>[],
+  settledSessionId: string | null,
+): QueueRow<TSession> | null {
+  const current = turns.findIndex((row) => row.session.id === settledSessionId);
+  const start = current === -1 ? 0 : current + 1;
+  for (let offset = 0; offset < turns.length; offset += 1) {
+    const row = turns[(start + offset) % turns.length];
+    if (row.session.id !== settledSessionId) {
+      return row;
+    }
+  }
+  return null;
+}

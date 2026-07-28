@@ -95,7 +95,9 @@ import {
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
 import { boundTicketForSession } from './utils/tickets';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
-import { buildQueueBands, isQueueModeEnabled, QUEUE_MODE_SETTING } from './utils/queueBands';
+import {
+  buildQueueBands, isQueueModeEnabled, nextTurnAfterSettle, QUEUE_MODE_SETTING,
+} from './utils/queueBands';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import { hideBootSplash } from './utils/bootSplash';
 import { getTerminalTheme } from './utils/terminalSizing';
@@ -2901,17 +2903,27 @@ sendFetchPRDetails,
   const { needsAttention: prsNeedingAttention } = usePRsNeedingAttention(prs);
   const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
-  // Settle the selected session's turn. Undefined while the queue arrangement is
-  // off so the shortcut is not registered at all.
+  // Settle the selected session's turn and move on to the next agent that still
+  // owes one, so closing a turn and picking up the next is one keystroke.
+  // Undefined while the queue arrangement is off so the shortcut is not
+  // registered at all.
+  //
+  // The next agent is taken from the queue as it stands before the settle: the
+  // band only drops the settled row once the daemon broadcast lands, so reading
+  // it afterwards would either find the row still there or race the refresh.
+  // With nothing left to go to, selection stays put.
   const handleSettleActiveTurn = useMemo(
     () => (queueModeEnabled
       ? () => {
-        if (activeSessionId) {
-          sendSettleTurn(activeSessionId);
+        if (!activeSessionId) return;
+        const next = nextTurnAfterSettle(queueBands?.turns ?? [], activeSessionId);
+        sendSettleTurn(activeSessionId);
+        if (next) {
+          handleSelectSession(next.session.id);
         }
       }
       : undefined),
-    [queueModeEnabled, activeSessionId, sendSettleTurn],
+    [queueModeEnabled, activeSessionId, queueBands, sendSettleTurn, handleSelectSession],
   );
 
   // Keyboard shortcut handlers

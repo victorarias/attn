@@ -62,7 +62,7 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'session.goToDashboard': { label: 'Go to dashboard (home)', category: 'sessions' },
   'view.toggleGrid': { label: 'Toggle grid view', category: 'sessions' },
   'session.jumpToWaiting': { label: 'Jump to next waiting session', category: 'sessions' },
-  'session.settle': { label: 'Settle this turn', category: 'sessions' },
+  'session.settle': { label: 'Settle turn, go to next', category: 'sessions' },
   'session.toggleSidebar': { label: 'Toggle sidebar', category: 'sessions', dockLabel: 'sidebar' },
   'workspace.select1': { label: 'Jump to workspace 1', category: 'sessions' },
   'workspace.select2': { label: 'Jump to workspace 2', category: 'sessions' },
