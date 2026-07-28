@@ -9,12 +9,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-28]
 
 ### Changed
-- **Choose how the focused workspace tile is marked.** Sidebar display settings
-  now offer an edge rail or a depth spotlight for the selected terminal, markdown
-  file, browser, or other tile, and remember the choice across launches. The
-  selected tile stays fully opaque while every unselected tile is dimmed to the
-  same level in both modes. Spotlight depth and corner marks are static so they
-  do not keep consuming animation work.
+- **Choose how the focused workspace tile is shown.** Sidebar display settings
+  now offer dimming alone, an edge rail, or a depth spotlight for the selected
+  terminal, markdown file, browser, or other tile, and remember the choice across
+  launches. The selected tile stays fully opaque while every unselected tile is
+  dimmed to the same level in all three modes. Spotlight depth and corner marks
+  are static so they do not keep consuming animation work.
 
 ---
 

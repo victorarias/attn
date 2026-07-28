@@ -867,7 +867,7 @@ export function Sidebar({
                 </div>
                 <span className="sidebar-settings-sub-label">Tile focus</span>
                 <div className="sidebar-display-toggle sidebar-display-toggle--selection" role="group" aria-label="Tile focus style">
-                  {(['rail', 'spotlight'] as const).map((style) => (
+                  {(['dim', 'rail', 'spotlight'] as const).map((style) => (
                     <button
                       type="button"
                       key={style}

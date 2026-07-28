@@ -560,9 +560,9 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sidebar settings' }));
 
     expect(screen.getByRole('button', { name: 'rail' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'spotlight' }));
+    fireEvent.click(screen.getByRole('button', { name: 'dim' }));
 
-    expect(onWorkspaceSelectionStyleChange).toHaveBeenCalledWith('spotlight');
+    expect(onWorkspaceSelectionStyleChange).toHaveBeenCalledWith('dim');
   });
 
   it('renders config-driven dock items, marks active ones, and fires actions on click', () => {

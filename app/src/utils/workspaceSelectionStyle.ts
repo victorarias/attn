@@ -1,12 +1,11 @@
-export type WorkspaceSelectionStyle = 'rail' | 'spotlight';
+export type WorkspaceSelectionStyle = 'dim' | 'rail' | 'spotlight';
 
 export const WORKSPACE_SELECTION_STYLE_STORAGE_KEY = 'attn.workspace.selectionStyle';
 
 export function readWorkspaceSelectionStyle(): WorkspaceSelectionStyle {
   try {
-    return window.localStorage.getItem(WORKSPACE_SELECTION_STYLE_STORAGE_KEY) === 'spotlight'
-      ? 'spotlight'
-      : 'rail';
+    const stored = window.localStorage.getItem(WORKSPACE_SELECTION_STYLE_STORAGE_KEY);
+    return stored === 'dim' || stored === 'spotlight' ? stored : 'rail';
   } catch {
     return 'rail';
   }
