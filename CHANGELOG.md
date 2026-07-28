@@ -6,7 +6,27 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
-## [2026-07-28]
+## [2026-07-29]
+
+### Added
+- **Auto-settle: turns you have already dealt with can close themselves.** Off by
+  default; turn it on in Settings > General, or from ⌘K. When a session that owes
+  you a turn goes back to work — which is what happens after you steer an agent —
+  attn waits 30 seconds, then runs a 15-second countdown and settles the turn for
+  you. Settling this way is identical to pressing ⌘⇧E yourself, and it never
+  changes which session you have selected.
+- **The countdown is visible wherever the session is.** Its terminal tile grows a
+  "Settling…" chip with a draining bar; a session with no tile on screen shows a
+  violet bar on its sidebar row instead, so a turn is never closed silently. The
+  bar drains right-to-left in violet against the nudge countdown's left-to-right
+  sky blue, so the two never read as the same event.
+- **⌘. keeps the turn.** Press it, or click the chip, and the countdown stops and
+  the turn stays yours. It will not re-arm while the agent keeps working; steering
+  the agent again starts a fresh one. Anything that takes the session out of
+  `working` cancels the countdown too.
+- **Both delays are configurable.** Settings > General takes the wait before the
+  countdown starts (5–3600s) and the countdown's own length (3–600s)
+  independently.
 
 ### Fixed
 - **Queue rows can be opened from the keyboard.** Each row in the agent queue

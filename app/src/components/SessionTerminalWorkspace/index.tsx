@@ -23,6 +23,7 @@ import {
 import type { SessionAgent } from '../../types/sessionAgent';
 import type { UISessionState } from '../../types/sessionState';
 import { HeaderNudgeIndicator, deriveNudgeMode } from '../NudgeIndicator';
+import { HeaderSettlingIndicator } from '../SettlingIndicator';
 import { HeaderPresentationChip } from '../PresentationChip';
 import { PaneTicketChip } from '../PaneTicketChip';
 import { TicketDetailPanel } from '../TicketDetailPanel';
@@ -117,6 +118,9 @@ interface SessionTerminalWorkspaceProps {
     state?: UISessionState;
     ticketUnread?: boolean;
     nudgeFiresAt?: string;
+    // The deadline an auto-settle countdown will close this session's turn at.
+    // Present only while one is running; the daemon owns the timer.
+    autoSettleFiresAt?: string;
     isActive?: boolean;
     presentation?: Presentation;
     // The board row for the ticket bound to this session (assignee == id), when
@@ -156,6 +160,9 @@ interface SessionTerminalWorkspaceProps {
   onFocusPane: (paneId: string) => void;
   onRenameSession?: (sessionId: string, label: string) => Promise<void>;
   onTriggerNudge?: (sessionId: string) => void;
+  // Keep the turn an auto-settle countdown is about to close. Clicking the chip
+  // is the pointer equivalent of the ⌘. shortcut.
+  onCancelAutoSettle?: (sessionId: string) => void;
   onOpenPresentation?: (presentationId: string) => void;
   // Cmd+click on a markdown path inside a pane's terminal: dock it as a
   // markdown tile bound to that pane's session (empty sessionId = let the
@@ -210,6 +217,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onFocusPane,
     onRenameSession,
     onTriggerNudge,
+    onCancelAutoSettle,
     onOpenPresentation,
     onOpenMarkdown,
     onTerminalModelRecovered,
@@ -885,10 +893,16 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         // makes the header ambient (always there) so steering is one click. Drag/
         // rename stay split-only — a nudge/presentation/ticket-only header is a
         // status bar, not a move handle.
+        // A running auto-settle countdown surfaces the header on a lone tile the
+        // same way a nudge does: the countdown needs its rectangle, and a turn
+        // about to be closed for you is exactly the thing that must not be
+        // invisible.
+        const autoSettleFiresAt = paneSession?.autoSettleFiresAt;
         const headerVisible = showPaneHeader
           || nudgeMode != null
           || paneSession?.presentation != null
-          || paneTicket != null;
+          || paneTicket != null
+          || autoSettleFiresAt != null;
         return (
           <div
             key={agentPane.id}
@@ -939,6 +953,12 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 <HeaderPresentationChip
                   presentation={paneSession.presentation}
                   onOpen={(presentationId) => onOpenPresentation?.(presentationId)}
+                />
+              ) : null}
+              {autoSettleFiresAt ? (
+                <HeaderSettlingIndicator
+                  firesAt={autoSettleFiresAt}
+                  onCancel={() => onCancelAutoSettle?.(agentPane.sessionId)}
                 />
               ) : null}
               {nudgeMode ? (

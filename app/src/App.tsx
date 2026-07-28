@@ -107,7 +107,12 @@ import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/i
 import { boundTicketForSession } from './utils/tickets';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import {
-  buildQueueBands, isQueueModeEnabled, nextTurnAfterSettle, QUEUE_MODE_SETTING,
+  buildQueueBands,
+  isQueueModeEnabled,
+  nextTurnAfterSettle,
+  QUEUE_MODE_SETTING,
+  isAutoSettleEnabled,
+  AUTO_SETTLE_ENABLED_SETTING,
 } from './utils/queueBands';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import { hideBootSplash } from './utils/bootSplash';
@@ -597,6 +602,7 @@ function App() {
     sendSessionSelected,
     sendTriggerNudge,
     sendSettleTurn,
+    sendCancelAutoSettle,
     sendWorkspaceSelected,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
@@ -816,6 +822,7 @@ function App() {
         sendSessionSelected={sendSessionSelected}
         sendTriggerNudge={sendTriggerNudge}
         sendSettleTurn={sendSettleTurn}
+        sendCancelAutoSettle={sendCancelAutoSettle}
         sendWorkspaceSelected={sendWorkspaceSelected}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
@@ -942,6 +949,7 @@ interface AppContentProps {
   sendSessionSelected: ReturnType<typeof useDaemonSocket>['sendSessionSelected'];
   sendTriggerNudge: ReturnType<typeof useDaemonSocket>['sendTriggerNudge'];
   sendSettleTurn: ReturnType<typeof useDaemonSocket>['sendSettleTurn'];
+  sendCancelAutoSettle: ReturnType<typeof useDaemonSocket>['sendCancelAutoSettle'];
   sendWorkspaceSelected: ReturnType<typeof useDaemonSocket>['sendWorkspaceSelected'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
@@ -1062,6 +1070,7 @@ sendFetchPRDetails,
   sendSessionSelected,
   sendTriggerNudge,
   sendSettleTurn,
+  sendCancelAutoSettle,
   sendWorkspaceSelected,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
@@ -1441,6 +1450,7 @@ sendFetchPRDetails,
       nudgeFiresAt: daemonSession?.nudge_fires_at,
       turnOwed: daemonSession?.turn_owed ?? false,
       turnOpenedAt: daemonSession?.turn_opened_at,
+      autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
       state_reason: paneState ? undefined : daemonSession?.state_reason,
@@ -2047,6 +2057,16 @@ sendFetchPRDetails,
       keywords: ['queue', 'turn', 'settle', 'attention', 'sidebar'],
       icon: <AttentionActionIcon />,
       run: handleToggleQueueMode,
+    },
+    {
+      // Same reasoning as the queue toggle: Settings owns the setting, this owns
+      // the day-to-day flip, and both write the same key.
+      id: 'toggle-auto-settle',
+      title: isAutoSettleEnabled(settings) ? 'Turn off auto-settle' : 'Turn on auto-settle',
+      description: 'Settle a turn once you have steered the agent and it goes back to work',
+      keywords: ['auto', 'settle', 'turn', 'countdown', 'queue', 'attention'],
+      icon: <AttentionActionIcon />,
+      run: () => sendSetSetting(AUTO_SETTLE_ENABLED_SETTING, isAutoSettleEnabled(settings) ? 'false' : 'true'),
     },
     {
       id: 'customize-shortcuts',
@@ -2876,6 +2896,24 @@ sendFetchPRDetails,
     [queueModeEnabled, activeSessionId, queueBands, sendSettleTurn, handleSelectSession],
   );
 
+  // Keep the selected session's turn, cancelling the auto-settle countdown that
+  // is about to close it. Undefined while the queue arrangement is off, so — like
+  // session.settle — the shortcut is not registered at all.
+  //
+  // Scoped to the selected session on purpose. An auto-settle happening on a
+  // session you are not looking at must not move your selection, so the cancel
+  // acts where you already are rather than hunting for whichever countdown is
+  // running.
+  const activeSessionSettling = Boolean(
+    enrichedLocalSessions.find((session) => session.id === activeSessionId)?.autoSettleFiresAt,
+  );
+  const handleCancelAutoSettle = useMemo(
+    () => (activeSessionSettling && activeSessionId
+      ? () => sendCancelAutoSettle(activeSessionId)
+      : undefined),
+    [activeSessionSettling, activeSessionId, sendCancelAutoSettle],
+  );
+
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
     const waiting = unmutedEnrichedSessions.find(wantsAttention);
@@ -2984,6 +3022,19 @@ sendFetchPRDetails,
       : [],
     [view, visibleGridSessionIds, workspaceViews],
   );
+  // Which sessions have a terminal tile the user can actually see right now. The
+  // auto-settle countdown lives on the tile, so anything NOT in here needs the
+  // sidebar to carry it instead — a turn closing off-screen must still be
+  // announced somewhere. Session view shows the selected workspace's panes; grid
+  // view shows the tiles that fit; every other surface (dashboard, notebook, the
+  // board) shows no terminal at all.
+  const onScreenSessionIds = useMemo(() => {
+    if (view === 'grid') return visibleGridSessionIds;
+    if (view !== 'session' || !activeWorkspaceId) return new Set<string>();
+    const workspace = workspaceViews.find((w) => w.id === activeWorkspaceId);
+    return new Set((workspace?.sessions ?? []).map((session) => session.id));
+  }, [view, visibleGridSessionIds, activeWorkspaceId, workspaceViews]);
+
   const warmWorkspaceIds = useMemo(
     () => computeWarmWorkspaceIds(
       allWorkspaceIds,
@@ -3518,6 +3569,7 @@ sendFetchPRDetails,
     onToggleGridMode: toggleGridMode,
     onJumpToWaiting: handleJumpToWaiting,
     onSettleTurn: handleSettleActiveTurn,
+    onCancelAutoSettle: handleCancelAutoSettle,
     onSelectWorkspaceByIndex: handleSelectWorkspaceByIndex,
     onPrevSession: handlePrevWorkspace,
     onNextSession: handleNextWorkspace,
@@ -3721,6 +3773,7 @@ sendFetchPRDetails,
           onWorkspaceReorder={handleWorkspaceReorder}
           queue={queueBands}
           onSettleTurn={sendSettleTurn}
+          onScreenSessionIds={onScreenSessionIds}
           onSelectSession={handleSelectSession}
           onTriggerNudge={sendTriggerNudge}
           onSelectWorkspace={handleSelectWorkspace}
@@ -3776,12 +3829,14 @@ sendFetchPRDetails,
                       state: entry.state,
                       ticketUnread: entry.ticketUnread,
                       nudgeFiresAt: entry.nudgeFiresAt,
+                      autoSettleFiresAt: entry.autoSettleFiresAt,
                       isActive: entry.id === activeSessionId,
                       presentation: presentationBySessionId.get(entry.id),
                       ticket: boundTicketForSession(tickets ?? [], entry.id),
                     }))}
                     ticketActions={ticketActions}
                     onTriggerNudge={sendTriggerNudge}
+                    onCancelAutoSettle={sendCancelAutoSettle}
                     onOpenPresentation={handleOpenPresentationWindow}
                     onOpenMarkdown={(path, sessionId) => {
                       void sendOpenMarkdown(path, sessionId).catch((error) => {

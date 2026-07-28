@@ -222,10 +222,16 @@ type Daemon struct {
 	ticketRebuildBeforeArmHook func(sessionID string, deadline time.Time) // tests only: invoked while deliveryMu is held
 	lastInputMu                sync.Mutex
 	lastUserInputAt            map[string]time.Time // per-session keystroke recency — the fire-time splice guard
-	recoveryMu                 sync.RWMutex
-	recovering                 bool
-	notebookMu                 sync.Mutex
-	notebookStore              *notebook.Store
+	// autoSettleMu guards both auto-settle maps: the pending timers and the
+	// standing user cancels. See auto_settle.go.
+	autoSettleMu         sync.Mutex
+	autoSettleTimers     map[string]*autoSettleTimer // presence == an arm delay or countdown is pending
+	autoSettleSuppressed map[string]bool             // sessions whose countdown the user cancelled, until they leave `working`
+	autoSettleFireHook   func(sessionID, outcome string)
+	recoveryMu           sync.RWMutex
+	recovering           bool
+	notebookMu           sync.Mutex
+	notebookStore        *notebook.Store
 	// notebookWatcher observes notebook.root for external edits; guarded by its
 	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
 	// without nesting locks. Lazily started on first notebook use.
@@ -1531,6 +1537,7 @@ func (d *Daemon) Stop() {
 	d.stopInstalledPlugins()
 	d.stopAllTranscriptWatchers()
 	d.stopNudgeCountdowns()
+	d.stopAutoSettleTimers()
 	if d.ptyBackend != nil {
 		_ = d.ptyBackend.Shutdown(context.Background())
 	}
@@ -1758,6 +1765,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 		d.reconcileTicketsOnSessionEnd(sessionID, string(session.State))
 	}
 	d.clearNudgeState(sessionID)
+	d.clearAutoSettleState(sessionID)
 	d.clearPTYWriteFence(sessionID)
 	d.store.Remove(sessionID)
 	// After the row is gone, not before: recordStateObservation gates on the row,
@@ -2726,6 +2734,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	}
 	d.decorateSessionWithStateReason(clone)
 	d.decorateSessionWithNudge(clone)
+	d.decorateSessionWithAutoSettle(clone)
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
 	d.decorateSessionWithWorkspace(clone)

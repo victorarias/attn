@@ -1,0 +1,135 @@
+/* Auto-settle countdown, shared by the pane header (an inline chip in
+   .workspace-pane-header) and the sidebar row (a thin bar on .session-item, used
+   only for sessions with no rendered tile).
+
+   Violet, and draining right-to-left, against the nudge indicator's sky-blue
+   left-to-right fill. Both can be on the same row at once and they mean opposite
+   things — one is something arriving, the other is something being taken away —
+   so they are separated by hue AND direction rather than by hue alone.
+
+   Colors are literal (not theme tokens) for the same reason NudgeIndicator.css
+   uses literals: the indicator must render identically in the packaged app
+   regardless of which token blocks are defined. */
+
+/* The palette is declared on every root this file styles, not just the chip.
+   The header's track is a *sibling* of the chip button, not a descendant, so a
+   custom property set only on `.settling-header` would not reach it — and an
+   undefined var() is a silent no-op, which renders the bar fully transparent
+   rather than failing loudly. */
+.settling-header,
+.settling-header-track,
+.settling-sidebar-bar {
+  --settling-accent: 167, 139, 250; /* violet */
+  --settling-accent-solid: #a78bfa;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ---- Pane header chip: inline, right-aligned inside .workspace-pane-header ---- */
+
+.settling-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  margin: 0;
+  padding: 2px 9px;
+  border: 1px solid rgba(var(--settling-accent), 0.55);
+  border-radius: 5px;
+  background: rgba(var(--settling-accent), 0.16);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1;
+  white-space: nowrap;
+  color: #e2d9fd;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.settling-header:hover {
+  background: rgba(var(--settling-accent), 0.28);
+  border-color: rgba(var(--settling-accent), 0.9);
+}
+
+.settling-header:active {
+  transform: translateY(0.5px);
+}
+
+.settling-header-label {
+  white-space: nowrap;
+}
+
+.settling-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--settling-accent-solid);
+  box-shadow: 0 0 8px 1px rgba(var(--settling-accent), 0.85);
+  animation: settling-dot-pulse 1.2s ease-in-out infinite;
+}
+
+/* The countdown itself: a hairline along the header's bottom edge that drains
+   right-to-left to the deadline (the width transition in CountdownFill). The
+   header is position:relative, so this pins to it and spans the full pane width.
+   Anchored right so the shrinking bar retreats toward its own end rather than
+   sliding. */
+.settling-header-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  background: rgba(var(--settling-accent), 0.16);
+  pointer-events: none;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settling-header-track-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--settling-accent-solid);
+  box-shadow: 0 0 9px 1px rgba(var(--settling-accent), 0.75);
+}
+
+/* ---- Sidebar row: a thin bar pinned to the bottom edge of .session-item ---- */
+
+.settling-sidebar-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  border-radius: 0 0 6px 6px;
+  overflow: hidden;
+  pointer-events: none;
+  background: rgba(var(--settling-accent), 0.18);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settling-sidebar-bar-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--settling-accent-solid);
+  box-shadow: 0 0 9px 1px rgba(var(--settling-accent), 0.7);
+}
+
+@keyframes settling-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settling-dot {
+    animation: none !important;
+  }
+}

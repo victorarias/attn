@@ -10,6 +10,7 @@ import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
 import { QueueBands } from './QueueBands';
 import { SidebarNudgeBar, deriveNudgeMode } from './NudgeIndicator';
+import { SidebarSettlingBar } from './SettlingIndicator';
 import { formatShortcut } from '../shortcuts/formatShortcut';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
 import { tileContentKey, type TileContentState, type TileLeaf } from '../types/workspace';
@@ -33,6 +34,7 @@ interface LocalSession {
   delegatedFromChief?: boolean;
   ticketUnread?: boolean;
   nudgeFiresAt?: string;
+  autoSettleFiresAt?: string;
   state_reason?: string;
   turnOwed?: boolean;
   turnOpenedAt?: string;
@@ -139,6 +141,13 @@ interface SidebarProps {
   // tile-only workspaces.
   queue?: QueueBandsModel<LocalSession> | null;
   onSettleTurn?: (id: string) => void;
+  /**
+   * Sessions whose terminal tile is on screen right now. The auto-settle
+   * countdown lives on the tile, so the sidebar draws it only for the sessions
+   * NOT in here — otherwise the same countdown would run twice, once on the tile
+   * the user is watching and once on its row.
+   */
+  onScreenSessionIds?: ReadonlySet<string>;
   mutedWorkspaces?: SidebarWorkspace[];
   mutedExpanded?: boolean;
   onMutedExpandedChange?: (expanded: boolean) => void;
@@ -336,6 +345,7 @@ export function Sidebar({
   onToggleDockCollapsed,
   queue = null,
   onSettleTurn,
+  onScreenSessionIds,
   mutedWorkspaces = [],
   mutedExpanded: mutedExpandedProp,
   onMutedExpandedChange,
@@ -969,6 +979,7 @@ export function Sidebar({
           selectedId={selectedId}
           onSelectSession={onSelectSession}
           onSettleTurn={(id) => onSettleTurn?.(id)}
+          onScreenSessionIds={onScreenSessionIds}
           onPinWorkspace={onPinWorkspace}
           onOpenActions={openSessionActions}
         />
@@ -1133,6 +1144,9 @@ export function Sidebar({
                         •••
                       </button>
                     </div>
+                    {session.autoSettleFiresAt && !onScreenSessionIds?.has(session.id) ? (
+                      <SidebarSettlingBar firesAt={session.autoSettleFiresAt} />
+                    ) : null}
                     {(() => {
                       const nudgeMode = deriveNudgeMode({
                         ticketUnread: session.ticketUnread,

@@ -77,6 +77,12 @@ export const SHORTCUTS = {
   // and the shortcut editor's chord tests lean on ⌘E being free to record as an
   // exclusive leader.
   'session.settle': { key: 'e', meta: true, shift: true },
+  // Keep the turn auto-settle is counting down to close. ⌘. is the macOS cancel
+  // idiom, carries no Menu::default accelerator, and — being a Cmd chord — never
+  // reaches the PTY, so it is safe to claim globally. Like session.settle it is
+  // only bound while the queue arrangement is on: with no turns there is nothing
+  // to keep.
+  'session.cancelAutoSettle': { key: '.', meta: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.refreshPRs': { key: 'r', meta: true },
 

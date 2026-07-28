@@ -13,6 +13,45 @@ export function isQueueModeEnabled(settings: Record<string, string>): boolean {
   return (settings[QUEUE_MODE_SETTING] || 'false') === 'true';
 }
 
+/**
+ * Auto-settle: attn closes a turn once you have steered the agent and it has
+ * gone back to work. Off by default — it changes state nobody asked it to, so it
+ * ships opt-in like the queue itself.
+ *
+ * The two windows answer different questions. The arm delay is how long the agent
+ * must keep working before anything starts, which is what proves the steering
+ * took; the countdown is the visible part on the terminal tile, and the only
+ * window in which ⌘. can keep the turn. All three are daemon-owned key/value
+ * strings and read through the helpers here, so Settings, the command menu, and
+ * the indicator can never disagree about what is in effect.
+ */
+export const AUTO_SETTLE_ENABLED_SETTING = 'auto_settle_enabled';
+export const AUTO_SETTLE_ARM_SETTING = 'auto_settle_arm_seconds';
+export const AUTO_SETTLE_COUNTDOWN_SETTING = 'auto_settle_countdown_seconds';
+
+export const DEFAULT_AUTO_SETTLE_ARM_SECONDS = 30;
+export const DEFAULT_AUTO_SETTLE_COUNTDOWN_SECONDS = 15;
+
+export function isAutoSettleEnabled(settings: Record<string, string>): boolean {
+  return (settings[AUTO_SETTLE_ENABLED_SETTING] || 'false') === 'true';
+}
+
+/**
+ * The effective seconds for one of the two windows. The daemon normalizes both to
+ * concrete values in the settings payload, so the fallback is only a safety net
+ * for a client that reads settings before the first broadcast lands.
+ */
+export function autoSettleSeconds(
+  settings: Record<string, string>,
+  key: typeof AUTO_SETTLE_ARM_SETTING | typeof AUTO_SETTLE_COUNTDOWN_SETTING,
+): number {
+  const parsed = Number.parseInt(settings[key] ?? '', 10);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return key === AUTO_SETTLE_ARM_SETTING
+    ? DEFAULT_AUTO_SETTLE_ARM_SECONDS
+    : DEFAULT_AUTO_SETTLE_COUNTDOWN_SECONDS;
+}
+
 export interface QueueBandSession extends WorkspaceViewSession {
   chiefOfStaff?: boolean;
   turnOwed?: boolean;

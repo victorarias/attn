@@ -157,6 +157,11 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	if profile.syncNudge {
 		d.syncNudgeForState(change.sessionID, change.state)
 	}
+	// After the turn is opened above, so a state that both opens a turn and is
+	// `working` is impossible to see half-applied. It runs for every cause,
+	// including startup recovery: a session restored into `working` with a turn
+	// still owed is exactly the case auto-settle exists for.
+	d.syncAutoSettle(change.sessionID, change.state)
 	if profile.broadcast {
 		d.broadcastSessionStateChanged(change.sessionID)
 	}

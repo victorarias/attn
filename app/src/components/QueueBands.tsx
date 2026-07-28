@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { StateIndicator } from './StateIndicator';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
+import { SidebarSettlingBar } from './SettlingIndicator';
 import { formatShortcut } from '../shortcuts/formatShortcut';
 import type { UISessionState } from '../types/sessionState';
 import { formatTurnAge, type QueueBands as QueueBandsModel, type QueueRow } from '../utils/queueBands';
@@ -13,6 +14,7 @@ export interface QueueBandSessionView {
   chiefOfStaff?: boolean;
   turnOwed?: boolean;
   turnOpenedAt?: string;
+  autoSettleFiresAt?: string;
 }
 
 interface QueueBandsProps {
@@ -20,6 +22,12 @@ interface QueueBandsProps {
   selectedId: string | null;
   onSelectSession: (id: string) => void;
   onSettleTurn: (id: string) => void;
+  /**
+   * Sessions whose terminal tile is on screen. A band row draws the auto-settle
+   * countdown only for the ones that are NOT, since a visible tile already
+   * carries it and two copies of the same countdown read as two events.
+   */
+  onScreenSessionIds?: ReadonlySet<string>;
   /**
    * Pinning a row's workspace is how an agent leaves the queue for good. The
    * band rows are the only place it can be asked for while queue mode is on:
@@ -60,6 +68,7 @@ function QueueRowView({
   onSettle,
   onPin,
   onOpenActions,
+  showSettling,
   testIdPrefix,
 }: {
   row: QueueRow<QueueBandSessionView>;
@@ -69,6 +78,7 @@ function QueueRowView({
   onSettle?: () => void;
   onPin?: () => void;
   onOpenActions?: (event: ReactMouseEvent) => void;
+  showSettling?: boolean;
   testIdPrefix: string;
 }) {
   const { session } = row;
@@ -145,6 +155,9 @@ function QueueRowView({
           ✓
         </button>
       )}
+      {showSettling && session.autoSettleFiresAt && (
+        <SidebarSettlingBar firesAt={session.autoSettleFiresAt} />
+      )}
     </div>
   );
 }
@@ -161,8 +174,9 @@ function QueueRowView({
  * Only pinned and muted workspaces still render as groups, below; they are
  * places you go and get work rather than a list handed to you.
  */
-export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, onPinWorkspace, onOpenActions }: QueueBandsProps) {
+export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, onScreenSessionIds, onPinWorkspace, onOpenActions }: QueueBandsProps) {
   const now = useNow(AGE_TICK_MS);
+  const offScreen = (id: string) => !onScreenSessionIds?.has(id);
 
   return (
     <div className="queue-bands" data-testid="sidebar-queue">
@@ -192,6 +206,7 @@ export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, o
             onSettle={() => onSettleTurn(row.session.id)}
             onPin={onPinWorkspace && (() => onPinWorkspace(row.workspaceId, true))}
             onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
+            showSettling={offScreen(row.session.id)}
             testIdPrefix="queue-turn"
           />
         ))

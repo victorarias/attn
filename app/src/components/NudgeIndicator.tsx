@@ -1,5 +1,5 @@
 import './NudgeIndicator.css';
-import { useEffect, useRef } from 'react';
+import { CountdownFill } from './CountdownFill';
 import type { UISessionState } from '../types/sessionState';
 
 // The visual mode for a session's incoming-ticket indicator, derived from the two
@@ -41,32 +41,6 @@ export function deriveNudgeMode(args: {
   if (nudgeFiresAt) return 'counting';
   if (ticketUnread) return 'marker';
   return null;
-}
-
-// A one-shot bar that fills 0 -> 100% over the remaining time to firesAt using a CSS
-// transition keyed off the deadline — no per-tick setInterval (which would re-render
-// every row every tick). One render, the browser animates the rest. A mid-countdown
-// remount restarts the fill from 0 but still completes at the right instant, which is
-// fine for a subtle "incoming" bar; we only know the deadline, not the window.
-function CountdownFill({ firesAt, className }: { firesAt: string; className: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const remainingMs = new Date(firesAt).getTime() - Date.now();
-    if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
-      el.style.transition = 'none';
-      el.style.width = '100%';
-      return;
-    }
-    el.style.transition = 'none';
-    el.style.width = '0%';
-    // Force a reflow so the width change below actually animates from 0.
-    void el.offsetWidth;
-    el.style.transition = `width ${remainingMs}ms linear`;
-    el.style.width = '100%';
-  }, [firesAt]);
-  return <div ref={ref} className={className} />;
 }
 
 function triggerHandler(onTrigger?: () => void) {

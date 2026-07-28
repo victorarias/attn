@@ -23,6 +23,9 @@ func (d *Daemon) handleSettleTurn(msg *protocol.SettleTurnMessage) {
 	if !d.store.SettleTurn(sessionID, time.Now()) {
 		return
 	}
+	// A hand settle makes any pending auto-settle moot: there is no turn left to
+	// close, and leaving a countdown on screen would promise a second settle.
+	d.cancelAutoSettle(sessionID, "settled by user")
 	d.traceSettle(sessionID)
 	d.broadcastSessionStateChanged(sessionID)
 }
