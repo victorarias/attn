@@ -17,10 +17,10 @@ describe('workspace selection style preference', () => {
     expect(readWorkspaceSelectionStyle()).toBe('rail');
   });
 
-  it('persists and restores the spotlight style', () => {
-    persistWorkspaceSelectionStyle('spotlight');
+  it.each(['dim', 'spotlight'] as const)('persists and restores the %s style', (style) => {
+    persistWorkspaceSelectionStyle(style);
 
-    expect(localStorage.getItem(WORKSPACE_SELECTION_STYLE_STORAGE_KEY)).toBe('spotlight');
-    expect(readWorkspaceSelectionStyle()).toBe('spotlight');
+    expect(localStorage.getItem(WORKSPACE_SELECTION_STYLE_STORAGE_KEY)).toBe(style);
+    expect(readWorkspaceSelectionStyle()).toBe(style);
   });
 });

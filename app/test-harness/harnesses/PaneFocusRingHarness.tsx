@@ -8,7 +8,8 @@
  * real stylesheet so the actual cascade/stacking is under test, not a
  * re-description of it. GhosttyTerminal (WASM/canvas) plays no role in this
  * stacking question, so it is not mounted. An unselected docked tile witnesses
- * that both focus styles preserve the shared inactive opacity.
+ * that all focus styles preserve the shared inactive opacity; dim additionally
+ * witnesses that no marker is drawn.
  */
 import { useEffect } from 'react';
 import '../../src/components/SessionTerminalWorkspace/SessionTerminalWorkspace.css';
