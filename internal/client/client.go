@@ -383,6 +383,7 @@ type DelegateOptions struct {
 	Worktree           string
 	WorktreePath       string
 	StartingFrom       string
+	NoWorktree         bool
 	AllowWorktreeReuse bool
 }
 
@@ -426,18 +427,26 @@ func (c *Client) StartDelegation(sourceSessionID, brief string, opts DelegateOpt
 	if value := strings.TrimSpace(opts.CWD); value != "" {
 		msg.Cwd = protocol.Ptr(value)
 	}
-	if branch := strings.TrimSpace(opts.Worktree); branch != "" {
+	branch := strings.TrimSpace(opts.Worktree)
+	worktreeRepo := strings.TrimSpace(opts.WorktreeRepo)
+	worktreePath := strings.TrimSpace(opts.WorktreePath)
+	startingFrom := strings.TrimSpace(opts.StartingFrom)
+	worktreeConfigured := branch != "" || worktreeRepo != "" || worktreePath != "" || startingFrom != ""
+	if opts.NoWorktree && worktreeConfigured {
+		return nil, errors.New("no worktree cannot be combined with worktree options")
+	}
+	if !opts.NoWorktree {
 		msg.Worktree = &protocol.DelegateWorktreeRequest{
 			Branch: branch,
 		}
-		if value := strings.TrimSpace(opts.WorktreeRepo); value != "" {
-			msg.Worktree.Repo = protocol.Ptr(value)
+		if worktreeRepo != "" {
+			msg.Worktree.Repo = protocol.Ptr(worktreeRepo)
 		}
-		if value := strings.TrimSpace(opts.WorktreePath); value != "" {
-			msg.Worktree.Path = protocol.Ptr(value)
+		if worktreePath != "" {
+			msg.Worktree.Path = protocol.Ptr(worktreePath)
 		}
-		if value := strings.TrimSpace(opts.StartingFrom); value != "" {
-			msg.Worktree.StartingFrom = protocol.Ptr(value)
+		if startingFrom != "" {
+			msg.Worktree.StartingFrom = protocol.Ptr(startingFrom)
 		}
 	}
 	resp, err := c.send(msg)

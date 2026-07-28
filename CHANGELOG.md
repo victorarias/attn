@@ -9,6 +9,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-07-28]
 
 ### Changed
+- **Delegated Git work starts isolated by default.** `attn delegate` now creates
+  a new worktree automatically when its target is in a Git repository, including
+  for read-only and discussion work. Use `--no-worktree` to deliberately continue
+  in the resolved checkout; explicit branch, base, repository, and path options
+  still customize the new worktree.
 - **Choose how the focused workspace tile is shown.** Sidebar display settings
   now offer dimming alone, an edge rail, or a depth spotlight for the selected
   terminal, markdown file, browser, or other tile, and remember the choice across
