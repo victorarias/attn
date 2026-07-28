@@ -1,21 +1,28 @@
 import { test, expect } from '@playwright/test';
 
-// Regression witness for the SessionTerminalWorkspace focus-ring z-index bug:
-// the active-pane `::after` ring must paint above any pane-local overlay
-// (currently the bound-ticket overlay), on the real stylesheet, in a real
-// browser — a stacking bug jsdom/happy-dom cannot see since neither applies
-// the component's CSS file. See SessionTerminalWorkspace.css.
-test('active-pane focus ring paints above the ticket overlay', async ({ page }) => {
+// Regression witness for the SessionTerminalWorkspace selection-marker z-index:
+// the edge rail and spotlight corner marks must paint above pane-local overlays.
+// This needs a real browser because jsdom/happy-dom do not apply the stylesheet.
+test('active-pane selection markers paint above the ticket overlay', async ({ page }) => {
   await page.goto('/test-harness/?component=PaneFocusRing');
   await page.waitForFunction(() => window.__HARNESS__?.ready === true);
 
+  const workspace = page.locator('[data-testid="workspace"]');
   const pane = page.locator('[data-testid="pane-active"]');
   const overlay = page.locator('[data-testid="ticket-overlay"]');
   await expect(overlay).toBeVisible();
 
-  const [paneZ, overlayZ] = await Promise.all([
-    pane.evaluate((el) => getComputedStyle(el, '::after').zIndex),
-    overlay.evaluate((el) => getComputedStyle(el).zIndex),
-  ]);
-  expect(Number(paneZ)).toBeGreaterThan(Number(overlayZ));
+  const overlayZ = Number(await overlay.evaluate((el) => getComputedStyle(el).zIndex));
+
+  for (const style of ['rail', 'spotlight']) {
+    await workspace.evaluate((el, selectionStyle) => {
+      el.classList.remove('workspace-selection--rail', 'workspace-selection--spotlight');
+      el.classList.add(`workspace-selection--${selectionStyle}`);
+    }, style);
+
+    const markerZ = Number(
+      await pane.evaluate((el) => getComputedStyle(el, '::after').zIndex),
+    );
+    expect(markerZ, `${style} marker z-index`).toBeGreaterThan(overlayZ);
+  }
 });

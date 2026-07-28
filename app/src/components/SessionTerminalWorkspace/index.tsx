@@ -41,6 +41,7 @@ import { WorkspaceLayoutRenderer } from './WorkspaceLayoutRenderer';
 import { WorkspaceDockTile } from './WorkspaceDockTile';
 import { startLeafDrag, type LeafDropSnapshot } from './leafDrag';
 import type { DockTarget } from './dockTarget';
+import type { WorkspaceSelectionStyle } from '../../utils/workspaceSelectionStyle';
 
 const ZOOM_PATH_RATIO = 0.76;
 const RESIZE_MOUSE_SUPPRESSION_MS = 1_500;
@@ -137,6 +138,7 @@ interface SessionTerminalWorkspaceProps {
     onResume: (ticketId: string) => void;
   };
   workspace: TerminalWorkspaceState;
+  workspaceSelectionStyle?: WorkspaceSelectionStyle;
   activePaneId: string;
   fontSize: number;
   resolvedTheme?: ResolvedTheme;
@@ -193,6 +195,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     workspaceSessions = [],
     ticketActions,
     workspace,
+    workspaceSelectionStyle = 'rail',
     activePaneId,
     fontSize,
     resolvedTheme,
@@ -1316,7 +1319,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
 
     return (
       <div
-        className={`session-terminal-workspace ${effectivePaneId ? 'focus-mode' : ''} ${effectiveZoomedPaneId && !effectivePaneId ? 'zoom-mode' : ''} ${renderedPaneIds.length > 1 ? 'multi-leaf' : ''}`.trim().replace(/\s+/g, ' ')}
+        className={`session-terminal-workspace workspace-selection--${workspaceSelectionStyle} ${effectivePaneId ? 'focus-mode' : ''} ${effectiveZoomedPaneId && !effectivePaneId ? 'zoom-mode' : ''} ${renderedPaneIds.length > 1 ? 'multi-leaf' : ''}`.trim().replace(/\s+/g, ' ')}
         data-session-terminal-workspace={workspaceId}
         data-workspace-id={workspaceId}
         data-active-pane-id={activePaneId}

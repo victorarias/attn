@@ -51,6 +51,11 @@ import {
   readWarmWorkspaceLimit,
   writeWarmWorkspaceLimit,
 } from './utils/terminalVirtualization';
+import {
+  persistWorkspaceSelectionStyle,
+  readWorkspaceSelectionStyle,
+  type WorkspaceSelectionStyle,
+} from './utils/workspaceSelectionStyle';
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo, type FsIndexResult, type NotebookEntry } from './hooks/useDaemonSocket';
 import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
@@ -2902,6 +2907,11 @@ sendFetchPRDetails,
   // consistent. They never contribute to unmutedWorkspaceViews, which feeds
   // session/attention counts.
   const [showSessionlessWorkspaces, setShowSessionlessWorkspaces] = useState<boolean>(readShowSessionlessWorkspaces);
+  const [workspaceSelectionStyle, setWorkspaceSelectionStyle] = useState<WorkspaceSelectionStyle>(readWorkspaceSelectionStyle);
+  const handleWorkspaceSelectionStyleChange = useCallback((style: WorkspaceSelectionStyle) => {
+    persistWorkspaceSelectionStyle(style);
+    setWorkspaceSelectionStyle(style);
+  }, []);
   const handleToggleShowSessionlessWorkspaces = useCallback(() => {
     setShowSessionlessWorkspaces((prev) => {
       const next = !prev;
@@ -3707,6 +3717,8 @@ sendFetchPRDetails,
           onChangeChiefOfStaff={handleChangeChiefOfStaff}
           showSessionless={showSessionlessWorkspaces}
           onToggleShowSessionless={handleToggleShowSessionlessWorkspaces}
+          workspaceSelectionStyle={workspaceSelectionStyle}
+          onWorkspaceSelectionStyleChange={handleWorkspaceSelectionStyleChange}
           leafDrag={leafWorkspaceDrag ? {
             sourceWorkspaceId: leafWorkspaceDrag.sourceWorkspaceId,
             endpointId: leafWorkspaceDrag.sourceEndpointId,
@@ -3794,6 +3806,7 @@ sendFetchPRDetails,
                     }}
                     onTerminalModelRecovered={handleTerminalModelRecovered}
                     workspace={workspaceState}
+                    workspaceSelectionStyle={workspaceSelectionStyle}
                     activePaneId={activePaneId}
                     fontSize={terminalFontSize}
                     resolvedTheme={resolvedTheme}

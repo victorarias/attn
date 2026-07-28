@@ -779,6 +779,18 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+.sidebar-settings-sub-label {
+  display: block;
+  margin: 11px 2px 6px;
+  color: var(--color-text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+}
+
+.sidebar-display-toggle--selection {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .sidebar-display-toggle button {
   border: 0;
   border-radius: 5px;
