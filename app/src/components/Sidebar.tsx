@@ -149,6 +149,11 @@ interface SidebarProps {
   onChangeChiefOfStaff?: (sessionId: string, enabled: boolean) => void;
   showSessionless?: boolean;
   onToggleShowSessionless?: () => void;
+  // The queue is the one arrangement in this popover the daemon owns: App reads
+  // it out of the settings map and writes it back through sendSetSetting, so the
+  // sidebar takes the resolved value and the writer rather than the key.
+  queueModeEnabled?: boolean;
+  onToggleQueueMode?: () => void;
   workspaceSelectionStyle?: WorkspaceSelectionStyle;
   onWorkspaceSelectionStyleChange?: (style: WorkspaceSelectionStyle) => void;
   leafDrag?: { sourceWorkspaceId: string; endpointId?: string } | null;
@@ -341,6 +346,8 @@ export function Sidebar({
   onChangeChiefOfStaff,
   showSessionless = false,
   onToggleShowSessionless,
+  queueModeEnabled = false,
+  onToggleQueueMode,
   workspaceSelectionStyle = 'rail',
   onWorkspaceSelectionStyleChange,
   leafDrag = null,
@@ -898,6 +905,19 @@ export function Sidebar({
             </button>
             {settingsOpen && (
               <div className="sidebar-settings-popover" role="dialog" aria-label="Sidebar settings">
+                {/* First, because it is the only choice here that changes what the
+                    sidebar contains rather than how the tree below is drawn. */}
+                <button
+                  type="button"
+                  className="sidebar-settings-switch-row sidebar-settings-switch-row--lead"
+                  role="switch"
+                  aria-checked={queueModeEnabled}
+                  data-testid="toggle-queue-mode"
+                  onClick={() => onToggleQueueMode?.()}
+                >
+                  <span className="sidebar-settings-switch-label">Agent queue</span>
+                  <span className={`sidebar-settings-switch ${queueModeEnabled ? 'on' : ''}`} aria-hidden="true" />
+                </button>
                 <span className="sidebar-settings-label">Display</span>
                 <div className="sidebar-display-toggle" role="group" aria-label="Sidebar display">
                   {(['open', 'tight', 'boxed'] as const).map((mode) => (

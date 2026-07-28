@@ -1937,6 +1937,13 @@ sendFetchPRDetails,
     if (claimPaletteFocus()) return;
     setMarkdownOpenerOpen(true);
   }, []);
+
+  // The single writer for the queue setting. The sidebar's display popover and
+  // the command menu both call it, so the two entry points can never disagree
+  // about what is in effect — and neither one has to know the setting's key.
+  const handleToggleQueueMode = useCallback(() => {
+    sendSetSetting(QUEUE_MODE_SETTING, isQueueModeEnabled(settings) ? 'false' : 'true');
+  }, [sendSetSetting, settings]);
   // Fuzzy mode searches the selected session's working directory; with no
   // session selected there is no project context, so it falls back to the
   // notebook root. Neither known = recents only. A remote session's cwd names a
@@ -2031,16 +2038,15 @@ sendFetchPRDetails,
       run: () => openBoardSurface(),
     },
     {
-      // Settings is the right home for a setting and the wrong home for something
-      // flipped ten times a day — and while the arrangement is being evaluated,
-      // flipping it back and forth is the evaluation. Both entries write the same
-      // setting, so they can never disagree.
+      // The switch itself lives in the sidebar's display popover, next to the
+      // other arrangement choices. This entry is the keyboard route to the same
+      // toggle, through the same writer, so the two can never disagree.
       id: 'toggle-queue-mode',
       title: isQueueModeEnabled(settings) ? 'Turn off the agent queue' : 'Turn on the agent queue',
       description: 'Show the turns you owe above the workspace tree',
       keywords: ['queue', 'turn', 'settle', 'attention', 'sidebar'],
       icon: <AttentionActionIcon />,
-      run: () => sendSetSetting(QUEUE_MODE_SETTING, isQueueModeEnabled(settings) ? 'false' : 'true'),
+      run: handleToggleQueueMode,
     },
     {
       id: 'customize-shortcuts',
@@ -2050,7 +2056,7 @@ sendFetchPRDetails,
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openBoardSurface, settings, sendSetSetting]);
+  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openBoardSurface, settings, handleToggleQueueMode]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
@@ -3697,6 +3703,8 @@ sendFetchPRDetails,
           onChangeChiefOfStaff={handleChangeChiefOfStaff}
           showSessionless={showSessionlessWorkspaces}
           onToggleShowSessionless={handleToggleShowSessionlessWorkspaces}
+          queueModeEnabled={queueModeEnabled}
+          onToggleQueueMode={handleToggleQueueMode}
           workspaceSelectionStyle={workspaceSelectionStyle}
           onWorkspaceSelectionStyleChange={handleWorkspaceSelectionStyleChange}
           leafDrag={leafWorkspaceDrag ? {

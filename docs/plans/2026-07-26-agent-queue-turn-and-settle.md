@@ -192,18 +192,21 @@ regardless of what the remote daemon's own setting says.
 
 ### The UI
 
-A `settings-block` in **General**, following the `workflows_enabled` block
-(`SettingsModal.tsx:1954-1982`) exactly: intro copy, a `settings-row-card`, and
-an Enable/Disable `settings-action` button, `data-testid="settings-queue-toggle"`.
-Heading: **Agent queue**. The copy has to say the one thing a user cannot infer —
-that an agent stays on the list until you settle it, running or not, and that
-everything stays exactly where it is in the sidebar below.
+A switch in the sidebar's display popover (`Sidebar.tsx`,
+`.sidebar-settings-popover`, `data-testid="toggle-queue-mode"`), labelled **Agent
+queue** and first in the popover — it is the only choice there that changes what
+the sidebar contains rather than how the tree below is drawn. It shipped as a
+`settings-block` in Settings → General and moved here afterwards: the queue is a
+sidebar arrangement, and every other control that changes how the sidebar looks
+was already one click away in that popover.
 
-The toggle is also a ⌘K action (`actionMenuItems` in `App.tsx:2103`), titled by
-the state it moves to and carrying the same `set_setting` call. Settings is the
-right home for a setting and the wrong home for something flipped ten times a day
-— and while the mode is being evaluated, flipping it back and forth *is* the
-evaluation. Both entries read the same setting, so they can never disagree.
+Unlike its neighbours the setting is daemon-owned, so `App.tsx` reads it with
+`isQueueModeEnabled` and hands `Sidebar` the resolved boolean plus the writer;
+the sidebar never sees the key.
+
+The toggle is also a ⌘K action (`actionMenuItems` in `App.tsx`), titled by the
+state it moves to and calling the same writer, so the two entries can never
+disagree.
 
 The settle shortcut is registered only while the mode is on: with the band gone
 the keystroke has nothing visible to do, and an invisible verb that silently

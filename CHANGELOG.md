@@ -22,6 +22,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   keystrokes per agent. With nothing left to go to, the selection stays where it
   is. The shortcut is still bound only while the queue arrangement is on, and a
   row's own settle button still settles just that row without moving you.
+- **The agent queue is switched on from the sidebar itself.** The toggle moved
+  out of Settings into the sidebar's display popover — the slider icon beside the
+  "+" in the Workspaces header — where it sits above Display, Tile focus, and
+  Tile-only workspaces. ⌘K still turns it on and off and always agrees with the
+  switch.
 - **Delegated Git work starts isolated by default.** `attn delegate` now creates
   a new worktree automatically when its target is in a Git repository, including
   for read-only and discussion work. Use `--no-worktree` to deliberately continue

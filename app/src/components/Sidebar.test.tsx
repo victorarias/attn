@@ -532,6 +532,37 @@ describe('Sidebar', () => {
     expect(onToggleShowSessionless).toHaveBeenCalledTimes(1);
   });
 
+  it('reflects and toggles queue mode from the display popover', () => {
+    const onToggleQueueMode = vi.fn();
+    const { rerender } = render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData([])}
+        queueModeEnabled={false}
+        onToggleQueueMode={onToggleQueueMode}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sidebar settings' }));
+    const toggle = screen.getByTestId('toggle-queue-mode');
+    expect(toggle).toHaveAttribute('role', 'switch');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(toggle);
+    expect(onToggleQueueMode).toHaveBeenCalledTimes(1);
+
+    // The switch tracks the value App hands back, not a local guess about it.
+    rerender(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData([])}
+        queueModeEnabled
+        onToggleQueueMode={onToggleQueueMode}
+      />
+    );
+    expect(screen.getByTestId('toggle-queue-mode')).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('keeps display options visible after selecting a mode', () => {
     render(
       <Sidebar
