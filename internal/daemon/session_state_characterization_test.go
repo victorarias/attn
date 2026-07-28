@@ -68,13 +68,6 @@ func assertCharacterizationLiveEffects(t *testing.T, d *Daemon, capture *broadca
 		t.Fatal("live state signal did not Touch the session")
 	}
 
-	d.longRunMu.Lock()
-	tracked := !d.longRun[sessionID].workingSince.IsZero()
-	d.longRunMu.Unlock()
-	if !tracked {
-		t.Fatal("working state did not start long-run tracking")
-	}
-
 	events := capture.snapshot()
 	if got := characterizationEventCount(events, protocol.EventSessionStateChanged, sessionID); got != 1 {
 		t.Fatalf("session_state_changed events=%d, want 1; events=%+v", got, events)
@@ -134,55 +127,10 @@ func TestSessionStateCharacterization_AHookOnlyFilesEvidence(t *testing.T) {
 	}
 }
 
-func TestSessionStateCharacterization_LongRunReviewDoesNotTouch(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "state.sock"))
-	sessionID := "long-run-handoff"
-	addCharacterizationSession(t, d, sessionID, protocol.SessionAgentCodex, protocol.SessionStateWorking)
-	d.longRun[sessionID] = longRunSession{workingSince: time.Now().Add(-longRunReviewThreshold - time.Minute)}
-	// The turn that ran long, and ended.
-	d.recordBracketEvidence(sessionID, protocol.StateWorking)
-	d.recordPTYEvidence(sessionID, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: time.Now()})
-	d.recordBracketEvidence(sessionID, protocol.StateIdle)
-	d.recordPTYEvidence(sessionID, pty.Observation{Source: pty.SourceHeartbeat, Claim: "not_busy", At: time.Now()})
-	capture := captureBroadcasts(d)
-
-	d.classifyOrDeferAfterStop(sessionID, "/tmp/characterization-transcript.jsonl")
-	d.resolveAllSessions(time.Now())
-
-	session := d.store.Get(sessionID)
-	if session == nil || session.State != protocol.SessionStateWaitingInput {
-		t.Fatalf("session=%+v, want waiting_input", session)
-	}
-	if session.LastSeen != characterizationOldTimestamp {
-		t.Fatalf("the resolver touched LastSeen=%q, want %q", session.LastSeen, characterizationOldTimestamp)
-	}
-	if !d.sessionNeedsReviewAfterLongRun(sessionID) {
-		t.Fatal("long-run handoff did not preserve needs-review tracking")
-	}
-	// At least one: the deferral broadcasts so the review flag reaches clients even
-	// when the state does not move, and the resolver broadcasts the state that does.
-	events := capture.snapshot()
-	if got := characterizationEventCount(events, protocol.EventSessionStateChanged, sessionID); got < 1 {
-		t.Fatalf("session_state_changed events=%d, want at least 1; events=%+v", got, events)
-	}
-	if got := characterizationEventCount(events, protocol.EventWorkspaceStateChanged, ""); got < 1 {
-		t.Fatalf("workspace_state_changed events=%d, want at least 1; events=%+v", got, events)
-	}
-}
-
-// The user-visible property the classifier's timestamp guard used to buy: a late
-// verdict must not overwrite an approval that arrived while it was running. The
-// guard is gone with the write — it is clause order now. An open approval outranks
-// a verdict, so the verdict landing changes nothing.
 func TestSessionStateCharacterization_ALateVerdictDoesNotOverwriteAnApproval(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "state.sock"))
 	sessionID := "stale-classifier"
 	addCharacterizationSession(t, d, sessionID, protocol.SessionAgentCodex, protocol.SessionStateWorking)
-	d.longRun[sessionID] = longRunSession{
-		workingSince:       time.Now().Add(-longRunReviewThreshold - time.Minute),
-		deferredTranscript: "/tmp/deferred.jsonl",
-		needsReview:        true,
-	}
 	classifier := newBlockingClassifier(protocol.StateIdle)
 	d.classifier = classifier
 
@@ -229,9 +177,6 @@ func TestSessionStateCharacterization_ALateVerdictDoesNotOverwriteAnApproval(t *
 	if after.StateUpdatedAt != fresh.StateUpdatedAt || after.LastSeen != fresh.LastSeen {
 		t.Fatalf("stale classifier changed timestamps: fresh=%+v after=%+v", fresh, after)
 	}
-	if !d.sessionNeedsReviewAfterLongRun(sessionID) {
-		t.Fatal("stale classifier cleared long-run review tracking")
-	}
 	if got := characterizationEventCount(capture.snapshot(), protocol.EventSessionStateChanged, sessionID); got != stateEventsBeforeRelease {
 		t.Fatalf("stale classifier emitted state event: before=%d after=%d", stateEventsBeforeRelease, got)
 	}
@@ -261,12 +206,6 @@ func TestSessionStateCharacterization_PluginCASGatesEffects(t *testing.T) {
 	if accepted.LastSeen == characterizationOldTimestamp {
 		t.Fatal("accepted plugin report did not Touch the session")
 	}
-	d.longRunMu.Lock()
-	tracked := !d.longRun[sessionID].workingSince.IsZero()
-	d.longRunMu.Unlock()
-	if !tracked {
-		t.Fatal("accepted plugin working report did not start long-run tracking")
-	}
 	stateEventsAfterAccepted := characterizationEventCount(capture.snapshot(), protocol.EventSessionStateChanged, sessionID)
 
 	if d.applyPluginReportedState(pluginReportStateParams{
@@ -291,7 +230,6 @@ func TestSessionStateCharacterization_ProcessExitEffects(t *testing.T) {
 	d.ptyBackend = &fakeSpawnBackend{}
 	sessionID := "process-exit"
 	addCharacterizationSession(t, d, sessionID, protocol.SessionAgentClaude, protocol.SessionStateWorking)
-	d.longRun[sessionID] = longRunSession{workingSince: time.Now().Add(-time.Minute)}
 	capture := captureBroadcasts(d)
 
 	d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 0})
@@ -300,12 +238,6 @@ func TestSessionStateCharacterization_ProcessExitEffects(t *testing.T) {
 	session := d.store.Get(sessionID)
 	if session == nil || session.State != protocol.SessionStateIdle {
 		t.Fatalf("session=%+v, want idle after exit", session)
-	}
-	d.longRunMu.Lock()
-	_, tracked := d.longRun[sessionID]
-	d.longRunMu.Unlock()
-	if tracked {
-		t.Fatal("process exit did not clear long-run tracking")
 	}
 	events := capture.snapshot()
 	if got := characterizationEventCount(events, protocol.EventSessionStateChanged, sessionID); got != 1 {

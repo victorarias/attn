@@ -35,11 +35,17 @@ func TestStopIsNonTerminal(t *testing.T) {
 			want:     true,
 		},
 		{
-			name:  "parked on a scheduled wakeup",
+			// A wakeup hours away does not make this turn unfinished. The
+			// transcript is flushed and the turn is over, so the end-of-turn work
+			// applies — including asking the classifier how it ended, which a
+			// cron-parked session was previously never asked.
+			name:  "parked on a scheduled wakeup: the turn still ended",
 			crons: 1,
-			want:  true,
+			want:  false,
 		},
 		{
+			// The background task is what defers the end of the turn. The cron
+			// alongside it changes nothing.
 			name:     "both outstanding",
 			statuses: []string{"running"},
 			crons:    1,
@@ -71,17 +77,17 @@ func TestStopIsNonTerminal(t *testing.T) {
 			want:     false,
 		},
 		{
-			name:     "chief relax: a parked schedule still does",
+			name:     "chief relax: a parked schedule does not defer it either",
 			statuses: []string{"running"},
 			crons:    1,
 			relax:    true,
-			want:     true,
+			want:     false,
 		},
 		{
-			name:  "chief relax: cron only, unchanged by relax",
+			name:  "chief relax: cron only, still a real end of turn",
 			crons: 1,
 			relax: true,
-			want:  true,
+			want:  false,
 		},
 	}
 	for _, tc := range cases {
@@ -149,9 +155,10 @@ func TestDaemon_StopCommand_BackgroundWork_StaysWorking(t *testing.T) {
 	waitForResolvedState(t, d, "bg-session", protocol.SessionStateWorking)
 }
 
-// TestDaemon_StopCommand_PendingCron_Parks covers the other non-terminal branch:
-// a stop parked on a scheduled wakeup reads as scheduled, not classified.
-func TestDaemon_StopCommand_PendingCron_Parks(t *testing.T) {
+// TestDaemon_StopCommand_PendingCron_Settles pins that a cron-parked stop runs
+// the end-of-turn path like any other: the classifier gets its say, and the
+// session settles into the user's queue instead of being excused from it.
+func TestDaemon_StopCommand_PendingCron_Settles(t *testing.T) {
 	useFreeWSPort(t)
 
 	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
@@ -175,7 +182,7 @@ func TestDaemon_StopCommand_PendingCron_Parks(t *testing.T) {
 		t.Fatalf("SendStop error: %v", err)
 	}
 
-	waitForResolvedState(t, d, "cron-session", protocol.SessionStateScheduled)
+	waitForResolvedState(t, d, "cron-session", protocol.SessionStateIdle)
 }
 
 // waitForResolvedState waits out the resolve tick. Nothing applies a state at the

@@ -1999,6 +1999,20 @@ const HeatStateCold HeatState = "cold"
 const HeatStateHot HeatState = "hot"
 const HeatStateWarm HeatState = "warm"
 
+type HookCompactionMessage struct {
+	// Active corresponds to the JSON schema field "active".
+	Active bool `json:"active"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Trigger corresponds to the JSON schema field "trigger".
+	Trigger *string `json:"trigger,omitempty,omitzero"`
+}
+
 type HookNotificationMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2011,6 +2025,20 @@ type HookNotificationMessage struct {
 
 	// NotificationType corresponds to the JSON schema field "notification_type".
 	NotificationType string `json:"notification_type"`
+}
+
+type HookStopFailureMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ErrorMessage corresponds to the JSON schema field "error_message".
+	ErrorMessage *string `json:"error_message,omitempty,omitzero"`
+
+	// ErrorType corresponds to the JSON schema field "error_type".
+	ErrorType string `json:"error_type"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 }
 
 type InitialStateMessage struct {
@@ -3925,10 +3953,6 @@ type Session struct {
 	// MainRepo corresponds to the JSON schema field "main_repo".
 	MainRepo *string `json:"main_repo,omitempty,omitzero"`
 
-	// NeedsReviewAfterLongRun corresponds to the JSON schema field
-	// "needs_review_after_long_run".
-	NeedsReviewAfterLongRun *bool `json:"needs_review_after_long_run,omitempty,omitzero"`
-
 	// NudgeFiresAt corresponds to the JSON schema field "nudge_fires_at".
 	NudgeFiresAt *string `json:"nudge_fires_at,omitempty,omitzero"`
 
@@ -3949,6 +3973,12 @@ type Session struct {
 
 	// Todos corresponds to the JSON schema field "todos".
 	Todos []string `json:"todos,omitempty,omitzero"`
+
+	// TurnOpenedAt corresponds to the JSON schema field "turn_opened_at".
+	TurnOpenedAt *string `json:"turn_opened_at,omitempty,omitzero"`
+
+	// TurnOwed corresponds to the JSON schema field "turn_owed".
+	TurnOwed *bool `json:"turn_owed,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
@@ -4108,14 +4138,6 @@ type SessionUnregisteredMessage struct {
 	Session Session `json:"session"`
 }
 
-type SessionVisualizedMessage struct {
-	// Cmd corresponds to the JSON schema field "cmd".
-	Cmd string `json:"cmd"`
-
-	// ID corresponds to the JSON schema field "id".
-	ID string `json:"id"`
-}
-
 type SessionsUpdatedMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -4239,6 +4261,14 @@ type SettingsUpdatedMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success *bool `json:"success,omitempty,omitzero"`
+}
+
+type SettleTurnMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
 }
 
 type SpawnResultMessage struct {

@@ -384,6 +384,48 @@ describe('SettingsModal', () => {
     expect(screen.getByText(/does not register a second tailnet device/i)).toBeInTheDocument();
   });
 
+  it('toggles the agent queue from General', async () => {
+    const onSetSetting = vi.fn();
+    const props = (queueMode: string) => ({
+      isOpen: true as const,
+      onClose: vi.fn(),
+      mutedRepos: [],
+      githubHosts: [],
+      onUnmuteRepo: vi.fn(),
+      mutedAuthors: [],
+      onUnmuteAuthor: vi.fn(),
+      settings: { queue_mode_enabled: queueMode },
+      endpoints: [],
+      plugins: [],
+      pluginIssues: [],
+      onAddEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onUpdateEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onRemoveEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onSetEndpointRemoteWeb: vi.fn().mockResolvedValue({ success: true }),
+      onListPlugins: vi.fn().mockResolvedValue({ plugins: [], issues: [] }),
+      onInstallPlugin: vi.fn().mockResolvedValue({ success: true }),
+      onRemovePlugin: vi.fn().mockResolvedValue({ success: true }),
+      onSetPluginPriority: vi.fn().mockResolvedValue({ success: true }),
+      onSetSetting,
+      themePreference: 'system' as const,
+      onSetTheme: vi.fn(),
+    });
+
+    const { rerender } = render(<SettingsModal {...props('false')} />);
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    const toggle = await screen.findByTestId('settings-queue-toggle');
+    expect(toggle).toHaveTextContent('Enable');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith('queue_mode_enabled', 'true');
+
+    rerender(<SettingsModal {...props('true')} />);
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    const toggleOn = await screen.findByTestId('settings-queue-toggle');
+    expect(toggleOn).toHaveTextContent('Disable');
+    fireEvent.click(toggleOn);
+    expect(onSetSetting).toHaveBeenCalledWith('queue_mode_enabled', 'false');
+  });
+
   it('enables workflows when off and disables them when on', async () => {
     const onSetSetting = vi.fn();
 

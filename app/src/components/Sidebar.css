@@ -1151,3 +1151,81 @@
 .muted-session[data-state="waiting_input"]::before {
   display: none;
 }
+
+/* Queue arrangement: the chief's anchored slot and the "Your turn" band, both
+   above the workspace tree. The tree below is unchanged, so these rows are
+   additions to the sidebar, never a filter over it. */
+.queue-bands {
+  border-bottom: 1px solid var(--color-border);
+  padding: 4px 0 6px;
+}
+
+.queue-band-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 12px 4px;
+}
+
+.queue-band-count {
+  color: var(--color-text-dimmed);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.queue-band-empty {
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-sm);
+  padding: 2px 12px 4px;
+}
+
+.queue-row {
+  margin: 0 6px;
+}
+
+.queue-row-workspace {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-xs);
+}
+
+.queue-row-age {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-row-settle,
+.queue-row-pin {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--color-text-dimmed);
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+
+.queue-row:hover .queue-row-settle,
+.queue-row:hover .queue-row-pin,
+.queue-row-settle:focus-visible,
+.queue-row-pin:focus-visible {
+  opacity: 1;
+}
+
+.queue-row-settle:hover,
+.queue-row-pin:hover {
+  color: var(--color-text-primary);
+}

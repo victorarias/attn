@@ -1329,7 +1329,8 @@ func sessionsMatch(left, right protocol.Session) bool {
 		left.StateSince == right.StateSince &&
 		left.StateUpdatedAt == right.StateUpdatedAt &&
 		protocol.Deref(left.StateReason) == protocol.Deref(right.StateReason) &&
-		protocol.Deref(left.NeedsReviewAfterLongRun) == protocol.Deref(right.NeedsReviewAfterLongRun) &&
+		protocol.Deref(left.TurnOwed) == protocol.Deref(right.TurnOwed) &&
+		protocol.Deref(left.TurnOpenedAt) == protocol.Deref(right.TurnOpenedAt) &&
 		protocol.Deref(left.TicketUnread) == protocol.Deref(right.TicketUnread) &&
 		protocol.Deref(left.NudgeFiresAt) == protocol.Deref(right.NudgeFiresAt) &&
 		strings.Join(left.Todos, "\x00") == strings.Join(right.Todos, "\x00") &&

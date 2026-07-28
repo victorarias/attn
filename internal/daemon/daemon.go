@@ -20,7 +20,6 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
-	"github.com/victorarias/attn/internal/attention"
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
@@ -62,16 +61,9 @@ type workerReconcileReport struct {
 	Changed           bool
 }
 
-type longRunSession struct {
-	workingSince       time.Time
-	deferredTranscript string
-	needsReview        bool
-}
-
 const (
-	longRunReviewThreshold = 5 * time.Minute
-	forcedStopSuppressTTL  = 30 * time.Second
-	branchMonitorInterval  = 15 * time.Second
+	forcedStopSuppressTTL = 30 * time.Second
+	branchMonitorInterval = 15 * time.Second
 
 	// backupInterval is how often the daemon takes a rotating snapshot of the
 	// SQLite store in the background. backupKeep is how many rotating
@@ -145,8 +137,6 @@ type Daemon struct {
 	// classification outcomes without waiting on an agent driver's retry policy.
 	// Production leaves it nil and uses extractLastAssistantMessage below.
 	classificationTranscriptExtractor func(*protocol.Session, string, int, time.Time) (string, string, error)
-	longRunMu                         sync.Mutex
-	longRun                           map[string]longRunSession
 	forcedStopMu                      sync.Mutex
 	forcedStop                        map[string]time.Time
 	pendingResumeMu                   sync.Mutex
@@ -336,7 +326,6 @@ type Daemon struct {
 	workflowEngineMu      sync.Mutex
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
-	workflowAttentionHook func(attention.Result)                    // optional, tests only
 	ticketsBroadcastHook  func([]protocol.Ticket)                   // optional, tests only
 
 	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
@@ -631,7 +620,6 @@ func New(socketPath string) *Daemon {
 		startedCh:           make(chan struct{}),
 		classifiedTurn:      make(map[string]string),
 		classifyingTurn:     make(map[string]string),
-		longRun:             make(map[string]longRunSession),
 		forcedStop:          make(map[string]time.Time),
 		pendingResumeID:     make(map[string]string),
 		tailscale:           newTailscaleRuntime(),
@@ -671,7 +659,6 @@ func NewForTesting(socketPath string) *Daemon {
 		startedCh:          make(chan struct{}),
 		classifiedTurn:     make(map[string]string),
 		classifyingTurn:    make(map[string]string),
-		longRun:            make(map[string]longRunSession),
 		forcedStop:         make(map[string]time.Time),
 		pendingResumeID:    make(map[string]string),
 		tailscale:          newTailscaleRuntime(),
@@ -716,7 +703,6 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		startedCh:          make(chan struct{}),
 		classifiedTurn:     make(map[string]string),
 		classifyingTurn:    make(map[string]string),
-		longRun:            make(map[string]longRunSession),
 		forcedStop:         make(map[string]time.Time),
 		pendingResumeID:    make(map[string]string),
 		tailscale:          newTailscaleRuntime(),
@@ -750,9 +736,6 @@ func (d *Daemon) Start() error {
 	}
 	if d.classifyingTurn == nil {
 		d.classifyingTurn = make(map[string]string)
-	}
-	if d.longRun == nil {
-		d.longRun = make(map[string]longRunSession)
 	}
 	if d.forcedStop == nil {
 		d.forcedStop = make(map[string]time.Time)
@@ -1609,7 +1592,6 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		}
 	}
 	d.stopTranscriptWatcher(info.ID)
-	d.clearLongRunTracking(info.ID)
 	d.closePluginDriverSession(info.ID, "exited", &info.ExitCode, info.Signal)
 
 	if d.ptyBackend != nil {
@@ -1748,7 +1730,6 @@ func (d *Daemon) forgetSession(sessionID string) {
 	if d.hubManager != nil {
 		d.hubManager.ForgetSession(sessionID)
 	}
-	d.clearLongRunTracking(sessionID)
 	d.clearClassifiedTurn(sessionID)
 	d.clearClassifyingTurn(sessionID)
 }
@@ -2223,6 +2204,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleState(conn, msg.(*protocol.StateMessage))
 	case protocol.CmdHookNotification:
 		d.handleHookNotification(conn, msg.(*protocol.HookNotificationMessage))
+	case protocol.CmdHookStopFailure:
+		d.handleHookStopFailure(conn, msg.(*protocol.HookStopFailureMessage))
+	case protocol.CmdHookCompaction:
+		d.handleHookCompaction(conn, msg.(*protocol.HookCompactionMessage))
 	case protocol.CmdSetSessionResumeID:
 		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
 	case protocol.CmdSessionInstructions:
@@ -2251,10 +2236,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleQuery(conn, msg.(*protocol.QueryMessage))
 	case protocol.CmdHeartbeat:
 		d.handleHeartbeat(conn, msg.(*protocol.HeartbeatMessage))
-	case protocol.CmdSessionVisualized:
-		visualizedMsg := msg.(*protocol.SessionVisualizedMessage)
-		d.handleSessionVisualized(visualizedMsg.ID)
-		d.sendOK(conn)
 	case protocol.CmdQueryPRs:
 		d.handleQueryPRs(conn, msg.(*protocol.QueryPRsMessage))
 	case protocol.CmdMutePR:
@@ -2305,7 +2286,6 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	d.logf("session registered: id=%s label=%s dir=%s", msg.ID, protocol.Deref(msg.Label), msg.Dir)
-	d.clearLongRunTracking(msg.ID)
 	existing := d.store.Get(msg.ID)
 
 	// Get branch info
@@ -2566,216 +2546,8 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 		return
 	}
 
-	// Async classification/deferred-review handling
-	go d.classifyOrDeferAfterStop(msg.ID, msg.TranscriptPath)
-}
-
-func (d *Daemon) classifyOrDeferAfterStop(sessionID, transcriptPath string) {
-	if d.sessionNeedsReviewAfterLongRun(sessionID) {
-		d.logf("classifySessionState: long-run review already pending for session=%s", sessionID)
-		return
-	}
-
-	session := d.store.Get(sessionID)
-	if session == nil {
-		d.clearLongRunTracking(sessionID)
-		return
-	}
-
-	runDuration := d.consumeRunDuration(sessionID, session.StateSince)
-	if runDuration >= longRunReviewThreshold {
-		d.setNeedsReviewAfterLongRun(sessionID, transcriptPath)
-		d.logf(
-			"classifySessionState: deferring long-run classification session=%s duration=%s",
-			sessionID,
-			runDuration.Round(time.Second),
-		)
-		// The deferral itself is the evidence: a turn worth minutes of work ended
-		// and attn is holding the verdict until someone reads it, which the resolver
-		// reports as waiting on the user rather than settling the result away as
-		// seen. Applying that state here is what this used to do, in a write the
-		// resolver's next tick undid — the review flag was invisible to it, so the
-		// same settled evidence resolved to idle a second later.
-		//
-		// The broadcast stays for the case where the state does not move: the flag
-		// rides on session broadcasts, and a long run that ended on an approval or a
-		// question is already the state the deferral would ask for.
-		d.broadcastSessionStateChanged(sessionID)
-		return
-	}
-
-	d.clearNeedsReviewAfterLongRun(sessionID)
-	d.classifySessionState(sessionID, transcriptPath)
-}
-
-func (d *Daemon) handleSessionVisualized(sessionID string) {
-	// The frontend reports the focused session here, so this doubles as our
-	// signal for "currently selected session" (used by `attn open`).
-	d.setSelectedSession(sessionID)
-
-	transcriptPath, shouldClassify := d.consumeNeedsReviewAfterLongRun(sessionID)
-	if !shouldClassify {
-		return
-	}
-	d.logf("classifySessionState: resuming deferred long-run classification session=%s", sessionID)
-	go d.classifySessionState(sessionID, transcriptPath)
-}
-
-// classifySessionState decides what a settled turn means and applies the result.
-// It is the IO shell around the rules in classify_decision.go: it gathers inputs,
-// performs the transcript read and the classifier call between rules, and owns the
-// single store write. The rules themselves make no decision about when to pay for
-// IO — they say what is still needed.
-func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
-	// Capture the timestamp BEFORE any classification work: applyState rejects a
-	// classifierObservation older than the state it would overwrite, so a slow
-	// classifier cannot clobber a newer live signal.
-	classificationStartTime := time.Now()
-	d.logf("classifySessionState: starting for session=%s, transcript=%s", sessionID, transcriptPath)
-
-	session := d.store.Get(sessionID)
-	if session == nil {
-		d.logf("classifySessionState: session %s not found, aborting", sessionID)
-		return
-	}
-
-	// Tell the resolver a verdict is coming, so its tick holds the pre-settle
-	// state instead of publishing idle and being corrected seconds later. The
-	// deferred clear covers every exit, including the early returns below: a
-	// classification that ends without a verdict is precisely when the session
-	// must be free to settle on its own.
-	d.recordClassifierStarted(sessionID, classificationStartTime)
-	defer d.recordClassifierFinished(sessionID)
-
-	apply := func(decision classifyDecision) {
-		if decision.action != classifyApply {
-			d.logf("classifySessionState: session=%s no state applied reason=%s", sessionID, decision.reason)
-			d.traceStateSkip(sessionID, stateSourceClassifier, decision.reason)
-			return
-		}
-		d.logf("classifySessionState: session=%s state=%s reason=%s", sessionID, decision.state, decision.reason)
-		// Filed, not applied. The verdict is one witness to how a turn ended and
-		// the weakest-timed of them: it describes the transcript as of
-		// classificationStartTime and lands seconds later, which is why it used to
-		// need a timestamp guard to stop it overwriting a newer state. As evidence
-		// it gets a stronger version of the same guard for free — the resolver drops
-		// a verdict the agent has since gone busy past, whatever the clock says.
-		d.recordClassifierEvidence(sessionID, decision.state, classificationStartTime)
-		d.traceStateEvidence(
-			sessionID,
-			stateOrigin{
-				source:     stateSourceClassifier,
-				detail:     decision.reason,
-				observedAt: classificationStartTime,
-			},
-			decision.state,
-		)
-	}
-
-	// Capability gates: agents can independently disable transcript parsing and
-	// classification.
-	transcriptEnabled := true
-	classifierEnabled := true
-	if driver := agentdriver.Get(string(session.Agent)); driver != nil {
-		caps := agentdriver.EffectiveCapabilities(driver)
-		transcriptEnabled = caps.HasTranscript
-		classifierEnabled = caps.HasClassifier
-	}
-
-	// Todos are stored as "[✓] task" (completed), "[→] task" (in_progress),
-	// "[ ] task" (pending).
-	pendingTodos := 0
-	for _, todo := range session.Todos {
-		if !strings.HasPrefix(todo, "[✓]") {
-			pendingTodos++
-		}
-	}
-	d.logf("classifySessionState: session %s has %d total todos, %d pending", sessionID, len(session.Todos), pendingTodos)
-
-	decision := classifyPreTranscript(pendingTodos, transcriptEnabled, classifierEnabled)
-	if decision.action != classifyReadTranscript {
-		apply(decision)
-		return
-	}
-
-	resolvedTranscriptPath := d.resolveTranscriptPathForSession(session, transcriptPath)
-	if resolvedTranscriptPath != transcriptPath {
-		d.logf(
-			"classifySessionState: session %s resolved transcript path %q -> %q",
-			sessionID,
-			transcriptPath,
-			resolvedTranscriptPath,
-		)
-	}
-
-	d.logf("classifySessionState: parsing transcript for session %s", sessionID)
-	extract := d.extractLastAssistantMessage
-	if d.classificationTranscriptExtractor != nil {
-		extract = d.classificationTranscriptExtractor
-	}
-	lastMessage, assistantTurnID, err := extract(session, resolvedTranscriptPath, 500, classificationStartTime)
-	if err != nil {
-		d.logf("classifySessionState: transcript read failed for %s: %v (transcript=%s)", sessionID, err, resolvedTranscriptPath)
-	}
-	if strings.TrimSpace(assistantTurnID) != "" && err == nil {
-		defer d.clearClassifyingTurn(sessionID)
-	}
-
-	decision = classifyPostTranscript(lastMessage, err)
-	if decision.action != classifyRunClassifier {
-		apply(decision)
-		return
-	}
-	lastMessage = strings.TrimSpace(lastMessage)
-
-	logMsg := lastMessage
-	if len(logMsg) > 100 {
-		logMsg = logMsg[:100] + "..."
-	}
-	d.logf("classifySessionState: last message for session %s: %s", sessionID, logMsg)
-
-	// Can be slow — 30+ seconds.
-	d.logf("classifySessionState: calling classifier for session %s", sessionID)
-	state, err := d.runClassifier(session, lastMessage, 30*time.Second)
-	if err != nil {
-		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
-	}
-	decision = classifyVerdict(state, err)
-	if strings.TrimSpace(assistantTurnID) != "" {
-		d.setClassifiedTurnID(sessionID, assistantTurnID)
-	}
-	apply(decision)
-}
-
-func (d *Daemon) runClassifier(session *protocol.Session, text string, timeout time.Duration) (string, error) {
-	if d.classifier != nil {
-		return d.classifier.Classify(text, timeout)
-	}
-	if session != nil {
-		driver := agentdriver.Get(string(session.Agent))
-		if state, err, ok := agentdriver.ClassifyWithDriver(
-			driver,
-			text,
-			d.store.GetSetting(executableSettingKey(string(session.Agent))),
-			session.Directory,
-			timeout,
-		); ok {
-			return state, err
-		}
-	}
-	// Fallback for a session whose driver has no classifier (and for a nil
-	// session): judge with headless Claude, the same backend Claude sessions use.
-	claude := agentdriver.Get("claude")
-	if state, err, ok := agentdriver.ClassifyWithDriver(
-		claude,
-		text,
-		d.store.GetSetting(canonicalExecutableSettingKey("claude")),
-		"",
-		timeout,
-	); ok {
-		return state, err
-	}
-	return protocol.StateUnknown, errors.New("no classifier backend available")
+	// Async classification
+	go d.classifySessionState(msg.ID, msg.TranscriptPath)
 }
 
 func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
@@ -2877,103 +2649,6 @@ func (d *Daemon) clearClassifyingTurn(sessionID string) {
 	delete(d.classifyingTurn, sessionID)
 }
 
-func (d *Daemon) markRunStartedIfNeeded(sessionID string) {
-	now := time.Now()
-	d.longRunMu.Lock()
-	defer d.longRunMu.Unlock()
-	if d.longRun == nil {
-		d.longRun = make(map[string]longRunSession)
-	}
-	entry := d.longRun[sessionID]
-	if entry.workingSince.IsZero() {
-		entry.workingSince = now
-	}
-	entry.deferredTranscript = ""
-	entry.needsReview = false
-	d.longRun[sessionID] = entry
-}
-
-func (d *Daemon) consumeRunDuration(sessionID, fallbackStateSince string) time.Duration {
-	now := time.Now()
-	d.longRunMu.Lock()
-	if entry, ok := d.longRun[sessionID]; ok && !entry.workingSince.IsZero() {
-		startedAt := entry.workingSince
-		entry.workingSince = time.Time{}
-		if entry.deferredTranscript == "" && !entry.needsReview {
-			delete(d.longRun, sessionID)
-		} else {
-			d.longRun[sessionID] = entry
-		}
-		d.longRunMu.Unlock()
-		if startedAt.IsZero() || !now.After(startedAt) {
-			return 0
-		}
-		return now.Sub(startedAt)
-	}
-	d.longRunMu.Unlock()
-
-	if fallbackStateSince == "" {
-		return 0
-	}
-	startedAt := protocol.Timestamp(fallbackStateSince).Time()
-	if startedAt.IsZero() || !now.After(startedAt) {
-		return 0
-	}
-	return now.Sub(startedAt)
-}
-
-func (d *Daemon) setNeedsReviewAfterLongRun(sessionID, transcriptPath string) {
-	d.longRunMu.Lock()
-	defer d.longRunMu.Unlock()
-	if d.longRun == nil {
-		d.longRun = make(map[string]longRunSession)
-	}
-	entry := d.longRun[sessionID]
-	entry.deferredTranscript = strings.TrimSpace(transcriptPath)
-	entry.needsReview = true
-	d.longRun[sessionID] = entry
-}
-
-func (d *Daemon) consumeNeedsReviewAfterLongRun(sessionID string) (string, bool) {
-	d.longRunMu.Lock()
-	defer d.longRunMu.Unlock()
-	entry, ok := d.longRun[sessionID]
-	if !ok || !entry.needsReview {
-		return "", false
-	}
-	transcriptPath := entry.deferredTranscript
-	entry.deferredTranscript = ""
-	entry.needsReview = false
-	if entry.workingSince.IsZero() {
-		delete(d.longRun, sessionID)
-	} else {
-		d.longRun[sessionID] = entry
-	}
-	return transcriptPath, true
-}
-
-func (d *Daemon) clearNeedsReviewAfterLongRun(sessionID string) {
-	d.longRunMu.Lock()
-	defer d.longRunMu.Unlock()
-	entry, ok := d.longRun[sessionID]
-	if !ok {
-		return
-	}
-	entry.deferredTranscript = ""
-	entry.needsReview = false
-	if entry.workingSince.IsZero() {
-		delete(d.longRun, sessionID)
-	} else {
-		d.longRun[sessionID] = entry
-	}
-}
-
-func (d *Daemon) clearLongRunTracking(sessionID string) {
-	d.longRunMu.Lock()
-	defer d.longRunMu.Unlock()
-	delete(d.longRun, sessionID)
-}
-
 func (d *Daemon) markForcedStopClassification(sessionID string) {
 	if strings.TrimSpace(sessionID) == "" {
 		return
@@ -3021,12 +2696,6 @@ func (d *Daemon) clearForcedStopClassification(sessionID string) {
 	delete(d.forcedStop, sessionID)
 }
 
-func (d *Daemon) sessionNeedsReviewAfterLongRun(sessionID string) bool {
-	d.longRunMu.Lock()
-	defer d.longRunMu.Unlock()
-	return d.longRun[sessionID].needsReview
-}
-
 func cloneSession(session *protocol.Session) *protocol.Session {
 	if session == nil {
 		return nil
@@ -3055,17 +2724,15 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	if clone == nil {
 		return nil
 	}
-	if d.sessionNeedsReviewAfterLongRun(clone.ID) {
-		clone.NeedsReviewAfterLongRun = protocol.Ptr(true)
-	} else {
-		clone.NeedsReviewAfterLongRun = nil
-	}
 	d.decorateSessionWithStateReason(clone)
 	d.decorateSessionWithNudge(clone)
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
 	d.decorateSessionWithWorkspace(clone)
 	d.decorateSessionWithWorkspaceMute(clone)
+	// Last: turn ownership reads the chief flag and the workspace the earlier
+	// decorations resolved.
+	d.decorateSessionWithTurn(clone)
 	return clone
 }
 
@@ -3643,7 +3310,6 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 		return
 	}
 
-	d.clearLongRunTracking(msg.Session.ID)
 	msg.Session.Agent = normalizeStoredSessionAgent(string(msg.Session.Agent), protocol.SessionAgentCodex)
 	workspaceID := strings.TrimSpace(msg.Session.WorkspaceID)
 	if workspaceID == "" {

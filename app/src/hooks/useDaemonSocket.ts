@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '195';
+export const PROTOCOL_VERSION = '198';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -885,7 +885,6 @@ export function useDaemonSocket({
   const canceledAttachIdsRef = useRef(new Set<string>());
   // Per-session attach serialization chain — see sendAttachSession.
   const attachQueueRef = useRef(new Map<string, Promise<unknown>>());
-  const pendingSessionVisualizedRef = useRef<Set<string>>(new Set());
   const selectedSessionRef = useRef<string | null>(null);
   const selectedWorkspaceRef = useRef<string | null>(null);
   const daemonInstanceIDRef = useRef<string>('');
@@ -1199,12 +1198,6 @@ export function useDaemonSocket({
         ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory: gitStatusSubscriptionRef.current }));
       }
 
-      if (pendingSessionVisualizedRef.current.size > 0) {
-        for (const sessionID of pendingSessionVisualizedRef.current) {
-          ws.send(JSON.stringify({ cmd: 'session_visualized', id: sessionID }));
-        }
-        pendingSessionVisualizedRef.current.clear();
-      }
       if (selectedSessionRef.current) {
         ws.send(JSON.stringify({ cmd: 'session_selected', id: selectedSessionRef.current }));
       }
@@ -5236,19 +5229,7 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'unsubscribe_git_status' }));
   }, []);
 
-  // Notify daemon that the user has visualized a session long enough to resume deferred classification.
-  const sendSessionVisualized = useCallback((id: string) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      pendingSessionVisualizedRef.current.add(id);
-      return;
-    }
-    ws.send(JSON.stringify({ cmd: 'session_visualized', id }));
-    pendingSessionVisualizedRef.current.delete(id);
-  }, []);
-
-  // Track ordinary UI selection separately from the delayed long-run review
-  // signal so `attn open` always targets the session currently shown.
+  // Records the session the UI is showing, so `attn open` targets it.
   const sendSessionSelected = useCallback((id: string) => {
     selectedSessionRef.current = id;
     const ws = wsRef.current;
@@ -5270,6 +5251,16 @@ export function useDaemonSocket({
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ cmd: 'trigger_nudge', session_id: sessionId }));
+  }, []);
+
+  // Close the turn a session opened. It is the only way a turn ends: no state
+  // transition takes a session out of the queue, so this is also the ordinary
+  // move on an agent that is still running. Fire and forget — the daemon stamps
+  // and re-broadcasts the session.
+  const sendSettleTurn = useCallback((sessionId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'settle_turn', session_id: sessionId }));
   }, []);
 
   // Get file diff
@@ -5827,8 +5818,8 @@ export function useDaemonSocket({
     sendUnsubscribeGitStatus,
     sendSessionSelected,
     sendTriggerNudge,
+    sendSettleTurn,
     sendWorkspaceSelected,
-    sendSessionVisualized,
     sendWorkspaceGet,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,

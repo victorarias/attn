@@ -3,6 +3,7 @@ package daemon
 import (
 	"time"
 
+	"github.com/victorarias/attn/internal/attention"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/statetrace"
 )
@@ -74,7 +75,6 @@ type stateOrigin struct {
 // not assemble these flags themselves.
 type stateEffectProfile struct {
 	touch     bool
-	trackRun  bool
 	syncNudge bool
 	broadcast bool
 }
@@ -82,11 +82,11 @@ type stateEffectProfile struct {
 func stateEffectProfileFor(cause sessionStateCause) (stateEffectProfile, bool) {
 	switch cause.(type) {
 	case liveSignal:
-		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
+		return stateEffectProfile{touch: true, syncNudge: true, broadcast: true}, true
 	case resolverObservation:
-		return stateEffectProfile{trackRun: true, syncNudge: true, broadcast: true}, true
+		return stateEffectProfile{syncNudge: true, broadcast: true}, true
 	case pluginReport:
-		return stateEffectProfile{touch: true, trackRun: true, syncNudge: true, broadcast: true}, true
+		return stateEffectProfile{touch: true, syncNudge: true, broadcast: true}, true
 	case startupRecovery:
 		return stateEffectProfile{}, true
 	default:
@@ -142,16 +142,17 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	}
 	d.traceStateChange(change, statetrace.OutcomeApplied, "")
 
+	// A turn opens on a state and closes only when the user settles it, so this
+	// is the one place a turn ever opens. It runs for every cause, including
+	// startup recovery: a session that comes back in a state that wants the user
+	// wants the user regardless of what moved it there. Opening is guarded in the
+	// store, so a state re-reported while a turn is already open changes nothing.
+	if attention.OpensTurn(protocol.SessionState(change.state)) {
+		d.store.OpenTurnIfClosed(change.sessionID, time.Now())
+	}
+
 	if profile.touch {
 		d.store.Touch(change.sessionID)
-	}
-	if profile.trackRun {
-		switch change.state {
-		case protocol.StateWorking:
-			d.markRunStartedIfNeeded(change.sessionID)
-		case protocol.StateIdle, protocol.StateScheduled:
-			d.clearLongRunTracking(change.sessionID)
-		}
 	}
 	if profile.syncNudge {
 		d.syncNudgeForState(change.sessionID, change.state)

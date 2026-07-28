@@ -101,7 +101,7 @@ authoritative.
   bundled agent skill documents it so agents can show the user a rendered doc.
 - **Session resolution:** explicit `--session` / `session_id` > `ATTN_SESSION_ID`
   (the agent's own session) > the daemon's currently-selected session (tracked
-  from `session_visualized`). This is what makes a bare `attn open notes.md`
+  from `session_selected`). This is what makes a bare `attn open notes.md`
   land next to whatever the user is looking at.
 - **No empty "show tile" toggle.** A markdown tile only exists once it points
   at a real file, so there is no sidebar button that docks a blank tile. Tiles

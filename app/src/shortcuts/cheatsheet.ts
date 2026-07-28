@@ -44,6 +44,7 @@ export function buildCheatsheet(): CheatsheetCategory[] {
         { label: 'Go to dashboard (home)', combos: [fromId('session.goToDashboard')] },
         { label: 'Toggle grid view', combos: [fromId('view.toggleGrid')] },
         { label: 'Jump to next waiting session', combos: [fromId('session.jumpToWaiting')] },
+        { label: 'Settle this turn', combos: [fromId('session.settle')] },
         { label: 'Toggle sidebar', combos: [fromId('session.toggleSidebar')] },
       ],
     },

@@ -64,6 +64,7 @@
     "real-app:scenario-present-flow": "node scripts/real-app-harness/scenario-present-flow.mjs",
     "real-app:scenario-ticket-lifecycle": "node scripts/real-app-harness/scenario-ticket-delegation-lifecycle.mjs",
     "real-app:scenario-ticket-resume": "node scripts/real-app-harness/scenario-ticket-resume.mjs",
+    "real-app:scenario-agent-queue": "node scripts/real-app-harness/scenario-agent-queue.mjs",
     "real-app:scenario-nudge-trigger": "node scripts/real-app-harness/scenario-nudge-trigger.mjs",
     "real-app:scenario-terminal-block-copy": "node scripts/real-app-harness/scenario-terminal-block-copy.mjs",
     "real-app:scenario-terminal-context-menu": "node scripts/real-app-harness/scenario-terminal-context-menu.mjs",

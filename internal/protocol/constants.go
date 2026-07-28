@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "195"
+const ProtocolVersion = "198"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -95,6 +95,8 @@ const (
 	CmdUnregister                            = "unregister"
 	CmdState                                 = "state"
 	CmdHookNotification                      = "hook_notification"
+	CmdHookStopFailure                       = "hook_stop_failure"
+	CmdHookCompaction                        = "hook_compaction"
 	CmdSetSessionResumeID                    = "set_session_resume_id"
 	CmdSessionInstructions                   = "session_instructions"
 	CmdSessionTranscript                     = "session_transcript"
@@ -104,10 +106,10 @@ const (
 	CmdFilesEdited                           = "files_edited"
 	CmdQuery                                 = "query"
 	CmdHeartbeat                             = "heartbeat"
-	CmdSessionVisualized                     = "session_visualized"
 	CmdSessionSelected                       = "session_selected"
 	CmdWorkspaceSelected                     = "workspace_selected"
 	CmdTriggerNudge                          = "trigger_nudge"
+	CmdSettleTurn                            = "settle_turn"
 	CmdMuteWorkspace                         = "mute_workspace"
 	CmdPinWorkspace                          = "pin_workspace"
 	CmdQueryPRs                              = "query_prs"
@@ -859,6 +861,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
+	case CmdHookStopFailure:
+		var msg HookStopFailureMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdHookCompaction:
+		var msg HookCompactionMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
 	case CmdSetSessionResumeID:
 		var msg SetSessionResumeIDMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -922,13 +938,6 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
-	case CmdSessionVisualized:
-		var msg SessionVisualizedMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			return "", nil, err
-		}
-		return peek.Cmd, &msg, nil
-
 	case CmdSessionSelected:
 		var msg SessionSelectedMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -945,6 +954,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdTriggerNudge:
 		var msg TriggerNudgeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSettleTurn:
+		var msg SettleTurnMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

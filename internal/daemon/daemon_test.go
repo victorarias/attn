@@ -5137,60 +5137,26 @@ func TestClassifySessionState_ClaudeConcurrentDuplicateTurnRunsOnce(t *testing.T
 	}
 }
 
-// TestScheduledClearsLongRunTracking proves that parking on a cron/loop ends
-// the current run for long-run-review purposes: a session that did real work
-// and then goes "scheduled" must drop its workingSince, so a later short
-// resumed turn does not falsely trip the 5-minute long-run review threshold.
-func TestScheduledClearsLongRunTracking(t *testing.T) {
+// A finished run publishes its verdict as soon as it is classified, whatever
+// its duration. The long-run review deferral used to hold verdicts back on runs
+// over five minutes and publish them when the session was next looked at; the
+// turn that the finish opens is what carries the result to the user now.
+func TestClassifySessionState_PublishesImmediatelyAfterALongRun(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-
-	now := time.Now()
-	nowStr := string(protocol.NewTimestamp(now))
-	d.store.Add(&protocol.Session{
-		ID:             "sess-loop",
-		Agent:          protocol.SessionAgentCodex,
-		Label:          "loop",
-		Directory:      "/tmp",
-		State:          protocol.StateWorking,
-		StateSince:     nowStr,
-		StateUpdatedAt: nowStr,
-		LastSeen:       nowStr,
-	})
-	// It has been working for 10 minutes, then parks on a cron.
-	d.longRun["sess-loop"] = longRunSession{workingSince: now.Add(-10 * time.Minute)}
-
-	d.applyState(sessionStateChange{
-		sessionID: "sess-loop",
-		state:     protocol.StateScheduled,
-		cause:     resolverObservation{},
-	})
-
-	d.longRunMu.Lock()
-	_, tracked := d.longRun["sess-loop"]
-	d.longRunMu.Unlock()
-	if tracked {
-		t.Fatal("parking on a schedule must clear long-run tracking; the leaked workingSince would mis-fire a review on the next short turn")
-	}
-}
-
-func TestClassifyOrDeferAfterStop_LongRunDefersUntilVisualized(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
+	mockClassifier := &countingClassifier{state: protocol.StateIdle}
 	d.classifier = mockClassifier
 
-	now := time.Now()
-	nowStr := string(protocol.NewTimestamp(now))
+	nowStr := string(protocol.NewTimestamp(time.Now()))
 	d.store.Add(&protocol.Session{
 		ID:             "sess-long",
 		Agent:          protocol.SessionAgentCodex,
 		Label:          "long",
 		Directory:      "/tmp",
 		State:          protocol.StateWorking,
-		StateSince:     nowStr,
+		StateSince:     string(protocol.NewTimestamp(time.Now().Add(-10 * time.Minute))),
 		StateUpdatedAt: nowStr,
 		LastSeen:       nowStr,
 	})
-	d.longRun["sess-long"] = longRunSession{workingSince: now.Add(-6 * time.Minute)}
 
 	transcriptPath := filepath.Join(t.TempDir(), "long-transcript.jsonl")
 	content := `{"type":"assistant","message":{"role":"assistant","content":"Completed long run"}}` + "\n"
@@ -5198,125 +5164,17 @@ func TestClassifyOrDeferAfterStop_LongRunDefersUntilVisualized(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 
-	// The turn's closing bracket, so the session has evidence to be resolved from:
-	// the deferral is a fact about a turn that ended, and the resolver is what
-	// turns it into a color.
 	d.recordBracketEvidence("sess-long", protocol.StateWorking)
 	d.recordBracketEvidence("sess-long", protocol.StateIdle)
 
-	d.classifyOrDeferAfterStop("sess-long", transcriptPath)
-	d.resolveAllSessions(time.Now())
-
-	if got := mockClassifier.CallCount(); got != 0 {
-		t.Fatalf("classifier calls=%d, want 0 while long-run review is deferred", got)
-	}
-	if !d.sessionNeedsReviewAfterLongRun("sess-long") {
-		t.Fatal("needs_review_after_long_run should be set for deferred long run")
-	}
-
-	session := d.store.Get("sess-long")
-	if session == nil {
-		t.Fatal("session missing")
-	}
-	if session.State != protocol.StateWaitingInput {
-		t.Fatalf("state=%s, want %s", session.State, protocol.StateWaitingInput)
-	}
-	decorated := d.sessionForBroadcast(session)
-	if decorated == nil || !protocol.Deref(decorated.NeedsReviewAfterLongRun) {
-		t.Fatal("broadcast session should include needs_review_after_long_run=true")
-	}
-
-	d.handleSessionVisualized("sess-long")
-
-	deadline := time.Now().Add(2 * time.Second)
-	for mockClassifier.CallCount() == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if got := mockClassifier.CallCount(); got != 1 {
-		t.Fatalf("classifier calls=%d, want 1 after visualization", got)
-	}
-	if d.sessionNeedsReviewAfterLongRun("sess-long") {
-		t.Fatal("needs_review_after_long_run should clear after visualization")
-	}
-}
-
-func TestClassifyOrDeferAfterStop_LongRunKeepsPendingApprovalState(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	mockClassifier := &countingClassifier{state: protocol.StateIdle}
-	d.classifier = mockClassifier
-
-	now := time.Now()
-	nowStr := string(protocol.NewTimestamp(now))
-	d.store.Add(&protocol.Session{
-		ID:             "sess-pending",
-		Agent:          protocol.SessionAgentCodex,
-		Label:          "pending",
-		Directory:      "/tmp",
-		State:          protocol.StatePendingApproval,
-		StateSince:     nowStr,
-		StateUpdatedAt: nowStr,
-		LastSeen:       nowStr,
-	})
-	d.longRun["sess-pending"] = longRunSession{workingSince: now.Add(-7 * time.Minute)}
-
-	d.classifyOrDeferAfterStop("sess-pending", "")
-
-	if got := mockClassifier.CallCount(); got != 0 {
-		t.Fatalf("classifier calls=%d, want 0 while deferred", got)
-	}
-	if !d.sessionNeedsReviewAfterLongRun("sess-pending") {
-		t.Fatal("needs_review_after_long_run should be set")
-	}
-
-	session := d.store.Get("sess-pending")
-	if session == nil {
-		t.Fatal("session missing")
-	}
-	if session.State != protocol.StatePendingApproval {
-		t.Fatalf("state=%s, want %s", session.State, protocol.StatePendingApproval)
-	}
-}
-
-func TestClassifyOrDeferAfterStop_ShortRunClassifiesImmediately(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	mockClassifier := &countingClassifier{state: protocol.StateIdle}
-	d.classifier = mockClassifier
-
-	now := time.Now()
-	nowStr := string(protocol.NewTimestamp(now))
-	d.store.Add(&protocol.Session{
-		ID:             "sess-short",
-		Agent:          protocol.SessionAgentCodex,
-		Label:          "short",
-		Directory:      "/tmp",
-		State:          protocol.StateWorking,
-		StateSince:     nowStr,
-		StateUpdatedAt: nowStr,
-		LastSeen:       nowStr,
-	})
-	d.longRun["sess-short"] = longRunSession{workingSince: now.Add(-2 * time.Minute)}
-
-	transcriptPath := filepath.Join(t.TempDir(), "short-transcript.jsonl")
-	content := `{"type":"assistant","message":{"role":"assistant","content":"Quick done"}}` + "\n"
-	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
-		t.Fatalf("write transcript: %v", err)
-	}
-
-	d.recordBracketEvidence("sess-short", protocol.StateWorking)
-	d.recordBracketEvidence("sess-short", protocol.StateIdle)
-
-	d.classifyOrDeferAfterStop("sess-short", transcriptPath)
+	d.classifySessionState("sess-long", transcriptPath)
 	// The verdict is evidence; the resolver is what publishes it.
 	d.resolveAllSessions(time.Now())
 
 	if got := mockClassifier.CallCount(); got != 1 {
-		t.Fatalf("classifier calls=%d, want 1 for short run", got)
+		t.Fatalf("classifier calls=%d, want 1", got)
 	}
-	if d.sessionNeedsReviewAfterLongRun("sess-short") {
-		t.Fatal("needs_review_after_long_run should be false for short run")
-	}
-
-	session := d.store.Get("sess-short")
+	session := d.store.Get("sess-long")
 	if session == nil {
 		t.Fatal("session missing")
 	}

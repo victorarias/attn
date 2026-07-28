@@ -255,6 +255,36 @@ func (c *Client) RecordNotification(id, notificationType, message string) error 
 	return err
 }
 
+// RecordStopFailure reports that a turn ended on an API error (Claude's
+// StopFailure hook) rather than on an answer.
+func (c *Client) RecordStopFailure(id, errorType, message string) error {
+	msg := protocol.HookStopFailureMessage{
+		Cmd:       protocol.CmdHookStopFailure,
+		ID:        id,
+		ErrorType: errorType,
+	}
+	if strings.TrimSpace(message) != "" {
+		msg.ErrorMessage = protocol.Ptr(message)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
+// RecordCompaction reports that the agent started or finished rewriting its own
+// context (Claude's PreCompact/PostCompact hooks).
+func (c *Client) RecordCompaction(id string, active bool, trigger string) error {
+	msg := protocol.HookCompactionMessage{
+		Cmd:    protocol.CmdHookCompaction,
+		ID:     id,
+		Active: active,
+	}
+	if strings.TrimSpace(trigger) != "" {
+		msg.Trigger = protocol.Ptr(trigger)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
 // SetSessionResumeID stores the agent-native resume session id for an attn session.
 func (c *Client) SetSessionResumeID(id, resumeSessionID string) error {
 	msg := protocol.SetSessionResumeIDMessage{

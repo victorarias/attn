@@ -13,7 +13,9 @@ var now = time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
 
 func testPolicy() Policy {
 	return Policy{
-		HeartbeatTTL:      time.Second,
+		HeartbeatTTL:         time.Second,
+		HeartbeatSettleAfter: 3 * time.Second,
+
 		StaleAfter:        4 * time.Second,
 		StuckAfter:        90 * time.Second,
 		GuardianDwell:     60 * time.Second,
@@ -388,26 +390,29 @@ func TestResolve(t *testing.T) {
 		{
 			// A pending wakeup resumes the session with nobody doing anything, so
 			// it is parked, not waiting on a person.
-			name: "a pending cron parks the session",
+			// A wakeup on the calendar says nothing about whether the turn that
+			// just ended left something for the user, so it does not get to
+			// describe the outcome the classifier read out of the transcript.
+			name: "a pending cron does not rename what the turn settled to",
 			evidence: Evidence{
 				PendingCron:    true,
 				LastClassifier: seen(SourceClassifier, ClaimIdle, time.Second),
 			},
-			wantState:  protocol.SessionStateScheduled,
-			wantReason: ReasonCronPending,
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonClassifierVerdict,
 		},
 		{
-			// The park used to be defended by a per-driver veto against the
-			// screen scraper knocking it to idle. The scraper is gone and the
-			// defense is now clause order: a settled turn is what a parked
-			// session looks like, so settling must not outrank the wakeup.
-			name: "a parked session stays parked once its turn settles",
+			// And with no verdict to describe it, the wakeup names why the
+			// session settled — still idle, still the user's to pick up. A user
+			// who wants a loop to run unwatched pins the workspace, which is
+			// filtered at read in internal/attention.
+			name: "a pending cron names the settle without suppressing it",
 			evidence: Evidence{
 				PendingCron: true,
 				Heartbeat:   seen(SourceHeartbeat, ClaimSettled, time.Second),
 				LastBusyAt:  now.Add(-30 * time.Second),
 			},
-			wantState:  protocol.SessionStateScheduled,
+			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonCronPending,
 		},
 		{
@@ -523,38 +528,6 @@ func TestResolve(t *testing.T) {
 			},
 			wantState:  protocol.SessionStateIdle,
 			wantReason: ReasonClassifierVerdict,
-		},
-
-		// --- a long run nobody has read yet ---------------------------------
-
-		{
-			// The deferral: a turn worth minutes of work ended and attn is holding
-			// the verdict until someone opens the session. Calling it idle would
-			// file that result away as seen, which is what happened while this was
-			// a state the deferral applied and the resolver overwrote.
-			name: "a long run awaiting review waits on the user",
-			evidence: Evidence{
-				AwaitingLongRunReview: true,
-				TurnEverOpened:        true,
-				Heartbeat:             seen(SourceHeartbeat, ClaimSettled, time.Second),
-				LastBusyAt:            now.Add(-time.Minute),
-			},
-			wantState:  protocol.SessionStateWaitingInput,
-			wantReason: ReasonLongRunReview,
-		},
-		{
-			// It describes a turn that has ended. A session that has started
-			// another one is working, whatever is still owed on the last.
-			name: "a long run awaiting review does not outrank a new turn",
-			evidence: Evidence{
-				AwaitingLongRunReview: true,
-				TurnOpen:              true,
-				TurnEverOpened:        true,
-				Heartbeat:             seen(SourceHeartbeat, ClaimBusy, 100*time.Millisecond),
-				LastBusyAt:            now.Add(-100 * time.Millisecond),
-			},
-			wantState:  protocol.SessionStateWorking,
-			wantReason: ReasonHeartbeatFresh,
 		},
 
 		// --- settled turns --------------------------------------------------
@@ -674,11 +647,15 @@ func TestHeartbeatFreshnessBoundary(t *testing.T) {
 	}{
 		{age: policy.HeartbeatTTL - time.Millisecond, want: protocol.SessionStateWorking},
 		{age: policy.HeartbeatTTL, want: protocol.SessionStateWorking},
-		// Past the TTL the agent is no longer visibly running, and with no bracket
-		// open there is nothing outstanding: the turn is over. It resolves idle
-		// rather than unknown because the heartbeat is real evidence of a settle,
-		// not an absence of evidence.
-		{age: policy.HeartbeatTTL + time.Millisecond, want: protocol.SessionStateIdle},
+		// Past the TTL the frame stops outranking the edges below it, but a busy
+		// frame going quiet is not yet a settle: the agent is held working until
+		// the silence passes HeartbeatSettleAfter.
+		{age: policy.HeartbeatTTL + time.Millisecond, want: protocol.SessionStateWorking},
+		{age: policy.HeartbeatSettleAfter, want: protocol.SessionStateWorking},
+		// Only a silence past the settle window says the turn is over. It resolves
+		// idle rather than unknown because the heartbeat is real evidence of a
+		// settle, not an absence of evidence.
+		{age: policy.HeartbeatSettleAfter + time.Millisecond, want: protocol.SessionStateIdle},
 	} {
 		// LastBusyAt travels with a busy frame — the daemon stamps both — and a
 		// settle needs a turn to have run.
@@ -689,6 +666,164 @@ func TestHeartbeatFreshnessBoundary(t *testing.T) {
 		}
 		if got := Resolve(e, policy, now); got.State != tc.want {
 			t.Fatalf("heartbeat aged %s resolved %s, want %s", tc.age, got.State, tc.want)
+		}
+	}
+}
+
+// A repaint cadence wider than the TTL must not make the session flap.
+//
+// This is the shape of the live failure that produced the settle window. Claude
+// repaints its title every ~1.92s while a `/compact` runs, and a compaction runs
+// between turns, so the previous turn's bracket is already closed and the
+// heartbeat is the only level in the table. Reading a gap past the TTL as a
+// settle therefore produced a state change every second: idle when the frame
+// aged out, working when the next one landed, for as long as the compaction ran.
+//
+// The cost was not the color. Every one of those idle edges opens a turn the
+// user owes, so settling the session put it back in the queue a second later and
+// there was no way to get it out.
+func TestARepaintGapWiderThanTheTTLDoesNotFlapTheSession(t *testing.T) {
+	policy := testPolicy()
+	// Measured on claude 2.1.220 during a compaction, and periodic to the
+	// millisecond. The property under test is that it sits between the two
+	// windows, which is where every flap lives.
+	const repaint = 1920 * time.Millisecond
+	if repaint <= policy.HeartbeatTTL || repaint >= policy.HeartbeatSettleAfter {
+		t.Fatalf("repaint %s must fall between the TTL %s and the settle window %s for this test to mean anything",
+			repaint, policy.HeartbeatTTL, policy.HeartbeatSettleAfter)
+	}
+
+	// The resolver ticks once a second against evidence that only advances every
+	// repaint, which is what makes the same evidence resolve twice at different
+	// ages.
+	for tick := 1; tick <= 30; tick++ {
+		at := now.Add(time.Duration(tick) * time.Second)
+		lastFrame := now.Add((at.Sub(now) / repaint) * repaint)
+		e := Evidence{
+			TurnEverOpened: true,
+			Heartbeat:      &Observation{Source: SourceHeartbeat, Claim: ClaimBusy, ObservedAt: lastFrame},
+			LastBusyAt:     lastFrame,
+			LastMovement:   lastFrame,
+		}
+		if got := Resolve(e, policy, at); got.State != protocol.SessionStateWorking {
+			t.Fatalf("tick %d: a busy frame %s old resolved %s/%s, want working: a repaint gap is not a settle",
+				tick, at.Sub(lastFrame), got.State, got.Reason)
+		}
+	}
+}
+
+// Replays the shape behind every `unknown` observed on 2026-07-27: a turn that
+// yielded with a background task, the harness confirming sixty seconds later
+// that the agent is parked at its prompt, and then nothing at all.
+//
+// Three sessions produced ten of these in one day, each one ninety seconds after
+// a confirmation the resolver had already recorded. The confirmation is the whole
+// point — a session attn has been *told* the location of is not a session it has
+// lost track of, so `stuck` is the one verdict this timeline must never reach.
+func TestAPromptIdleConfirmationRetiresAnOutstandingBackgroundTask(t *testing.T) {
+	policy := testPolicy()
+
+	// The Stop payload that opens the timeline: a background task outstanding, and
+	// a title frame that has already gone quiet because the turn is over.
+	yielded := now
+	at := func(d time.Duration) Evidence {
+		e := Evidence{
+			TurnEverOpened: true,
+			BackgroundWork: true,
+			Heartbeat:      &Observation{Source: SourceHeartbeat, Claim: ClaimSettled, ObservedAt: yielded},
+			LastBusyAt:     yielded.Add(-time.Second),
+			LastMovement:   yielded,
+		}
+		// The notification lands a minute in and moves the table with it.
+		if d >= time.Minute {
+			e.PromptIdleAt = yielded.Add(time.Minute)
+			e.LastMovement = yielded.Add(time.Minute)
+		}
+		return e
+	}
+
+	// Before the confirmation the background task is all attn has, and it holds.
+	if got := Resolve(at(30*time.Second), policy, yielded.Add(30*time.Second)); got.State != protocol.SessionStateWorking {
+		t.Fatalf("30s in: resolved %s/%s, want working: an outstanding background task is the only fact so far",
+			got.State, got.Reason)
+	}
+
+	// From the confirmation on, the session owes the user a turn and keeps owing
+	// it. The sweep runs well past StuckAfter measured from the confirmation,
+	// which is where every observed `unknown` landed.
+	for _, d := range []time.Duration{
+		time.Minute,
+		time.Minute + 30*time.Second,
+		time.Minute + policy.StuckAfter,
+		time.Minute + policy.StuckAfter + time.Second,
+		10 * time.Minute,
+	} {
+		got := Resolve(at(d), policy, yielded.Add(d))
+		if got.State == protocol.SessionStateUnknown {
+			t.Fatalf("%s in: resolved unknown/%s after the harness said the agent is at its prompt", d, got.Reason)
+		}
+		if got.State != protocol.SessionStateIdle || got.Reason != ReasonPromptIdle {
+			t.Fatalf("%s in: resolved %s/%s, want idle/%s", d, got.State, got.Reason, ReasonPromptIdle)
+		}
+	}
+}
+
+// A finished turn is the user's to pick up whatever the calendar says. The
+// wakeup names why the session settled and changes nothing else — suppressing
+// the queue is a user control (a pinned workspace), not something the resolver
+// infers from a schedule.
+func TestAParkedWakeupDoesNotExcuseTheAgentFromTheQueue(t *testing.T) {
+	policy := testPolicy()
+	e := Evidence{
+		TurnEverOpened: true,
+		PendingCron:    true,
+		LastBusyAt:     now.Add(-2 * time.Minute),
+		LastMovement:   now.Add(-time.Minute),
+	}
+
+	got := Resolve(e, policy, now)
+	if got.State != protocol.SessionStateIdle || got.Reason != ReasonCronPending {
+		t.Fatalf("resolved %s/%s, want idle/cron_pending", got.State, got.Reason)
+	}
+
+	// The harness confirming it is at its prompt is the same answer, said twice.
+	e.PromptIdleAt = now.Add(-time.Second)
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateIdle || got.Reason != ReasonPromptIdle {
+		t.Fatalf("resolved %s/%s after the confirmation, want idle/prompt_idle", got.State, got.Reason)
+	}
+
+	// And a background task outstanding alongside it is retired by the same
+	// confirmation rather than reopening the settle.
+	e.BackgroundWork = true
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateIdle {
+		t.Fatalf("resolved %s/%s with both facts set, want idle", got.State, got.Reason)
+	}
+}
+
+// A session parked on a wakeup hours away is quiet because there is nothing to
+// say, not because it stopped saying it — so silence must not decay into
+// `unknown` here. The clauses that do diagnose a dead session (process exit, an
+// open bracket gone silent) sit above this one and are untouched.
+func TestAParkedWakeupDoesNotRotIntoUnknown(t *testing.T) {
+	policy := testPolicy()
+	parked := now.Add(-time.Minute)
+	e := Evidence{
+		TurnEverOpened: true,
+		PendingCron:    true,
+		LastBusyAt:     parked,
+		LastMovement:   parked,
+	}
+
+	for _, quiet := range []time.Duration{
+		policy.StuckAfter - time.Second,
+		policy.StuckAfter,
+		policy.StuckAfter + time.Second,
+		10 * policy.StuckAfter,
+	} {
+		at := parked.Add(quiet)
+		got := Resolve(e, policy, at)
+		if got.State != protocol.SessionStateIdle || got.Reason != ReasonCronPending {
+			t.Fatalf("resolved %s/%s after %s of silence, want idle/cron_pending", got.State, got.Reason, quiet)
 		}
 	}
 }
@@ -829,47 +964,81 @@ func TestPolicyForUsesTheMeasuredPerAgentTTL(t *testing.T) {
 		if policy.StaleAfter <= policy.HeartbeatTTL {
 			t.Fatalf("StaleAfter %s must exceed HeartbeatTTL %s", policy.StaleAfter, policy.HeartbeatTTL)
 		}
+		// The whole point of the settle window is that it is the wider of the two.
+		// Collapsed onto the TTL, every repaint gap past the TTL settles the
+		// session and the next frame revives it.
+		if policy.HeartbeatSettleAfter <= policy.HeartbeatTTL {
+			t.Fatalf("HeartbeatSettleAfter %s must exceed HeartbeatTTL %s",
+				policy.HeartbeatSettleAfter, policy.HeartbeatTTL)
+		}
 	}
 }
 
-// IdleStale is the rule behind the mark: a finished result nobody has looked at
-// stops counting as done. The cases that matter are the ones where it must stay
-// quiet — a session that is still running has produced nothing to miss, and a
-// result already read is not something to be reminded about twice.
-func TestIdleStaleOnlyFiresForAnUnreadFinishedResult(t *testing.T) {
-	policy := PolicyFor(string(protocol.SessionAgentClaude))
-	settled := time.Now()
-	past := settled.Add(policy.IdleStaleAfter + time.Second)
-
-	cases := []struct {
-		name       string
-		state      protocol.SessionState
-		stateSince time.Time
-		lastRead   time.Time
-		now        time.Time
-		want       bool
-	}{
-		{"unread past the window", protocol.SessionStateIdle, settled, time.Time{}, past, true},
-		{"read before it finished", protocol.SessionStateIdle, settled, settled.Add(-time.Hour), past, true},
-		{"still inside the window", protocol.SessionStateIdle, settled, time.Time{}, settled.Add(time.Minute), false},
-		{"read after it finished", protocol.SessionStateIdle, settled, settled.Add(time.Second), past, false},
-		{"read at the same instant", protocol.SessionStateIdle, settled, settled, past, false},
-		{"still working", protocol.SessionStateWorking, settled, time.Time{}, past, false},
-		{"waiting on the user", protocol.SessionStateWaitingInput, settled, time.Time{}, past, false},
-		{"never had a state", protocol.SessionStateIdle, time.Time{}, time.Time{}, past, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := IdleStale(tc.state, tc.stateSince, tc.lastRead, policy, tc.now); got != tc.want {
-				t.Fatalf("IdleStale = %v, want %v", got, tc.want)
-			}
-		})
+// The gap a compaction leaves is wide enough to look like a finished turn, and
+// between turns there is no bracket left to say otherwise.
+//
+// The fallback that covers it today is HeartbeatSettleAfter, which infers the
+// gap from the shape of the title frames. That inference stays — codex has no
+// compaction hook, and nothing rules out another source of wide gaps — but where
+// claude reports the fact, the fact should win: the heuristic settles a real
+// end-of-turn that much later, and this does not.
+func TestCompactionIsWorkNothingElseCanSee(t *testing.T) {
+	policy := testPolicy()
+	e := Evidence{
+		TurnEverOpened: true,
+		Compacting:     true,
+		// Every other source says the turn is over: no bracket, and title frames
+		// that stopped long enough to settle on their own.
+		Heartbeat:    seen(SourceHeartbeat, ClaimSettled, 10*time.Second),
+		LastBusyAt:   now.Add(-10 * time.Second),
+		LastMovement: now.Add(-time.Second),
 	}
 
-	// A policy with no window turns the whole thing off rather than firing
-	// instantly, which is what an agent with no measured numbers would get if the
-	// default were ever dropped.
-	if IdleStale(protocol.SessionStateIdle, settled, time.Time{}, Policy{}, past) {
-		t.Fatal("a zero window marked a session stale instead of disabling the rule")
+	got := Resolve(e, policy, now)
+	if got.State != protocol.SessionStateWorking || got.Reason != ReasonCompacting {
+		t.Fatalf("resolved %s/%s while compacting, want working/compacting", got.State, got.Reason)
+	}
+
+	// And it is a claim that something is running, so it expires like every other
+	// one: a PostCompact that never arrives must not pin the session green.
+	e.LastMovement = now.Add(-policy.StuckAfter - time.Second)
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateUnknown {
+		t.Fatalf("resolved %s/%s after total silence, want unknown: a lost PostCompact must not hold working forever", got.State, got.Reason)
+	}
+}
+
+// A turn cut off by the API produced nothing and cannot resume until a person
+// acts — waits out a rate limit, pays a bill, renews a login. Every other signal
+// makes that indistinguishable from an agent that finished and went quiet, which
+// is the reading that leaves the user waiting on a session that is not coming
+// back.
+func TestATurnKilledByTheAPIAsksForTheUser(t *testing.T) {
+	policy := testPolicy()
+	e := Evidence{
+		TurnEverOpened: true,
+		LastHarnessEvent: &Observation{
+			Source:     SourceHarnessEvent,
+			Claim:      ClaimStopFailed,
+			Detail:     "rate_limit: usage limit reached",
+			ObservedAt: now.Add(-time.Second),
+		},
+		LastBusyAt:   now.Add(-5 * time.Second),
+		LastMovement: now.Add(-time.Second),
+	}
+
+	got := Resolve(e, policy, now)
+	if got.State != protocol.SessionStateWaitingInput || got.Reason != ReasonStopFailed {
+		t.Fatalf("resolved %s/%s, want waiting_input/stop_failed", got.State, got.Reason)
+	}
+	if got.Detail != "rate_limit: usage limit reached" {
+		t.Fatalf("detail = %q, want the error carried through: which failure it was is the part worth reading", got.Detail)
+	}
+
+	// Retired by the agent running again, which is the right edge whether the
+	// user fixed the cause or simply re-prompted.
+	e.Heartbeat = seen(SourceHeartbeat, ClaimBusy, 100*time.Millisecond)
+	e.LastBusyAt = now.Add(-100 * time.Millisecond)
+	if got := Resolve(e, policy, now); got.State != protocol.SessionStateWorking {
+		t.Fatalf("resolved %s/%s once the agent ran again, want working", got.State, got.Reason)
 	}
 }

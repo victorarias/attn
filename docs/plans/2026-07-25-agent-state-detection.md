@@ -845,15 +845,19 @@ and predict the colors.
       the dead `pty.SourceApproval` plumbing, and `Source.AppliesState` (which
       became identical to `ClaimsProtocolState` once the scrapers went).
 
-### Phase 4 — attention mode (opt-in working mode)
+### Phase 4 — the agent queue (opt-in working mode)
 
-**Not planned yet — deliberately.** Victor's call, 2026-07-25: phases 0–3 are the
-groundwork and are judged on colors alone, and phase 4 needs his full vision
-written down before it is worth designing. The only constraint phases 0–3 must
-respect: the projection is derived from `Resolve`'s output, so nothing below phase
-4 may introduce a second notion of "needs attention". Sketch of what exists today
-so far (`Resolution.Unsettles` on the wire, a setting, sidebar grouping) is
-placeholder only; do not implement against it.
+Phases 0–3 are the groundwork and are judged on colors alone. Phase 4 is now its
+own initiative with a north star of its own —
+[the agent queue vision](../vision/agent-queue.md) — and its first chunk is
+planned in
+[turn ownership and settle](2026-07-26-agent-queue-turn-and-settle.md). Two
+things resolved there overturn sketches left in this document: a finished run
+owes the user a turn immediately, so `IdleStale`/`IdleStaleAfter` are deleted
+rather than consumed, and `needs_review_after_long_run` is retired rather than
+generalized. The constraint this phase kept from phases 0–3 holds: turn ownership
+is derived from `Resolve`'s output, and there is no second notion of "needs
+attention".
 
 ## Decisions
 
@@ -862,6 +866,95 @@ placeholder only; do not implement against it.
   protocol unchanged, and under the attention projection it is settled either way,
   so the extra state would buy only a color distinction. Revisit if a long
   `attn wait-pr` reads as misleadingly active in practice.
+- **…but only until the harness says the agent is parked at its prompt.** The
+  entry above stands for a session that is otherwise quiet; what it missed is
+  that the background-work fact had no way to expire, so the resolver retired it
+  by declaring the session `unknown`/`stuck` ninety seconds later instead of
+  reading the confirmation it already held. Every `unknown` observed on
+  2026-07-27 — ten of them, across three sessions — was this, and in each one the
+  user resumed the turn, not the task.
+  Claude fires the `idle_prompt` notification on a flat prompt-idle timer that
+  reads neither `background_tasks` nor `session_crons`: measured at exactly 60s
+  across seven live background-task cases, and confirmed for a pending cron with
+  a `CronCreate` probe on claude 2.1.220. That is what makes it dependable enough
+  to outrank the guess. `LastBusyAt` spends the confirmation, so a task that does
+  resume the turn takes the session back to `working` on its next title frame.
+  Scoped to the background half: a cron is a promise to return at a known time,
+  which an idle prompt does not contradict, so `scheduled` still wins. A quiet
+  cron-parked session therefore still decays to `unknown` after `StuckAfter` —
+  see the entry below, which closed that gap by a different route than the one
+  guessed at here.
+- **A parked cron is not a state, so it stopped being a clause.** The gap above
+  suggested reading the cron expression and holding `scheduled` until the wakeup
+  was due. That would have been the wrong fix for the wrong problem. The table
+  answers one question — does the agent need the user — and a registered wakeup
+  does not answer it: it is as true of an agent mid-turn as of one waiting on a
+  reply. Reading it as a state produced both observed faults at once. Sitting
+  above the classifier, it painted a turn that *ended by asking the user
+  something* as `scheduled`, which never opens a turn — so the queue silently
+  dropped exactly the sessions most likely to be waiting. And being phrased as a
+  claim that work was outstanding, it inherited the expiry every such claim needs
+  and rotted into `unknown`/`stuck` once the session went quiet, which is to say
+  it diagnosed the schedule working correctly as a fault.
+  `PendingCron` now names the *outcome of a settle* instead: `parked` renames a
+  resolution that asks nothing of anyone, and only that one. A question outranks
+  it wherever the question came from, and nothing about being parked expires,
+  because nothing is claimed to be running. A dead worker is still caught, by the
+  clauses that actually detect one — process exit above, and an open bracket that
+  went silent. The cron expression is not needed and is not read.
+  The same category error had a second home, in `stopIsNonTerminal`: a
+  cron-parked Stop was treated as a yield, so the end-of-turn work — including
+  classification — was skipped entirely. The stated reason (the transcript is not
+  flushed yet) is true of background work and false of a wakeup hours away, and
+  the effect was that a cron-parked session was never asked how its turn ended,
+  which made the clause fix above unreachable from the classifier. Removed;
+  measured live, `scheduled` now lands 7s after the Stop instead of 60.
+- **A parked cron does not excuse the agent from the queue at all.** Victor's
+  call, 2026-07-28, arrived in two steps. First, on seeing the fix land
+  `scheduled` on the same tick as the `idle_prompt` notification: a wakeup on the
+  calendar is a claim about the future and was never a reason to leave the user
+  out of the present — the turn that just ended produced a result nobody has
+  read, and the next run being scheduled does not read it for them. That narrowed
+  `scheduled` to a ~53-second window, which made the remaining question whether it
+  was worth having at all.
+
+  It was not. Suppressing the queue is a user's decision, and attn already has
+  the control that says so: a pinned workspace is excluded at read in
+  `internal/attention.turn.go`, with the turn stamps still accumulating
+  underneath. Inferring the same thing from a cron guesses at intent the user can
+  state directly. So `parked` is gone; `PendingCron` now only names why a settle
+  happened (`cron_pending`), and the settle itself resolves like any other.
+
+  Measured before deciding (isolated claude 2.1.220 session, every hook logged,
+  real cron): a wakeup arrives as an ordinary `UserPromptSubmit` carrying the
+  cron's own prompt, and the turn closes with the usual `Stop`. So the running
+  iteration is `working` for the ordinary reason, and the between-runs state is
+  the only thing this decision governs. The same probe corrected a claim made
+  earlier in this plan: `session_crons` does carry `schedule` (a 5-field
+  local-time expression, already decoded into `sessionCron.Schedule`), so the
+  next fire time *is* computable — see the snooze follow-up.
+
+  `protocol.SessionStateScheduled` is now unreachable from the resolver. It is
+  left defined, and left in `resolverOwnedStates` so a row persisted by an older
+  daemon can still be moved off it.
+- **`StopFailure`, `PreCompact`/`PostCompact`, and `agent_id` are the hooks worth
+  wiring; the rest of the 30 are not.** Surveyed by logging every hook claude
+  fires (2.1.220) over a live session. `StopFailure` is the only report that a
+  turn died on an API error — a rate limit, an expired login, an unpaid bill —
+  and without it that is indistinguishable from a turn that finished quietly,
+  which is the reading that leaves the user waiting on a session that is not
+  coming back; it is filed as a harness edge, so the agent going busy again
+  retires it. `PreCompact`/`PostCompact` bracket work no other source can see:
+  compaction opens no turn and no tool call, and the title frames it paints have
+  gaps wide enough to read as a settle. `agent_id` is empty on the main thread
+  and set on subagent tool events, which is what makes it possible to stop a
+  background subagent's tool completions from reporting on the main thread's turn
+  — they were retiring unanswered approvals.
+  `HeartbeatSettleAfter` stays as the backstop rather than being retired by the
+  compaction hooks: codex has no counterpart, and nothing rules out another
+  source of wide title gaps. The compaction level is a claim that something is
+  running, so it expires like every other one, and a turn going to work clears it
+  in case `PostCompact` is lost.
 - **Done is settled, but goes stale.** An unread idle result unsettles past
   `idleStaleAfter` so work Victor drove is never silently forgotten. Strict
   "always settled" was rejected for that reason.
@@ -914,6 +1007,26 @@ placeholder only; do not implement against it.
   rejected: deriving one from the session's own repaint interval lets a stalling
   agent stretch its own deadline, delaying exactly the detection the heartbeat
   exists to provide.
+- **Settling on heartbeat silence needs its own window, wider than the TTL
+  (`HeartbeatSettleAfter`, 5s).** The entry above is still right that the TTL
+  must stay short, and this is what it missed: the TTL was also being used to
+  decide the opposite question. `heartbeat_settled` fires when no bracket is open
+  and the last busy frame has aged out, so a repaint gap wider than the TTL
+  settled the session and the next frame revived it — a state change every
+  second, indefinitely, with no second fault required.
+  Witnessed live on 2026-07-27: a claude session running `/compact` repaints its
+  title every ~1.92s, and a compaction runs *between* turns, so the previous
+  turn's bracket is already closed and the title is the only evidence left. The
+  session alternated working/idle at 1Hz for the length of the compaction. The
+  cost was not the color — every idle edge opens a turn, so the queue refilled a
+  second after each settle and could not be emptied.
+  The two questions are now sized separately: the TTL for "is it running right
+  now", which precedence needs and which stays at 1.5s, and
+  `HeartbeatSettleAfter` for "has it stopped for good", which must clear the
+  agent's *worst* repaint gap. The latency is paid only where the classifier
+  declined to publish a verdict, since a normal turn end settles on its Stop hook
+  and its verdict. An explicit not-busy frame still settles immediately — the
+  window applies only to a busy frame that has gone quiet.
 - **Approvals depend on hooks, with no fallback.** Victor's call, 2026-07-25. The
   heartbeat structurally cannot corroborate an approval (the agent genuinely is
   not running), which is why the hybrid's residual 27.6s/43.4s worst streaks are
@@ -959,3 +1072,10 @@ placeholder only; do not implement against it.
 - `sessionstate.IdleStale` is tested and has no caller. Whatever acts on "done but
   unread" is where the read-time signal gets defined; until then there is no wire
   for a client to guess the meaning of.
+- Snooze-until-due for scheduled wakeups. `session_crons[].schedule` is a full
+  5-field local-time expression, so the next fire time is computable at Stop: a
+  session could stay out of the queue until its wakeup is due and open a turn only
+  if the wakeup passes without a `UserPromptSubmit` — which is a better signal
+  than any of the current ones, because it means the loop is broken. This belongs
+  with the queue's snooze primitive rather than in the resolver, since it is the
+  same behavior with a different trigger.

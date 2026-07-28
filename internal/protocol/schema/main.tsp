@@ -132,11 +132,12 @@ model Session {
   state_since: string;          // ISO timestamp, always set
   state_updated_at: string;     // ISO timestamp, always set
   state_reason?: string;        // Why the resolver reached this state (e.g. "stuck", "classifier_verdict"); absent for states it does not own
-  needs_review_after_long_run?: boolean; // True when a 5m+ run finished and awaits user visualization
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
   ticket_unread?: boolean;      // True when this session has unread ticket events (drives the incoming-nudge indicator)
   nudge_fires_at?: string;      // ISO timestamp a pending ticket-nudge countdown will fire; absent when paused (active session) or no countdown
+  turn_owed?: boolean;          // True when the user owes this session a turn. Derived at broadcast from the turn stamps plus the queue's exclusions (shell, chief, pinned, muted); never stored, and never recomputed by a client.
+  turn_opened_at?: string;      // ISO timestamp the outstanding turn opened; the queue's sort key. Absent when nothing is owed.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -631,6 +632,34 @@ model HookNotificationMessage {
   id: string;
   notification_type: string;
   message?: string;
+}
+
+// HookStopFailureMessage carries Claude's `StopFailure` hook, which replaces
+// `Stop` when a turn ends on an API error rather than on an answer. Without it
+// an agent that died on a rate limit or an unpaid bill is indistinguishable
+// from one that finished quietly, which is the opposite of the truth: the turn
+// produced nothing and cannot resume until a person does something.
+//
+// error_type is the harness's own classification ("rate_limit", "overloaded",
+// "billing_error", "authentication_failed", …) and error_message is its
+// human-readable form.
+model HookStopFailureMessage {
+  cmd: "hook_stop_failure";
+  id: string;
+  error_type: string;
+  error_message?: string;
+}
+
+// HookCompactionMessage carries Claude's `PreCompact`/`PostCompact` pair, which
+// bracket the agent rewriting its own context. Compaction is work — measured at
+// 26s — but it paints no spinner frames and opens no turn, so between turns it
+// reads as a session that went quiet and settles. active is true on PreCompact
+// and false on PostCompact; trigger is "manual" or "auto".
+model HookCompactionMessage {
+  cmd: "hook_compaction";
+  id: string;
+  active: boolean;
+  trigger?: string;
 }
 
 model SetSessionResumeIDMessage {
@@ -1323,11 +1352,6 @@ model HeartbeatMessage {
   id: string;
 }
 
-model SessionVisualizedMessage {
-  cmd: "session_visualized";
-  id: string;
-}
-
 model SessionSelectedMessage {
   cmd: "session_selected";
   id: string;
@@ -1342,6 +1366,15 @@ model WorkspaceSelectedMessage {
 // the pending ticket doorbell immediately, bypassing the countdown. Fire-and-forget.
 model TriggerNudgeMessage {
   cmd: "trigger_nudge";
+  session_id: string;
+}
+
+// SettleTurnMessage closes the turn a session opened. It is the only way a turn
+// ever ends: no state transition removes a session from the queue, so an agent
+// stays there — running or not — until the user says they are done with it.
+// Fire-and-forget; the daemon broadcasts the session afterwards.
+model SettleTurnMessage {
+  cmd: "settle_turn";
   session_id: string;
 }
 

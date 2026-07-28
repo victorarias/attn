@@ -20,10 +20,6 @@ func (d *Daemon) handleClearWarningsWS() {
 	d.clearWarnings()
 }
 
-func (d *Daemon) handleSessionVisualizedWS(msg *protocol.SessionVisualizedMessage) {
-	d.handleSessionVisualized(msg.ID)
-}
-
 func (d *Daemon) handleUnregisterWS(client *wsClient, msg *protocol.UnregisterMessage) {
 	if d.isChiefOfStaffSession(msg.ID) {
 		d.logf("refusing to unregister chief-of-staff session %s; unset the chief role first", msg.ID)
@@ -123,7 +119,6 @@ func (d *Daemon) clearAllSessions() {
 
 	for sessionID := range sessionIDs {
 		d.terminateSession(sessionID, syscall.SIGTERM)
-		d.clearLongRunTracking(sessionID)
 	}
 	d.store.ClearSessions()
 	d.clearChiefOfStaffIfSession(d.chiefOfStaffSessionID())

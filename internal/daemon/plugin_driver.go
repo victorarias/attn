@@ -377,14 +377,12 @@ func validatePluginReportedStop(params pluginReportStopParams) error {
 }
 
 func (d *Daemon) applyPluginReportedStop(params pluginReportStopParams) {
-	if d.applyPluginReportedState(pluginReportStateParams{
+	d.applyPluginReportedState(pluginReportStateParams{
 		SessionID: params.SessionID,
 		RunID:     params.RunID,
 		Seq:       params.Seq,
 		State:     strings.TrimSpace(params.Verdict),
-	}) {
-		d.clearLongRunTracking(params.SessionID)
-	}
+	})
 }
 
 func (d *Daemon) applyPluginReportedMetadata(params pluginReportMetadataParams) bool {

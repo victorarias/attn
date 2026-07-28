@@ -25,6 +25,46 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-27]
 
+### Added
+- **The agent queue: a list of the turns you owe, at the top of the sidebar.**
+  Off by default; turn it on in Settings > General, or from ⌘K. An agent joins
+  the queue when it wants you — waiting for input, waiting for approval, or in a
+  state attn cannot explain — and the queue is ordered by how long you have owed
+  it, oldest first, across every workspace. The chief of staff sits in its own
+  slot above the list rather than competing with the work it dispatched. An agent
+  that owes you nothing is still right there below, under *Settled*.
+- **Settle (⌘⇧E) is how a turn ends, and the only way it ends.** Prompting an
+  agent does not take it off your list — you sent it back to work, and only you
+  know whether that finished what you owed it. Settling an agent that is still
+  running is the ordinary move: it means "done with this for now", and the agent
+  comes back the next time it wants you. Everything you have not settled is still
+  there after a restart.
+
+### Changed
+- **The focused pane or tile is now marked, not just brightened.** The focused
+  leaf carries an accent ring and an accented header, applied the same way to
+  terminals and docked tiles, so which one has the keyboard is readable at a
+  glance.
+- **An agent that finishes its run joins the queue too.** A run you asked for
+  that ended without a question is still a result nobody has read, so it lands at
+  the bottom of the list. So does an agent you just launched and have not spoken
+  to yet: nothing will happen in it until you type, which makes it a turn you owe
+  like any other.
+
+- **The sidebar in queue mode is now the whole standing order.** *Your turn* is
+  followed by *Settled*, and an agent is drawn in exactly one of them — one row
+  per agent, no workspace groups. Previously the band sat on top of the unchanged
+  workspace tree, so every queued agent appeared twice and looked like it moved
+  when only one of its two copies did. Settling now moves an agent to *Settled*
+  rather than back into a group. Pinned workspaces keep their groups below, which
+  is where a pinned agent lives instead of the queue; muted workspaces are
+  unchanged. Turning the queue off restores the full tree exactly as before.
+- **Pin and mute a workspace from anywhere.** Every queue row has a pin button
+  that takes its workspace out of the queue, and ⌘K can pin or mute the workspace
+  of the agent you are in. Pinning used to be reachable only from a workspace
+  group header, which queue mode no longer draws. The per-session menu — chief of
+  staff, close, reload — is on the queue rows for the same reason.
+
 ### Fixed
 - **The focus ring around a terminal pane is whole again.** On an agent or shell
   pane the accent ring flashed on open and then collapsed to a single line above
@@ -41,12 +81,52 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   land inside. Docked tiles are now first-class focus targets: click one, or
   navigate into it with ⌘⌥arrows, and it becomes the focused leaf — ⌘W closes
   that tile, ⌘⇧Enter zooms it, and the annotation shortcut is armed.
+- **A settled agent no longer comes straight back while it is compacting.** A
+  Claude session running `/compact` repaints its terminal title more slowly than
+  it does mid-turn, and attn read each of those pauses as the turn ending: the
+  session flickered between green and settled once a second, and every one of
+  those flickers put it back in the queue a second after you settled it. attn now
+  waits for the title to stay quiet before calling a turn over, so a pause in the
+  repaint is no longer mistaken for the end of the work.
+- **An agent that ran a background task no longer turns purple while waiting for
+  you.** Anything left running in the background — a build, a watcher, a
+  background shell — kept its agent green after the turn ended, and once that
+  green ran out of evidence the agent went to *unknown* instead of asking for
+  you. It happened to every agent that used a background task, and the agent
+  stayed purple until it next did some work. Claude announces when it is sitting
+  at its prompt waiting for input, and attn now believes that over an
+  unfinished background task, so the agent joins your queue as what it is.
+- **A scheduled wakeup no longer hides an agent from you.** A session parked on a
+  cron or a `/loop` was drawn as *scheduled* no matter how its turn actually
+  ended — attn never even looked at how it ended — so a question it asked on the
+  way to its next run never reached your queue, and the same session turned
+  purple a minute and a half later, as though being quiet between runs were a
+  fault. A wakeup on the calendar says nothing about whether the agent needs you,
+  so it no longer decides anything: an agent that stopped to ask you something is
+  drawn as waiting for you, and one that simply finished joins your queue like
+  any other agent with a result nobody has read. If you want a loop to run
+  without ever being asked about it, pin its workspace — that has always kept a
+  workspace out of the queue, and it says what you mean instead of being inferred
+  from a schedule.
+- **An agent stopped by a rate limit or a billing problem now asks for you.**
+  When Claude's API cuts a turn short, the agent produces nothing and cannot
+  continue until you act. It used to be indistinguishable from an agent that
+  finished and went quiet, so it sat there looking done. It now joins your queue,
+  and the reason — rate limit, expired login, unpaid bill — is on the session.
+- **Compacting no longer flickers an agent between working and finished.** An
+  agent rewriting its context does so silently for half a minute, which read as a
+  finished turn; the agent dropped into your queue and pulled itself back out a
+  moment later. Claude reports when compaction starts and ends, and attn now
+  waits it out.
+- **A background subagent's work no longer clears an approval you have not
+  answered.** Anything an agent ran in the background reported its progress as
+  the main conversation's, so a tool finishing back there wiped out the
+  permission prompt sitting in front of you and drew the agent as busy.
 
-### Changed
-- **The focused pane or tile is now marked, not just brightened.** The focused
-  leaf carries an accent ring and an accented header, applied the same way to
-  terminals and docked tiles, so which one has the keyboard is readable at a
-  glance.
+### Removed
+- **The long-run review gate is gone.** Runs over five minutes used to hold their
+  final color back until you looked at the session. A finished run now publishes
+  what it actually is straight away, and the queue is what carries it to you.
 
 ---
 

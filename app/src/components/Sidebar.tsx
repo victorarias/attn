@@ -8,12 +8,14 @@ import { SessionActionsPopover } from './SessionActionsPopover';
 import { GridLayoutControl } from './grid/GridLayoutControl';
 import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
+import { QueueBands } from './QueueBands';
 import { SidebarNudgeBar, deriveNudgeMode } from './NudgeIndicator';
 import { formatShortcut } from '../shortcuts';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
 import { tileContentKey, type TileContentState, type TileLeaf } from '../types/workspace';
 import { deriveTileTitle } from '../utils/tilePresentation';
 import type { WorkspaceWithSessions } from '../utils/workspaceViewModels';
+import type { QueueBands as QueueBandsModel } from '../utils/queueBands';
 import type { WorkspaceSelectionStyle } from '../utils/workspaceSelectionStyle';
 
 interface LocalSession {
@@ -32,6 +34,8 @@ interface LocalSession {
   ticketUnread?: boolean;
   nudgeFiresAt?: string;
   state_reason?: string;
+  turnOwed?: boolean;
+  turnOpenedAt?: string;
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
@@ -130,6 +134,11 @@ interface SidebarProps {
   dockItems?: DockItem[];
   dockCollapsed?: boolean;
   onToggleDockCollapsed?: () => void;
+  // The queue arrangement's bands, or null when the arrangement is off. While it
+  // is on the tree below is reduced to what the bands exclude: pinned and
+  // tile-only workspaces.
+  queue?: QueueBandsModel<LocalSession> | null;
+  onSettleTurn?: (id: string) => void;
   mutedWorkspaces?: SidebarWorkspace[];
   mutedExpanded?: boolean;
   onMutedExpandedChange?: (expanded: boolean) => void;
@@ -320,6 +329,8 @@ export function Sidebar({
   dockItems = [],
   dockCollapsed = false,
   onToggleDockCollapsed,
+  queue = null,
+  onSettleTurn,
   mutedWorkspaces = [],
   mutedExpanded: mutedExpandedProp,
   onMutedExpandedChange,
@@ -353,6 +364,13 @@ export function Sidebar({
   onGoToDashboard,
   onToggleCollapse,
 }: SidebarProps) {
+  // Each arrangement has one notion of what wants the user, and the mode selects
+  // it: the daemon's turn_owed while the queue is on (it honours settle and the
+  // exclusions), the state predicate while it is off.
+  const sessionWantsAttention = (session: LocalSession) => (
+    queue ? Boolean(session.turnOwed) : isAttentionSessionState(session.state)
+  );
+
   const [mutedExpandedLocal, setMutedExpandedLocal] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [displayMode, setDisplayMode] = useState<'open' | 'tight' | 'boxed'>('boxed');
@@ -379,8 +397,10 @@ export function Sidebar({
     const rect = event.currentTarget.getBoundingClientRect();
     setRenameTarget({ kind, id, name, anchor: { top: rect.bottom + 4, left: rect.left } });
   };
+  // Takes the fields it reads rather than a whole LocalSession, so the queue
+  // rows — which carry a narrower session view — can open the same menu.
   const openSessionActions = (
-    session: LocalSession,
+    session: { id: string; label: string; chiefOfStaff?: boolean },
     event: ReactMouseEvent,
   ) => {
     event.stopPropagation();
@@ -398,8 +418,34 @@ export function Sidebar({
     onMutedExpandedChange?.(v);
   };
 
+  // The chief holds its anchored slot whatever its workspace is, so a workspace
+  // that survives in the tree — pinned, or muted — must not draw it a second
+  // time. This is the one session the bands claim from a workspace they
+  // otherwise leave alone.
+  const withoutChiefRow = (workspace: SidebarWorkspace): SidebarWorkspace => {
+    if (!queue || !workspace.sessions.some((session) => session.chiefOfStaff)) {
+      return workspace;
+    }
+    return {
+      ...workspace,
+      sessions: workspace.sessions.filter((session) => !session.chiefOfStaff),
+      children: workspace.children.filter((child) => child.kind === 'tile' || !child.session.chiefOfStaff),
+    };
+  };
+
   const isWorkspaceVisible = (workspace: SidebarWorkspace) => workspace.pinned || !isSessionless(workspace) || showSessionless;
-  const visibleWorkspaces = workspaces.filter(isWorkspaceVisible);
+  // Queue mode renders every ordinary agent as a flat row in a band, so drawing
+  // its workspace group as well would show the same agent twice and make it look
+  // like a row moved when only one of the two copies did. What is left in the
+  // tree is what the bands deliberately exclude: pinned workspaces, and — when
+  // the toggle asks for them — tile-only ones, which have no agent and so no row
+  // anywhere else.
+  const isTreeWorkspace = (workspace: SidebarWorkspace) => (
+    !queue || workspace.pinned || isSessionless(workspace)
+  );
+  const visibleWorkspaces = workspaces
+    .map(withoutChiefRow)
+    .filter((workspace) => isWorkspaceVisible(workspace) && isTreeWorkspace(workspace));
   const visibleVisualOrder = visualOrder.filter(isWorkspaceVisible);
   const visibleVisualIndexByWorkspaceId = new Map(
     visibleVisualOrder.map((workspace, index) => [workspace.id, index]),
@@ -787,7 +833,7 @@ export function Sidebar({
               title={`${workspace.title} (⌘${visualIndexOfWorkspace(workspace.id) + 1})`}
             >
               ▸
-              {workspace.sessions.some((session) => isAttentionSessionState(session.state)) && (
+              {workspace.sessions.some(sessionWantsAttention) && (
                 <span className={`mini-badge ${workspace.status === 'pending_approval' ? 'pending' : ''} ${workspace.status === 'unknown' ? 'unknown' : ''}`} />
               )}
             </button>
@@ -895,6 +941,17 @@ export function Sidebar({
           </div>
         </div>
       </div>
+
+      {queue && (
+        <QueueBands
+          bands={queue}
+          selectedId={selectedId}
+          onSelectSession={onSelectSession}
+          onSettleTurn={(id) => onSettleTurn?.(id)}
+          onPinWorkspace={onPinWorkspace}
+          onOpenActions={openSessionActions}
+        />
+      )}
 
       <div className={`session-list ${reorderDrag ? 'session-list--reordering' : ''}`.trim()}>
         {visibleWorkspaces.map((workspace) => {
@@ -1116,7 +1173,7 @@ export function Sidebar({
           </button>
           {mutedExpanded && (
             <div className="muted-sessions-list">
-              {mutedWorkspaces.map((workspace) => (
+              {mutedWorkspaces.map(withoutChiefRow).map((workspace) => (
                 <div
                   key={`${workspace.endpointId || 'local'}:${workspace.id}`}
                   className={`workspace-group muted-workspace ${selectedWorkspaceId === workspace.id ? 'selected' : ''}${workspaceDragClass(workspace)}`}

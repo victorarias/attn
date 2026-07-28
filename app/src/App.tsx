@@ -59,7 +59,7 @@ import {
 import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo, type FsIndexResult, type NotebookEntry } from './hooks/useDaemonSocket';
 import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
-import { isAttentionSessionState, normalizeSessionState } from './types/sessionState';
+import { isAttentionSessionState, normalizeSessionState, type UISessionState } from './types/sessionState';
 import { GridView, type GridSessionTile } from './components/grid/GridView';
 import {
   type GridLayout,
@@ -95,6 +95,7 @@ import {
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
 import { boundTicketForSession } from './utils/tickets';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
+import { buildQueueBands, isQueueModeEnabled, QUEUE_MODE_SETTING } from './utils/queueBands';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import { hideBootSplash } from './utils/bootSplash';
 import { getTerminalTheme } from './utils/terminalSizing';
@@ -649,8 +650,8 @@ function App() {
     sendUnsubscribeGitStatus,
     sendSessionSelected,
     sendTriggerNudge,
+    sendSettleTurn,
     sendWorkspaceSelected,
-    sendSessionVisualized,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
     sendWorkspaceSetSplitRatio,
@@ -868,8 +869,8 @@ function App() {
         sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
         sendSessionSelected={sendSessionSelected}
         sendTriggerNudge={sendTriggerNudge}
+        sendSettleTurn={sendSettleTurn}
         sendWorkspaceSelected={sendWorkspaceSelected}
-        sendSessionVisualized={sendSessionVisualized}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
         sendWorkspaceClosePane={sendWorkspaceClosePane}
         sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
@@ -994,8 +995,8 @@ interface AppContentProps {
   sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
   sendSessionSelected: ReturnType<typeof useDaemonSocket>['sendSessionSelected'];
   sendTriggerNudge: ReturnType<typeof useDaemonSocket>['sendTriggerNudge'];
+  sendSettleTurn: ReturnType<typeof useDaemonSocket>['sendSettleTurn'];
   sendWorkspaceSelected: ReturnType<typeof useDaemonSocket>['sendWorkspaceSelected'];
-  sendSessionVisualized: ReturnType<typeof useDaemonSocket>['sendSessionVisualized'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
   sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
   sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
@@ -1114,8 +1115,8 @@ sendFetchPRDetails,
   sendUnsubscribeGitStatus,
   sendSessionSelected,
   sendTriggerNudge,
+  sendSettleTurn,
   sendWorkspaceSelected,
-  sendSessionVisualized,
   sendWorkspaceAddSessionPane,
   sendWorkspaceClosePane,
   sendWorkspaceSetSplitRatio,
@@ -1492,6 +1493,8 @@ sendFetchPRDetails,
       delegatedFromChief: daemonSession?.delegated_from_chief ?? false,
       ticketUnread: daemonSession?.ticket_unread ?? false,
       nudgeFiresAt: daemonSession?.nudge_fires_at,
+      turnOwed: daemonSession?.turn_owed ?? false,
+      turnOpenedAt: daemonSession?.turn_opened_at,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
       state_reason: paneState ? undefined : daemonSession?.state_reason,
@@ -1566,11 +1569,6 @@ sendFetchPRDetails,
   );
   const dockPanelCloseTimersRef = useRef<Partial<Record<DockPanelId, number>>>({});
   const gitStatusSubscribedDirRef = useRef<string | null>(null);
-  const activeSessionVisibleSinceRef = useRef<{ id: string; at: number } | null>(null);
-  const pendingSessionVisualizedRef = useRef<{ key: string | null; timeoutId: number | null }>({
-    key: null,
-    timeoutId: null,
-  });
 
   // When activeSessionId changes, update view
   useEffect(() => {
@@ -1590,70 +1588,6 @@ sendFetchPRDetails,
       sendSessionSelected(activeSessionId);
     }
   }, [activeSessionId, sendSessionSelected, view]);
-
-  // Track when the currently-selected session became visible.
-  useEffect(() => {
-    if (view !== 'session' || !activeSessionId) {
-      activeSessionVisibleSinceRef.current = null;
-      return;
-    }
-    const current = activeSessionVisibleSinceRef.current;
-    if (!current || current.id !== activeSessionId) {
-      activeSessionVisibleSinceRef.current = { id: activeSessionId, at: Date.now() };
-    }
-  }, [activeSessionId, view]);
-
-  // For long runs, defer classification until the user has visualized the session long enough.
-  useEffect(() => {
-    const tracker = pendingSessionVisualizedRef.current;
-    const activeSession =
-      view === 'session' && activeSessionId
-        ? daemonSessions.find((session) => session.id === activeSessionId)
-        : undefined;
-    const needsReview = Boolean(activeSession?.needs_review_after_long_run);
-    const key = needsReview && activeSession ? `${activeSession.id}:${activeSession.state_updated_at}` : null;
-
-    if (tracker.key === key) {
-      return;
-    }
-
-    if (tracker.timeoutId !== null) {
-      clearTimeout(tracker.timeoutId);
-      tracker.timeoutId = null;
-    }
-    tracker.key = key;
-
-    if (!activeSession || !needsReview || !key) {
-      return;
-    }
-
-    let delayMs = 5000;
-    const visibleSince = activeSessionVisibleSinceRef.current;
-    const stateUpdatedAtMs = Date.parse(activeSession.state_updated_at);
-    const userAlreadyViewingWhenFinished =
-      visibleSince?.id === activeSession.id &&
-      Number.isFinite(stateUpdatedAtMs) &&
-      visibleSince.at <= stateUpdatedAtMs;
-    if (userAlreadyViewingWhenFinished) {
-      delayMs = 0;
-    }
-
-    tracker.timeoutId = window.setTimeout(() => {
-      sendSessionVisualized(activeSession.id);
-      tracker.timeoutId = null;
-    }, delayMs);
-  }, [activeSessionId, daemonSessions, sendSessionVisualized, view]);
-
-  useEffect(() => {
-    return () => {
-      const tracker = pendingSessionVisualizedRef.current;
-      if (tracker.timeoutId !== null) {
-        clearTimeout(tracker.timeoutId);
-        tracker.timeoutId = null;
-      }
-      tracker.key = null;
-    };
-  }, []);
 
   // Subscribe to git status for active session
   useEffect(() => {
@@ -2151,6 +2085,18 @@ sendFetchPRDetails,
       run: () => openBoardSurface(),
     },
     {
+      // Settings is the right home for a setting and the wrong home for something
+      // flipped ten times a day — and while the arrangement is being evaluated,
+      // flipping it back and forth is the evaluation. Both entries write the same
+      // setting, so they can never disagree.
+      id: 'toggle-queue-mode',
+      title: isQueueModeEnabled(settings) ? 'Turn off the agent queue' : 'Turn on the agent queue',
+      description: 'Show the turns you owe above the workspace tree',
+      keywords: ['queue', 'turn', 'settle', 'attention', 'sidebar'],
+      icon: <AttentionActionIcon />,
+      run: () => sendSetSetting(QUEUE_MODE_SETTING, isQueueModeEnabled(settings) ? 'false' : 'true'),
+    },
+    {
       id: 'customize-shortcuts',
       title: 'Customize keyboard shortcuts',
       description: 'Rebind shortcuts and restore defaults',
@@ -2158,7 +2104,7 @@ sendFetchPRDetails,
       icon: <KeyboardActionIcon />,
       run: () => setShortcutEditorOpen(true),
     },
-  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openBoardSurface]);
+  ], [openDockPanel, openWorkspaceContextNavigator, handleOpenNotebookTile, openBoardSurface, settings, sendSetSetting]);
 
   const handleToggleActionMenu = useCallback(() => {
     if (actionMenuOpen) {
@@ -2809,6 +2755,71 @@ sendFetchPRDetails,
     [unmutedWorkspaceViews],
   );
 
+  // The sidebar arrangement in effect. The daemon stamps turns and broadcasts
+  // turn_owed either way; this only selects what the sidebar draws and which
+  // notion of "wants me" the attention surfaces follow.
+  const queueModeEnabled = isQueueModeEnabled(settings);
+  const queueBands = useMemo(
+    () => (queueModeEnabled ? buildQueueBands(unmutedWorkspaceViews) : null),
+    [queueModeEnabled, unmutedWorkspaceViews],
+  );
+
+  // The workspace the pin/mute commands act on: the one holding the agent you
+  // are looking at, since that is what "this workspace" means from inside a
+  // session. Muted workspaces are searched too — unmuting has to be reachable
+  // from the thing it was applied to.
+  const activeWorkspaceForCommands = useMemo(
+    () => workspaceViews.find((workspace) => workspace.sessions.some((session) => session.id === activeSessionId)) ?? null,
+    [workspaceViews, activeSessionId],
+  );
+
+  // Pin and mute reach the command menu because the workspace group header, the
+  // only other place that offers them, is not drawn for ordinary workspaces
+  // while the queue is on. Pinning is how an agent leaves the queue for good, so
+  // without an entry here turning the queue on would be a one-way door. They are
+  // appended rather than declared with the rest because they need the workspace
+  // views, which are built further down.
+  const actionMenuItemsWithWorkspaceActions = useMemo<ActionMenuItem[]>(() => {
+    const workspace = activeWorkspaceForCommands;
+    if (!workspace) return actionMenuItems;
+    return [
+      ...actionMenuItems,
+      {
+        id: 'pin-active-workspace',
+        title: workspace.pinned ? `Unpin ${workspace.title}` : `Pin ${workspace.title}`,
+        description: workspace.pinned
+          ? 'Put this workspace back in the queue'
+          : 'Take this workspace out of the queue and keep it in view',
+        keywords: ['pin', 'unpin', 'workspace', 'queue'],
+        icon: <AttentionActionIcon />,
+        run: () => sendPinWorkspace(workspace.id, !workspace.pinned),
+      },
+      {
+        id: 'mute-active-workspace',
+        title: workspace.muted ? `Unmute ${workspace.title}` : `Mute ${workspace.title}`,
+        description: workspace.muted
+          ? 'Let this workspace ask for you again'
+          : 'Nothing from this workspace reaches you',
+        keywords: ['mute', 'unmute', 'workspace', 'silence'],
+        icon: <AttentionActionIcon />,
+        // mute_workspace toggles; the title is what says which way it will go.
+        run: () => sendMuteWorkspace(workspace.id, workspace.endpointId),
+      },
+    ];
+  }, [actionMenuItems, activeWorkspaceForCommands, sendPinWorkspace, sendMuteWorkspace]);
+
+  // Each arrangement has one notion of what wants the user, and the mode selects
+  // it. In the queue arrangement that is the daemon's turn_owed — which honours
+  // settle, and the shell/chief/pinned/muted exclusions a client cannot see. With
+  // the queue off it stays the state predicate, so pinned agents keep their badge
+  // in the arrangement where pinning means kept in view.
+  const wantsAttention = useCallback(
+    (session: { state: UISessionState; turnOwed?: boolean }) => (
+      queueModeEnabled ? Boolean(session.turnOwed) : isAttentionSessionState(session.state)
+    ),
+    [queueModeEnabled],
+  );
+
   // Global grid tiles: one per live agent pane across all (unmuted) workspaces,
   // keyed by the PTY runtimeId that grid mode feeds from / routes input to.
   const gridSessionTiles = useMemo<GridSessionTile[]>(() => {
@@ -2822,11 +2833,11 @@ sendFetchPRDetails,
         sessionId: s.id,
         title: pane.title,
         state,
-        attention: isAttentionSessionState(state),
+        attention: wantsAttention(s),
       });
     }
     return result;
-  }, [unmutedEnrichedSessions]);
+  }, [unmutedEnrichedSessions, wantsAttention]);
 
   // Grid shape: a manual rows×cols picked from the sidebar square-picker, or Auto
   // (a near-square that fits every tile — today's default). Persists across
@@ -2886,20 +2897,30 @@ sendFetchPRDetails,
   const gridOffBoardCount = gridMembers.length - visibleGridTiles.length;
 
   // Calculate attention count for drawer badge (muted workspaces excluded)
-  const waitingLocalSessions = unmutedEnrichedSessions
-    .filter((s) => isAttentionSessionState(s.state));
+  const waitingLocalSessions = unmutedEnrichedSessions.filter(wantsAttention);
   const { needsAttention: prsNeedingAttention } = usePRsNeedingAttention(prs);
   const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
+  // Settle the selected session's turn. Undefined while the queue arrangement is
+  // off so the shortcut is not registered at all.
+  const handleSettleActiveTurn = useMemo(
+    () => (queueModeEnabled
+      ? () => {
+        if (activeSessionId) {
+          sendSettleTurn(activeSessionId);
+        }
+      }
+      : undefined),
+    [queueModeEnabled, activeSessionId, sendSettleTurn],
+  );
+
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
-    const waiting = unmutedEnrichedSessions.find((s) =>
-      isAttentionSessionState(s.state)
-    );
+    const waiting = unmutedEnrichedSessions.find(wantsAttention);
     if (waiting) {
       handleSelectSession(waiting.id);
     }
-  }, [unmutedEnrichedSessions, handleSelectSession]);
+  }, [unmutedEnrichedSessions, handleSelectSession, wantsAttention]);
 
   // Sessionless (tile-only) workspaces are revealed via the sidebar display
   // popover; the preference is the single source of truth for every derived list
@@ -3534,6 +3555,7 @@ sendFetchPRDetails,
     onGoToDashboard: goToDashboard,
     onToggleGridMode: toggleGridMode,
     onJumpToWaiting: handleJumpToWaiting,
+    onSettleTurn: handleSettleActiveTurn,
     onSelectWorkspaceByIndex: handleSelectWorkspaceByIndex,
     onPrevSession: handlePrevWorkspace,
     onNextSession: handleNextWorkspace,
@@ -3731,6 +3753,8 @@ sendFetchPRDetails,
           onSessionDragStart={handleLeafDragStart}
           onSessionDragEnd={handleLeafDragEnd}
           onWorkspaceReorder={handleWorkspaceReorder}
+          queue={queueBands}
+          onSettleTurn={sendSettleTurn}
           onSelectSession={handleSelectSession}
           onTriggerNudge={sendTriggerNudge}
           onSelectWorkspace={handleSelectWorkspace}
@@ -4116,7 +4140,7 @@ sendFetchPRDetails,
       )}
       <ActionMenu
         isOpen={actionMenuOpen}
-        actions={actionMenuItems}
+        actions={actionMenuItemsWithWorkspaceActions}
         onClose={() => setActionMenuOpen(false)}
       />
       <ShortcutsModal

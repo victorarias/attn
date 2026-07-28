@@ -1832,6 +1832,40 @@ export function useUiAutomationBridge({
         });
         return session ? serializeSession(session, getActivePaneIdForSession) : null;
       }
+      case 'queue_get_state': {
+        // Read the rendered band, not the model behind it: ordering, membership,
+        // and the live state dot are the whole claim of the queue arrangement,
+        // and only the DOM can testify that what the user sees matches it.
+        const band = document.querySelector('[data-testid="sidebar-queue"]');
+        const readRow = (row: Element, prefix: string) => ({
+          id: (row.getAttribute('data-testid') || '').slice(prefix.length),
+          label: row.querySelector('.session-label')?.textContent?.trim() || '',
+          state: row.getAttribute('data-state') || '',
+          workspace: row.querySelector('.queue-row-workspace')?.textContent?.trim() || '',
+          workspaceId: row.getAttribute('data-workspace-id') || '',
+          age: row.querySelector('.queue-row-age')?.textContent?.trim() || '',
+          selected: row.classList.contains('selected'),
+        });
+        const chiefRow = band?.querySelector('[data-testid^="queue-chief-"]');
+        return {
+          present: Boolean(band),
+          empty: Boolean(band?.querySelector('[data-testid="queue-empty"]')),
+          chief: chiefRow ? readRow(chiefRow, 'queue-chief-') : null,
+          turns: Array.from(band?.querySelectorAll('[data-testid^="queue-turn-"]') || [])
+            .map((row) => readRow(row, 'queue-turn-')),
+          settled: Array.from(band?.querySelectorAll('[data-testid^="queue-settled-"]') || [])
+            .map((row) => readRow(row, 'queue-settled-')),
+          // What is left of the tree while the queue is on: pinned and tile-only
+          // workspaces. An agent in a band must not also be here — appearing
+          // twice is what made a row look like it moved.
+          treeSessionIds: Array.from(document.querySelectorAll('.session-list [data-testid^="sidebar-session-"]'))
+            .map((row) => (row.getAttribute('data-testid') || '').slice('sidebar-session-'.length)),
+          // The groups themselves, which is what lets a caller tell "this group
+          // does not draw that agent" apart from "this group is not drawn yet".
+          treeWorkspaceIds: Array.from(document.querySelectorAll('.session-list [data-testid^="sidebar-workspace-"]'))
+            .map((group) => (group.getAttribute('data-testid') || '').slice('sidebar-workspace-'.length)),
+        };
+      }
       case 'chief_of_staff_get_state':
         return {
           sessions: sessions.map((session) => {
