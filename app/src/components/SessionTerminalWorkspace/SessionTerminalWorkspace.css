@@ -100,10 +100,6 @@
   opacity: 1;
 }
 
-.workspace-pane.workspace-pane--tile {
-  opacity: 1;
-}
-
 /* The selected-leaf treatment applies only when there is another visible leaf
    to disambiguate. Edge rail is the default: one strong edge without boxing in
    terminal or document content. The overlay sits above pane-local overlays but
@@ -123,15 +119,12 @@
   color: var(--color-text-primary);
 }
 
-/* Spotlight uses contrast plus static depth and corner marks. Selection changes
-   animate opacity only, which compositors can handle without repainting pane
-   contents. The shadow and marks never animate; filters, backdrop blur, and
-   permanent will-change layers are intentionally avoided to keep WebGL terminal
-   GPU memory stable. */
-.session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane {
-  opacity: 0.76;
-}
-
+/* Spotlight adds static depth and corner marks while preserving the same
+   selected/unselected opacity contrast as the rail. Selection changes animate
+   opacity only, which compositors can handle without repainting pane contents.
+   The shadow and marks never animate; filters, backdrop blur, and permanent
+   will-change layers are intentionally avoided to keep WebGL terminal GPU
+   memory stable. */
 .session-terminal-workspace.workspace-selection--spotlight.multi-leaf .workspace-pane.active {
   z-index: 4;
   opacity: 1;
