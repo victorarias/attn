@@ -8,7 +8,37 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-29]
 
+### Added
+- **Auto-settle: turns you have already dealt with can close themselves.** Off by
+  default; turn it on in Settings > General, or from ⌘K. When a session that owes
+  you a turn goes back to work — which is what happens after you steer an agent —
+  attn waits 30 seconds, then runs a 15-second countdown and settles the turn for
+  you. Settling this way is identical to pressing ⌘⇧E yourself, and it never
+  changes which session you have selected.
+- **The countdown is visible wherever the session is.** Its terminal tile grows a
+  "Settling…" chip with a draining bar; a session with no tile on screen shows a
+  violet bar on its sidebar row instead, so a turn is never closed silently. The
+  bar drains right-to-left in violet against the nudge countdown's left-to-right
+  sky blue, so the two never read as the same event.
+- **⌘. keeps the turn.** Press it, or click the chip, and the countdown stops and
+  the turn stays yours. It will not re-arm while the agent keeps working; steering
+  the agent again starts a fresh one. Anything that takes the session out of
+  `working` cancels the countdown too.
+- **Both delays are configurable.** Settings > General takes the wait before the
+  countdown starts (5–3600s) and the countdown's own length (3–600s)
+  independently.
+
 ### Changed
+- **Creating a worktree is the first thing the repo chooser offers.** After
+  picking a repository, the new-worktree form now sits at the top of the
+  chooser, already expanded, with a generated name such as `frosty-newt`
+  pre-filled and "start from origin/&lt;default branch&gt;" preselected — so a fresh
+  worktree off the latest upstream costs a single Enter. The name is selected on
+  arrival, so typing replaces it, and the ⟳ button (or ⌃R) draws another one.
+  Existing worktrees moved below the form under "Open existing"; ↓ steps into
+  that list, where Enter, D, R, and the number shortcuts behave as before.
+  Choosing a path that resolves to a specific worktree still lands on that
+  worktree, so Enter opens it rather than creating something new.
 - **Every delegation is now tracked as a ticket.** Delegating from any session —
   not just the chief of staff — opens a ticket bound to the new agent, with the
   brief as its description, and tells that agent to report its work state onto
@@ -39,6 +69,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   keystrokes per agent. With nothing left to go to, the selection stays where it
   is. The shortcut is still bound only while the queue arrangement is on, and a
   row's own settle button still settles just that row without moving you.
+- **The agent queue is switched on from the sidebar itself.** The toggle moved
+  out of Settings into the sidebar's display popover — the slider icon beside the
+  "+" in the Workspaces header — where it sits above Display, Tile focus, and
+  Tile-only workspaces. ⌘K still turns it on and off and always agrees with the
+  switch.
 - **Delegated Git work starts isolated by default.** `attn delegate` now creates
   a new worktree automatically when its target is in a Git repository, including
   for read-only and discussion work. Use `--no-worktree` to deliberately continue

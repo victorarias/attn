@@ -49,9 +49,21 @@ const (
 	// native auto-approve mode (Claude `--permission-mode auto`, Codex
 	// `approvals_reviewer=auto_review`) so they can run unattended without
 	// stalling on permission gates. Off by default. Yolo overrides it.
-	SettingAutoApproveEnabled   = "auto_approve_enabled"
-	SettingKeybindingsConfig    = "keybindings_config"
-	SettingNewSessionYoloPrefix = "new_session_yolo_"
+	SettingAutoApproveEnabled = "auto_approve_enabled"
+	// SettingAutoSettleEnabled turns on closing a turn for the user once they
+	// have steered the agent and it has gone back to work. Off by default: it
+	// mutates state nobody asked it to, so it ships opt-in like the queue itself.
+	SettingAutoSettleEnabled = "auto_settle_enabled"
+	// SettingAutoSettleArmSeconds is how long a session must hold `working`
+	// before the visible countdown starts — the delay that proves the steering
+	// took. Empty/unset => defaultAutoSettleArmSeconds.
+	SettingAutoSettleArmSeconds = "auto_settle_arm_seconds"
+	// SettingAutoSettleCountdownSeconds is how long the countdown on the terminal
+	// tile runs before the turn is settled — the window the user has to cancel.
+	// Empty/unset => defaultAutoSettleCountdownSeconds.
+	SettingAutoSettleCountdownSeconds = "auto_settle_countdown_seconds"
+	SettingKeybindingsConfig          = "keybindings_config"
+	SettingNewSessionYoloPrefix       = "new_session_yolo_"
 	// SettingChiefModelPrefix + agent (e.g. "chief_model_claude") pins the model a
 	// chief-of-staff launch uses, passed through as --model. Empty/unset => the
 	// agent's own default model. Only consulted for chief launches.
@@ -156,6 +168,17 @@ func (d *Daemon) handleSetSettingWS(client *wsClient, msg *protocol.SetSettingMe
 	}
 	if msg.Key == SettingHeadlessContextWindowCap {
 		d.applyHeadlessContextWindowCap()
+	}
+	// Turning auto-settle off must stop a countdown already on screen rather than
+	// let it run out; turning it on has to reach the sessions already working,
+	// since there is no state transition coming to arm them. Both windows are
+	// re-read per arm, so a duration change needs neither.
+	if msg.Key == SettingAutoSettleEnabled {
+		if parseBooleanSetting(msg.Value) {
+			d.armAutoSettleForRunningSessions()
+		} else {
+			d.cancelAllAutoSettle()
+		}
 	}
 	d.broadcastSettings(msg.Key)
 }
@@ -284,6 +307,11 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	settings[SettingWorkflowsEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingWorkflowsEnabled]))
 	settings[SettingQueueModeEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingQueueModeEnabled]))
 	settings[SettingAutoApproveEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingAutoApproveEnabled]))
+	// Surface the EFFECTIVE auto-settle policy so the UI shows the concrete
+	// defaults (off, 30s, 15s) rather than absent keys it would have to guess at.
+	settings[SettingAutoSettleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingAutoSettleEnabled]))
+	settings[SettingAutoSettleArmSeconds] = strconv.Itoa(int(resolveAutoSettleSeconds(stored[SettingAutoSettleArmSeconds], defaultAutoSettleArmSeconds) / time.Second))
+	settings[SettingAutoSettleCountdownSeconds] = strconv.Itoa(int(resolveAutoSettleSeconds(stored[SettingAutoSettleCountdownSeconds], defaultAutoSettleCountdownSeconds) / time.Second))
 	// Normalize the keeper master switch to its EFFECTIVE value so the UI toggle
 	// reflects the default-ON semantics (blank/unset => "true") rather than an
 	// absent key the frontend would read as off.
@@ -435,8 +463,12 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingQueueModeEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled:
 		return validateBooleanSetting(value)
+	case SettingAutoSettleArmSeconds:
+		return validateAutoSettleSeconds("auto-settle delay", value, autoSettleArmMinSeconds, autoSettleArmMaxSeconds)
+	case SettingAutoSettleCountdownSeconds:
+		return validateAutoSettleSeconds("auto-settle countdown", value, autoSettleCountdownMinSeconds, autoSettleCountdownMaxSeconds)
 	case SettingChiefContextWindowCap, SettingHeadlessContextWindowCap:
 		return validateContextWindowCap(value)
 	case SettingKeeperCompact:
@@ -483,6 +515,24 @@ func (d *Daemon) validateSetting(key, value string) error {
 		}
 		return fmt.Errorf("unknown setting: %s", key)
 	}
+}
+
+// validateAutoSettleSeconds accepts an empty value (meaning the built-in default)
+// or a whole number of seconds inside the bounds. label names which of the two
+// windows failed, since the two settings sit side by side in the UI.
+func validateAutoSettleSeconds(label, value string, minSeconds, maxSeconds int) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return fmt.Errorf("%s must be a whole number of seconds: %s", label, value)
+	}
+	if n < minSeconds || n > maxSeconds {
+		return fmt.Errorf("%s must be between %d and %d seconds", label, minSeconds, maxSeconds)
+	}
+	return nil
 }
 
 func validateBooleanSetting(value string) error {

@@ -828,6 +828,13 @@
   font-size: var(--font-size-xs);
 }
 
+/* The lead row sits above the first section label, so it carries its spacing
+   below instead of above. */
+.sidebar-settings-switch-row--lead {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
 .sidebar-settings-switch-row:hover {
   color: var(--color-text-primary);
 }

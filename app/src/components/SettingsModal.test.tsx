@@ -384,7 +384,9 @@ describe('SettingsModal', () => {
     expect(screen.getByText(/does not register a second tailnet device/i)).toBeInTheDocument();
   });
 
-  it('toggles the agent queue from General', async () => {
+  // The queue switch moved to the sidebar's display popover, where the rest of
+  // the sidebar arrangement lives. Settings must not offer a second one.
+  it('does not carry an agent-queue toggle', async () => {
     const onSetSetting = vi.fn();
     const props = (queueMode: string) => ({
       isOpen: true as const,
@@ -411,19 +413,13 @@ describe('SettingsModal', () => {
       onSetTheme: vi.fn(),
     });
 
-    const { rerender } = render(<SettingsModal {...props('false')} />);
+    render(<SettingsModal {...props('false')} />);
     fireEvent.click(screen.getByTestId('settings-nav-general'));
-    const toggle = await screen.findByTestId('settings-queue-toggle');
-    expect(toggle).toHaveTextContent('Enable');
-    fireEvent.click(toggle);
-    expect(onSetSetting).toHaveBeenCalledWith('queue_mode_enabled', 'true');
+    await screen.findByTestId('settings-projects-directory-input');
 
-    rerender(<SettingsModal {...props('true')} />);
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
-    const toggleOn = await screen.findByTestId('settings-queue-toggle');
-    expect(toggleOn).toHaveTextContent('Disable');
-    fireEvent.click(toggleOn);
-    expect(onSetSetting).toHaveBeenCalledWith('queue_mode_enabled', 'false');
+    expect(screen.queryByTestId('settings-queue-toggle')).toBeNull();
+    expect(screen.queryByText('Agent queue')).toBeNull();
+    expect(onSetSetting).not.toHaveBeenCalled();
   });
 
   it('enables workflows when off and disables them when on', async () => {
@@ -1362,4 +1358,65 @@ describe('SettingsModal automation handle', () => {
       /unknown settings section "nonexistent"/,
     );
   });
+
+  /**
+   * The modal mounts before the daemon's settings broadcast arrives, so the
+   * auto-settle drafts initialise from the built-in 30/15 defaults. If they are
+   * not resynced when the real settings land, a saved policy is displayed wrong
+   * and — because both fields commit on blur — writing that stale display back
+   * silently replaces the user's policy with the defaults.
+   */
+  it('hydrates the auto-settle fields when settings arrive after mount', async () => {
+    const onSetSetting = vi.fn();
+    const props = {
+      isOpen: true as const,
+      onClose: vi.fn(),
+      mutedRepos: [],
+      githubHosts: [],
+      onUnmuteRepo: vi.fn(),
+      mutedAuthors: [],
+      onUnmuteAuthor: vi.fn(),
+      endpoints: [],
+      plugins: [],
+      pluginIssues: [],
+      onAddEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onUpdateEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onRemoveEndpoint: vi.fn().mockResolvedValue({ success: true }),
+      onSetEndpointRemoteWeb: vi.fn().mockResolvedValue({ success: true }),
+      onListPlugins: vi.fn().mockResolvedValue({ plugins: [], issues: [] }),
+      onInstallPlugin: vi.fn().mockResolvedValue({ success: true }),
+      onRemovePlugin: vi.fn().mockResolvedValue({ success: true }),
+      onSetPluginPriority: vi.fn().mockResolvedValue({ success: true }),
+      onSetSetting,
+      themePreference: 'system' as const,
+      onSetTheme: vi.fn(),
+    };
+
+    // Mounted with nothing from the daemon yet.
+    const { rerender } = render(<SettingsModal {...props} settings={{}} />);
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+    const arm = await screen.findByTestId('settings-auto-settle-arm');
+    expect((arm as HTMLInputElement).value).toBe('30');
+
+    // The broadcast lands, carrying a policy the user already saved.
+    rerender(
+      <SettingsModal
+        {...props}
+        settings={{ auto_settle_arm_seconds: '60', auto_settle_countdown_seconds: '20' }}
+      />
+    );
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+
+    await waitFor(() => {
+      expect((screen.getByTestId('settings-auto-settle-arm') as HTMLInputElement).value).toBe('60');
+    });
+    expect(
+      (screen.getByTestId('settings-auto-settle-countdown') as HTMLInputElement).value
+    ).toBe('20');
+
+    // And blurring an untouched field must not write anything back.
+    fireEvent.blur(screen.getByTestId('settings-auto-settle-arm'));
+    expect(onSetSetting).not.toHaveBeenCalled();
+  });
+
 });

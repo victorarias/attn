@@ -48,6 +48,10 @@ export default defineConfig(async () => ({
     setupFiles: ["./src/test/setup.ts"],
     include: [
       "src/**/*.test.{ts,tsx}",
+      // Plain-JS tests, for guards that must read source files off disk: the app
+      // tsconfig has no node types, and vitest stubs CSS imports to empty, so a
+      // stylesheet assertion cannot live in a .ts test.
+      "src/**/*.test.mjs",
       "scripts/real-app-harness/**/*.test.{ts,mjs}",
     ],
     environmentMatchGlobs: [
