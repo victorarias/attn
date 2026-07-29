@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useEscapeStack } from '../../hooks/useEscapeStack';
-import { generateWorktreeName } from './worktreeNames';
+import { generateWorktreeName, isBranchAlreadyExistsError } from './worktreeNames';
 import './RepoOptions.css';
 
 interface RepoInfo {
@@ -134,8 +134,11 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   );
   const committedDestinationIndex = selectedDestinationIndex >= 0 ? selectedDestinationIndex : 0;
   const selectedDestination = destinationItems[committedDestinationIndex];
-  // Names that would make `git worktree add` fail, so a generated name never
-  // produces a create the daemon has to reject.
+  // Names that would make `git worktree add` fail, so a generated name rarely
+  // produces a create the daemon has to reject. This is necessarily incomplete
+  // — `RepoInfo` has no visibility into a local branch with no worktree — so
+  // `attemptCreateWorktree` below also rerolls and retries on the specific
+  // "branch already exists" failure as a backstop.
   const takenBranchNames = useMemo(
     () => [repoInfo.currentBranch, ...repoInfo.worktrees.map((worktree) => worktree.branch)],
     [repoInfo],
@@ -232,6 +235,28 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     setNewWorktreeName(generateWorktreeName(takenBranchNames));
   }, [takenBranchNames]);
 
+  // `takenBranchNames` can only carry what `RepoInfo` knows about — the current
+  // branch and branches with an attached worktree — so a generated name can
+  // still collide with an ordinary local branch that has no worktree, or one
+  // another client created in the meantime. Rather than surface that raw git
+  // failure, reroll and retry automatically: the user asked for "a" fresh
+  // worktree, not that specific generated name.
+  const MAX_CREATE_ATTEMPTS = 5;
+  const attemptCreateWorktree = useCallback(
+    (branchName: string, startFrom: string, attempt: number, avoid: Set<string>): Promise<void> =>
+      onCreateWorktree(branchName, startFrom).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        if (isBranchAlreadyExistsError(message) && attempt + 1 < MAX_CREATE_ATTEMPTS) {
+          avoid.add(branchName);
+          const nextName = generateWorktreeName([...takenBranchNames, ...avoid]);
+          setNewWorktreeName(nextName);
+          return attemptCreateWorktree(nextName, startFrom, attempt + 1, avoid);
+        }
+        throw err;
+      }),
+    [onCreateWorktree, takenBranchNames],
+  );
+
   const submitCreateWorktree = useCallback(() => {
     const branchName = newWorktreeName.trim();
     if (!branchName || creatingWorktree) {
@@ -241,7 +266,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       ? selectedDestination?.branch || repoInfo.currentBranch
       : `origin/${repoInfo.defaultBranch}`;
     setCreatingWorktree(true);
-    void onCreateWorktree(branchName, startFrom)
+    void attemptCreateWorktree(branchName, startFrom, 0, new Set())
       .catch((err) => {
         console.error('Create worktree failed:', err);
         onError?.(err instanceof Error ? err.message : 'Create worktree failed');
@@ -250,9 +275,9 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
         setCreatingWorktree(false);
       });
   }, [
+    attemptCreateWorktree,
     creatingWorktree,
     newWorktreeName,
-    onCreateWorktree,
     onError,
     repoInfo.currentBranch,
     repoInfo.defaultBranch,

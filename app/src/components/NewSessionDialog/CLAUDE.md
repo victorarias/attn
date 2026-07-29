@@ -63,5 +63,5 @@ The initial zone is `create` **except** when the incoming `selectedPath` resolve
 Regressions to guard:
 - Repo root → Enter creates a worktree without any typing.
 - Exact worktree path → Enter opens that worktree, and `onCreateWorktree` is not called.
-- A generated name never collides with an existing branch (`generateWorktreeName` takes the taken list).
+- A generated name never collides with an existing branch (`generateWorktreeName` takes the taken list). `RepoInfo` only carries the current branch and branches with an attached worktree, so an ordinary local branch with no worktree is invisible to that list; `attemptCreateWorktree` rerolls and retries on git's "branch already exists" failure as a backstop (`isBranchAlreadyExistsError` in `worktreeNames.ts`).
 - `.repo-options-destinations` keeps a `min-height` floor; without it the always-open form collapses the destination list to nothing in a small window.

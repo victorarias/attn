@@ -26,6 +26,17 @@ const NOUNS = [
   'raccoon', 'seal', 'tapir', 'toucan', 'walrus', 'weasel', 'wombat', 'yak',
 ];
 
+// `generateWorktreeName`'s caller can only feed it names it knows are taken —
+// e.g. `RepoInfo` carries the current branch and branches with an attached
+// worktree, but says nothing about a local branch that has no worktree (or one
+// created concurrently by another client). `git worktree add -b <name>`
+// rejects those the same way, so a create can still fail after a "never
+// collide" generated name. Recognizing that specific failure lets the caller
+// reroll and retry instead of surfacing raw git output as a dead end.
+export function isBranchAlreadyExistsError(message: string): boolean {
+  return /branch named ['"]?.+['"]? already exists/i.test(message);
+}
+
 const pick = <T,>(items: readonly T[], random: () => number): T =>
   items[Math.floor(random() * items.length) % items.length];
 

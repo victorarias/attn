@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateWorktreeName } from './worktreeNames';
+import { generateWorktreeName, isBranchAlreadyExistsError } from './worktreeNames';
 
 describe('generateWorktreeName', () => {
   it('produces a git-safe adjective-noun pair', () => {
@@ -35,5 +35,17 @@ describe('generateWorktreeName', () => {
       names.add(generateWorktreeName());
     }
     expect(names.size).toBeGreaterThan(100);
+  });
+});
+
+describe('isBranchAlreadyExistsError', () => {
+  it('recognizes git worktree add failing on an existing branch', () => {
+    const message = "git worktree add failed: fatal: a branch named 'frosty-newt' already exists\n";
+    expect(isBranchAlreadyExistsError(message)).toBe(true);
+  });
+
+  it('does not misfire on unrelated git failures', () => {
+    expect(isBranchAlreadyExistsError('git worktree add failed: fatal: not a git repository')).toBe(false);
+    expect(isBranchAlreadyExistsError('Network request timed out')).toBe(false);
   });
 });

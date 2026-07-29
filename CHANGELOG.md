@@ -43,7 +43,6 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ---
 
 ## [2026-07-28]
->>>>>>> a11d4db3 (feat(new-session): make creating a worktree the default chooser action)
 
 ### Fixed
 - **Queue rows can be opened from the keyboard.** Each row in the agent queue

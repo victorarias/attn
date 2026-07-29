@@ -105,6 +105,43 @@ describe('RepoOptions', () => {
     await waitFor(() => expect(onCreateWorktree).toHaveBeenCalledWith(generated, 'origin/main'));
   });
 
+  it('rerolls and retries when the generated name collides with a branch RepoInfo never saw', async () => {
+    // `takenBranchNames` is built from `repoInfo.currentBranch` and
+    // `repoInfo.worktrees` alone, so it has no visibility into an ordinary
+    // local branch that was never checked out into a worktree. Git rejects
+    // `worktree add -b` on that branch the same way it would on a taken one;
+    // the component must recover by rerolling rather than surfacing the raw
+    // git failure.
+    const onCreateWorktree = vi.fn();
+    let firstAttempt: string | undefined;
+    onCreateWorktree.mockImplementation(async (branchName: string) => {
+      if (firstAttempt === undefined) {
+        firstAttempt = branchName;
+        throw new Error(`git worktree add failed: fatal: a branch named '${branchName}' already exists`);
+      }
+    });
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+        onError={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    await waitFor(() => expect(onCreateWorktree).toHaveBeenCalledTimes(2));
+    const [firstCall, secondCall] = onCreateWorktree.mock.calls;
+    expect(secondCall[0]).not.toBe(firstCall[0]);
+    expect(secondCall[1]).toBe('origin/main');
+  });
+
   it('keeps focus on the typed worktree so Enter still opens it', () => {
     const onSelectWorktree = vi.fn();
     const onCreateWorktree = vi.fn(async () => {});
