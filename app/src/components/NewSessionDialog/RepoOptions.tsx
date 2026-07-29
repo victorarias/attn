@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useEscapeStack } from '../../hooks/useEscapeStack';
+import { generateWorktreeName } from './worktreeNames';
 import './RepoOptions.css';
 
 interface RepoInfo {
@@ -79,6 +80,15 @@ type ForceableError = Error & {
   forceable?: boolean;
 };
 
+// Creating a worktree is the overwhelmingly common reason to open this step, so
+// the create form is always expanded, pre-named, and focused first — a new
+// worktree off the latest origin/<default> costs a single Enter.
+//
+// The exception is arriving with a specific worktree already selected: that only
+// happens when the typed path resolved to that worktree, which is an explicit
+// "open this one" and must keep Enter meaning "open", not "create".
+type FocusZone = 'create' | 'destinations';
+
 export const RepoOptions: React.FC<RepoOptionsProps> = ({
   repoInfo,
   selectedPath,
@@ -93,6 +103,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   refreshing = false,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const destinationListRef = useRef<HTMLDivElement>(null);
   const destinationItems = useMemo<DestinationItem[]>(
     () => [
@@ -117,17 +128,24 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     ],
     [repoInfo],
   );
-  const createWorktreeIndex = destinationItems.length;
   const selectedDestinationIndex = useMemo(
     () => destinationItems.findIndex((item) => item.path === selectedPath),
     [destinationItems, selectedPath],
   );
   const committedDestinationIndex = selectedDestinationIndex >= 0 ? selectedDestinationIndex : 0;
   const selectedDestination = destinationItems[committedDestinationIndex];
-  // Focus can temporarily move to the action row, but selectedPath remains the committed destination.
+  // Names that would make `git worktree add` fail, so a generated name never
+  // produces a create the daemon has to reject.
+  const takenBranchNames = useMemo(
+    () => [repoInfo.currentBranch, ...repoInfo.worktrees.map((worktree) => worktree.branch)],
+    [repoInfo],
+  );
+
+  const [focusZone, setFocusZone] = useState<FocusZone>(
+    committedDestinationIndex > 0 ? 'destinations' : 'create',
+  );
   const [focusIndex, setFocusIndex] = useState(committedDestinationIndex);
-  const [showNewWorktree, setShowNewWorktree] = useState(false);
-  const [newWorktreeName, setNewWorktreeName] = useState('');
+  const [newWorktreeName, setNewWorktreeName] = useState(() => generateWorktreeName(takenBranchNames));
   // Default to origin/<defaultBranch> so a new worktree starts fresh from the
   // latest upstream main (fetched first daemon-side), not from whatever local
   // branch the selected destination happens to be sitting on — which can be
@@ -140,43 +158,34 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const isBusy = creatingWorktree || deletingPath !== null;
 
   // Sub-state Escape handling via the stack so LIFO order is preserved.
-  // pendingDeletePath and showNewWorktree are pushed above LocationPicker's handler.
+  // pendingDeletePath is pushed above LocationPicker's handler.
   const cancelPendingDelete = useCallback(() => {
     setPendingDeletePath(null);
     setDeleteFailure(null);
   }, []);
   useEscapeStack(cancelPendingDelete, pendingDeletePath !== null || deleteFailure !== null);
 
-  const cancelNewWorktree = useCallback(() => {
-    setShowNewWorktree(false);
-    setNewWorktreeName('');
-    setFocusIndex(committedDestinationIndex);
-  }, [committedDestinationIndex]);
-  useEscapeStack(cancelNewWorktree, showNewWorktree);
-
   useEffect(() => {
     setPendingDeletePath(null);
     setDeleteFailure(null);
-    setFocusIndex((prev) => {
-      if (showNewWorktree || prev === createWorktreeIndex) {
-        return prev;
-      }
-      return committedDestinationIndex;
-    });
-  }, [committedDestinationIndex, createWorktreeIndex, showNewWorktree]);
-
-  useEffect(() => {
-    if (showNewWorktree) {
-      return;
-    }
-    rootRef.current?.focus();
-  }, [showNewWorktree]);
+    setFocusIndex(committedDestinationIndex);
+  }, [committedDestinationIndex]);
 
   useEffect(() => {
     if (pendingDeletePath) {
       rootRef.current?.focus();
+      return;
     }
-  }, [pendingDeletePath]);
+    if (focusZone === 'create') {
+      const input = inputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+      return;
+    }
+    rootRef.current?.focus();
+  }, [creatingWorktree, focusZone, pendingDeletePath]);
 
   useEffect(() => {
     const activeDeletePath = pendingDeletePath || deleteFailure?.path || null;
@@ -191,7 +200,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       ?.scrollIntoView({ block: 'nearest' });
   }, [committedDestinationIndex, deleteFailure, destinationItems, pendingDeletePath]);
 
-  const focusedDestination = focusIndex >= 0 && focusIndex < destinationItems.length
+  const focusedDestination = focusZone === 'destinations' && focusIndex >= 0 && focusIndex < destinationItems.length
     ? destinationItems[focusIndex]
     : null;
   const canDeleteSelectedItem = Boolean(
@@ -203,28 +212,58 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   const commitDestination = useCallback((index: number) => {
     const clamped = Math.max(0, Math.min(index, destinationItems.length - 1));
     const item = destinationItems[clamped];
+    setFocusZone('destinations');
     setFocusIndex(clamped);
     if (item) {
       onSelectedPathChange(item.path);
     }
   }, [destinationItems, onSelectedPathChange]);
 
-  const openNewWorktree = useCallback(() => {
+  const focusCreateForm = useCallback(() => {
     if (isBusy) {
       return;
     }
     setPendingDeletePath(null);
     setDeleteFailure(null);
-    setFocusIndex(createWorktreeIndex);
-    setShowNewWorktree(true);
-  }, [createWorktreeIndex, isBusy]);
+    setFocusZone('create');
+  }, [isBusy]);
+
+  const rerollWorktreeName = useCallback(() => {
+    setNewWorktreeName(generateWorktreeName(takenBranchNames));
+  }, [takenBranchNames]);
+
+  const submitCreateWorktree = useCallback(() => {
+    const branchName = newWorktreeName.trim();
+    if (!branchName || creatingWorktree) {
+      return;
+    }
+    const startFrom = startingBranch === 'current'
+      ? selectedDestination?.branch || repoInfo.currentBranch
+      : `origin/${repoInfo.defaultBranch}`;
+    setCreatingWorktree(true);
+    void onCreateWorktree(branchName, startFrom)
+      .catch((err) => {
+        console.error('Create worktree failed:', err);
+        onError?.(err instanceof Error ? err.message : 'Create worktree failed');
+      })
+      .finally(() => {
+        setCreatingWorktree(false);
+      });
+  }, [
+    creatingWorktree,
+    newWorktreeName,
+    onCreateWorktree,
+    onError,
+    repoInfo.currentBranch,
+    repoInfo.defaultBranch,
+    selectedDestination,
+    startingBranch,
+  ]);
 
   const beginDeleteWorktree = useCallback((path: string) => {
     if (isBusy) {
       return;
     }
-    setShowNewWorktree(false);
-    setNewWorktreeName('');
     setDeleteFailure(null);
     setPendingDeletePath(path);
   }, [isBusy]);
@@ -233,18 +272,19 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
     if (isBusy) {
       return;
     }
-    if (index < destinationItems.length) {
-      const item = destinationItems[index];
-      onSelectedPathChange(item.path);
-      if (item.kind === 'main-repo') {
-        onSelectMainRepo();
-      } else {
-        onSelectWorktree(item.path);
-      }
+    const item = destinationItems[index];
+    if (!item) {
       return;
     }
-    openNewWorktree();
-  }, [destinationItems, isBusy, onSelectMainRepo, onSelectWorktree, onSelectedPathChange, openNewWorktree]);
+    setFocusZone('destinations');
+    setFocusIndex(index);
+    onSelectedPathChange(item.path);
+    if (item.kind === 'main-repo') {
+      onSelectMainRepo();
+    } else {
+      onSelectWorktree(item.path);
+    }
+  }, [destinationItems, isBusy, onSelectMainRepo, onSelectWorktree, onSelectedPathChange]);
 
   const executeDelete = useCallback(async (force = false) => {
     const targetPath = force ? deleteFailure?.path : pendingDeletePath;
@@ -316,52 +356,42 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       return;
     }
 
-    if (showNewWorktree) {
+    // The create form owns a text input, so bare letters must keep reaching it.
+    // Only the keys listed here are intercepted while this zone has focus.
+    if (focusZone === 'create') {
       e.stopPropagation();
-      if (e.key === 'Escape') {
-        setShowNewWorktree(false);
-        setNewWorktreeName('');
-        setFocusIndex(committedDestinationIndex);
-        e.preventDefault();
-      } else if (e.key === 'Enter' && newWorktreeName.trim()) {
-        const startFrom = startingBranch === 'current'
-          ? selectedDestination?.branch || repoInfo.currentBranch
-          : `origin/${repoInfo.defaultBranch}`;
-        setCreatingWorktree(true);
-        void onCreateWorktree(newWorktreeName.trim(), startFrom)
-          .catch((err) => {
-            console.error('Create worktree failed:', err);
-            onError?.(err instanceof Error ? err.message : 'Create worktree failed');
-          })
-          .finally(() => {
-            setCreatingWorktree(false);
-          });
+      if (e.key === 'Enter') {
+        submitCreateWorktree();
         e.preventDefault();
       } else if (e.key === 'Tab') {
         setStartingBranch((prev) => prev === 'current' ? 'default' : 'current');
+        e.preventDefault();
+      } else if (e.key === 'ArrowDown') {
+        commitDestination(committedDestinationIndex);
+        e.preventDefault();
+      } else if ((e.key === 'r' || e.key === 'R') && (e.ctrlKey || e.metaKey)) {
+        rerollWorktreeName();
+        e.preventDefault();
+      } else if (e.key === 'Escape') {
+        onBack();
         e.preventDefault();
       }
       return;
     }
 
-    const totalItems = destinationItems.length + 1;
     switch (e.key) {
       case 'ArrowUp':
         e.stopPropagation();
         if (focusIndex <= 0) {
-          commitDestination(0);
-        } else if (focusIndex <= destinationItems.length) {
+          focusCreateForm();
+        } else {
           commitDestination(focusIndex - 1);
         }
         e.preventDefault();
         break;
       case 'ArrowDown':
         e.stopPropagation();
-        if (focusIndex < destinationItems.length - 1) {
-          commitDestination(focusIndex + 1);
-        } else {
-          setFocusIndex(Math.min(totalItems - 1, focusIndex + 1));
-        }
+        commitDestination(Math.min(destinationItems.length - 1, focusIndex + 1));
         e.preventDefault();
         break;
       case 'Enter':
@@ -372,10 +402,8 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
       case 'd':
       case 'D':
         e.stopPropagation();
-        if (canDeleteSelectedItem) {
-          if (focusedDestination) {
-            beginDeleteWorktree(focusedDestination.path);
-          }
+        if (canDeleteSelectedItem && focusedDestination) {
+          beginDeleteWorktree(focusedDestination.path);
         }
         e.preventDefault();
         break;
@@ -396,40 +424,34 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
           const index = parseInt(e.key, 10) - 1;
           if (index < destinationItems.length) {
             commitDestination(index);
-          } else if (index === createWorktreeIndex) {
-            openNewWorktree();
           }
           e.preventDefault();
         }
         break;
     }
   }, [
-    canDeleteSelectedItem,
     beginDeleteWorktree,
+    canDeleteSelectedItem,
     commitDestination,
-    focusIndex,
+    committedDestinationIndex,
+    deleteFailure,
     destinationItems,
     executeDelete,
+    focusCreateForm,
+    focusIndex,
+    focusZone,
     focusedDestination,
     handleActivate,
     isBusy,
-    newWorktreeName,
     onBack,
-    onCreateWorktree,
-    onError,
     onRefresh,
-    openNewWorktree,
     pendingDeletePath,
-    deleteFailure,
-    repoInfo.currentBranch,
-    repoInfo.defaultBranch,
-    committedDestinationIndex,
-    showNewWorktree,
-    startingBranch,
+    rerollWorktreeName,
+    submitCreateWorktree,
   ]);
 
   const renderDestination = (itemIndex: number, item: DestinationItem) => {
-    const isSelected = committedDestinationIndex === itemIndex;
+    const isSelected = focusZone === 'destinations' && committedDestinationIndex === itemIndex;
     const isDeleting = pendingDeletePath === item.path;
     const failedDelete = deleteFailure?.path === item.path ? deleteFailure : null;
     const isDeleteRunning = deletingPath === item.path;
@@ -496,8 +518,82 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
             <span>Refreshing repo options</span>
           </div>
         )}
+
+        <div className="repo-options-actions">
+          <div className="repo-section-header">NEW WORKTREE</div>
+          <div
+            key="new-worktree-form"
+            className={`new-worktree-form ${focusZone === 'create' ? 'focused' : ''}`}
+            data-testid="repo-new-worktree-form"
+            onClick={focusCreateForm}
+          >
+            <div className="new-worktree-input-row">
+              <span className="repo-option-icon icon-blue">+</span>
+              <input
+                ref={inputRef}
+                type="text"
+                className="new-worktree-input"
+                data-testid="repo-new-worktree-input"
+                placeholder="Branch name..."
+                value={newWorktreeName}
+                onChange={(e) => setNewWorktreeName(e.target.value)}
+                onFocus={() => setFocusZone('create')}
+                disabled={creatingWorktree}
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="new-worktree-reroll"
+                data-testid="repo-new-worktree-reroll"
+                title="Pick another name (⌃R)"
+                aria-label="Pick another name"
+                onClick={rerollWorktreeName}
+                disabled={creatingWorktree}
+              >
+                ⟳
+              </button>
+            </div>
+            <div className="new-worktree-radio-row">
+              <label className={startingBranch === 'default' ? 'selected' : ''}>
+                <input
+                  type="radio"
+                  name="startingBranch"
+                  value="default"
+                  data-testid="repo-new-worktree-start-default"
+                  checked={startingBranch === 'default'}
+                  onChange={() => setStartingBranch('default')}
+                />
+                Start from origin/{repoInfo.defaultBranch}
+              </label>
+              <label className={startingBranch === 'current' ? 'selected' : ''}>
+                <input
+                  type="radio"
+                  name="startingBranch"
+                  value="current"
+                  data-testid="repo-new-worktree-start-current"
+                  checked={startingBranch === 'current'}
+                  onChange={() => setStartingBranch('current')}
+                />
+                Start from {selectedDestination?.branch || repoInfo.currentBranch}
+              </label>
+            </div>
+            <div className={`new-worktree-hint ${creatingWorktree ? 'operation-running' : ''}`}>
+              {creatingWorktree ? (
+                <>
+                  <span className="repo-operation-dot" aria-hidden="true" />
+                  Creating worktree...
+                </>
+              ) : (
+                'Enter to create • Tab to toggle • ⌃R for another name • ↓ to open an existing one'
+              )}
+            </div>
+          </div>
+        </div>
+
         <div className="repo-options-destinations">
-          <div className="repo-section-header">DESTINATIONS</div>
+          <div className="repo-section-header">OPEN EXISTING</div>
           <div
             ref={destinationListRef}
             className="repo-destination-list"
@@ -510,85 +606,23 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
             ))}
           </div>
         </div>
-
-        <div className="repo-options-actions">
-          <div className="repo-section-header">ACTIONS</div>
-          {showNewWorktree ? (
-            <div key="new-worktree-form" className="new-worktree-form" data-testid="repo-new-worktree-form">
-              <div className="new-worktree-input-row">
-                <span className="repo-option-icon icon-blue">+</span>
-                <input
-                  type="text"
-                  className="new-worktree-input"
-                  data-testid="repo-new-worktree-input"
-                  placeholder="Branch name..."
-                  value={newWorktreeName}
-                  onChange={(e) => setNewWorktreeName(e.target.value)}
-                  disabled={creatingWorktree}
-                  autoFocus
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                />
-              </div>
-              <div className="new-worktree-radio-row">
-                <label className={startingBranch === 'default' ? 'selected' : ''}>
-                  <input
-                    type="radio"
-                    name="startingBranch"
-                    value="default"
-                    data-testid="repo-new-worktree-start-default"
-                    checked={startingBranch === 'default'}
-                    onChange={() => setStartingBranch('default')}
-                  />
-                  Start from origin/{repoInfo.defaultBranch}
-                </label>
-                <label className={startingBranch === 'current' ? 'selected' : ''}>
-                  <input
-                    type="radio"
-                    name="startingBranch"
-                    value="current"
-                    data-testid="repo-new-worktree-start-current"
-                    checked={startingBranch === 'current'}
-                    onChange={() => setStartingBranch('current')}
-                  />
-                  Start from {selectedDestination?.branch || repoInfo.currentBranch}
-                </label>
-              </div>
-              <div className={`new-worktree-hint ${creatingWorktree ? 'operation-running' : ''}`}>
-                {creatingWorktree ? (
-                  <>
-                    <span className="repo-operation-dot" aria-hidden="true" />
-                    Creating worktree...
-                  </>
-                ) : (
-                  'Press Enter to create • Tab to toggle • Esc to cancel'
-                )}
-              </div>
-            </div>
-          ) : (
-            <div
-              className={`repo-option-item ${focusIndex === createWorktreeIndex ? 'selected' : ''}`}
-              data-testid={`repo-option-${createWorktreeIndex}`}
-              data-option-index={createWorktreeIndex}
-              data-option-kind="new-worktree"
-              onClick={openNewWorktree}
-              aria-disabled={isBusy}
-            >
-              <span className="repo-option-icon icon-blue">+</span>
-              <span className="repo-option-name">Create worktree...</span>
-              <span className="repo-option-detail">Create a new worktree and open it immediately</span>
-              <span className="repo-option-shortcut">{createWorktreeIndex + 1}</span>
-            </div>
-          )}
-        </div>
       </div>
       <div className="repo-options-footer">
-        <span>↑↓ Navigate</span>
-        <span>Enter Open</span>
-        {canDeleteSelectedItem && <span>D Delete worktree</span>}
-        <span>R Refresh{refreshing && ' ...'}</span>
-        <span>Esc Back</span>
+        {focusZone === 'create' ? (
+          <>
+            <span>Enter Create worktree</span>
+            <span>↓ Open existing</span>
+            <span>Esc Back</span>
+          </>
+        ) : (
+          <>
+            <span>↑↓ Navigate</span>
+            <span>Enter Open</span>
+            {canDeleteSelectedItem && <span>D Delete worktree</span>}
+            <span>R Refresh{refreshing && ' ...'}</span>
+            <span>Esc Back</span>
+          </>
+        )}
       </div>
     </div>
   );

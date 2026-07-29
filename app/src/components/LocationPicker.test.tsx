@@ -162,7 +162,7 @@ describe('LocationPicker', () => {
     await waitFor(() => {
       expect(screen.getByRole('radio', { name: /snipe/i })).toHaveAttribute('aria-checked', 'true');
     });
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/remote-repo' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -186,7 +186,7 @@ describe('LocationPicker', () => {
     }));
     const { onSelect } = renderPicker({ onInspectPath });
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/pro' } });
     fireEvent.keyDown(input, { key: 'ArrowDown' });
 
@@ -216,7 +216,7 @@ describe('LocationPicker', () => {
     }));
     const { onSelect } = renderPicker({ onInspectPath });
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/pro' } });
     fireEvent.click(screen.getByTestId('location-picker-item-0'));
 
@@ -229,7 +229,7 @@ describe('LocationPicker', () => {
   it('hover does not change the input or selection', () => {
     renderPicker();
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/pro' } });
 
     const firstItem = screen.getByTestId('location-picker-item-0');
@@ -242,7 +242,7 @@ describe('LocationPicker', () => {
   it('ArrowDown on window does not affect picker input or item selection', () => {
     renderPicker();
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/pro' } });
 
     fireEvent.keyDown(window, { key: 'ArrowDown' });
@@ -253,7 +253,7 @@ describe('LocationPicker', () => {
   it('Escape first deselects highlighted item then closes', async () => {
     const { onClose } = renderPicker();
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/pro' } });
 
     fireEvent.keyDown(input, { key: 'ArrowDown' });
@@ -274,7 +274,7 @@ describe('LocationPicker', () => {
   it('tabs ghost text into the input query', async () => {
     renderPicker();
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/pro' } });
 
     await waitFor(() => {
@@ -290,7 +290,7 @@ describe('LocationPicker', () => {
   it('tabs the highlighted row into the input query before submit', async () => {
     renderPicker();
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/pro' } });
     fireEvent.keyDown(input, { key: 'ArrowDown' });
 
@@ -324,7 +324,7 @@ describe('LocationPicker', () => {
 
     for (const typedPath of ['~/projects/exsin--feat-images', '~/projects/exsin--feat-images/']) {
       const { onSelect } = renderPicker({ onInspectPath, onGetRepoInfo });
-      const input = screen.getByRole('textbox');
+      const input = screen.getByTestId('location-picker-path-input');
       fireEvent.change(input, { target: { value: typedPath } });
       fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -350,7 +350,7 @@ describe('LocationPicker', () => {
     }));
     const { onSelect } = renderPicker({ onInspectPath });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '/' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -382,7 +382,7 @@ describe('LocationPicker', () => {
     }));
     const { onSelect } = renderPicker({ onInspectPath });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '/tmp/project/' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -427,7 +427,7 @@ describe('LocationPicker', () => {
       expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
     });
 
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByTestId('location-picker-path-input'), { key: 'Enter' });
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/home/remote/projects/recent-repo', undefined);
@@ -446,7 +446,7 @@ describe('LocationPicker', () => {
       expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
     });
 
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByTestId('location-picker-path-input'), { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -461,14 +461,14 @@ describe('LocationPicker', () => {
       expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
     });
 
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByTestId('location-picker-path-input'), { key: 'ArrowDown' });
 
     // After manual navigation, Escape deselects first and only then closes.
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByTestId('location-picker-path-input'), { key: 'Escape' });
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByTestId('location-picker-item-0')).not.toHaveClass('selected');
 
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByTestId('location-picker-path-input'), { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -521,7 +521,7 @@ describe('LocationPicker', () => {
       expect(screen.getByTestId('location-picker-item-0')).toHaveClass('selected');
     });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '/tmp/other' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -538,7 +538,7 @@ describe('LocationPicker', () => {
     }));
     renderPicker({ onGetRecentLocations });
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/projects/recent-repo' } });
 
     await waitFor(() => {
@@ -578,7 +578,7 @@ describe('LocationPicker', () => {
     }));
     const { onSelect } = renderPicker({ onInspectPath, onGetRepoInfo, onCreateWorktree });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin--feat-images' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -587,7 +587,7 @@ describe('LocationPicker', () => {
       expect(screen.getByTestId('repo-option-1')).toHaveClass('selected');
     });
 
-    fireEvent.click(screen.getByTestId('repo-option-2'));
+    fireEvent.click(screen.getByTestId('repo-new-worktree-form'));
     fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feat-more' } });
     // Worktrees now default to origin/<defaultBranch>; opt into the selected
     // worktree's current branch to exercise that path.
@@ -633,7 +633,7 @@ describe('LocationPicker', () => {
       },
     });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin--feat-images' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -670,7 +670,7 @@ describe('LocationPicker', () => {
     expect(within(terminalOption).getByText('⌥T')).toBeInTheDocument();
     expect(within(terminalOption).queryByText(/⌥[1-9]/)).not.toBeInTheDocument();
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     input.focus();
     fireEvent.keyDown(input, { key: '†', code: 'KeyT', altKey: true });
     await waitFor(() => {
@@ -750,7 +750,7 @@ describe('LocationPicker', () => {
     const onDeleteWorktree = vi.fn(async () => ({ success: true }));
     renderPicker({ onInspectPath, onGetRepoInfo, onDeleteWorktree });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin--feat-b' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -790,7 +790,7 @@ describe('LocationPicker', () => {
       });
     renderPicker({ onInspectPath, onGetRepoInfo });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin--feat-images' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -844,7 +844,7 @@ describe('LocationPicker', () => {
     });
 
     fireEvent.click(screen.getByRole('radio', { name: /gpu-box/i }));
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin--feat-images/' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -884,7 +884,7 @@ describe('LocationPicker', () => {
     });
 
     fireEvent.click(screen.getByRole('radio', { name: /gpu-box/i }));
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '/' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -915,7 +915,7 @@ describe('LocationPicker', () => {
       }],
     });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -946,11 +946,11 @@ describe('LocationPicker', () => {
     const onGetRepoInfo = vi.fn();
     renderPicker({ onInspectPath, onGetRepoInfo });
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '~/projects/exsin' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/tmp/other' } });
+    fireEvent.change(screen.getByTestId('location-picker-path-input'), { target: { value: '/tmp/other' } });
     inspectGate.resolve({
       success: true,
       inspection: {
@@ -964,7 +964,7 @@ describe('LocationPicker', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole('textbox')).toHaveValue('/tmp/other');
+      expect(screen.getByTestId('location-picker-path-input')).toHaveValue('/tmp/other');
     });
 
     expect(onGetRepoInfo).not.toHaveBeenCalled();
@@ -977,7 +977,7 @@ describe('LocationPicker', () => {
     const onGetRepoInfo = vi.fn();
     renderClosablePicker({ onInspectPath, onGetRepoInfo });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1020,7 +1020,7 @@ describe('LocationPicker', () => {
     const onGetRepoInfo = vi.fn(() => repoInfoGate.promise);
     renderClosablePicker({ onInspectPath, onGetRepoInfo });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1028,7 +1028,7 @@ describe('LocationPicker', () => {
       expect(onGetRepoInfo).toHaveBeenCalledWith('/home/remote/projects/exsin', undefined);
     });
 
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByTestId('location-picker-path-input'), { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: 'Reopen' }));
 
     repoInfoGate.resolve({
@@ -1048,7 +1048,7 @@ describe('LocationPicker', () => {
     const onInspectPath = vi.fn(() => inspectGate.promise);
     const { onSelect } = renderPicker({ onInspectPath });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1084,7 +1084,7 @@ describe('LocationPicker', () => {
     const onError = vi.fn();
     renderPicker({ onInspectPath, onError });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/missing' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1110,7 +1110,7 @@ describe('LocationPicker', () => {
     const onGetRepoInfo = vi.fn(() => repoInfoGate.promise);
     renderPicker({ onInspectPath, onGetRepoInfo });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1145,7 +1145,7 @@ describe('LocationPicker', () => {
     const onError = vi.fn();
     const { onSelect } = renderPicker({ onInspectPath, onGetRepoInfo, onError });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1176,7 +1176,7 @@ describe('LocationPicker', () => {
       }],
     });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1210,7 +1210,7 @@ describe('LocationPicker', () => {
     const onCreateWorktree = vi.fn(() => createGate.promise);
     const { onSelect } = renderClosablePicker({ onInspectPath, onGetRepoInfo, onCreateWorktree });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin--feat-images' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1218,7 +1218,7 @@ describe('LocationPicker', () => {
       expect(screen.getByTestId('repo-options')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('repo-option-2'));
+    fireEvent.click(screen.getByTestId('repo-new-worktree-form'));
     fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feat-more' } });
     fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
     fireEvent.click(screen.getByTestId('location-picker-overlay'));
@@ -1265,7 +1265,7 @@ describe('LocationPicker', () => {
     const onGetRepoInfo = vi.fn(async () => firstRepoInfoGate.promise);
     const { onSelect } = renderClosablePicker({ onInspectPath, onGetRepoInfo });
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/exsin' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1273,8 +1273,8 @@ describe('LocationPicker', () => {
       expect(onGetRepoInfo).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '/tmp/other' } });
-    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' });
+    fireEvent.change(screen.getByTestId('location-picker-path-input'), { target: { value: '/tmp/other' } });
+    fireEvent.keyDown(screen.getByTestId('location-picker-path-input'), { key: 'Enter' });
 
     await waitFor(() => {
       expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false, false);
@@ -1302,7 +1302,7 @@ describe('LocationPicker', () => {
       },
     });
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     expect(screen.queryByText('⌥2')).not.toBeInTheDocument();
 
     input.focus();
@@ -1345,7 +1345,7 @@ describe('LocationPicker', () => {
       ],
     });
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     expect(input.value).toBe('/Users/victor/projects/');
 
     input.focus();
@@ -1390,7 +1390,7 @@ describe('LocationPicker', () => {
       ],
     });
 
-    const input = screen.getByRole('textbox') as HTMLInputElement;
+    const input = screen.getByTestId('location-picker-path-input') as HTMLInputElement;
     expect(input.value).toBe('/Users/victor/projects/');
     expect(screen.queryByText('⌥W')).not.toBeInTheDocument();
 
@@ -1442,7 +1442,7 @@ describe('LocationPicker', () => {
 
     expect(setSetting).toHaveBeenCalledWith('new_session_yolo_daemon_daemon-remote-1', 'true');
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByTestId('location-picker-path-input');
     fireEvent.change(input, { target: { value: '~/projects/remote-repo' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1493,7 +1493,7 @@ describe('LocationPicker', () => {
       const { onSelect } = renderPicker({ chiefExists: false, purpose: 'workspace', onInspectPath });
 
       fireEvent.click(screen.getByTestId('location-picker-chief-toggle'));
-      const input = screen.getByRole('textbox');
+      const input = screen.getByTestId('location-picker-path-input');
       fireEvent.change(input, { target: { value: '/home/remote/projects' } });
       fireEvent.keyDown(input, { key: 'Enter' });
 
@@ -1506,7 +1506,7 @@ describe('LocationPicker', () => {
       const onInspectPath = inspectsTo('/home/remote/projects');
       const { onSelect } = renderPicker({ chiefExists: false, purpose: 'workspace', onInspectPath });
 
-      const input = screen.getByRole('textbox');
+      const input = screen.getByTestId('location-picker-path-input');
       fireEvent.change(input, { target: { value: '/home/remote/projects' } });
       fireEvent.keyDown(input, { key: 'Enter' });
 

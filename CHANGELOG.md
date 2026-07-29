@@ -28,6 +28,23 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   countdown starts (5–3600s) and the countdown's own length (3–600s)
   independently.
 
+### Changed
+- **Creating a worktree is the first thing the repo chooser offers.** After
+  picking a repository, the new-worktree form now sits at the top of the
+  chooser, already expanded, with a generated name such as `frosty-newt`
+  pre-filled and "start from origin/&lt;default branch&gt;" preselected — so a fresh
+  worktree off the latest upstream costs a single Enter. The name is selected on
+  arrival, so typing replaces it, and the ⟳ button (or ⌃R) draws another one.
+  Existing worktrees moved below the form under "Open existing"; ↓ steps into
+  that list, where Enter, D, R, and the number shortcuts behave as before.
+  Choosing a path that resolves to a specific worktree still lands on that
+  worktree, so Enter opens it rather than creating something new.
+
+---
+
+## [2026-07-28]
+>>>>>>> a11d4db3 (feat(new-session): make creating a worktree the default chooser action)
+
 ### Fixed
 - **Queue rows can be opened from the keyboard.** Each row in the agent queue
   now offers a real, focusable control for opening its agent, with a visible
