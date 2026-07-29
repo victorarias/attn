@@ -142,6 +142,74 @@ describe('RepoOptions', () => {
     expect(secondCall[1]).toBe('origin/main');
   });
 
+  it('surfaces the collision instead of rerolling when the user typed the name', async () => {
+    // A typed name is a deliberate choice. Rerolling it would build an
+    // unrelated worktree and silently discard what the user asked for, so the
+    // "already exists" failure has to reach them unchanged.
+    const onError = vi.fn();
+    const onCreateWorktree = vi.fn(async (branchName: string) => {
+      throw new Error(`git worktree add failed: fatal: a branch named '${branchName}' already exists`);
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+        onError={onError}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feature' } });
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    await waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(onCreateWorktree).toHaveBeenCalledTimes(1);
+    expect(onCreateWorktree).toHaveBeenCalledWith('feature', 'origin/main');
+    expect(onError.mock.calls[0][0]).toMatch(/a branch named 'feature' already exists/);
+    // The typed name survives so the user can correct it.
+    expect((screen.getByTestId('repo-new-worktree-input') as HTMLInputElement).value).toBe('feature');
+    consoleError.mockRestore();
+  });
+
+  it('still rerolls after the user types and then presses the reroll button', async () => {
+    // Reroll hands ownership back to the generator, so the collision recovery
+    // applies again even though the field was user-edited in between.
+    const onCreateWorktree = vi.fn();
+    let firstAttempt: string | undefined;
+    onCreateWorktree.mockImplementation(async (branchName: string) => {
+      if (firstAttempt === undefined) {
+        firstAttempt = branchName;
+        throw new Error(`git worktree add failed: fatal: a branch named '${branchName}' already exists`);
+      }
+    });
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+        onError={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'hand-typed' } });
+    fireEvent.click(screen.getByTestId('repo-new-worktree-reroll'));
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    await waitFor(() => expect(onCreateWorktree).toHaveBeenCalledTimes(2));
+    expect(onCreateWorktree.mock.calls[0][0]).not.toBe('hand-typed');
+  });
+
   it('keeps focus on the typed worktree so Enter still opens it', () => {
     const onSelectWorktree = vi.fn();
     const onCreateWorktree = vi.fn(async () => {});
