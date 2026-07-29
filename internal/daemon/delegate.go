@@ -530,12 +530,8 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	return d.delegateOperation(msg, "", "", "", false, "", "")
 }
 
-func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID, workspaceID, directory, name, agent, model, effort, brief string, trackedByChief bool) error {
-	initialPrompt := brief
-	if trackedByChief {
-		initialPrompt = delegatedTicketPrompt(brief)
-	}
-	initialPrompt = withLeafIdentity(initialPrompt)
+func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID, workspaceID, directory, name, agent, model, effort, brief string) error {
+	initialPrompt := withLeafIdentity(delegatedTicketPrompt(brief))
 	spawnMsg := &protocol.SpawnSessionMessage{
 		Cmd:           protocol.CmdSpawnSession,
 		ID:            sessionID,
@@ -592,11 +588,15 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	if sessionID == "" {
 		sessionID = uuid.NewString()
 	}
-	chiefSessionID := initiatingChiefSessionID
-	if operationID == "" && d.chiefOfStaffSessionID() == sourceSessionID {
-		chiefSessionID = sourceSessionID
-	}
-	trackedByChief := chiefSessionID != ""
+	// Every delegation is ticket-tracked; only the chief's own delegations are
+	// additionally chief-OWNED. delegatedByChief therefore no longer gates tracking,
+	// just the two behaviors that are genuinely about the chief: durable role
+	// ownership of the ticket (which also drives the delegated-from-chief sidebar
+	// badge) and unmuting a hidden target workspace. The chief-ness of an operation
+	// is fixed when it is claimed (initiatingChiefSessionID), so a role transfer
+	// mid-launch cannot change it underneath a resumed operation.
+	delegatedByChief := initiatingChiefSessionID != "" ||
+		(operationID == "" && d.chiefOfStaffSessionID() == sourceSessionID)
 	paneID := "pane-" + sessionID
 	placement := delegationPlacement(msg)
 	workspaceID := ""
@@ -627,29 +627,28 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 				_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
 					"recovering delegated runtime", existing.WorkspaceID, "", existing.Directory, nil, nil, time.Now())
 			}
-			if err := d.spawnDelegatedRuntime(msg, sessionID, existing.WorkspaceID, existing.Directory, existing.Label, agent, model, effort, brief, trackedByChief); err != nil {
+			if err := d.spawnDelegatedRuntime(msg, sessionID, existing.WorkspaceID, existing.Directory, existing.Label, agent, model, effort, brief); err != nil {
 				return nil, fmt.Errorf("recover delegated session runtime: %w", err)
 			}
 		}
-		if trackedByChief {
-			ticket, ticketErr := d.store.ActiveTicketForSession(sessionID)
+		ticket, ticketErr := d.store.ActiveTicketForSession(sessionID)
+		if ticketErr != nil {
+			return nil, ticketErr
+		}
+		if ticket == nil {
+			ticketID, ticketErr := d.createDelegatedTicket(sourceSessionID, delegatedByChief, existing, brief, existing.Label, agent)
 			if ticketErr != nil {
 				return nil, ticketErr
 			}
-			if ticket == nil {
-				ticketID, ticketErr := d.createDelegatedTicket(chiefSessionID, existing, brief, existing.Label, agent)
-				if ticketErr != nil {
-					return nil, ticketErr
+			if operationID != "" {
+				worktreePath := ""
+				if msg.Worktree != nil {
+					worktreePath = existing.Directory
 				}
-				if operationID != "" {
-					worktreePath := ""
-					if msg.Worktree != nil {
-						worktreePath = existing.Directory
-					}
-					_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
-						"recovered delegated ticket", existing.WorkspaceID, ticketID, worktreePath, nil, nil, time.Now())
-				}
+				_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
+					"recovered delegated ticket", existing.WorkspaceID, ticketID, worktreePath, nil, nil, time.Now())
 			}
+			d.broadcastTicketsUpdated()
 		}
 		return d.completedDelegationResult(existing, placement, worktreeOwned), nil
 	}
@@ -832,7 +831,7 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		}
 	}
 
-	if err := d.spawnDelegatedRuntime(msg, sessionID, workspaceID, directory, name, agent, model, effort, brief, trackedByChief); err != nil {
+	if err := d.spawnDelegatedRuntime(msg, sessionID, workspaceID, directory, name, agent, model, effort, brief); err != nil {
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, fmt.Errorf("spawn delegated session: %w", err))
 	}
@@ -842,7 +841,9 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, fmt.Errorf("delegated session was not persisted"))
 	}
-	if trackedByChief {
+	// Unmuting the target workspace stays chief-only: an ordinary delegation
+	// preserves the workspace's current mute state (references/delegation.md).
+	if delegatedByChief {
 		if _, errMsg := d.setWorkspaceMuted(workspaceID, false); errMsg != "" {
 			d.unregisterSession(sessionID, syscall.SIGTERM)
 			d.removeWorkspaceLayoutPaneForSession(sessionID)
@@ -852,23 +853,27 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 				fmt.Errorf("make delegated workspace visible: %s", errMsg),
 			)
 		}
-		ticketID, err := d.createDelegatedTicket(chiefSessionID, session, brief, name, agent)
-		if err != nil {
-			d.unregisterSession(sessionID, syscall.SIGTERM)
-			d.removeWorkspaceLayoutPaneForSession(sessionID)
-			return nil, d.rollbackDelegation(
-				createdWorkspaceID,
-				createdWorktreePath,
-				fmt.Errorf("create delegated ticket: %w", err),
-			)
-		}
-		d.logf("delegate: bound ticket %q to session %s", ticketID, session.ID)
-		if operationID != "" {
-			_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
-				"delegated session and ticket created", workspaceID, ticketID, operationWorktreePath, nil, nil, time.Now())
-		}
-		d.broadcastTicketsUpdated()
 	}
+	// The ticket is not incidental to a delegation: the delegated agent's own prompt
+	// tells it to report through `attn ticket status`, and the ticket is the only
+	// channel back to it. A ticket failure therefore still fails the whole delegation
+	// atomically rather than leaving a running session nobody can reach.
+	ticketID, err := d.createDelegatedTicket(sourceSessionID, delegatedByChief, session, brief, name, agent)
+	if err != nil {
+		d.unregisterSession(sessionID, syscall.SIGTERM)
+		d.removeWorkspaceLayoutPaneForSession(sessionID)
+		return nil, d.rollbackDelegation(
+			createdWorkspaceID,
+			createdWorktreePath,
+			fmt.Errorf("create delegated ticket: %w", err),
+		)
+	}
+	d.logf("delegate: bound ticket %q to session %s", ticketID, session.ID)
+	if operationID != "" {
+		_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
+			"delegated session and ticket created", workspaceID, ticketID, operationWorktreePath, nil, nil, time.Now())
+	}
+	d.broadcastTicketsUpdated()
 	result := &protocol.DelegateResult{
 		SessionID:   session.ID,
 		WorkspaceID: workspaceID,
@@ -913,17 +918,16 @@ const leafIdentityPreamble = "You are a delegated attn session — a leaf, not a
 	"explicitly asks for one."
 
 // withLeafIdentity prefixes a delegated agent's composed initial prompt with the
-// leaf identity line, applied uniformly whether or not the delegation is tracked
-// by the chief of staff.
+// leaf identity line. Tracking is universal, so this line carries the whole
+// "you are a leaf" signal — a bound ticket is never a promotion to coordinator.
 func withLeafIdentity(prompt string) string {
 	return leafIdentityPreamble + "\n\n---\n\n" + strings.TrimSpace(prompt)
 }
 
-// delegatedTicketPrompt augments a chief-delegated agent's brief with the
-// self-report contract: the agent's work is bound to an attn ticket (assignee ==
-// session), and it moves that ticket across the board by reporting its own work
-// state. This replaces the retired chief-of-staff dispatch reporting surface —
-// the chief reads the ticket board instead of a parallel dispatch record.
+// delegatedTicketPrompt augments every delegated agent's brief with the self-report
+// contract: the agent's work is bound to an attn ticket (assignee == session), and
+// it moves that ticket across the board by reporting its own work state. The
+// delegator, the agent, and the chief of staff all read that board.
 func delegatedTicketPrompt(brief string) string {
 	return strings.TrimSpace(brief) + `
 

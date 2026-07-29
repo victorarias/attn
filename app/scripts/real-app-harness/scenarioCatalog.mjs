@@ -79,6 +79,14 @@ export const scenarioCatalog = [
     timeoutMs: 360_000,
   },
   {
+    id: 'ordinary-delegation-ticket',
+    label: 'Ordinary delegation: a non-chief session delegates, and the bound ticket routes to worker, delegator, and chief',
+    command: ['pnpm', 'run', 'real-app:scenario-ordinary-delegation-ticket'],
+    // Bootstraps a chief + a delegator + a real codex delegation in one app
+    // lifecycle; same budget class as the chief lifecycle scenario.
+    timeoutMs: 360_000,
+  },
+  {
     id: 'nudge-trigger',
     label: 'Ticket nudge: paused gate holds, then the real "deliver now" button doorbells the agent',
     command: ['pnpm', 'run', 'real-app:scenario-nudge-trigger'],

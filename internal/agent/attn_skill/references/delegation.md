@@ -20,13 +20,18 @@ Interpret the requested object first:
 - "dispatch subagents to investigate" means native subagents
 
 Attn delegation starts another agent with a focused brief; it does not create
-durable parent-child lineage. If you are the chief of staff, attn binds a ticket
-to the delegated session and your system-prompt guidance covers the follow-up path:
-all runtimes receive the same ticket nudge when activity remains unread; Claude may
-also arm a Monitor on `attn ticket inbox --watch` to consume updates sooner. Ordinary
-delegation needs none of that.
+durable parent-child lineage. Every delegation binds a ticket to the delegated
+session — the brief is its description, the session is its assignee — and you are a
+participant on the ticket you created. That ticket is the channel in both
+directions: the agent reports its work state onto it, and you reach the agent with
+`attn ticket comment <ticket-id> -m "<note>"`. The chief of staff is also a
+participant on every delegation ticket, whoever started it.
 
-For a chief-tracked delegation that returns a durable plan, read the ticket before
+Follow-up: all runtimes receive the same ticket nudge when activity remains unread;
+Claude may also arm a Monitor on `attn ticket inbox --watch` to consume updates
+sooner.
+
+For a delegation that returns a durable plan, read the ticket before
 continuing. `attn ticket show <ticket-id>` lists its Notebook artifacts. If one is a
 repository-reference card, pass its Git path, branch, and introducing commit in the
 follow-on brief and say that Git remains canonical. Otherwise pass the canonical

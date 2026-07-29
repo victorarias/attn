@@ -6,6 +6,23 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-29]
+
+### Changed
+- **Every delegation is now tracked as a ticket.** Delegating from any session —
+  not just the chief of staff — opens a ticket bound to the new agent, with the
+  brief as its description, and tells that agent to report its work state onto
+  it. The ticket reaches the session that delegated it, the delegated agent, and
+  the chief of staff, so a delegation you started shows up on your board, you can
+  send the agent a note with `attn ticket comment <ticket-id>`, and the chief
+  keeps its overview of every delegation in the system. Previously only the
+  chief's delegations were tracked and every other one was invisible and
+  unreachable. Delegating into a hidden workspace still unmutes it only for the
+  chief, and only the chief's own delegations are marked as delegated-from-chief
+  in the sidebar.
+
+---
+
 ## [2026-07-28]
 
 ### Fixed

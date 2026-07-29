@@ -39,8 +39,9 @@ Choose your role before reading anything about delegation:
 - **Otherwise, an ordinary session:** an explicit user request selects attn
   delegation; otherwise, use native subagents.
 
-A ticket-tracked task is still a leaf task — being tracked means the chief is
-*watching* your ticket, not that you inherited the chief's delegation license.
+A ticket-tracked task is still a leaf task. Every delegation is ticket-tracked, so
+a bound ticket says nothing about your role: it means your delegator and the chief
+are *watching* your ticket, not that you inherited a delegation license.
 
 ## Capability Index
 

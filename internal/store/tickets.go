@@ -200,13 +200,24 @@ func ValidateTicketID(id string) error {
 // The supplied now stamps created_at/updated_at (and closed_at, in the unusual
 // case of creating directly into a terminal status).
 func (s *Store) CreateTicket(t Ticket, author string, now time.Time) (*Ticket, error) {
-	return s.createTicket(t, author, "", now)
+	return s.createTicket(t, author, "", nil, now)
 }
 
 // CreateRoleOwnedTicket creates a ticket whose notification ownership belongs to
 // a durable profile role. The concrete author remains on the event for audit.
 func (s *Store) CreateRoleOwnedTicket(t Ticket, author, ownerRole string, now time.Time) (*Ticket, error) {
-	return s.createTicket(t, author, strings.TrimSpace(ownerRole), now)
+	return s.createTicket(t, author, strings.TrimSpace(ownerRole), nil, now)
+}
+
+// CreateTicketWithSubscribers creates a ticket and opts identities into its
+// notifications in the SAME transaction, so a ticket never lands with a partial
+// participant set. Delegation needs this: the delegator (and, when the chief role
+// does not own the ticket, the chief role identity) must be reachable from the
+// ticket's very first event, and a half-created ticket left behind by a failed
+// follow-up subscription would be unroutable. Subscribing carries no cursor write,
+// exactly as AddTicketSubscription does.
+func (s *Store) CreateTicketWithSubscribers(t Ticket, author, ownerRole string, subscribers []string, now time.Time) (*Ticket, error) {
+	return s.createTicket(t, author, strings.TrimSpace(ownerRole), subscribers, now)
 }
 
 // EnsureAutomationTicket creates or adopts the unique ticket for an automation run.
@@ -217,10 +228,10 @@ func (s *Store) EnsureAutomationTicket(t Ticket, author, ownerRole string, now t
 	if existing, err := s.GetTicketByAutomationRunID(t.AutomationRunID); err != nil || existing != nil {
 		return existing, err
 	}
-	return s.createTicket(t, author, strings.TrimSpace(ownerRole), now)
+	return s.createTicket(t, author, strings.TrimSpace(ownerRole), nil, now)
 }
 
-func (s *Store) createTicket(t Ticket, author, ownerRole string, now time.Time) (*Ticket, error) {
+func (s *Store) createTicket(t Ticket, author, ownerRole string, subscribers []string, now time.Time) (*Ticket, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -313,6 +324,19 @@ func (s *Store) createTicket(t Ticket, author, ownerRole string, now time.Time) 
 	// the delegation caller if that case ever appears.
 	if t.Assignee != "" {
 		if err := setTicketCursorTx(tx, t.Assignee, t.ID, createdSeq, now); err != nil {
+			return nil, err
+		}
+	}
+	for _, identity := range subscribers {
+		identity = strings.TrimSpace(identity)
+		if identity == "" {
+			continue
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO ticket_subscriptions (identity, ticket_id, created_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT(identity, ticket_id) DO NOTHING
+		`, identity, t.ID, formatTicketTime(now)); err != nil {
 			return nil, err
 		}
 	}

@@ -388,12 +388,30 @@ func TestDelegatedFromChiefDecoratesBroadcastSession(t *testing.T) {
 	}
 }
 
-func TestOrdinaryDelegationDoesNotDecorateDelegatedFromChief(t *testing.T) {
+// An ordinary (non-chief) delegation is ticket-tracked exactly like the chief's:
+// the ticket is bound to the delegated session and routed to the delegator, the
+// agent, and the chief role. It is NOT, however, decorated as delegated-from-chief
+// — that badge belongs to work the chief actually started.
+func TestOrdinaryDelegationBindsTicketWithoutChiefDecoration(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
 	// No chief role is set, so this is a plain session-to-session delegation.
 	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
-	consumeDelegatedPrompt(t, backend)
+
+	var prompt string
+	backend.onSpawn = func(opts ptybackend.SpawnOptions) {
+		if opts.ID == sourceSessionID || opts.InitialPromptFile == "" {
+			return
+		}
+		content, err := os.ReadFile(opts.InitialPromptFile)
+		if err != nil {
+			t.Fatalf("read initial prompt: %v", err)
+		}
+		prompt = string(content)
+		if err := os.Remove(opts.InitialPromptFile); err != nil {
+			t.Fatalf("remove initial prompt: %v", err)
+		}
+	}
 
 	result, err := d.delegate(&protocol.DelegateMessage{
 		Cmd:             protocol.CmdDelegate,
@@ -405,13 +423,41 @@ func TestOrdinaryDelegationDoesNotDecorateDelegatedFromChief(t *testing.T) {
 		t.Fatalf("delegate() error = %v", err)
 	}
 
-	// Ordinary (non-chief) delegation binds no ticket and decorates nothing.
 	ticket, err := d.store.ActiveTicketForSession(result.SessionID)
 	if err != nil {
 		t.Fatalf("ActiveTicketForSession: %v", err)
 	}
-	if ticket != nil {
-		t.Fatalf("ordinary delegation should not bind a ticket: %+v", ticket)
+	if ticket == nil {
+		t.Fatalf("ordinary delegation did not bind a ticket to session %s", result.SessionID)
+	}
+	if ticket.Assignee != result.SessionID || ticket.Description != "Plain delegated task." {
+		t.Fatalf("bound ticket = %+v", ticket)
+	}
+
+	// The agent is told to report through the ticket, and is still told it is a leaf.
+	if !strings.Contains(prompt, "attn ticket status in_progress") {
+		t.Fatalf("ordinary delegated prompt missing the ticket self-report contract: %q", prompt)
+	}
+	if !strings.Contains(prompt, "a leaf, not a coordinator") {
+		t.Fatalf("ordinary delegated prompt missing the leaf identity: %q", prompt)
+	}
+
+	participants, err := d.store.TicketParticipants(ticket.ID)
+	if err != nil {
+		t.Fatalf("TicketParticipants: %v", err)
+	}
+	got := map[string]bool{}
+	for _, p := range participants {
+		got[p] = true
+	}
+	for _, want := range []string{
+		result.SessionID,
+		sourceSessionID,
+		store.TicketRoleIdentity(store.TicketRoleChiefOfStaff),
+	} {
+		if !got[want] {
+			t.Fatalf("participants = %v, missing %q", participants, want)
+		}
 	}
 
 	delegated := d.sessionForBroadcast(d.store.Get(result.SessionID))

@@ -113,6 +113,127 @@ func TestTicketInboxConsumesByIdentity(t *testing.T) {
 	}
 }
 
+// Routing contract for an ORDINARY delegation: the delegated agent's report reaches
+// both the session that delegated it and the chief of staff, which was not the
+// creator and reads through its durable role identity.
+func TestTicketInboxRoutesOrdinaryDelegationToCreatorAndChief(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, creatorSessionID, _ := setupDelegationSource(t, d, backend)
+	// A chief exists but is a different session, so it never touches this delegation.
+	chiefSessionID := "session-chief"
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	consumeDelegatedPrompt(t, backend)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: creatorSessionID,
+		Brief:           "Plain delegated task.",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate(): %v", err)
+	}
+	agentSession := result.SessionID
+	ticketID := boundTicketID(t, d, agentSession)
+
+	// The creator drains the created event it authored nothing of interest on, so the
+	// assertion below is about the agent's report alone.
+	callTicketInbox(t, d, creatorSessionID)
+	callTicketInbox(t, d, chiefSessionID)
+
+	callSetTicketStatus(t, d, agentSession, string(protocol.DispatchWorkStateReadyForReview), "take a look")
+
+	for _, observer := range []struct {
+		name      string
+		sessionID string
+	}{
+		{"creator", creatorSessionID},
+		{"chief", chiefSessionID},
+	} {
+		bundles := callTicketInbox(t, d, observer.sessionID)
+		if len(bundles) != 1 || bundles[0].TicketID != ticketID {
+			t.Fatalf("%s inbox = %+v, want one bundle for %q", observer.name, bundles, ticketID)
+		}
+		if len(bundles[0].Events) != 1 {
+			t.Fatalf("%s inbox events = %+v, want exactly one", observer.name, bundles[0].Events)
+		}
+		ev := bundles[0].Events[0]
+		if ev.Author != agentSession || ev.ToStatus == nil || *ev.ToStatus != protocol.TicketStatusInReview {
+			t.Fatalf("%s inbox event = %+v, want the agent's in_review report", observer.name, ev)
+		}
+	}
+
+	// A steer from the delegator reaches the agent — the note channel back to it.
+	commentOnTicket(t, d, ticketID, "one more thing to check")
+	steer := callTicketInbox(t, d, agentSession)
+	if len(steer) != 1 || len(steer[0].Events) != 1 ||
+		steer[0].Events[0].Kind != protocol.TicketEventKind(store.TicketEventCommented) {
+		t.Fatalf("agent inbox after steer = %+v, want one commented event", steer)
+	}
+}
+
+// When the creator IS the chief, it holds two identities on the ticket (its session
+// subscription and the durable chief role). ticketnotify.ConsumeAll merges the two
+// queues by event seq, so the agent's report is delivered exactly once — no
+// dedup guard of our own is needed.
+func TestTicketInboxDoesNotDuplicateWhenChiefIsTheCreator(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
+	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefSessionID); err != nil {
+		t.Fatalf("set chief role: %v", err)
+	}
+	consumeDelegatedPrompt(t, backend)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: chiefSessionID,
+		Brief:           "Migrate the store to X",
+		Agent:           protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate(): %v", err)
+	}
+	agentSession := result.SessionID
+	ticketID := boundTicketID(t, d, agentSession)
+
+	// The chief observes through both identities.
+	observers := d.ticketObserversForSession(chiefSessionID)
+	if len(observers) != 2 {
+		t.Fatalf("chief observers = %+v, want session and role identities", observers)
+	}
+	subscribed, err := d.store.IsTicketSubscribed(chiefSessionID, ticketID)
+	if err != nil || !subscribed {
+		t.Fatalf("chief session subscribed = %v (err %v), want true as the creator", subscribed, err)
+	}
+
+	callTicketInbox(t, d, chiefSessionID)
+	callSetTicketStatus(t, d, agentSession, string(protocol.DispatchWorkStateReadyForReview), "take a look")
+
+	// The merge is load-bearing here, not incidental: BOTH identities have the report
+	// queued, so an unmerged consume would hand the chief the same event twice.
+	for _, observer := range observers {
+		events, err := d.store.UnreadTicketEventsFor(observer.ID, observer.AuthorID)
+		if err != nil {
+			t.Fatalf("UnreadTicketEventsFor(%s): %v", observer.ID, err)
+		}
+		if len(events) != 1 {
+			t.Fatalf("identity %s queue = %+v, want the report queued once", observer.ID, events)
+		}
+	}
+
+	bundles := callTicketInbox(t, d, chiefSessionID)
+	if len(bundles) != 1 || bundles[0].TicketID != ticketID {
+		t.Fatalf("chief inbox = %+v, want one bundle for %q", bundles, ticketID)
+	}
+	if len(bundles[0].Events) != 1 {
+		t.Fatalf("chief inbox events = %+v, want the report exactly once", bundles[0].Events)
+	}
+}
+
 func TestTicketInboxRequiresSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	server, clientConn := net.Pipe()

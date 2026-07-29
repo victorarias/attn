@@ -13,13 +13,13 @@ otherwise, use native subagents.
 An attn delegation creates a visible agent session the user can inspect,
 converse with, and steer directly. Native subagents report to you.
 
-## If Your Work Is Tracked, Report Your State
+## Report Your State on Your Bound Ticket
 
-If the chief of staff delegated this and is following a ticket bound to your
-session, self-report your work state so the ticket moves across the board and
-the chief can follow your progress without interrupting you to ask. When the
-chief delegates, attn opens that ticket (you are its assignee) and starts it in
-the working column. Report when you:
+Every delegation is tracked. attn opened a ticket for this task when it delegated
+you (you are its assignee) and started it in the working column. Self-report your
+work state so the ticket moves across the board and the people watching it — the
+session that delegated you and the chief of staff — can follow your progress
+without interrupting you to ask. Report when you:
 
 - reach a meaningful milestone
 - need input or are blocked
@@ -43,9 +43,9 @@ the matching state:
     attn ticket status failed \
       --comment "Implementation cannot continue because the required API was removed"
 
-Reporting moves your bound ticket to the matching column so the chief sees your
-progress on the board. Keep the comment concrete: outcome, evidence, and next
-action.
+Reporting moves your bound ticket to the matching column so your delegator and the
+chief see your progress on the board. Keep the comment concrete: outcome, evidence,
+and next action.
 
 Use `completed` when strong terminal evidence shows the requested outcome is done
 and no review or decision remains — for example, Victor accepted the work, the
@@ -97,4 +97,4 @@ it copies each source into the Notebook and does not retire it.
 After success, edit only the reported canonical source: the Git file named by a
 repository reference, or the returned Notebook file. When you make a meaningful
 edit, rename, or deletion, report it with `ticket status --comment` or `ticket
-comment` so the chief knows to re-read the ticket.
+comment` so the ticket's participants know to re-read it.
