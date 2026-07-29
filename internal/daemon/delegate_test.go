@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2204,5 +2205,97 @@ func TestDelegateWorktreeExplicitRepoStillUsesRepoDefault(t *testing.T) {
 	}
 	if head != upstreamHead {
 		t.Fatalf("new branch head = %s, want origin/main %s", head, upstreamHead)
+	}
+}
+
+// Ticket creation is the last step of the delegation saga, and the only failure
+// point past a live session. Its compensation set is the deepest one — session,
+// pane, workspace, worktree — so this is what proves the rollback stack unwinds
+// everything rather than the subset a particular failure site happened to list.
+func TestDelegateRollsBackEverythingWhenTicketCreationFails(t *testing.T) {
+	root := t.TempDir()
+	mainRepo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	runGitDaemon(t, mainRepo, "init")
+	runGitDaemon(t, mainRepo, "commit", "--allow-empty", "-m", "init")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	sourceWorkspaceID, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, mainRepo)
+	d.delegationTicketCreateHook = func() error { return errors.New("ticket store is unavailable") }
+	worktreePath := filepath.Join(root, "repo--feat-ticket-rollback")
+
+	if _, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "This delegation should roll back at the ticket step.",
+		Placement:       protocol.Ptr(delegationPlacementNew),
+		Label:           protocol.Ptr("ticket-rollback"),
+		Worktree: &protocol.DelegateWorktreeRequest{
+			Repo:   protocol.Ptr(mainRepo),
+			Branch: "feat/ticket-rollback",
+			Path:   protocol.Ptr(worktreePath),
+		},
+	}); err == nil {
+		t.Fatal("delegate() succeeded, want ticket-creation failure")
+	}
+
+	// The worktree it created is gone.
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree still exists after rollback: %v", err)
+	}
+	// The workspace it created is gone; the source workspace survives untouched.
+	workspaces := d.store.ListWorkspaces()
+	if len(workspaces) != 1 || workspaces[0].ID != sourceWorkspaceID {
+		t.Fatalf("workspaces after rollback = %+v, want only the source workspace", workspaces)
+	}
+	if layout := d.store.GetWorkspaceLayout(sourceWorkspaceID); layout == nil ||
+		len(layout.Panes) != 1 || layout.Panes[0].SessionID != sourceSessionID {
+		t.Fatalf("source workspace layout after rollback = %+v", layout)
+	}
+	// No orphan session or pane is left behind, and no half-created ticket.
+	for _, session := range d.store.List("") {
+		if session.ID != sourceSessionID {
+			t.Fatalf("delegated session %q survived the rollback", session.ID)
+		}
+	}
+	tickets, err := d.store.ListTickets(store.TicketListFilter{})
+	if err != nil {
+		t.Fatalf("ListTickets: %v", err)
+	}
+	if len(tickets) != 0 {
+		t.Fatalf("tickets after rollback = %+v, want none", tickets)
+	}
+}
+
+// The same deepest failure, but delegating into the SOURCE workspace: no workspace
+// is created, so unregistering one cannot incidentally take the session with it.
+// The session compensation is the only thing that can remove the spawned session,
+// which is what makes this the load-bearing case for it.
+func TestDelegateRollsBackSpawnedSessionWhenTicketCreationFails(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	sourceWorkspaceID, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	d.delegationTicketCreateHook = func() error { return errors.New("ticket store is unavailable") }
+
+	if _, err := d.delegate(&protocol.DelegateMessage{
+		Cmd:             protocol.CmdDelegate,
+		SourceSessionID: sourceSessionID,
+		Brief:           "This delegation should roll back at the ticket step.",
+		Label:           protocol.Ptr("tkt-rb-cur"),
+	}); err == nil {
+		t.Fatal("delegate() succeeded, want ticket-creation failure")
+	}
+
+	for _, session := range d.store.List("") {
+		if session.ID != sourceSessionID {
+			t.Fatalf("delegated session %q survived the rollback", session.ID)
+		}
+	}
+	if layout := d.store.GetWorkspaceLayout(sourceWorkspaceID); layout == nil ||
+		len(layout.Panes) != 1 || layout.Panes[0].SessionID != sourceSessionID {
+		t.Fatalf("source workspace layout after rollback = %+v", layout)
 	}
 }

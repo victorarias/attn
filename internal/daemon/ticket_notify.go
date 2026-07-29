@@ -49,15 +49,6 @@ func (d *Daemon) ticketBufferWindow() time.Duration {
 	return defaultTicketBufferWindow
 }
 
-// ticketAttentionKey intentionally follows the durable chief role across chief
-// session transfer. Other observers use their ordinary session identity.
-func (d *Daemon) ticketAttentionKey(sessionID string) string {
-	if d.isChiefOfStaffSession(sessionID) {
-		return store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)
-	}
-	return sessionID
-}
-
 func (d *Daemon) ticketDeadline(sessionID string, event store.TicketEvent, now time.Time) (time.Time, bool, error) {
 	ticket, err := d.store.GetTicket(event.TicketID)
 	if err != nil || ticket == nil {
@@ -120,11 +111,7 @@ func (d *Daemon) notifyTicketObservers(ticketID string) {
 	now := time.Now()
 	targets := make(map[string]bool, len(participants))
 	for _, identity := range participants {
-		id := identity
-		if identity == store.TicketRoleIdentity(store.TicketRoleChiefOfStaff) {
-			id = d.chiefOfStaffSessionID()
-		}
-		if id != "" {
+		if id := d.ticketSessionForIdentity(identity); id != "" {
 			targets[id] = true
 		}
 	}

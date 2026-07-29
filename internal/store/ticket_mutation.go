@@ -154,28 +154,12 @@ func unreadTargetTicketEventsTx(
 		WHERE e.ticket_id = ?
 			AND e.author != ?
 			AND e.seq > COALESCE(c.cursor, 0)
-			AND (
-				EXISTS (SELECT 1 FROM tickets t WHERE t.id = e.ticket_id AND t.assignee = ?)
-				OR EXISTS (
-					SELECT 1 FROM ticket_events e2
-					WHERE e2.ticket_id = e.ticket_id AND e2.author = ? AND e2.kind != 'commented'
-						AND NOT (
-							e2.kind = 'created' AND EXISTS (
-								SELECT 1 FROM ticket_role_owners ro WHERE ro.ticket_id = e2.ticket_id
-							)
-						)
-				)
-				OR EXISTS (
-					SELECT 1 FROM ticket_subscriptions sub
-					WHERE sub.ticket_id = e.ticket_id AND sub.identity = ?
-				)
-				OR EXISTS (
-					SELECT 1 FROM ticket_role_owners ro
-					WHERE ro.ticket_id = e.ticket_id AND ? = ('role:' || ro.role)
-				)
+			AND EXISTS (
+				SELECT 1 FROM ticket_participants p
+				WHERE p.ticket_id = e.ticket_id AND p.identity = ?
 			)
 		ORDER BY e.seq ASC
-	`, cursorIdentity, ticketID, authorIdentity, cursorIdentity, cursorIdentity, cursorIdentity, cursorIdentity)
+	`, cursorIdentity, ticketID, authorIdentity, cursorIdentity)
 	if err != nil {
 		return nil, err
 	}

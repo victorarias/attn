@@ -58,6 +58,11 @@ func ticketSlug(label string) string {
 // role identity; ticketnotify.ConsumeAll merges the two queues by event seq, so
 // the activity is still delivered once. No extra guard is needed for that case.
 func (d *Daemon) createDelegatedTicket(creatorSessionID string, ownedByChiefRole bool, session *protocol.Session, brief, label, agent string) (string, error) {
+	if d.delegationTicketCreateHook != nil {
+		if err := d.delegationTicketCreateHook(); err != nil {
+			return "", err
+		}
+	}
 	ownerRole := ""
 	chiefRoleIdentity := store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)
 	subscribers := []string{creatorSessionID}
