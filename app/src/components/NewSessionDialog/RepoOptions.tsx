@@ -295,6 +295,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   }, [
     attemptCreateWorktree,
     creatingWorktree,
+    generatedName,
     newWorktreeName,
     onError,
     repoInfo.currentBranch,
