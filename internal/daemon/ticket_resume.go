@@ -82,7 +82,7 @@ func (d *Daemon) resumeTicket(ticketID string) (*ticketResumeOutcome, error) {
 	// rollback if this call created it — a re-register is idempotent and preserves a
 	// stored rename (handleRegisterWorkspace's title guard), so it must survive.
 	workspaceID := "workspace-" + sessionID
-	createdWorkspaceID := ""
+	rollback := d.newDelegationRollback()
 	if d.store.GetWorkspace(workspaceID) == nil {
 		d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
 			Cmd:       protocol.CmdRegisterWorkspace,
@@ -93,7 +93,7 @@ func (d *Daemon) resumeTicket(ticketID string) (*ticketResumeOutcome, error) {
 		if d.store.GetWorkspace(workspaceID) == nil {
 			return nil, fmt.Errorf("create resume workspace")
 		}
-		createdWorkspaceID = workspaceID
+		rollback.onWorkspaceCreated(workspaceID)
 	}
 
 	paneID := "pane-" + sessionID
@@ -106,8 +106,9 @@ func (d *Daemon) resumeTicket(ticketID string) (*ticketResumeOutcome, error) {
 		Title:       protocol.Ptr(ticket.Title),
 	})
 	if _, err := readInternalActionResult(paneClient); err != nil {
-		return nil, d.rollbackDelegation(createdWorkspaceID, "", fmt.Errorf("create resume pane: %w", err))
+		return nil, rollback.fail(fmt.Errorf("create resume pane: %w", err))
 	}
+	rollback.onPaneCreated(sessionID)
 
 	// ResumePicker (not a passed ResumeSessionID) keeps handleSpawnSession the single
 	// resume-id resolver: its ticket-resume branch resolves the mirrored id for this
@@ -125,14 +126,12 @@ func (d *Daemon) resumeTicket(ticketID string) (*ticketResumeOutcome, error) {
 		ResumePicker: protocol.Ptr(true),
 	})
 	if _, err := readInternalActionResult(spawnClient); err != nil {
-		d.removeWorkspaceLayoutPaneForSession(sessionID)
-		return nil, d.rollbackDelegation(createdWorkspaceID, "", fmt.Errorf("spawn resume session: %w", err))
+		return nil, rollback.fail(fmt.Errorf("spawn resume session: %w", err))
 	}
 
 	session := d.store.Get(sessionID)
 	if session == nil {
-		d.removeWorkspaceLayoutPaneForSession(sessionID)
-		return nil, d.rollbackDelegation(createdWorkspaceID, "", fmt.Errorf("resume session was not persisted"))
+		return nil, rollback.fail(fmt.Errorf("resume session was not persisted"))
 	}
 
 	d.logf("resume: reopened ticket %q as session %s in %s", ticketID, sessionID, directory)

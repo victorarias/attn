@@ -791,6 +791,32 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 	// first queue is the honest outstanding board at sensible ages, rather than
 	// starting empty and hiding live turns.
 	{81, "add turn stamps to sessions", ""}, // see applyMigration81
+	// One definition of "who participates in a ticket". The rule had been
+	// hand-written in SQL three times — once per question asked of it (tickets for
+	// an identity, identities for a ticket, this identity on this one ticket) — in
+	// three different idioms, with nothing enforcing that they agreed. The view
+	// materializes the four participation sources once; every caller joins against
+	// it, so adding a fifth source is a single edit here.
+	//
+	// DROP first so re-running the migration on a database that already carries an
+	// older definition of the view replaces it rather than silently keeping it.
+	{82, "define the ticket participant rule once as a view", `
+		DROP VIEW IF EXISTS ticket_participants;
+		CREATE VIEW ticket_participants (ticket_id, identity) AS
+			SELECT id, assignee FROM tickets WHERE assignee != ''
+			UNION
+			SELECT e.ticket_id, e.author FROM ticket_events e
+			WHERE e.author != '' AND e.kind != 'commented'
+				AND NOT (
+					e.kind = 'created' AND EXISTS (
+						SELECT 1 FROM ticket_role_owners ro WHERE ro.ticket_id = e.ticket_id
+					)
+				)
+			UNION
+			SELECT ticket_id, identity FROM ticket_subscriptions WHERE identity != ''
+			UNION
+			SELECT ticket_id, ('role:' || role) FROM ticket_role_owners WHERE role != '';
+	`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

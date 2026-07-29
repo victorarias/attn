@@ -111,7 +111,8 @@ inbox (see the delegated-agent reference). These two commands reach **any** tick
   id, even one you aren't assigned to — the agent-to-agent note channel. Put the text behind
   `-m` (`--message`), not as a bare argument, so it can contain spaces and dashes and so
   `--session`/`--json` still parse. The comment informs that ticket's **participants** (its
-  assignee, the chief who created it, anyone subscribed) but does **not** subscribe *you*:
+  assignee, the session that delegated it, the chief of staff, anyone subscribed) but does
+  **not** subscribe *you*:
   it is a way to chime in without joining the ticket's future activity. Use it to flag
   something to a sibling agent or annotate a thread you're not on; for your own bound
   ticket, prefer `attn ticket status … --comment` so the note also moves the board.

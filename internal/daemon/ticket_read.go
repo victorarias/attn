@@ -12,24 +12,10 @@ import (
 	"github.com/victorarias/attn/internal/ticketnotify"
 )
 
-// ticketObserversForSession builds the effective notification identities for a
-// session. Every session retains its ordinary session identity. The active chief
-// additionally observes through the durable chief role identity, whose cursor
-// survives role transfers while AuthorID keeps self-authored events excluded. The
-// delivery path is shared by all runtimes; an optional runtime `ticket inbox
-// --watch` consumes the same unread queue before a countdown has to ring.
-func (d *Daemon) ticketObserversForSession(sessionID string) []ticketnotify.Observer {
-	personal := ticketnotify.Observer{ID: sessionID, AuthorID: sessionID, DeliveryID: sessionID}
-	observers := []ticketnotify.Observer{personal}
-	if d.isChiefOfStaffSession(sessionID) {
-		observers = append(observers, ticketnotify.Observer{
-			ID:         store.TicketRoleIdentity(store.TicketRoleChiefOfStaff),
-			AuthorID:   sessionID,
-			DeliveryID: sessionID,
-		})
-	}
-	return observers
-}
+// The observer identities a session reads through live in ticket_identity.go,
+// beside the inverse mapping they must agree with. The delivery path is shared by
+// all runtimes; an optional runtime `ticket inbox --watch` consumes the same unread
+// queue before a countdown has to ring.
 
 func (d *Daemon) sessionHasSelfMonitor(sessionID string) bool {
 	agentName := ""

@@ -208,20 +208,83 @@ func (d *Daemon) activeSessionInLinkedWorktree(directory string) (string, bool) 
 	return worktreeRoot, false
 }
 
-func (d *Daemon) rollbackDelegation(createdWorkspaceID, createdWorktreePath string, cause error) error {
-	if createdWorkspaceID != "" {
-		d.handleUnregisterWorkspace(nil, &protocol.UnregisterWorkspaceMessage{
-			Cmd: protocol.CmdUnregisterWorkspace,
-			ID:  createdWorkspaceID,
-		})
+// delegationRollback is the compensation stack for delegation's saga, shared with
+// ticket resume, which reassembles the same resources. Delegation acquires several
+// in sequence — a worktree, a workspace, a layout pane, a live session — and any
+// step after the first can fail. Each acquisition pushes its own undo here; a
+// later failure unwinds everything pushed so far, newest first.
+//
+// The point is that a failure site no longer decides WHICH compensations apply.
+// Hand-listing them at each `return` is what leaks a workspace, a pane, or a
+// worktree the moment a new failure point is added between two existing ones,
+// because the correct set is only visible by reading every site above it.
+//
+// Unwind order is acquisition order reversed, which is also the only safe order:
+// the session must stop before its pane is removed, the pane must go before its
+// workspace is unregistered, and the workspace must go before the worktree its
+// directory points at is deleted.
+type delegationRollback struct {
+	d    *Daemon
+	undo []func() error
+}
+
+func (d *Daemon) newDelegationRollback() *delegationRollback {
+	return &delegationRollback{d: d}
+}
+
+// fail unwinds every compensation pushed so far and returns cause, annotated with
+// any compensation that itself failed. The stack is emptied, so a caller that
+// keeps using the same rollback after a handled failure cannot double-undo.
+func (r *delegationRollback) fail(cause error) error {
+	for i := len(r.undo) - 1; i >= 0; i-- {
+		if err := r.undo[i](); err != nil {
+			cause = fmt.Errorf("%w; %v", cause, err)
+		}
 	}
-	if createdWorktreePath == "" {
-		return cause
-	}
-	if err := d.doDeleteWorktree(createdWorktreePath, nil, deleteWorktreeOptions{}); err != nil {
-		return fmt.Errorf("%w; rollback worktree %s: %v", cause, createdWorktreePath, err)
-	}
+	r.undo = nil
 	return cause
+}
+
+// abandon drops the pending compensations without running them, for the case where
+// undoing is no longer safe. Only correct when EVERY pending compensation is one
+// this operation must not perform; it is not a general "skip cleanup".
+func (r *delegationRollback) abandon() {
+	r.undo = nil
+}
+
+// onWorktreeCreated registers deletion of a worktree THIS operation created. A
+// reused or adopted worktree must never be pushed here.
+func (r *delegationRollback) onWorktreeCreated(path string) {
+	r.undo = append(r.undo, func() error {
+		if err := r.d.doDeleteWorktree(path, nil, deleteWorktreeOptions{}); err != nil {
+			return fmt.Errorf("rollback worktree %s: %v", path, err)
+		}
+		return nil
+	})
+}
+
+func (r *delegationRollback) onWorkspaceCreated(workspaceID string) {
+	r.undo = append(r.undo, func() error {
+		r.d.handleUnregisterWorkspace(nil, &protocol.UnregisterWorkspaceMessage{
+			Cmd: protocol.CmdUnregisterWorkspace,
+			ID:  workspaceID,
+		})
+		return nil
+	})
+}
+
+func (r *delegationRollback) onPaneCreated(sessionID string) {
+	r.undo = append(r.undo, func() error {
+		r.d.removeWorkspaceLayoutPaneForSession(sessionID)
+		return nil
+	})
+}
+
+func (r *delegationRollback) onSessionSpawned(sessionID string) {
+	r.undo = append(r.undo, func() error {
+		r.d.unregisterSession(sessionID, syscall.SIGTERM)
+		return nil
+	})
 }
 
 func delegationWorktreeOwnerPath(worktreePath string) (string, error) {
@@ -509,20 +572,26 @@ func (d *Daemon) createDelegationWorktree(baseDirectory, inferredRepo string, re
 		StartingFrom: startingFrom,
 	})
 	if err != nil {
-		if worktreePath != "" {
-			return "", false, d.rollbackDelegation("", worktreePath, fmt.Errorf("create delegated worktree: %w", err))
+		if worktreePath == "" {
+			return "", false, fmt.Errorf("create delegated worktree: %w", err)
 		}
-		return "", false, fmt.Errorf("create delegated worktree: %w", err)
+		rollback := d.newDelegationRollback()
+		rollback.onWorktreeCreated(worktreePath)
+		return "", false, rollback.fail(fmt.Errorf("create delegated worktree: %w", err))
 	}
+	rollback := d.newDelegationRollback()
+	rollback.onWorktreeCreated(worktreePath)
 	if operationID != "" {
 		ownerToken := uuid.NewString()
 		if err := writeDelegationWorktreeOwner(worktreePath, ownerToken); err != nil {
-			return "", false, d.rollbackDelegation("", worktreePath, err)
+			return "", false, rollback.fail(err)
 		}
 		if err := d.store.MarkDelegationWorktreeOwned(operationID, worktreePath, ownerToken, time.Now()); err != nil {
-			return "", false, d.rollbackDelegation("", worktreePath, fmt.Errorf("record delegated worktree ownership: %w", err))
+			return "", false, rollback.fail(fmt.Errorf("record delegated worktree ownership: %w", err))
 		}
 	}
+	// Handed to the caller intact; its own rollback owns the worktree from here.
+	rollback.abandon()
 	return worktreePath, true, nil
 }
 
@@ -530,12 +599,8 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 	return d.delegateOperation(msg, "", "", "", false, "", "")
 }
 
-func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID, workspaceID, directory, name, agent, model, effort, brief string, trackedByChief bool) error {
-	initialPrompt := brief
-	if trackedByChief {
-		initialPrompt = delegatedTicketPrompt(brief)
-	}
-	initialPrompt = withLeafIdentity(initialPrompt)
+func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID, workspaceID, directory, name, agent, model, effort, brief string) error {
+	initialPrompt := withLeafIdentity(delegatedTicketPrompt(brief))
 	spawnMsg := &protocol.SpawnSessionMessage{
 		Cmd:           protocol.CmdSpawnSession,
 		ID:            sessionID,
@@ -592,18 +657,22 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	if sessionID == "" {
 		sessionID = uuid.NewString()
 	}
-	chiefSessionID := initiatingChiefSessionID
-	if operationID == "" && d.chiefOfStaffSessionID() == sourceSessionID {
-		chiefSessionID = sourceSessionID
-	}
-	trackedByChief := chiefSessionID != ""
+	// Every delegation is ticket-tracked; only the chief's own delegations are
+	// additionally chief-OWNED. delegatedByChief therefore no longer gates tracking,
+	// just the two behaviors that are genuinely about the chief: durable role
+	// ownership of the ticket (which also drives the delegated-from-chief sidebar
+	// badge) and unmuting a hidden target workspace. The chief-ness of an operation
+	// is fixed when it is claimed (initiatingChiefSessionID), so a role transfer
+	// mid-launch cannot change it underneath a resumed operation.
+	delegatedByChief := initiatingChiefSessionID != "" ||
+		(operationID == "" && d.chiefOfStaffSessionID() == sourceSessionID)
 	paneID := "pane-" + sessionID
 	placement := delegationPlacement(msg)
 	workspaceID := ""
 	directory := ""
-	createdWorkspaceID := ""
 	createdWorktreePath := ""
 	operationWorktreePath := ""
+	rollback := d.newDelegationRollback()
 	if existing := d.store.Get(sessionID); existing != nil {
 		expectedWorkspaceID := ""
 		switch placement {
@@ -627,29 +696,28 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 				_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
 					"recovering delegated runtime", existing.WorkspaceID, "", existing.Directory, nil, nil, time.Now())
 			}
-			if err := d.spawnDelegatedRuntime(msg, sessionID, existing.WorkspaceID, existing.Directory, existing.Label, agent, model, effort, brief, trackedByChief); err != nil {
+			if err := d.spawnDelegatedRuntime(msg, sessionID, existing.WorkspaceID, existing.Directory, existing.Label, agent, model, effort, brief); err != nil {
 				return nil, fmt.Errorf("recover delegated session runtime: %w", err)
 			}
 		}
-		if trackedByChief {
-			ticket, ticketErr := d.store.ActiveTicketForSession(sessionID)
+		ticket, ticketErr := d.store.ActiveTicketForSession(sessionID)
+		if ticketErr != nil {
+			return nil, ticketErr
+		}
+		if ticket == nil {
+			ticketID, ticketErr := d.createDelegatedTicket(sourceSessionID, delegatedByChief, existing, brief, existing.Label, agent)
 			if ticketErr != nil {
 				return nil, ticketErr
 			}
-			if ticket == nil {
-				ticketID, ticketErr := d.createDelegatedTicket(chiefSessionID, existing, brief, existing.Label, agent)
-				if ticketErr != nil {
-					return nil, ticketErr
+			if operationID != "" {
+				worktreePath := ""
+				if msg.Worktree != nil {
+					worktreePath = existing.Directory
 				}
-				if operationID != "" {
-					worktreePath := ""
-					if msg.Worktree != nil {
-						worktreePath = existing.Directory
-					}
-					_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
-						"recovered delegated ticket", existing.WorkspaceID, ticketID, worktreePath, nil, nil, time.Now())
-				}
+				_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
+					"recovered delegated ticket", existing.WorkspaceID, ticketID, worktreePath, nil, nil, time.Now())
 			}
+			d.broadcastTicketsUpdated()
 		}
 		return d.completedDelegationResult(existing, placement, worktreeOwned), nil
 	}
@@ -760,10 +828,11 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		}
 		if created {
 			createdWorktreePath = worktreePath
+			rollback.onWorktreeCreated(worktreePath)
 		}
 		validatedDirectory, directoryErr := validateDelegationDirectory(worktreePath)
 		if directoryErr != nil {
-			return nil, d.rollbackDelegation("", createdWorktreePath, directoryErr)
+			return nil, rollback.fail(directoryErr)
 		}
 		directory = validatedDirectory
 		operationWorktreePath = directory
@@ -773,13 +842,16 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	if placement == delegationPlacementNew {
 		validatedDirectory, directoryErr := validateDelegationDirectory(directory)
 		if directoryErr != nil {
-			return nil, d.rollbackDelegation("", createdWorktreePath, directoryErr)
+			return nil, rollback.fail(directoryErr)
 		}
 		directory = validatedDirectory
 	}
 	if worktreeRoot, occupied := d.activeSessionInLinkedWorktree(directory); occupied && !protocol.Deref(msg.AllowWorktreeReuse) {
 		// Once another active session occupies the worktree, it is no longer safe
 		// to roll the directory back even if this operation originally created it.
+		// The worktree is the only thing acquired so far, so abandoning the whole
+		// stack is exactly "leave the occupied worktree alone".
+		rollback.abandon()
 		return nil, fmt.Errorf("an active session already uses worktree %s; pass --allow-worktree-reuse only when sharing it is intentional", worktreeRoot)
 	}
 
@@ -789,7 +861,7 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	if name == "" {
 		name = truncateDelegationName(filepath.Base(directory))
 		if err := d.validateDelegationName(name, creatingWorkspace, sessionNameWorkspaceID); err != nil {
-			return nil, d.rollbackDelegation("", createdWorktreePath, err)
+			return nil, rollback.fail(err)
 		}
 	}
 
@@ -802,20 +874,20 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 			Directory: directory,
 		})
 		if d.store.GetWorkspace(workspaceID) == nil {
-			return nil, d.rollbackDelegation("", createdWorktreePath, fmt.Errorf("create delegated workspace"))
+			return nil, rollback.fail(fmt.Errorf("create delegated workspace"))
 		}
-		createdWorkspaceID = workspaceID
+		rollback.onWorkspaceCreated(workspaceID)
 	}
 	if operationID != "" {
 		if err := d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
 			"assembling workspace and session", workspaceID, "", operationWorktreePath, nil, nil, time.Now()); err != nil {
-			return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, err)
+			return nil, rollback.fail(err)
 		}
 	}
 
 	if existingWorkspaceID, _, found := d.store.FindWorkspaceLayoutPaneBySessionID(sessionID); found {
 		if existingWorkspaceID != workspaceID {
-			return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath,
+			return nil, rollback.fail(
 				fmt.Errorf("reserved delegated pane belongs to workspace %s, want %s", existingWorkspaceID, workspaceID))
 		}
 	} else {
@@ -828,47 +900,44 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 			Title:       protocol.Ptr(name),
 		})
 		if _, err := readInternalActionResult(paneClient); err != nil {
-			return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, fmt.Errorf("create delegated pane: %w", err))
+			return nil, rollback.fail(fmt.Errorf("create delegated pane: %w", err))
 		}
 	}
+	// Covers the reserved pane too: an interrupted operation's pane is this
+	// operation's to clean up once it has adopted it, which is what the previous
+	// hand-listed compensations did at every failure site below.
+	rollback.onPaneCreated(sessionID)
 
-	if err := d.spawnDelegatedRuntime(msg, sessionID, workspaceID, directory, name, agent, model, effort, brief, trackedByChief); err != nil {
-		d.removeWorkspaceLayoutPaneForSession(sessionID)
-		return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, fmt.Errorf("spawn delegated session: %w", err))
+	if err := d.spawnDelegatedRuntime(msg, sessionID, workspaceID, directory, name, agent, model, effort, brief); err != nil {
+		return nil, rollback.fail(fmt.Errorf("spawn delegated session: %w", err))
 	}
 
 	session := d.store.Get(sessionID)
 	if session == nil {
-		d.removeWorkspaceLayoutPaneForSession(sessionID)
-		return nil, d.rollbackDelegation(createdWorkspaceID, createdWorktreePath, fmt.Errorf("delegated session was not persisted"))
+		return nil, rollback.fail(fmt.Errorf("delegated session was not persisted"))
 	}
-	if trackedByChief {
+	rollback.onSessionSpawned(sessionID)
+	// Unmuting the target workspace stays chief-only: an ordinary delegation
+	// preserves the workspace's current mute state (references/delegation.md).
+	if delegatedByChief {
 		if _, errMsg := d.setWorkspaceMuted(workspaceID, false); errMsg != "" {
-			d.unregisterSession(sessionID, syscall.SIGTERM)
-			d.removeWorkspaceLayoutPaneForSession(sessionID)
-			return nil, d.rollbackDelegation(
-				createdWorkspaceID,
-				createdWorktreePath,
-				fmt.Errorf("make delegated workspace visible: %s", errMsg),
-			)
+			return nil, rollback.fail(fmt.Errorf("make delegated workspace visible: %s", errMsg))
 		}
-		ticketID, err := d.createDelegatedTicket(chiefSessionID, session, brief, name, agent)
-		if err != nil {
-			d.unregisterSession(sessionID, syscall.SIGTERM)
-			d.removeWorkspaceLayoutPaneForSession(sessionID)
-			return nil, d.rollbackDelegation(
-				createdWorkspaceID,
-				createdWorktreePath,
-				fmt.Errorf("create delegated ticket: %w", err),
-			)
-		}
-		d.logf("delegate: bound ticket %q to session %s", ticketID, session.ID)
-		if operationID != "" {
-			_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
-				"delegated session and ticket created", workspaceID, ticketID, operationWorktreePath, nil, nil, time.Now())
-		}
-		d.broadcastTicketsUpdated()
 	}
+	// The ticket is not incidental to a delegation: the delegated agent's own prompt
+	// tells it to report through `attn ticket status`, and the ticket is the only
+	// channel back to it. A ticket failure therefore still fails the whole delegation
+	// atomically rather than leaving a running session nobody can reach.
+	ticketID, err := d.createDelegatedTicket(sourceSessionID, delegatedByChief, session, brief, name, agent)
+	if err != nil {
+		return nil, rollback.fail(fmt.Errorf("create delegated ticket: %w", err))
+	}
+	d.logf("delegate: bound ticket %q to session %s", ticketID, session.ID)
+	if operationID != "" {
+		_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
+			"delegated session and ticket created", workspaceID, ticketID, operationWorktreePath, nil, nil, time.Now())
+	}
+	d.broadcastTicketsUpdated()
 	result := &protocol.DelegateResult{
 		SessionID:   session.ID,
 		WorkspaceID: workspaceID,
@@ -913,17 +982,16 @@ const leafIdentityPreamble = "You are a delegated attn session — a leaf, not a
 	"explicitly asks for one."
 
 // withLeafIdentity prefixes a delegated agent's composed initial prompt with the
-// leaf identity line, applied uniformly whether or not the delegation is tracked
-// by the chief of staff.
+// leaf identity line. Tracking is universal, so this line carries the whole
+// "you are a leaf" signal — a bound ticket is never a promotion to coordinator.
 func withLeafIdentity(prompt string) string {
 	return leafIdentityPreamble + "\n\n---\n\n" + strings.TrimSpace(prompt)
 }
 
-// delegatedTicketPrompt augments a chief-delegated agent's brief with the
-// self-report contract: the agent's work is bound to an attn ticket (assignee ==
-// session), and it moves that ticket across the board by reporting its own work
-// state. This replaces the retired chief-of-staff dispatch reporting surface —
-// the chief reads the ticket board instead of a parallel dispatch record.
+// delegatedTicketPrompt augments every delegated agent's brief with the self-report
+// contract: the agent's work is bound to an attn ticket (assignee == session), and
+// it moves that ticket across the board by reporting its own work state. The
+// delegator, the agent, and the chief of staff all read that board.
 func delegatedTicketPrompt(brief string) string {
 	return strings.TrimSpace(brief) + `
 

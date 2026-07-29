@@ -63,6 +63,7 @@
     "real-app:scenario-autoclose-on-exit": "node scripts/real-app-harness/scenario-autoclose-on-exit.mjs",
     "real-app:scenario-present-flow": "node scripts/real-app-harness/scenario-present-flow.mjs",
     "real-app:scenario-ticket-lifecycle": "node scripts/real-app-harness/scenario-ticket-delegation-lifecycle.mjs",
+    "real-app:scenario-ordinary-delegation-ticket": "node scripts/real-app-harness/scenario-ordinary-delegation-ticket.mjs",
     "real-app:scenario-ticket-resume": "node scripts/real-app-harness/scenario-ticket-resume.mjs",
     "real-app:scenario-agent-queue": "node scripts/real-app-harness/scenario-agent-queue.mjs",
     "real-app:scenario-nudge-trigger": "node scripts/real-app-harness/scenario-nudge-trigger.mjs",

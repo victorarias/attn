@@ -33,11 +33,6 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// ObserverChief is the original simulation-harness identity. Production uses the
-// store's durable role identity plus the current chief session as AuthorID and
-// DeliveryID.
-const ObserverChief = "chief"
-
 // EventStore is the store surface the notifier needs. The real *store.Store
 // satisfies it; the harness uses the real store, so there is no mock to drift.
 //
@@ -58,11 +53,6 @@ type Observer struct {
 	DeliveryID string
 }
 
-// ChiefObserver returns the harness-only chief observer.
-func ChiefObserver() Observer {
-	return Observer{ID: ObserverChief, AuthorID: ObserverChief, DeliveryID: ObserverChief}
-}
-
 // Bundle is an observer's unread events for a single ticket. Consume returns one
 // Bundle per ticket, in oldest-activity-first order — the gateway's "bundle by
 // sender", re-homed to "bundle by ticket".
@@ -79,8 +69,15 @@ type Bundle struct {
 // Single-consumer-per-observer assumption: Consume reads unread events then writes
 // each touched ticket's cursor as separately-locked store calls, so two Consume
 // calls racing for the SAME observer can double-deliver. In practice an observer is
-// one session with one Monitor, so its consumes are serialized. Slice 3 makes this
-// atomic if real concurrency appears.
+// one session with one Monitor, so its consumes are serialized.
+//
+// The same non-atomicity applies WITHIN one ConsumeAll: it drains each identity in
+// turn, so a crash between two identities' cursor writes leaves one advanced and one
+// not, and the next consume replays those events. This is no longer an exotic path —
+// since every delegation binds a ticket, a chief that delegates routinely holds both
+// its session identity and the durable role identity on the same ticket. The failure
+// still costs at most a duplicate delivery, never a lost one, so it is documented
+// rather than fixed; a single transactional consume is the fix if it ever bites.
 func Consume(es EventStore, obs Observer, now time.Time) ([]Bundle, error) {
 	bundles, advance, err := pending(es, obs)
 	if err != nil {

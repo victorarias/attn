@@ -13,6 +13,19 @@ import (
 // unread cursor, dedup, bundle-by-ticket, the nudge path, and self-authored
 // exclusion.
 
+// ObserverChief is the simulation harness's chief identity — a flat string, not
+// the durable role identity production resolves through
+// store.TicketRoleIdentity(store.TicketRoleChiefOfStaff). It exists only to give
+// the example-based tests below a stable "the chief did this" author.
+const ObserverChief = "chief"
+
+// ChiefObserver is the harness-only single-identity chief observer. The real
+// two-identity chief — session identity plus durable role — is exercised in
+// routing_model_test.go and multi_identity_test.go.
+func ChiefObserver() Observer {
+	return Observer{ID: ObserverChief, AuthorID: ObserverChief, DeliveryID: ObserverChief}
+}
+
 // harness wires a real store to a recording Nudger. It also satisfies Nudger, so
 // the nudge path is observable. Note the Nudger contract takes only an observer id
 // — there is structurally no channel for event content, which is the

@@ -168,6 +168,11 @@ type Daemon struct {
 	delegationRunning map[string]bool
 	// deterministic slow-preparation seam used by delegation idempotency tests.
 	delegationWorktreePrepareHook func(path string)
+	// deterministic failure seam for the LAST step of the delegation saga. Ticket
+	// creation is the only failure point past a live session, so it is the only way
+	// to exercise the deepest compensation set (session + pane + workspace +
+	// worktree) without corrupting the store. Tests only.
+	delegationTicketCreateHook func() error
 	// reloadingSessions marks sessions whose agent is being re-spawned in place
 	// (chief-of-staff assign/demote reload). handlePTYExit consumes the flag to
 	// suppress the killed worker's session_exited so the reload reads as a runtime
