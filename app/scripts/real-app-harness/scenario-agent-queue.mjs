@@ -30,7 +30,9 @@
  *   8. the chief of staff occupies its own slot and never the band,
  *   9. turning the arrangement off and back on mid-session restores the whole
  *      workspace tree, then returns the same queue with the same agent selected,
- *  10. a settle survives a daemon restart.
+ *  10. settling by keyboard hands over the next agent that still owes a turn,
+ *      and leaves selection alone when nothing does,
+ *  11. a settle survives a daemon restart.
  *
  * Prereqs: `claude` on PATH; a non-production profile install with the
  * automation layer; a built `./attn` (or ATTN_HARNESS_BIN) for the restart step.
@@ -542,6 +544,19 @@ async function main() {
       await driver.pressKey('e', { command: true, shift: true });
       await waitForTurns(client, [alpha.sessionId], 'beta settled by shortcut before the restart');
 
+      // Closing a turn hands over the next agent that still owes one, so the
+      // user never has to settle and then go looking. The target is taken from
+      // the queue as it stood before the settle — reading it afterwards would
+      // race the daemon broadcast that drops the settled row.
+      const jumped = await pollFor(async () => {
+        const state = await client.request('get_state');
+        return state.activeSessionId === alpha.sessionId ? state : null;
+      }, 'settling to hand over the next agent in queue order', 15_000);
+      runner.assert(
+        jumped.activeSessionId === alpha.sessionId,
+        `settling selected the next owed turn: ${jumped.activeSessionId}`,
+      );
+
       // The app respawns the daemon, so it has to be down for the restart to be
       // a restart.
       await client.quitApp();
@@ -554,6 +569,22 @@ async function main() {
       runner.assert(
         settledIds(queue).includes(beta.sessionId),
         `beta came back as a session, just not as a turn: ${JSON.stringify(settledIds(queue))}`,
+      );
+    });
+
+    await runner.step('settling_the_last_turn_leaves_selection_alone', async () => {
+      // With nothing left to hand over, the keystroke settles and stops there —
+      // jumping somewhere arbitrary would take the user away from the agent they
+      // were just looking at.
+      await client.request('select_session', { sessionId: alpha.sessionId });
+      await driver.activateApp();
+      await driver.clickWindow(0.5, 0.5);
+      await driver.pressKey('e', { command: true, shift: true });
+      await waitForTurns(client, [], 'the last turn settled by shortcut');
+      const state = await client.request('get_state');
+      runner.assert(
+        state.activeSessionId === alpha.sessionId,
+        `selection stayed on the agent that was just settled: ${state.activeSessionId}`,
       );
     });
 

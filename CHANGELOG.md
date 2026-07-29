@@ -16,6 +16,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   settle, pin, and actions buttons are unchanged.
 
 ### Changed
+- **Settling a turn hands you the next agent that owes one.** ⌘⇧E now settles the
+  selected agent and selects the next turn in queue order — oldest owed first,
+  wrapping to the top — so working through the queue no longer takes two
+  keystrokes per agent. With nothing left to go to, the selection stays where it
+  is. The shortcut is still bound only while the queue arrangement is on, and a
+  row's own settle button still settles just that row without moving you.
 - **Delegated Git work starts isolated by default.** `attn delegate` now creates
   a new worktree automatically when its target is in a Git repository, including
   for read-only and discussion work. Use `--no-worktree` to deliberately continue

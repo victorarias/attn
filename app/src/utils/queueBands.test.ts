@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildQueueBands, type QueueBandSession } from './queueBands';
+import { buildQueueBands, nextTurnAfterSettle, type QueueBandSession } from './queueBands';
 import { buildWorkspaceViewModels } from './workspaceViewModels';
 
 const workspaces = [
@@ -158,5 +158,46 @@ describe('buildQueueBands', () => {
     buildQueueBands(tree);
 
     expect(tree.map((workspace) => workspace.sessions.map((session) => session.id))).toEqual([['a'], ['b']]);
+  });
+});
+
+describe('nextTurnAfterSettle', () => {
+  function turnsFor(ids: string[]) {
+    return buildQueueBands(views(ids.map((id, index) => ({
+      id,
+      label: id,
+      workspaceId: 'ws-a',
+      turnOwed: true,
+      turnOpenedAt: `2026-07-26T0${index}:00:00Z`,
+    })))).turns;
+  }
+
+  it('lands on the row after the one settled, in queue order', () => {
+    const turns = turnsFor(['oldest', 'middle', 'newest']);
+
+    expect(nextTurnAfterSettle(turns, 'oldest')?.session.id).toBe('middle');
+    expect(nextTurnAfterSettle(turns, 'middle')?.session.id).toBe('newest');
+  });
+
+  it('wraps to the top when the last row is settled', () => {
+    // Queue order is not attention order: the rows above are still owed, so the
+    // bottom row moves on to the oldest rather than falling off the end.
+    const turns = turnsFor(['oldest', 'middle', 'newest']);
+
+    expect(nextTurnAfterSettle(turns, 'newest')?.session.id).toBe('oldest');
+  });
+
+  it('never lands on the row just settled', () => {
+    // The band is read before the settle, so the settled row is still in it.
+    expect(nextTurnAfterSettle(turnsFor(['only']), 'only')).toBeNull();
+    expect(nextTurnAfterSettle([], 'anything')).toBeNull();
+    expect(nextTurnAfterSettle(turnsFor(['only']), null)?.session.id).toBe('only');
+  });
+
+  it('starts at the top for a session the band does not hold', () => {
+    // Already settled, pinned, muted, or the chief: no position to move on from.
+    const turns = turnsFor(['oldest', 'newest']);
+
+    expect(nextTurnAfterSettle(turns, 'elsewhere')?.session.id).toBe('oldest');
   });
 });
