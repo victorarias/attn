@@ -16,7 +16,6 @@ import {
   setSettingsAutomationHandle,
 } from './settingsAutomation';
 import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
-import { isQueueModeEnabled, QUEUE_MODE_SETTING } from '../utils/queueBands';
 import type { ThemePreference } from '../hooks/useTheme';
 import {
   AGENT_CAPABILITY_ORDER,
@@ -241,7 +240,6 @@ export function SettingsModal({
   const effectiveNotebookRoot = settings['notebook.root.effective'] || '';
   const tailscaleEnabled = (settings.tailscale_enabled || 'false') === 'true';
   const workflowsEnabled = (settings.workflows_enabled || 'false') === 'true';
-  const queueModeEnabled = isQueueModeEnabled(settings);
   const autoApproveEnabled = (settings.auto_approve_enabled || 'false') === 'true';
   const tailscaleStatus = settings.tailscale_status || 'disabled';
   const tailscaleURL = settings.tailscale_url || '';
@@ -455,10 +453,6 @@ export function SettingsModal({
   const handleToggleTailscale = useCallback(() => {
     onSetSetting('tailscale_enabled', tailscaleEnabled ? 'false' : 'true');
   }, [onSetSetting, tailscaleEnabled]);
-
-  const handleToggleQueueMode = useCallback(() => {
-    onSetSetting(QUEUE_MODE_SETTING, queueModeEnabled ? 'false' : 'true');
-  }, [onSetSetting, queueModeEnabled]);
 
   const handleToggleWorkflows = useCallback(() => {
     onSetSetting('workflows_enabled', workflowsEnabled ? 'false' : 'true');
@@ -1200,38 +1194,6 @@ export function SettingsModal({
                 </button>
               )}
             </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="settings-block">
-        <div className="settings-block-intro">
-          <div className="settings-kicker">Sidebar</div>
-          <h3>Agent queue</h3>
-          <p className="settings-description">
-            Puts the turns you owe at the top of the sidebar, oldest first, across every
-            workspace — with the chief of staff in its own slot above them. Off by default.
-          </p>
-        </div>
-        <div className="settings-block-body">
-          <div className="settings-row-card">
-            <div>
-              <p className="settings-row-title">Show the queue</p>
-              <p className="settings-row-copy">
-                An agent joins the queue when it wants you and stays there until you settle it
-                (⌘⇧E) — running or not, because you are the only one who knows whether you are
-                done with it. Everything stays exactly where it is in the sidebar below; the
-                queue only adds rows.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="settings-action"
-              data-testid="settings-queue-toggle"
-              onClick={handleToggleQueueMode}
-            >
-              {queueModeEnabled ? 'Disable' : 'Enable'}
-            </button>
           </div>
         </div>
       </section>

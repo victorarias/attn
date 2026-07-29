@@ -3,8 +3,9 @@ import type { WorkspaceWithSessions, WorkspaceViewSession } from './workspaceVie
 /**
  * The daemon-owned setting selecting the sidebar arrangement: off (the default)
  * is the workspace tree alone, on adds the chief's anchored slot and the "Your
- * turn" band above it. Read it through isQueueModeEnabled so Settings, the
- * command menu, and the sidebar can never disagree about what is in effect.
+ * turn" band above it. Read it through isQueueModeEnabled so the sidebar's
+ * display popover, the command menu, and the sidebar itself can never disagree
+ * about what is in effect.
  */
 export const QUEUE_MODE_SETTING = 'queue_mode_enabled';
 

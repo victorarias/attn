@@ -384,7 +384,9 @@ describe('SettingsModal', () => {
     expect(screen.getByText(/does not register a second tailnet device/i)).toBeInTheDocument();
   });
 
-  it('toggles the agent queue from General', async () => {
+  // The queue switch moved to the sidebar's display popover, where the rest of
+  // the sidebar arrangement lives. Settings must not offer a second one.
+  it('does not carry an agent-queue toggle', async () => {
     const onSetSetting = vi.fn();
     const props = (queueMode: string) => ({
       isOpen: true as const,
@@ -411,19 +413,13 @@ describe('SettingsModal', () => {
       onSetTheme: vi.fn(),
     });
 
-    const { rerender } = render(<SettingsModal {...props('false')} />);
+    render(<SettingsModal {...props('false')} />);
     fireEvent.click(screen.getByTestId('settings-nav-general'));
-    const toggle = await screen.findByTestId('settings-queue-toggle');
-    expect(toggle).toHaveTextContent('Enable');
-    fireEvent.click(toggle);
-    expect(onSetSetting).toHaveBeenCalledWith('queue_mode_enabled', 'true');
+    await screen.findByTestId('settings-projects-directory-input');
 
-    rerender(<SettingsModal {...props('true')} />);
-    fireEvent.click(screen.getByTestId('settings-nav-general'));
-    const toggleOn = await screen.findByTestId('settings-queue-toggle');
-    expect(toggleOn).toHaveTextContent('Disable');
-    fireEvent.click(toggleOn);
-    expect(onSetSetting).toHaveBeenCalledWith('queue_mode_enabled', 'false');
+    expect(screen.queryByTestId('settings-queue-toggle')).toBeNull();
+    expect(screen.queryByText('Agent queue')).toBeNull();
+    expect(onSetSetting).not.toHaveBeenCalled();
   });
 
   it('enables workflows when off and disables them when on', async () => {
