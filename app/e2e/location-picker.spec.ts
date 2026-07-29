@@ -305,6 +305,8 @@ test.describe('LocationPicker', () => {
         await page.keyboard.press('Enter');
 
         await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        // The repo root lands on the create form; step into the destination list.
+        await page.keyboard.press('ArrowDown');
         await expect(page.locator('[data-testid="repo-option-0"]')).toHaveClass(/selected/);
 
         await page.locator('[data-testid="repo-option-1"]').hover();
@@ -335,16 +337,47 @@ test.describe('LocationPicker', () => {
         await page.keyboard.press('Enter');
 
         await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
-        await page.locator('[data-testid="repo-option-2"]').click();
+        await page.locator('[data-testid="repo-new-worktree-form"]').click();
         await expect(page.locator('[data-testid="repo-new-worktree-input"]')).toBeVisible({ timeout: 2000 });
         await expect(page.getByText('Start from feat-images')).toBeVisible();
 
         await page.locator('[data-testid="repo-new-worktree-input"]').focus();
+        await page.keyboard.press('Meta+a');
         await page.keyboard.type('feat-more');
         await page.keyboard.press('Enter');
 
         await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 10000 });
         await expect(page.locator('.session-name', { hasText: 'exsin--feat-more' }).first()).toBeVisible({ timeout: 10000 });
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    test('creates a worktree from the generated name with a single Enter', async ({ page, daemon }) => {
+      await daemon.start();
+      const repo = createLocationPickerRepo(['feat-images']);
+
+      try {
+        await page.goto('/');
+        await page.waitForSelector('.dashboard');
+        await page.keyboard.press('Meta+t');
+        await expect(page.locator('.location-picker-overlay')).toBeVisible({ timeout: 2000 });
+
+        const input = page.locator('[data-testid="location-picker-path-input"]');
+        await input.focus();
+        await page.keyboard.type(repo.repoPath);
+        await page.keyboard.press('Enter');
+
+        await expect(page.locator('[data-testid="repo-options"]')).toBeVisible({ timeout: 5000 });
+        const nameField = page.locator('[data-testid="repo-new-worktree-input"]');
+        await expect(nameField).toBeFocused();
+        const generated = await nameField.inputValue();
+        expect(generated).toMatch(/^[a-z]+-[a-z]+$/);
+
+        await page.keyboard.press('Enter');
+
+        await expect(page.locator('.location-picker-overlay')).not.toBeVisible({ timeout: 10000 });
+        await expect(page.locator('.session-name', { hasText: `exsin--${generated}` }).first()).toBeVisible({ timeout: 10000 });
       } finally {
         repo.cleanup();
       }

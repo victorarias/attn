@@ -60,7 +60,222 @@ describe('RepoOptions', () => {
     expect(screen.getByTestId('repo-option-1')).toHaveClass('selected');
     expect(screen.getByTestId('repo-option-0')).toHaveAttribute('data-option-kind', 'main-repo');
     expect(screen.getByTestId('repo-option-1')).toHaveAttribute('data-option-kind', 'worktree');
-    expect(screen.getByTestId('repo-option-2')).toHaveAttribute('data-option-kind', 'new-worktree');
+    expect(screen.queryByTestId('repo-option-2')).not.toBeInTheDocument();
+  });
+
+  it('focuses the create form with a generated name when the repo root was chosen', () => {
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={vi.fn(async () => {})}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByTestId('repo-new-worktree-input') as HTMLInputElement;
+    expect(input).toHaveFocus();
+    expect(input.value).toMatch(/^[a-z]+-[a-z]+$/);
+    // No destination is armed, so Enter cannot open one by accident.
+    expect(screen.getByTestId('repo-option-0')).not.toHaveClass('selected');
+  });
+
+  it('creates a worktree from the prefilled name with a single Enter', async () => {
+    const onCreateWorktree = vi.fn(async () => {});
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    const generated = (screen.getByTestId('repo-new-worktree-input') as HTMLInputElement).value;
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    await waitFor(() => expect(onCreateWorktree).toHaveBeenCalledWith(generated, 'origin/main'));
+  });
+
+  it('rerolls and retries when the generated name collides with a branch RepoInfo never saw', async () => {
+    // `takenBranchNames` is built from `repoInfo.currentBranch` and
+    // `repoInfo.worktrees` alone, so it has no visibility into an ordinary
+    // local branch that was never checked out into a worktree. Git rejects
+    // `worktree add -b` on that branch the same way it would on a taken one;
+    // the component must recover by rerolling rather than surfacing the raw
+    // git failure.
+    const onCreateWorktree = vi.fn();
+    let firstAttempt: string | undefined;
+    onCreateWorktree.mockImplementation(async (branchName: string) => {
+      if (firstAttempt === undefined) {
+        firstAttempt = branchName;
+        throw new Error(`git worktree add failed: fatal: a branch named '${branchName}' already exists`);
+      }
+    });
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+        onError={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    await waitFor(() => expect(onCreateWorktree).toHaveBeenCalledTimes(2));
+    const [firstCall, secondCall] = onCreateWorktree.mock.calls;
+    expect(secondCall[0]).not.toBe(firstCall[0]);
+    expect(secondCall[1]).toBe('origin/main');
+  });
+
+  it('surfaces the collision instead of rerolling when the user typed the name', async () => {
+    // A typed name is a deliberate choice. Rerolling it would build an
+    // unrelated worktree and silently discard what the user asked for, so the
+    // "already exists" failure has to reach them unchanged.
+    const onError = vi.fn();
+    const onCreateWorktree = vi.fn(async (branchName: string) => {
+      throw new Error(`git worktree add failed: fatal: a branch named '${branchName}' already exists`);
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+        onError={onError}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feature' } });
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    await waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(onCreateWorktree).toHaveBeenCalledTimes(1);
+    expect(onCreateWorktree).toHaveBeenCalledWith('feature', 'origin/main');
+    expect(onError.mock.calls[0][0]).toMatch(/a branch named 'feature' already exists/);
+    // The typed name survives so the user can correct it.
+    expect((screen.getByTestId('repo-new-worktree-input') as HTMLInputElement).value).toBe('feature');
+    consoleError.mockRestore();
+  });
+
+  it('still rerolls after the user types and then presses the reroll button', async () => {
+    // Reroll hands ownership back to the generator, so the collision recovery
+    // applies again even though the field was user-edited in between.
+    const onCreateWorktree = vi.fn();
+    let firstAttempt: string | undefined;
+    onCreateWorktree.mockImplementation(async (branchName: string) => {
+      if (firstAttempt === undefined) {
+        firstAttempt = branchName;
+        throw new Error(`git worktree add failed: fatal: a branch named '${branchName}' already exists`);
+      }
+    });
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+        onError={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'hand-typed' } });
+    fireEvent.click(screen.getByTestId('repo-new-worktree-reroll'));
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    await waitFor(() => expect(onCreateWorktree).toHaveBeenCalledTimes(2));
+    expect(onCreateWorktree.mock.calls[0][0]).not.toBe('hand-typed');
+  });
+
+  it('keeps focus on the typed worktree so Enter still opens it', () => {
+    const onSelectWorktree = vi.fn();
+    const onCreateWorktree = vi.fn(async () => {});
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo--feature"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={onSelectWorktree}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    expect(onSelectWorktree).toHaveBeenCalledWith('/tmp/repo--feature');
+    expect(onCreateWorktree).not.toHaveBeenCalled();
+  });
+
+  it('reaches the destination list with ArrowDown from the create form', () => {
+    const onSelectMainRepo = vi.fn();
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={onSelectMainRepo}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={vi.fn(async () => {})}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'ArrowDown' });
+    expect(screen.getByTestId('repo-option-0')).toHaveClass('selected');
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+    expect(onSelectMainRepo).toHaveBeenCalledTimes(1);
+  });
+
+  it('draws a different name when the reroll button is pressed', () => {
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={vi.fn(async () => {})}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByTestId('repo-new-worktree-input') as HTMLInputElement;
+    const names = new Set([input.value]);
+    for (let i = 0; i < 12; i++) {
+      fireEvent.click(screen.getByTestId('repo-new-worktree-reroll'));
+      names.add(input.value);
+    }
+
+    expect(names.size).toBeGreaterThan(1);
   });
 
   it('keeps committed selection stable when hovering another destination', () => {
@@ -79,6 +294,7 @@ describe('RepoOptions', () => {
       />,
     );
 
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'ArrowDown' });
     fireEvent.mouseEnter(screen.getByTestId('repo-option-1'));
     expect(screen.getByTestId('repo-option-0')).toHaveClass('selected');
     expect(screen.getByTestId('repo-option-1')).not.toHaveClass('selected');
@@ -132,7 +348,7 @@ describe('RepoOptions', () => {
     });
   });
 
-  it('does not arm delete when focus has moved to the create-worktree action', () => {
+  it('does not arm delete when focus has moved to the create form', () => {
     render(
       <RepoOptions
         repoInfo={repoInfo}
@@ -147,8 +363,10 @@ describe('RepoOptions', () => {
       />,
     );
 
-    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'ArrowDown' });
-    expect(screen.getByTestId('repo-option-2')).toHaveClass('selected');
+    // Up off the top of the destination list lands back in the create form.
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'ArrowUp' });
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'ArrowUp' });
+    expect(screen.getByTestId('repo-new-worktree-input')).toHaveFocus();
 
     fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'D' });
     expect(screen.queryByText(/Delete .* \(y\/n\)/)).not.toBeInTheDocument();
@@ -180,12 +398,12 @@ describe('RepoOptions', () => {
     expect(onBack).not.toHaveBeenCalled();
   });
 
-  it('esc cancels the new-worktree form without leaving the chooser', () => {
+  it('esc from the create form goes back to the path input', () => {
     const onBack = vi.fn();
     render(
       <RepoOptions
         repoInfo={repoInfo}
-        selectedPath="/tmp/repo--feature"
+        selectedPath="/tmp/repo"
         onSelectedPathChange={vi.fn()}
         onSelectMainRepo={vi.fn()}
         onSelectWorktree={vi.fn()}
@@ -195,17 +413,13 @@ describe('RepoOptions', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('repo-option-2'));
-    expect(screen.getByTestId('repo-new-worktree-form')).toBeInTheDocument();
-
+    expect(screen.getByTestId('repo-new-worktree-input')).toHaveFocus();
     fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Escape' });
 
-    expect(screen.getByTestId('repo-options')).toBeInTheDocument();
-    expect(screen.queryByTestId('repo-new-worktree-form')).not.toBeInTheDocument();
-    expect(onBack).not.toHaveBeenCalled();
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 
-  it('opening the create-worktree form clears any pending delete confirmation', () => {
+  it('focusing the create form clears any pending delete confirmation', () => {
     render(
       <RepoOptions
         repoInfo={repoInfo}
@@ -223,10 +437,10 @@ describe('RepoOptions', () => {
     fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'D' });
     expect(screen.getByText(/Delete repo--feature/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('repo-option-2'));
+    fireEvent.click(screen.getByTestId('repo-new-worktree-form'));
 
     expect(screen.queryByText(/Delete repo--feature/)).not.toBeInTheDocument();
-    expect(screen.getByTestId('repo-new-worktree-form')).toBeInTheDocument();
+    expect(screen.getByTestId('repo-new-worktree-input')).toHaveFocus();
   });
 
   it('keeps destinations visible while repo info is refreshing', () => {
@@ -265,7 +479,7 @@ describe('RepoOptions', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('repo-option-2'));
+    fireEvent.click(screen.getByTestId('repo-new-worktree-form'));
     fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feature-2' } });
     fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
 
@@ -296,7 +510,7 @@ describe('RepoOptions', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('repo-option-2'));
+    fireEvent.click(screen.getByTestId('repo-new-worktree-form'));
     fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feature-2' } });
 
     expect(screen.getByTestId('repo-new-worktree-start-default')).toBeChecked();
@@ -322,7 +536,7 @@ describe('RepoOptions', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('repo-option-2'));
+    fireEvent.click(screen.getByTestId('repo-new-worktree-form'));
     fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feature-2' } });
     fireEvent.click(screen.getByTestId('repo-new-worktree-start-current'));
 

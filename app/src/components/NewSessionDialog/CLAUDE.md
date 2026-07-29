@@ -48,3 +48,20 @@ Regression to guard: Tab into `~/projects/victor/attn/` (ghost shows first child
 ## Selection Flow
 
 `PathInput` calls `onSelect(path)` → `LocationPicker.handleSelect` checks whether the path is a git repo → shows `RepoOptions` or closes.
+
+## RepoOptions focus zones
+
+Creating a worktree is the dominant reason to reach this step, so the create form is **always expanded** at the top of the chooser with a generated name (`worktreeNames.ts`) pre-filled and selected. Existing destinations sit below it.
+
+Focus is modelled as two zones rather than one index list:
+
+- `create` — the name input holds focus. Only `Enter` (create), `Tab` (toggle start point), `↓` (into the destination list), `⌃R`/`⌘R` (reroll the name), and `Escape` (back) are intercepted; every other key must keep reaching the text input, so the destination shortcuts (`D`, `R`, `1`–`9`) are deliberately inert here.
+- `destinations` — the list behaves as it always has: arrow keys commit as they move, `Enter` opens, `D` deletes, `R` refreshes, digits jump. `↑` off the top returns to the create form.
+
+The initial zone is `create` **except** when the incoming `selectedPath` resolves to a specific worktree (index > 0). Typing an exact worktree path is an explicit "open this one", so Enter must still open it.
+
+Regressions to guard:
+- Repo root → Enter creates a worktree without any typing.
+- Exact worktree path → Enter opens that worktree, and `onCreateWorktree` is not called.
+- A generated name never collides with an existing branch (`generateWorktreeName` takes the taken list). `RepoInfo` only carries the current branch and branches with an attached worktree, so an ordinary local branch with no worktree is invisible to that list; `attemptCreateWorktree` rerolls and retries on git's "branch already exists" failure as a backstop (`isBranchAlreadyExistsError` in `worktreeNames.ts`).
+- `.repo-options-destinations` keeps a `min-height` floor; without it the always-open form collapses the destination list to nothing in a small window.

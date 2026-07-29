@@ -975,11 +975,8 @@ Remote hub options:
       20_000,
     );
     saveJson(path.join(runDir, 'picker-worktree-options.json'), worktreeRepoOptions);
-    const newWorktreeOption = (worktreeRepoOptions.repoOptions?.items || []).find((item) => item.kind === 'new-worktree');
-    if (!newWorktreeOption) {
-      throw new Error(`New worktree option missing from repo options: ${JSON.stringify(worktreeRepoOptions, null, 2)}`);
-    }
-    await client.request('location_picker_select_repo_option', { index: newWorktreeOption.index });
+    // The create form is always expanded at the top of the chooser, so there is
+    // no row to select first — it is ready as soon as repo options render.
     const newWorktreeForm = await waitForLocationPickerState(
       client,
       (state) => state?.open && state?.repoOptions?.newWorktree?.visible,
