@@ -995,6 +995,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdWorkspaceSelected:
 	case protocol.CmdSettleTurn:
 		d.handleSettleTurn(msg.(*protocol.SettleTurnMessage))
+	case protocol.CmdCancelAutoSettle:
+		d.handleCancelAutoSettle(msg.(*protocol.CancelAutoSettleMessage))
 	case protocol.CmdTriggerNudge:
 		go d.handleTriggerNudge(msg.(*protocol.TriggerNudgeMessage))
 	case protocol.CmdPRVisited:
@@ -1305,6 +1307,12 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		// locally it would write nothing the remote knows about, and the next
 		// snapshot from the endpoint would put the row straight back.
 		if typed, ok := msg.(*protocol.SettleTurnMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdCancelAutoSettle:
+		// Same reasoning as settle_turn: the countdown that would close the turn
+		// runs in the daemon that owns the session, so the cancel has to reach it.
+		if typed, ok := msg.(*protocol.CancelAutoSettleMessage); ok {
 			return typed.SessionID
 		}
 	}

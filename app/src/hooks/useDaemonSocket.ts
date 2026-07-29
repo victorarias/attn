@@ -169,7 +169,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '198';
+export const PROTOCOL_VERSION = '199';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -5263,6 +5263,16 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'settle_turn', session_id: sessionId }));
   }, []);
 
+  // Keep a turn auto-settle is about to close. Stops the countdown and leaves the
+  // turn owed; the daemon also suppresses re-arming until the session next leaves
+  // `working`, so the cancel survives the agent simply carrying on. Fire and
+  // forget — the daemon re-broadcasts the session without its deadline.
+  const sendCancelAutoSettle = useCallback((sessionId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'cancel_auto_settle', session_id: sessionId }));
+  }, []);
+
   // Get file diff
   // Options: staged (deprecated), baseRef (for PR-like branch diffs), headRef
   // (pins the modified side to a commit instead of the working tree — used by
@@ -5819,6 +5829,7 @@ export function useDaemonSocket({
     sendSessionSelected,
     sendTriggerNudge,
     sendSettleTurn,
+    sendCancelAutoSettle,
     sendWorkspaceSelected,
     sendWorkspaceGet,
     sendWorkspaceAddSessionPane,

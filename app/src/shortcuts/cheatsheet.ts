@@ -45,6 +45,7 @@ export function buildCheatsheet(): CheatsheetCategory[] {
         { label: 'Toggle grid view', combos: [fromId('view.toggleGrid')] },
         { label: 'Jump to next waiting session', combos: [fromId('session.jumpToWaiting')] },
         { label: 'Settle turn, go to next', combos: [fromId('session.settle')] },
+        { label: 'Keep this turn (stop auto-settle)', combos: [fromId('session.cancelAutoSettle')] },
         { label: 'Toggle sidebar', combos: [fromId('session.toggleSidebar')] },
       ],
     },

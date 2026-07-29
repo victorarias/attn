@@ -679,6 +679,14 @@ type BrowserControlResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type CancelAutoSettleMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
 type ChiefOfStaffResultMessage struct {
 	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
 	ChiefOfStaff bool `json:"chief_of_staff"`
@@ -3922,6 +3930,9 @@ type RuntimeRespawnedMessage struct {
 type Session struct {
 	// Agent corresponds to the JSON schema field "agent".
 	Agent string `json:"agent"`
+
+	// AutoSettleFiresAt corresponds to the JSON schema field "auto_settle_fires_at".
+	AutoSettleFiresAt *string `json:"auto_settle_fires_at,omitempty,omitzero"`
 
 	// Branch corresponds to the JSON schema field "branch".
 	Branch *string `json:"branch,omitempty,omitzero"`

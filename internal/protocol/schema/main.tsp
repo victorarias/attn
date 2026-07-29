@@ -138,6 +138,7 @@ model Session {
   nudge_fires_at?: string;      // ISO timestamp a pending ticket-nudge countdown will fire; absent when paused (active session) or no countdown
   turn_owed?: boolean;          // True when the user owes this session a turn. Derived at broadcast from the turn stamps plus the queue's exclusions (shell, chief, pinned, muted); never stored, and never recomputed by a client.
   turn_opened_at?: string;      // ISO timestamp the outstanding turn opened; the queue's sort key. Absent when nothing is owed.
+  auto_settle_fires_at?: string; // ISO timestamp the auto-settle countdown will close this session's turn. Present only while the countdown is running, which is the whole contract: it is what the terminal tile animates against, and its absence is what says nothing is pending. Absent during the arm delay, when auto-settle is off, and after a cancel.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -1375,6 +1376,18 @@ model TriggerNudgeMessage {
 // Fire-and-forget; the daemon broadcasts the session afterwards.
 model SettleTurnMessage {
   cmd: "settle_turn";
+  session_id: string;
+}
+
+// CancelAutoSettleMessage is the user saying they want to keep a turn that
+// auto-settle was about to close. It stops the running countdown (and any arm
+// delay behind it) and leaves the turn owed. The countdown does not re-arm on the
+// state the session is already in: the user has said this one is theirs, and
+// re-arming three seconds later would make the cancel meaningless. A later
+// transition back into `working` arms a fresh one, which is the agent being
+// steered again. Fire-and-forget.
+model CancelAutoSettleMessage {
+  cmd: "cancel_auto_settle";
   session_id: string;
 }
 

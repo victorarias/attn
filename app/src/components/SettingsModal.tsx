@@ -16,6 +16,13 @@ import {
   setSettingsAutomationHandle,
 } from './settingsAutomation';
 import { normalizeSessionAgent, type SessionAgent } from '../types/sessionAgent';
+import {
+  isAutoSettleEnabled,
+  autoSettleSeconds,
+  AUTO_SETTLE_ENABLED_SETTING,
+  AUTO_SETTLE_ARM_SETTING,
+  AUTO_SETTLE_COUNTDOWN_SETTING,
+} from '../utils/queueBands';
 import type { ThemePreference } from '../hooks/useTheme';
 import {
   AGENT_CAPABILITY_ORDER,
@@ -206,6 +213,14 @@ export function SettingsModal({
   const [headlessContextCap, setHeadlessContextCap] = useState(
     settings.headless_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP),
   );
+  // Auto-settle windows, in seconds. Edited locally and committed on blur/Enter
+  // like the context caps; the daemon rejects out-of-range values.
+  const [autoSettleArm, setAutoSettleArm] = useState(
+    String(autoSettleSeconds(settings, AUTO_SETTLE_ARM_SETTING)),
+  );
+  const [autoSettleCountdown, setAutoSettleCountdown] = useState(
+    String(autoSettleSeconds(settings, AUTO_SETTLE_COUNTDOWN_SETTING)),
+  );
   // One draft (agent + model) per keeper duty, edited locally and committed per-row.
   const [keeperDrafts, setKeeperDrafts] = useState<Record<KeeperDutyKey, KeeperDraft>>(
     emptyKeeperDrafts,
@@ -259,6 +274,9 @@ export function SettingsModal({
   const actualReviewerModel = settings.reviewer_model || '';
   const actualChiefContextCap = settings.chief_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP);
   const actualHeadlessContextCap = settings.headless_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP);
+  const autoSettleEnabled = isAutoSettleEnabled(settings);
+  const actualAutoSettleArm = String(autoSettleSeconds(settings, AUTO_SETTLE_ARM_SETTING));
+  const actualAutoSettleCountdown = String(autoSettleSeconds(settings, AUTO_SETTLE_COUNTDOWN_SETTING));
   // The saved (persisted) config for every keeper duty, keyed by duty. A null entry
   // means the setting is blank (default for always-on duties, disabled for opt-in).
   const actualKeeperConfigs = useMemo(() => {
@@ -396,6 +414,12 @@ export function SettingsModal({
     setReviewerModel(actualReviewerModel);
     setChiefContextCap(actualChiefContextCap);
     setHeadlessContextCap(actualHeadlessContextCap);
+    // The modal mounts before the daemon's settings broadcast arrives, so these
+    // two start on the built-in defaults. Without this resync a saved 60/20
+    // policy would still be displayed as 30/15, and the commit-on-blur would
+    // then write those defaults back over it.
+    setAutoSettleArm(actualAutoSettleArm);
+    setAutoSettleCountdown(actualAutoSettleCountdown);
     setKeeperDrafts({
       summarize: initialKeeperDraft(KEEPER_DUTY_BY_KEY.summarize, actualKeeperConfigs.summarize, keeperAgents),
       narrate: initialKeeperDraft(KEEPER_DUTY_BY_KEY.narrate, actualKeeperConfigs.narrate, keeperAgents),
@@ -411,7 +435,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualDefaultModels, actualDefaultEfforts, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualKeeperConfigs, keeperAgents]);
+  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualDefaultModels, actualDefaultEfforts, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualAutoSettleArm, actualAutoSettleCountdown, actualKeeperConfigs, keeperAgents]);
 
   useEscapeStack(onClose, isOpen);
 
@@ -453,6 +477,24 @@ export function SettingsModal({
   const handleToggleTailscale = useCallback(() => {
     onSetSetting('tailscale_enabled', tailscaleEnabled ? 'false' : 'true');
   }, [onSetSetting, tailscaleEnabled]);
+
+  const handleToggleAutoSettle = useCallback(() => {
+    onSetSetting(AUTO_SETTLE_ENABLED_SETTING, autoSettleEnabled ? 'false' : 'true');
+  }, [onSetSetting, autoSettleEnabled]);
+
+  const commitAutoSettleArm = useCallback(() => {
+    const next = autoSettleArm.trim();
+    if (next !== actualAutoSettleArm.trim()) {
+      onSetSetting(AUTO_SETTLE_ARM_SETTING, next);
+    }
+  }, [autoSettleArm, actualAutoSettleArm, onSetSetting]);
+
+  const commitAutoSettleCountdown = useCallback(() => {
+    const next = autoSettleCountdown.trim();
+    if (next !== actualAutoSettleCountdown.trim()) {
+      onSetSetting(AUTO_SETTLE_COUNTDOWN_SETTING, next);
+    }
+  }, [autoSettleCountdown, actualAutoSettleCountdown, onSetSetting]);
 
   const handleToggleWorkflows = useCallback(() => {
     onSetSetting('workflows_enabled', workflowsEnabled ? 'false' : 'true');
@@ -1193,6 +1235,94 @@ export function SettingsModal({
                   Match app
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Sidebar</div>
+          <h3>Auto-settle</h3>
+          <p className="settings-description">
+            Closes a turn for you once you have steered the agent and walked away, so the queue
+            does not fill up with turns you have already dealt with. Off by default.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Settle a turn once you have steered the agent</p>
+              <p className="settings-row-copy">
+                When an agent you owe a turn goes back to work and stays there, its terminal
+                tile runs a countdown and then settles the turn for you — the same thing ⌘⇧E
+                does. Press ⌘. to keep the turn instead. Anything that makes the agent want you
+                again — a question, an approval, an error, a finished run — cancels it. Off by
+                default.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-auto-settle-toggle"
+              onClick={handleToggleAutoSettle}
+            >
+              {autoSettleEnabled ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+
+          <div className="settings-field-grid">
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-auto-settle-arm">
+                Wait before counting down (seconds)
+              </label>
+              <input
+                id="settings-auto-settle-arm"
+                data-testid="settings-auto-settle-arm"
+                type="number"
+                min={5}
+                max={3600}
+                step={5}
+                value={autoSettleArm}
+                onChange={(e) => setAutoSettleArm(e.target.value)}
+                onBlur={commitAutoSettleArm}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitAutoSettleArm();
+                  }
+                }}
+                className="settings-input"
+              />
+              <p className="settings-hint">
+                How long the agent must keep working before anything starts. Nothing is shown
+                during this window.
+              </p>
+            </div>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-auto-settle-countdown">
+                Countdown before settling (seconds)
+              </label>
+              <input
+                id="settings-auto-settle-countdown"
+                data-testid="settings-auto-settle-countdown"
+                type="number"
+                min={3}
+                max={600}
+                step={1}
+                value={autoSettleCountdown}
+                onChange={(e) => setAutoSettleCountdown(e.target.value)}
+                onBlur={commitAutoSettleCountdown}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitAutoSettleCountdown();
+                  }
+                }}
+                className="settings-input"
+              />
+              <p className="settings-hint">
+                How long the countdown runs on the tile — your window to press ⌘. and keep the
+                turn.
+              </p>
             </div>
           </div>
         </div>

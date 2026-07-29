@@ -51,6 +51,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdTriggerNudge:                          commandMetadata(ScopeSession, false, true),
 	protocol.CmdWorkspaceSelected:                     commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSettleTurn:                            commandMetadata(ScopeSession, false, true),
+	protocol.CmdCancelAutoSettle:                      commandMetadata(ScopeSession, false, true),
 	protocol.CmdMuteWorkspace:                         commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdQueryPRs:                              commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdMutePR:                                commandMetadata(ScopeHubLocal, false, true),

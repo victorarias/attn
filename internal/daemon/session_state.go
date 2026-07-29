@@ -126,7 +126,12 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	if profile.syncNudge {
 		d.doorbellMu.Lock()
 	}
+	// Unconditional, unlike the nudge lock above: syncAutoSettle runs for every
+	// cause, so every state write has to be ordered against a timer that may be
+	// deciding to settle right now. See autoSettleFireMu.
+	d.autoSettleFireMu.Lock()
 	applied := d.commitSessionState(change)
+	d.autoSettleFireMu.Unlock()
 	if profile.syncNudge {
 		d.doorbellMu.Unlock()
 	}
@@ -157,6 +162,11 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	if profile.syncNudge {
 		d.syncNudgeForState(change.sessionID, change.state)
 	}
+	// After the turn is opened above, so a state that both opens a turn and is
+	// `working` is impossible to see half-applied. It runs for every cause,
+	// including startup recovery: a session restored into `working` with a turn
+	// still owed is exactly the case auto-settle exists for.
+	d.syncAutoSettle(change.sessionID, change.state)
 	if profile.broadcast {
 		d.broadcastSessionStateChanged(change.sessionID)
 	}
