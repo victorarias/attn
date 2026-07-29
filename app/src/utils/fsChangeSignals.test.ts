@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { bumpFsChangeSignal, fsChangeSignalKey } from './App';
+import { bumpFsChangeSignal, fsChangeSignalKey } from './fsChangeSignals';
 
 // Pure-logic coverage for the per-root fs_changed routing that feeds every
 // notebook surface's changeSignal (see makeNotebookSurfaceDaemon in App.tsx).
 // App.tsx has no dedicated render-level test suite for this wiring (see
-// App.presentationNotices.test.ts for the same pattern applied to another
+// utils/presentationNotices.test.ts for the same pattern applied to another
 // piece of App.tsx state), so this exercises the extracted key/reducer
 // functions directly rather than standing up a full App render + mocked
 // WebSocket.

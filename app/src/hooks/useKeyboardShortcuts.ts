@@ -1,6 +1,6 @@
 // app/src/hooks/useKeyboardShortcuts.ts
 import { useEffect } from 'react';
-import { useShortcut } from '../shortcuts';
+import { useShortcut } from '../shortcuts/useShortcut';
 import { isAccelKeyPressed } from '../shortcuts/platform';
 
 interface KeyboardShortcutsConfig {

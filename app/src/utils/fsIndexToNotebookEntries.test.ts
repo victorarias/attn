@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fsIndexToNotebookEntries } from './App';
-import type { FsIndexResult } from './hooks/useDaemonSocket';
+import { fsIndexToNotebookEntries } from './fsChangeSignals';
+import type { FsIndexResult } from '../hooks/useDaemonSocket';
 
 // Pure-logic coverage for the fs_index -> NotebookEntry adapter that backs the
 // ⌘P finder (both notebook tiles and the fullscreen NotebookBrowser) since PR5

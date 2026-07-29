@@ -270,11 +270,41 @@ async function main() {
     });
 
     await runner.step('clicking_a_row_hands_the_agent_over', async () => {
-      await client.request('dom_click', { selector: `[data-testid="queue-turn-${alpha.sessionId}"]` });
+      await client.request('dom_click', { selector: `[data-testid="queue-select-${alpha.sessionId}"]` });
       await pollFor(async () => {
         const state = await client.request('get_state');
         return state.activeSessionId === alpha.sessionId ? state : null;
       }, 'the clicked row to select its agent', 15_000);
+      await waitForPaneInputFocus(client, alpha.sessionId, alpha.paneId, 15_000);
+    });
+
+    await runner.step('a_row_opens_from_the_keyboard', async () => {
+      // A queue row must be operable without a mouse. The focus is placed
+      // directly rather than walked to with Tab — where a blind Tab walk ends up
+      // depends on the whole window, which says nothing about this row — but the
+      // keypress itself is a real Return through the packaged app, so it proves
+      // the row responds to the keyboard and not only to a click handler.
+      await client.request('select_session', { sessionId: beta.sessionId });
+      await driver.activateApp();
+
+      const focused = await client.request('dom_focus', {
+        selector: `[data-testid="queue-select-${alpha.sessionId}"]`,
+      });
+      runner.assert(focused.tag === 'BUTTON', `the row's open control is a button: ${JSON.stringify(focused)}`);
+
+      const row = (await queueState(client)).turns.find((entry) => entry.id === alpha.sessionId);
+      runner.assert(
+        row.open?.focused === true && row.open.label.length > 0,
+        `the focused control is the row's own, and is named: ${JSON.stringify(row.open)}`,
+      );
+
+      await driver.pressEnter();
+      await pollFor(async () => {
+        const state = await client.request('get_state');
+        return state.activeSessionId === alpha.sessionId ? state : null;
+      }, 'Return on the focused row to open its agent', 15_000);
+      runner.log('a queue row opened from the keyboard', { row: alpha.sessionId, open: row.open });
+
       await waitForPaneInputFocus(client, alpha.sessionId, alpha.paneId, 15_000);
     });
 

@@ -1189,6 +1189,33 @@
   margin: 0 6px;
 }
 
+/* Fills the row from behind, so a click lands on it wherever it falls. Absolute
+   rather than a wrapper: the row's other children stay direct children of
+   .session-item and keep their layout. */
+.queue-row-select {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: inherit;
+  cursor: pointer;
+}
+
+.queue-row-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Above the fill, so pressing one of these is not also opening the session. */
+.queue-row > .session-actions,
+.queue-row > .queue-row-pin,
+.queue-row > .queue-row-settle {
+  position: relative;
+  z-index: 1;
+}
+
 .queue-row-workspace {
   flex: 0 1 auto;
   min-width: 0;

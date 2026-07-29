@@ -1,9 +1,9 @@
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { StateIndicator } from './StateIndicator';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
-import { formatShortcut } from '../shortcuts';
+import { formatShortcut } from '../shortcuts/formatShortcut';
 import type { UISessionState } from '../types/sessionState';
-import type { QueueBands as QueueBandsModel, QueueRow } from '../utils/queueBands';
+import { formatTurnAge, type QueueBands as QueueBandsModel, type QueueRow } from '../utils/queueBands';
 
 export interface QueueBandSessionView {
   id: string;
@@ -43,19 +43,6 @@ interface QueueBandsProps {
  */
 const AGE_TICK_MS = 30_000;
 
-export function formatTurnAge(openedAt: string | undefined, now: number): string {
-  if (!openedAt) return '';
-  const opened = Date.parse(openedAt);
-  if (Number.isNaN(opened)) return '';
-  const seconds = Math.max(0, Math.round((now - opened) / 1000));
-  if (seconds < 60) return 'now';
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.round(hours / 24)}d`;
-}
-
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -91,8 +78,24 @@ function QueueRowView({
       data-testid={`${testIdPrefix}-${session.id}`}
       data-state={session.state}
       data-workspace-id={row.workspaceId}
-      onClick={onSelect}
     >
+      {/*
+        Opening the session is a real button so it is reachable by Tab and
+        pressed by Enter or Space, not a click handler on the row. It fills the
+        row from behind rather than wrapping its contents, which keeps a click
+        anywhere on the row opening the session and leaves every other child a
+        direct child of .session-item — the row's flex layout and the `>`
+        selectors that style it are untouched. The settle, pin, and actions
+        controls are lifted above it so they stay independently clickable and
+        do not sit inside an interactive ancestor.
+      */}
+      <button
+        type="button"
+        className="queue-row-select"
+        data-testid={`queue-select-${session.id}`}
+        aria-label={`Open ${session.label}`}
+        onClick={onSelect}
+      />
       <StateIndicator state={session.state} size="md" seed={session.id} reason={session.state_reason} />
       <span className="session-label">{session.label}</span>
       {session.chiefOfStaff && <ChiefOfStaffBadge />}

@@ -4,8 +4,8 @@ import {
   presentationNeedsNotice,
   seedPresentationNotices,
   upsertPresentationNotice,
-} from './App';
-import type { Presentation } from './types/generated';
+} from './presentationNotices';
+import type { Presentation } from '../types/generated';
 
 // Pure-logic coverage for the presentation-notice list that feeds the pane
 // header chip (HeaderPresentationChip in components/PresentationChip.tsx).

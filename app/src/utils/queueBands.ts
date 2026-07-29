@@ -24,6 +24,24 @@ export interface QueueRow<TSession extends QueueBandSession> {
   workspaceTitle: string;
 }
 
+/**
+ * How long a turn has been outstanding, in the coarsest unit that still reads
+ * as an age. `now` is passed in rather than read here so the caller owns the
+ * clock and the function stays a pure projection of the two timestamps.
+ */
+export function formatTurnAge(openedAt: string | undefined, now: number): string {
+  if (!openedAt) return '';
+  const opened = Date.parse(openedAt);
+  if (Number.isNaN(opened)) return '';
+  const seconds = Math.max(0, Math.round((now - opened) / 1000));
+  if (seconds < 60) return 'now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
 export interface QueueBands<TSession extends QueueBandSession> {
   /** The chief's anchored slot. It never queues, so it is always its own row. */
   chief: QueueRow<TSession> | null;
