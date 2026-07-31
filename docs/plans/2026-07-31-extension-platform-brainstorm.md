@@ -471,7 +471,42 @@ Both were understated in the first pass:
    capability is declared, auditable and revocable per extension, and the daemon
    sees every call. Heavier needs escalate to an out-of-process plugin.
 
-## Still open
+## Corrections (2026-07-31, final)
 
-Nothing. The platform is specified; see
-[the implementation plan](2026-07-31-extension-platform-implementation.md).
+Three things above are wrong and are retracted. The live document is
+[the implementation plan](2026-07-31-extension-platform-implementation.md),
+which is organized around primitives rather than around one tenant.
+
+**Automations are not unadopted.** The "unused in production" line came from
+`2026-07-21-automations-v2-simplification.md`, where it described **v1**, as the
+justification for the v2 rebuild. It was carried forward here as a present-tense
+fact about the shipped v2 feature, which is wrong: automations work, are used,
+and are customizable. The primitives describe automations
+(`subscribe + think`); they do not replace them.
+
+**The security framing was mostly theater.** An agent running inside attn
+already has a shell — it can write and run a script directly. Reaching the same
+capability *through* an attn extension is strictly more work, so the platform
+grants a compromised agent nothing new, and capability grants over `shell` gate
+nothing. The unescaped `sh -lc` in `open_in_editor` and `csp: null` are real
+issues on their own merits and worth fixing, but they are not arguments about
+this platform. What actually survives is narrower and is about reliability, not
+security: an extension runs persistently and automatically, so a broken one
+misbehaves for longer than a session-bound agent. That argues for an invocation
+log and a kill switch. Nothing more.
+
+**goja was the wrong call, for the same reason the YAML view-model was.** A
+restricted bespoke runtime — ES2017, no `fetch`, no `console.log`, no
+`setTimeout`, no npm, no debugger — is another thing agents don't know and have
+to relearn, with every API hand-built by attn. bun is what agents already write
+for, attn already supervises bun processes, and
+`internal/daemon/daemon.go:342` records that attn had already decided the JS
+engine runs outside the daemon. Reusing the goja engine because it happened to
+be in the repo was tail-wagging-dog.
+
+**And the organizing mistake behind all of it:** every draft above was built
+around the delegation gate, with a platform wrapped around it. The gate is one
+composition of the primitives, not the thing being built. The
+`observe | decide | gate` taxonomy was the clearest symptom — a list of use
+cases wearing primitive clothes, fusing two orthogonal primitives (`block` and
+`ask`) into one axis.

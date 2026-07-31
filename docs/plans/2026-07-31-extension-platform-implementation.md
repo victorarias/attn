@@ -1,216 +1,156 @@
-# Plan: the attn extension platform
+# Plan: attn extension primitives
 
 ## Goal
 
-Make attn self-extensible: an agent inside attn creates a new event-driven
-interaction — subscribe to something the daemon does, put up a purpose-built UI,
-take the human's decision, act on it — **without a core PR and without a human
-clicking anything**.
+Give agents inside attn a small set of **primitives** they can combine to build
+interactions attn does not have. Not a feature with a platform around it — a
+vocabulary.
 
-Grounded in [the brainstorm and spike](2026-07-31-extension-platform-brainstorm.md),
-whose `spike-ext/` host proved the load-bearing mechanics: a goja handler can
-block a core operation on a human verdict, a long block does not trip the
-watchdog, runaway handlers are still interrupted, unanswered gates time out to
-policy, and a cheap policy path costs the human nothing.
+The test of the vocabulary is not "can it build the delegation gate." It is
+that things attn *already has* fall out of it as compositions, and that the
+next twenty ideas are compositions too rather than core PRs.
 
-Two proving tenants, stressing different axes:
+## The primitives
 
-- **`delegation.before_start`** — the event and interception half. Review a
-  delegation's prompt before the delegate starts; approve, or send it back with
-  feedback.
-- **Present's use cases** — the expressiveness half. If extensions can host
-  change review and document reading, this is a platform and not a form
-  renderer.
+| Primitive | What it does |
+| --- | --- |
+| `subscribe(event)` | attn emits named events; an extension listens |
+| `block` | a subscriber makes attn wait for its answer before continuing |
+| `ask(ui)` | render React, get a structured answer back |
+| `render(ui)` | mount React somewhere persistent, not tied to a question |
+| `state` | durable per-extension storage |
+| `act` | call attn's own commands — delegate, ticket, comment, session |
+| `think` | invoke an agent and use its answer |
 
-This is a foundation, not a minimal feature. Where a choice is between "smaller
-now" and "right to build on," it goes to the latter.
+**`block` and `ask` are orthogonal.** An earlier draft fused them into an
+`observe | decide | gate` taxonomy; that was a list of use cases, not
+primitives, and it kept collapsing the design back onto one feature. Blocking
+without asking is a code-only decision. Asking without blocking is a
+notification that wants an answer. Both together is a gate.
 
-### Settled
-
-1. **Runtime — goja-first, plugins kept.** Handlers run in-daemon; the existing
-   out-of-process plugin path stays for anything needing filesystem, network or
-   real dependencies, sharing one catalog.
-2. **UI — real React, not a data model.** Extensions ship `.tsx` importing a
-   provided `@attn/ui` component library. Supersedes the earlier view-tree
-   catalog: a bespoke schema has no training data and would reproduce the
-   authoring cost that stalled Present.
-3. **Placement — the extension declares it** (drawer / tile / window).
-4. **All three interaction kinds** — `observe`, `decide`, `gate`.
-5. **Present** — machinery reused, manifest schema not inherited; not adopted,
-   so not a constraint.
-6. **Automations** — committed as a future tenant; v2 code untouched here.
-7. **Registration is agent-driven** — CLI over the socket, hot reload, no
-   clicking, no daemon restart.
-8. **State preservation is a platform primitive** — durable, transactional,
-   per-extension, reachable from handler and UI alike.
-9. **UI isolation — same-context dynamic import.** Rendered inline with one
-   React instance and no bridge; contained by a per-extension error boundary and
-   disable, not by a sandbox. The webview remains a placement for untrusted or
-   heavyweight content.
-10. **Handler power — capability-gated host fns.** `fetch`, file read/write and
-    shell are declared in `extension.toml` and granted per extension; every call
-    is auditable and revocable. Heavier needs escalate to a plugin.
-
-## Architecture Map
+### The set validated against what already exists
 
 ```text
-AUTHORING (an agent, no human in the loop)
-  writes  my-extension/{extension.toml, handler.ts, ui.tsx}
-  runs    attn ext register ./my-extension
-    -> bun bundles: handler.ts -> plain JS (goja)
-                    ui.tsx     -> ESM, react/react-dom externalized
-    -> registered, hot-reloaded, live. No restart, no UI ceremony.
-
-BACKEND
-  a daemon operation (delegate, worktree create, session state change, ...)
-  -> emit(event, payload)                          [internal/extension: catalog]
-    -> dispatch: subscribers, priority, kind       [internal/extension: dispatch]
-      |
-      +-- goja runtime — ONE VM PER INVOCATION     [internal/extension/runtime]
-      |     host fns: ui() state() emit() agent() log()
-      |     per-invocation budget; capability-gated
-      |
-      +-- out-of-process plugin (existing JSON-RPC path, same catalog)
-      |
-      v
-    verdict: observe -> ignored
-             decide  -> handled | decline    (chain of responsibility)
-             gate    -> allow | deny(data)   (deadline + declared default)
-  -> the daemon acts: proceed, or abort carrying the extension's feedback
-
-FRONTEND
-  ui(props) from a handler
-  -> persist a pending interaction               [internal/store]
-  -> broadcast; placement declared by the extension
-  -> app dynamically imports the extension's ESM module
-  -> renders <ExtensionUI/> inside a per-extension error boundary
-     importing @attn/ui (themed components) and @attn/host (typed daemon SDK)
-  -> human acts -> response -> handler resumes -> verdict
-
-STATE
-  extension_state: durable, transactional, namespaced per extension
-  reachable from the handler (host fn) and the UI (host SDK) alike.
-  Long-lived state lives HERE — the runtime keeps no resident VM.
-
-Tests:
-  internal/extension  unit tests, in-memory store fake + injected clock
-  daemon integration  real SQLite via ScopeTestEnvironment
-  frontend            extension host + error boundary via createMockDaemon
-  live                packaged scenarios on a throwaway profile
+automations                 = subscribe + think
+present                     = render + ask + state
+worktree provider plugins   = subscribe + block
+delegation prompt approval  = subscribe + block + ask
+a custom queue view         = render + state
+nightly digest of idle work = subscribe + think + state
 ```
 
-## Data Model
+Automations and the worktree plugins are **working features** — this vocabulary
+describes them, it does not replace them. Where an existing mechanism is a
+composition of these primitives, converging later is a rename, not a rewrite.
 
-```text
-extensions            id, name, source_path, bundle_hash, schema_version,
-                      enabled, capabilities_json, created_at, updated_at
+## Where extension code runs
 
-extension_subscriptions  extension_id, event_name, interaction_kind, priority
-                      -- rebuilt from the handler's registration pass on every
-                         load; never hand-maintained
+**Handlers are supervised bun processes on the existing plugin chassis.**
 
-extension_interactions   id, extension_id, event_name, correlation_id,
-                      props_json, placement,
-                      state: pending | answered | expired | cancelled,
-                      response_json, created_at, deadline_at, answered_at
-                      -- durable so a daemon restart does not strand a gate
+attn already made this call: `internal/daemon/daemon.go:342` — *"The engine runs
+in a separate process (the `attn workflow run` CLI)."* The goja engine in
+`internal/workflow` is deliberately out-of-daemon, and an earlier draft of this
+plan reversed that without noticing.
 
-extension_invocations    id, extension_id, event_name, state, error,
-                      started_at, ended_at
-                      -- observability: a wedged gate is diagnosable in one look
+The deciding argument is the same one that killed the YAML view-model: **a
+restricted bespoke runtime is another thing agents don't know.** goja is an
+ES2017-era realm with no `fetch`, no `console.log`, no `setTimeout`, no npm and
+no debugger — every API has to be hand-built by attn and hand-learned by the
+agent. bun is the environment agents already write for, and attn already runs
+plugins in it (`internal/daemon/plugin_supervisor.go`).
 
-extension_state          extension_id, key, value_json, updated_at
-                      -- the durable primitive; transactional get/set/delete/list
-```
+Reused rather than rebuilt: `plugin_rpc.go` (JSON-RPC, handshake, generation
+tokens, priority-ordered registry), `plugin_supervisor.go` (crash restart with
+bounded backoff — this *is* hot reload), `sdk/plugin` (the authoring SDK).
 
-The event catalog is code, not rows: `(event name, payload schema, interaction
-kind)`, versioned alongside `ProtocolVersion`, so a daemon upgrade cannot
-silently change what a gate sees.
+## What already exists for each primitive
+
+| Primitive | Today | Gap |
+| --- | --- | --- |
+| `subscribe` | ~100 daemon broadcasts; 4 closed plugin surfaces; 3 closed automation triggers | no open, named catalog |
+| `block` | `dispatchWorktreeCreateProvider` blocks a core operation on an out-of-process verdict, with timeouts, fallback and chain | worktrees only |
+| `ask` | `attn present --wait` returns verdicts | diffs only, CLI only |
+| `render` | tiles (`markdown`, `browser`), `PresentRoot` window | no extension-authored UI |
+| `state` | — | nothing |
+| `act` | the whole `attn` CLI over the socket | not reachable from a handler |
+| `think` | delegation, automations spawn agents | not reachable from a handler |
+
+`block` is the one people assume is hardest and is in fact nearly done —
+`plugin_worktree.go:93` already has the shape, including a 2-minute
+provider timeout and a declared fallback.
+
+## Verdicts carry data
+
+`allow`/`deny` is too narrow. `worktree.create` already returns `(path, branch)`
+— a result that *replaces* what the daemon would have done. And the delegation
+case wants **edit the prompt and approve**, not just approve or reject; without
+it a one-word fix costs a full agent round-trip.
+
+So a blocking subscriber returns `continue` | `continue_with(data)` | `stop(data)`.
 
 ## Boundaries
 
-- `internal/extension` owns the catalog, dispatch, the runtime and bundling. It
-  never imports `internal/store` or `internal/daemon` — the daemon adapts
-  concrete types to its interfaces, the inversion `internal/automation`'s
-  `BindingStore` already uses.
-- The daemon owns emission and materialization, and is the only thing that acts
-  on a verdict.
-- The app hosts extension modules; it never interprets extension semantics.
-- **One catalog for both runtimes**, so an extension can graduate from script to
-  plugin without the platform changing shape.
-- **No bespoke UI data model, ever.** If a need arises that React plus
-  `@attn/ui` cannot express, the answer is a new component in the library — not
-  a schema. This is the constraint that keeps the platform out of Present's
-  failure mode.
-- `@attn/ui` is the easy path, not a cage. Consistency comes from the components
-  being convenient, not from rejecting anything else.
-- Gates are **policy-first**: decide cheaply in code, reach for the human only
-  on the expensive path. This is how a gate mechanism keeps faith with
-  *"autonomy over approval."*
+- One event catalog serving every subscriber, whoever they are. The catalog is
+  the opened form of `validatePluginSurfaces`, not a parallel mechanism.
+- Which events can be blocked is a property the **daemon author** sets per
+  event, with a documented contract: where it is emitted, what state exists at
+  that point, what `stop` unwinds, what happens on timeout. Opening a new
+  blockable event is core work; the win is that it is one seam instead of a
+  vertical feature.
+- No bespoke UI data model, ever. If React plus the provided components can't
+  express something, the answer is another component.
+- Registration is agent-driven: files plus one command, no clicking, no restart.
+
+## Open questions (real ones)
+
+1. **How does agent-authored React load into the packaged app?** Bundled ESM
+   through the asset protocol, with `react` externalized so there is one React
+   instance. This is genuinely unproven — `build:browser-runtime` is a
+   first-party bundle built at app build time, which is not the same thing.
+   **Spike this before writing PR3.**
+2. **Daemon restart while something is blocked.** The waiting operation does not
+   survive the restart, so the honest semantics are: fail to the declared
+   default and say so. `make install-daemon-dev` restarts the daemon, so this
+   happens routinely and should be boring, not clever.
+3. **Where in `delegateOperation` the pause sits.** That path is a compensation
+   saga (`delegationRollback`) with a strict acquisition order. Before any
+   resource is reserved is safe; later is not.
 
 ## Implementation Steps
 
-- [ ] **PR1 — the authoring spine.** `internal/extension`: catalog, surface
-      registry (replacing `validatePluginSurfaces`'s closed switch), goja runtime
-      (one VM per invocation, per-invocation budget, capability gating),
-      `extension_state` with its host fn, and bun-backed bundling. CLI:
-      `attn ext register|reload|list|enable|disable|logs`. Hot reload, no
-      restart. `observe` kind only — nothing can block, nothing can wedge.
-      *Live-verify: an agent authors an extension end to end with no human
-      interaction, it logs on a real daemon event, and its state survives a
-      daemon restart.*
-- [ ] **PR2 — the `gate` kind, headless.** Emit `delegation.before_start`; a
-      handler returns allow/deny from policy alone, no UI. Deadline, declared
-      default, per-extension kill switch, `extension_invocations` observability.
-      *Live-verify: a real delegation is blocked then released by a script, and
-      an unanswered gate falls through to its default.*
-- [ ] **PR3 — the React host.** Extension module loading in the packaged app
-      (asset protocol, cache-busted reload, React externalization), the
-      per-extension error boundary, `@attn/ui` v0 and the `@attn/host` typed
-      SDK, durable `extension_interactions`, protocol bump, drawer placement.
-      *Live-verify: the delegation prompt gate end to end — approve, and send
-      back with feedback that reaches the delegating agent.*
+One primitive per PR, so each lands with a real consumer and nothing is built
+on speculation.
 
-  **← foundation complete.** The motivating feature works, built entirely on
-  platform seams, and an agent can author the next one unaided.
+- [ ] **PR1 — `subscribe` + `act`.** Event catalog (opened
+      `validatePluginSurfaces`), bun handlers on the existing plugin chassis,
+      handler access to attn's commands, `attn ext register|list|enable|disable
+      |logs`, hot reload, invocation log. *Proves: an extension reacts to
+      something and does something.*
+- [ ] **PR2 — `state`.** Durable per-extension storage, reachable from the
+      handler. Serialized read-modify-write. *Proves: an extension remembers.*
+- [ ] **PR3 — `render`.** The React host, after the spike: bundling,
+      loading in the packaged app, one React instance, error boundary, hot
+      reload, the provided component set (start tiny, grow from real use).
+      *Proves: an extension shows something.*
+- [ ] **PR4 — `ask`.** Structured answers back from a rendered surface.
+      *Proves: an extension has a conversation.*
+- [ ] **PR5 — `block`.** Blockable events, generalized from
+      `dispatchWorktreeCreateProvider`; verdicts carrying data; timeout to
+      declared default; kill switch. First blockable event:
+      `delegation.before_start`. *Proves: an extension changes what attn does.*
+- [ ] **PR6 — `think`.** Agent invocation from a handler.
 
-- [ ] **PR4 — remaining placements.** Tile and window (window reuses the
-      `PresentRoot` shell — a solved Tauri multi-window blindspot). Sandboxed
-      webview placement for untrusted or heavyweight content.
-- [ ] **PR5 — the `decide` kind.** Migrate the four worktree surfaces onto the
-      catalog and delete the private path, so one mechanism serves everything.
-- [ ] **PR6 — presenter agent.** A host fn handing raw material and intent to an
-      agent whose only job is composing the UI. Additive: the platform still
-      just renders a React module.
-- [ ] **PR7 — Present's use cases as tenants.** Change review and document
-      reading as extensions, reusing Present's diff rendering. Decide
-      `internal/present`'s fate once the replacement is genuinely better.
+The delegation prompt approval is the composition that falls out after PR5. It
+is the proof, not the plan.
 
-## Risks
+## Testing
 
-- **Blast radius.** Code that can block core operations needs capability grants,
-  a kill switch, and observability from PR1 — not retrofitted at PR3. A wedged
-  gate must be diagnosable in one look, never inferred from a stalled
-  delegation.
-- **Same-context React has no sandbox.** An extension module imported into the
-  app runs with app privileges. Mitigated by an error boundary and per-extension
-  disable; the webview placement (PR4) is the containment answer when it is
-  actually needed. **Open decision — see below.**
-- **React version lock.** Extensions build against the app's React. Externalizing
-  `react`/`react-dom` keeps one instance; a major bump is a compatibility event
-  and needs the same fail-explicitly discipline as `ProtocolVersion`.
-- **`bun` becomes load-bearing.** Already true for plugins, but registration
-  failing because bun is missing must be a clear, actionable error.
-- **A third mechanism.** PR5 folds plugins' surfaces in; automations are
-  committed as a future tenant. If neither lands, attn has grown a third
-  half-overlapping way to do the same thing.
-- **Porting Present's failure.** PR7 must not reproduce the authoring cost that
-  stalled Present. PR6 lands first for exactly that reason.
+`attn ext invoke <ext> --event <name> --payload <file>` runs a handler against a
+fixture without firing a real event. Without it, an agent developing against
+`delegation.before_start` debugs by spawning real delegations with real
+worktrees. This is PR1 material.
 
 ## Verification
 
-This touches daemon lifecycle, protocol, persisted state, and UI surfaces, so
-every PR from PR2 on needs live verification in a running non-production app per
-AGENTS.md — daemon-tier installs are not sufficient once events reach the app.
-PR1 is daemon-internal and may verify at the daemon tier plus its unit tests.
-Run the bundled preflight before each evidence run.
+Touches daemon lifecycle, protocol, persisted state and UI, so live verification
+in a running non-production app per AGENTS.md from PR1 on.
