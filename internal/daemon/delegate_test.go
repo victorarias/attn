@@ -147,6 +147,49 @@ func TestDelegateSpawnsAgentInSourceWorkspaceWithBrief(t *testing.T) {
 	}
 }
 
+func TestDelegateAdoptsExistingTicketAsTaskSource(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	if _, err := d.store.CreateTicket(store.Ticket{
+		ID: "planned-fix", Title: "Planned fix", Description: "Implement the complete planned fix.",
+		Status: store.TicketStatusDone,
+	}, "you", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var prompt string
+	backend.onSpawn = func(opts ptybackend.SpawnOptions) {
+		content, err := os.ReadFile(opts.InitialPromptFile)
+		if err != nil {
+			t.Fatalf("read initial prompt: %v", err)
+		}
+		prompt = string(content)
+		_ = os.Remove(opts.InitialPromptFile)
+	}
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID,
+		TicketID: protocol.Ptr("planned-fix"), Agent: protocol.Ptr("codex"),
+	})
+	if err != nil {
+		t.Fatalf("delegate: %v", err)
+	}
+	if !strings.Contains(prompt, "Implement the complete planned fix.") {
+		t.Fatalf("prompt does not contain ticket description: %q", prompt)
+	}
+	delegated := d.store.Get(result.SessionID)
+	if delegated == nil || delegated.Label != "Planned fix" {
+		t.Fatalf("delegated session = %+v", delegated)
+	}
+	tickets, err := d.store.ListTickets(store.TicketListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tickets) != 1 || tickets[0].ID != "planned-fix" || tickets[0].Assignee != result.SessionID || tickets[0].Status != store.TicketStatusWorking {
+		t.Fatalf("tickets = %+v", tickets)
+	}
+}
+
 func TestDelegateDefaultsToNewWorktreeForGitRepository(t *testing.T) {
 	root := t.TempDir()
 	mainRepo := initDelegationRepo(t, root, "repo")

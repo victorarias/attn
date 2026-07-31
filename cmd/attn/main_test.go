@@ -505,6 +505,44 @@ func TestParseDelegateArgsDefaultsToCurrentWorkspace(t *testing.T) {
 	}
 }
 
+func TestParseDelegateArgsAdoptsTicket(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--ticket", " planned-work ",
+		"--confirm",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+	if parsed.brief != "" || parsed.options.TicketID != "planned-work" || !parsed.options.Confirm {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+}
+
+func TestParseDelegateArgsRejectsMultipleTaskSources(t *testing.T) {
+	for _, args := range [][]string{
+		{"--brief", "text", "--ticket", "planned"},
+		{"--brief-file", "brief.md", "--ticket", "planned"},
+		{"--brief", "text", "--brief-file", "brief.md"},
+	} {
+		_, err := parseDelegateArgs(append([]string{"--source-session", "source-session"}, args...))
+		if err == nil || !strings.Contains(err.Error(), "pass only one") {
+			t.Fatalf("parseDelegateArgs(%v) error = %v", args, err)
+		}
+	}
+}
+
+func TestParseDelegateArgsConfirmRequiresTicket(t *testing.T) {
+	_, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "text",
+		"--confirm",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--confirm requires --ticket") {
+		t.Fatalf("parseDelegateArgs() error = %v", err)
+	}
+}
+
 func TestParseDelegateArgsNoWorktree(t *testing.T) {
 	parsed, err := parseDelegateArgs([]string{
 		"--source-session", "source-session",

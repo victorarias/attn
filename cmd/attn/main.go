@@ -600,6 +600,7 @@ commands:
 	  session <command>                 inspect a session's conversation
   state explain <id>                replay why a session's state is what it is
   delegate --brief-file <path>      start another agent with a delegated brief
+  delegate --ticket <id>            start another agent on an existing ticket
   journal append --entry <text>     serialized append to the daily notebook journal
   workspace context <command>       edit shared workspace context
   open <file.md> [--session <id>]   show a markdown file in attn
@@ -682,7 +683,13 @@ func runDelegate() {
 }
 
 func writeDelegateHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path>) [options]
+	fmt.Fprint(w, `usage: attn delegate (--brief <text> | --brief-file <path> | --ticket <id>) [options]
+
+task source:
+  --brief <text>              delegate a short task and create its ticket
+  --brief-file <path>         delegate a task file and create its ticket
+  --ticket <id>               adopt an existing ticket and use its description
+  --confirm                   take over a ticket with a non-orphan assignee
 
 placement:
   (no flags)                 add a pane to the source workspace; Git repositories
@@ -712,7 +719,8 @@ session options:
                              medium, high, xhigh)
   --name <text>              name for the agent and, when a new workspace is
                              created, the workspace (max 16 chars, must be
-                             unique; defaults to the directory name)
+                             unique; defaults to the ticket title for --ticket,
+                             otherwise the directory name)
   --source-session <id>      source session (defaults to ATTN_SESSION_ID)
   --yolo                     bypass agent approval prompts
 	--allow-worktree-reuse     explicitly allow another active session to share the worktree
@@ -2293,6 +2301,8 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	fs.SetOutput(io.Discard)
 	briefText := fs.String("brief", "", "delegated task brief")
 	briefFile := fs.String("brief-file", "", "file containing the delegated task brief")
+	ticketID := fs.String("ticket", "", "existing ticket to adopt")
+	confirm := fs.Bool("confirm", false, "take over a ticket with a non-orphan assignee")
 	agentName := fs.String("agent", "", "target agent (defaults to the source session agent)")
 	model := fs.String("model", "", "pin the delegated agent's model (alias or full id)")
 	effort := fs.String("effort", "", "pin the delegated agent's reasoning effort")
@@ -2322,8 +2332,19 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	if source == "" {
 		return delegateCLIArgs{}, errors.New("no source session; run inside attn or pass --source-session")
 	}
-	if strings.TrimSpace(*briefText) != "" && strings.TrimSpace(*briefFile) != "" {
-		return delegateCLIArgs{}, errors.New("pass only one of --brief or --brief-file")
+	ticket := strings.TrimSpace(*ticketID)
+	sources := 0
+	if strings.TrimSpace(*briefText) != "" {
+		sources++
+	}
+	if strings.TrimSpace(*briefFile) != "" {
+		sources++
+	}
+	if ticket != "" {
+		sources++
+	}
+	if sources > 1 {
+		return delegateCLIArgs{}, errors.New("pass only one of --brief, --brief-file, or --ticket")
 	}
 	brief := strings.TrimSpace(*briefText)
 	if strings.TrimSpace(*briefFile) != "" {
@@ -2333,8 +2354,11 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		}
 		brief = strings.TrimSpace(string(content))
 	}
-	if brief == "" {
-		return delegateCLIArgs{}, errors.New("--brief or --brief-file is required")
+	if sources == 0 || (brief == "" && ticket == "") {
+		return delegateCLIArgs{}, errors.New("--brief, --brief-file, or --ticket is required")
+	}
+	if *confirm && ticket == "" {
+		return delegateCLIArgs{}, errors.New("--confirm requires --ticket")
 	}
 
 	explicitWorkspace := strings.TrimSpace(*workspaceID)
@@ -2366,6 +2390,8 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 		brief:           brief,
 		options: client.DelegateOptions{
 			RequestID:          stableRequestID,
+			TicketID:           ticket,
+			Confirm:            *confirm,
 			Agent:              strings.TrimSpace(*agentName),
 			Model:              strings.TrimSpace(*model),
 			Effort:             strings.TrimSpace(*effort),

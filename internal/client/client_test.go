@@ -407,7 +407,7 @@ func TestClient_Delegate(t *testing.T) {
 	}
 }
 
-func TestClientDelegateNoWorktree(t *testing.T) {
+func TestClientDelegateTicket(t *testing.T) {
 	tmpDir := t.TempDir()
 	sockPath := filepath.Join(tmpDir, "test.sock")
 	listener, err := net.Listen("unix", sockPath)
@@ -449,8 +449,10 @@ func TestClientDelegateNoWorktree(t *testing.T) {
 		})
 	}()
 
-	_, err = New(sockPath).Delegate("source-session", "Continue here", DelegateOptions{
+	_, err = New(sockPath).Delegate("source-session", "", DelegateOptions{
 		RequestID:  "request-1",
+		TicketID:   "planned-work",
+		Confirm:    true,
 		NoWorktree: true,
 	})
 	if err != nil {
@@ -459,6 +461,9 @@ func TestClientDelegateNoWorktree(t *testing.T) {
 	request := <-requests
 	if request.Worktree != nil {
 		t.Fatalf("Delegate request = %+v, want no worktree request", request)
+	}
+	if request.Brief != "" || protocol.Deref(request.TicketID) != "planned-work" || !protocol.Deref(request.Confirm) {
+		t.Fatalf("Delegate ticket source = %+v", request)
 	}
 }
 

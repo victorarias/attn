@@ -15,6 +15,7 @@ import (
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 const (
@@ -631,8 +632,9 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		return nil, fmt.Errorf("source_session_id is required")
 	}
 	brief := strings.TrimSpace(msg.Brief)
-	if brief == "" {
-		return nil, fmt.Errorf("brief is required")
+	ticketID := strings.TrimSpace(protocol.Deref(msg.TicketID))
+	if (brief == "") == (ticketID == "") {
+		return nil, fmt.Errorf("exactly one of brief or ticket_id is required")
 	}
 	source := d.store.Get(sourceSessionID)
 	if source == nil {
@@ -650,12 +652,33 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	if err := d.validateDelegationModelEffort(agent, model, effort); err != nil {
 		return nil, err
 	}
-	// name is the explicit --name, or empty to default to the directory basename
-	// once the directory is finalized below.
-	name := strings.TrimSpace(protocol.Deref(msg.Label))
 	sessionID := reservedSessionID
 	if sessionID == "" {
 		sessionID = uuid.NewString()
+	}
+	// An adopted ticket is validated before any worktree or runtime side effect.
+	// The durable operation reservation prevents another delegation from racing
+	// this one; the store repeats the ownership check atomically at bind time so a
+	// concurrent ticket-take still cannot be overwritten silently.
+	var adoptedTicket *store.Ticket
+	if ticketID != "" {
+		adoptedTicket, err = d.store.GetTicket(ticketID)
+		if err != nil {
+			return nil, err
+		}
+		if adoptedTicket == nil {
+			return nil, fmt.Errorf("ticket not found: %s", ticketID)
+		}
+		if err := store.ValidateTicketDelegationAdoption(adoptedTicket, sessionID, protocol.Deref(msg.Confirm)); err != nil {
+			return nil, fmt.Errorf("adopt ticket %s: %w", ticketID, err)
+		}
+		brief = strings.TrimSpace(adoptedTicket.Description)
+	}
+	// name is the explicit --name, otherwise an adopted ticket's title, otherwise
+	// the finalized directory basename below.
+	name := strings.TrimSpace(protocol.Deref(msg.Label))
+	if name == "" && adoptedTicket != nil {
+		name = truncateDelegationName(adoptedTicket.Title)
 	}
 	// Every delegation is ticket-tracked; only the chief's own delegations are
 	// additionally chief-OWNED. delegatedByChief therefore no longer gates tracking,
@@ -704,8 +727,24 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 		if ticketErr != nil {
 			return nil, ticketErr
 		}
+		// Adoption may have committed immediately before a daemon crash, and the
+		// agent may even have moved the ticket to a terminal column before this
+		// operation's completed state persisted. Recognize the requested ticket by
+		// assignment, not only through ActiveTicketForSession (which excludes
+		// terminal tickets), so recovery never reopens finished work.
+		if ticketID != "" && adoptedTicket.Assignee == sessionID {
+			ticket = adoptedTicket
+		}
+		if ticket != nil && ticketID != "" && ticket.ID != ticketID {
+			return nil, fmt.Errorf("reserved delegated session is already bound to ticket %s", ticket.ID)
+		}
 		if ticket == nil {
-			ticketID, ticketErr := d.createDelegatedTicket(sourceSessionID, delegatedByChief, existing, brief, existing.Label, agent)
+			boundTicketID := ""
+			if ticketID != "" {
+				boundTicketID, ticketErr = d.adoptDelegatedTicket(sourceSessionID, delegatedByChief, existing, ticketID, agent, protocol.Deref(msg.Confirm))
+			} else {
+				boundTicketID, ticketErr = d.createDelegatedTicket(sourceSessionID, delegatedByChief, existing, brief, existing.Label, agent)
+			}
 			if ticketErr != nil {
 				return nil, ticketErr
 			}
@@ -715,7 +754,10 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 					worktreePath = existing.Directory
 				}
 				_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
-					"recovered delegated ticket", existing.WorkspaceID, ticketID, worktreePath, nil, nil, time.Now())
+					"recovered delegated ticket", existing.WorkspaceID, boundTicketID, worktreePath, nil, nil, time.Now())
+			}
+			if ticketID != "" {
+				d.notifyTicketObservers(ticketID)
 			}
 			d.broadcastTicketsUpdated()
 		}
@@ -928,14 +970,22 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	// tells it to report through `attn ticket status`, and the ticket is the only
 	// channel back to it. A ticket failure therefore still fails the whole delegation
 	// atomically rather than leaving a running session nobody can reach.
-	ticketID, err := d.createDelegatedTicket(sourceSessionID, delegatedByChief, session, brief, name, agent)
-	if err != nil {
-		return nil, rollback.fail(fmt.Errorf("create delegated ticket: %w", err))
+	boundTicketID := ""
+	if ticketID != "" {
+		boundTicketID, err = d.adoptDelegatedTicket(sourceSessionID, delegatedByChief, session, ticketID, agent, protocol.Deref(msg.Confirm))
+	} else {
+		boundTicketID, err = d.createDelegatedTicket(sourceSessionID, delegatedByChief, session, brief, name, agent)
 	}
-	d.logf("delegate: bound ticket %q to session %s", ticketID, session.ID)
+	if err != nil {
+		return nil, rollback.fail(fmt.Errorf("bind delegated ticket: %w", err))
+	}
+	d.logf("delegate: bound ticket %q to session %s", boundTicketID, session.ID)
 	if operationID != "" {
 		_ = d.store.UpdateDelegationOperation(operationID, protocol.DelegationOperationStatePreparing,
-			"delegated session and ticket created", workspaceID, ticketID, operationWorktreePath, nil, nil, time.Now())
+			"delegated session and ticket bound", workspaceID, boundTicketID, operationWorktreePath, nil, nil, time.Now())
+	}
+	if ticketID != "" {
+		d.notifyTicketObservers(ticketID)
 	}
 	d.broadcastTicketsUpdated()
 	result := &protocol.DelegateResult{

@@ -6,6 +6,15 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-07-31]
+
+### Added
+- **Delegate an existing ticket without duplicating it.** `attn delegate
+  --ticket <id>` now starts an agent from that ticket's
+  description, preserving its activity thread instead of creating a duplicate;
+  orphaned tickets transfer automatically while active takeovers require
+  `--confirm`.
+
 ## [2026-07-29]
 
 ### Added

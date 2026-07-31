@@ -61,6 +61,20 @@ Use `--brief <text>` only for short, simple tasks.
 
 > The same brief is a ticket's description. To capture a backlog item *without* delegating — an unbound `todo` — use `attn ticket new` (see [tickets.md](tickets.md)); do this only when the user asks.
 
+## Adopt an Existing Ticket
+
+When the task already has a ticket, adopt it instead of creating a duplicate:
+
+    attn delegate --ticket <ticket-id>
+
+Its description becomes the task; the ticket keeps its id and thread, binds to
+the new session, and moves to `working`. Unassigned and reconciled-orphan tickets
+transfer directly. Taking over a live assignee requires confirmation:
+
+    attn delegate --ticket <ticket-id> --confirm
+
+`--name`, placement, and worktree flags behave as usual.
+
 ## Agent Selection
 
 The source agent is used by default. Select another supported agent with:

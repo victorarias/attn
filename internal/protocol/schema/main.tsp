@@ -729,7 +729,9 @@ model DelegateMessage {
   cmd: "delegate";
   request_id: string; // Stable caller-supplied idempotency key for one logical delegation
   source_session_id: string;
-  brief: string;
+  brief: string; // Empty only when ticket_id supplies the task source
+  ticket_id?: string; // Existing ticket to adopt; mutually exclusive with brief
+  confirm?: boolean; // Allow takeover when the ticket has a non-orphan assignee
   agent?: string;
   label?: string;
   yolo_mode?: boolean;
