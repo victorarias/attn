@@ -1975,6 +1975,77 @@ func TestDelegateWorktreeExplicitRepoOverridesWorkspaceSessions(t *testing.T) {
 	}
 }
 
+// TestDelegateNamedWorktreeUsesRepoDefaultForEveryPlacement protects named
+// --worktree delegations from inheriting ambient checkout state. Automatic
+// branch names already resolve the default in applyDefaultDelegationWorktree;
+// these are the placement paths that previously let an omitted --from inherit
+// the branch checked out in the source directory or --cwd.
+func TestDelegateNamedWorktreeUsesRepoDefaultForEveryPlacement(t *testing.T) {
+	tests := []struct {
+		name      string
+		placement string
+		useCWD    bool
+		useRepo   bool
+	}{
+		{name: "no placement flag", placement: delegationPlacementCurrent},
+		{name: "new workspace", placement: delegationPlacementNew, useRepo: true},
+		{name: "cwd", placement: delegationPlacementNew, useCWD: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			repo := initDelegationRepo(t, root, "repo")
+			runGitDaemon(t, repo, "branch", "-M", "main")
+			defaultHead := gitRevParseDaemon(t, repo, "main")
+			runGitDaemon(t, repo, "checkout", "-q", "-b", "topic/ambient")
+			runGitDaemon(t, repo, "commit", "--allow-empty", "-m", "ambient")
+			ambientHead := gitRevParseDaemon(t, repo, "HEAD")
+
+			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+			backend := &fakeSpawnBackend{}
+			var sourceSessionID string
+			if tt.useCWD {
+				_, sourceSessionID, _ = setupDelegationSource(t, d, backend)
+			} else {
+				_, sourceSessionID, _ = setupDelegationSourceAt(t, d, backend, repo)
+			}
+			consumeDelegatedPrompt(t, backend)
+
+			request := &protocol.DelegateWorktreeRequest{
+				Branch: "feat/from-default",
+				Path:   protocol.Ptr(filepath.Join(root, "repo--delegated")),
+			}
+			if tt.useRepo {
+				request.Repo = protocol.Ptr(repo)
+			}
+			msg := &protocol.DelegateMessage{
+				Cmd:             protocol.CmdDelegate,
+				SourceSessionID: sourceSessionID,
+				Brief:           "Start from the default branch.",
+				Placement:       protocol.Ptr(tt.placement),
+				Label:           protocol.Ptr("delegated"),
+				Worktree:        request,
+			}
+			if tt.useCWD {
+				msg.Cwd = protocol.Ptr(repo)
+			}
+
+			result, err := d.delegate(msg)
+			if err != nil {
+				t.Fatalf("delegate() error = %v", err)
+			}
+			head := gitRevParseDaemon(t, result.Directory, "HEAD")
+			if head == ambientHead {
+				t.Fatalf("new branch inherited ambient checkout head %s", head)
+			}
+			if head != defaultHead {
+				t.Fatalf("new branch head = %s, want default branch head %s", head, defaultHead)
+			}
+		})
+	}
+}
+
 // TestDelegateWorktreeSameRepoDifferentBranchesUsesRepoDefault covers the case
 // where a workspace's member sessions sit in different worktrees of the SAME
 // main repository, each on its own branch. The repository is unambiguous, so

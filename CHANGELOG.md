@@ -8,6 +8,13 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-07-31]
 
+### Changed
+- **Delegated worktrees always start from the repository default branch.** Every
+  `attn delegate` placement now uses `origin/<default>`, or the local default
+  branch when no matching remote exists, instead of inheriting the branch checked
+  out in its source directory. Use `--from <ref>` to deliberately continue or
+  stack on in-progress work.
+
 ### Added
 - **Delegate an existing ticket without duplicating it.** `attn delegate
   --ticket <id>` now starts an agent from that ticket's
