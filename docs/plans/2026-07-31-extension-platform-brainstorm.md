@@ -457,6 +457,21 @@ Both were understated in the first pass:
   state on load. This is the substitute for the resident VM the runtime
   deliberately does not keep.
 
+## Settled, round three (2026-07-31)
+
+7. **UI isolation — same-context dynamic import.** The app imports the
+   extension's ESM module and renders it inline: native feel, full theming, one
+   React instance, no bridge. Extension code runs with app privileges; the
+   realistic failure is a buggy extension, not a hostile one, and a
+   per-extension error boundary plus disable covers it. The sandboxed webview
+   stays available as a placement for untrusted or heavyweight content.
+8. **Handler power — capability-gated host fns.** `fetch`, file read/write and
+   shell are host fns an extension must declare in `extension.toml` and that
+   Victor grants. This is *more* controllable than bun, not less: every
+   capability is declared, auditable and revocable per extension, and the daemon
+   sees every call. Heavier needs escalate to an out-of-process plugin.
+
 ## Still open
 
-The isolation boundary (a) vs (b) above.
+Nothing. The platform is specified; see
+[the implementation plan](2026-07-31-extension-platform-implementation.md).

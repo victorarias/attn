@@ -43,6 +43,13 @@ now" and "right to build on," it goes to the latter.
    clicking, no daemon restart.
 8. **State preservation is a platform primitive** — durable, transactional,
    per-extension, reachable from handler and UI alike.
+9. **UI isolation — same-context dynamic import.** Rendered inline with one
+   React instance and no bridge; contained by a per-extension error boundary and
+   disable, not by a sandbox. The webview remains a placement for untrusted or
+   heavyweight content.
+10. **Handler power — capability-gated host fns.** `fetch`, file read/write and
+    shell are declared in `extension.toml` and granted per extension; every call
+    is auditable and revocable. Heavier needs escalate to a plugin.
 
 ## Architecture Map
 
