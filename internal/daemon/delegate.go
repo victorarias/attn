@@ -465,22 +465,15 @@ func (d *Daemon) applyDefaultDelegationWorktree(msg *protocol.DelegateMessage, p
 
 	request.Repo = protocol.Ptr(repo)
 	request.Branch = automaticDelegationBranch(label, sessionID)
-	if strings.TrimSpace(protocol.Deref(request.StartingFrom)) == "" {
-		startingFrom := delegationDefaultStartRef(repo)
-		if startingFrom == "" {
-			return fmt.Errorf("cannot determine the repository's default branch; pass --from or --no-worktree")
-		}
-		request.StartingFrom = protocol.Ptr(startingFrom)
-	}
 	msg.Worktree = request
 	return nil
 }
 
 // createDelegationWorktree creates the worktree. inferredRepo, when non-empty,
 // names the main repository already resolved by the caller; baseDirectory, when
-// non-empty, is a working directory the repository and the starting ref may be
-// inferred from. A caller that knows the repository but has no defensible
-// starting point passes the repository alone and leaves baseDirectory empty.
+// non-empty, is a working directory the repository may be inferred from. The
+// starting ref is always explicit: --from when supplied, otherwise the
+// repository's default branch.
 func (d *Daemon) createDelegationWorktree(baseDirectory, inferredRepo string, request *protocol.DelegateWorktreeRequest, operationID, ownedPath string, worktreeOwned bool, ownedToken string, allowReuse bool) (string, bool, error) {
 	branch := strings.TrimSpace(request.Branch)
 	if branch == "" {
@@ -543,27 +536,12 @@ func (d *Daemon) createDelegationWorktree(baseDirectory, inferredRepo string, re
 		d.delegationWorktreePrepareHook(expectedPath)
 	}
 	startingFrom := request.StartingFrom
-	if strings.TrimSpace(protocol.Deref(startingFrom)) == "" && baseDirectory == "" {
-		// No working directory whose branch could serve as a starting point, so
-		// name the repository's default branch explicitly. Leaving this empty
-		// would make `git worktree add -b` start from the main checkout's current
-		// HEAD (see starting_from in the protocol schema) — whatever that
-		// checkout happens to have checked out today, which is the same kind of
-		// ambient state this resolution exists to eliminate.
-		if ref := delegationDefaultStartRef(repo); ref != "" {
-			startingFrom = protocol.Ptr(ref)
+	if strings.TrimSpace(protocol.Deref(startingFrom)) == "" {
+		ref := delegationDefaultStartRef(repo)
+		if ref == "" {
+			return "", false, fmt.Errorf("cannot determine the repository's default branch; pass --from or --no-worktree")
 		}
-	}
-	if strings.TrimSpace(protocol.Deref(startingFrom)) == "" && baseDirectory != "" {
-		baseRoot, baseRootErr := git.GetRepoRoot(baseDirectory)
-		baseBranch, baseBranchErr := git.GetBranchInfo(baseDirectory)
-		if baseRootErr == nil &&
-			baseBranchErr == nil &&
-			baseBranch != nil &&
-			strings.TrimSpace(baseBranch.Branch) != "" &&
-			git.ResolveMainRepoPath(baseRoot) == git.ResolveMainRepoPath(repo) {
-			startingFrom = protocol.Ptr(strings.TrimSpace(baseBranch.Branch))
-		}
+		startingFrom = protocol.Ptr(ref)
 	}
 	worktreePath, err := d.doCreateWorktree(&protocol.CreateWorktreeMessage{
 		Cmd:          protocol.CmdCreateWorktree,
@@ -826,26 +804,12 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	}
 
 	// The workspace record's directory is a registration artifact, not a repo
-	// authority (see delegationWorktreeRepo). Only an existing-workspace
-	// placement would otherwise infer a repo from it; current/new placements
-	// already base off a real session directory or an explicit --cwd, where that
-	// directory legitimately supplies both the repository and the starting ref.
-	//
-	// worktreeStartRefBase is cleared once the repository is known from the
-	// member sessions, which decouples the two inferences. Those sessions may sit
-	// in different worktrees of the one repository, each on its own branch, so
-	// there is no member branch that deserves to become the implicit --from.
-	// Clearing it makes createDelegationWorktree resolve the repository's default
-	// branch explicitly (delegationDefaultStartRef) rather than a branch chosen
-	// by session ordering — and, just as importantly, rather than the main
-	// checkout's current HEAD. An explicit --from still wins.
-	worktreeStartRefBase := directory
+	// authority (see delegationWorktreeRepo). Existing-workspace placement must
+	// infer the repository from its member sessions. Starting-ref selection is
+	// independent of placement: an explicit --from wins, otherwise
+	// createDelegationWorktree uses the repository's default branch.
 	inferredWorktreeRepo := ""
 	if msg.Worktree != nil && placement == delegationPlacementExisting {
-		// Unconditionally, including when --repo is given: the workspace record's
-		// directory never supplies a starting ref for this placement. --repo
-		// selects the repository; only --from selects a non-default starting ref.
-		worktreeStartRefBase = ""
 		if strings.TrimSpace(protocol.Deref(msg.Worktree.Repo)) == "" {
 			resolvedRepo, repoErr := d.delegationWorktreeRepo(workspaceID)
 			if repoErr != nil {
@@ -864,7 +828,7 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	}
 
 	if msg.Worktree != nil {
-		worktreePath, created, createErr := d.createDelegationWorktree(worktreeStartRefBase, inferredWorktreeRepo, msg.Worktree, operationID, ownedWorktreePath, worktreeOwned, worktreeToken, protocol.Deref(msg.AllowWorktreeReuse))
+		worktreePath, created, createErr := d.createDelegationWorktree(directory, inferredWorktreeRepo, msg.Worktree, operationID, ownedWorktreePath, worktreeOwned, worktreeToken, protocol.Deref(msg.AllowWorktreeReuse))
 		if createErr != nil {
 			return nil, createErr
 		}
