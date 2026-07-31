@@ -218,16 +218,67 @@ delegation.
 The test for every proposed primitive: does it serve *agents extending attn for
 Victor*, or is it a plugin API for a hypothetical third party?
 
-## Open decisions
+## Settled (2026-07-31)
 
-1. Fork 1 — goja-first, with plugins kept for heavyweight cases? (recommended)
-2. Fork 2 — component catalog as the paved road, sandboxed HTML as the declared
-   escape hatch? (recommended) Or go straight to HTML for maximum dynamism?
-3. Fork 3 — open the surface catalog to all three interaction kinds at once, or
-   ship `observe` + `gate` and leave `decide` to the worktree path?
-4. Where do extension UIs appear — a new tile kind, the present window shell, a
-   banner notice, or the attention drawer?
-5. Does the first tenant stay `delegation.before_start`, or is there a
-   lower-stakes first event worth proving on?
-6. Consolidation: does the platform absorb automations later, and do we commit
-   to that now?
+1. **Runtime — goja-first, plugins kept.** Agent-authored extensions are a
+   single `.js` file run in-daemon. Out-of-process plugins stay for anything
+   needing filesystem, network, or real dependencies, sharing one event catalog
+   so an extension can graduate without the platform changing shape.
+2. **UI — component catalog as the paved road, `html` as a declared escape
+   hatch.** Grow the vocabulary from what people keep reaching into the hatch
+   for.
+3. **Placement — the extension declares it.** The view tree names its own
+   surface (tile / window / drawer) and attn honors it.
+
+## Present is not a competing tenant — it is the same project
+
+Aligned 2026-07-31: aim the platform at the prompt-approval gate **and** at
+Present.
+
+This looked like a scope grab and is closer to the opposite. Present's own
+unbuilt rocks already contain both of the platform's key primitives:
+
+| Present rock (unbuilt) | Platform primitive |
+| --- | --- |
+| Gates — presentations that block; rounds that require approval | the `gate` interaction kind |
+| HTML artifacts — sandboxed rendering + annotation | the `html` escape hatch |
+| Document reader; Rendering palette | the component catalog |
+| Feedback vocabulary | the interaction's structured response model |
+
+And Present's own open question — *"Gate ↔ `pending_approval` interplay: is a
+gated presentation a session state, a ticket state, or its own thing?"* — is
+precisely the question the platform's `gate` kind exists to answer. Its
+principle *"One spine, many uses. A new use is a new manifest shape, not a new
+subsystem"* is the platform's thesis, stated a month early and scoped to one
+content type.
+
+The structural fact: **a Present manifest is already a view tree with a single
+component kind (`changes`), a declared placement (its own window), and a
+verdict-carrying response.** The platform is that manifest generalized — a
+catalog instead of one kind, an event catalog instead of only agent-initiated
+opens, and `gate` instead of only advisory `--wait`.
+
+So the two tenants stress the platform along different axes, which is exactly
+what a first release wants:
+
+- **`delegation.before_start`** proves the *event and interception* half: a
+  named event, a blocking gate on a core daemon operation, a structured verdict
+  flowing back, and a cheap policy path that never interrupts the human.
+- **Present** proves the *expressiveness* half: if the catalog can host attn's
+  most demanding review UI — diffs, inline annotation anchoring, keyboard-first
+  traversal, rounds and drift — it is a platform rather than a form renderer.
+
+Present is therefore the platform's first-party surface, not an extension
+competing with it. What stays open is only how aggressive to be with the
+already-shipped change reader.
+
+## Still open
+
+1. Fork 3 — open the surface catalog to all three interaction kinds
+   (`observe` / `decide` / `gate`) at once, or ship `observe` + `gate` and leave
+   `decide` on the existing worktree path?
+2. Present migration posture — generalize in place, rebuild to parity then
+   demolish, or share only the catalog (see the question below).
+3. Consolidation: does the platform absorb automations later, and do we commit
+   to that now? Automations are already `(closed event set) → (spawn an agent)`,
+   a strict subset of the platform.
