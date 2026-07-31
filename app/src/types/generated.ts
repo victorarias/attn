@@ -1127,6 +1127,7 @@ export interface DelegateMessage {
     allow_worktree_reuse?: boolean;
     brief:                 string;
     cmd:                   DelegateMessageCmd;
+    confirm?:              boolean;
     cwd?:                  string;
     effort?:               string;
     label?:                string;
@@ -1134,6 +1135,7 @@ export interface DelegateMessage {
     placement?:            string;
     request_id:            string;
     source_session_id:     string;
+    ticket_id?:            string;
     workspace_id?:         string;
     worktree?:             DelegateMessageWorktree;
     yolo_mode?:            boolean;
@@ -9471,6 +9473,7 @@ const typeMap: any = {
         { json: "allow_worktree_reuse", js: "allow_worktree_reuse", typ: u(undefined, true) },
         { json: "brief", js: "brief", typ: "" },
         { json: "cmd", js: "cmd", typ: r("DelegateMessageCmd") },
+        { json: "confirm", js: "confirm", typ: u(undefined, true) },
         { json: "cwd", js: "cwd", typ: u(undefined, "") },
         { json: "effort", js: "effort", typ: u(undefined, "") },
         { json: "label", js: "label", typ: u(undefined, "") },
@@ -9478,6 +9481,7 @@ const typeMap: any = {
         { json: "placement", js: "placement", typ: u(undefined, "") },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "source_session_id", js: "source_session_id", typ: "" },
+        { json: "ticket_id", js: "ticket_id", typ: u(undefined, "") },
         { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
         { json: "worktree", js: "worktree", typ: u(undefined, r("DelegateMessageWorktree")) },
         { json: "yolo_mode", js: "yolo_mode", typ: u(undefined, true) },

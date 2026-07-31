@@ -214,7 +214,7 @@ func TestDelegationOperationRestartResumesAcceptedRecord(t *testing.T) {
 	_, sourceID, _ := setupDelegationSource(t, d1, backend)
 	msg := protocol.DelegateMessage{Cmd: protocol.CmdDelegate, RequestID: "restart-request", SourceSessionID: sourceID, Brief: "Resume after restart.", Agent: protocol.Ptr("codex"), Label: protocol.Ptr("restart")}
 	requestJSON, _ := json.Marshal(msg)
-	record, claimed, err := d1.store.ClaimDelegationOperation(msg.RequestID, "operation-restart", "session-restart", "", string(requestJSON), time.Now())
+	record, claimed, err := d1.store.ClaimDelegationOperation(msg.RequestID, "operation-restart", "session-restart", "", "", string(requestJSON), time.Now())
 	if err != nil || !claimed {
 		t.Fatalf("claim: claimed=%v err=%v", claimed, err)
 	}
@@ -245,7 +245,7 @@ func TestDelegationOperationAdoptsReconciledReservedRuntime(t *testing.T) {
 	workspaceID, sourceID, cwd := setupDelegationSource(t, d, backend)
 	msg := protocol.DelegateMessage{Cmd: protocol.CmdDelegate, RequestID: "spawn-crash", SourceSessionID: sourceID, Brief: "Adopt the surviving runtime.", Agent: protocol.Ptr("codex"), Label: protocol.Ptr("adopted")}
 	encoded, _ := json.Marshal(msg)
-	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-spawn-crash", "session-spawn-crash", "", string(encoded), time.Now())
+	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-spawn-crash", "session-spawn-crash", "", "", string(encoded), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,13 +268,47 @@ func TestDelegationOperationAdoptsReconciledReservedRuntime(t *testing.T) {
 	}
 }
 
+func TestDelegationRecoveryDoesNotReopenAdoptedTerminalTicket(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	workspaceID, sourceID, cwd := setupDelegationSource(t, d, backend)
+	const sessionID = "session-adopted"
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID: sessionID, WorkspaceID: workspaceID, Label: "adopted", Agent: protocol.SessionAgentCodex,
+		Directory: cwd, State: protocol.SessionStateWorking, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	backend.sessionIDs = append(backend.sessionIDs, sessionID)
+	if _, err := d.store.CreateTicket(store.Ticket{
+		ID: "finished-adoption", Title: "Finished", Description: "Already completed.",
+		Status: store.TicketStatusDone, Assignee: sessionID,
+	}, sourceID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := d.delegateOperation(&protocol.DelegateMessage{
+		Cmd: protocol.CmdDelegate, SourceSessionID: sourceID,
+		TicketID: protocol.Ptr("finished-adoption"), Agent: protocol.Ptr("codex"),
+	}, "", sessionID, "", false, "", "")
+	if err != nil {
+		t.Fatalf("recover delegation: %v", err)
+	}
+	if result.SessionID != sessionID {
+		t.Fatalf("result = %+v", result)
+	}
+	ticket, err := d.store.GetTicket("finished-adoption")
+	if err != nil || ticket.Status != store.TicketStatusDone {
+		t.Fatalf("ticket = %+v, err = %v", ticket, err)
+	}
+}
+
 func TestDelegationOperationRespawnsPersistedSessionWithoutLiveRuntime(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
 	workspaceID, sourceID, cwd := setupDelegationSource(t, d, backend)
 	msg := protocol.DelegateMessage{Cmd: protocol.CmdDelegate, RequestID: "spawn-missing", SourceSessionID: sourceID, Brief: "Recover the missing runtime.", Agent: protocol.Ptr("codex"), Label: protocol.Ptr("respawned")}
 	encoded, _ := json.Marshal(msg)
-	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-spawn-missing", "session-spawn-missing", "", string(encoded), time.Now())
+	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-spawn-missing", "session-spawn-missing", "", "", string(encoded), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +370,7 @@ func TestDelegationRestartDoesNotOwnWorktreeFromPathJournalAlone(t *testing.T) {
 		Worktree: &protocol.DelegateWorktreeRequest{Repo: protocol.Ptr(mainRepo), Branch: "feat/external", Path: protocol.Ptr(path)},
 	}
 	encoded, _ := json.Marshal(msg)
-	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-path-only", "session-path-only", "", string(encoded), time.Now())
+	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-path-only", "session-path-only", "", "", string(encoded), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +416,7 @@ func TestDelegationRestartDoesNotDeleteReplacementForPreviouslyOwnedWorktree(t *
 		Worktree: &protocol.DelegateWorktreeRequest{Repo: protocol.Ptr(mainRepo), Branch: "feat/replacement", Path: protocol.Ptr(path)},
 	}
 	encoded, _ := json.Marshal(msg)
-	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-owned-replaced", "session-owned-replaced", "", string(encoded), time.Now())
+	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-owned-replaced", "session-owned-replaced", "", "", string(encoded), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +458,7 @@ func TestDelegationRestartResumesPreviouslyOwnedWorktreeWithMatchingMarker(t *te
 		Worktree: &protocol.DelegateWorktreeRequest{Repo: protocol.Ptr(mainRepo), Branch: "feat/owned", Path: protocol.Ptr(path)},
 	}
 	encoded, _ := json.Marshal(msg)
-	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-owned-resume", "session-owned-resume", "", string(encoded), time.Now())
+	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-owned-resume", "session-owned-resume", "", "", string(encoded), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +499,7 @@ func TestDelegationRestartLeavesOwnedWorktreeWhenAnotherSessionOccupiesIt(t *tes
 		Worktree: &protocol.DelegateWorktreeRequest{Repo: protocol.Ptr(mainRepo), Branch: "feat/occupied", Path: protocol.Ptr(path)},
 	}
 	encoded, _ := json.Marshal(msg)
-	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-owned-occupied", "session-owned-occupied", "", string(encoded), time.Now())
+	record, _, err := d.store.ClaimDelegationOperation(msg.RequestID, "operation-owned-occupied", "session-owned-occupied", "", "", string(encoded), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

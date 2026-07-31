@@ -831,6 +831,9 @@ type DelegateMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// Confirm corresponds to the JSON schema field "confirm".
+	Confirm *bool `json:"confirm,omitempty,omitzero"`
+
 	// Cwd corresponds to the JSON schema field "cwd".
 	Cwd *string `json:"cwd,omitempty,omitzero"`
 
@@ -851,6 +854,9 @@ type DelegateMessage struct {
 
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID string `json:"source_session_id"`
+
+	// TicketID corresponds to the JSON schema field "ticket_id".
+	TicketID *string `json:"ticket_id,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`

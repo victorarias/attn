@@ -85,6 +85,29 @@ func (d *Daemon) createDelegatedTicket(creatorSessionID string, ownedByChiefRole
 	return created.ID, nil
 }
 
+// adoptDelegatedTicket binds an existing ticket instead of minting a duplicate.
+// Its description has already been delivered in the spawn prompt, so the store
+// advances the new assignee's cursor through the adoption events. The previous
+// assignee remains subscribed so a deliberate takeover is visible to it.
+func (d *Daemon) adoptDelegatedTicket(creatorSessionID string, ownedByChiefRole bool, session *protocol.Session, ticketID, agent string, confirm bool) (string, error) {
+	ownerRole := ""
+	chiefRoleIdentity := store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)
+	subscribers := []string{creatorSessionID}
+	if ownedByChiefRole {
+		ownerRole = store.TicketRoleChiefOfStaff
+	} else {
+		subscribers = append(subscribers, chiefRoleIdentity)
+	}
+	adopted, err := d.store.AdoptTicketForDelegation(
+		ticketID, session.ID, session.Directory, agent, creatorSessionID,
+		ownerRole, subscribers, confirm, time.Now(),
+	)
+	if err != nil {
+		return "", err
+	}
+	return adopted.ID, nil
+}
+
 // ticketSlugSequentialAttempts bounds the readable base-2, base-3, ... walk before
 // the allocator switches to random suffixes. Now that EVERY delegation creates a
 // ticket, one popular base (a repo's directory basename, the common default label)

@@ -32,7 +32,7 @@ func (d *Daemon) startDelegation(msg *protocol.DelegateMessage) (*protocol.Deleg
 	if currentChief := d.chiefOfStaffSessionID(); currentChief == strings.TrimSpace(msg.SourceSessionID) {
 		chiefSessionID = currentChief
 	}
-	record, claimed, err := d.store.ClaimDelegationOperation(requestID, "op-"+uuid.NewString(), uuid.NewString(), chiefSessionID, string(encoded), time.Now())
+	record, claimed, err := d.store.ClaimDelegationOperation(requestID, "op-"+uuid.NewString(), uuid.NewString(), chiefSessionID, strings.TrimSpace(protocol.Deref(msg.TicketID)), string(encoded), time.Now())
 	if err != nil {
 		return nil, err
 	}

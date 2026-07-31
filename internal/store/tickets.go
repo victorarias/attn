@@ -172,6 +172,10 @@ var (
 	// ErrTicketNotClosed means an open ticket can't be archived — open tickets
 	// are durable and never leave the board until they settle.
 	ErrTicketNotClosed = errors.New("ticket is not closed")
+	// ErrTicketAdoptionConfirmRequired prevents a delegation from silently
+	// replacing a ticket's live owner. A reconciled ticket is a proven orphan and
+	// may be adopted without confirmation.
+	ErrTicketAdoptionConfirmRequired = errors.New("ticket has a non-orphan assignee")
 )
 
 // ticketIDPattern is a human-friendly slug: lowercase alphanumerics and hyphens,
@@ -764,6 +768,116 @@ func (s *Store) AssignTicket(id, assignee, author string, now time.Time) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ValidateTicketDelegationAdoption checks whether ticket can be bound to the
+// reserved delegated session. Unassigned tickets and tickets carrying the
+// durable reconciliation stamp are safe to adopt. A different non-orphan
+// assignee requires the caller's explicit confirmation.
+func ValidateTicketDelegationAdoption(ticket *Ticket, sessionID string, confirm bool) error {
+	if ticket == nil {
+		return ErrTicketNotFound
+	}
+	if strings.TrimSpace(ticket.Description) == "" {
+		return errors.New("ticket description is empty; add a description before delegating it")
+	}
+	if ticket.Assignee != "" && ticket.Assignee != sessionID && ticket.ReconciledAt == nil && !confirm {
+		return fmt.Errorf("%w: %s; pass --confirm to take it over", ErrTicketAdoptionConfirmRequired, ticket.Assignee)
+	}
+	return nil
+}
+
+// AdoptTicketForDelegation atomically binds an existing ticket to a delegated
+// session, moves it to Working, records the session metadata used by Resume,
+// and installs the same participant routing as a newly-created delegation
+// ticket. The delegated agent's cursor advances through the adoption events
+// because its initial prompt already contains the full ticket description.
+func (s *Store) AdoptTicketForDelegation(id, sessionID, cwd, lastAgentID, author, ownerRole string, subscribers []string, confirm bool, now time.Time) (*Ticket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	current, err := scanTicket(tx.QueryRow(ticketSelect+` WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: %q", ErrTicketNotFound, id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateTicketDelegationAdoption(current, sessionID, confirm); err != nil {
+		return nil, err
+	}
+
+	previousAssignee := current.Assignee
+	if _, err := tx.Exec(`
+		UPDATE tickets SET assignee = ?, cwd = ?, last_agent_id = ?, reconciled_at = '', updated_at = ? WHERE id = ?
+	`, sessionID, cwd, lastAgentID, formatTicketTime(now), id); err != nil {
+		return nil, err
+	}
+	if previousAssignee != sessionID {
+		if _, _, err := appendTicketEventTx(tx, TicketEvent{
+			TicketID: id, Kind: TicketEventAssigned, Author: author, Detail: sessionID,
+		}, now); err != nil {
+			return nil, err
+		}
+	}
+	if current.Status != TicketStatusWorking {
+		if _, err := setTicketStatusTx(tx, id, TicketStatusWorking, author, "", now); err != nil {
+			return nil, err
+		}
+	}
+
+	if ownerRole != "" {
+		if _, err := tx.Exec(`
+			INSERT INTO ticket_role_owners (role, ticket_id, created_at)
+			VALUES (?, ?, ?) ON CONFLICT(role, ticket_id) DO NOTHING
+		`, ownerRole, id, formatTicketTime(now)); err != nil {
+			return nil, err
+		}
+	}
+	if previousAssignee != "" && previousAssignee != sessionID {
+		subscribers = append(subscribers, previousAssignee)
+	}
+	for _, identity := range subscribers {
+		identity = strings.TrimSpace(identity)
+		if identity == "" {
+			continue
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO ticket_subscriptions (identity, ticket_id, created_at)
+			VALUES (?, ?, ?) ON CONFLICT(identity, ticket_id) DO NOTHING
+		`, identity, id, formatTicketTime(now)); err != nil {
+			return nil, err
+		}
+	}
+	var latestSeq int64
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM ticket_events WHERE ticket_id = ?`, id).Scan(&latestSeq); err != nil {
+		return nil, err
+	}
+	if err := setTicketCursorTx(tx, sessionID, id, latestSeq, now); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	current.Assignee = sessionID
+	current.Cwd = cwd
+	current.LastAgentID = lastAgentID
+	current.Status = TicketStatusWorking
+	current.ClosedAt = nil
+	current.ArchivedAt = nil
+	current.ReconciledAt = nil
+	current.UpdatedAt = now
+	current.LatestEventSeq = latestSeq
+	return current, nil
 }
 
 // SetTicketSession records the last session's working dir and agent id, which the

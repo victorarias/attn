@@ -11,7 +11,10 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-var ErrDelegationRequestConflict = errors.New("delegation request id already has different inputs")
+var (
+	ErrDelegationRequestConflict = errors.New("delegation request id already has different inputs")
+	ErrTicketDelegationReserved  = errors.New("ticket already has a delegation being prepared")
+)
 
 // DelegationOperationRecord is the durable launch journal. RequestJSON is kept
 // alongside the public operation shape so a daemon restart can resume the exact
@@ -24,7 +27,7 @@ type DelegationOperationRecord struct {
 	ChiefSessionID string
 }
 
-func (s *Store) ClaimDelegationOperation(requestID, operationID, sessionID, chiefSessionID, requestJSON string, now time.Time) (*DelegationOperationRecord, bool, error) {
+func (s *Store) ClaimDelegationOperation(requestID, operationID, sessionID, chiefSessionID, ticketID, requestJSON string, now time.Time) (*DelegationOperationRecord, bool, error) {
 	if strings.HasPrefix(requestID, "op-") {
 		return nil, false, fmt.Errorf("request id uses reserved operation prefix op-")
 	}
@@ -34,11 +37,15 @@ func (s *Store) ClaimDelegationOperation(requestID, operationID, sessionID, chie
 		return nil, false, errors.New("delegation idempotency requires a database")
 	}
 	stamp := now.UTC().Format(time.RFC3339Nano)
-	result, err := s.db.Exec(`INSERT OR IGNORE INTO delegation_operations
-		(request_id, operation_id, request_json, state, progress, session_id, chief_session_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, requestID, operationID, requestJSON,
-		string(protocol.DelegationOperationStateAccepted), "accepted by daemon", sessionID, chiefSessionID, stamp, stamp)
+	result, err := s.db.Exec(`INSERT INTO delegation_operations
+		(request_id, operation_id, request_json, state, progress, session_id, chief_session_id, ticket_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(request_id) DO NOTHING`, requestID, operationID, requestJSON,
+		string(protocol.DelegationOperationStateAccepted), "accepted by daemon", sessionID, chiefSessionID, ticketID, stamp, stamp)
 	if err != nil {
+		if ticketID != "" && strings.Contains(err.Error(), "delegation_operations.ticket_id") {
+			return nil, false, fmt.Errorf("%w: %s", ErrTicketDelegationReserved, ticketID)
+		}
 		return nil, false, fmt.Errorf("claim delegation operation: %w", err)
 	}
 	rows, err := result.RowsAffected()

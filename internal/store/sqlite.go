@@ -112,7 +112,10 @@ const delegationOperationsSchema = `CREATE TABLE IF NOT EXISTS delegation_operat
 	updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_delegation_operations_operation_id
-	ON delegation_operations(operation_id);`
+	ON delegation_operations(operation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_delegation_operations_active_ticket
+	ON delegation_operations(ticket_id)
+	WHERE ticket_id != '' AND state IN ('accepted', 'preparing');`
 
 // migrations defines all schema migrations in order.
 // Each migration is applied exactly once, tracked in schema_migrations table.
@@ -816,6 +819,11 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 			SELECT ticket_id, identity FROM ticket_subscriptions WHERE identity != ''
 			UNION
 			SELECT ticket_id, ('role:' || role) FROM ticket_role_owners WHERE role != '';
+	`},
+	{83, "reserve tickets during delegation preparation", `
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_delegation_operations_active_ticket
+			ON delegation_operations(ticket_id)
+			WHERE ticket_id != '' AND state IN ('accepted', 'preparing');
 	`},
 }
 

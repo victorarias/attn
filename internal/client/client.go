@@ -401,6 +401,8 @@ func (c *Client) RecordFilesEdited(id string, paths []string) error {
 
 type DelegateOptions struct {
 	RequestID          string
+	TicketID           string
+	Confirm            bool
 	Agent              string
 	Model              string
 	Effort             string
@@ -428,7 +430,13 @@ func (c *Client) StartDelegation(sourceSessionID, brief string, opts DelegateOpt
 		Cmd:             protocol.CmdDelegate,
 		RequestID:       requestID,
 		SourceSessionID: sourceSessionID,
-		Brief:           brief,
+		Brief:           strings.TrimSpace(brief),
+	}
+	if value := strings.TrimSpace(opts.TicketID); value != "" {
+		msg.TicketID = protocol.Ptr(value)
+	}
+	if opts.Confirm {
+		msg.Confirm = protocol.Ptr(true)
 	}
 	if value := strings.TrimSpace(opts.Agent); value != "" {
 		msg.Agent = protocol.Ptr(value)
