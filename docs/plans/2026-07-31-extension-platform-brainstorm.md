@@ -269,16 +269,54 @@ what a first release wants:
   traversal, rounds and drift — it is a platform rather than a form renderer.
 
 Present is therefore the platform's first-party surface, not an extension
-competing with it. What stays open is only how aggressive to be with the
-already-shipped change reader.
+competing with it.
+
+### Migration posture: free hand
+
+Aligned 2026-07-31: Present is **not yet adopted** — the change reader is not
+working well enough for daily use, and Victor is explicit that we can do
+whatever we want with it.
+
+That retires the constraint behind the cautious option. "Generalize in place"
+was recommended to avoid a daily-review regression window; there is no daily
+review to regress. So the platform does **not** inherit Present's manifest
+schema as its contract. That schema was designed for exactly one content type,
+and treating it as the platform's foundation would bake a single-tenant shape
+into a multi-tenant catalog.
+
+Instead: design the catalog from first principles, and treat Present's *use
+cases* — change review, document reading, teaching — as its first tenants.
+What carries over is the hard-won machinery, not the schema:
+
+- the second-window shell (`PresentRoot`, Tauri multi-window lifecycle, WS
+  client, shortcut routing) — a solved blindspot, reused as a placement
+- diff rendering and inline commenting — the heaviest component in the catalog
+- rounds, pinned SHAs and drift — a genuine concept, re-expressed as
+  interaction state
+- the doorbell/`--wait` agent loop — becomes the generic `gate` response path
+
+The shipped change reader stays working until its replacement is better; it is
+simply no longer a constraint on the design.
+
+**Open risk to carry into the plan:** Present not reaching adoption is
+unexplained. Rebuilding it on the platform without knowing *why* it stalled
+would port the failure into the foundation. The plan must name the adoption
+gap before it commits to a first-party review surface.
+
+## Settled, round two (2026-07-31)
+
+4. **Interaction kinds — open all three at once** (`observe` / `decide` /
+   `gate`). The catalog is complete from day one and the existing worktree
+   surfaces migrate onto the same mechanism rather than remaining a private
+   fourth path.
+5. **Present — free hand.** Not adopted, so not a constraint. Catalog designed
+   from first principles; Present's machinery reused, its schema not inherited.
+6. **Automations — commit now, migrate later.** The vision states that
+   automations become a platform tenant, and the event catalog is designed so a
+   scheduled trigger and a `github_review_requested` trigger are expressible as
+   events. The working v2 automations code is not touched in this effort.
 
 ## Still open
 
-1. Fork 3 — open the surface catalog to all three interaction kinds
-   (`observe` / `decide` / `gate`) at once, or ship `observe` + `gate` and leave
-   `decide` on the existing worktree path?
-2. Present migration posture — generalize in place, rebuild to parity then
-   demolish, or share only the catalog (see the question below).
-3. Consolidation: does the platform absorb automations later, and do we commit
-   to that now? Automations are already `(closed event set) → (spawn an agent)`,
-   a strict subset of the platform.
+1. Why Present has not reached adoption — the answer shapes what the
+   first-party review surface must actually do.
