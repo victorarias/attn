@@ -1,154 +1,221 @@
-# Plan: attn extension primitives
+# Plan: attn extension platform — the layers
 
 ## Goal
 
-Give agents inside attn a small set of **primitives** they can combine to build
-interactions attn does not have. Not a feature with a platform around it — a
-vocabulary.
+Build the infrastructure layers an agent inside attn composes to create
+interactions attn does not have. None of these layers is novel; that is the
+point. They are well-understood pieces, built properly once, so that the next
+twenty ideas are compositions instead of core PRs.
 
-The test of the vocabulary is not "can it build the delegation gate." It is
-that things attn *already has* fall out of it as compositions, and that the
-next twenty ideas are compositions too rather than core PRs.
+Deliberately a bit over-built: a foundation to build on, not a minimum.
 
-## The primitives
-
-| Primitive | What it does |
-| --- | --- |
-| `subscribe(event)` | attn emits named events; an extension listens |
-| `block` | a subscriber makes attn wait for its answer before continuing |
-| `ask(ui)` | render React, get a structured answer back |
-| `render(ui)` | mount React somewhere persistent, not tied to a question |
-| `state` | durable per-extension storage |
-| `act` | call attn's own commands — delegate, ticket, comment, session |
-| `think` | invoke an agent and use its answer |
-
-**`block` and `ask` are orthogonal.** An earlier draft fused them into an
-`observe | decide | gate` taxonomy; that was a list of use cases, not
-primitives, and it kept collapsing the design back onto one feature. Blocking
-without asking is a code-only decision. Asking without blocking is a
-notification that wants an answer. Both together is a gate.
-
-### The set validated against what already exists
+## The layers
 
 ```text
-automations                 = subscribe + think
-present                     = render + ask + state
-worktree provider plugins   = subscribe + block
-delegation prompt approval  = subscribe + block + ask
-a custom queue view         = render + state
-nightly digest of idle work = subscribe + think + state
+  ┌──────────────────────────────────────────────────────────────┐
+  │ 6. HOST / PLUGIN SYSTEM                                       │
+  │    processes, supervision, RPC, registration, hot reload      │
+  │    — connects extension code to every layer below             │
+  └──────────────────────────────────────────────────────────────┘
+  ┌───────────────────────────┐  ┌───────────────────────────────┐
+  │ 1. EVENT BUS              │  │ 4. RENDERING                  │
+  │    named events, typed    │  │    bundle, load, mount        │
+  │    payloads, subscriptions│  │    agent-authored React       │
+  └───────────────────────────┘  ├───────────────────────────────┤
+  ┌───────────────────────────┐  │ 5. COMPONENT LIBRARY          │
+  │ 2. DURABLE WORKFLOW       │  │    provided React components  │
+  │    (Temporal-style)       │  └───────────────────────────────┘
+  │    workflows / activities │
+  │    signals / timers       │
+  └───────────────────────────┘
+  ┌──────────────────────────────────────────────────────────────┐
+  │ 3. STORAGE                                                    │
+  │    extension state, workflow histories, interaction records   │
+  └──────────────────────────────────────────────────────────────┘
+
+  cross-cutting: STABILITY · OBSERVABILITY · HOT RELOAD
 ```
 
-Automations and the worktree plugins are **working features** — this vocabulary
-describes them, it does not replace them. Where an existing mechanism is a
-composition of these primitives, converging later is a rename, not a rewrite.
+### 1. Event bus
 
-## Where extension code runs
+Named events with typed payloads, an open subscription registry, and delivery
+accounting. Today attn has ~100 daemon broadcasts addressed to the app, four
+closed plugin surfaces (`validatePluginSurfaces`), and three closed automation
+triggers — three private buses, none subscribable.
 
-**Handlers are supervised bun processes on the existing plugin chassis.**
+Owns: the catalog (name, payload schema, version), subscriptions, delivery,
+per-event delivery records for replay and debugging.
 
-attn already made this call: `internal/daemon/daemon.go:342` — *"The engine runs
-in a separate process (the `attn workflow run` CLI)."* The goja engine in
-`internal/workflow` is deliberately out-of-daemon, and an earlier draft of this
-plan reversed that without noticing.
+Does **not** own: whether anything blocks. That is the workflow layer's
+business — an event is a fact, not a request.
 
-The deciding argument is the same one that killed the YAML view-model: **a
-restricted bespoke runtime is another thing agents don't know.** goja is an
-ES2017-era realm with no `fetch`, no `console.log`, no `setTimeout`, no npm and
-no debugger — every API has to be hand-built by attn and hand-learned by the
-agent. bun is the environment agents already write for, and attn already runs
-plugins in it (`internal/daemon/plugin_supervisor.go`).
+### 2. Durable workflow engine (Temporal-style)
 
-Reused rather than rebuilt: `plugin_rpc.go` (JSON-RPC, handshake, generation
-tokens, priority-ordered registry), `plugin_supervisor.go` (crash restart with
-bounded backoff — this *is* hot reload), `sdk/plugin` (the authoring SDK).
+The layer that makes the others compose, and the one attn is closest to already
+having without realizing it.
 
-## What already exists for each primitive
+- **Workflow** — deterministic, replayable orchestration. Survives daemon
+  restarts by replaying its history. No clock, no randomness, no direct I/O.
+- **Activity** — an effectful step: call an attn command, hit an API, spawn an
+  agent. Unconstrained, retried with backoff, result journaled.
+- **Signal** — external input that wakes a waiting workflow. *A human answering
+  a question is a signal.*
+- **Timer** — durable sleep. Timeouts, reminders, "wait three days."
 
-| Primitive | Today | Gap |
+**Why this is the keystone.** Without it, "wait for the human, then continue"
+is a parked in-memory continuation that dies on every `make install-daemon-dev`.
+With it, waiting is `await signal(...)` — restart-safe by construction, because
+resume replays history and the await resolves from the journal. Every awkward
+question in earlier drafts (what happens on restart, how a paused operation
+resumes, where timeouts live, how to retry) is answered once, here, instead of
+per feature.
+
+**What attn already has.** `internal/workflow` is a durable execution engine:
+the journal is keyed by *structural ordinal* rather than time; `DurableJournal`
+is SQLite-backed and rebuilds from persisted rows "so a fresh process can resume
+a prior run"; determinism bans keep replay faithful; the engine runs
+out-of-process and journals to the daemon over IPC (`workflow_ipcjournal.go`) —
+Temporal's worker model.
+
+To be precise about the distinction: the `attn workflow` **feature** is agent
+fan-out and is not what this layer is for. The **machinery** underneath it is
+generic durable execution and is exactly what this layer needs.
+
+**What is missing.** One activity type (`agent()`) and nothing else; no signals;
+no timers; a journal entry schema that is agent-call-shaped (`PromptHash`,
+`Model`, `Phase`) rather than a generic history. Generalizing the entry from
+"agent call" to "activity result", then adding signals and timers, is the work.
+
+**This corrects an earlier call.** A previous draft moved everything to bun and
+called the determinism bans goja baggage. They are not — they are
+durable-execution semantics, the same constraints Temporal places on workflow
+code, for the same reason. The split is Temporal's own:
+
+| Code | Runtime | Constraints |
 | --- | --- | --- |
-| `subscribe` | ~100 daemon broadcasts; 4 closed plugin surfaces; 3 closed automation triggers | no open, named catalog |
-| `block` | `dispatchWorktreeCreateProvider` blocks a core operation on an out-of-process verdict, with timeouts, fallback and chain | worktrees only |
-| `ask` | `attn present --wait` returns verdicts | diffs only, CLI only |
-| `render` | tiles (`markdown`, `browser`), `PresentRoot` window | no extension-authored UI |
-| `state` | — | nothing |
-| `act` | the whole `attn` CLI over the socket | not reachable from a handler |
-| `think` | delegation, automations spawn agents | not reachable from a handler |
+| Workflow (orchestration, awaits, signals) | goja + journal | deterministic, replayable |
+| Activity (side effects) | bun | none — full npm, fetch, fs |
+| Handler (stateless event reaction) | bun | none |
 
-`block` is the one people assume is hardest and is in fact nearly done —
-`plugin_worktree.go:93` already has the shape, including a 2-minute
-provider timeout and a declared fallback.
+So goja *and* bun, each where its semantics are right.
 
-## Verdicts carry data
+### 3. Storage
 
-`allow`/`deny` is too narrow. `worktree.create` already returns `(path, branch)`
-— a result that *replaces* what the daemon would have done. And the delegation
-case wants **edit the prompt and approve**, not just approve or reject; without
-it a one-word fix costs a full agent round-trip.
+Durable state per extension, plus the workflow histories and interaction
+records the layers above depend on. SQLite via `internal/store`.
 
-So a blocking subscriber returns `continue` | `continue_with(data)` | `stop(data)`.
+Extension-facing state needs serialized read-modify-write (two events in flight
+doing get-then-set is the obvious first bug), namespacing, and a declared
+version so an extension can migrate its own data.
 
-## Boundaries
+### 4. Rendering
 
-- One event catalog serving every subscriber, whoever they are. The catalog is
-  the opened form of `validatePluginSurfaces`, not a parallel mechanism.
-- Which events can be blocked is a property the **daemon author** sets per
-  event, with a documented contract: where it is emitted, what state exists at
-  that point, what `stop` unwinds, what happens on timeout. Opening a new
-  blockable event is core work; the win is that it is one seam instead of a
-  vertical feature.
-- No bespoke UI data model, ever. If React plus the provided components can't
-  express something, the answer is another component.
-- Registration is agent-driven: files plus one command, no clicking, no restart.
+How agent-authored React gets into attn: bundling, loading into the packaged
+Tauri app with one React instance, mounting at a declared placement, error
+isolation, hot reload.
 
-## Open questions (real ones)
+**The only layer with genuine unknowns.** Dynamic `import()` of a bundled ESM
+module through the asset protocol in a packaged WKWebView, with `react`
+externalized so extension hooks share the app's instance, is unproven.
+`build:browser-runtime` is a first-party bundle built at app build time, which
+is not the same thing. Spike before building.
 
-1. **How does agent-authored React load into the packaged app?** Bundled ESM
-   through the asset protocol, with `react` externalized so there is one React
-   instance. This is genuinely unproven — `build:browser-runtime` is a
-   first-party bundle built at app build time, which is not the same thing.
-   **Spike this before writing PR3.**
-2. **Daemon restart while something is blocked.** The waiting operation does not
-   survive the restart, so the honest semantics are: fail to the declared
-   default and say so. `make install-daemon-dev` restarts the daemon, so this
-   happens routinely and should be boring, not clever.
-3. **Where in `delegateOperation` the pause sits.** That path is a compensation
-   saga (`delegationRollback`) with a strict acquisition order. Before any
-   resource is reserved is safe; later is not.
+### 5. Component library
+
+Provided React components so extension UI looks and behaves like attn without
+each extension reinventing it. Starts tiny and grows from real use — a
+component library with no consumers is how the Present manifest failed, in
+library form.
+
+### 6. Host / plugin system
+
+Process lifecycle, supervision, RPC, registration, hot reload — and the wiring
+that gives extension code access to layers 1–5.
+
+Largely exists: `plugin_rpc.go` (JSON-RPC, handshake, generation tokens,
+priority-ordered registry), `plugin_supervisor.go` (crash restart with bounded
+backoff, which is hot reload), `sdk/plugin` (authoring SDK). What it lacks is
+reach: today it connects to four worktree surfaces and nothing else.
+
+### Cross-cutting principles
+
+- **Stability.** Nothing an extension does takes attn down. Extension code runs
+  out-of-process (handlers, activities) or sandboxed-by-semantics (workflows);
+  UI faults are isolated per extension; every wait has a declared timeout and
+  default; a kill switch is reachable without the extension's cooperation.
+- **Observability.** Every event delivery, workflow step, activity retry,
+  signal and UI mount is recorded and inspectable. A stuck extension is
+  diagnosable in one look, never inferred from a stalled operation.
+- **Hot reload.** Edit, and it is live — no daemon restart, no app rebuild, no
+  clicking. This is a platform requirement, not a convenience: an agent
+  iterating on an extension is the primary authoring loop.
+
+## What exists, per layer
+
+| Layer | Today | Work |
+| --- | --- | --- |
+| Event bus | 3 private closed buses | open + unify |
+| Durable workflow | replay core, durable journal, out-of-process worker | generalize activities; add signals, timers |
+| Storage | SQLite store | extension tables |
+| Rendering | tiles, `PresentRoot` window | build it (spike first) |
+| Components | Present's diff rendering | build it, small |
+| Host/plugin | RPC, supervision, SDK | widen its reach |
+| Observability | per-subsystem logs | unify across layers |
+
+Two of seven exist and are good. One is ~60% there and is the keystone.
+
+## Composition check
+
+The layers are right if what attn already has falls out of them, and the new
+ideas do too:
+
+```text
+automations            = events + activity(spawn agent)
+worktree plugins       = events + workflow(blocking activity)
+present                = rendering + components + storage
+delegation approval    = events + workflow(signal) + rendering + components
+nightly digest         = events + timer + activity + storage
+"wait for CI, then ask,
+ then delegate"        = events + timers + signals + activities
+```
+
+The last one is the tell: it is trivial with a durable workflow layer and
+essentially impossible without it.
 
 ## Implementation Steps
 
-One primitive per PR, so each lands with a real consumer and nothing is built
-on speculation.
+- [ ] **PR1 — event bus.** Catalog, open subscription registry, delivery
+      records, `attn ext` registration on the existing host, hot reload.
+      Handlers in bun. *An extension reacts to things and does things.*
+- [ ] **PR2 — storage.** Extension state with serialized read-modify-write,
+      namespacing, versioning.
+- [ ] **PR3 — durable workflow, part 1.** Generalize the journal entry from
+      agent-call to activity-result; general activities; workflow start/resume
+      driven by events. *An extension survives a daemon restart mid-task.*
+- [ ] **PR4 — durable workflow, part 2.** Signals and timers. *An extension can
+      wait — for a human, for a clock, for anything — durably.*
+- [ ] **PR5 — rendering.** After the spike: bundling, loading, mounting,
+      placement, error isolation, hot reload.
+- [ ] **PR6 — component library v0.** Grown from what PR5's first consumers
+      actually need.
+- [ ] **PR7 — blocking events.** Generalize `dispatchWorktreeCreateProvider` so
+      an event can await a workflow's verdict; verdicts carry data
+      (`continue` | `continue_with(data)` | `stop(data)`), since
+      `worktree.create` already returns `(path, branch)` and prompt approval
+      wants edit-and-approve.
+- [ ] **PR8 — observability surface.** One view across events, workflows,
+      activities and extensions.
 
-- [ ] **PR1 — `subscribe` + `act`.** Event catalog (opened
-      `validatePluginSurfaces`), bun handlers on the existing plugin chassis,
-      handler access to attn's commands, `attn ext register|list|enable|disable
-      |logs`, hot reload, invocation log. *Proves: an extension reacts to
-      something and does something.*
-- [ ] **PR2 — `state`.** Durable per-extension storage, reachable from the
-      handler. Serialized read-modify-write. *Proves: an extension remembers.*
-- [ ] **PR3 — `render`.** The React host, after the spike: bundling,
-      loading in the packaged app, one React instance, error boundary, hot
-      reload, the provided component set (start tiny, grow from real use).
-      *Proves: an extension shows something.*
-- [ ] **PR4 — `ask`.** Structured answers back from a rendered surface.
-      *Proves: an extension has a conversation.*
-- [ ] **PR5 — `block`.** Blockable events, generalized from
-      `dispatchWorktreeCreateProvider`; verdicts carrying data; timeout to
-      declared default; kill switch. First blockable event:
-      `delegation.before_start`. *Proves: an extension changes what attn does.*
-- [ ] **PR6 — `think`.** Agent invocation from a handler.
-
-The delegation prompt approval is the composition that falls out after PR5. It
-is the proof, not the plan.
+The delegation prompt approval is the composition that falls out once PR7
+lands. It is the proof, not the plan.
 
 ## Testing
 
-`attn ext invoke <ext> --event <name> --payload <file>` runs a handler against a
-fixture without firing a real event. Without it, an agent developing against
-`delegation.before_start` debugs by spawning real delegations with real
-worktrees. This is PR1 material.
+`attn ext invoke <ext> --event <name> --payload <file>` runs a handler or
+workflow against a fixture without firing a real event, and workflow histories
+replay deterministically by construction — a recorded history is a test case.
+Otherwise an agent developing against `delegation.before_start` debugs by
+spawning real delegations with real worktrees.
 
 ## Verification
 
