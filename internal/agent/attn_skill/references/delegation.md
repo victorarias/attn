@@ -63,29 +63,17 @@ Use `--brief <text>` only for short, simple tasks.
 
 ## Adopt an Existing Ticket
 
-When the task already exists on the board, delegate that ticket instead of
-copying its brief into a new delegation:
+When the task already has a ticket, adopt it instead of creating a duplicate:
 
     attn delegate --ticket <ticket-id>
 
-The existing ticket's description becomes the agent's initial task. Attn keeps
-the ticket id and activity thread, binds it to the new session, and moves it to
-`working`; it does not create another ticket. The description must be non-empty.
-The session name defaults to the ticket title (shortened to the normal 16-character
-limit), while `--name` still overrides it. Placement and worktree flags have their
-normal meanings and the delegated session's resolved directory becomes the
-ticket's current `cwd`.
-
-An unassigned ticket can be adopted directly. A ticket assigned to a session is
-also adopted directly when orphan reconciliation has stamped it, because no agent
-is still working on it. A non-orphan assignee is protected from silent takeover:
+Its description becomes the task; the ticket keeps its id and thread, binds to
+the new session, and moves to `working`. Unassigned and reconciled-orphan tickets
+transfer directly. Taking over a live assignee requires confirmation:
 
     attn delegate --ticket <ticket-id> --confirm
 
-Adoption clears the orphan stamp. The previous assignee remains a participant so
-the reassignment appears in its ticket activity. `--ticket`, `--brief`, and
-`--brief-file` are mutually exclusive task sources, and `--confirm` is valid only
-with `--ticket`.
+`--name`, placement, and worktree flags behave as usual.
 
 ## Agent Selection
 
