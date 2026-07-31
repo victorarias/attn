@@ -316,7 +316,56 @@ gap before it commits to a first-party review surface.
    scheduled trigger and a `github_review_requested` trigger are expressible as
    events. The working v2 automations code is not touched in this effort.
 
+## The adoption gap, answered — and what it changes
+
+Aligned 2026-07-31. Present stalled on three things:
+
+1. **Authoring friction.** Agents don't reliably produce good manifests.
+2. **Only diffs, no documents.** The surface only appears at the end of work.
+3. **It is slow for agents to author.** The manifest is a rigid, verbose schema
+   (`frame` + `files` + per-entry `note` + `annotations` with four anchor forms
+   + `skip`) and composing one costs real agent time.
+
+Victor's read: *a simpler data model that gives agents more autonomy, and
+potentially let the agent prompt another agent that drives the presentation.*
+
+### This corrects the tambo call above
+
+The earlier section dismissed tambo's generative half — "attn's agents author
+the tree deliberately; take the schema discipline, skip the generative
+middleman." That was wrong in an important way. It assumed authoring was cheap.
+It isn't; authoring is *the* bottleneck. Once that is true, "an LLM fills a
+schema'd component catalog" stops being a middleman and becomes the fix.
+
+The revised call: attn still doesn't need tambo's hosted backend, thread state,
+or streaming props — it owns its state and transport. But the pattern of *a
+model composing UI against a registered, schema'd catalog* is exactly the
+answer to the authoring gap, and it makes fork 2's catalog choice load-bearing
+for a second reason. A schema'd catalog is not only safer and themeable; it is
+the contract that makes agent-authored UI **fast and reliable**, because it is a
+tool-call surface a model can fill without inventing structure.
+
+### Three design consequences
+
+- **The catalog must be small and forgiving.** Few required fields, strong
+  defaults, progressive disclosure. Derive what can be derived (a diff's repo
+  and base ref) instead of demanding it. The manifest's rigidity is the thing
+  being fixed, so a big rigid schema with more component kinds would be the same
+  failure with a wider surface.
+- **A presenter agent is a first-class concept.** An extension may hand raw
+  material and intent to an agent whose only job is composing the view. attn
+  already has the machinery — `agent()` in the workflow engine, plus the
+  delegation path.
+- **The view tree is the contract; authorship is free.** Whether the extension
+  emits the tree directly, or delegates composition to a presenter agent, the
+  platform sees the same validated tree. That keeps the presenter agent
+  *additive* — it can land after the spine, without the foundation depending on
+  it.
+
+This also dissolves "only diffs, no documents" as a separate problem: a catalog
+carrying `markdown`, `code`, `diff` and `html` is content-type-agnostic by
+construction.
+
 ## Still open
 
-1. Why Present has not reached adoption — the answer shapes what the
-   first-party review surface must actually do.
+Nothing blocking. Proceed to the plan.
