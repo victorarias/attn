@@ -366,6 +366,97 @@ This also dissolves "only diffs, no documents" as a separate problem: a catalog
 carrying `markdown`, `code`, `diff` and `html` is content-type-agnostic by
 construction.
 
+## Revision (2026-07-31, later): the UI is React, not a data model
+
+**This supersedes fork 2.** Victor: *"Agents are really good at react. Building
+UI with a custom yaml data model is a lot harder for agents."*
+
+That is decisive, and it is the same argument that killed Present — one level
+up. The adoption post-mortem above says Present failed partly because its
+custom manifest was slow and unreliable for agents to author. A schema-validated
+view tree is *another custom data model with no training data*, which an agent
+must relearn from documentation on every use. Shipping it would reproduce
+Present's failure mode across a wider surface, while congratulating ourselves
+for having generalized it.
+
+React inverts every term: enormous training data, agents are fluent, and the
+model is one they already reason about natively.
+
+### What survives, and what it becomes
+
+The catalog was doing two jobs. Only one of them needed a data model.
+
+| Catalog was for | Now delivered by |
+| --- | --- |
+| Consistent, themed, native-feeling UI | `@attn/ui` — a **provided component library** extensions import |
+| A surface a model can fill reliably | React + TSX, which agents already know |
+| Validation at the boundary | TypeScript types + a per-extension error boundary |
+| Safety / isolation | the isolation boundary (see below), not the schema |
+
+So the catalog survives as a **component library rather than a data schema** —
+which is strictly better on Victor's own criterion, because consuming a
+component library is exactly what agents are best at. Consistency stops being
+enforced by rejecting invalid JSON and starts being enforced by the components
+being the easy path.
+
+### The shape of an extension
+
+One directory, a familiar server/client split agents already reason about:
+
+```text
+my-extension/
+  extension.toml    name, events, capabilities, placement defaults
+  handler.ts        daemon-side: subscribes, decides, gates       -> goja
+  ui.tsx            app-side: the interaction surface             -> React
+```
+
+`attn ext register <dir>` bundles both with **bun** (already an assumed
+dependency — `internal/plugins` and the plugin supervisor shell out to
+`/usr/bin/env bun`): `handler.ts` compiles to plain JS for the goja runtime,
+`ui.tsx` to an ESM module with `react`/`react-dom` externalized so the app keeps
+one React instance. `app/package.json` already builds a second bundle this way
+for the browser runtime (`build:browser-runtime`), so this is a pattern attn has
+shipped before rather than a new one.
+
+The `html` escape hatch is no longer needed as an escape hatch — React *is* the
+full-power path. A sandboxed webview remains available for genuinely untrusted
+or heavyweight content.
+
+### The new fork this opens: the isolation boundary
+
+Dropping the DSL moves safety from "validate the data" to "contain the code":
+
+- **(a) Same-context dynamic import.** The app imports the extension's ESM
+  module and renders it inline. Native feel, full theming, shared React, no
+  bridge, no latency. Cost: extension code runs with app privileges, including
+  Tauri IPC.
+- **(b) Sandboxed webview.** The UI renders in an isolated context with a
+  narrow typed bridge. True containment. Cost: a bridge for every capability, a
+  shipped stylesheet to stay on-theme, and keyboard/shortcut integration drift —
+  the same drift that makes the browser tile feel like a guest.
+
+For attn's actual threat model — Victor's own agents, on Victor's machine — the
+realistic failure is a *buggy* extension, not a malicious one, and an error
+boundary plus per-extension disable handles that. That argues for (a). But it is
+a real security call and it is the one thing here that should not be decided by
+inference.
+
+## Two requirements promoted to first-class
+
+Both were understated in the first pass:
+
+- **Dynamic registration, no clicking.** An agent creates an extension by
+  writing files and running one command. Everything is CLI-over-socket —
+  `attn ext register|reload|list|enable|disable|logs` — with hot reload on
+  change. There is no UI ceremony anywhere in the authoring path, and no daemon
+  restart. This is a PR1 requirement, not a convenience.
+- **State preservation is a platform primitive.** A durable, transactional,
+  per-extension key/value store reachable from **both** the handler (host fn)
+  and the UI (host SDK), namespaced by extension, surviving daemon restarts and
+  extension reloads. Extensions declare a `schema_version` and migrate their own
+  state on load. This is the substitute for the resident VM the runtime
+  deliberately does not keep.
+
 ## Still open
 
-Nothing blocking. Proceed to the plan.
+The isolation boundary (a) vs (b) above.
