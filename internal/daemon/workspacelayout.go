@@ -539,6 +539,29 @@ func (d *Daemon) handleWorkspaceLayoutUndockTile(client *wsClient, msg *protocol
 	}
 	snapshot.Layout = layout
 	normalized := workspacelayout.NormalizeWorkspaceLayout(*snapshot)
+	if workspacelayout.LayoutEmpty(normalized.Layout) {
+		// The tile was the workspace's last leaf — the case of a sessionless
+		// workspace that only existed to hold it. Mirror close-pane: drop the layout
+		// row rather than storing a leafless one, because every layout command goes
+		// through ensureWorkspaceLayout, which rejects a leafless layout. Storing it
+		// and broadcasting through the normal path would leave a workspace nothing
+		// can act on: the sidebar row survives with a close button that can never
+		// work again.
+		d.store.RemoveWorkspaceLayout(msg.WorkspaceID)
+		d.sendWorkspaceLayoutTileActionResult(client, protocol.CmdWorkspaceLayoutUndockTile, msg.WorkspaceID, tileID, nil)
+		if d.unregisterWorkspaceIfEmpty(msg.WorkspaceID) {
+			return
+		}
+		// It survives (pinned, or sessions remain), so publish the empty layout
+		// instead of leaving clients replaying the undocked tile.
+		emptyLayout, err := protocolWorkspaceLayout(normalized)
+		if err != nil {
+			d.logf("workspace empty layout update failed for workspace %s: %v", msg.WorkspaceID, err)
+			return
+		}
+		d.broadcastWorkspaceLayoutSnapshotUpdated(emptyLayout)
+		return
+	}
 	if err := d.store.SaveWorkspaceLayout(normalized); err != nil {
 		d.sendWorkspaceLayoutTileActionResult(client, protocol.CmdWorkspaceLayoutUndockTile, msg.WorkspaceID, tileID, err)
 		return
@@ -727,7 +750,7 @@ func (d *Daemon) handleWorkspaceLayoutMoveLeafToNewWorkspace(client *wsClient, m
 	if err != nil {
 		// The move failed after the workspace was registered. Tear the empty
 		// new workspace back down so a failed drag leaves no orphan behind.
-		d.unregisterWorkspaceIfEmptyAfterMove(newWorkspaceID)
+		d.unregisterWorkspaceIfEmpty(newWorkspaceID)
 	}
 	d.sendWorkspaceLayoutMoveToNewWorkspaceResult(client, sourceWorkspaceID, newWorkspaceID, leafID, finalLeafID, err)
 }
@@ -994,7 +1017,7 @@ func (d *Daemon) moveLeafToWorkspace(sourceWorkspaceID, targetWorkspaceID, leafI
 	}
 
 	if sourceEmpty {
-		d.unregisterWorkspaceIfEmptyAfterMove(sourceWorkspaceID)
+		d.unregisterWorkspaceIfEmpty(sourceWorkspaceID)
 	} else {
 		d.recomputeAndBroadcastWorkspace(sourceWorkspaceID)
 	}
@@ -1002,22 +1025,27 @@ func (d *Daemon) moveLeafToWorkspace(sourceWorkspaceID, targetWorkspaceID, leafI
 	return move.FinalLeafID, nil
 }
 
-func (d *Daemon) unregisterWorkspaceIfEmptyAfterMove(workspaceID string) {
+// unregisterWorkspaceIfEmpty tears down a workspace that holds nothing after a
+// leaf left it — moved away, or undocked. A workspace with sessions, a pin, or a
+// retained tile survives and only has its rollup rebroadcast. Reports whether the
+// workspace was removed, so callers can tell the two outcomes apart.
+func (d *Daemon) unregisterWorkspaceIfEmpty(workspaceID string) bool {
 	if d.workspaces == nil {
-		return
+		return false
 	}
 	if len(d.workspaces.sessionIDs(workspaceID)) > 0 ||
 		d.workspaceHasSessionlessContent(workspaceID) {
 		d.recomputeAndBroadcastWorkspace(workspaceID)
-		return
+		return false
 	}
 	snapshot, removed := d.workspaces.unregister(workspaceID)
 	if !removed {
-		return
+		return false
 	}
 	// Layout teardown (last visible pane/tile removed): tear down and write the
 	// removal-boundary retrospective.
 	d.tearDownRemovedWorkspace(snapshot)
+	return true
 }
 
 func (d *Daemon) recomputeAndBroadcastWorkspace(workspaceID string) {

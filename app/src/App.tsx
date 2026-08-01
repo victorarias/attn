@@ -2881,7 +2881,10 @@ sendFetchPRDetails,
   // The next agent is taken from the queue as it stands before the settle: the
   // band only drops the settled row once the daemon broadcast lands, so reading
   // it afterwards would either find the row still there or race the refresh.
-  // With nothing left to go to, selection stays put.
+  //
+  // With nothing left to go to, the queue is empty and home is where that ends:
+  // staying on the agent just settled leaves you on the one screen guaranteed to
+  // be finished with.
   const handleSettleActiveTurn = useMemo(
     () => (queueModeEnabled
       ? () => {
@@ -2890,10 +2893,12 @@ sendFetchPRDetails,
         sendSettleTurn(activeSessionId);
         if (next) {
           handleSelectSession(next.session.id);
+        } else {
+          goToDashboard();
         }
       }
       : undefined),
-    [queueModeEnabled, activeSessionId, queueBands, sendSettleTurn, handleSelectSession],
+    [queueModeEnabled, activeSessionId, queueBands, sendSettleTurn, handleSelectSession, goToDashboard],
   );
 
   // Keep the selected session's turn, cancelling the auto-settle countdown that
@@ -3703,33 +3708,11 @@ sendFetchPRDetails,
           step={openPRLauncherJob.progress.step}
         />
       )}
-      {/* Dashboard - always rendered, shown/hidden via z-index */}
-      <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
-        <Dashboard
-          sessions={unmutedEnrichedSessions}
-          mutedWorkspaces={mutedWorkspaceViews}
-          prs={prs}
-          isLoading={!hasReceivedInitialState}
-          isRefreshing={isRefreshingPRs}
-          refreshError={refreshError}
-          rateLimit={rateLimit}
-          endpoints={daemonEndpoints}
-          onRebootstrapEndpoint={handleRebootstrapEndpoint}
-          onSelectSession={handleSelectSession}
-          onNewSession={() => handleNewSession('vertical')}
-          onRefreshPRs={handleRefreshPRs}
-          onOpenPR={handleOpenPR}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onMutedGroupClick={() => {
-            setSidebarCollapsed(false);
-            setSidebarMutedExpanded(true);
-            setView('session');
-          }}
-        />
-      </div>
-
-      {/* Session view - always rendered to keep terminals alive */}
-      <div className={`view-container ${view === 'session' ? 'visible' : 'hidden'}`}>
+      {/* The app shell: the sidebar is a peer of the view stack rather than a
+          child of the session view, so home and a session are both framed by it.
+          Grid view stays outside the shell — it is a full-window takeover and
+          hoisting the sidebar must not quietly put a sidebar beside it. */}
+      <div className="app-frame">
         <Sidebar
           workspaces={sidebarWorkspaceViews}
           visualOrder={visualWorkspaces}
@@ -3784,8 +3767,38 @@ sendFetchPRDetails,
           onCloseSession={handleRequestCloseSession}
           onReloadSession={handleReloadSession}
           onGoToDashboard={goToDashboard}
+          homeActive={view === 'dashboard'}
           onToggleCollapse={toggleSidebarCollapse}
         />
+        <div className="view-stack">
+      {/* Dashboard - always rendered, shown/hidden via z-index */}
+      <div className={`view-container ${view === 'dashboard' ? 'visible' : 'hidden'}`}>
+        <Dashboard
+          sessions={unmutedEnrichedSessions}
+          mutedWorkspaces={mutedWorkspaceViews}
+          prs={prs}
+          isLoading={!hasReceivedInitialState}
+          isRefreshing={isRefreshingPRs}
+          refreshError={refreshError}
+          rateLimit={rateLimit}
+          endpoints={daemonEndpoints}
+          onRebootstrapEndpoint={handleRebootstrapEndpoint}
+          queueModeEnabled={queueModeEnabled}
+          onSelectSession={handleSelectSession}
+          onNewSession={() => handleNewSession('vertical')}
+          onRefreshPRs={handleRefreshPRs}
+          onOpenPR={handleOpenPR}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onMutedGroupClick={() => {
+            setSidebarCollapsed(false);
+            setSidebarMutedExpanded(true);
+            setView('session');
+          }}
+        />
+      </div>
+
+      {/* Session view - always rendered to keep terminals alive */}
+      <div className={`view-container ${view === 'session' ? 'visible' : 'hidden'}`}>
         <div className="terminal-pane">
           <div className="terminal-main-area">
             {workspaceViews.map((workspace) => {
@@ -4008,6 +4021,8 @@ sendFetchPRDetails,
             },
           ]}
         />
+      </div>
+        </div>
       </div>
 
       {/* Grid view — global mission control. Mounted only while active so its

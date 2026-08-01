@@ -62,13 +62,13 @@ func TestSnapshotWorkspaceContextAtRemovalSites(t *testing.T) {
 			},
 		},
 		{
-			name: "unregisterWorkspaceIfEmptyAfterMove",
+			name: "unregisterWorkspaceIfEmpty",
 			wsID: "ws-move",
 			remove: func(d *Daemon, sessionID, workspaceID string) {
 				// The session must be gone for the workspace to be considered empty.
 				d.workspaces.dissociateSession(sessionID)
 				d.store.Remove(sessionID)
-				d.unregisterWorkspaceIfEmptyAfterMove(workspaceID)
+				d.unregisterWorkspaceIfEmpty(workspaceID)
 			},
 		},
 	}

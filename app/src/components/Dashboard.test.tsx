@@ -164,3 +164,99 @@ describe('Dashboard sessions', () => {
     expect(screen.queryByTestId('chief-session-summary')).not.toBeInTheDocument();
   });
 });
+
+describe('Dashboard in queue mode', () => {
+  const props = {
+    prs: [],
+    isLoading: false,
+    queueModeEnabled: true,
+    onSelectSession: vi.fn(),
+    onNewSession: vi.fn(),
+    onOpenSettings: vi.fn(),
+  };
+
+  it('leads with the turns owed, oldest first, and keeps them out of the state groups', () => {
+    render(
+      <Dashboard
+        {...props}
+        sessions={[
+          { id: 's1', label: 'newer', state: 'waiting_input', cwd: '/a', turnOwed: true, turnOpenedAt: '2026-07-29T10:05:00Z' },
+          { id: 's2', label: 'older', state: 'pending_approval', cwd: '/b', turnOwed: true, turnOpenedAt: '2026-07-29T09:00:00Z' },
+          { id: 's3', label: 'settled-but-waiting', state: 'waiting_input', cwd: '/c', turnOwed: false },
+        ]}
+      />
+    );
+
+    const turns = screen.getByTestId('session-group-turns');
+    expect(turns).toBeInTheDocument();
+    const names = Array.from(turns.querySelectorAll('.session-name')).map((n) => n.textContent);
+    expect(names).toEqual(['older', 'newer']);
+
+    // The settled agent is still in waiting_input, so the state group exists —
+    // but it holds only the agent whose turn is closed.
+    const waiting = screen.getByTestId('session-group-waiting');
+    expect(waiting).toContainElement(screen.getByTestId('session-s3'));
+    expect(waiting).not.toContainElement(screen.getByTestId('session-s1'));
+    expect(screen.getByTestId('session-group-settled')).toBeInTheDocument();
+    expect(screen.queryByTestId('all-settled')).not.toBeInTheDocument();
+  });
+
+  it('announces all settled with what is still running once nothing is owed', () => {
+    render(
+      <Dashboard
+        {...props}
+        sessions={[
+          { id: 's1', label: 'busy', state: 'working', cwd: '/a', turnOwed: false },
+          { id: 's2', label: 'busy-too', state: 'working', cwd: '/b', turnOwed: false },
+          { id: 's3', label: 'later', state: 'scheduled', cwd: '/c', turnOwed: false },
+        ]}
+      />
+    );
+
+    expect(screen.getByTestId('all-settled')).toBeInTheDocument();
+    expect(screen.getByText('2 working · 1 scheduled')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-group-turns')).not.toBeInTheDocument();
+  });
+
+  it('says nothing is running when everything settled is parked', () => {
+    render(
+      <Dashboard
+        {...props}
+        sessions={[{ id: 's1', label: 'parked', state: 'idle', cwd: '/a', turnOwed: false }]}
+      />
+    );
+
+    expect(screen.getByText('Nothing is running.')).toBeInTheDocument();
+  });
+
+  it('leaves the chief out of the turns, matching the sidebar band', () => {
+    render(
+      <Dashboard
+        {...props}
+        sessions={[
+          { id: 'chief', label: 'chief', state: 'waiting_input', cwd: '/a', chiefOfStaff: true, turnOwed: true, turnOpenedAt: '2026-07-29T09:00:00Z' },
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId('session-group-turns')).not.toBeInTheDocument();
+    expect(screen.getByTestId('all-settled')).toBeInTheDocument();
+  });
+
+  it('keeps the plain state grouping when the queue is off', () => {
+    render(
+      <Dashboard
+        {...props}
+        queueModeEnabled={false}
+        sessions={[
+          { id: 's1', label: 'asking', state: 'waiting_input', cwd: '/a', turnOwed: true, turnOpenedAt: '2026-07-29T09:00:00Z' },
+        ]}
+      />
+    );
+
+    expect(screen.queryByTestId('session-group-turns')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('session-group-settled')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('all-settled')).not.toBeInTheDocument();
+    expect(screen.getByTestId('session-group-waiting')).toContainElement(screen.getByTestId('session-s1'));
+  });
+});

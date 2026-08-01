@@ -1,10 +1,11 @@
-import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { type MouseEvent as ReactMouseEvent } from 'react';
 import { StateIndicator } from './StateIndicator';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { SidebarSettlingBar } from './SettlingIndicator';
 import { formatShortcut } from '../shortcuts/formatShortcut';
 import type { UISessionState } from '../types/sessionState';
 import { formatTurnAge, type QueueBands as QueueBandsModel, type QueueRow } from '../utils/queueBands';
+import { useNow, TURN_AGE_TICK_MS } from '../hooks/useNow';
 
 export interface QueueBandSessionView {
   id: string;
@@ -42,22 +43,6 @@ interface QueueBandsProps {
    * reach for anything in a band.
    */
   onOpenActions?: (session: { id: string; label: string; chiefOfStaff?: boolean }, event: ReactMouseEvent) => void;
-}
-
-/**
- * Turn ages are read from a clock, not from a prop, so a row that has been
- * outstanding for an hour does not keep claiming it arrived a minute ago
- * whenever the daemon happens to go quiet.
- */
-const AGE_TICK_MS = 30_000;
-
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
-  return now;
 }
 
 function QueueRowView({
@@ -175,7 +160,7 @@ function QueueRowView({
  * places you go and get work rather than a list handed to you.
  */
 export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, onScreenSessionIds, onPinWorkspace, onOpenActions }: QueueBandsProps) {
-  const now = useNow(AGE_TICK_MS);
+  const now = useNow(TURN_AGE_TICK_MS);
   const offScreen = (id: string) => !onScreenSessionIds?.has(id);
 
   return (

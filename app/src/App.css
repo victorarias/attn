@@ -241,6 +241,25 @@ html, body, #root {
   background: transparent;
 }
 
+/* The sidebar and the stack of views it frames. Grid view is not in here: it
+   stays an absolutely positioned child of `.app`, so it still covers the whole
+   window including the sidebar. */
+.app-frame {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  position: relative;
+}
+
+/* Home and the session view stack here, so `.view-container`'s absolute fill
+   resolves against the column beside the sidebar rather than the window. */
+.view-stack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  position: relative;
+}
+
 .view-container {
   position: absolute;
   top: 0;

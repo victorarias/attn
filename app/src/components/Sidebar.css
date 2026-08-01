@@ -46,12 +46,14 @@
   gap: 6px;
 }
 
+/* Nothing labels this row any more — the home row below names the sidebar's
+   place, so the "+" and the display popover trigger sit flush right on their own. */
 .sidebar-header-row {
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .sidebar-tool-btn,
-.home-btn,
 .new-session-btn,
 .collapse-btn,
 .sidebar-settings-btn,
@@ -62,7 +64,6 @@
 }
 
 .sidebar-tool-btn svg,
-.home-btn svg,
 .new-session-btn svg,
 .collapse-btn svg,
 .sidebar-settings-btn svg,
@@ -116,37 +117,6 @@
   font-weight: 700;
   line-height: 18px;
   text-align: center;
-}
-
-.home-btn {
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  color: var(--color-text-secondary);
-  width: 100%;
-  height: 30px;
-  cursor: pointer;
-}
-
-.home-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-primary);
-}
-
-.home-shortcut {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-dimmed);
-}
-
-.sidebar-title {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--color-text-dimmed);
-  flex: 1;
 }
 
 .new-session-btn {
@@ -1157,6 +1127,50 @@
 
 .muted-session[data-state="waiting_input"]::before {
   display: none;
+}
+
+/* The home row. Above the queue bands and the tree, so it reads as the fixed
+   place you return to rather than a member of either list. */
+.sidebar-home-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 12px);
+  margin: 4px 6px 0;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar-home-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-primary);
+}
+.sidebar-home-row.selected {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+}
+.sidebar-home-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.sidebar-home-row svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.sidebar-home-label {
+  flex: 1;
+}
+.sidebar-home-shortcut {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-dimmed);
 }
 
 /* Queue arrangement: the chief's anchored slot and the "Your turn" band, both
