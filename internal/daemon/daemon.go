@@ -2165,143 +2165,146 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	}
 
 	switch cmd {
-	case protocol.CmdRegister:
+	case protocol.CmdRegister: // wire: register
 		d.handleRegister(conn, msg.(*protocol.RegisterMessage))
-	case protocol.CmdDelegate:
+	case protocol.CmdDelegate: // wire: delegate
 		d.handleDelegate(conn, msg.(*protocol.DelegateMessage))
+	// wire: automation_apply, automation_validate, automation_definitions_get,
+	// automation_definition_get, automation_run, automation_runs_get,
+	// automation_set_enabled, automation_delete, automation_cleanup
 	case protocol.CmdAutomationApply, protocol.CmdAutomationValidate, protocol.CmdAutomationDefinitionsGet, protocol.CmdAutomationDefinitionGet, protocol.CmdAutomationRun, protocol.CmdAutomationRunsGet, protocol.CmdAutomationSetEnabled, protocol.CmdAutomationDelete, protocol.CmdAutomationCleanup:
 		d.handleAutomationCommand(conn, cmd, msg)
-	case protocol.CmdDelegateStatus:
+	case protocol.CmdDelegateStatus: // wire: delegate_status
 		d.handleDelegateStatus(conn, msg.(*protocol.DelegateStatusMessage))
-	case protocol.CmdSetTicketStatus:
+	case protocol.CmdSetTicketStatus: // wire: set_ticket_status
 		d.handleSetTicketStatus(conn, msg.(*protocol.SetTicketStatusMessage))
-	case protocol.CmdTicketInbox:
+	case protocol.CmdTicketInbox: // wire: ticket_inbox
 		d.handleTicketInbox(conn, msg.(*protocol.TicketInboxMessage))
-	case protocol.CmdTicketList:
+	case protocol.CmdTicketList: // wire: ticket_list
 		d.handleTicketList(conn, msg.(*protocol.TicketListMessage))
-	case protocol.CmdTicketShow:
+	case protocol.CmdTicketShow: // wire: ticket_show
 		d.handleTicketShow(conn, msg.(*protocol.TicketShowMessage))
-	case protocol.CmdTicketSubscribe:
+	case protocol.CmdTicketSubscribe: // wire: ticket_subscribe
 		d.handleTicketSubscribe(conn, msg.(*protocol.TicketSubscribeMessage))
-	case protocol.CmdTicketUnsubscribe:
+	case protocol.CmdTicketUnsubscribe: // wire: ticket_unsubscribe
 		d.handleTicketUnsubscribe(conn, msg.(*protocol.TicketUnsubscribeMessage))
-	case protocol.CmdTicketAttach:
+	case protocol.CmdTicketAttach: // wire: ticket_attach
 		d.handleTicketAttach(conn, msg.(*protocol.TicketAttachMessage))
-	case protocol.CmdTicketCreate:
+	case protocol.CmdTicketCreate: // wire: ticket_create
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
-	case protocol.CmdTicketComment:
+	case protocol.CmdTicketComment: // wire: ticket_comment
 		d.handleTicketComment(conn, msg.(*protocol.TicketCommentMessage))
-	case protocol.CmdPresentOpen:
+	case protocol.CmdPresentOpen: // wire: present_open
 		d.handlePresentOpen(conn, msg.(*protocol.PresentOpenMessage))
-	case protocol.CmdPresentFeedback:
+	case protocol.CmdPresentFeedback: // wire: present_feedback
 		d.handlePresentFeedback(conn, msg.(*protocol.PresentFeedbackMessage))
-	case protocol.CmdTicketTake:
+	case protocol.CmdTicketTake: // wire: ticket_take
 		d.handleTicketTake(conn, msg.(*protocol.TicketTakeMessage))
-	case protocol.CmdWorkspaceContextCheckout:
+	case protocol.CmdWorkspaceContextCheckout: // wire: workspace_context_checkout
 		d.handleWorkspaceContextCheckout(conn, msg.(*protocol.WorkspaceContextCheckoutMessage))
-	case protocol.CmdWorkspaceContextUpdate:
+	case protocol.CmdWorkspaceContextUpdate: // wire: workspace_context_update
 		d.handleWorkspaceContextUpdate(conn, msg.(*protocol.WorkspaceContextUpdateMessage))
-	case protocol.CmdWorkspaceContextStatus:
+	case protocol.CmdWorkspaceContextStatus: // wire: workspace_context_status
 		d.handleWorkspaceContextStatus(conn, msg.(*protocol.WorkspaceContextStatusMessage))
-	case protocol.CmdWorkspaceContextList:
+	case protocol.CmdWorkspaceContextList: // wire: workspace_context_list
 		d.handleWorkspaceContextList(conn)
-	case protocol.CmdWorkspaceContextCompact:
+	case protocol.CmdWorkspaceContextCompact: // wire: workspace_context_compact
 		d.handleWorkspaceContextCompact(conn, msg.(*protocol.WorkspaceContextCompactMessage))
-	case protocol.CmdWorkspaceContextRollback:
+	case protocol.CmdWorkspaceContextRollback: // wire: workspace_context_rollback
 		d.handleWorkspaceContextRollback(conn, msg.(*protocol.WorkspaceContextRollbackMessage))
-	case protocol.CmdNotebookGuide:
+	case protocol.CmdNotebookGuide: // wire: notebook_guide
 		// notebook_guide is the one surviving unix-socket notebook command: the
 		// agent-launch wrapper uses it to learn whether a session is the chief of
 		// staff and where the notebook root is. The former user-facing
 		// `attn notebook …` subcommands were removed; the frontend reads and writes
 		// the notebook over the WebSocket path instead.
 		d.handleNotebookGuide(conn, msg.(*protocol.NotebookGuideMessage))
-	case protocol.CmdJournalAppend:
+	case protocol.CmdJournalAppend: // wire: journal_append
 		// journal_append is the contention-safe way an agent writes the daily
 		// journal: it goes through the daemon's single serialized notebook.Store
 		// writer instead of the agent editing journal/<date>.md directly, which
 		// races the keeper's own writes to the same file.
 		d.handleJournalAppend(conn, msg.(*protocol.JournalAppendMessage))
-	case protocol.CmdUnregister:
+	case protocol.CmdUnregister: // wire: unregister
 		d.handleUnregister(conn, msg.(*protocol.UnregisterMessage))
-	case protocol.CmdState:
+	case protocol.CmdState: // wire: state
 		d.handleState(conn, msg.(*protocol.StateMessage))
-	case protocol.CmdHookNotification:
+	case protocol.CmdHookNotification: // wire: hook_notification
 		d.handleHookNotification(conn, msg.(*protocol.HookNotificationMessage))
-	case protocol.CmdHookStopFailure:
+	case protocol.CmdHookStopFailure: // wire: hook_stop_failure
 		d.handleHookStopFailure(conn, msg.(*protocol.HookStopFailureMessage))
-	case protocol.CmdHookCompaction:
+	case protocol.CmdHookCompaction: // wire: hook_compaction
 		d.handleHookCompaction(conn, msg.(*protocol.HookCompactionMessage))
-	case protocol.CmdSetSessionResumeID:
+	case protocol.CmdSetSessionResumeID: // wire: set_session_resume_id
 		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
-	case protocol.CmdSessionInstructions:
+	case protocol.CmdSessionInstructions: // wire: session_instructions
 		d.handleSessionInstructions(conn, msg.(*protocol.SessionInstructionsMessage))
-	case protocol.CmdSessionTranscript:
+	case protocol.CmdSessionTranscript: // wire: session_transcript
 		d.handleSessionTranscript(conn, msg.(*protocol.SessionTranscriptMessage))
-	case protocol.CmdStateExplain:
+	case protocol.CmdStateExplain: // wire: state_explain
 		d.handleStateExplain(conn, msg.(*protocol.StateExplainMessage))
-	case protocol.CmdStop:
+	case protocol.CmdStop: // wire: stop
 		d.handleStop(conn, msg.(*protocol.StopMessage))
-	case protocol.CmdTodos:
+	case protocol.CmdTodos: // wire: todos
 		d.handleTodos(conn, msg.(*protocol.TodosMessage))
-	case protocol.CmdFilesEdited:
+	case protocol.CmdFilesEdited: // wire: files_edited
 		d.handleFilesEdited(conn, msg.(*protocol.FilesEditedMessage))
-	case protocol.CmdWorkflowRunUpsert:
+	case protocol.CmdWorkflowRunUpsert: // wire: workflow_run_upsert
 		d.handleWorkflowRunUpsert(conn, msg.(*protocol.WorkflowRunUpsertMessage))
-	case protocol.CmdWorkflowCallUpsert:
+	case protocol.CmdWorkflowCallUpsert: // wire: workflow_call_upsert
 		d.handleWorkflowCallUpsert(conn, msg.(*protocol.WorkflowCallUpsertMessage))
-	case protocol.CmdWorkflowRunGet:
+	case protocol.CmdWorkflowRunGet: // wire: workflow_run_get
 		d.handleWorkflowRunGet(conn, msg.(*protocol.WorkflowRunGetMessage))
-	case protocol.CmdWorkflowRunList:
+	case protocol.CmdWorkflowRunList: // wire: workflow_run_list
 		d.handleWorkflowRunList(conn, msg.(*protocol.WorkflowRunListMessage))
-	case protocol.CmdWorkflowRunCancel:
+	case protocol.CmdWorkflowRunCancel: // wire: workflow_run_cancel
 		d.handleWorkflowRunCancel(conn, msg.(*protocol.WorkflowRunCancelMessage))
-	case protocol.CmdQuery:
+	case protocol.CmdQuery: // wire: query
 		d.handleQuery(conn, msg.(*protocol.QueryMessage))
-	case protocol.CmdHeartbeat:
+	case protocol.CmdHeartbeat: // wire: heartbeat
 		d.handleHeartbeat(conn, msg.(*protocol.HeartbeatMessage))
-	case protocol.CmdQueryPRs:
+	case protocol.CmdQueryPRs: // wire: query_prs
 		d.handleQueryPRs(conn, msg.(*protocol.QueryPRsMessage))
-	case protocol.CmdMutePR:
+	case protocol.CmdMutePR: // wire: mute_pr
 		d.handleMutePR(conn, msg.(*protocol.MutePRMessage))
-	case protocol.CmdMuteRepo:
+	case protocol.CmdMuteRepo: // wire: mute_repo
 		d.handleMuteRepo(conn, msg.(*protocol.MuteRepoMessage))
-	case protocol.CmdMuteWorkspace:
+	case protocol.CmdMuteWorkspace: // wire: mute_workspace
 		if _, errMsg := d.toggleWorkspaceMute(msg.(*protocol.MuteWorkspaceMessage).WorkspaceID); errMsg != "" {
 			d.sendError(conn, errMsg)
 			return
 		}
 		d.sendOK(conn)
-	case protocol.CmdPinWorkspace:
+	case protocol.CmdPinWorkspace: // wire: pin_workspace
 		m := msg.(*protocol.PinWorkspaceMessage)
 		if _, errMsg := d.setWorkspacePinned(m.WorkspaceID, m.Pinned); errMsg != "" {
 			d.sendError(conn, errMsg)
 			return
 		}
 		d.sendOK(conn)
-	case protocol.CmdCollapseRepo:
+	case protocol.CmdCollapseRepo: // wire: collapse_repo
 		d.handleCollapseRepo(conn, msg.(*protocol.CollapseRepoMessage))
-	case protocol.CmdQueryRepos:
+	case protocol.CmdQueryRepos: // wire: query_repos
 		d.handleQueryRepos(conn, msg.(*protocol.QueryReposMessage))
-	case protocol.CmdQueryAuthors:
+	case protocol.CmdQueryAuthors: // wire: query_authors
 		d.handleQueryAuthors(conn, msg.(*protocol.QueryAuthorsMessage))
-	case protocol.CmdFetchPRDetails:
+	case protocol.CmdFetchPRDetails: // wire: fetch_pr_details
 		d.handleFetchPRDetails(conn, msg.(*protocol.FetchPRDetailsMessage))
-	case protocol.CmdInjectTestPR:
+	case protocol.CmdInjectTestPR: // wire: inject_test_pr
 		d.handleInjectTestPR(conn, msg.(*protocol.InjectTestPRMessage))
-	case protocol.CmdInjectTestSession:
+	case protocol.CmdInjectTestSession: // wire: inject_test_session
 		d.handleInjectTestSession(conn, msg.(*protocol.InjectTestSessionMessage))
-	case protocol.CmdOpenMarkdown:
+	case protocol.CmdOpenMarkdown: // wire: open_markdown
 		d.handleOpenMarkdown(conn, msg.(*protocol.OpenMarkdownMessage))
-	case protocol.CmdOpenBrowser:
+	case protocol.CmdOpenBrowser: // wire: open_browser
 		d.handleOpenBrowser(conn, msg.(*protocol.OpenBrowserMessage))
-	case protocol.CmdBrowserControl:
+	case protocol.CmdBrowserControl: // wire: browser_control
 		d.handleBrowserControl(conn, msg.(*protocol.BrowserControlMessage))
-	case protocol.CmdListWorktrees:
+	case protocol.CmdListWorktrees: // wire: list_worktrees
 		d.handleListWorktrees(conn, msg.(*protocol.ListWorktreesMessage))
-	case protocol.CmdCreateWorktree:
+	case protocol.CmdCreateWorktree: // wire: create_worktree
 		d.handleCreateWorktree(conn, msg.(*protocol.CreateWorktreeMessage))
-	case protocol.CmdDeleteWorktree:
+	case protocol.CmdDeleteWorktree: // wire: delete_worktree
 		d.handleDeleteWorktree(conn, msg.(*protocol.DeleteWorktreeMessage))
 	default:
 		d.sendError(conn, "unknown command")

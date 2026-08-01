@@ -3027,3 +3027,222 @@ describe('useDaemonSocket ticket request/result', () => {
     unmount();
   });
 });
+
+// The notebook and markdown-annotation events moved out of useDaemonSocket.ts
+// into daemonNotebookEvents.ts and daemonMarkdownAnnotationEvents.ts. Nothing
+// covered them at the time, so the move was unfalsifiable; these exercise the
+// two correlation schemes through the hook's public surface.
+describe('useDaemonSocket notebook and annotation events', () => {
+  let originalWebSocket: typeof WebSocket;
+
+  beforeEach(() => {
+    originalWebSocket = globalThis.WebSocket;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+  });
+  afterEach(() => {
+    globalThis.WebSocket = originalWebSocket;
+    vi.clearAllMocks();
+  });
+
+  // Take the socket this render created, by index. Grabbing the newest instance
+  // races with a reconnect leaked from an earlier test and hands back a socket
+  // the hook under test never writes to.
+  async function renderAndOpen(extra: Record<string, unknown> = {}) {
+    const before = FakeWebSocket.instances.length;
+    const rendered = renderNotebookHook(extra);
+    await waitFor(() => {
+      expect(FakeWebSocket.instances.length).toBeGreaterThan(before);
+    });
+    const ws = FakeWebSocket.instances[before];
+    await waitFor(() => {
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+    });
+    return { ...rendered, ws };
+  }
+
+  function renderNotebookHook(extra: Record<string, unknown> = {}) {
+    return renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+        ...extra,
+      }),
+    );
+  }
+
+  function lastSent(ws: FakeWebSocket): { cmd: string; request_id: string; [k: string]: unknown } {
+    return JSON.parse(ws.sent[ws.sent.length - 1]);
+  }
+
+  it('resolves notebook_read with the daemon result', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendNotebookRead('journal/2026-08-01.md');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'notebook_read', path: 'journal/2026-08-01.md' });
+
+    ws.emit({
+      event: 'notebook_read_result',
+      request_id: sent.request_id,
+      success: true,
+      result: { path: 'journal/2026-08-01.md', content: 'today', hash: 'h1' },
+    });
+    await expect(promise).resolves.toEqual({ path: 'journal/2026-08-01.md', content: 'today', hash: 'h1' });
+    unmount();
+  });
+
+  it('rejects notebook_read when the daemon reports success without a result', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendNotebookRead('gone.md');
+    await Promise.resolve();
+    ws.emit({ event: 'notebook_read_result', request_id: lastSent(ws).request_id, success: true });
+
+    await expect(promise).rejects.toThrow('Notebook read failed');
+    unmount();
+  });
+
+  it('resolves notebook_write on a conflict rather than rejecting', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendNotebookWrite('a.md', 'v2', 'h1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'notebook_write', path: 'a.md' });
+
+    ws.emit({
+      event: 'notebook_write_result',
+      request_id: sent.request_id,
+      success: true,
+      result: { path: 'a.md', hash: 'h2', conflict: true, current_hash: 'h3' },
+    });
+    await expect(promise).resolves.toEqual({ path: 'a.md', hash: 'h2', conflict: true, currentHash: 'h3' });
+    unmount();
+  });
+
+  it('resolves notebook_list and notebook_backlinks from their own pending keys', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const list = result.current.sendNotebookList('journal');
+    await Promise.resolve();
+    const listSent = lastSent(ws);
+    const backlinks = result.current.sendNotebookBacklinks('journal/a.md');
+    await Promise.resolve();
+    const backlinksSent = lastSent(ws);
+    expect(listSent.cmd).toBe('notebook_list');
+    expect(backlinksSent.cmd).toBe('notebook_backlinks');
+
+    // Answer out of order: each result must find its own waiter.
+    ws.emit({ event: 'notebook_backlinks_result', request_id: backlinksSent.request_id, success: true, entries: [{ path: 'b.md' }] });
+    ws.emit({ event: 'notebook_list_result', request_id: listSent.request_id, success: true, entries: [{ path: 'a.md' }] });
+
+    await expect(backlinks).resolves.toEqual([{ path: 'b.md' }]);
+    await expect(list).resolves.toEqual([{ path: 'a.md' }]);
+    unmount();
+  });
+
+  it('resolves markdown annotation get with annotations and generation', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.getMarkdownAnnotations('doc.md', 'ws-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'markdown_annotations_get', path: 'doc.md', workspace_id: 'ws-1' });
+
+    ws.emit({
+      event: 'markdown_annotations_get_result',
+      request_id: sent.request_id,
+      workspace_id: 'ws-1',
+      path: 'doc.md',
+      success: true,
+      annotations: [{ id: 'a1' }],
+      generation: 7,
+    });
+    await expect(promise).resolves.toEqual({ annotations: [{ id: 'a1' }], generation: 7 });
+    unmount();
+  });
+
+  it('treats a stale save as a resolved outcome, not an error', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.saveMarkdownAnnotations('doc.md', 'ws-1', [], 3);
+    await Promise.resolve();
+    const sent = lastSent(ws);
+
+    ws.emit({
+      event: 'markdown_annotations_save_result',
+      request_id: sent.request_id,
+      workspace_id: 'ws-1',
+      path: 'doc.md',
+      success: false,
+      stale: true,
+    });
+    await expect(promise).resolves.toEqual({ stale: true });
+    unmount();
+  });
+
+  it('drops an annotation result whose request was superseded', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    // `get` deliberately shares one in-flight round-trip per document, so
+    // supersede is exercised through `save`, which does replace its waiter.
+    const first = result.current.saveMarkdownAnnotations('doc.md', 'ws-1', [], 1);
+    await Promise.resolve();
+    const firstSent = lastSent(ws);
+    const second = result.current.saveMarkdownAnnotations('doc.md', 'ws-1', [], 2);
+    await Promise.resolve();
+    const secondSent = lastSent(ws);
+    expect(firstSent.request_id).not.toBe(secondSent.request_id);
+    await expect(first).rejects.toThrow('Superseded by a newer request');
+
+    // The late answer to the superseded request must not settle the live one.
+    ws.emit({
+      event: 'markdown_annotations_save_result',
+      request_id: firstSent.request_id,
+      workspace_id: 'ws-1',
+      path: 'doc.md',
+      success: false,
+      stale: true,
+    });
+    ws.emit({
+      event: 'markdown_annotations_save_result',
+      request_id: secondSent.request_id,
+      workspace_id: 'ws-1',
+      path: 'doc.md',
+      success: true,
+    });
+    await expect(second).resolves.toEqual({ stale: false });
+    unmount();
+  });
+
+  it('shares one in-flight round-trip when the same document is hydrated twice', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const first = result.current.getMarkdownAnnotations('doc.md', 'ws-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    const second = result.current.getMarkdownAnnotations('doc.md', 'ws-1');
+    await Promise.resolve();
+    // No second command: a rejected hydrate would lock that tile's saves.
+    expect(lastSent(ws).request_id).toBe(sent.request_id);
+
+    ws.emit({
+      event: 'markdown_annotations_get_result',
+      request_id: sent.request_id,
+      workspace_id: 'ws-1',
+      path: 'doc.md',
+      success: true,
+      annotations: [{ id: 'a1' }],
+      generation: 4,
+    });
+    await expect(first).resolves.toEqual({ annotations: [{ id: 'a1' }], generation: 4 });
+    await expect(second).resolves.toEqual({ annotations: [{ id: 'a1' }], generation: 4 });
+    unmount();
+  });
+});

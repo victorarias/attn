@@ -876,296 +876,296 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	}
 
 	switch cmd {
-	case protocol.CmdClientHello:
+	case protocol.CmdClientHello: // wire: client_hello
 		d.handleClientHello(client, msg.(*protocol.ClientHelloMessage))
-	case protocol.CmdDelegate:
+	case protocol.CmdDelegate: // wire: delegate
 		go d.handleDelegateWS(client, msg.(*protocol.DelegateMessage))
-	case protocol.CmdDelegateStatus:
+	case protocol.CmdDelegateStatus: // wire: delegate_status
 		go d.handleDelegateStatusWS(client, msg.(*protocol.DelegateStatusMessage))
-	case protocol.CmdWorkspaceContextCheckout:
+	case protocol.CmdWorkspaceContextCheckout: // wire: workspace_context_checkout
 		go func() {
 			result, err := d.checkoutWorkspaceContext(msg.(*protocol.WorkspaceContextCheckoutMessage))
 			d.sendWorkspaceContextWSResult(client, "checkout", result, err)
 		}()
-	case protocol.CmdWorkspaceContextUpdate:
+	case protocol.CmdWorkspaceContextUpdate: // wire: workspace_context_update
 		go func() {
 			result, _, err := d.updateWorkspaceContext(msg.(*protocol.WorkspaceContextUpdateMessage))
 			d.sendWorkspaceContextWSResult(client, "update", result, err)
 		}()
-	case protocol.CmdWorkspaceContextStatus:
+	case protocol.CmdWorkspaceContextStatus: // wire: workspace_context_status
 		go func() {
 			result, err := d.workspaceContextStatus(msg.(*protocol.WorkspaceContextStatusMessage))
 			d.sendWorkspaceContextWSResult(client, "status", result, err)
 		}()
-	case protocol.CmdWorkspaceContextList:
+	case protocol.CmdWorkspaceContextList: // wire: workspace_context_list
 		go d.sendWorkspaceContextListWSResult(client, msg.(*protocol.WorkspaceContextListMessage).RequestID)
-	case protocol.CmdNotebookList:
+	case protocol.CmdNotebookList: // wire: notebook_list
 		nbList := msg.(*protocol.NotebookListMessage)
 		go d.sendNotebookListWSResult(client, protocol.Deref(nbList.RequestID), protocol.Deref(nbList.Prefix))
-	case protocol.CmdNotebookRead:
+	case protocol.CmdNotebookRead: // wire: notebook_read
 		nbRead := msg.(*protocol.NotebookReadMessage)
 		go d.sendNotebookReadWSResult(client, protocol.Deref(nbRead.RequestID), nbRead.Path)
-	case protocol.CmdNotebookBacklinks:
+	case protocol.CmdNotebookBacklinks: // wire: notebook_backlinks
 		nbBack := msg.(*protocol.NotebookBacklinksMessage)
 		go d.sendNotebookBacklinksWSResult(client, protocol.Deref(nbBack.RequestID), nbBack.Path)
-	case protocol.CmdNotebookWrite:
+	case protocol.CmdNotebookWrite: // wire: notebook_write
 		nbWrite := msg.(*protocol.NotebookWriteMessage)
 		go d.sendNotebookWriteWSResult(client, protocol.Deref(nbWrite.RequestID), nbWrite.Path, nbWrite.Content, protocol.Deref(nbWrite.BaseHash))
-	case protocol.CmdNotebookSendToChief:
+	case protocol.CmdNotebookSendToChief: // wire: notebook_send_to_chief
 		nbChief := msg.(*protocol.NotebookSendToChiefMessage)
 		go d.sendNotebookToChiefWSResult(client, protocol.Deref(nbChief.RequestID), protocol.Deref(nbChief.SourcePath), nbChief.Selection)
-	case protocol.CmdTaskList:
+	case protocol.CmdTaskList: // wire: task_list
 		nbTaskList := msg.(*protocol.TaskListMessage)
 		go d.sendTaskListWSResult(client, protocol.Deref(nbTaskList.RequestID))
-	case protocol.CmdTaskRetry:
+	case protocol.CmdTaskRetry: // wire: task_retry
 		nbTaskRetry := msg.(*protocol.TaskRetryMessage)
 		go d.sendTaskRetryWSResult(client, protocol.Deref(nbTaskRetry.RequestID), nbTaskRetry.TaskID)
-	case protocol.CmdNotificationList:
+	case protocol.CmdNotificationList: // wire: notification_list
 		notifList := msg.(*protocol.NotificationListMessage)
 		go d.sendNotificationListWSResult(client, protocol.Deref(notifList.RequestID))
-	case protocol.CmdNotificationMarkRead:
+	case protocol.CmdNotificationMarkRead: // wire: notification_mark_read
 		notifMark := msg.(*protocol.NotificationMarkReadMessage)
 		go d.sendNotificationMarkReadWSResult(client, protocol.Deref(notifMark.RequestID), notifMark.NotificationID)
-	case protocol.CmdGetTicket:
+	case protocol.CmdGetTicket: // wire: get_ticket
 		getTicket := msg.(*protocol.GetTicketMessage)
 		go d.sendGetTicketWSResult(client, protocol.Deref(getTicket.RequestID), getTicket.TicketID)
-	case protocol.CmdTicketChangeStatus:
+	case protocol.CmdTicketChangeStatus: // wire: ticket_change_status
 		go d.handleTicketChangeStatus(client, msg.(*protocol.TicketChangeStatusMessage))
-	case protocol.CmdTicketAddComment:
+	case protocol.CmdTicketAddComment: // wire: ticket_add_comment
 		go d.handleTicketAddComment(client, msg.(*protocol.TicketAddCommentMessage))
-	case protocol.CmdTicketEditDescription:
+	case protocol.CmdTicketEditDescription: // wire: ticket_edit_description
 		go d.handleTicketEditDescription(client, msg.(*protocol.TicketEditDescriptionMessage))
-	case protocol.CmdTicketAttach:
+	case protocol.CmdTicketAttach: // wire: ticket_attach
 		go d.handleTicketAttachWS(client, msg.(*protocol.TicketAttachMessage))
-	case protocol.CmdTicketResume:
+	case protocol.CmdTicketResume: // wire: ticket_resume
 		go d.handleTicketResume(client, msg.(*protocol.TicketResumeMessage))
-	case protocol.CmdFsList:
+	case protocol.CmdFsList: // wire: fs_list
 		fsList := msg.(*protocol.FsListMessage)
 		go d.sendFsListWSResult(client, protocol.Deref(fsList.RequestID), protocol.Deref(fsList.Path), protocol.Deref(fsList.Root))
-	case protocol.CmdFsRead:
+	case protocol.CmdFsRead: // wire: fs_read
 		fsRead := msg.(*protocol.FsReadMessage)
 		go d.sendFsReadWSResult(client, protocol.Deref(fsRead.RequestID), fsRead.Path, protocol.Deref(fsRead.Root))
-	case protocol.CmdFsReadAsset:
+	case protocol.CmdFsReadAsset: // wire: fs_read_asset
 		fsReadAsset := msg.(*protocol.FsReadAssetMessage)
 		go d.sendFsReadAssetWSResult(client, protocol.Deref(fsReadAsset.RequestID), fsReadAsset.Path, protocol.Deref(fsReadAsset.Root))
-	case protocol.CmdFsWrite:
+	case protocol.CmdFsWrite: // wire: fs_write
 		fsWrite := msg.(*protocol.FsWriteMessage)
 		go d.sendFsWriteWSResult(client, protocol.Deref(fsWrite.RequestID), fsWrite.Path, fsWrite.Content, protocol.Deref(fsWrite.BaseHash), protocol.Deref(fsWrite.Root))
-	case protocol.CmdFsRename:
+	case protocol.CmdFsRename: // wire: fs_rename
 		fsRename := msg.(*protocol.FsRenameMessage)
 		go d.sendFsRenameWSResult(client, protocol.Deref(fsRename.RequestID), fsRename.Path, fsRename.NewPath, protocol.Deref(fsRename.Root))
-	case protocol.CmdFsDelete:
+	case protocol.CmdFsDelete: // wire: fs_delete
 		fsDelete := msg.(*protocol.FsDeleteMessage)
 		go d.sendFsDeleteWSResult(client, protocol.Deref(fsDelete.RequestID), fsDelete.Path, protocol.Deref(fsDelete.Root))
-	case protocol.CmdFsExists:
+	case protocol.CmdFsExists: // wire: fs_exists
 		fsExists := msg.(*protocol.FsExistsMessage)
 		go d.sendFsExistsWSResult(client, protocol.Deref(fsExists.RequestID), fsExists.Path, protocol.Deref(fsExists.Root))
-	case protocol.CmdFsWatch:
+	case protocol.CmdFsWatch: // wire: fs_watch
 		fsWatch := msg.(*protocol.FsWatchMessage)
 		go d.handleFsWatch(client, protocol.Deref(fsWatch.RequestID), protocol.Deref(fsWatch.Root))
-	case protocol.CmdFsUnwatch:
+	case protocol.CmdFsUnwatch: // wire: fs_unwatch
 		fsUnwatch := msg.(*protocol.FsUnwatchMessage)
 		go d.handleFsUnwatch(client, protocol.Deref(fsUnwatch.RequestID), protocol.Deref(fsUnwatch.Root))
-	case protocol.CmdFsIndex:
+	case protocol.CmdFsIndex: // wire: fs_index
 		fsIndex := msg.(*protocol.FsIndexMessage)
 		go d.handleFsIndex(client, protocol.Deref(fsIndex.RequestID), protocol.Deref(fsIndex.Root), fsIndex.Extensions)
-	case protocol.CmdApprovePR:
+	case protocol.CmdApprovePR: // wire: approve_pr
 		d.handleApprovePRWS(client, msg.(*protocol.ApprovePRMessage))
-	case protocol.CmdMergePR:
+	case protocol.CmdMergePR: // wire: merge_pr
 		d.handleMergePRWS(client, msg.(*protocol.MergePRMessage))
-	case protocol.CmdMutePR:
+	case protocol.CmdMutePR: // wire: mute_pr
 		d.handleMutePRWS(msg.(*protocol.MutePRMessage))
-	case protocol.CmdMuteRepo:
+	case protocol.CmdMuteRepo: // wire: mute_repo
 		d.handleMuteRepoWS(msg.(*protocol.MuteRepoMessage))
-	case protocol.CmdMuteAuthor:
+	case protocol.CmdMuteAuthor: // wire: mute_author
 		d.handleMuteAuthorWS(msg.(*protocol.MuteAuthorMessage))
-	case protocol.CmdMuteWorkspace:
+	case protocol.CmdMuteWorkspace: // wire: mute_workspace
 		d.handleMuteWorkspaceWS(client, msg.(*protocol.MuteWorkspaceMessage))
-	case protocol.CmdPinWorkspace:
+	case protocol.CmdPinWorkspace: // wire: pin_workspace
 		d.handlePinWorkspaceWS(client, msg.(*protocol.PinWorkspaceMessage))
-	case protocol.CmdRefreshPRs:
+	case protocol.CmdRefreshPRs: // wire: refresh_prs
 		d.handleRefreshPRsWS(client)
-	case protocol.CmdFetchPRDetails:
+	case protocol.CmdFetchPRDetails: // wire: fetch_pr_details
 		d.handleFetchPRDetailsWS(client, msg.(*protocol.FetchPRDetailsMessage))
-	case protocol.CmdClearSessions:
+	case protocol.CmdClearSessions: // wire: clear_sessions
 		d.handleClearSessionsWS()
-	case protocol.CmdClearWarnings:
+	case protocol.CmdClearWarnings: // wire: clear_warnings
 		d.handleClearWarningsWS()
-	case protocol.CmdSessionSelected:
-	case protocol.CmdWorkspaceSelected:
-	case protocol.CmdSettleTurn:
+	case protocol.CmdSessionSelected: // wire: session_selected
+	case protocol.CmdWorkspaceSelected: // wire: workspace_selected
+	case protocol.CmdSettleTurn: // wire: settle_turn
 		d.handleSettleTurn(msg.(*protocol.SettleTurnMessage))
-	case protocol.CmdCancelAutoSettle:
+	case protocol.CmdCancelAutoSettle: // wire: cancel_auto_settle
 		d.handleCancelAutoSettle(msg.(*protocol.CancelAutoSettleMessage))
-	case protocol.CmdTriggerNudge:
+	case protocol.CmdTriggerNudge: // wire: trigger_nudge
 		go d.handleTriggerNudge(msg.(*protocol.TriggerNudgeMessage))
-	case protocol.CmdPRVisited:
+	case protocol.CmdPRVisited: // wire: pr_visited
 		d.handlePRVisitedWS(msg.(*protocol.PRVisitedMessage))
-	case protocol.CmdListWorktrees:
+	case protocol.CmdListWorktrees: // wire: list_worktrees
 		d.handleListWorktreesWS(client, msg.(*protocol.ListWorktreesMessage))
-	case protocol.CmdCreateWorktree:
+	case protocol.CmdCreateWorktree: // wire: create_worktree
 		d.handleCreateWorktreeWS(client, msg.(*protocol.CreateWorktreeMessage))
-	case protocol.CmdDeleteWorktree:
+	case protocol.CmdDeleteWorktree: // wire: delete_worktree
 		d.handleDeleteWorktreeWS(client, msg.(*protocol.DeleteWorktreeMessage))
-	case protocol.CmdGetSettings:
+	case protocol.CmdGetSettings: // wire: get_settings
 		d.handleGetSettingsWS(client)
-	case protocol.CmdSetSetting:
+	case protocol.CmdSetSetting: // wire: set_setting
 		d.handleSetSettingWS(client, msg.(*protocol.SetSettingMessage))
-	case protocol.CmdListPlugins:
+	case protocol.CmdListPlugins: // wire: list_plugins
 		d.handleListPluginsWS(client)
-	case protocol.CmdInstallPlugin:
+	case protocol.CmdInstallPlugin: // wire: install_plugin
 		d.handleInstallPluginWS(client, msg.(*protocol.InstallPluginMessage))
-	case protocol.CmdInstallBundledPlugin:
+	case protocol.CmdInstallBundledPlugin: // wire: install_bundled_plugin
 		d.handleInstallBundledPluginWS(client, msg.(*protocol.InstallBundledPluginMessage))
-	case protocol.CmdUninstallPlugin:
+	case protocol.CmdUninstallPlugin: // wire: uninstall_plugin
 		d.handleUninstallPluginWS(client, msg.(*protocol.UninstallPluginMessage))
-	case protocol.CmdRemovePlugin:
+	case protocol.CmdRemovePlugin: // wire: remove_plugin
 		d.handleRemovePluginWS(client, msg.(*protocol.RemovePluginMessage))
-	case protocol.CmdSetPluginPriority:
+	case protocol.CmdSetPluginPriority: // wire: set_plugin_priority
 		d.handleSetPluginPriorityWS(client, msg.(*protocol.SetPluginPriorityMessage))
-	case protocol.CmdAddEndpoint:
+	case protocol.CmdAddEndpoint: // wire: add_endpoint
 		d.handleAddEndpointWS(client, msg.(*protocol.AddEndpointMessage))
-	case protocol.CmdRemoveEndpoint:
+	case protocol.CmdRemoveEndpoint: // wire: remove_endpoint
 		d.handleRemoveEndpointWS(client, msg.(*protocol.RemoveEndpointMessage))
-	case protocol.CmdUpdateEndpoint:
+	case protocol.CmdUpdateEndpoint: // wire: update_endpoint
 		d.handleUpdateEndpointWS(client, msg.(*protocol.UpdateEndpointMessage))
-	case protocol.CmdBootstrapEndpoint:
+	case protocol.CmdBootstrapEndpoint: // wire: bootstrap_endpoint
 		d.handleBootstrapEndpointWS(client, msg.(*protocol.BootstrapEndpointMessage))
-	case protocol.CmdListEndpoints:
+	case protocol.CmdListEndpoints: // wire: list_endpoints
 		d.handleListEndpointsWS(client)
-	case protocol.CmdSetEndpointRemoteWeb:
+	case protocol.CmdSetEndpointRemoteWeb: // wire: set_endpoint_remote_web
 		d.handleSetEndpointRemoteWebWS(client, msg.(*protocol.SetEndpointRemoteWebMessage))
-	case protocol.CmdUnregister:
+	case protocol.CmdUnregister: // wire: unregister
 		d.handleUnregisterWS(client, msg.(*protocol.UnregisterMessage))
-	case protocol.CmdGetRecentLocations:
+	case protocol.CmdGetRecentLocations: // wire: get_recent_locations
 		d.handleGetRecentLocationsWS(client, msg.(*protocol.GetRecentLocationsMessage))
-	case protocol.CmdRecentFiles:
+	case protocol.CmdRecentFiles: // wire: recent_files
 		d.handleRecentFilesWS(client, msg.(*protocol.RecentFilesMessage))
-	case protocol.CmdBrowseDirectory:
+	case protocol.CmdBrowseDirectory: // wire: browse_directory
 		d.handleBrowseDirectoryWS(client, msg.(*protocol.BrowseDirectoryMessage))
-	case protocol.CmdInspectPath:
+	case protocol.CmdInspectPath: // wire: inspect_path
 		d.handleInspectPathWS(client, msg.(*protocol.InspectPathMessage))
-	case protocol.CmdListBranches:
+	case protocol.CmdListBranches: // wire: list_branches
 		d.handleListBranchesWS(client, msg.(*protocol.ListBranchesMessage))
-	case protocol.CmdCreateWorktreeFromBranch:
+	case protocol.CmdCreateWorktreeFromBranch: // wire: create_worktree_from_branch
 		d.handleCreateWorktreeFromBranchWS(client, msg.(*protocol.CreateWorktreeFromBranchMessage))
-	case protocol.CmdGetDefaultBranch:
+	case protocol.CmdGetDefaultBranch: // wire: get_default_branch
 		d.handleGetDefaultBranchWS(client, msg.(*protocol.GetDefaultBranchMessage))
-	case protocol.CmdFetchRemotes:
+	case protocol.CmdFetchRemotes: // wire: fetch_remotes
 		d.handleFetchRemotesWS(client, msg.(*protocol.FetchRemotesMessage))
-	case protocol.CmdListRemoteBranches:
+	case protocol.CmdListRemoteBranches: // wire: list_remote_branches
 		d.handleListRemoteBranchesWS(client, msg.(*protocol.ListRemoteBranchesMessage))
-	case protocol.CmdEnsureRepo:
+	case protocol.CmdEnsureRepo: // wire: ensure_repo
 		d.handleEnsureRepoWS(client, msg.(*protocol.EnsureRepoMessage))
-	case protocol.CmdSubscribeGitStatus:
+	case protocol.CmdSubscribeGitStatus: // wire: subscribe_git_status
 		d.handleSubscribeGitStatus(client, msg.(*protocol.SubscribeGitStatusMessage))
-	case protocol.CmdUnsubscribeGitStatus:
+	case protocol.CmdUnsubscribeGitStatus: // wire: unsubscribe_git_status
 		d.handleUnsubscribeGitStatusWS(client)
-	case protocol.CmdGetFileDiff:
+	case protocol.CmdGetFileDiff: // wire: get_file_diff
 		d.handleGetFileDiffWS(client, msg.(*protocol.GetFileDiffMessage))
-	case protocol.CmdGetRepoInfo:
+	case protocol.CmdGetRepoInfo: // wire: get_repo_info
 		d.handleGetRepoInfoWS(client, msg.(*protocol.GetRepoInfoMessage))
-	case protocol.CmdGetPresentations:
+	case protocol.CmdGetPresentations: // wire: get_presentations
 		d.handleGetPresentations(client, msg.(*protocol.GetPresentationsMessage))
-	case protocol.CmdGetPresentationRound:
+	case protocol.CmdGetPresentationRound: // wire: get_presentation_round
 		d.handleGetPresentationRound(client, msg.(*protocol.GetPresentationRoundMessage))
-	case protocol.CmdPresentSubmitRound:
+	case protocol.CmdPresentSubmitRound: // wire: present_submit_round
 		d.handlePresentSubmitRound(client, msg.(*protocol.PresentSubmitRoundMessage))
-	case protocol.CmdPresentClose:
+	case protocol.CmdPresentClose: // wire: present_close
 		d.handlePresentClose(client, msg.(*protocol.PresentCloseMessage))
-	case protocol.CmdWorkflowRunGet:
+	case protocol.CmdWorkflowRunGet: // wire: workflow_run_get
 		d.handleWorkflowRunGetWS(client, msg.(*protocol.WorkflowRunGetMessage))
-	case protocol.CmdWorkflowRunList:
+	case protocol.CmdWorkflowRunList: // wire: workflow_run_list
 		d.handleWorkflowRunListWS(client, msg.(*protocol.WorkflowRunListMessage))
-	case protocol.CmdWorkflowRunCancel:
+	case protocol.CmdWorkflowRunCancel: // wire: workflow_run_cancel
 		d.handleWorkflowRunCancelWS(client, msg.(*protocol.WorkflowRunCancelMessage))
-	case protocol.CmdAutomationDefinitionsGet:
+	case protocol.CmdAutomationDefinitionsGet: // wire: automation_definitions_get
 		d.handleAutomationDefinitionsGetWS(client, msg.(*protocol.AutomationDefinitionsGetMessage))
-	case protocol.CmdAutomationDefinitionGet:
+	case protocol.CmdAutomationDefinitionGet: // wire: automation_definition_get
 		d.handleAutomationDefinitionGetWS(client, msg.(*protocol.AutomationDefinitionGetMessage))
-	case protocol.CmdAutomationRunsGet:
+	case protocol.CmdAutomationRunsGet: // wire: automation_runs_get
 		d.handleAutomationRunsGetWS(client, msg.(*protocol.AutomationRunsGetMessage))
-	case protocol.CmdAutomationSetEnabled:
+	case protocol.CmdAutomationSetEnabled: // wire: automation_set_enabled
 		d.handleAutomationSetEnabledWS(client, msg.(*protocol.AutomationSetEnabledMessage))
-	case protocol.CmdAutomationApply:
+	case protocol.CmdAutomationApply: // wire: automation_apply
 		d.handleAutomationApplyWS(client, msg.(*protocol.AutomationApplyMessage))
-	case protocol.CmdAutomationValidate:
+	case protocol.CmdAutomationValidate: // wire: automation_validate
 		d.handleAutomationValidateWS(client, msg.(*protocol.AutomationValidateMessage))
-	case protocol.CmdAutomationDelete:
+	case protocol.CmdAutomationDelete: // wire: automation_delete
 		d.handleAutomationDeleteWS(client, msg.(*protocol.AutomationDeleteMessage))
-	case protocol.CmdAutomationCleanup:
+	case protocol.CmdAutomationCleanup: // wire: automation_cleanup
 		d.handleAutomationCleanupWS(client, msg.(*protocol.AutomationCleanupMessage))
-	case protocol.CmdAutomationRun:
+	case protocol.CmdAutomationRun: // wire: automation_run
 		d.handleAutomationRunWS(client, msg.(*protocol.AutomationRunMessage))
-	case protocol.CmdSpawnSession:
+	case protocol.CmdSpawnSession: // wire: spawn_session
 		d.handleSpawnSession(client, msg.(*protocol.SpawnSessionMessage))
-	case protocol.CmdAttachSession:
+	case protocol.CmdAttachSession: // wire: attach_session
 		d.handleAttachSession(client, msg.(*protocol.AttachSessionMessage))
-	case protocol.CmdDetachSession:
+	case protocol.CmdDetachSession: // wire: detach_session
 		d.handleDetachSessionWS(client, msg.(*protocol.DetachSessionMessage))
-	case protocol.CmdGetScreenSnapshot:
+	case protocol.CmdGetScreenSnapshot: // wire: get_screen_snapshot
 		d.handleGetScreenSnapshot(client, msg.(*protocol.GetScreenSnapshotMessage))
-	case protocol.CmdPtyInput:
+	case protocol.CmdPtyInput: // wire: pty_input
 		d.handlePtyInput(client, msg.(*protocol.PtyInputMessage))
-	case protocol.CmdPtyResize:
+	case protocol.CmdPtyResize: // wire: pty_resize
 		d.handlePtyResize(client, msg.(*protocol.PtyResizeMessage))
-	case protocol.CmdKillSession:
+	case protocol.CmdKillSession: // wire: kill_session
 		d.handleKillSession(client, msg.(*protocol.KillSessionMessage))
-	case protocol.CmdReloadSession:
+	case protocol.CmdReloadSession: // wire: reload_session
 		d.handleReloadSession(client, msg.(*protocol.ReloadSessionMessage))
-	case protocol.CmdSetTerminalTheme:
+	case protocol.CmdSetTerminalTheme: // wire: set_terminal_theme
 		d.handleSetTerminalTheme(client, msg.(*protocol.SetTerminalThemeMessage))
-	case protocol.CmdWorkspaceLayoutGet:
+	case protocol.CmdWorkspaceLayoutGet: // wire: workspace_layout_get
 		d.handleWorkspaceLayoutGet(client, msg.(*protocol.WorkspaceLayoutGetMessage))
-	case protocol.CmdWorkspaceLayoutAddSessionPane:
+	case protocol.CmdWorkspaceLayoutAddSessionPane: // wire: workspace_layout_add_session_pane
 		d.handleWorkspaceLayoutAddSessionPane(client, msg.(*protocol.WorkspaceLayoutAddSessionPaneMessage))
-	case protocol.CmdWorkspaceLayoutClosePane:
+	case protocol.CmdWorkspaceLayoutClosePane: // wire: workspace_layout_close_pane
 		d.handleWorkspaceLayoutClosePane(client, msg.(*protocol.WorkspaceLayoutClosePaneMessage))
-	case protocol.CmdWorkspaceLayoutFocusPane:
+	case protocol.CmdWorkspaceLayoutFocusPane: // wire: workspace_layout_focus_pane
 		d.handleWorkspaceLayoutFocusPane(client, msg.(*protocol.WorkspaceLayoutFocusPaneMessage))
-	case protocol.CmdWorkspaceLayoutRenamePane:
+	case protocol.CmdWorkspaceLayoutRenamePane: // wire: workspace_layout_rename_pane
 		d.handleWorkspaceLayoutRenamePane(client, msg.(*protocol.WorkspaceLayoutRenamePaneMessage))
-	case protocol.CmdWorkspaceLayoutSetSplitRatio:
+	case protocol.CmdWorkspaceLayoutSetSplitRatio: // wire: workspace_layout_set_split_ratio
 		d.handleWorkspaceLayoutSetSplitRatio(client, msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage))
-	case protocol.CmdWorkspaceLayoutDockTile:
+	case protocol.CmdWorkspaceLayoutDockTile: // wire: workspace_layout_dock_tile
 		d.handleWorkspaceLayoutDockTile(client, msg.(*protocol.WorkspaceLayoutDockTileMessage))
-	case protocol.CmdWorkspaceLayoutUndockTile:
+	case protocol.CmdWorkspaceLayoutUndockTile: // wire: workspace_layout_undock_tile
 		d.handleWorkspaceLayoutUndockTile(client, msg.(*protocol.WorkspaceLayoutUndockTileMessage))
-	case protocol.CmdWorkspaceLayoutUpdateTile:
+	case protocol.CmdWorkspaceLayoutUpdateTile: // wire: workspace_layout_update_tile
 		d.handleWorkspaceLayoutUpdateTile(client, msg.(*protocol.WorkspaceLayoutUpdateTileMessage))
-	case protocol.CmdWorkspaceLayoutMoveLeaf:
+	case protocol.CmdWorkspaceLayoutMoveLeaf: // wire: workspace_layout_move_leaf
 		d.handleWorkspaceLayoutMoveLeaf(client, msg.(*protocol.WorkspaceLayoutMoveLeafMessage))
-	case protocol.CmdWorkspaceLayoutMoveLeafToWorkspace:
+	case protocol.CmdWorkspaceLayoutMoveLeafToWorkspace: // wire: workspace_layout_move_leaf_to_workspace
 		d.handleWorkspaceLayoutMoveLeafToWorkspace(client, msg.(*protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage))
-	case protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace:
+	case protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace: // wire: workspace_layout_move_leaf_to_new_workspace
 		d.handleWorkspaceLayoutMoveLeafToNewWorkspace(client, msg.(*protocol.WorkspaceLayoutMoveLeafToNewWorkspaceMessage))
-	case protocol.CmdSetWorkspaceRank:
+	case protocol.CmdSetWorkspaceRank: // wire: set_workspace_rank
 		d.handleSetWorkspaceRank(client, msg.(*protocol.SetWorkspaceRankMessage))
-	case protocol.CmdWorkspaceTileContentGet:
+	case protocol.CmdWorkspaceTileContentGet: // wire: workspace_tile_content_get
 		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
-	case protocol.CmdOpenMarkdown:
+	case protocol.CmdOpenMarkdown: // wire: open_markdown
 		d.handleOpenMarkdownWS(client, msg.(*protocol.OpenMarkdownMessage))
-	case protocol.CmdMarkdownAnnotationsGet:
+	case protocol.CmdMarkdownAnnotationsGet: // wire: markdown_annotations_get
 		d.handleMarkdownAnnotationsGet(client, msg.(*protocol.MarkdownAnnotationsGetMessage))
-	case protocol.CmdMarkdownAnnotationsSave:
+	case protocol.CmdMarkdownAnnotationsSave: // wire: markdown_annotations_save
 		d.handleMarkdownAnnotationsSave(client, msg.(*protocol.MarkdownAnnotationsSaveMessage))
-	case protocol.CmdMarkdownAnnotationsClear:
+	case protocol.CmdMarkdownAnnotationsClear: // wire: markdown_annotations_clear
 		d.handleMarkdownAnnotationsClear(client, msg.(*protocol.MarkdownAnnotationsClearMessage))
-	case protocol.CmdMarkdownAnnotationsSubmit:
+	case protocol.CmdMarkdownAnnotationsSubmit: // wire: markdown_annotations_submit
 		d.handleMarkdownAnnotationsSubmit(client, msg.(*protocol.MarkdownAnnotationsSubmitMessage))
-	case protocol.CmdBrowserControl:
+	case protocol.CmdBrowserControl: // wire: browser_control
 		go d.handleRemoteBrowserControl(client, msg.(*protocol.BrowserControlMessage))
-	case protocol.CmdBrowserControlResult:
+	case protocol.CmdBrowserControlResult: // wire: browser_control_result
 		d.handleBrowserControlResult(client, msg.(*protocol.BrowserControlResultMessage))
-	case protocol.CmdRegisterWorkspace:
+	case protocol.CmdRegisterWorkspace: // wire: register_workspace
 		d.handleRegisterWorkspace(client, msg.(*protocol.RegisterWorkspaceMessage))
-	case protocol.CmdUnregisterWorkspace:
+	case protocol.CmdUnregisterWorkspace: // wire: unregister_workspace
 		d.handleUnregisterWorkspace(client, msg.(*protocol.UnregisterWorkspaceMessage))
-	case protocol.CmdRenameSession:
+	case protocol.CmdRenameSession: // wire: rename_session
 		d.handleRenameSession(client, msg.(*protocol.RenameSessionMessage))
-	case protocol.CmdRenameWorkspace:
+	case protocol.CmdRenameWorkspace: // wire: rename_workspace
 		d.handleRenameWorkspace(client, msg.(*protocol.RenameWorkspaceMessage))
-	case protocol.CmdSetChiefOfStaff:
+	case protocol.CmdSetChiefOfStaff: // wire: set_chief_of_staff
 		d.handleSetChiefOfStaff(client, msg.(*protocol.SetChiefOfStaffMessage))
 	default:
 		d.sendCommandError(client, cmd, "unsupported command")
@@ -1201,9 +1201,9 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 			return false
 		}
 		switch cmd {
-		case protocol.CmdAttachSession:
+		case protocol.CmdAttachSession: // wire: attach_session
 			client.notePendingRemoteAttach(ptyTargetID)
-		case protocol.CmdDetachSession:
+		case protocol.CmdDetachSession: // wire: detach_session
 			client.clearRemoteAttach(ptyTargetID)
 		}
 		if err := d.hubManager.ForwardPTYCommand(context.Background(), ptyTargetID, raw); err != nil {
@@ -1281,27 +1281,27 @@ func (d *Daemon) tryHandleRemoteWSCommand(client *wsClient, cmd string, msg inte
 
 func remoteCommandSessionID(cmd string, msg interface{}) string {
 	switch cmd {
-	case protocol.CmdSessionSelected:
+	case protocol.CmdSessionSelected: // wire: session_selected
 		if typed, ok := msg.(*protocol.SessionSelectedMessage); ok {
 			return typed.ID
 		}
-	case protocol.CmdTriggerNudge:
+	case protocol.CmdTriggerNudge: // wire: trigger_nudge
 		if typed, ok := msg.(*protocol.TriggerNudgeMessage); ok {
 			return typed.SessionID
 		}
-	case protocol.CmdRenameSession:
+	case protocol.CmdRenameSession: // wire: rename_session
 		if typed, ok := msg.(*protocol.RenameSessionMessage); ok {
 			return typed.SessionID
 		}
-	case protocol.CmdOpenMarkdown:
+	case protocol.CmdOpenMarkdown: // wire: open_markdown
 		if typed, ok := msg.(*protocol.OpenMarkdownMessage); ok {
 			return protocol.Deref(typed.SessionID)
 		}
-	case protocol.CmdMarkdownAnnotationsSubmit:
+	case protocol.CmdMarkdownAnnotationsSubmit: // wire: markdown_annotations_submit
 		if typed, ok := msg.(*protocol.MarkdownAnnotationsSubmitMessage); ok {
 			return typed.TargetSessionID
 		}
-	case protocol.CmdSettleTurn:
+	case protocol.CmdSettleTurn: // wire: settle_turn
 		// The turn's stamps live in the store of the daemon that owns the
 		// session, so settling a remote row has to reach that daemon. Handled
 		// locally it would write nothing the remote knows about, and the next
@@ -1309,7 +1309,7 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.SettleTurnMessage); ok {
 			return typed.SessionID
 		}
-	case protocol.CmdCancelAutoSettle:
+	case protocol.CmdCancelAutoSettle: // wire: cancel_auto_settle
 		// Same reasoning as settle_turn: the countdown that would close the turn
 		// runs in the daemon that owns the session, so the cancel has to reach it.
 		if typed, ok := msg.(*protocol.CancelAutoSettleMessage); ok {
@@ -1321,75 +1321,75 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 
 func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 	switch cmd {
-	case protocol.CmdWorkspaceLayoutGet:
+	case protocol.CmdWorkspaceLayoutGet: // wire: workspace_layout_get
 		if typed, ok := msg.(*protocol.WorkspaceLayoutGetMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutAddSessionPane:
+	case protocol.CmdWorkspaceLayoutAddSessionPane: // wire: workspace_layout_add_session_pane
 		if typed, ok := msg.(*protocol.WorkspaceLayoutAddSessionPaneMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutClosePane:
+	case protocol.CmdWorkspaceLayoutClosePane: // wire: workspace_layout_close_pane
 		if typed, ok := msg.(*protocol.WorkspaceLayoutClosePaneMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutFocusPane:
+	case protocol.CmdWorkspaceLayoutFocusPane: // wire: workspace_layout_focus_pane
 		if typed, ok := msg.(*protocol.WorkspaceLayoutFocusPaneMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutRenamePane:
+	case protocol.CmdWorkspaceLayoutRenamePane: // wire: workspace_layout_rename_pane
 		if typed, ok := msg.(*protocol.WorkspaceLayoutRenamePaneMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutSetSplitRatio:
+	case protocol.CmdWorkspaceLayoutSetSplitRatio: // wire: workspace_layout_set_split_ratio
 		if typed, ok := msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutDockTile:
+	case protocol.CmdWorkspaceLayoutDockTile: // wire: workspace_layout_dock_tile
 		if typed, ok := msg.(*protocol.WorkspaceLayoutDockTileMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutUndockTile:
+	case protocol.CmdWorkspaceLayoutUndockTile: // wire: workspace_layout_undock_tile
 		if typed, ok := msg.(*protocol.WorkspaceLayoutUndockTileMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutUpdateTile:
+	case protocol.CmdWorkspaceLayoutUpdateTile: // wire: workspace_layout_update_tile
 		if typed, ok := msg.(*protocol.WorkspaceLayoutUpdateTileMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutMoveLeaf:
+	case protocol.CmdWorkspaceLayoutMoveLeaf: // wire: workspace_layout_move_leaf
 		if typed, ok := msg.(*protocol.WorkspaceLayoutMoveLeafMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutMoveLeafToWorkspace:
+	case protocol.CmdWorkspaceLayoutMoveLeafToWorkspace: // wire: workspace_layout_move_leaf_to_workspace
 		if typed, ok := msg.(*protocol.WorkspaceLayoutMoveLeafToWorkspaceMessage); ok {
 			return typed.SourceWorkspaceID
 		}
-	case protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace:
+	case protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace: // wire: workspace_layout_move_leaf_to_new_workspace
 		if typed, ok := msg.(*protocol.WorkspaceLayoutMoveLeafToNewWorkspaceMessage); ok {
 			return typed.SourceWorkspaceID
 		}
-	case protocol.CmdSetWorkspaceRank:
+	case protocol.CmdSetWorkspaceRank: // wire: set_workspace_rank
 		if typed, ok := msg.(*protocol.SetWorkspaceRankMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdWorkspaceTileContentGet:
+	case protocol.CmdWorkspaceTileContentGet: // wire: workspace_tile_content_get
 		if typed, ok := msg.(*protocol.WorkspaceTileContentGetMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdMarkdownAnnotationsGet:
+	case protocol.CmdMarkdownAnnotationsGet: // wire: markdown_annotations_get
 		if typed, ok := msg.(*protocol.MarkdownAnnotationsGetMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdMarkdownAnnotationsSave:
+	case protocol.CmdMarkdownAnnotationsSave: // wire: markdown_annotations_save
 		if typed, ok := msg.(*protocol.MarkdownAnnotationsSaveMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdMarkdownAnnotationsClear:
+	case protocol.CmdMarkdownAnnotationsClear: // wire: markdown_annotations_clear
 		if typed, ok := msg.(*protocol.MarkdownAnnotationsClearMessage); ok {
 			return typed.WorkspaceID
 		}
-	case protocol.CmdRenameWorkspace:
+	case protocol.CmdRenameWorkspace: // wire: rename_workspace
 		if typed, ok := msg.(*protocol.RenameWorkspaceMessage); ok {
 			return typed.WorkspaceID
 		}
@@ -1399,39 +1399,39 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 
 func remoteCommandEndpointID(cmd string, msg interface{}) string {
 	switch cmd {
-	case protocol.CmdGetRecentLocations:
+	case protocol.CmdGetRecentLocations: // wire: get_recent_locations
 		if typed, ok := msg.(*protocol.GetRecentLocationsMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
-	case protocol.CmdBrowseDirectory:
+	case protocol.CmdBrowseDirectory: // wire: browse_directory
 		if typed, ok := msg.(*protocol.BrowseDirectoryMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
-	case protocol.CmdInspectPath:
+	case protocol.CmdInspectPath: // wire: inspect_path
 		if typed, ok := msg.(*protocol.InspectPathMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
-	case protocol.CmdSpawnSession:
+	case protocol.CmdSpawnSession: // wire: spawn_session
 		if typed, ok := msg.(*protocol.SpawnSessionMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
-	case protocol.CmdRegisterWorkspace:
+	case protocol.CmdRegisterWorkspace: // wire: register_workspace
 		if typed, ok := msg.(*protocol.RegisterWorkspaceMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
-	case protocol.CmdMuteWorkspace:
+	case protocol.CmdMuteWorkspace: // wire: mute_workspace
 		if typed, ok := msg.(*protocol.MuteWorkspaceMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
-	case protocol.CmdCreateWorktree:
+	case protocol.CmdCreateWorktree: // wire: create_worktree
 		if typed, ok := msg.(*protocol.CreateWorktreeMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
-	case protocol.CmdDeleteWorktree:
+	case protocol.CmdDeleteWorktree: // wire: delete_worktree
 		if typed, ok := msg.(*protocol.DeleteWorktreeMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
-	case protocol.CmdGetRepoInfo:
+	case protocol.CmdGetRepoInfo: // wire: get_repo_info
 		if typed, ok := msg.(*protocol.GetRepoInfoMessage); ok {
 			return strings.TrimSpace(protocol.Deref(typed.EndpointID))
 		}
@@ -1441,28 +1441,28 @@ func remoteCommandEndpointID(cmd string, msg interface{}) string {
 
 func remoteCommandPTYTargetID(cmd string, msg interface{}) string {
 	switch cmd {
-	case protocol.CmdSpawnSession:
-	case protocol.CmdAttachSession:
+	case protocol.CmdSpawnSession: // wire: spawn_session
+	case protocol.CmdAttachSession: // wire: attach_session
 		if typed, ok := msg.(*protocol.AttachSessionMessage); ok {
 			return typed.ID
 		}
-	case protocol.CmdDetachSession:
+	case protocol.CmdDetachSession: // wire: detach_session
 		if typed, ok := msg.(*protocol.DetachSessionMessage); ok {
 			return typed.ID
 		}
-	case protocol.CmdPtyInput:
+	case protocol.CmdPtyInput: // wire: pty_input
 		if typed, ok := msg.(*protocol.PtyInputMessage); ok {
 			return typed.ID
 		}
-	case protocol.CmdPtyResize:
+	case protocol.CmdPtyResize: // wire: pty_resize
 		if typed, ok := msg.(*protocol.PtyResizeMessage); ok {
 			return typed.ID
 		}
-	case protocol.CmdKillSession:
+	case protocol.CmdKillSession: // wire: kill_session
 		if typed, ok := msg.(*protocol.KillSessionMessage); ok {
 			return typed.ID
 		}
-	case protocol.CmdReloadSession:
+	case protocol.CmdReloadSession: // wire: reload_session
 		if typed, ok := msg.(*protocol.ReloadSessionMessage); ok {
 			return typed.ID
 		}
