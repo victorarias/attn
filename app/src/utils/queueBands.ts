@@ -97,6 +97,28 @@ export function compareTurnOrder(a: QueueBandSession, b: QueueBandSession): numb
   return a.id < b.id ? -1 : 1;
 }
 
+/**
+ * The jump-to-waiting (⌘J) target: of the sessions that want the user, the one
+ * whose turn has been owed longest. Queue order, not list order — a jump that
+ * follows workspace rank while the band on screen is sorted by age reads as
+ * random. `wants` is passed in because each arrangement has its own notion of
+ * wanting the user (turn_owed with the queue on, the state predicate with it
+ * off) and that choice belongs to the caller.
+ */
+export function oldestWantedTurn<TSession extends QueueBandSession>(
+  sessions: TSession[],
+  wants: (session: TSession) => boolean,
+): TSession | null {
+  let oldest: TSession | null = null;
+  for (const session of sessions) {
+    if (!wants(session)) continue;
+    if (!oldest || compareTurnOrder(session, oldest) < 0) {
+      oldest = session;
+    }
+  }
+  return oldest;
+}
+
 export interface QueueBands<TSession extends QueueBandSession> {
   /** The chief's anchored slot. It never queues, so it is always its own row. */
   chief: QueueRow<TSession> | null;

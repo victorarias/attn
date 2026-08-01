@@ -110,6 +110,7 @@ import {
   buildQueueBands,
   isQueueModeEnabled,
   nextTurnAfterSettle,
+  oldestWantedTurn,
   QUEUE_MODE_SETTING,
   isAutoSettleEnabled,
   AUTO_SETTLE_ENABLED_SETTING,
@@ -2921,7 +2922,7 @@ sendFetchPRDetails,
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
-    const waiting = unmutedEnrichedSessions.find(wantsAttention);
+    const waiting = oldestWantedTurn(unmutedEnrichedSessions, wantsAttention);
     if (waiting) {
       handleSelectSession(waiting.id);
     }

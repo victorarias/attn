@@ -1229,26 +1229,48 @@
   outline-offset: -2px;
 }
 
-/* Above the fill, so pressing one of these is not also opening the session. */
-.queue-row > .session-actions,
-.queue-row > .queue-row-pin,
-.queue-row > .queue-row-settle {
-  position: relative;
+/* The hover controls float over the row's right edge instead of sitting in its
+   flex flow: buttons that are invisible at rest must not reserve label width.
+   Above the fill button, so pressing one of these is not also opening the
+   session; opaque, so while shown they read as replacing the age underneath
+   (the background matches the row's hover/selected background). */
+.queue-row-controls {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 6px;
   z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  background: var(--color-bg-elevated);
+  border-radius: inherit;
+  transition: opacity 120ms ease;
 }
 
-.queue-row-workspace {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-dimmed);
-  font-size: var(--font-size-xs);
+.queue-row:hover .queue-row-controls,
+.queue-row:focus-within .queue-row-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The container is the only visibility gate: the per-button reveals (hover for
+   settle/pin, .session-item:hover for the actions menu) would leave whichever
+   button the current interaction does not match as an invisible hole in an
+   otherwise visible strip. */
+.queue-row-controls .session-actions,
+.queue-row-controls .queue-row-pin,
+.queue-row-controls .queue-row-settle {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .queue-row-age {
   flex: 0 0 auto;
+  margin-left: auto;
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   font-variant-numeric: tabular-nums;

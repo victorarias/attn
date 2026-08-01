@@ -253,8 +253,8 @@ async function main() {
     await runner.step('band_is_oldest_first_and_each_agent_appears_once', async () => {
       const queue = await waitForTurns(client, [alpha.sessionId, beta.sessionId], 'both turns, oldest first');
       runner.assert(
-        queue.turns[0].workspace !== queue.turns[1].workspace,
-        `the two turns come from different workspaces: ${JSON.stringify(queue.turns.map((row) => row.workspace))}`,
+        queue.turns[0].workspaceId !== queue.turns[1].workspaceId,
+        `the two turns come from different workspaces: ${JSON.stringify(queue.turns.map((row) => row.workspaceId))}`,
       );
       // The bands replace the tree rather than sitting on top of it. An agent
       // drawn in both places is what made a row look like it moved when only one
