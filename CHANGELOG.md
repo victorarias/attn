@@ -6,6 +6,18 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-08-01]
+
+### Fixed
+- **A workspace that holds only a tile can be closed again.** Closing the last
+  notebook, markdown, or browser tile in a workspace with no agents left the
+  workspace in the sidebar — and every later click on its × did nothing, so the
+  row could never be dismissed. Closing that last tile now closes the workspace
+  with it. Workspaces stranded by the old behaviour are cleaned up the next time
+  the app starts.
+
+---
+
 ## [2026-07-31]
 
 ### Changed
@@ -22,9 +34,18 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   orphaned tickets transfer automatically while active takeovers require
   `--confirm`.
 
+---
+
 ## [2026-07-29]
 
 ### Added
+- **Settling the last turn takes you home, and home tells you everything is
+  settled.** Working down the agent queue used to end nowhere: settling the last
+  agent that owed you a turn left you sitting on that same agent. It now lands
+  you on the home screen, which leads with an "All settled" banner and a line
+  saying what is still running — three working, one scheduled, or nothing at
+  all. Nothing owes you a turn and nothing jumps in on its own; the next turn
+  waits in the queue until you go and take it.
 - **Auto-settle: turns you have already dealt with can close themselves.** Off by
   default; turn it on in Settings > General, or from ⌘K. When a session that owes
   you a turn goes back to work — which is what happens after you steer an agent —
@@ -66,6 +87,20 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   unreachable. Delegating into a hidden workspace still unmutes it only for the
   chief, and only the chief's own delegations are marked as delegated-from-chief
   in the sidebar.
+- **Home is a place in the app, not a screen that replaces it.** The home screen
+  now sits beside the sidebar exactly as an agent's terminal does, so you can see
+  the queue and the workspace tree while you are on it. Grid view still fills the
+  window.
+- **The sidebar has a Home row.** It sits at the very top, above the chief of
+  staff and "Your turn", and highlights while you are on the home screen. It
+  shows the shortcut home is actually bound to (⌘⇧H), and the collapsed sidebar
+  keeps its home button. The "WORKSPACES" heading and the ⌘G hint it carried are
+  gone — that hint had been stale since grid view took ⌘G.
+- **The home screen understands turns.** With the agent queue on, it leads with
+  the turns you owe, oldest first with the age of each, and files everything else
+  under *Settled*, still grouped by what it is doing. Previously it grouped
+  purely by state, so agents you had already settled kept being announced as
+  waiting for you. With the queue off it is unchanged.
 
 ---
 

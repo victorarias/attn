@@ -9,6 +9,8 @@ import { useDaemonContext } from '../contexts/DaemonContext';
 import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { UISessionState } from '../types/sessionState';
+import { compareTurnOrder, formatTurnAge } from '../utils/queueBands';
+import { useNow, TURN_AGE_TICK_MS } from '../hooks/useNow';
 import appIcon from '../assets/icon.png';
 import './Dashboard.css';
 
@@ -20,7 +22,31 @@ type DashboardSession = {
   endpointName?: string;
   endpointStatus?: string;
   chiefOfStaff?: boolean;
+  // The daemon's answer to "does this owe me a turn", and since when. Read,
+  // never derived from state: an agent can sit in waiting_input with its turn
+  // already settled, which is exactly the case grouping by state gets wrong.
+  turnOwed?: boolean;
+  turnOpenedAt?: string;
 };
+
+/**
+ * The state groups, in the order they read best: the states that used to mean
+ * "this wants you" first, then the ones that are just what is happening.
+ *
+ * In queue mode these describe *settled* agents only — whether an agent wants
+ * you is the turn's business, and answering it twice is how home ends up
+ * announcing "Waiting for input (3)" directly beneath "All settled".
+ */
+const STATE_GROUPS: { state: UISessionState; label: string; testId: string }[] = [
+  { state: 'waiting_input', label: 'Waiting for input', testId: 'session-group-waiting' },
+  { state: 'pending_approval', label: 'Pending approval', testId: 'session-group-pending' },
+  { state: 'launching', label: 'Launching', testId: 'session-group-launching' },
+  { state: 'working', label: 'Working', testId: 'session-group-working' },
+  { state: 'scheduled', label: 'Scheduled', testId: 'session-group-scheduled' },
+  { state: 'idle', label: 'Idle', testId: 'session-group-idle' },
+  { state: 'recoverable', label: 'Recoverable', testId: 'session-group-recoverable' },
+  { state: 'unknown', label: 'Unknown / error', testId: 'session-group-unknown' },
+];
 
 type DashboardWorkspace = {
   id: string;
@@ -44,6 +70,10 @@ interface DashboardProps {
   onOpenPR?: (pr: DaemonPR) => void;
   onOpenSettings: () => void;
   onMutedGroupClick?: () => void;
+  // Whether the queue arrangement is on. It selects home's whole shape: turns
+  // first with the settled rest below, or the plain state grouping that is all
+  // there is to say when nothing tracks turns.
+  queueModeEnabled?: boolean;
 }
 
 export function Dashboard({
@@ -62,7 +92,10 @@ export function Dashboard({
   onOpenPR,
   onOpenSettings,
   onMutedGroupClick,
+  queueModeEnabled = false,
 }: DashboardProps) {
+  const now = useNow(TURN_AGE_TICK_MS);
+
   const renderEndpointBadge = (session: DashboardProps['sessions'][number]) => {
     if (!session.endpointName) {
       return null;
@@ -74,15 +107,65 @@ export function Dashboard({
     );
   };
 
-  const waitingSessions = sessions.filter((s) => s.state === 'waiting_input');
-  const pendingApprovalSessions = sessions.filter((s) => s.state === 'pending_approval');
-  const launchingSessions = sessions.filter((s) => s.state === 'launching');
-  const workingSessions = sessions.filter((s) => s.state === 'working');
-  const scheduledSessions = sessions.filter((s) => s.state === 'scheduled');
-  const idleSessions = sessions.filter((s) => s.state === 'idle');
-  const recoverableSessions = sessions.filter((s) => s.state === 'recoverable');
-  const unknownSessions = sessions.filter((s) => s.state === 'unknown');
   const chiefSession = sessions.find((session) => session.chiefOfStaff);
+
+  // The chief is left out of the turns, exactly as the sidebar band leaves it
+  // out: it has its own card here and its own slot there. That does mean home
+  // can read "all settled" while the chief wants you — the same thing the
+  // sidebar says, which is the lesser of the two surprises.
+  const turnSessions = useMemo(() => (
+    queueModeEnabled
+      ? sessions.filter((s) => s.turnOwed && !s.chiefOfStaff).sort(compareTurnOrder)
+      : []
+  ), [queueModeEnabled, sessions]);
+
+  // With the queue off nothing has been settled, so every session is grouped by
+  // state and there is no second band to keep them out of.
+  const settledSessions = useMemo(() => (
+    queueModeEnabled
+      ? sessions.filter((s) => !(s.turnOwed && !s.chiefOfStaff))
+      : sessions
+  ), [queueModeEnabled, sessions]);
+
+  const stateGroups = useMemo(() => (
+    STATE_GROUPS
+      .map((group) => ({ ...group, rows: settledSessions.filter((s) => s.state === group.state) }))
+      .filter((group) => group.rows.length > 0)
+  ), [settledSessions]);
+
+  const allSettled = queueModeEnabled && turnSessions.length === 0 && sessions.length > 0;
+
+  // What is still in flight once nothing is owed. "All settled" with six agents
+  // mid-turn is a different situation from "all settled" with everything parked,
+  // and the line is the only thing that tells them apart.
+  const stillRunning = useMemo(() => {
+    const counts = [
+      { label: 'working', n: settledSessions.filter((s) => s.state === 'working').length },
+      { label: 'launching', n: settledSessions.filter((s) => s.state === 'launching').length },
+      { label: 'scheduled', n: settledSessions.filter((s) => s.state === 'scheduled').length },
+      { label: 'recoverable', n: settledSessions.filter((s) => s.state === 'recoverable').length },
+    ].filter((entry) => entry.n > 0);
+    if (counts.length === 0) {
+      return 'Nothing is running.';
+    }
+    return counts.map((entry) => `${entry.n} ${entry.label}`).join(' · ');
+  }, [settledSessions]);
+
+  const renderSessionRow = (s: DashboardSession, age?: string) => (
+    <div
+      key={s.id}
+      className="session-row clickable"
+      data-testid={`session-${s.id}`}
+      data-state={s.state}
+      onClick={() => onSelectSession(s.id)}
+    >
+      <StateIndicator state={s.state} size="sm" seed={s.id} />
+      <span className="session-name">{s.label}</span>
+      {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
+      {renderEndpointBadge(s)}
+      {age && <span className="session-turn-age">{age}</span>}
+    </div>
+  );
 
   // Group PRs by repo
   const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(new Set());
@@ -205,6 +288,20 @@ export function Dashboard({
         </button>
       </header>
 
+      {/* The queue's terminus. Only in queue mode, because only there does an
+          agent stop wanting you without its state changing. */}
+      {allSettled && (
+        <div className="all-settled-banner" data-testid="all-settled">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <div className="all-settled-body">
+            <span className="all-settled-title">All settled</span>
+            <span className="all-settled-detail">{stillRunning}</span>
+          </div>
+        </div>
+      )}
+
       {/* Rate limit banner */}
       {rateLimitCountdown && (
         <div className="rate-limit-banner">
@@ -261,158 +358,31 @@ export function Dashboard({
               <div className="card-empty">No active sessions</div>
             ) : (
               <>
-                {waitingSessions.length > 0 && (
-                  <div className="session-group" data-testid="session-group-waiting">
-                    <div className="group-label">Waiting for input</div>
-                    {waitingSessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="session-row clickable"
-                        data-testid={`session-${s.id}`}
-                        data-state={s.state}
-                        onClick={() => onSelectSession(s.id)}
-                      >
-                        <StateIndicator state="waiting_input" size="sm" seed={s.id} />
-                        <span className="session-name">{s.label}</span>
-                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
-                        {renderEndpointBadge(s)}
-                      </div>
+                {turnSessions.length > 0 && (
+                  <div className="session-group" data-testid="session-group-turns">
+                    <div className="group-label">
+                      Your turn
+                      <span className="group-count">{turnSessions.length}</span>
+                    </div>
+                    {turnSessions.map((s) => (
+                      renderSessionRow(s, formatTurnAge(s.turnOpenedAt, now))
                     ))}
                   </div>
                 )}
-                {pendingApprovalSessions.length > 0 && (
-                  <div className="session-group" data-testid="session-group-pending">
-                    <div className="group-label">Pending approval</div>
-                    {pendingApprovalSessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="session-row clickable"
-                        data-testid={`session-${s.id}`}
-                        data-state={s.state}
-                        onClick={() => onSelectSession(s.id)}
-                      >
-                        <StateIndicator state="pending_approval" size="sm" seed={s.id} />
-                        <span className="session-name">{s.label}</span>
-                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
-                        {renderEndpointBadge(s)}
-                      </div>
-                    ))}
+                {/* Settled is a heading, not a group: the state groups below it
+                    are what those agents are doing, now that whether they want
+                    you has already been answered above. */}
+                {queueModeEnabled && stateGroups.length > 0 && (
+                  <div className="group-label group-label--section" data-testid="session-group-settled">
+                    Settled
                   </div>
                 )}
-                {launchingSessions.length > 0 && (
-                  <div className="session-group" data-testid="session-group-launching">
-                    <div className="group-label">Launching</div>
-                    {launchingSessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="session-row clickable"
-                        data-testid={`session-${s.id}`}
-                        data-state={s.state}
-                        onClick={() => onSelectSession(s.id)}
-                      >
-                        <StateIndicator state="launching" size="sm" seed={s.id} />
-                        <span className="session-name">{s.label}</span>
-                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
-                        {renderEndpointBadge(s)}
-                      </div>
-                    ))}
+                {stateGroups.map((group) => (
+                  <div key={group.state} className="session-group" data-testid={group.testId}>
+                    <div className="group-label">{group.label}</div>
+                    {group.rows.map((s) => renderSessionRow(s))}
                   </div>
-                )}
-                {workingSessions.length > 0 && (
-                  <div className="session-group" data-testid="session-group-working">
-                    <div className="group-label">Working</div>
-                    {workingSessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="session-row clickable"
-                        data-testid={`session-${s.id}`}
-                        data-state={s.state}
-                        onClick={() => onSelectSession(s.id)}
-                      >
-                        <StateIndicator state="working" size="sm" seed={s.id} />
-                        <span className="session-name">{s.label}</span>
-                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
-                        {renderEndpointBadge(s)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {scheduledSessions.length > 0 && (
-                  <div className="session-group" data-testid="session-group-scheduled">
-                    <div className="group-label">Scheduled</div>
-                    {scheduledSessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="session-row clickable"
-                        data-testid={`session-${s.id}`}
-                        data-state={s.state}
-                        onClick={() => onSelectSession(s.id)}
-                      >
-                        <StateIndicator state="scheduled" size="sm" seed={s.id} />
-                        <span className="session-name">{s.label}</span>
-                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
-                        {renderEndpointBadge(s)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {idleSessions.length > 0 && (
-                  <div className="session-group" data-testid="session-group-idle">
-                    <div className="group-label">Idle</div>
-                    {idleSessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="session-row clickable"
-                        data-testid={`session-${s.id}`}
-                        data-state={s.state}
-                        onClick={() => onSelectSession(s.id)}
-                      >
-                        <StateIndicator state="idle" size="sm" seed={s.id} />
-                        <span className="session-name">{s.label}</span>
-                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
-                        {renderEndpointBadge(s)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {recoverableSessions.length > 0 && (
-                  <div className="session-group" data-testid="session-group-recoverable">
-                    <div className="group-label">Recoverable</div>
-                    {recoverableSessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="session-row clickable"
-                        data-testid={`session-${s.id}`}
-                        data-state={s.state}
-                        onClick={() => onSelectSession(s.id)}
-                      >
-                        <StateIndicator state="recoverable" size="sm" seed={s.id} />
-                        <span className="session-name">{s.label}</span>
-                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
-                        {renderEndpointBadge(s)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {unknownSessions.length > 0 && (
-                  <div className="session-group" data-testid="session-group-unknown">
-                    <div className="group-label">Unknown / error</div>
-                    {unknownSessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="session-row clickable"
-                        data-testid={`session-${s.id}`}
-                        data-state={s.state}
-                        onClick={() => onSelectSession(s.id)}
-                      >
-                        <StateIndicator state="unknown" size="sm" seed={s.id} />
-                        <span className="session-name">{s.label}</span>
-                        {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
-                        {renderEndpointBadge(s)}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                ))}
                 {mutedWorkspaces.length > 0 && (
                   <div
                     className="session-group muted-summary clickable"

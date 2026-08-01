@@ -82,6 +82,21 @@ export function formatTurnAge(openedAt: string | undefined, now: number): string
   return `${Math.round(hours / 24)}d`;
 }
 
+/**
+ * Queue order: how long the turn has been owed, oldest first, tie-broken by id
+ * so the order is total and does not shuffle between renders. Exported because
+ * home lists the same turns and must list them in the same order — two orders
+ * for one queue is two queues.
+ */
+export function compareTurnOrder(a: QueueBandSession, b: QueueBandSession): number {
+  const openedA = a.turnOpenedAt ?? '';
+  const openedB = b.turnOpenedAt ?? '';
+  if (openedA !== openedB) {
+    return openedA < openedB ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : 1;
+}
+
 export interface QueueBands<TSession extends QueueBandSession> {
   /** The chief's anchored slot. It never queues, so it is always its own row. */
   chief: QueueRow<TSession> | null;
@@ -145,14 +160,7 @@ export function buildQueueBands<TSession extends QueueBandSession>(
     }
   }
 
-  turns.sort((a, b) => {
-    const openedA = a.session.turnOpenedAt ?? '';
-    const openedB = b.session.turnOpenedAt ?? '';
-    if (openedA !== openedB) {
-      return openedA < openedB ? -1 : 1;
-    }
-    return a.session.id < b.session.id ? -1 : 1;
-  });
+  turns.sort((a, b) => compareTurnOrder(a.session, b.session));
 
   return { chief, turns, settled };
 }

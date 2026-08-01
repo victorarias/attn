@@ -669,7 +669,7 @@ func TestWorkspaceTeardownDoesNotPanicBeforeCompactRunnerExists(t *testing.T) {
 		}
 	})
 
-	t.Run("unregisterWorkspaceIfEmptyAfterMove", func(t *testing.T) {
+	t.Run("unregisterWorkspaceIfEmpty", func(t *testing.T) {
 		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 		// The session must be gone for the workspace to be considered empty.
@@ -677,7 +677,7 @@ func TestWorkspaceTeardownDoesNotPanicBeforeCompactRunnerExists(t *testing.T) {
 		d.store.Remove("session-1")
 		d.compactRunner = nil
 
-		d.unregisterWorkspaceIfEmptyAfterMove("workspace-1")
+		d.unregisterWorkspaceIfEmpty("workspace-1")
 
 		if d.store.GetWorkspace("workspace-1") != nil {
 			t.Fatal("empty workspace was not removed after move-out")

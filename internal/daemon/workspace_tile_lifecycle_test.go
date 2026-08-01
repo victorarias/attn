@@ -102,6 +102,50 @@ func TestClosingLastPaneKeepsTileOnlyWorkspaceAlive(t *testing.T) {
 	assertTileOnlyWorkspaceAlive(t, d, workspaceID, sessionID)
 }
 
+// Undocking the last tile of a sessionless workspace is the user closing the last
+// thing that workspace holds. It must take the workspace with it: a workspace with
+// a leafless layout is unreachable by every layout command (they all go through
+// ensureWorkspaceLayout), so leaving one behind strands a sidebar row whose close
+// button can never work again.
+func TestUndockingLastTileTearsDownSessionlessWorkspace(t *testing.T) {
+	d, client, workspaceID, sessionID, paneID := setupSessionWorkspaceWithTile(t)
+	d.handleWorkspaceLayoutClosePane(client, &protocol.WorkspaceLayoutClosePaneMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutClosePane,
+		WorkspaceID: workspaceID,
+		PaneID:      paneID,
+	})
+	expectWorkspaceLayoutActionResult(t, client, protocol.CmdWorkspaceLayoutClosePane, workspaceID, paneID, true)
+	assertTileOnlyWorkspaceAlive(t, d, workspaceID, sessionID)
+
+	tileID := workspacelayout.TileIDs(d.store.GetWorkspaceLayout(workspaceID).Layout)[0]
+	cap := captureBroadcasts(d)
+	d.handleWorkspaceLayoutUndockTile(client, &protocol.WorkspaceLayoutUndockTileMessage{
+		Cmd:         protocol.CmdWorkspaceLayoutUndockTile,
+		WorkspaceID: workspaceID,
+		TileID:      tileID,
+	})
+	expectWorkspaceLayoutActionResultIDs(t, client, protocol.CmdWorkspaceLayoutUndockTile, workspaceID, "", "", tileID, true)
+
+	if ws := d.store.GetWorkspace(workspaceID); ws != nil {
+		t.Fatalf("workspace survived undocking its last tile: %+v", ws)
+	}
+	if _, registered := d.workspaces.snapshot(workspaceID); registered {
+		t.Fatal("workspace still in the in-memory registry after its last tile was undocked")
+	}
+	if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot != nil {
+		t.Fatalf("leafless layout left behind: %+v", snapshot)
+	}
+	unregistered := false
+	for _, event := range cap.snapshot() {
+		if event.Event == protocol.EventWorkspaceUnregistered && event.Workspace != nil && event.Workspace.ID == workspaceID {
+			unregistered = true
+		}
+	}
+	if !unregistered {
+		t.Fatalf("no workspace_unregistered broadcast; clients keep showing the workspace: %+v", cap.snapshot())
+	}
+}
+
 func TestTileOnlyWorkspaceSurvivesStartupReap(t *testing.T) {
 	d, client, workspaceID, sessionID, paneID := setupSessionWorkspaceWithTile(t)
 	d.handleWorkspaceLayoutClosePane(client, &protocol.WorkspaceLayoutClosePaneMessage{

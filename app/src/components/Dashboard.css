@@ -5,11 +5,11 @@
   background: var(--color-bg-app);
   display: flex;
   flex-direction: column;
-  padding: 40px;
+  padding: 24px 28px;
 }
 
 .dashboard-header {
-  margin-bottom: 40px;
+  margin-bottom: 24px;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -78,6 +78,37 @@
 }
 
 /* Rate limit banner */
+/* The all-settled banner. Deliberately the calm colour rather than the accent:
+   nothing here wants you, and a banner that shouts would say the opposite. */
+.all-settled-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  background: rgba(120, 200, 140, 0.08);
+  border: 1px solid rgba(120, 200, 140, 0.25);
+  border-radius: 6px;
+  color: #78c88c;
+}
+.all-settled-banner svg {
+  flex-shrink: 0;
+}
+.all-settled-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.all-settled-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+.all-settled-detail {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
 .rate-limit-banner {
   display: flex;
   align-items: center;
@@ -179,9 +210,16 @@
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 20px;
+  gap: 16px;
   flex: 1;
   min-height: 0; /* Allow grid to shrink below content size */
+  /* Home sits beside the sidebar, so the cards stack into one column well
+     before the window is narrow. Rows take the height they need and the grid
+     itself scrolls — dividing the column's height between three stacked cards
+     leaves each of them too short to show anything. */
+  grid-auto-rows: minmax(200px, max-content);
+  align-content: start;
+  overflow-y: auto;
 }
 
 .dashboard-card {
@@ -881,4 +919,30 @@
 .group-label.dim {
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+/* Heads the state groups in queue mode. Sits above them rather than inside one,
+   so every group below reads as settled without repeating the word. */
+.group-label--section {
+  margin-top: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.group-count {
+  margin-left: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0;
+  color: var(--color-text-muted);
+}
+
+/* How long the turn has been owed, right-aligned so the ages line up as a column. */
+.session-turn-age {
+  margin-left: auto;
+  padding-left: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-dimmed);
 }

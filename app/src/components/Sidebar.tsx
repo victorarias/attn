@@ -200,6 +200,9 @@ interface SidebarProps {
   onCloseSession: (id: string) => void;
   onReloadSession: (id: string) => void;
   onGoToDashboard: () => void;
+  // Whether home is the view on screen. Drives the home row's selected state so
+  // it reads like any other row you can be sitting on.
+  homeActive?: boolean;
   onToggleCollapse: () => void;
 }
 
@@ -379,6 +382,7 @@ export function Sidebar({
   onCloseSession,
   onReloadSession,
   onGoToDashboard,
+  homeActive = false,
   onToggleCollapse,
 }: SidebarProps) {
   // Each arrangement has one notion of what wants the user, and the mode selects
@@ -820,7 +824,13 @@ export function Sidebar({
     return (
       <div className="sidebar collapsed">
         <div className="icon-rail">
-          <button className="icon-btn" onClick={onGoToDashboard} title="Dashboard (⌘G)">
+          <button
+            className={`icon-btn ${homeActive ? 'active' : ''}`}
+            onClick={onGoToDashboard}
+            title={`Home (${formatShortcut('session.goToDashboard')})`}
+            aria-label="Home"
+            aria-current={homeActive ? 'page' : undefined}
+          >
             <HomeIcon />
           </button>
           <div className="icon-divider" />
@@ -872,9 +882,6 @@ export function Sidebar({
     <div className={`sidebar sidebar--display-${displayMode}`}>
       <div className="sidebar-header">
         <div className="sidebar-tool-row">
-          <button className="home-btn" onClick={onGoToDashboard} title="Dashboard (⌘G)" aria-label="Dashboard">
-            <HomeIcon />
-          </button>
           {gridLayout && onSelectGridLayout && (
             <GridLayoutControl layout={gridLayout} onSelect={onSelectGridLayout} />
           )}
@@ -898,8 +905,6 @@ export function Sidebar({
           </button>
         </div>
         <div className="sidebar-header-row">
-          <span className="sidebar-title">Workspaces</span>
-          <span className="home-shortcut">⌘G</span>
           <button className="new-session-btn" onClick={onNewSession} title="New Session (⌘N)" aria-label="New Session">
             <PlusIcon />
           </button>
@@ -972,6 +977,21 @@ export function Sidebar({
           </div>
         </div>
       </div>
+
+      {/* Home sits above everything, the chief's slot included: it is the one
+          row that is not an agent, and it is where the queue leaves you once
+          nothing is owed. */}
+      <button
+        type="button"
+        className={`sidebar-home-row ${homeActive ? 'selected' : ''}`}
+        data-testid="sidebar-home"
+        onClick={onGoToDashboard}
+        aria-current={homeActive ? 'page' : undefined}
+      >
+        <HomeIcon />
+        <span className="sidebar-home-label">Home</span>
+        <span className="sidebar-home-shortcut">{formatShortcut('session.goToDashboard')}</span>
+      </button>
 
       {queue && (
         <QueueBands

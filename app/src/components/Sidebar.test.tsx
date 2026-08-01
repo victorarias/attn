@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { Sidebar, type DockItem } from './Sidebar';
+import { formatShortcut } from '../shortcuts/formatShortcut';
 import { buildWorkspaceViewModels, type WorkspaceWithSessions } from '../utils/workspaceViewModels';
 
 function sessionlessWorkspace(): WorkspaceWithSessions<TestSession> {
@@ -786,5 +787,73 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByTestId('chief-of-staff-session-action'));
 
     expect(onChangeChiefOfStaff).toHaveBeenCalledWith('s1', true);
+  });
+});
+
+describe('Sidebar home row', () => {
+  const sessions: TestSession[] = [{ id: 's1', label: 'agent', state: 'working' }];
+
+  it('goes home when the row is clicked', () => {
+    const onGoToDashboard = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData(sessions)}
+        onGoToDashboard={onGoToDashboard}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId('sidebar-home'));
+
+    expect(onGoToDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the row as the current page only while home is on screen', () => {
+    const { rerender } = render(
+      <Sidebar {...baseProps} {...buildSidebarData(sessions)} homeActive={false} />
+    );
+    expect(screen.getByTestId('sidebar-home')).not.toHaveAttribute('aria-current');
+
+    rerender(
+      <Sidebar {...baseProps} {...buildSidebarData(sessions)} homeActive />
+    );
+    expect(screen.getByTestId('sidebar-home')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('sidebar-home').className).toContain('selected');
+  });
+
+  it('replaces the workspaces title, so the header carries no label of its own', () => {
+    render(<Sidebar {...baseProps} {...buildSidebarData(sessions)} />);
+
+    expect(screen.queryByText('Workspaces')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sidebar-home')).toBeInTheDocument();
+  });
+
+  // The old header hardcoded ⌘G, which had already gone stale when grid view
+  // took that chord and home moved to ⌘⇧H. Read the hint from the registry so
+  // it cannot drift again — or disagree with a rebind.
+  it('shows the shortcut home is actually bound to, not a hardcoded one', () => {
+    render(<Sidebar {...baseProps} {...buildSidebarData(sessions)} />);
+
+    const hint = screen.getByTestId('sidebar-home').querySelector('.sidebar-home-shortcut');
+    expect(hint?.textContent).toBe(formatShortcut('session.goToDashboard'));
+    expect(hint?.textContent).not.toBe('⌘G');
+  });
+
+  it('keeps a way home when the sidebar is collapsed', () => {
+    const onGoToDashboard = vi.fn();
+    render(
+      <Sidebar
+        {...baseProps}
+        {...buildSidebarData(sessions)}
+        collapsed
+        homeActive
+        onGoToDashboard={onGoToDashboard}
+      />
+    );
+
+    const home = screen.getByLabelText('Home');
+    expect(home).toHaveAttribute('aria-current', 'page');
+    fireEvent.click(home);
+    expect(onGoToDashboard).toHaveBeenCalledTimes(1);
   });
 });
