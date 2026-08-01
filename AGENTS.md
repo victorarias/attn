@@ -199,6 +199,28 @@ See [docs/plans/2026-07-18-db-loss-mitigation.md](docs/plans/2026-07-18-db-loss-
 - `internal/transcript`: assistant-message extraction from JSONL
 - `app`: Tauri frontend; WebSocket `ws://localhost:9849`
 
+Frontend map (`app/src`) — `app/CLAUDE.md` covers components and test patterns;
+this is where daemon traffic lands:
+
+- `hooks/useDaemonSocket.ts`: the socket. Connection, reconnect/circuit breaker,
+  the event switch, and every `send*` command. Its return value is the frontend's
+  entire daemon API, threaded through `App` → `AppContent` → `DaemonProvider`.
+- `hooks/daemonPendingRequests.ts`: request/result correlation. A fallible
+  command parks its promise under `<kind>:<requestId>` until the matching
+  `*_result` event lands. `settlePendingRequest` is the typed way in.
+- `hooks/daemon<Domain>Events.ts` (`Fs`, `Notebook`, `MarkdownAnnotation`):
+  per-domain event bodies lifted out of the switch, reached from its `default`.
+  Grep a wire name (`fs_write_result`) to find the module that owns it. Adding a
+  domain means a new module plus one line in that `default` chain.
+- `hooks/daemonMarkdownAnnotationEvents.ts` uses a *second* correlation scheme —
+  keyed `<op>:<workspaceId>:<path>`, last-writer-wins, `request_id`-checked — so
+  annotation drafts supersede rather than queue. Do not route it through
+  `daemonPendingRequests`.
+- `store/daemonSessions.ts`: Zustand store for session/PR state.
+- `pty/`: transport, attach planning, binary frame decode, runtime lifecycle.
+- Tests are topic-suffixed: `Source.concern.test.tsx`. Keep that — the suffix
+  names the behavior, and the set of suffixes maps a large file's seams.
+
 States: `launching`, `working`, `pending_approval`, `waiting_input`, `idle`,
 `unknown`, `scheduled`, `recoverable`. A turn opens when a session reaches a
 state that wants the user (`internal/attention`) and closes only when the user

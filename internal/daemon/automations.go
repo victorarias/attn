@@ -112,23 +112,23 @@ func (d *Daemon) handleAutomationCommand(conn net.Conn, cmd string, msg any) {
 	ctx := context.Background()
 	var result any
 	switch cmd {
-	case protocol.CmdAutomationApply:
+	case protocol.CmdAutomationApply: // wire: automation_apply
 		result = d.actionAutomationApply(ctx, msg.(*protocol.AutomationApplyMessage))
-	case protocol.CmdAutomationValidate:
+	case protocol.CmdAutomationValidate: // wire: automation_validate
 		result = d.actionAutomationValidate(msg.(*protocol.AutomationValidateMessage))
-	case protocol.CmdAutomationDefinitionsGet:
+	case protocol.CmdAutomationDefinitionsGet: // wire: automation_definitions_get
 		result = d.actionAutomationDefinitionsGet(msg.(*protocol.AutomationDefinitionsGetMessage))
-	case protocol.CmdAutomationDefinitionGet:
+	case protocol.CmdAutomationDefinitionGet: // wire: automation_definition_get
 		result = d.actionAutomationDefinitionGet(msg.(*protocol.AutomationDefinitionGetMessage))
-	case protocol.CmdAutomationRun:
+	case protocol.CmdAutomationRun: // wire: automation_run
 		result = d.actionAutomationRun(ctx, msg.(*protocol.AutomationRunMessage))
-	case protocol.CmdAutomationRunsGet:
+	case protocol.CmdAutomationRunsGet: // wire: automation_runs_get
 		result = d.actionAutomationRunsGet(msg.(*protocol.AutomationRunsGetMessage))
-	case protocol.CmdAutomationSetEnabled:
+	case protocol.CmdAutomationSetEnabled: // wire: automation_set_enabled
 		result = d.actionAutomationSetEnabled(ctx, msg.(*protocol.AutomationSetEnabledMessage))
-	case protocol.CmdAutomationDelete:
+	case protocol.CmdAutomationDelete: // wire: automation_delete
 		result = d.actionAutomationDelete(ctx, msg.(*protocol.AutomationDeleteMessage))
-	case protocol.CmdAutomationCleanup:
+	case protocol.CmdAutomationCleanup: // wire: automation_cleanup
 		result = d.actionAutomationCleanup(ctx, msg.(*protocol.AutomationCleanupMessage))
 	}
 	_ = json.NewEncoder(conn).Encode(result)

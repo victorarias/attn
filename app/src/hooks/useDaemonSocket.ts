@@ -61,6 +61,14 @@ import { recordDiag, recordLayout } from '../utils/terminalDiagnosticsLog';
 import { recordPtyCommand, recordWsBinaryPtyOutput, recordWsJsonParse } from '../utils/ptyPerf';
 import { decodeBinaryPtyFrame } from '../pty/binaryPtyFrame';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
+import { handleFsDaemonEvent } from './daemonFsEvents';
+import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
+import {
+  handleMarkdownAnnotationDaemonEvent,
+  markdownAnnotationKey,
+  type PendingMarkdownAnnotations,
+} from './daemonMarkdownAnnotationEvents';
+import { pendingRequestKey, type PendingRequests } from './daemonPendingRequests';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
@@ -862,14 +870,12 @@ export function useDaemonSocket({
   };
   const reconnectTimeoutRef = useRef<number | null>(null);
   const reconnectDelayRef = useRef<number>(1000); // Start with 1s, exponential backoff
-  const pendingActionsRef = useRef<Map<string, { resolve: (result: any) => void; reject: (error: Error) => void }>>(new Map());
-  // Markdown-annotation drafts: keyed `<op>:<path>`, request_id-correlated
-  // (see sendMarkdownAnnotationsCommand).
-  const mdAnnotationsPendingRef = useRef<Map<string, {
-    requestId: string;
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-  }>>(new Map());
+  // Keyed `<kind>:<requestId>` — see daemonPendingRequests.ts for the format and
+  // the settle helper the extracted event modules use.
+  const pendingActionsRef = useRef<PendingRequests>(new Map());
+  // Markdown-annotation drafts use their own last-writer-wins correlation —
+  // see daemonMarkdownAnnotationEvents.ts, not daemonPendingRequests.ts.
+  const mdAnnotationsPendingRef = useRef<PendingMarkdownAnnotations>(new Map());
   // In-flight `get` promises shared per path: two tiles hydrating the same
   // document must share one round-trip, not supersede-reject each other
   // (a rejected hydrate would leave that tile's saves locked until retry).
@@ -1552,13 +1558,6 @@ export function useDaemonSocket({
             break;
           }
 
-          case 'notebook_changed':
-            callbacksRef.current.onNotebookChanged?.(
-              typeof data.origin === 'string' ? data.origin : '',
-              Array.isArray(data.paths) ? data.paths : [],
-            );
-            break;
-
           case 'tasks_changed':
             // Payload-free broadcast: an open Tasks panel refetches the list so it
             // reflects the runner's truth (no optimistic mutation here).
@@ -1572,49 +1571,6 @@ export function useDaemonSocket({
               typeof data.unread_count === 'number' ? data.unread_count : 0,
             );
             break;
-
-          case 'fs_changed':
-            callbacksRef.current.onFsChanged?.(
-              typeof data.origin === 'string' ? data.origin : '',
-              Array.isArray(data.paths) ? data.paths : [],
-              typeof data.root === 'string' ? data.root : '',
-            );
-            break;
-
-          case 'fs_list_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `fs_list:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success) {
-              // Convert the wire's is_dir to the camelCase public FsEntry shape.
-              const rawEntries = (data.entries || []) as Array<{
-                path: string;
-                name: string;
-                is_dir?: boolean;
-                size?: number;
-                modified?: string;
-              }>;
-              pending.resolve(
-                rawEntries.map((e) => ({
-                  path: e.path,
-                  name: e.name,
-                  isDir: !!e.is_dir,
-                  size: typeof e.size === 'number' ? e.size : 0,
-                  modified: e.modified,
-                })),
-              );
-            } else {
-              pending.reject(new Error(data.error || 'Filesystem list failed'));
-            }
-            break;
-          }
 
           case 'open_markdown_result': {
             const requestId = data.request_id;
@@ -1631,134 +1587,6 @@ export function useDaemonSocket({
               pending.resolve({ workspaceId: data.workspace_id, tileId: data.tile_id });
             } else {
               pending.reject(new Error(data.error || 'Open markdown failed'));
-            }
-            break;
-          }
-
-          case 'fs_read_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `fs_read:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.result) {
-              pending.resolve(data.result);
-            } else {
-              pending.reject(new Error(data.error || 'Filesystem read failed'));
-            }
-            break;
-          }
-
-          case 'fs_read_asset_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `fs_read_asset:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.result) {
-              pending.resolve({
-                path: data.result.path,
-                mimeType: data.result.mime_type,
-                dataBase64: data.result.data_base64,
-              });
-            } else {
-              pending.reject(new Error(data.error || 'Filesystem asset read failed'));
-            }
-            break;
-          }
-
-          case 'fs_write_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `fs_write:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.result) {
-              // A conflict is a SUCCESSFUL result the editor reconciles, not a
-              // rejection — only a transport/daemon error rejects.
-              pending.resolve({
-                path: data.result.path,
-                hash: data.result.hash,
-                conflict: !!data.result.conflict,
-                currentHash: data.result.current_hash,
-              });
-            } else {
-              pending.reject(new Error(data.error || 'Filesystem write failed'));
-            }
-            break;
-          }
-
-          case 'fs_rename_result':
-          case 'fs_delete_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') break;
-            const prefix = data.event === 'fs_rename_result' ? 'fs_rename' : 'fs_delete';
-            const key = `${prefix}:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) break;
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.result) {
-              pending.resolve(data.result);
-            } else {
-              pending.reject(new Error(data.error || 'Filesystem action failed'));
-            }
-            break;
-          }
-
-          case 'fs_exists_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `fs_exists:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.result) {
-              pending.resolve({
-                path: data.result.path,
-                exists: !!data.result.exists,
-              });
-            } else {
-              pending.reject(new Error(data.error || 'Filesystem exists check failed'));
-            }
-            break;
-          }
-
-          case 'fs_watch_result':
-          case 'fs_unwatch_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const prefix = data.event === 'fs_watch_result' ? 'fs_watch' : 'fs_unwatch';
-            const key = `${prefix}:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.root) {
-              pending.resolve({ root: data.root });
-            } else {
-              pending.reject(new Error(data.error || 'Filesystem watch action failed'));
             }
             break;
           }
@@ -1784,69 +1612,6 @@ export function useDaemonSocket({
               })));
             } else {
               pending.reject(new Error(data.error || 'Recent files failed'));
-            }
-            break;
-          }
-
-          case 'fs_index_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `fs_index:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success) {
-              pending.resolve({
-                root: data.root,
-                files: data.files || [],
-                truncated: !!data.truncated,
-              });
-            } else {
-              pending.reject(new Error(data.error || 'Filesystem index failed'));
-            }
-            break;
-          }
-
-          case 'notebook_list_result':
-          case 'notebook_backlinks_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const prefix = data.event === 'notebook_list_result' ? 'notebook_list' : 'notebook_backlinks';
-            const key = `${prefix}:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success) {
-              pending.resolve(data.entries || []);
-            } else {
-              pending.reject(new Error(data.error || 'Notebook request failed'));
-            }
-            break;
-          }
-
-          case 'notebook_read_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `notebook_read:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.result) {
-              pending.resolve(data.result);
-            } else {
-              pending.reject(new Error(data.error || 'Notebook read failed'));
             }
             break;
           }
@@ -2003,54 +1768,6 @@ export function useDaemonSocket({
               pending.resolve(typeof data.unread_count === 'number' ? data.unread_count : 0);
             } else {
               pending.reject(new Error(data.error || 'Notification mark-read failed'));
-            }
-            break;
-          }
-
-          case 'notebook_write_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `notebook_write:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.result) {
-              // A conflict is a SUCCESSFUL result the editor reconciles, not a
-              // rejection — only a transport/daemon error rejects.
-              pending.resolve({
-                path: data.result.path,
-                hash: data.result.hash,
-                conflict: !!data.result.conflict,
-                currentHash: data.result.current_hash,
-              });
-            } else {
-              pending.reject(new Error(data.error || 'Notebook write failed'));
-            }
-            break;
-          }
-
-          case 'notebook_send_to_chief_result': {
-            const requestId = data.request_id;
-            if (typeof requestId !== 'string') {
-              break;
-            }
-            const key = `notebook_send_to_chief:${requestId}`;
-            const pending = pendingActionsRef.current.get(key);
-            if (!pending) {
-              break;
-            }
-            pendingActionsRef.current.delete(key);
-            if (data.success && data.result) {
-              pending.resolve({
-                path: data.result.path,
-                nudged: !!data.result.nudged,
-              });
-            } else {
-              pending.reject(new Error(data.error || 'Send to chief failed'));
             }
             break;
           }
@@ -2286,67 +2003,6 @@ export function useDaemonSocket({
                   pending.resolve(null);
                 }
               }
-            }
-            break;
-          }
-
-          case 'markdown_annotations_get_result':
-          case 'markdown_annotations_save_result':
-          case 'markdown_annotations_clear_result': {
-            const op = data.event === 'markdown_annotations_get_result'
-              ? 'get'
-              : data.event === 'markdown_annotations_save_result' ? 'save' : 'clear';
-            const key = `${op}:${data.workspace_id ?? ''}:${data.path}`;
-            const pending = mdAnnotationsPendingRef.current.get(key);
-            if (!pending || pending.requestId !== data.request_id) {
-              break; // superseded or timed out — drop the late result
-            }
-            mdAnnotationsPendingRef.current.delete(key);
-            if (op === 'save' && !data.success && data.stale) {
-              // Stale generation (tombstone / newer writer) is a protocol
-              // outcome the client handles, not an error.
-              pending.resolve({ stale: true });
-            } else if (!data.success) {
-              pending.reject(new Error(data.error || `markdown_annotations_${op} failed`));
-            } else if (op === 'get') {
-              pending.resolve({
-                annotations: Array.isArray(data.annotations) ? data.annotations : [],
-                generation: typeof data.generation === 'number' ? data.generation : 0,
-              });
-            } else if (op === 'save') {
-              pending.resolve({ stale: false });
-            } else {
-              pending.resolve({
-                generation: typeof data.generation === 'number' ? data.generation : 0,
-              });
-            }
-            break;
-          }
-
-          case 'markdown_annotations_submit_result': {
-            // Submit routes by target session, not workspace; the send side
-            // keys its pending entry with workspaceId '' so mirror that here
-            // (daemon echoes workspace_id '' or omits it).
-            const key = `submit:${data.workspace_id ?? ''}:${data.path}`;
-            const pending = mdAnnotationsPendingRef.current.get(key);
-            if (!pending || pending.requestId !== data.request_id) {
-              break; // superseded or timed out — drop the late result
-            }
-            mdAnnotationsPendingRef.current.delete(key);
-            if (data.success || data.status === 'skipped_pending_approval') {
-              // skipped_pending_approval resolves (success:false) so the UI
-              // can message it distinctly from a hard failure; a delivered
-              // result may still carry `error` (delivery succeeded, draft
-              // clear failed) — never re-deliver in that case.
-              pending.resolve({
-                status: typeof data.status === 'string' && data.status !== ''
-                  ? data.status
-                  : 'delivered',
-                ...(typeof data.generation === 'number' ? { generation: data.generation } : {}),
-                ...(typeof data.error === 'string' && data.error !== '' ? { error: data.error } : {}),
-              });
-            } else {
-              pending.reject(new Error(data.error || 'markdown_annotations_submit failed'));
             }
             break;
           }
@@ -2933,6 +2589,17 @@ export function useDaemonSocket({
             console.error('[Daemon] Command error:', data.cmd, data.error);
             rejectPendingForCommand(data.cmd, data.error || `Command ${data.cmd || ''} failed`);
             break;
+
+          // Domains that live in their own module. The chain sits in `default`
+          // so the hot cases above (pty_output) never pay for it, and an event
+          // no module claims stays silently ignored, as it was before.
+          default: {
+            const pending = pendingActionsRef.current;
+            if (handleFsDaemonEvent(data, { pending, onFsChanged: callbacksRef.current.onFsChanged })) break;
+            if (handleNotebookDaemonEvent(data, { pending, onNotebookChanged: callbacksRef.current.onNotebookChanged })) break;
+            if (handleMarkdownAnnotationDaemonEvent(data, mdAnnotationsPendingRef.current)) break;
+            break;
+          }
         }
       } catch (err) {
         console.error('[Daemon] Parse error:', err);
@@ -3706,7 +3373,7 @@ export function useDaemonSocket({
       }
       // workspace-scoped: the same path open in two workspaces (possibly on
       // two different endpoints) must not supersede each other's requests.
-      const key = `${op}:${workspaceId}:${path}`;
+      const key = markdownAnnotationKey(op, workspaceId, path);
       const requestId = crypto.randomUUID();
       mdAnnotationsPendingRef.current.get(key)?.reject(new Error('Superseded by a newer request'));
       mdAnnotationsPendingRef.current.set(key, { requestId, resolve: resolve as (value: unknown) => void, reject });
@@ -4437,7 +4104,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('notebook_list');
-      const key = `notebook_list:${requestId}`;
+      const key = pendingRequestKey('notebook_list', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'notebook_list', request_id: requestId, ...(prefix ? { prefix } : {}) }));
       setTimeout(() => {
@@ -4458,7 +4125,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('notebook_read');
-      const key = `notebook_read:${requestId}`;
+      const key = pendingRequestKey('notebook_read', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'notebook_read', request_id: requestId, path }));
       setTimeout(() => {
@@ -4720,7 +4387,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('notebook_backlinks');
-      const key = `notebook_backlinks:${requestId}`;
+      const key = pendingRequestKey('notebook_backlinks', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'notebook_backlinks', request_id: requestId, path }));
       setTimeout(() => {
@@ -4744,7 +4411,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('notebook_write');
-      const key = `notebook_write:${requestId}`;
+      const key = pendingRequestKey('notebook_write', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'notebook_write', request_id: requestId, path, content, ...(baseHash ? { base_hash: baseHash } : {}) }));
       setTimeout(() => {
@@ -4768,7 +4435,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('notebook_send_to_chief');
-      const key = `notebook_send_to_chief:${requestId}`;
+      const key = pendingRequestKey('notebook_send_to_chief', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'notebook_send_to_chief', request_id: requestId, selection, ...(sourcePath ? { source_path: sourcePath } : {}) }));
       setTimeout(() => {
@@ -4791,7 +4458,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('fs_list');
-      const key = `fs_list:${requestId}`;
+      const key = pendingRequestKey('fs_list', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'fs_list', request_id: requestId, ...(path ? { path } : {}), ...(root ? { root } : {}) }));
       setTimeout(() => {
@@ -4812,7 +4479,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('fs_read');
-      const key = `fs_read:${requestId}`;
+      const key = pendingRequestKey('fs_read', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'fs_read', request_id: requestId, path, ...(root ? { root } : {}) }));
       setTimeout(() => {
@@ -4834,7 +4501,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('fs_read_asset');
-      const key = `fs_read_asset:${requestId}`;
+      const key = pendingRequestKey('fs_read_asset', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'fs_read_asset', request_id: requestId, path, ...(root ? { root } : {}) }));
       setTimeout(() => {
@@ -4857,7 +4524,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('fs_write');
-      const key = `fs_write:${requestId}`;
+      const key = pendingRequestKey('fs_write', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'fs_write', request_id: requestId, path, content, ...(baseHash ? { base_hash: baseHash } : {}), ...(root ? { root } : {}) }));
       setTimeout(() => {
@@ -4876,7 +4543,7 @@ export function useDaemonSocket({
       return;
     }
     const requestId = nextRequestID('fs_rename');
-    const key = `fs_rename:${requestId}`;
+    const key = pendingRequestKey('fs_rename', requestId);
     pendingActionsRef.current.set(key, { resolve, reject });
     ws.send(JSON.stringify({ cmd: 'fs_rename', request_id: requestId, path, new_path: newPath, ...(root ? { root } : {}) }));
     setTimeout(() => {
@@ -4894,7 +4561,7 @@ export function useDaemonSocket({
       return;
     }
     const requestId = nextRequestID('fs_delete');
-    const key = `fs_delete:${requestId}`;
+    const key = pendingRequestKey('fs_delete', requestId);
     pendingActionsRef.current.set(key, { resolve, reject });
     ws.send(JSON.stringify({ cmd: 'fs_delete', request_id: requestId, path, ...(root ? { root } : {}) }));
     setTimeout(() => {
@@ -4916,7 +4583,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('fs_exists');
-      const key = `fs_exists:${requestId}`;
+      const key = pendingRequestKey('fs_exists', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'fs_exists', request_id: requestId, path, ...(root ? { root } : {}) }));
       setTimeout(() => {
@@ -4940,7 +4607,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('fs_watch');
-      const key = `fs_watch:${requestId}`;
+      const key = pendingRequestKey('fs_watch', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'fs_watch', request_id: requestId, ...(root ? { root } : {}) }));
       setTimeout(() => {
@@ -4963,7 +4630,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('fs_unwatch');
-      const key = `fs_unwatch:${requestId}`;
+      const key = pendingRequestKey('fs_unwatch', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({ cmd: 'fs_unwatch', request_id: requestId, ...(root ? { root } : {}) }));
       setTimeout(() => {
@@ -4988,7 +4655,7 @@ export function useDaemonSocket({
         return;
       }
       const requestId = nextRequestID('fs_index');
-      const key = `fs_index:${requestId}`;
+      const key = pendingRequestKey('fs_index', requestId);
       pendingActionsRef.current.set(key, { resolve, reject });
       ws.send(JSON.stringify({
         cmd: 'fs_index',
