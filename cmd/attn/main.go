@@ -233,6 +233,9 @@ func main() {
 	case "db":
 		maybePrintProfileBanner()
 		runDB()
+	case "bus":
+		maybePrintProfileBanner()
+		runBus()
 	case "journal":
 		maybePrintProfileBanner()
 		runJournal()
@@ -613,6 +616,7 @@ commands:
   present <command>                 open a review presentation and read feedback
   debug <command>                   probe debug artifacts (incidents, logs)
   db <command>                      database maintenance (restore from backup)
+  bus <command>                     event bus: consumer cursors, lag, kill switch
   vision-check <image> <question>   answer a question about an image (single LLM call)
   daemon <command>                  manage the daemon
 	  daemon ensure|stop                ensure the daemon is running, or stop it

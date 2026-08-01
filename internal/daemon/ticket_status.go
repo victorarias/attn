@@ -107,5 +107,5 @@ func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketSta
 	// Notify excludes it — no self-nudge.
 	d.notifyTicketObservers(updated.ID)
 	// Refresh the app's board view: the column moved.
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketStatusChanged, updated.ID)
 }

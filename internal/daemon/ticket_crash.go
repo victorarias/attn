@@ -46,6 +46,6 @@ func (d *Daemon) crashTicket(ticketID, sessionID, state string) bool {
 	// is skipped as a non-live participant).
 	d.notifyTicketObservers(ticketID)
 	// Refresh the app's board view: the ticket moved to the Crashed lane.
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketStatusChanged, ticketID)
 	return true
 }

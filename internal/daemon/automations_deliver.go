@@ -65,13 +65,14 @@ func (d *Daemon) failAutomationRun(run *store.AutomationRun, deliveryErr error) 
 				persistErr = errors.Join(persistErr, fmt.Errorf("record continuation failure: %w", err))
 			}
 			d.notifyTicketObservers(ticket.ID)
+			d.publishTicketFact(FactTicketCommented, ticket.ID)
 		} else if ticket.Status != store.TicketStatusFailed {
 			if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusFailed, store.TicketAuthorAttn, comment, now); err != nil {
 				persistErr = errors.Join(persistErr, fmt.Errorf("mark automation ticket failed: %w", err))
 			}
+			d.publishTicketFact(FactTicketStatusChanged, ticket.ID)
 		}
 	}
-	d.broadcastTicketsUpdated()
 	d.broadcastAutomationsChanged(run.DefinitionID)
 	failed, err := d.store.GetAutomationRun(run.ID)
 	if err != nil {
@@ -107,13 +108,14 @@ func (d *Daemon) cancelAutomationRun(run *store.AutomationRun, reason, message s
 				persistErr = errors.Join(persistErr, fmt.Errorf("record continuation cancellation: %w", err))
 			}
 			d.notifyTicketObservers(ticket.ID)
+			d.publishTicketFact(FactTicketCommented, ticket.ID)
 		} else if ticket.Status != store.TicketStatusFailed {
 			if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusFailed, store.TicketAuthorAttn, comment, now); err != nil {
 				persistErr = errors.Join(persistErr, fmt.Errorf("mark automation ticket failed: %w", err))
 			}
+			d.publishTicketFact(FactTicketStatusChanged, ticket.ID)
 		}
 	}
-	d.broadcastTicketsUpdated()
 	d.broadcastAutomationsChanged(run.DefinitionID)
 	cancelled, err := d.store.GetAutomationRun(run.ID)
 	if err != nil {
@@ -174,7 +176,7 @@ func (d *Daemon) deliverAutomationRun(ctx context.Context, run *store.Automation
 	if err := d.store.MarkAutomationRunDelivered(run.ID, string(result.Resolved), time.Now()); err != nil {
 		return err
 	}
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketChanged, run.TicketID)
 	// This pending->delivered transition broadcast has no unit-test coverage:
 	// every unit test that reaches deliverAutomationRun's success path does so
 	// through automationDeliveryHook (bypassing this real delivery return) or
@@ -371,7 +373,7 @@ func (d *Daemon) ensureAutomationTicket(_ context.Context, req automation.WorkRe
 		if err := d.store.EnsureAutomationContinuationTicket(req.IDs.TicketID, req.IDs.SessionID, req.RunID, inputPath, author, time.Now()); err != nil {
 			return err
 		}
-		d.broadcastTicketsUpdated()
+		d.publishTicketFact(FactTicketChanged, req.IDs.TicketID)
 		// The ticket event is the durable payload. Use the ordinary content-free
 		// doorbell so an idle live reviewer learns that a new cycle is waiting.
 		d.notifyTicketObservers(req.IDs.TicketID)
@@ -408,7 +410,7 @@ func (d *Daemon) activateAutomationContinuationTicket(req automation.WorkRequest
 	if _, err := d.store.SetTicketStatus(ticket.ID, store.TicketStatusWorking, "automation:"+req.DefinitionID, comment, time.Now()); err != nil {
 		return err
 	}
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketStatusChanged, ticket.ID)
 	d.notifyTicketObservers(ticket.ID)
 	return nil
 }
