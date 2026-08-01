@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -208,5 +209,114 @@ func TestBusStatusReportsLag(t *testing.T) {
 	// Registered in the database but with no loop in this process.
 	if st.Consumers[0].Live {
 		t.Fatal("a consumer with no delivery loop reported Live")
+	}
+}
+
+// failingAppendBusStore is the real adapter with a switchable append fault, so
+// the test exercises the actual daemon wiring rather than a hand-built bus.
+type failingAppendBusStore struct {
+	bus.Store
+	mu   sync.Mutex
+	fail error
+}
+
+func (f *failingAppendBusStore) Append(e bus.Event, now time.Time) (int64, error) {
+	f.mu.Lock()
+	err := f.fail
+	f.mu.Unlock()
+	if err != nil {
+		return 0, err
+	}
+	return f.Store.Append(e, now)
+}
+
+func (f *failingAppendBusStore) setFail(err error) {
+	f.mu.Lock()
+	f.fail = err
+	f.mu.Unlock()
+}
+
+// rewireBusWithFailingAppend swaps the daemon's bus for one whose durable append
+// can be made to fail, keeping the hub subscription that ensureEventBus installs.
+func rewireBusWithFailingAppend(t *testing.T, d *Daemon) *failingAppendBusStore {
+	t.Helper()
+	d.stopEventBus()
+	backing := &failingAppendBusStore{Store: d.newSQLBusStore()}
+	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf})
+	d.busUnsubscribe = d.eventBus.Subscribe(bus.All, d.projectToClients)
+	t.Cleanup(d.stopEventBus)
+	return backing
+}
+
+// A ticket mutation has already committed by the time its fact is published. If
+// the durable append then fails, the board push must still go out: before the
+// bus existed this was a direct broadcast, and a client cannot be allowed to
+// miss a committed mutation because the event log had a bad night.
+func TestBoardStillPushesWhenTheBusAppendFails(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backing := rewireBusWithFailingAppend(t, d)
+
+	var boards int
+	d.ticketsBroadcastHook = func([]protocol.Ticket) { boards++ }
+
+	now := time.Now()
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "tk-1", Title: "work"}, "sess-a", now); err != nil {
+		t.Fatalf("CreateTicket: %v", err)
+	}
+
+	backing.setFail(errors.New("disk had a bad night"))
+	d.publishTicketFact(FactTicketStatusChanged, "tk-1")
+
+	if boards != 1 {
+		t.Fatalf("a committed ticket mutation produced %d board pushes while the bus append was failing, want 1", boards)
+	}
+	// The fact is genuinely lost — only its durability, not the wire.
+	logged, err := d.store.BusEventsSince(0, 10)
+	if err != nil {
+		t.Fatalf("BusEventsSince: %v", err)
+	}
+	if len(logged) != 0 {
+		t.Fatalf("append was supposed to fail, but the log holds %d event(s)", len(logged))
+	}
+
+	// Recovery: once the store is healthy the next fact is durable again, and the
+	// board still pushes exactly once for it.
+	backing.setFail(nil)
+	d.publishTicketFact(FactTicketStatusChanged, "tk-1")
+	if boards != 2 {
+		t.Fatalf("board pushes = %d after recovery, want 2", boards)
+	}
+	logged, err = d.store.BusEventsSince(0, 10)
+	if err != nil {
+		t.Fatalf("BusEventsSince: %v", err)
+	}
+	if len(logged) != 1 {
+		t.Fatalf("log holds %d event(s) after recovery, want 1", len(logged))
+	}
+}
+
+// The same guarantee for session state. This is the sharper case: the nudge and
+// auto-settle countdowns broadcast without any preceding store write, so nothing
+// upstream gates the push — the bus is the only thing that could drop it.
+func TestSessionStateStillReachesTheWireWhenTheBusAppendFails(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backing := rewireBusWithFailingAppend(t, d)
+
+	d.store.Add(&protocol.Session{ID: "sess-1", Directory: "/tmp/x", State: "idle"})
+
+	var events []string
+	d.wsHub.broadcastListener = func(e *protocol.WebSocketEvent) { events = append(events, e.Event) }
+
+	backing.setFail(errors.New("disk had a bad night"))
+	d.broadcastSessionStateChanged("sess-1")
+
+	found := false
+	for _, name := range events {
+		if name == protocol.EventSessionStateChanged {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a failing bus append silenced session_state_changed; wire saw %v", events)
 	}
 }

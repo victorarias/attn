@@ -174,6 +174,14 @@ closed. Both only affected durable consumers, so neither reached the wire.
   operator would reach for the switch. The bit is now re-read on the poll
   interval from inside the batch loop.
 
+- **A failed durable append silenced the wire.** `publish` returned before
+  fanning out, so a transient SQLite failure after an already-committed ticket or
+  session mutation dropped the projection entirely — a push that could not fail
+  that way before the bus existed. Ephemeral delivery is now unconditional, the
+  same degradation the store-less path already documented: the fact happened, only
+  its durability is missing. `Seq == 0` marks a non-durable event, and the caller
+  still gets the error.
+
 Known and accepted: production registers no durable consumers yet — the hub is
 ephemeral and extensions arrive in A4 — so the durable delivery loop is proved
 by tests (including against the real adapter) rather than by production traffic.

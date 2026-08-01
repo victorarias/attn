@@ -18,7 +18,8 @@ type memStore struct {
 	nextSeq   int64
 	consumers map[string]Consumer
 
-	sinceErr error
+	sinceErr  error
+	appendErr error
 }
 
 func newMemStore() *memStore {
@@ -28,6 +29,9 @@ func newMemStore() *memStore {
 func (m *memStore) Append(e Event, now time.Time) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.appendErr != nil {
+		return 0, m.appendErr
+	}
 	m.nextSeq++
 	e.Seq = m.nextSeq
 	e.CreatedAt = now
@@ -94,6 +98,12 @@ func (m *memStore) SetCursor(name string, cursor int64, now time.Time) error {
 	c.UpdatedAt = now
 	m.consumers[name] = c
 	return nil
+}
+
+func (m *memStore) setAppendErr(err error) {
+	m.mu.Lock()
+	m.appendErr = err
+	m.mu.Unlock()
 }
 
 func (m *memStore) setEnabled(name string, enabled bool) {
@@ -872,4 +882,56 @@ func (c *testClock) advance(d time.Duration) {
 	c.mu.Lock()
 	c.now = c.now.Add(d)
 	c.mu.Unlock()
+}
+
+// A failed durable append must not take the wire down with it. Ephemeral
+// subscribers project onto the WebSocket; before the bus existed those were
+// direct broadcasts that could not fail this way, so degrading to fan-out —
+// exactly as a store-less bus does — is what keeps clients in sync.
+func TestFailedAppendStillFansOutToSubscribers(t *testing.T) {
+	s := newMemStore()
+	b := testBus(t, s)
+
+	var mu sync.Mutex
+	var seen []Event
+	cancel := b.Subscribe(All, func(ev Event) {
+		mu.Lock()
+		seen = append(seen, ev)
+		mu.Unlock()
+	})
+	t.Cleanup(cancel)
+
+	s.setAppendErr(errors.New("disk had a bad night"))
+
+	seq, err := b.Publish("ticket.created", "t-1", nil)
+	if err == nil {
+		t.Fatalf("Publish reported success despite a failed append")
+	}
+	if seq != 0 {
+		t.Fatalf("a non-durable fact got seq %d, want 0", seq)
+	}
+
+	mu.Lock()
+	got := append([]Event(nil), seen...)
+	mu.Unlock()
+
+	if len(got) != 1 {
+		t.Fatalf("the subscriber saw %d event(s); a failed append silenced the wire", len(got))
+	}
+	if got[0].Name != "ticket.created" || got[0].Subject != "t-1" {
+		t.Fatalf("fanned out the wrong event: %+v", got[0])
+	}
+	if got[0].Seq != 0 {
+		t.Fatalf("a non-durable event carried seq %d, want 0 as the marker", got[0].Seq)
+	}
+
+	// And the bus recovers: once the store is healthy the next fact is durable.
+	s.setAppendErr(nil)
+	seq, err = b.Publish("ticket.created", "t-2", nil)
+	if err != nil {
+		t.Fatalf("Publish after recovery: %v", err)
+	}
+	if seq == 0 {
+		t.Fatalf("the fact after recovery was not made durable")
+	}
 }

@@ -244,6 +244,11 @@ func (b *Bus) publish(ev Event, payload any) (int64, error) {
 
 	seq, err := b.store.Append(ev, now)
 	if err != nil {
+		// Same degradation as the store-less case above, and for the same reason.
+		// These projections were direct broadcasts before the bus existed; a client
+		// must not miss a state change because the durable log had a bad night. The
+		// caller still learns durability was lost.
+		b.fanoutEphemeral(ev)
 		return 0, fmt.Errorf("bus: appending %s: %w", ev.Name, err)
 	}
 	ev.Seq = seq
@@ -319,6 +324,11 @@ func (b *Bus) Register(name string, filter Filter, h Handler) error {
 // subscriber holds no cursor, starts at head, and is invoked inline on the
 // publishing goroutine in seq order — so its function must be cheap and must not
 // publish back onto the bus.
+//
+// Seq is 0 when the fact could not be made durable (no store, or a failed
+// append). Ephemeral delivery is deliberately not conditional on durability:
+// these subscribers project onto the wire, and the wire must not go quiet
+// because the log did. A subscriber that cares must check Seq.
 func (b *Bus) Subscribe(filter Filter, fn func(Event)) func() {
 	if fn == nil {
 		return func() {}
