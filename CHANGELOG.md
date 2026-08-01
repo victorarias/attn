@@ -8,7 +8,19 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-08-01]
 
+### Changed
+- **Queue rows give the whole line to the session name.** Sidebar rows in the
+  agent queue no longer show the workspace name, the waiting time sits at the
+  right edge, and the settle/pin/actions buttons appear over the right edge on
+  hover instead of permanently reserving space — so long session names are
+  readable instead of truncating next to empty space. The pin button's tooltip
+  still names the workspace a row would leave the queue by.
+
 ### Fixed
+- **⌘J jumps to the agent that has waited longest.** Jump-to-waiting used to
+  pick the first waiting session in sidebar workspace order, which made its
+  target feel arbitrary. It now follows the queue's own order — the turn owed
+  longest, the same row the "Your turn" band lists first.
 - **A workspace that holds only a tile can be closed again.** Closing the last
   notebook, markdown, or browser tile in a workspace with no agents left the
   workspace in the sidebar — and every later click on its × did nothing, so the

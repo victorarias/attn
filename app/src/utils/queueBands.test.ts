@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildQueueBands, nextTurnAfterSettle, type QueueBandSession } from './queueBands';
+import { buildQueueBands, nextTurnAfterSettle, oldestWantedTurn, type QueueBandSession } from './queueBands';
 import { buildWorkspaceViewModels } from './workspaceViewModels';
 
 const workspaces = [
@@ -158,6 +158,39 @@ describe('buildQueueBands', () => {
     buildQueueBands(tree);
 
     expect(tree.map((workspace) => workspace.sessions.map((session) => session.id))).toEqual([['a'], ['b']]);
+  });
+});
+
+describe('oldestWantedTurn', () => {
+  const wantsOwed = (session: QueueBandSession) => Boolean(session.turnOwed);
+
+  it('lands on the turn owed longest, not the first in list order', () => {
+    // The list arrives in workspace order; ⌘J must follow the queue's order.
+    const target = oldestWantedTurn([
+      { id: 'newest', label: 'newest', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T12:00:00Z' },
+      { id: 'oldest', label: 'oldest', workspaceId: 'ws-b', turnOwed: true, turnOpenedAt: '2026-07-26T09:00:00Z' },
+      { id: 'middle', label: 'middle', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T10:00:00Z' },
+    ], wantsOwed);
+
+    expect(target?.id).toBe('oldest');
+  });
+
+  it('skips sessions that do not want the user, whatever their stamp says', () => {
+    // A settled turn keeps its turnOpenedAt until the next turn opens; being
+    // old is not being owed.
+    const target = oldestWantedTurn([
+      { id: 'settled-old', label: 'a', workspaceId: 'ws-a', turnOwed: false, turnOpenedAt: '2026-07-26T08:00:00Z' },
+      { id: 'owed', label: 'b', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T10:00:00Z' },
+    ], wantsOwed);
+
+    expect(target?.id).toBe('owed');
+  });
+
+  it('is null when nothing wants the user', () => {
+    expect(oldestWantedTurn([
+      { id: 'quiet', label: 'quiet', workspaceId: 'ws-a' },
+    ], wantsOwed)).toBeNull();
+    expect(oldestWantedTurn([], wantsOwed)).toBeNull();
   });
 });
 

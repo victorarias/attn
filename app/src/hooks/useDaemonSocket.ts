@@ -2657,7 +2657,18 @@ export function useDaemonSocket({
       if (recoveryNoticeTimeoutRef.current) {
         clearTimeout(recoveryNoticeTimeoutRef.current);
       }
-      wsRef.current?.close();
+      // Detach handlers before closing: onclose otherwise schedules a fresh
+      // reconnect timer synchronously (as it does in tests, and can in real
+      // browsers too), which would leak past this cleanup and fire after
+      // teardown with a stale WebSocket reference.
+      const ws = wsRef.current;
+      if (ws) {
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        ws.onopen = null;
+        ws.close();
+      }
     };
   }, [connect]);
 

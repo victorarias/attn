@@ -92,53 +92,64 @@ function QueueRowView({
         onClick={onSelect}
       />
       <StateIndicator state={session.state} size="md" seed={session.id} reason={session.state_reason} />
+      {/*
+        No workspace name in a band row: the row is about the agent, the label
+        needs every column the sidebar has, and the pin button's tooltip still
+        says which workspace the row would leave the queue by. The age anchors
+        to the right edge; the hover controls float above it (see .queue-row-
+        controls) rather than reserving row width for buttons that are usually
+        invisible.
+      */}
       <span className="session-label">{session.label}</span>
       {session.chiefOfStaff && <ChiefOfStaffBadge />}
-      <span className="queue-row-workspace">{row.workspaceTitle}</span>
       {age && <span className="queue-row-age">{age}</span>}
-      {onOpenActions && (
-        <div className="session-actions">
-          <button
-            type="button"
-            className="session-action-btn session-more-btn"
-            data-testid={`session-actions-${session.id}`}
-            onClick={onOpenActions}
-            title="Session actions"
-            aria-label={`Actions for ${session.label}`}
-          >
-            •••
-          </button>
+      {(onOpenActions || onPin || onSettle) && (
+        <div className="queue-row-controls">
+          {onOpenActions && (
+            <div className="session-actions">
+              <button
+                type="button"
+                className="session-action-btn session-more-btn"
+                data-testid={`session-actions-${session.id}`}
+                onClick={onOpenActions}
+                title="Session actions"
+                aria-label={`Actions for ${session.label}`}
+              >
+                •••
+              </button>
+            </div>
+          )}
+          {onPin && (
+            <button
+              type="button"
+              className="queue-row-pin"
+              data-testid={`queue-pin-${session.id}`}
+              title={`Pin ${row.workspaceTitle} — take it out of the queue`}
+              aria-label={`Pin workspace ${row.workspaceTitle}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onPin();
+              }}
+            >
+              📍
+            </button>
+          )}
+          {onSettle && (
+            <button
+              type="button"
+              className="queue-row-settle"
+              data-testid={`queue-settle-${session.id}`}
+              title={`Settle this turn (${formatShortcut('session.settle')})`}
+              aria-label={`Settle ${session.label}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSettle();
+              }}
+            >
+              ✓
+            </button>
+          )}
         </div>
-      )}
-      {onPin && (
-        <button
-          type="button"
-          className="queue-row-pin"
-          data-testid={`queue-pin-${session.id}`}
-          title={`Pin ${row.workspaceTitle} — take it out of the queue`}
-          aria-label={`Pin workspace ${row.workspaceTitle}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onPin();
-          }}
-        >
-          📍
-        </button>
-      )}
-      {onSettle && (
-        <button
-          type="button"
-          className="queue-row-settle"
-          data-testid={`queue-settle-${session.id}`}
-          title={`Settle this turn (${formatShortcut('session.settle')})`}
-          aria-label={`Settle ${session.label}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSettle();
-          }}
-        >
-          ✓
-        </button>
       )}
       {showSettling && session.autoSettleFiresAt && (
         <SidebarSettlingBar firesAt={session.autoSettleFiresAt} />
