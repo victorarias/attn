@@ -317,9 +317,6 @@ func (f *wireFeeder) observe() {
 	}
 }
 
-// failResync records the first observation failure of this chunk. The APC's
-// grid effect is already in the terminal; the wire gets nothing for it, and the
-// snapshot the client re-attaches for carries the truth.
 // appeared reports whether the observations recorded past index from brought
 // any placement into existence, as opposed to only retiring or moving ones the
 // wire has already accounted for.
@@ -332,6 +329,9 @@ func (f *wireFeeder) appeared(from int) bool {
 	return false
 }
 
+// failResync records the first observation failure of this chunk. The APC's
+// grid effect is already in the terminal; the wire gets nothing for it, and the
+// snapshot the client re-attaches for carries the truth.
 func (f *wireFeeder) failResync(reason string) {
 	if f.resync == "" {
 		f.resync = reason

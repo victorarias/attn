@@ -308,11 +308,17 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			chunks: []string{"\x1b_Ga=T,i=41,f=24,t=d,s=8,v=16;\x840 done\x1b\\"},
 		},
 		{
-			// The same disagreement one layer up: the ESC that abandons an APC
-			// is also what opens the next one, so neither can be extracted.
+			// The same disagreement one layer up. The first APC is never
+			// terminated: the ESC that abandons it is the second one's
+			// introducer, so cutting the second out would take the first's exit
+			// with it and neither can be extracted. Every byte goes to the wire
+			// verbatim, which keeps the parsers in step — but ghostty still
+			// dispatches the second command and places its image, and the client
+			// cannot, so the feeder resyncs. Reachable only once kitty storage is
+			// live.
 			name: "an apc opened by the escape that abandoned the previous one",
 			cols: 20, rows: 8,
-			chunks: []string{"A" + kittyPlaceRGB(43, 8, 16, "") + "B"},
+			chunks: []string{"A" + kittyIntro + "a=T;AA" + kittyPlaceRGB(43, 8, 16, "") + "B"},
 		},
 		{
 			// An APC ghostty DOES parse as kitty but the segmenter must not cut

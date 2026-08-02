@@ -156,7 +156,7 @@ func FuzzKittySegmenterFraming(f *testing.F) {
 			})
 		}
 		if got := string(rebuilt) + string(seg.pending); got != string(data) {
-			t.Fatalf("emissions rebuild %q, want %q (chunk size %d)", got, data, data)
+			t.Fatalf("emissions rebuild %q, want %q (chunk size %d)", got, data, size)
 		}
 
 		want := ghosttyInGround(t, string(data))

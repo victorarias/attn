@@ -316,10 +316,10 @@ Layers around the gate:
 
 ### A4 — enable, restore, remote, receipts
 
-Two synthesis defects are known and deliberately deferred to here. Both are
+Three synthesis defects are known and deliberately deferred to here. All are
 unreachable while the storage limit is 0 — nothing dispatches, so the grid never
-moves and `writeAPC` returns early — and both become live the moment the limit
-is flipped. Neither may ship with the flip.
+moves and `writeAPC` returns early — and all become live the moment the limit
+is flipped. None may ship with the flip.
 
 - [ ] **CHA is wrong under DECLRMM + origin mode.** Synthesis ends with an
       absolute column move, and a client with left/right margins enabled
@@ -336,6 +336,16 @@ is flipped. Neither may ship with the flip.
       Measure real emitters before deciding whether that needs a cheaper
       repair (a wire-side sequence-abort byte was sketched and rejected as
       unproven; see the segmenter's header).
+- [ ] **The undescribed-image check only sees images APPEAR.** The end-of-feed
+      comparison resyncs on `delta.Added` alone, because `Updated` is scroll
+      noise: `ViewportCol`/`ViewportRow` are viewport-relative, and observation
+      happens only on APC writes, so ordinary scrolling between two of them
+      moves every live placement and would resync constantly. The cost is two
+      divergences that stay silent on a verbatim APC — a re-place of an
+      existing `{ImageID, PlacementID}` at a new spot, and a retransmission
+      that changes the image content under a live id (`ImageGeneration` moves,
+      the placement key does not). Decide at the flip: include `Updated` and
+      accept the re-pushes, or key the diff on the fields a scroll cannot move.
 
 - [ ] Flip the storage limit on (measured number, named limit errors surfaced
       through kitty's own response channel and the daemon log).
