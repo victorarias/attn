@@ -6,14 +6,15 @@
 // membership a comparison between two stamps rather than a reading of the
 // current state — state matters only at the instant a turn opens.
 //
-// The package is pure. It derives over protocol values and timestamps and
-// imports neither the store nor the daemon.
+// The package is pure. It derives over protocol values, resolver reasons, and
+// timestamps, and imports neither the store nor the daemon.
 package attention
 
 import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/sessionstate"
 )
 
 // OpensTurn reports whether reaching this state starts a turn the user owes.
@@ -44,6 +45,37 @@ func OpensTurn(state protocol.SessionState) bool {
 		protocol.SessionStateUnknown,
 		protocol.SessionStateIdle:
 		return true
+	default:
+		return false
+	}
+}
+
+// BreaksSnooze reports whether reaching this state cuts a snooze short.
+//
+// Snoozing says *not now*, and business as usual does not undo it: the agent
+// stopping, asking a question, wanting an approval, or finishing its run are all
+// things the user was deferring when they pressed it. What breaks through is what
+// they could not have anticipated.
+//
+//   - unknown is the daemon admitting it cannot explain the session (reasons
+//     "stuck" and "no_evidence"). A deferral is a judgement about an agent the
+//     user understood; this is the daemon saying that judgement no longer has
+//     anything behind it.
+//   - idle with reason "process_exited" is the agent's process actually gone.
+//     A run that merely ended resolves idle through "prompt_idle" or
+//     "classifier_verdict", so ordinary finishing stays deferred and only dying
+//     rings.
+//
+// The reason arrives as a plain string because that is how it rides the wire and
+// sits in the store, but it is compared against the resolver's own constant: the
+// set is defined by what the resolver means, and a renamed reason must not
+// silently stop breaking through.
+func BreaksSnooze(state protocol.SessionState, reason string) bool {
+	switch state {
+	case protocol.SessionStateUnknown:
+		return true
+	case protocol.SessionStateIdle:
+		return reason == string(sessionstate.ReasonProcessExited)
 	default:
 		return false
 	}

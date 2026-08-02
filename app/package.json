@@ -66,6 +66,7 @@
     "real-app:scenario-ordinary-delegation-ticket": "node scripts/real-app-harness/scenario-ordinary-delegation-ticket.mjs",
     "real-app:scenario-ticket-resume": "node scripts/real-app-harness/scenario-ticket-resume.mjs",
     "real-app:scenario-agent-queue": "node scripts/real-app-harness/scenario-agent-queue.mjs",
+    "real-app:scenario-agent-queue-snooze": "node scripts/real-app-harness/scenario-agent-queue-snooze.mjs",
     "real-app:scenario-nudge-trigger": "node scripts/real-app-harness/scenario-nudge-trigger.mjs",
     "real-app:scenario-terminal-block-copy": "node scripts/real-app-harness/scenario-terminal-block-copy.mjs",
     "real-app:scenario-terminal-context-menu": "node scripts/real-app-harness/scenario-terminal-context-menu.mjs",

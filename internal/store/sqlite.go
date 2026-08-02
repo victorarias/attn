@@ -850,6 +850,7 @@ CREATE TABLE IF NOT EXISTS bus_consumers (
     enabled    INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL DEFAULT ''
 );`},
+	{85, "add the snooze deadline to sessions", ""}, // see applyMigration85
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1110,6 +1111,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 81 {
 			if err := applyMigration81(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 85 {
+			if err := applyMigration85(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2042,6 +2048,19 @@ func applyMigration81(tx *sql.Tx) error {
 	_, err = tx.Exec(`
 		UPDATE sessions SET turn_opened_at = state_since
 		 WHERE state IN ('waiting_input', 'pending_approval', 'unknown')`)
+	return err
+}
+
+// applyMigration85 adds the snooze deadline. Nothing is backfilled: no snooze
+// has ever been expressed, so every existing session is correctly not deferred.
+// Guarded on the column existing so a rewound schema_migrations table re-runs it
+// without erroring on the duplicate.
+func applyMigration85(tx *sql.Tx) error {
+	has, err := columnExists(tx, "sessions", "turn_snoozed_until")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN turn_snoozed_until TEXT NOT NULL DEFAULT ''")
 	return err
 }
 

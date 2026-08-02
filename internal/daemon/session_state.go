@@ -152,7 +152,13 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	// startup recovery: a session that comes back in a state that wants the user
 	// wants the user regardless of what moved it there. Opening is guarded in the
 	// store, so a state re-reported while a turn is already open changes nothing.
-	if attention.OpensTurn(protocol.SessionState(change.state)) {
+	//
+	// A snooze suppresses that, which is the whole of the deferral: the state is
+	// still committed and still broadcast, it simply does not put the agent back
+	// on the user's plate. A state that breaks through clears the snooze inside
+	// the check and falls through to open the turn it would have opened anyway.
+	if attention.OpensTurn(protocol.SessionState(change.state)) &&
+		!d.snoozeSuppressesTurn(change.sessionID, protocol.SessionState(change.state)) {
 		d.store.OpenTurnIfClosed(change.sessionID, time.Now())
 	}
 

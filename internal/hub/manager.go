@@ -1344,6 +1344,10 @@ func sessionsMatch(left, right protocol.Session) bool {
 		protocol.Deref(left.StateReason) == protocol.Deref(right.StateReason) &&
 		protocol.Deref(left.TurnOwed) == protocol.Deref(right.TurnOwed) &&
 		protocol.Deref(left.TurnOpenedAt) == protocol.Deref(right.TurnOpenedAt) &&
+		// Without this a remote agent snoozed on its own daemon changes nothing
+		// the hub compares, so the re-broadcast is suppressed and the row never
+		// moves into the snoozed section.
+		protocol.Deref(left.TurnSnoozedUntil) == protocol.Deref(right.TurnSnoozedUntil) &&
 		protocol.Deref(left.TicketUnread) == protocol.Deref(right.TicketUnread) &&
 		protocol.Deref(left.NudgeFiresAt) == protocol.Deref(right.NudgeFiresAt) &&
 		strings.Join(left.Todos, "\x00") == strings.Join(right.Todos, "\x00") &&

@@ -1,0 +1,19 @@
+kind: added
+area: queue
+change: >
+  In the agent queue, any agent — one that owes you a turn, or one still
+  working — can be deferred for 30 minutes, an hour, 8 hours, or until
+  tomorrow, Saturday, or Monday morning. Snoozing closes the open turn and
+  stops the next one from opening until then, so an agent you can't act on
+  yet stays out of your queue instead of asking again the moment it stops.
+  Deferred agents collect in a collapsible Snoozed section at the foot of the
+  sidebar, above muted workspaces, each showing when it comes back; a
+  wake-now action wakes one early. Snooze from the row menu, Cmd+Shift+S on
+  the selected agent, or the command menu — and like settling, snoozing
+  hands you the next agent that wants you. A deferral is honoured while it
+  lasts: typing to a snoozed agent, or looking at it, does not cancel it.
+  Only what you couldn't have anticipated breaks through — an agent whose
+  state attn can't explain, or one whose process died — and that ends the
+  snooze and puts the turn back in your queue. When the time arrives the
+  agent returns at the tail of the queue, not the head: the clock on what
+  you owe starts when you said you'd come back.

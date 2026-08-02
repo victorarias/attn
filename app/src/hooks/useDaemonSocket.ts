@@ -177,7 +177,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '200';
+export const PROTOCOL_VERSION = '201';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -4941,6 +4941,25 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'settle_turn', session_id: sessionId }));
   }, []);
 
+  // Defer a session until an instant. Closes any open turn and stops the next
+  // one opening before then, so an agent you cannot act on yet leaves the queue
+  // without being pretended-settled. `until` is absolute and computed here:
+  // "tomorrow" and "Monday" need the user's timezone, which the daemon that owns
+  // a remote session does not share. Fire and forget.
+  const sendSnoozeTurn = useCallback((sessionId: string, until: Date) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'snooze_turn', session_id: sessionId, until: until.toISOString() }));
+  }, []);
+
+  // End a snooze early. Whether a turn then opens depends on the state the agent
+  // is in, which is the daemon's call. Fire and forget.
+  const sendWakeTurn = useCallback((sessionId: string) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'wake_turn', session_id: sessionId }));
+  }, []);
+
   // Keep a turn auto-settle is about to close. Stops the countdown and leaves the
   // turn owed; the daemon also suppresses re-arming until the session next leaves
   // `working`, so the cancel survives the agent simply carrying on. Fire and
@@ -5507,6 +5526,8 @@ export function useDaemonSocket({
     sendSessionSelected,
     sendTriggerNudge,
     sendSettleTurn,
+    sendSnoozeTurn,
+    sendWakeTurn,
     sendCancelAutoSettle,
     sendWorkspaceSelected,
     sendWorkspaceGet,

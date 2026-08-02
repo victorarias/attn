@@ -164,6 +164,71 @@ describe('buildQueueBands', () => {
 
     expect(tree.map((workspace) => workspace.sessions.map((session) => session.id))).toEqual([['a'], ['b']]);
   });
+
+  describe('snoozed', () => {
+    // Fixed clocks: a snooze is a comparison against now, and a test whose
+    // deadlines drift with the wall clock is a test that expires.
+    const now = Date.parse('2026-07-26T12:00:00Z');
+    const laterToday = '2026-07-26T13:00:00Z';
+    const laterStill = '2026-07-26T18:00:00Z';
+
+    it('takes a deferred agent out of both bands into its own list', () => {
+      const bands = buildQueueBands(views([
+        { id: 'owed', label: 'owed', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T09:00:00Z' },
+        { id: 'quiet', label: 'quiet', workspaceId: 'ws-a' },
+        { id: 'deferred', label: 'deferred', workspaceId: 'ws-b', turnSnoozedUntil: laterToday },
+      ]), now);
+
+      expect(bands.turns.map((row) => row.session.id)).toEqual(['owed']);
+      expect(bands.settled.map((row) => row.session.id)).toEqual(['quiet']);
+      expect(bands.snoozed.map((row) => row.session.id)).toEqual(['deferred']);
+    });
+
+    it('orders by when each comes back, soonest first', () => {
+      const bands = buildQueueBands(views([
+        { id: 'late', label: 'late', workspaceId: 'ws-a', turnSnoozedUntil: laterStill },
+        { id: 'soon', label: 'soon', workspaceId: 'ws-b', turnSnoozedUntil: laterToday },
+      ]), now);
+
+      expect(bands.snoozed.map((row) => row.session.id)).toEqual(['soon', 'late']);
+    });
+
+    it('returns a lapsed deadline to the settled band', () => {
+      // The daemon strips a lapsed deadline from the broadcast, but a client
+      // holding a snapshot across the wake must not park the row for as long as
+      // it takes the next one to land.
+      const bands = buildQueueBands(views([
+        { id: 'woken', label: 'woken', workspaceId: 'ws-a', turnSnoozedUntil: '2026-07-26T11:00:00Z' },
+      ]), now);
+
+      expect(bands.snoozed).toEqual([]);
+      expect(bands.settled.map((row) => row.session.id)).toEqual(['woken']);
+    });
+
+    it('keeps a snoozed agent out of the turns band even if a snapshot still says owed', () => {
+      // The daemon settles as it snoozes, so the two never both hold. The order
+      // of the checks is what stops a snapshot taken mid-broadcast from drawing
+      // a deferred agent as a turn the user owes.
+      const bands = buildQueueBands(views([
+        { id: 'both', label: 'both', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T09:00:00Z', turnSnoozedUntil: laterToday },
+      ]), now);
+
+      expect(bands.turns).toEqual([]);
+      expect(bands.snoozed.map((row) => row.session.id)).toEqual(['both']);
+    });
+
+    it('leaves a pinned workspace out of the snoozed list too', () => {
+      // Pinned and muted are in the tree, not the bands, whatever else is true
+      // of them.
+      const pinnedViews = buildWorkspaceViewModels(
+        [{ id: 'ws-p', title: 'P', directory: '/repo/p', rank: 'a', pinned: true }],
+        [{ id: 'pinned', label: 'pinned', workspaceId: 'ws-p', turnSnoozedUntil: laterToday }],
+      );
+
+      expect(buildQueueBands(pinnedViews, now).snoozed).toEqual([]);
+    });
+  });
+
 });
 
 describe('oldestWantedTurn', () => {
@@ -338,6 +403,34 @@ describe('advanceAfterTurnClosed', () => {
     const after = buildQueueBands(views([owed('next', 1)]));
 
     expect(advanceAfterTurnClosed(before.turns, after, 'watched')).toBeNull();
+  });
+
+  it('moves on when the watched turn closed by being snoozed', () => {
+    // A snooze closes the turn on the agent the user is looking at, exactly like
+    // a settle — so leaving them parked in the agent they just deferred is the
+    // bookkeeping this exists to remove.
+    const watched = owed('watched', 0);
+    const before = buildQueueBands(views([watched, owed('next', 1)]));
+    const after = buildQueueBands(views([
+      { ...watched, turnOwed: false, turnSnoozedUntil: '2026-07-26T20:00:00Z' },
+      owed('next', 1),
+    ]), Date.parse('2026-07-26T12:00:00Z'));
+
+    expect(after.snoozed.map((row) => row.session.id)).toEqual(['watched']);
+    expect(advanceAfterTurnClosed(before.turns, after, 'watched')).toEqual({
+      to: 'session',
+      row: expect.objectContaining({ session: expect.objectContaining({ id: 'next' }) }),
+    });
+  });
+
+  it('goes home when the snoozed turn was the last one owed', () => {
+    const only = owed('watched', 0);
+    const before = buildQueueBands(views([only]));
+    const after = buildQueueBands(views([
+      { ...only, turnOwed: false, turnSnoozedUntil: '2026-07-26T20:00:00Z' },
+    ]), Date.parse('2026-07-26T12:00:00Z'));
+
+    expect(advanceAfterTurnClosed(before.turns, after, 'watched')).toEqual({ to: 'dashboard' });
   });
 
   it('stays put with no agent selected, or before any bands exist', () => {

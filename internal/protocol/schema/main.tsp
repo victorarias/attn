@@ -138,6 +138,7 @@ model Session {
   nudge_fires_at?: string;      // ISO timestamp a pending ticket-nudge countdown will fire; absent when paused (active session) or no countdown
   turn_owed?: boolean;          // True when the user owes this session a turn. Derived at broadcast from the turn stamps plus the queue's exclusions (shell, chief, pinned, muted); never stored, and never recomputed by a client.
   turn_opened_at?: string;      // ISO timestamp the outstanding turn opened; the queue's sort key. Absent when nothing is owed.
+  turn_snoozed_until?: string;  // ISO timestamp a live snooze runs to. Present only while the deferral holds; its presence is what puts the row in the sidebar's snoozed section, and while it is set no state can open a turn for this session except one that breaks through.
   auto_settle_fires_at?: string; // ISO timestamp the auto-settle countdown will close this session's turn. Present only while the countdown is running, which is the whole contract: it is what the terminal tile animates against, and its absence is what says nothing is pending. Absent during the arm delay, when auto-settle is off, and after a cancel.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
@@ -1378,6 +1379,28 @@ model TriggerNudgeMessage {
 // Fire-and-forget; the daemon broadcasts the session afterwards.
 model SettleTurnMessage {
   cmd: "settle_turn";
+  session_id: string;
+}
+
+// SnoozeTurnMessage defers a session until an instant: it closes any open turn
+// and stops the next one from opening before then. Snooze is available on any
+// agent, not only one that currently owes a turn, so a run you already know you
+// do not want handed back can be deferred before it finishes.
+//
+// `until` is an absolute ISO instant computed by the client, because "tomorrow"
+// and "Monday" are calendar questions that need the user's timezone — which a
+// remote endpoint's daemon does not share. Fire-and-forget.
+model SnoozeTurnMessage {
+  cmd: "snooze_turn";
+  session_id: string;
+  until: string;
+}
+
+// WakeTurnMessage ends a snooze early. It clears the deadline; whether a turn
+// then opens depends on the state the agent is in at that instant, which is the
+// daemon's call. Fire-and-forget.
+model WakeTurnMessage {
+  cmd: "wake_turn";
   session_id: string;
 }
 

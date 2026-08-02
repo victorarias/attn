@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { onOpenUrl, getCurrent } from '@tauri-apps/plugin-deep-link';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
@@ -31,6 +32,7 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { ShortcutEditorModal } from './components/ShortcutEditorModal';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { ActionMenu, type ActionMenuItem } from './components/ActionMenu';
+import { SnoozeMenu } from './components/SnoozeMenu';
 import { MarkdownOpener, OPENER_EXTENSIONS } from './components/palette/MarkdownOpener';
 import { resolveMarkdownOpenerTarget } from './components/palette/openerTarget';
 import { claimPaletteFocus } from './components/palette/paletteClaim';
@@ -603,6 +605,8 @@ function App() {
     sendSessionSelected,
     sendTriggerNudge,
     sendSettleTurn,
+    sendSnoozeTurn,
+    sendWakeTurn,
     sendCancelAutoSettle,
     sendWorkspaceSelected,
     sendWorkspaceAddSessionPane,
@@ -823,6 +827,8 @@ function App() {
         sendSessionSelected={sendSessionSelected}
         sendTriggerNudge={sendTriggerNudge}
         sendSettleTurn={sendSettleTurn}
+        sendSnoozeTurn={sendSnoozeTurn}
+        sendWakeTurn={sendWakeTurn}
         sendCancelAutoSettle={sendCancelAutoSettle}
         sendWorkspaceSelected={sendWorkspaceSelected}
         sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
@@ -950,6 +956,8 @@ interface AppContentProps {
   sendSessionSelected: ReturnType<typeof useDaemonSocket>['sendSessionSelected'];
   sendTriggerNudge: ReturnType<typeof useDaemonSocket>['sendTriggerNudge'];
   sendSettleTurn: ReturnType<typeof useDaemonSocket>['sendSettleTurn'];
+  sendSnoozeTurn: ReturnType<typeof useDaemonSocket>['sendSnoozeTurn'];
+  sendWakeTurn: ReturnType<typeof useDaemonSocket>['sendWakeTurn'];
   sendCancelAutoSettle: ReturnType<typeof useDaemonSocket>['sendCancelAutoSettle'];
   sendWorkspaceSelected: ReturnType<typeof useDaemonSocket>['sendWorkspaceSelected'];
   sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
@@ -1071,6 +1079,8 @@ sendFetchPRDetails,
   sendSessionSelected,
   sendTriggerNudge,
   sendSettleTurn,
+  sendSnoozeTurn,
+  sendWakeTurn,
   sendCancelAutoSettle,
   sendWorkspaceSelected,
   sendWorkspaceAddSessionPane,
@@ -1451,6 +1461,7 @@ sendFetchPRDetails,
       nudgeFiresAt: daemonSession?.nudge_fires_at,
       turnOwed: daemonSession?.turn_owed ?? false,
       turnOpenedAt: daemonSession?.turn_opened_at,
+      turnSnoozedUntil: daemonSession?.turn_snoozed_until,
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
@@ -2781,6 +2792,7 @@ sendFetchPRDetails,
     ];
   }, [actionMenuItems, activeWorkspaceForCommands, sendPinWorkspace, sendMuteWorkspace]);
 
+
   // Each arrangement has one notion of what wants the user, and the mode selects
   // it. In the queue arrangement that is the daemon's turn_owed — which honours
   // settle, and the shell/chief/pinned/muted exclusions a client cannot see. With
@@ -2888,6 +2900,83 @@ sendFetchPRDetails,
       : undefined),
     [queueModeEnabled, activeSessionId, sendSettleTurn],
   );
+
+  // The snooze duration menu. Snooze needs a *when*, so unlike settle the verb
+  // cannot fire straight from a keystroke or a click — every entry point opens
+  // this and the choice is what sends the command.
+  const [snoozeMenu, setSnoozeMenu] = useState<
+    { session: { id: string; label: string }; anchor: { top: number; left: number } } | null
+  >(null);
+
+  const openSnoozeMenu = useCallback(
+    (session: { id: string; label: string }, event: ReactMouseEvent) => {
+      const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      setSnoozeMenu({ session, anchor: { top: rect.bottom + 4, left: rect.left } });
+    },
+    [],
+  );
+
+  // The keyboard path has no click to anchor to, so it anchors to the selected
+  // session's own row — the menu belongs to that agent, and opening it in the
+  // middle of the screen would make the user check which one it means. Falling
+  // back to the viewport corner keeps the verb usable when the row is scrolled
+  // out or the sidebar is collapsed.
+  const handleSnoozeActiveSession = useMemo(
+    () => (queueModeEnabled
+      ? () => {
+        if (!activeSessionId) return;
+        const session = enrichedLocalSessions.find((s) => s.id === activeSessionId);
+        if (!session) return;
+        const row = document.querySelector<HTMLElement>(`[data-testid$="-${activeSessionId}"].queue-row`);
+        const rect = row?.getBoundingClientRect();
+        setSnoozeMenu({
+          session: { id: session.id, label: session.label },
+          anchor: rect ? { top: rect.bottom + 4, left: rect.left } : { top: 72, left: 72 },
+        });
+      }
+      : undefined),
+    [queueModeEnabled, activeSessionId, enrichedLocalSessions],
+  );
+
+  // Snooze and wake for the agent you are in. One entry each rather than one per
+  // duration: six near-identical rows would crowd the palette, and the duration
+  // menu is where the wake times are actually shown. Both are queue-only, like
+  // the shortcut — there is no queue to defer out of with the arrangement off.
+  const activeSessionSnoozedUntil = enrichedLocalSessions.find(
+    (session) => session.id === activeSessionId,
+  )?.turnSnoozedUntil;
+  const actionMenuItemsWithQueueActions = useMemo<ActionMenuItem[]>(() => {
+    if (!queueModeEnabled || !activeSessionId) return actionMenuItemsWithWorkspaceActions;
+    const items = [...actionMenuItemsWithWorkspaceActions];
+    if (activeSessionSnoozedUntil) {
+      items.push({
+        id: 'wake-active-session',
+        title: 'Wake this agent now',
+        description: 'End the snooze and let it back into the queue',
+        keywords: ['wake', 'snooze', 'defer', 'queue', 'turn'],
+        icon: <AttentionActionIcon />,
+        run: () => sendWakeTurn(activeSessionId),
+      });
+    } else if (handleSnoozeActiveSession) {
+      items.push({
+        id: 'snooze-active-session',
+        title: 'Snooze this agent…',
+        description: 'Take it off your plate until a time you choose',
+        keywords: ['snooze', 'defer', 'later', 'queue', 'turn'],
+        icon: <AttentionActionIcon />,
+        shortcut: [shortcutTokens('session.snooze')],
+        run: handleSnoozeActiveSession,
+      });
+    }
+    return items;
+  }, [
+    actionMenuItemsWithWorkspaceActions,
+    queueModeEnabled,
+    activeSessionId,
+    activeSessionSnoozedUntil,
+    handleSnoozeActiveSession,
+    sendWakeTurn,
+  ]);
 
   // Closing a turn hands over the next agent that owes one, or home when none
   // does. This is the only place that happens, for every way a turn can close:
@@ -3596,6 +3685,7 @@ sendFetchPRDetails,
     onToggleGridMode: toggleGridMode,
     onJumpToWaiting: handleJumpToWaiting,
     onSettleTurn: handleSettleActiveTurn,
+    onSnoozeTurn: handleSnoozeActiveSession,
     onCancelAutoSettle: handleCancelAutoSettle,
     onSelectWorkspaceByIndex: handleSelectWorkspaceByIndex,
     onPrevSession: handlePrevWorkspace,
@@ -3778,6 +3868,8 @@ sendFetchPRDetails,
           onWorkspaceReorder={handleWorkspaceReorder}
           queue={queueBands}
           onSettleTurn={sendSettleTurn}
+          onOpenSnooze={openSnoozeMenu}
+          onWakeTurn={sendWakeTurn}
           onScreenSessionIds={onScreenSessionIds}
           onSelectSession={handleSelectSession}
           onTriggerNudge={sendTriggerNudge}
@@ -4196,9 +4288,20 @@ sendFetchPRDetails,
           }}
         />
       )}
+      {/* Owned here rather than in the sidebar because ⌘⇧S opens it too, and a
+          menu that exists only while the sidebar drew the row would be missing
+          exactly when the shortcut is most useful. */}
+      {snoozeMenu && (
+        <SnoozeMenu
+          sessionLabel={snoozeMenu.session.label}
+          anchor={snoozeMenu.anchor}
+          onSnooze={(until) => sendSnoozeTurn(snoozeMenu.session.id, until)}
+          onClose={() => setSnoozeMenu(null)}
+        />
+      )}
       <ActionMenu
         isOpen={actionMenuOpen}
-        actions={actionMenuItemsWithWorkspaceActions}
+        actions={actionMenuItemsWithQueueActions}
         onClose={() => setActionMenuOpen(false)}
       />
       <ShortcutsModal

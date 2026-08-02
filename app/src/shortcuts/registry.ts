@@ -77,6 +77,11 @@ export const SHORTCUTS = {
   // and the shortcut editor's chord tests lean on ⌘E being free to record as an
   // exclusive leader.
   'session.settle': { key: 'e', meta: true, shift: true },
+  // Open the snooze duration menu for the selected session. Like session.settle
+  // it is bound only while the queue arrangement is on. ⌘⇧S carries no
+  // Menu::default accelerator (the default menu claims no S at all) and, being a
+  // Cmd chord, never reaches the PTY.
+  'session.snooze': { key: 's', meta: true, shift: true },
   // Keep the turn auto-settle is counting down to close. ⌘. is the macOS cancel
   // idiom, carries no Menu::default accelerator, and — being a Cmd chord — never
   // reaches the PTY, so it is safe to claim globally. Like session.settle it is
