@@ -59,9 +59,18 @@ func TestAFailingCronEntryStaysArmed(t *testing.T) {
 	}
 	mustStart(t, r)
 
+	// The handler counts its fire on entry, so counting to `want` says the fire
+	// started, not that it finished and re-armed. Wait for the re-arm before
+	// advancing again: the next fire is scheduled an interval past the moment the
+	// last one finished, so advancing first would push the schedule out from under
+	// the very clock move meant to trigger it.
 	for want := int64(1); want <= 3; want++ {
 		clock.advance(time.Minute)
 		waitFor(t, "the failing cron entry to fire", func() bool { return fires.Load() == want })
+		waitFor(t, "the failing cron entry to re-arm", func() bool {
+			next, err := r.CronEntry(cronKind)
+			return err == nil && next != nil && next.State == StateQueued && next.ScheduledAt.After(clock.now())
+		})
 	}
 	entry, err := r.CronEntry(cronKind)
 	if err != nil || entry == nil {

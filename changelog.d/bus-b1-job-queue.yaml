@@ -1,0 +1,16 @@
+kind: internal
+area: daemon
+change: >
+  Every background duty (context compaction, session summarization, workspace
+  narration, ticket reconcile) and every periodic tick now runs on one durable
+  job queue (`internal/jobs`), replacing `internal/tasks` and the per-duty
+  ticker goroutines. Jobs carry a JSON payload and a persisted result;
+  coalescing is opt-in via a unique key rather than baked into the record's
+  identity; a recurring duty is an ordinary job that re-arms itself, so its
+  next fire survives a restart and shows up in the background-work panel like
+  everything else. Existing `tasks` rows are imported once, preserving their
+  ids so pre-upgrade notification links still resolve.
+notes: >
+  The wire shape is unchanged, so the background-work panel behaves as before.
+  Parity against the pre-move behavior is recorded item by item in
+  docs/plans/2026-08-01-ext-b1-job-queue.md.

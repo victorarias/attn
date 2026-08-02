@@ -134,8 +134,8 @@ they are not the unbounded growth trimming exists to bound.
 ### Slices
 
 1. `internal/jobs` + the SQLite store + migration **86** — the package and its
-   tests, no callers. (85 is claimed by an in-flight branch and already applied
-   to two real profile DBs.)
+   tests, no callers. (85 was taken by the session snooze deadline, which was
+   in flight alongside this and has since landed.)
 2. The daemon builds a `jobs.Runner`, the four kinds move onto it kind by kind
    against the parity checklist below, `internal/tasks` is deleted, and
    existing `tasks` rows are imported once. The wire shape does not change:
