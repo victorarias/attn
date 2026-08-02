@@ -1,47 +1,54 @@
 package pty
 
-// Kitty graphics APC segmenter — the outer split of the worker's PTY feed.
+// The worker's PTY feed segmenter — the ONE place that decides where a
+// sequence begins and ends.
 //
-// The feed path nests two segmenters. This one runs OUTSIDE, cutting the raw
-// stream into plain runs and complete kitty graphics APCs; the OSC 133
-// segmenter (osc133.go) runs INSIDE, over the plain runs only. The nesting is
-// not cosmetic — the two layers dispose of their bytes differently. An OSC 133
-// marker goes nowhere: stripped from the terminal feed and from the wire. A
-// kitty APC goes to the terminal, because ghostty is the system's only kitty
-// parser, but not to the wire, which carries layout bytes synthesized from
-// what ghostty did instead. Only the outer layer can route a whole APC that
-// way, and running it outside also keeps an opaque payload out of the inner
-// scanner's reach.
+// It cuts the raw stream into three kinds of run, which differ only in how the
+// consumer disposes of them:
 //
-// This file is the ONLY place in attn that knows how a kitty escape is
-// delimited, and it knows nothing else about the protocol. Ids, chunked
-// transmissions, deletes, placement geometry, z-order — all of that is read
-// back out of ghostty's authoritative state, never re-derived here ("observe,
-// never interpret", docs/plans/2026-08-02-terminal-kitty-images.md).
+//   - plain output, which goes to the terminal AND to the wire;
+//   - a complete kitty graphics APC, which goes to the TERMINAL only — ghostty
+//     is the system's only kitty parser — while the wire carries layout bytes
+//     synthesized from what ghostty did with it;
+//   - a complete OSC 133 marker, which goes to the WIRE only, where the
+//     client's own parser reads it, while the worker's terminal is kept clean
+//     and the block table gets the parsed marker instead.
+//
+// The two extractions used to live in nested segmenters, an outer one for kitty
+// and an inner byte-pattern scan for OSC 133. They are one machine now because
+// they ask the same question and only a parser can answer it (see below); two
+// answers meant two chances to be wrong, and the inner one was.
+//
+// This file is the only place in attn that knows how a kitty escape or an OSC
+// 133 marker is DELIMITED, and it knows nothing else about either protocol.
+// Kitty ids, chunked transmissions, deletes, placement geometry, z-order are
+// all read back out of ghostty's authoritative state ("observe, never
+// interpret", docs/plans/2026-08-02-terminal-kitty-images.md); a marker's
+// meaning is parsed in osc133.go, from the payload this file hands it.
 //
 // The invariant everything here serves: for any input, split into any sequence
 // of chunks, the emissions concatenate back to that input byte for byte, in
-// order — minus only a tail held for the next Feed. The terminal is fed every
-// byte exactly once; the wire is fed everything except the extracted APCs. A
-// byte dropped, doubled, or reordered here is a silent divergence between the
+// order — minus only a tail held for the next Feed. Every byte is accounted for
+// exactly once, and which side of the feed it lands on is the emission's kind.
+// A byte dropped, doubled, or reordered here is a silent divergence between the
 // worker grid and the client grid, which is the bug class this plan exists to
 // remove.
 //
 // Delimiting an escape is not pattern matching, which is why this file carries
-// a parser state machine. Extraction REMOVES bytes from the wire, so it is safe
-// only when the removed run is a whole sequence to both parsers at once. The
-// leading ESC of a kitty APC does double duty whenever the stream is not in
-// ground: it also ends the OSC, string, CSI or escape that was open. Taking the
-// APC away then takes that exit with it, and the client sits inside a sequence
-// the worker has already left — the two grids diverge from the next byte on,
-// silently, with no resync to catch it.
+// a parser state machine. Extraction REMOVES bytes from one side of the feed,
+// so it is safe only when the removed run is a whole sequence to both parsers
+// at once. The leading ESC of a kitty APC or an OSC 133 marker does double duty
+// whenever the stream is not in ground: it also ends the OSC, string, CSI or
+// escape that was open. Taking the sequence away then takes that exit with it,
+// and one side sits inside a sequence the other has already left — the two
+// grids diverge from the next byte on, silently, with no resync to catch it.
 //
 // So the machine answers exactly one question: would ghostty's parser be in
 // ground when this ESC arrives? Extraction happens only there, and only for a
-// sequence that ends at ST. Every other byte — a kitty APC opened mid-sequence,
-// one a control byte cut short, one still unterminated at the tripwire — is
-// replayed to both sides as plain, which is always safe because both ends are
-// ghostty and parse identical bytes identically.
+// sequence that reaches its terminator. Everything else — a sequence opened
+// mid-sequence, one a control byte cut short, one still unterminated at the
+// tripwire — is replayed to both sides as plain, which is always safe because
+// both ends are ghostty and parse identical bytes identically.
 //
 // Every transition below was MEASURED against the native terminal rather than
 // read off the VT spec, and TestKittySegmenterGroundMatchesGhostty holds them
@@ -51,6 +58,15 @@ package pty
 // aborts a string; a raw C1 introducer opens a sequence from escape and CSI but
 // is inert in ground, and inside a string only three of the six introduce at
 // all. Change a rule here only with a measurement to point at.
+
+func indexOfByte(b []byte, target byte) int {
+	for i, c := range b {
+		if c == target {
+			return i
+		}
+	}
+	return -1
+}
 
 // kittyAPCIntroducer is ESC _ G — APC plus kitty graphics' protocol byte.
 // Ghostty identifies kitty on that G alone, with the command following
@@ -76,9 +92,26 @@ var kittyAPCIntroducer = []byte{0x1b, 0x5f, 0x47}
 // convention chunks a transmission into escapes of 4 KiB or less.
 const kittySegMaxPendingBytes = 72 * 1024 * 1024
 
+// osc133MarkerMaxPendingBytes is the same tripwire for a held OSC 133 marker,
+// and the same disposal past it: the bytes replay as plain, so both sides see
+// them and only the block event is lost.
+//
+// Receipt. The largest marker anything can legitimately emit is a C marker,
+// whose payload is a percent-encoded command line: ESC ] 133 ; C ;
+// cmdline_url= … terminator, about 22 bytes of framing around the command. A
+// command line that can actually run is bounded by ARG_MAX, measured at 1 MiB
+// on this machine (`getconf ARG_MAX` = 1048576) and lower on Linux, where
+// MAX_ARG_STRLEN caps a single string at 128 KiB. Encoding can triple a byte
+// (`%3B`), so 3 MiB is the ceiling for a command that could be executed at all
+// — and attn's own emitter is far under it, escaping only six characters
+// (shell_startup.go) and observed at 61 bytes across the recorded fish corpus.
+// 16 MiB clears the ceiling five times over. Reaching it means a producer that
+// opened a marker and never closed it.
+const osc133MarkerMaxPendingBytes = 16 * 1024 * 1024
+
 // kittySegMode is where ghostty's parser stands after everything fed so far.
 // The segmenter tracks it to answer one question — is the stream in ground? —
-// and holds no bytes on any account but kittySegKitty.
+// and holds bytes only in the modes holding() names.
 type kittySegMode uint8
 
 const (
@@ -96,6 +129,15 @@ const (
 	kittySegCSI
 	// kittySegOSC: inside ESC ] …, which ends on its own byte set.
 	kittySegOSC
+	// kittySegOSC133Prefix: inside an OSC that opened in GROUND and still
+	// matches osc133Prefix, so it may yet turn out to be a marker. Holds its
+	// bytes — no prefix of a marker this segmenter removes may reach the
+	// terminal ahead of the removal — but only ever the five that are still
+	// undecided. The first byte that diverges drops the hold and the run
+	// carries on as an ordinary OSC, so a title write never stalls the feed.
+	kittySegOSC133Prefix
+	// kittySegOSC133Body: the marker prefix matched; holding to the terminator.
+	kittySegOSC133Body
 	// kittySegOpaque: inside a DCS, SOS, PM or APC string — including a kitty
 	// APC this segmenter has decided it cannot extract.
 	kittySegOpaque
@@ -189,43 +231,93 @@ func kittySegOpens7Bit(b byte) (kittySegMode, bool) {
 	return kittySegOpensC1(b)
 }
 
-// kittyAPCSegmenter splits the PTY byte stream into plain segments and
-// extractable kitty graphics APCs. It buffers a partial APC (or a partial
-// introducer) across Feed calls, and carries the parser mode across them.
-type kittyAPCSegmenter struct {
+// feedSegKind says how the consumer must dispose of an emission's bytes.
+type feedSegKind uint8
+
+const (
+	// feedSegPlain: ordinary output. To the terminal and to the wire.
+	feedSegPlain feedSegKind = iota
+	// feedSegKittyAPC: one complete kitty graphics APC, introducer through
+	// terminator. To the terminal only; the wire carries synthesized layout
+	// bytes in its place.
+	feedSegKittyAPC
+	// feedSegOSC133: one complete OSC 133 marker, introducer through
+	// terminator. To the wire only; the worker's terminal never sees it and
+	// the block table takes the parsed marker instead. OSC 133 produces no
+	// cells, so keeping it off one side costs the grids nothing.
+	feedSegOSC133
+)
+
+// feedSegment is one emission. Bytes is never empty.
+//
+// The slice is valid only for the duration of its callback: it aliases either
+// the caller's chunk or the segmenter's own buffer, both of which the next call
+// reuses. Copy anything that has to outlive the callback.
+type feedSegment struct {
+	Kind  feedSegKind
+	Bytes []byte
+	// Marker is what a feedSegOSC133 emission means — nil for a subtype no
+	// block event is defined for, in which case the bytes are still consumed.
+	// Always nil for the other kinds.
+	Marker *osc133Marker
+}
+
+// feedSegmenter splits the PTY byte stream into the three dispositions above.
+// It buffers a partial extractable sequence (or a partial introducer) across
+// Feed calls, and carries the parser mode across them.
+type feedSegmenter struct {
 	mode    kittySegMode
 	pending []byte
-	// resume is how far into pending the APC body scan has already looked.
-	// Meaningful only in kittySegKitty, the one mode that holds body bytes;
-	// pending in kittySegGround is a suffix that might still become an
-	// introducer and is rescanned from the front, which costs two bytes.
+	// resume is how far into pending the scan has already looked. Meaningful
+	// only in the modes that hold body bytes; pending in kittySegGround is a
+	// suffix that might still become an introducer and is rescanned from the
+	// front, which costs two bytes.
 	resume int
 }
 
-// Feed reports the chunk as ordered emissions: emit(plain, nil) for a run of
-// non-kitty bytes, emit(nil, apc) for one complete kitty APC (its FULL bytes,
-// introducer through terminator). Exactly one argument is non-nil per call, and
-// a plain run is never empty.
+// holding reports whether the mode is one whose bytes are buffered rather than
+// emitted, which is what an extraction needs and what a resumed scan continues.
+func (m kittySegMode) holding() bool {
+	return m == kittySegKitty || m == kittySegOSC133Prefix || m == kittySegOSC133Body
+}
+
+// maxPending is the tripwire for the sequence this mode is holding.
+func (m kittySegMode) maxPending() int {
+	if m == kittySegKitty {
+		return kittySegMaxPendingBytes
+	}
+	return osc133MarkerMaxPendingBytes
+}
+
+// abandoned is where the parser stands once a held sequence is given up on at
+// the tripwire: both ends are still inside it, with nothing here that will
+// terminate it.
+func (m kittySegMode) abandoned() kittySegMode {
+	if m == kittySegKitty {
+		return kittySegOpaque
+	}
+	return kittySegOSC
+}
+
+// Feed reports the chunk as ordered emissions, in stream order.
 //
-// An emitted slice is only valid for the duration of its emit call: it aliases
-// either the caller's chunk or the segmenter's own buffer, both of which the
-// next call reuses. Copy anything that has to outlive the callback.
+// Fast path: a chunk holding no ESC while the stream is in ground and nothing
+// is pending produces exactly one plain emission that passes the input slice
+// through — no copy, no allocation. That is every chunk of every session that
+// prints ordinary output. Ground is part of the condition because it is the
+// only mode an ESC-free chunk cannot move: measured, every non-ESC byte keeps
+// ghostty in ground, while inside a string a bare C1 or CAN still ends it. A
+// raw C1 introducer is inert in ground — the stream is UTF-8, so 0x9d decodes
+// to U+FFFD and prints rather than opening an OSC.
 //
-// Fast path, matching the osc133Segmenter contract: a chunk holding no ESC
-// while the stream is in ground and nothing is pending produces exactly one
-// emit(chunk, nil) that passes the input slice through — no copy, no
-// allocation. Ground is part of the condition because it is the only mode an
-// ESC-free chunk cannot move: measured, every non-ESC byte keeps ghostty in
-// ground, while inside a string a bare C1 or CAN still ends it.
-//
-// Cost is amortized O(len(chunk)) even while an APC stays open across many
+// Cost is amortized O(len(chunk)) even while a sequence stays open across many
 // calls: the chunk is appended to the buffer in place and only the new bytes
 // are scanned. Anything proportional to the bytes already buffered turns the
 // walk to the tripwire quadratic, and the tripwire is 72 MiB.
-func (s *kittyAPCSegmenter) Feed(chunk []byte, emit func(plain []byte, apc []byte)) {
+func (s *feedSegmenter) Feed(chunk []byte, emit func(feedSegment)) {
 	if s.mode == kittySegGround && len(s.pending) == 0 && indexOfByte(chunk, oscESC) < 0 {
 		if len(chunk) > 0 {
-			emit(chunk, nil)
+			emit(feedSegment{Kind: feedSegPlain, Bytes: chunk})
 		}
 		return
 	}
@@ -234,17 +326,25 @@ func (s *kittyAPCSegmenter) Feed(chunk []byte, emit func(plain []byte, apc []byt
 	// holding bytes back at the end costs a copy.
 	carried := len(s.pending) > 0
 	buffer := chunk
-	// apcStart is where an extractable APC began, or -1 for none. An APC open
-	// from an earlier chunk begins at buffer[0] and its scan continues where
-	// the last call stopped.
-	apcStart := -1
+	// holdStart is where the extractable sequence being held began, or -1 for
+	// none. Only one can be open at a time. A sequence open from an earlier
+	// chunk begins at buffer[0] and its scan continues where the last call
+	// stopped.
+	holdStart := -1
 	i := 0
 	if carried {
 		s.pending = append(s.pending, chunk...)
 		buffer = s.pending
-		if s.mode == kittySegKitty {
-			apcStart = 0
+		if s.mode.holding() {
+			holdStart = 0
 			i = s.resume
+		}
+	}
+
+	// emitPlain closes the run that ends where an extraction begins.
+	emitPlain := func(from, to int) {
+		if to > from {
+			emit(feedSegment{Kind: feedSegPlain, Bytes: buffer[from:to]})
 		}
 	}
 
@@ -263,25 +363,31 @@ scan:
 				i++
 				continue
 			}
-			// Deciding whether this ESC introduces an extractable APC needs two
-			// more bytes. Hold when they have not arrived: no prefix of
-			// ESC _ G may reach the wire ahead of the extraction that removes
-			// it.
+			// Deciding what this ESC introduces needs the byte after it, and for
+			// a kitty APC the one after that. Hold when they have not arrived:
+			// no prefix of a sequence this segmenter removes may reach the far
+			// side ahead of the removal.
 			if i+1 >= len(buffer) || (buffer[i+1] == kittyAPCIntroducer[1] && i+2 >= len(buffer)) {
-				if i > plainStart {
-					emit(buffer[plainStart:i], nil)
-				}
+				emitPlain(plainStart, i)
 				s.hold(buffer, carried, i, i)
 				return
 			}
-			if buffer[i+1] == kittyAPCIntroducer[1] && buffer[i+2] == kittyAPCIntroducer[2] {
-				apcStart = i
+			switch {
+			case buffer[i+1] == ']':
+				// An OSC opened in ground is the only kind that can be a
+				// marker. Whether it IS one takes four more bytes to know, and
+				// kittySegOSC133Prefix is where that is decided.
+				holdStart = i
+				s.mode = kittySegOSC133Prefix
+				i += 2
+			case buffer[i+1] == kittyAPCIntroducer[1] && buffer[i+2] == kittyAPCIntroducer[2]:
+				holdStart = i
 				s.mode = kittySegKitty
 				i += len(kittyAPCIntroducer)
-				continue
+			default:
+				s.mode = kittySegEscape
+				i++
 			}
-			s.mode = kittySegEscape
-			i++
 
 		case kittySegEscape, kittySegEscapeIntermediate:
 			if mode, ok := kittySegOpensC1(b); ok {
@@ -353,6 +459,67 @@ scan:
 			}
 			i++
 
+		case kittySegOSC133Prefix:
+			if b == osc133Prefix[i-holdStart] {
+				i++
+				if i-holdStart == len(osc133Prefix) {
+					s.mode = kittySegOSC133Body
+				}
+				continue
+			}
+			// Not a marker. These are an ordinary OSC's bytes, which this
+			// segmenter does not touch: drop the hold so they stay in the plain
+			// run, and read this byte again as OSC payload.
+			holdStart = -1
+			s.mode = kittySegOSC
+
+		case kittySegOSC133Body:
+			switch {
+			case b == oscBEL:
+				i++
+				emitPlain(plainStart, holdStart)
+				emitMarker(emit, buffer[holdStart:i])
+				plainStart = i
+				holdStart = -1
+				s.mode = kittySegGround
+			case b == oscESC:
+				if i+1 >= len(buffer) {
+					// ST may still be arriving; hold and resume on this ESC.
+					break scan
+				}
+				if buffer[i+1] == oscBackslash {
+					i += 2
+					emitPlain(plainStart, holdStart)
+					emitMarker(emit, buffer[holdStart:i])
+					plainStart = i
+					holdStart = -1
+					s.mode = kittySegGround
+					continue
+				}
+				// Measured: a stray ESC makes ghostty DISPATCH the marker and
+				// open a new escape, so cutting here would in fact be framing-
+				// safe. It is still replayed as plain, because the client runs
+				// its own parser over the wire (terminalOsc133.ts) and that one
+				// knows only BEL and ST — stripping a marker it would not have
+				// recognised leaves the two block tables disagreeing about a
+				// command only one of them saw. Identical bytes to both sides
+				// costs a block boundary on a malformed stream and nothing else.
+				holdStart = -1
+				s.mode = kittySegEscape
+				i++
+			case b == 0x18 || b == 0x1a:
+				// Measured: CAN and SUB also DISPATCH the marker rather than
+				// aborting it, and leave the parser in ground. Same disposal,
+				// same reason.
+				holdStart = -1
+				s.mode = kittySegGround
+				i++
+			default:
+				// Measured: an OSC swallows everything else — C1 ST and every
+				// C1 introducer included. See kittySegOSC.
+				i++
+			}
+
 		case kittySegOpaque:
 			switch {
 			case b == oscESC:
@@ -374,13 +541,11 @@ scan:
 					break scan
 				}
 				if buffer[i+1] == oscBackslash {
-					if apcStart > plainStart {
-						emit(buffer[plainStart:apcStart], nil)
-					}
-					emit(nil, buffer[apcStart:i+2])
+					emitPlain(plainStart, holdStart)
+					emit(feedSegment{Kind: feedSegKittyAPC, Bytes: buffer[holdStart : i+2]})
 					i += 2
 					plainStart = i
-					apcStart = -1
+					holdStart = -1
 					s.mode = kittySegGround
 					continue
 				}
@@ -389,20 +554,18 @@ scan:
 				// whole sequence stays in the plain run instead: this is where
 				// an abandoned APC is disposed of, by replaying its bytes to
 				// both sides unchanged.
-				apcStart = -1
+				holdStart = -1
 				s.mode = kittySegEscape
 				i++
 			case b == 0x9c:
 				// Measured: C1 ST terminates a kitty APC exactly as ESC \ does,
 				// dispatching the command — so it is cut and stripped the same
 				// way, one byte instead of two.
-				if apcStart > plainStart {
-					emit(buffer[plainStart:apcStart], nil)
-				}
+				emitPlain(plainStart, holdStart)
 				i++
-				emit(nil, buffer[apcStart:i])
+				emit(feedSegment{Kind: feedSegKittyAPC, Bytes: buffer[holdStart:i]})
 				plainStart = i
-				apcStart = -1
+				holdStart = -1
 				s.mode = kittySegGround
 			case kittySegAborts(b):
 				// A control that ends the APC without being a terminator. The
@@ -410,14 +573,14 @@ scan:
 				// CAN prints nothing), which synthesis cannot observe, so the
 				// sequence is replayed as plain and both parsers cut it in the
 				// same place.
-				apcStart = -1
+				holdStart = -1
 				s.mode = kittySegGround
 				i++
 			default:
 				if mode, ok := kittySegOpensInsideString(b); ok {
 					// The APC ends here too, into a sequence rather than into
 					// ground. Same disposal: replay it all as plain.
-					apcStart = -1
+					holdStart = -1
 					s.mode = mode
 				}
 				i++
@@ -425,33 +588,50 @@ scan:
 		}
 	}
 
-	if apcStart >= 0 {
-		if len(buffer)-apcStart > kittySegMaxPendingBytes {
-			emit(buffer[plainStart:], nil)
+	if holdStart >= 0 {
+		if len(buffer)-holdStart > s.mode.maxPending() {
+			emitPlain(plainStart, len(buffer))
 			s.release()
-			// Both parsers are now inside an APC neither will see terminated
-			// here; the stream is opaque until something ends it.
-			s.mode = kittySegOpaque
+			// Both parsers are now inside a sequence neither will see
+			// terminated here; the stream stays opaque until something ends it.
+			s.mode = s.mode.abandoned()
 			return
 		}
-		if apcStart > plainStart {
-			emit(buffer[plainStart:apcStart], nil)
-		}
-		s.hold(buffer, carried, apcStart, i)
+		emitPlain(plainStart, holdStart)
+		s.hold(buffer, carried, holdStart, i)
 		return
 	}
-	if len(buffer) > plainStart {
-		emit(buffer[plainStart:], nil)
-	}
+	emitPlain(plainStart, len(buffer))
 	s.release()
+}
+
+// emitMarker reports one complete OSC 133 marker: raw is its FULL bytes,
+// introducer through terminator, and the payload between them is what gives it
+// meaning.
+//
+// Only the two extracting terminators may reach here — BEL, or the two bytes of
+// ST after a matched prefix — which is what makes the payload slice safe. A
+// third terminator added to kittySegOSC133Body without widening this would index
+// backwards past the introducer.
+func emitMarker(emit func(feedSegment), raw []byte) {
+	payloadEnd := len(raw) - 1
+	if raw[len(raw)-1] != oscBEL {
+		// ST, two bytes.
+		payloadEnd--
+	}
+	emit(feedSegment{
+		Kind:   feedSegOSC133,
+		Bytes:  raw,
+		Marker: osc133MarkerFromPayload(string(raw[len(osc133Prefix):payloadEnd])),
+	})
 }
 
 // hold keeps buffer[from:] for the next Feed, with resumeAt the absolute index
 // the body scan should continue from (pass from itself when the bytes are not
-// an open APC). Keeping an APC that already sits at the front of the buffer it
+// an open sequence). Keeping one that already sits at the front of the buffer it
 // is growing into costs nothing, which is what makes a long transmission
 // linear.
-func (s *kittyAPCSegmenter) hold(buffer []byte, carried bool, from, resumeAt int) {
+func (s *feedSegmenter) hold(buffer []byte, carried bool, from, resumeAt int) {
 	if from >= len(buffer) {
 		s.release()
 		return
@@ -474,7 +654,7 @@ func (s *kittyAPCSegmenter) hold(buffer []byte, carried bool, from, resumeAt int
 // sequence. A finished APC may have grown to megabytes, and a session that
 // once carried one would otherwise hold that memory for its whole life. The
 // parser mode is not part of what it drops: the stream keeps running.
-func (s *kittyAPCSegmenter) release() {
+func (s *feedSegmenter) release() {
 	s.pending = nil
 	s.resume = 0
 }

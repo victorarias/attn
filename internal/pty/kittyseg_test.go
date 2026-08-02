@@ -30,18 +30,22 @@ var (
 // kittyEmission is one emit call, normalized: adjacent plain runs are merged.
 // How Feed groups plain bytes is not part of the contract — a chunk boundary
 // legitimately cuts a run in two — but their order and content are, and so is
-// every extracted APC.
+// every extracted sequence.
 type kittyEmission struct {
-	apc   bool
+	kind  feedSegKind
 	bytes string
 }
 
-func plainEmission(s string) kittyEmission { return kittyEmission{bytes: s} }
-func apcEmission(s string) kittyEmission   { return kittyEmission{apc: true, bytes: s} }
+func plainEmission(s string) kittyEmission  { return kittyEmission{kind: feedSegPlain, bytes: s} }
+func apcEmission(s string) kittyEmission    { return kittyEmission{kind: feedSegKittyAPC, bytes: s} }
+func markerEmission(s string) kittyEmission { return kittyEmission{kind: feedSegOSC133, bytes: s} }
 
 func (e kittyEmission) String() string {
-	if e.apc {
+	switch e.kind {
+	case feedSegKittyAPC:
 		return fmt.Sprintf("apc(%q)", e.bytes)
+	case feedSegOSC133:
+		return fmt.Sprintf("marker(%q)", e.bytes)
 	}
 	return fmt.Sprintf("plain(%q)", e.bytes)
 }
@@ -138,12 +142,15 @@ var kittySegBattery = []kittySegCase{
 		want:  []kittyEmission{plainEmission("\x1b_Zwhatever\x1b\\")},
 	},
 	{
-		name:  "osc and csi sequences stay plain",
+		// A title write and an SGR run are nobody's business here and flow
+		// straight through; the shell-integration marker at the end is the one
+		// OSC this segmenter takes out of the terminal feed.
+		name:  "ordinary osc and csi sequences stay plain",
 		input: "\x1b]0;title\x07\x1b[1;31mred\x1b[0m" + kittyQuery + "\x1b]133;A\x07",
 		want: []kittyEmission{
 			plainEmission("\x1b]0;title\x07\x1b[1;31mred\x1b[0m"),
 			apcEmission(kittyQuery),
-			plainEmission("\x1b]133;A\x07"),
+			markerEmission("\x1b]133;A\x07"),
 		},
 	},
 	{
@@ -222,6 +229,128 @@ var kittySegBattery = []kittySegCase{
 		name:  "an abandoned apc followed by a partial introducer holds nothing",
 		input: kittyIntro + "a=T;AA\x1b_",
 		want:  []kittyEmission{plainEmission(kittyIntro + "a=T;AA\x1b_")},
+	},
+
+	// --- OSC 133 markers. Cut by the same rules and for the same reason: a
+	// marker is removed from the terminal feed, so the removed run has to be a
+	// whole sequence to ghostty too.
+	{
+		name:  "a marker terminated by bel",
+		input: "out\x1b]133;A\x07$ ",
+		want: []kittyEmission{
+			plainEmission("out"),
+			markerEmission("\x1b]133;A\x07"),
+			plainEmission("$ "),
+		},
+	},
+	{
+		name:  "a marker terminated by st",
+		input: "\x1b]133;D;0" + kittyST + "tail",
+		want: []kittyEmission{
+			markerEmission("\x1b]133;D;0" + kittyST),
+			plainEmission("tail"),
+		},
+	},
+	{
+		// An unknown subtype is still a marker sequence: consumed, with no
+		// block event to record. Leaving its bytes in would put an OSC 133 on
+		// the terminal the stripping contract says never carries one.
+		name:  "a marker with an unknown subtype is still consumed",
+		input: "a\x1b]133;Z;stuff\x07b",
+		want: []kittyEmission{
+			plainEmission("a"),
+			markerEmission("\x1b]133;Z;stuff\x07"),
+			plainEmission("b"),
+		},
+	},
+	{
+		// The first of the two fuzz reproducers that blocked the whole-path
+		// soak. The old byte-pattern scanner stepped over this ESC looking for
+		// a terminator and swallowed the rest; measured, ghostty ends the OSC
+		// on it and executes what follows.
+		name:  "a marker cut short by a stray esc stays plain",
+		input: "\x1b]133;A\x1b0Z",
+		want:  []kittyEmission{plainEmission("\x1b]133;A\x1b0Z")},
+	},
+	{
+		// The second one, and the mirror of the kitty case above: the marker's
+		// ESC ] is not in ground — the ESC before it opened an escape that this
+		// one restarts — so cutting the marker out would take that escape's
+		// bytes with it.
+		name:  "a marker whose introducer was never in ground stays plain",
+		input: "\x1b\x1b]133;A" + kittyST + "00",
+		want:  []kittyEmission{plainEmission("\x1b\x1b]133;A" + kittyST + "00")},
+	},
+	{
+		// Measured: CAN and SUB DISPATCH the marker for ghostty rather than
+		// aborting it, so cutting here would be framing-safe. It stays plain
+		// anyway, because the client's parser knows only BEL and ST and would
+		// not have counted it — identical bytes to both sides is the invariant,
+		// and a block boundary on a malformed stream is the price.
+		name:  "a marker cut short by can stays plain",
+		input: "\x1b]133;A\x18tail",
+		want:  []kittyEmission{plainEmission("\x1b]133;A\x18tail")},
+	},
+	{
+		name:  "a marker cut short by sub stays plain",
+		input: "\x1b]133;B\x1atail",
+		want:  []kittyEmission{plainEmission("\x1b]133;B\x1atail")},
+	},
+	{
+		// Measured: C1 ST does not end an OSC, so these are payload and the
+		// marker runs on to its real terminator.
+		name:  "c1 st inside a marker payload is ordinary payload",
+		input: "\x1b]133;C;cmdline_url=a\x9cb\x07",
+		want:  []kittyEmission{markerEmission("\x1b]133;C;cmdline_url=a\x9cb\x07")},
+	},
+	{
+		// A marker opened by a C1 OSC introducer rather than ESC ]. Measured to
+		// dispatch, but osc133Prefix is the only introducer this segmenter
+		// recognises and the client's parser agrees, so it flows as plain.
+		name:  "a c1-introduced marker stays plain",
+		input: "\x9d133;A\x07",
+		want:  []kittyEmission{plainEmission("\x9d133;A\x07")},
+	},
+	{
+		// An OSC that is not a marker must not stall the feed while the
+		// segmenter waits to find out: the run carries on the moment the
+		// prefix diverges.
+		name:  "an osc that diverges from the marker prefix stays plain",
+		input: "\x1b]13;x\x07\x1b]1;y\x07\x1b]134;z\x07",
+		want:  []kittyEmission{plainEmission("\x1b]13;x\x07\x1b]1;y\x07\x1b]134;z\x07")},
+	},
+	{
+		name:  "two markers around output in one run",
+		input: "\x1b]133;A\x07prompt output\x1b]133;D;0\x07",
+		want: []kittyEmission{
+			markerEmission("\x1b]133;A\x07"),
+			plainEmission("prompt output"),
+			markerEmission("\x1b]133;D;0\x07"),
+		},
+	},
+	{
+		name:    "the stream ends inside a marker prefix",
+		input:   "tail\x1b]13",
+		want:    []kittyEmission{plainEmission("tail")},
+		pending: "\x1b]13",
+	},
+	{
+		name:    "the stream ends inside a marker payload",
+		input:   "\x1b]133;C;cmdline_url=ma",
+		pending: "\x1b]133;C;cmdline_url=ma",
+	},
+	{
+		name:    "the stream ends on a marker's partial terminator",
+		input:   "\x1b]133;A\x1b",
+		pending: "\x1b]133;A\x1b",
+	},
+	{
+		// A kitty APC introduced from inside a marker's payload: the marker
+		// swallows it, because an OSC ends on its own byte set and ESC _ is not
+		// in it — the ESC ends the OSC and the APC opens from escape state.
+		name:  "an apc pattern inside a marker payload keeps both on the wire",
+		input: "\x1b]133;C;cmdline_url=x" + kittyRecovered + "tail",
+		want:  []kittyEmission{plainEmission("\x1b]133;C;cmdline_url=x" + kittyRecovered + "tail")},
 	},
 
 	// --- Foreign strings. An APC pattern inside one is text to ghostty, and
@@ -435,7 +564,7 @@ var kittySegBattery = []kittySegCase{
 // buffer it reuses, and the same bytes are on their way to the wire.
 func runKittySegmenter(t *testing.T, chunks []string) ([]kittyEmission, string) {
 	t.Helper()
-	seg := &kittyAPCSegmenter{}
+	seg := &feedSegmenter{}
 	var out []kittyEmission
 	for _, chunk := range chunks {
 		out = feedKitty(t, seg, chunk, out)
@@ -445,23 +574,21 @@ func runKittySegmenter(t *testing.T, chunks []string) ([]kittyEmission, string) 
 
 // feedKitty pushes one chunk through seg, appending its emissions to out in
 // normalized form and checking the per-call contract.
-func feedKitty(t *testing.T, seg *kittyAPCSegmenter, chunk string, out []kittyEmission) []kittyEmission {
+func feedKitty(t *testing.T, seg *feedSegmenter, chunk string, out []kittyEmission) []kittyEmission {
 	t.Helper()
 	input := []byte(chunk)
-	seg.Feed(input, func(plain, apc []byte) {
+	seg.Feed(input, func(s feedSegment) {
 		switch {
-		case (plain == nil) == (apc == nil):
-			t.Fatalf("emit wants exactly one argument, got plain=%q apc=%q", plain, apc)
-		case apc != nil:
-			out = append(out, apcEmission(string(apc)))
-		case len(plain) == 0:
-			t.Fatal("emit called with an empty plain run")
+		case len(s.Bytes) == 0:
+			t.Fatal("emit called with an empty run")
+		case s.Kind != feedSegPlain:
+			out = append(out, kittyEmission{kind: s.Kind, bytes: string(s.Bytes)})
 		default:
-			if n := len(out); n > 0 && !out[n-1].apc {
-				out[n-1].bytes += string(plain)
+			if n := len(out); n > 0 && out[n-1].kind == feedSegPlain {
+				out[n-1].bytes += string(s.Bytes)
 				return
 			}
-			out = append(out, plainEmission(string(plain)))
+			out = append(out, plainEmission(string(s.Bytes)))
 		}
 	})
 	if string(input) != chunk {
@@ -605,20 +732,20 @@ func TestKittyAPCSegmenterJoinsAnAPCSplitAcrossChunks(t *testing.T) {
 	}
 }
 
-// TestKittyAPCSegmenterFastPathPassesTheChunkThrough pins the no-copy contract
-// osc133Segmenter also carries: the overwhelmingly common chunk is plain
-// output, and it must reach the terminal without an allocation.
+// TestKittyAPCSegmenterFastPathPassesTheChunkThrough pins the no-copy
+// contract: the overwhelmingly common chunk is plain output, and it must reach
+// the terminal without an allocation.
 func TestKittyAPCSegmenterFastPathPassesTheChunkThrough(t *testing.T) {
-	var seg kittyAPCSegmenter
+	var seg feedSegmenter
 	chunk := []byte("plain output with no escapes\r\n")
 	calls := 0
-	seg.Feed(chunk, func(plain, apc []byte) {
+	seg.Feed(chunk, func(s feedSegment) {
 		calls++
-		if apc != nil {
-			t.Fatalf("a plain chunk produced an apc: %q", apc)
+		if s.Kind != feedSegPlain {
+			t.Fatalf("a plain chunk produced a %v emission: %q", s.Kind, s.Bytes)
 		}
-		if len(plain) != len(chunk) || &plain[0] != &chunk[0] {
-			t.Fatalf("a plain chunk was copied: emitted %q, want the input slice itself", plain)
+		if len(s.Bytes) != len(chunk) || &s.Bytes[0] != &chunk[0] {
+			t.Fatalf("a plain chunk was copied: emitted %q, want the input slice itself", s.Bytes)
 		}
 	})
 	if calls != 1 {
@@ -641,16 +768,16 @@ func TestKittyAPCSegmenterAbandonsAnOversizedAPC(t *testing.T) {
 		flood[i] = 'A'
 	}
 
-	var seg kittyAPCSegmenter
+	var seg feedSegmenter
 	consumed := 0
-	seg.Feed(flood, func(plain, apc []byte) {
-		if apc != nil {
-			t.Fatalf("an oversized apc was extracted (%d bytes)", len(apc))
+	seg.Feed(flood, func(s feedSegment) {
+		if s.Kind != feedSegPlain {
+			t.Fatalf("an oversized apc was extracted (%d bytes)", len(s.Bytes))
 		}
-		if !bytes.Equal(plain, flood[consumed:consumed+len(plain)]) {
+		if !bytes.Equal(s.Bytes, flood[consumed:consumed+len(s.Bytes)]) {
 			t.Fatalf("plain run at %d does not match the input", consumed)
 		}
-		consumed += len(plain)
+		consumed += len(s.Bytes)
 	})
 	if consumed != len(flood) {
 		t.Fatalf("flushed %d bytes of the oversized apc, want all %d", consumed, len(flood))
@@ -692,9 +819,9 @@ func BenchmarkKittyAPCSegmenterUnterminatedAPC(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(size))
 			for b.Loop() {
-				var seg kittyAPCSegmenter
+				var seg feedSegmenter
 				var emitted int
-				sink := func(plain, apc []byte) { emitted += len(plain) + len(apc) }
+				sink := func(s feedSegment) { emitted += len(s.Bytes) }
 				seg.Feed(head, sink)
 				for fed := 0; fed < size; fed += chunkSize {
 					seg.Feed(chunk, sink)

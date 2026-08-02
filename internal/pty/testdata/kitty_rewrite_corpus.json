@@ -677,6 +677,75 @@
       "cursorRow": 0
     },
     {
+      "name": "a marker cut short by a stray escape",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "G10xMzM7QRswWiBkb25l"
+      ],
+      "wire": [
+        "G10xMzM7QRswWiBkb25l"
+      ],
+      "resync": [
+        ""
+      ],
+      "workerPlainText": "Z done",
+      "workerViewportText": "Z done\n\n\n\n\n\n\n\n",
+      "cursorCol": 6,
+      "cursorRow": 0
+    },
+    {
+      "name": "a marker whose introducer was never in ground",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "GxtdMTMzO0EbXDAwIGRvbmU="
+      ],
+      "wire": [
+        "GxtdMTMzO0EbXDAwIGRvbmU="
+      ],
+      "resync": [
+        ""
+      ],
+      "workerPlainText": "00 done",
+      "workerViewportText": "00 done\n\n\n\n\n\n\n\n",
+      "cursorCol": 7,
+      "cursorRow": 0
+    },
+    {
+      "name": "markers split across feed chunks around an image",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "G10xMw==",
+        "MztBByQgG10xMzM7QztjbWRsaW5lX3VybD1pYw==",
+        "YXQH",
+        "G19HYT1ULGk9NDYsZj0yNCx0PWQscz0xNix2PTMyO0RSUWJJaWt3Tno1RlRGTmFZV2h2ZG4yRWk1S1pvS2V1dGJ6RHl0SFkzK2J0OUFBSERoVWNJeW94T0Q5R1RWUmJZbWx3ZDM2RmpKT2FvYWl2dHIzRXk5TFo0T2Z1OVFFSUR4WWRKQ3N5T1VCSFRsVmNZMnB4ZUgrR2paU2JvcW13dDc3RnpOUGE0ZWp2OWdJSkVCY2VKU3d6T2tGSVQxWmRaR3R5ZVlDSGpwV2NvNnF4dUwvR3pkVGI0dW53OXdNS0VSZ2ZKaTAwTzBKSlVGZGVaV3h6ZW9HSWo1YWRwS3V5dWNESHp0WGM0K3J4K0FRTEVoa2dKeTQxUEVOS1VWaGZabTEwZTRLSmtKZWVwYXl6dXNISXo5YmQ1T3Z5K1FVTUV4b2hLQzgyUFVSTFVsbGdaMjUxZklPS2taaWZwcTIwdThMSjBOZmU1ZXp6K2dZTkZCc2lLVEEzUGtWTVUxcGhhRzkyZllTTGtwbWdwNjYxdk1QSzBkamY1dTMwQUFjT0ZSd2pLakU0UDBaTlZGdGlhWEIzZm9XTWs1cWhxSysydmNUTDB0bmc1KzcxQVFnUEZoMGtLekk1UUVkT1ZWeGphbkY0ZjRhTmxKdWlxYkMzdnNYTTA5cmg2Ty8yQWdrUUZ4NGxMRE02UVVoUFZsMWthM0o1Z0llT2xaeWpxckc0djhiTjFOdmk2ZkQzQXdvUkdCOG1MVFE3UWtsUVYxNWxiSE42Z1lpUGxwMmtxN0s1d01mTzFkemo2dkg0QkFzU0dTQW5MalU4UTBwUldGOW1iWFI3Z29tUWw1NmxyTE82d2NqUDF0M2s2L0w1QlF3VEdpRW9Melk5UkV0U1dXQm5iblY4ZzRxUm1KK21yYlM3d3NuUTE5N2w3UFA2QmcwVUd5SXBNRGMrUlV4VFdtRm9iM1o5aEl1U21hQ25yclc4dzhyUjJOL203ZlFBQnc0VkhDTXFNVGcvUmsxVVcySnBjSGQraFl5VG1xR29yN2E5eE12UzJlRG43dlVCQ0E4V0hTUXJNamxBUjA1VlhHTnFjWGgvaG8yVW02S3BzTGUreGN6VDJ1SG83L1lDQ1JBWEhpVXNNenBCU0U5V1hXUnJjbm1BaDQ2Vm5LT3FzYmkveHMzVTIrTHA4UGNEQ2hFWUh5WXRORHRDU1ZCWFhtVnNjM3FCaUkrV25hU3Jzcm5BeDg3VjNPUHE4ZmdFQ3hJWklDY3VOVHhEU2xGWVgyWnRkSHVDaVpDWG5xV3NzN3JCeU0vVzNlVHI4dmtGREJNYUlTZ3ZOajFFUzFKWllHZHVkWHlEaXBHWW42YXR0THZDeWREWDN1WHM4L29HRFJRYklpa3dOejVGVEZOYVlXaHZkbjJFaTVLWm9LZXV0YnpEeXRIWTMrYnQ5QUFIRGhVY0l5b3hPRDlHVFZSYlltbHdkMzZGakpPYW9haXZ0cjNFeTlMWjRPZnU5UUVJRHhZZEpDc3lPVUJIVGxWY1kycHhlSCtHalpTYm9xbXd0NzdGek5QYTRlanY5Z0lKRUJjZUpTd3pPa0ZJVDFaZFpHdHllWUNIanBXY282cXh1TC9HemRUYjR1bnc5d01LRVJnZkppMDBPMEpKVUZkZVpXeHplb0dJajVhZHBLdXl1Y0RIenRYYzQrcngrQVFMRWhrZ0p5NDFQRU5LVVZoZlptMTBlNEtKa0plZXBheXp1c0hJejliZDVPdnkrUVVNRXhvaEtDODJQVVJMVWxsZ1oyNTFmSU9La1ppZnBxMjB1OExKME5mZTVlenorZ1lORkJzaUtUQTNQa1ZNVTFwaGFHOTJmWVNMa3BtZ3A2NjF2TVBLMGRqZjV1MzBBQWNPRlJ3aktqRTRQMFpOVkZ0aWFYQjNmb1dNazVxaHFLKzJ2Y1RMMHRuZzUrNzFBUWdQRmgwa0t6STVRRWRPVlZ4amFuRjRmNGFObEp1aXFiQzN2c1hNMDlyaDZPLzJBZ2tRRng0bExETTZRVWhQVmwxa2EzSjVnSWVPbFp5anFyRzR2OGJOMU52aTZmRDNBd29SR0I4bUxUUTdRa2xRVjE1bGJITjZnWWlQbHAya3E3SzV3TWZPMWR6ajZ2SDRCQXNTR1NBbkxqVThRMHBSV0Y5bWJYUjdnb21RbDU2bHJMTzZ3Y2pQMXQzazYvTDVCUXdUR2lFb0x6WTlSRXRTV1dCbmJuVjhnNHFSbUorbXJiUzd3c25RMTk3bDdQUDZCZzBVR3lJcE1EYytSVXhUV21Gb2IzWjloSXVTbWFDbnJyVzh3OHJSMk4vbTdmUUFCdzRWSENNcU1UZy9SazFVVzJKcGNIZCtoWXlUbXFHb3I3YTl4TXZTMmVEbjd2VUJDQThXSFNRck1qbEFSMDVWWEdOcWNYaC9obzJVbTZLcHNMZSt4Y3pUMnVIbzcvWUNDUkFYSGlVc016cEJTRTlXWFdScmNubUFoNDZWbktPcXNiaS94czNVMitMcDhQY0RDaEVZSHlZdE5EdENTVkJYWG1Wc2MzcUJpSStXbmFTcnNybkF4ODdWM09QcThmZ0VDeElaSUNjdU5UeERTbEZZWDJadGRIdUNpWkNYbnFXc3M3ckJ5TS9XM2VUcjh2a0ZEQk1hSVNndk5qMUVTMUpaWUdkdWRYeURpcEdZbjZhdHRMdkN5ZERYM3VYczgvb0dEUlFiSWlrd056NUZURk5hWVdodmRuMkVpNUtab0tldXRiekR5dEhZG1w=",
+        "DQobXTEzMztEOzAb",
+        "XGRvbmU="
+      ],
+      "wire": [
+        "",
+        "G10xMzM7QQckIA==",
+        "G10xMzM7QztjbWRsaW5lX3VybD1pY2F0Bw==",
+        "G1sxQhtbNUc=",
+        "DQo=",
+        "G10xMzM7RDswG1xkb25l"
+      ],
+      "resync": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "workerPlainText": "$ \n\ndone",
+      "workerViewportText": "$\n\ndone\n\n\n\n\n\n",
+      "cursorCol": 4,
+      "cursorRow": 2
+    },
+    {
       "name": "image taller than an alternate screen that keeps no history",
       "cols": 20,
       "rows": 6,

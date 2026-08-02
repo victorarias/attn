@@ -26,6 +26,12 @@ package pty
 // where ghostty's parser stands and extracts only from ground, with every
 // transition measured against the terminal rather than read off the spec, and
 // the two smallest streams it found are corpus entries next door.
+//
+// What it reaches now is a different kind of defect, and the reason this target
+// is not yet a gate: the two remaining divergences are in what the feed path
+// DOES with a correctly framed sequence, not in where it cuts one. Both are
+// measured, reproduced, and written up under A4 in the plan; neither is fixable
+// inside a framing change.
 
 import (
 	"strings"
@@ -116,13 +122,15 @@ func FuzzKittyWireMirror(f *testing.F) {
 // FuzzKittySegmenterFraming soaks the segmenter's framing rules on their own,
 // without the rest of the feed path in the loop.
 //
-// It exists because the whole-path property above cannot currently run: the
-// OSC 133 scanner nested inside it still finds its marker by byte pattern and
-// diverges within seconds on streams that contain no kitty escape at all, which
-// starves the search of the time it needs to reach anything here. This target
-// asks the one question kittyseg.go answers — would ghostty's parser be in
-// ground after these bytes? — and asserts the segmenter agrees, under an
-// arbitrary chunking, while reconstructing every byte it was handed.
+// It exists because framing and disposal fail differently, and only framing is
+// settled. The whole-path property above still stops early, but no longer on a
+// framing defect: it now reaches two ways the feed path can move the worker's
+// grid without the wire describing it, both older than this segmenter and both
+// recorded as gates in the plan's A4 section. This target asks the one question
+// kittyseg.go answers — would ghostty's parser be in ground after these bytes?
+// — and asserts the segmenter agrees, under an arbitrary chunking, while
+// reconstructing every byte it was handed, so the framing rules keep a soak of
+// their own while those gates are open.
 //
 // Both halves matter. Agreement alone would pass for a segmenter that tracked
 // state perfectly and dropped a byte; reconstruction alone would pass for one
@@ -144,15 +152,14 @@ func FuzzKittySegmenterFraming(f *testing.F) {
 		}
 		size := int(chunkSize%4096) + 1
 
-		var seg kittyAPCSegmenter
+		var seg feedSegmenter
 		rebuilt := make([]byte, 0, len(data))
 		for start := 0; start < len(data); start += size {
 			chunk := data[start:min(start+size, len(data))]
 			// A copy per chunk, because an emission may alias the chunk and the
 			// segmenter is allowed to reuse its own buffer afterwards.
-			seg.Feed(append([]byte(nil), chunk...), func(plain, apc []byte) {
-				rebuilt = append(rebuilt, plain...)
-				rebuilt = append(rebuilt, apc...)
+			seg.Feed(append([]byte(nil), chunk...), func(e feedSegment) {
+				rebuilt = append(rebuilt, e.Bytes...)
 			})
 		}
 		if got := string(rebuilt) + string(seg.pending); got != string(data) {

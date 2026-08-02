@@ -30,18 +30,6 @@ type osc133Marker struct {
 	ExitCode *int32
 }
 
-// osc133Segmenter splits raw PTY output at complete OSC 133 markers,
-// buffering partial markers across chunks. The client parser in
-// app/src/utils/terminalOsc133.ts is the semantic reference; parity is
-// enforced by a shared fixture corpus. emit is called in stream order: the
-// bytes BEFORE each marker, then that marker; the final call carries any
-// trailing bytes with a nil marker. Fast path requirement: a chunk containing
-// no marker prefix while no partial marker is pending must produce exactly
-// one emit(chunk, nil) passing the input slice through (no copy, no alloc).
-type osc133Segmenter interface {
-	Feed(chunk []byte, emit func(segment []byte, marker *osc133Marker))
-}
-
 // blockRef is the position pin the block table holds for each marker —
 // backed by ghosttyvt.TrackedRef in production, by fakes in pure tests. The
 // ref follows its content across scrolling, scrollback pruning, and reflow;
@@ -96,15 +84,15 @@ type workerBlockTable interface {
 	Close()
 }
 
-// blockFeeder owns the ghostty write path for a session: it splits PTY output
-// at OSC 133 markers, writes each segment to the terminal, and pins a tracked
-// ref at each marker's cursor position for the block table. All methods are
-// called under replayMu (the same critical section that assigns the seq
-// watermark and serializes the dump), which is what makes the attach snapshot
-// an atomic {dump, blocks, watermark} triple.
+// blockFeeder owns the ghostty write path for a session: it writes plain
+// output to the terminal and pins a tracked ref at each OSC 133 marker's
+// cursor position for the block table. Where a marker begins and ends is the
+// feed segmenter's decision (kittyseg.go); this half only reacts to it. All
+// methods are called under replayMu (the same critical section that assigns
+// the seq watermark and serializes the dump), which is what makes the attach
+// snapshot an atomic {dump, blocks, watermark} triple.
 type blockFeeder struct {
 	term  *ghosttyvt.Terminal
-	seg   osc133Segmenter
 	table workerBlockTable
 }
 
@@ -113,37 +101,39 @@ type blockFeeder struct {
 // callers nil-guard exactly like every other ghostty use, and the attach
 // snapshot simply carries no blocks.
 //
-// The real OSC 133 segmenter and worker block table are wired HERE — nowhere
-// else. On the non-macOS stub, TrackCursor returns nil so the table pins
-// nothing and serves no blocks; the segmenter still runs (pure Go) but its
-// markers resolve to unserializable blocks, degrading exactly like every other
-// ghostty use off macOS.
+// The worker block table is wired HERE — nowhere else. On the non-macOS stub,
+// TrackCursor returns nil so the table pins nothing and serves no blocks;
+// markers still arrive but resolve to unserializable blocks, degrading exactly
+// like every other ghostty use off macOS.
 func newBlockFeeder(term *ghosttyvt.Terminal) *blockFeeder {
 	if term == nil {
 		return nil
 	}
-	return &blockFeeder{term: term, seg: &osc133ScanSegmenter{}, table: newBlockTable()}
+	return &blockFeeder{term: term, table: newBlockTable()}
 }
 
-// feed writes one PTY output chunk into the terminal, pinning block positions
-// at marker boundaries. Caller holds replayMu.
-func (f *blockFeeder) feed(data []byte) {
-	f.seg.Feed(data, func(segment []byte, marker *osc133Marker) {
-		if len(segment) > 0 {
-			f.term.Write(segment)
-		}
-		if marker == nil {
-			return
-		}
-		// Pin AFTER the pre-marker bytes are written: the cursor now sits on
-		// the cell the marker refers to (the row the prompt/command/output
-		// renders on next).
-		var ref blockRef
-		if r := f.term.TrackCursor(); r != nil {
-			ref = r
-		}
-		f.table.ApplyMarker(*marker, ref, f.term.AltScreenActive())
-	})
+// write feeds one run of plain output to the terminal. Caller holds replayMu.
+func (f *blockFeeder) write(segment []byte) {
+	if len(segment) > 0 {
+		f.term.Write(segment)
+	}
+}
+
+// mark applies one OSC 133 marker at the cursor. It must be called in stream
+// order, after the plain bytes that preceded the marker have been written: the
+// cursor then sits on the cell the marker refers to (the row the prompt,
+// command or output renders on next), which is what the pin captures. A nil
+// marker is a sequence with no block event defined for its subtype — consumed,
+// with nothing to record. Caller holds replayMu.
+func (f *blockFeeder) mark(marker *osc133Marker) {
+	if marker == nil {
+		return
+	}
+	var ref blockRef
+	if r := f.term.TrackCursor(); r != nil {
+		ref = r
+	}
+	f.table.ApplyMarker(*marker, ref, f.term.AltScreenActive())
 }
 
 // snapshotBlocks resolves the block table to SCREEN-space rows. Caller holds

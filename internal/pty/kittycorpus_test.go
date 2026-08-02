@@ -342,6 +342,37 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			chunks: []string{"\x1b]0;ti", "tle\x1b_Ga=T,i=42;AA", "\x07", kittyPlaceRGB(45, 8, 16, ""), " done"},
 		},
 		{
+			// The two streams that blocked the whole-path soak, both found by
+			// the fuzzer against the OSC 133 byte-pattern scanner and neither
+			// carrying a kitty escape at all. Here the scanner stepped over a
+			// stray ESC hunting for a terminator and swallowed what ghostty
+			// printed.
+			name: "a marker cut short by a stray escape",
+			cols: 20, rows: 8,
+			chunks: []string{"\x1b]133;A\x1b0Z done"},
+		},
+		{
+			// And here it stripped a marker whose ESC ] was never in ground —
+			// the lone ESC before it means ghostty is mid-escape, so removing
+			// the marker removed that escape's exit too.
+			name: "a marker whose introducer was never in ground",
+			cols: 20, rows: 8,
+			chunks: []string{"\x1b\x1b]133;A\x1b\\00 done"},
+		},
+		{
+			// A marker split across feed chunks in every state it can hold
+			// bytes in — mid-introducer, mid-payload, and on a partial
+			// terminator — beside a real image, so the wire rewrite and the
+			// marker stripping have to interleave correctly.
+			name: "markers split across feed chunks around an image",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b]13", "3;A\x07$ \x1b]133;C;cmdline_url=ic",
+				"at\x07", kittyPlaceRGB(46, 16, 32, ""),
+				"\r\n\x1b]133;D;0\x1b", "\\done",
+			},
+		},
+		{
 			// The alternate screen keeps no history at all, so the same clamp
 			// fires on a genuinely destroyed anchor. This one the re-push exists
 			// for.
@@ -580,6 +611,16 @@ var kittyGroundNamedPrefixes = []string{
 	"\x1b_Ga=T;AA\x18",
 	"\x1b]0;t\x1b",
 	"\x1b[1\x1b",
+	// OSC 133 shapes. The marker states hold bytes, so a disagreement about
+	// where one ends is a disagreement about which bytes were removed: partway
+	// through the introducer, past it, and inside the payload.
+	"\x1b]1",
+	"\x1b]133",
+	"\x1b]133;",
+	"\x1b]133;A",
+	"\x1b]133;C;cmdline_url=ma",
+	"\x1b]133;A\x1b",
+	"\x1b\x1b]133;A",
 }
 
 // ghosttyInGround reports whether ghostty's parser is in ground after input, by
@@ -612,11 +653,10 @@ func ghosttyInGround(t *testing.T, input string) bool {
 // ghostty has already left ground on it.
 func segmenterInGround(t *testing.T, input string) bool {
 	t.Helper()
-	var seg kittyAPCSegmenter
+	var seg feedSegmenter
 	rebuilt := make([]byte, 0, len(input))
-	seg.Feed([]byte(input), func(plain, apc []byte) {
-		rebuilt = append(rebuilt, plain...)
-		rebuilt = append(rebuilt, apc...)
+	seg.Feed([]byte(input), func(e feedSegment) {
+		rebuilt = append(rebuilt, e.Bytes...)
 	})
 	// The byte-exactness invariant, checked on every case for free: a machine
 	// that tracked state correctly while losing a byte would still be a silent

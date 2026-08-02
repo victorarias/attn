@@ -52,7 +52,7 @@ func newLifetimeRaceSession(t *testing.T, id string, cols, rows int) (*Session, 
 		startedAt:   time.Now(),
 	}
 	s.ghostty = gt
-	s.wireFeed = &wireFeeder{term: gt, blocks: &blockFeeder{term: gt, seg: markerScanSegmenter{}, table: newBlockTable()}}
+	s.wireFeed = &wireFeeder{term: gt, blocks: &blockFeeder{term: gt, table: newBlockTable()}}
 	return s, w
 }
 

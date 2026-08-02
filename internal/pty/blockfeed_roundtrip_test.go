@@ -49,9 +49,11 @@ func TestBlockFeedRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ghosttyvt.New: %v", err)
 	}
-	feeder := newBlockFeeder(term)
+	// Through the production feed path: the real segmenter decides where each
+	// marker begins and ends, and the real block table records it.
+	feeder := newWireFeeder(term)
 	if feeder == nil {
-		t.Fatal("newBlockFeeder returned nil for a live terminal")
+		t.Fatal("newWireFeeder returned nil for a live terminal")
 	}
 
 	// A couple of plain rows first so the prompts don't land at row 0 — the

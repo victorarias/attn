@@ -2,18 +2,18 @@ package pty
 
 // Feed composition: the outer half of the worker's PTY feed path.
 //
-// blockfeed.go owns the inner half — OSC 133 markers stripped out of the byte
-// stream on their way into ghostty. This file wraps it, and turns one arriving
-// chunk into two different things:
+// kittyseg.go owns the framing — one machine that tracks where ghostty's parser
+// stands and cuts the stream into plain runs, complete kitty APCs, and complete
+// OSC 133 markers. This file decides where each of those goes, turning one
+// arriving chunk into two different things:
 //
-//   - the TERMINAL feed: every byte, in order. Plain runs go through the OSC
-//     133 scanner exactly as before; a complete kitty APC goes straight to
-//     ghostty, because ghostty is the system's only kitty parser and the inner
-//     scanner has no business inside an opaque payload.
+//   - the TERMINAL feed: every byte in order except the markers, which
+//     blockfeed.go turns into block-table entries instead. A complete kitty APC
+//     goes to ghostty whole, because ghostty is the system's only kitty parser.
 //   - the WIRE bytes: the same stream with each APC replaced, in position, by
 //     bytes that leave a kitty-ignorant terminal on the same grid — the scroll
 //     and the cursor the placement caused, and nothing else. Usually that is no
-//     bytes at all.
+//     bytes at all. Markers go out untouched; the client parses its own.
 //
 // Both are produced in one call, under the caller's replayMu, in the same
 // critical section that advances the seq watermark. That is what keeps the
@@ -99,7 +99,7 @@ func (d kittyPlacementDelta) empty() bool {
 type wireFeeder struct {
 	term   *ghosttyvt.Terminal
 	blocks *blockFeeder
-	seg    kittyAPCSegmenter
+	seg    feedSegmenter
 
 	// wire is the assembly buffer for a chunk the feeder had to rewrite. It is
 	// reused across calls and handed out by feed, so it is valid only until the
@@ -165,19 +165,25 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 	// copied on the spot.
 	whole := false
 	first := true
-	f.seg.Feed(data, func(plain, apc []byte) {
-		if plain != nil {
-			f.blocks.feed(plain)
-			if first && len(plain) == len(data) && &plain[0] == &data[0] {
+	f.seg.Feed(data, func(seg feedSegment) {
+		switch seg.Kind {
+		case feedSegPlain:
+			f.blocks.write(seg.Bytes)
+			if first && len(seg.Bytes) == len(data) && &seg.Bytes[0] == &data[0] {
 				whole = true
 			} else {
-				f.wire = append(f.wire, plain...)
+				f.wire = append(f.wire, seg.Bytes...)
 			}
-			first = false
-			return
+		case feedSegKittyAPC:
+			f.writeAPC(seg.Bytes)
+		case feedSegOSC133:
+			// The wire carries the marker and the terminal does not: the client
+			// runs its own OSC 133 parser over the wire, and the worker's block
+			// table takes the parsed marker in place of the bytes.
+			f.wire = append(f.wire, seg.Bytes...)
+			f.blocks.mark(seg.Marker)
 		}
 		first = false
-		f.writeAPC(apc)
 	})
 
 	// Anything the terminal's kitty state did that writeAPC did not account for

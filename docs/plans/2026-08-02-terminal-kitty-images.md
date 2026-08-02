@@ -283,25 +283,61 @@ Layers around the gate:
       A kitty APC whose introducing ESC also ends the sequence before it cannot
       be cut out without taking that exit with it, so it stays on the wire and
       the feeder resyncs on the image it places (`kitty_undescribed_image`).
-- [x] Parity corpus (26 entries, replayed into native ghostty and the shipped
+- [x] Parity corpus (29 entries, replayed into native ghostty and the shipped
       wasm model) + the unit layers above. No protocol change; the wire still
       carries nothing new (limit stays 0 until A4).
-- [ ] **Fuzz soak — BLOCKED on the OSC 133 scanner, not on this phase.** The
-      seed corpus is green and a `-fuzz` soak finds nothing in the kitty layer,
-      but it reaches the INNER scanner in seconds. `osc133Segmenter` still finds
-      its marker by byte pattern, which is the same defect the kitty segmenter
-      just shed, in both directions: `\x1b]133;\x1b00` keeps swallowing past a
-      stray ESC that ends the OSC for ghostty, and `\x1b\x1b]133;\x1b\\00`
-      strips a marker whose `ESC ]` was never in ground, taking the lone ESC's
-      meaning with it. Both reproduce through `blockFeeder` alone with no kitty
-      escape in the stream. The fix is the same shape and wants the same machine
-      — `kittySegMode` already knows when the stream is in ground, and osc133
-      runs over exactly the plain runs it emits, so the tracking can be shared
-      rather than written twice. Re-run the whole-path soak once that lands: it
-      currently fails at 2.4s, and at 5.6s with the first of the two defects
-      patched out locally, so it has never run long enough to say anything about
-      the kitty rules. `FuzzKittySegmenterFraming` soaks those rules on their
-      own in the meantime.
+- [x] **One segmenter for both sequence families.** The OSC 133 scanner used to
+      find its marker by byte pattern — the same defect the kitty segmenter had
+      shed, in both directions: `\x1b]133;\x1b00` swallowed past a stray ESC
+      that ends the OSC for ghostty, and `\x1b\x1b]133;\x1b\\00` stripped a
+      marker whose `ESC ]` was never in ground, taking the lone ESC's meaning
+      with it. Both reproduced through `blockFeeder` alone, with no kitty escape
+      in the stream. The mode machine now emits a third disposition instead, so
+      one parser-state tracker frames both families and the byte scan is gone.
+      Terminations were measured at dispatch level rather than read off the
+      spec: BEL and ST extract; CAN, SUB and a stray ESC all DISPATCH the marker
+      in ghostty, but are replayed as plain anyway, because the client's own
+      parser knows only BEL and ST and stripping a marker it would not have
+      recognised leaves the two block tables disagreeing.
+- [ ] **Fuzz soak — still blocked, on disposal rather than framing.** The seed
+      corpus is green, `FuzzKittySegmenterFraming` soaks clean, and the framing
+      wall the whole-path target used to hit is gone: it ran 2.4s before the
+      merge and reaches ~30s after it. What it reaches now is not a framing
+      defect. Two ways the feed path moves the worker's grid without the wire
+      describing it are recorded below and under A4; both are older than this
+      segmenter, both reproduce on `main`, and neither is fixable by changing
+      where a sequence is cut. Make this target a gate once they close.
+
+#### Live defect: `OSC 133;A` is not grid-neutral
+
+Stripping markers from the worker terminal has always rested on the claim that
+they produce no cells, so both grids land in the same place either way. Measured
+against ghostty, that is false for prompt-start: with the cursor mid-line,
+`OSC 133;A` performs a line break. `0\x1b]133;A\x1b\\` leaves the cursor at
+`(0,1)`; the same stream without the marker leaves it at `(1,0)`. `B`, `C`, `D`
+and unknown subtypes are neutral, and only `A` is not — it is ghostty's
+"a prompt always starts on a fresh line" rule.
+
+So today the worker, which never sees the marker, keeps the cursor mid-line
+while the client, which does, breaks the line. Every prompt drawn after output
+with no trailing newline diverges, which is not a rare shape. Nothing shows it
+until an attach, and then it shows badly: the client resets to the worker's
+dump, so the prompt the user was looking at on its own line jumps up to sit
+against the previous output.
+
+This is not gated on the storage flip; it is live now, and it is the first thing
+the whole-path fuzz target finds (16.5s, on `0\x1b]133;A`). The fix measured to
+work is one line — write the marker's bytes to the terminal as well as the wire,
+pinning the block-table cursor after them rather than before — which makes the
+two grids agree by construction and leaves the block table on the row the prompt
+actually starts on. It changes zero tests: the stripping contract the suite
+asserts is segmenter-level (a marker is its own emission, never part of a plain
+run), which that fix keeps. The VT dump was measured not to re-emit OSC 133, so
+the marker reaching the terminal cannot leak into restore or double-seed the
+client's block store, which is what the Phase 3a contract requires.
+
+It is left out of the segmenter change on purpose: that change moves framing
+only, and this moves disposal.
 
 ### A3 — protocol + frontend rendering
 
@@ -316,10 +352,11 @@ Layers around the gate:
 
 ### A4 — enable, restore, remote, receipts
 
-Three synthesis defects are known and deliberately deferred to here. All are
+Four synthesis defects are known and deliberately deferred to here. All are
 unreachable while the storage limit is 0 — nothing dispatches, so the grid never
 moves and `writeAPC` returns early — and all become live the moment the limit
-is flipped. None may ship with the flip.
+is flipped. None may ship with the flip. (The `OSC 133;A` defect above is NOT
+one of these: it is live today and gated on nothing.)
 
 - [ ] **CHA is wrong under DECLRMM + origin mode.** Synthesis ends with an
       absolute column move, and a client with left/right margins enabled
@@ -346,6 +383,20 @@ is flipped. None may ship with the flip.
       that changes the image content under a live id (`ImageGeneration` moves,
       the placement key does not). Decide at the flip: include `Updated` and
       accept the re-pushes, or key the diff on the fields a scroll cannot move.
+- [ ] **A placement that appears and dies inside one chunk is invisible.** The
+      end-of-feed check runs ONE diff per feed call, against the placement set
+      from before it. An image that is displayed and then deleted in the same
+      PTY chunk leaves that set unchanged, so `Added` is empty and no resync
+      fires — while the scroll the placement caused is still on the worker's
+      grid and never reached the wire. Found by `FuzzKittyWireMirror` at ~30s
+      on a transmit-and-display followed by `\x1b_Ga=d\x1b\\`, which reports
+      `gen 0->4, added=0 removed=0 updated=0` and leaves the worker at `(3,1)`
+      against the client's `(1,0)`. It needs no exotic stream: PTY reads are
+      4 KiB and up, so an emitter that draws an image and clears it lands both
+      in one read. The generation stamp is the honest signal here — it moved
+      four times while the diff saw nothing — but keying purely on the stamp
+      resyncs on prunes too, which is what the `Added`-only rule was avoiding.
+      Decide with the item above; they are the same choice seen twice.
 
 - [ ] Flip the storage limit on (measured number, named limit errors surfaced
       through kitty's own response channel and the daemon log).
