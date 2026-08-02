@@ -229,6 +229,9 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 	if maxSB <= 0 {
 		maxSB = DefaultMaxScrollback
 	}
+	// Process-global and idempotent; without it ghostty rejects every f=100
+	// (PNG) kitty transmission, which is most of what real emitters send.
+	installPNGDecoder()
 	t := &Terminal{cols: cols, rows: rows, sink: &respSink{}}
 	copts := C.GhosttyTerminalOptions{
 		cols:           C.uint16_t(cols),

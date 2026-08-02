@@ -84,3 +84,53 @@ func (t *Terminal) AltScreenActive() bool { return false }
 
 // LiveTrackedRefs mirrors the real build's leak accounting; always zero here.
 func LiveTrackedRefs() int { return 0 }
+
+// KittyImageFormat mirrors the real build's stored-image pixel layouts.
+type KittyImageFormat uint8
+
+const (
+	KittyImageRGB KittyImageFormat = iota
+	KittyImageRGBA
+	KittyImageGrayAlpha
+	KittyImageGray
+)
+
+// KittyPlacement mirrors the real build's observed placement.
+type KittyPlacement struct {
+	ImageID         uint32
+	PlacementID     uint32
+	Virtual         bool
+	Z               int32
+	PixelWidth      uint32
+	PixelHeight     uint32
+	GridCols        uint32
+	GridRows        uint32
+	ViewportCol     int32
+	ViewportRow     int32
+	ViewportVisible bool
+	SourceX         uint32
+	SourceY         uint32
+	SourceWidth     uint32
+	SourceHeight    uint32
+	ImageGeneration uint64
+}
+
+// KittyImage mirrors the real build's copied-out image.
+type KittyImage struct {
+	ID         uint32
+	Width      uint32
+	Height     uint32
+	Format     KittyImageFormat
+	Generation uint64
+	Data       []byte
+}
+
+// KittyGeneration is always zero on the stub: no parser, so nothing ever
+// mutates the storage — the same value a live terminal reports while empty.
+func (t *Terminal) KittyGeneration() uint64 { return 0 }
+
+// KittyPlacements is always empty on the stub.
+func (t *Terminal) KittyPlacements() []KittyPlacement { return nil }
+
+// KittyImage never finds an image on the stub.
+func (t *Terminal) KittyImage(_ uint32) (KittyImage, bool) { return KittyImage{}, false }
