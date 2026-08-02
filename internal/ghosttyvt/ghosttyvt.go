@@ -49,6 +49,12 @@ static GhosttyResult ghosttyvt_install(GhosttyTerminal t, void* userdata) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_WRITE_PTY, (const void*)goWritePty);
 }
 
+// Set the kitty image storage limit. ghostty_terminal_set reads the value
+// synchronously, so the caller's stack local need not outlive the call.
+static GhosttyResult ghosttyvt_set_kitty_limit(GhosttyTerminal t, uint64_t v) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &v);
+}
+
 // Build formatter options: one self-contained VT (or plain) stream with all
 // "extra" state on and unwrap=false so soft-wrap survives the dump. NULL
 // selection = the entire screen including scrollback history.
@@ -164,6 +170,13 @@ const DefaultMaxScrollback = 10000
 type Options struct {
 	// MaxScrollback caps retained scrollback lines. Zero uses DefaultMaxScrollback.
 	MaxScrollback int
+
+	// KittyImageStorageLimit is the kitty graphics image storage cap in
+	// bytes, applied at construction. The zero value disables the kitty
+	// graphics protocol entirely — deliberate: the library's own default is
+	// 10MB, and a silently-live worker-side parser desyncs the grid from the
+	// client model, which never parses kitty.
+	KittyImageStorageLimit uint64
 }
 
 // Snapshot is a self-contained serialization of terminal state suitable for
@@ -224,6 +237,11 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 	}
 	if rc := C.ghostty_terminal_new(nil, &t.term, copts); rc != C.GHOSTTY_SUCCESS {
 		return nil, fmt.Errorf("ghosttyvt: terminal_new failed: rc=%d", int(rc))
+	}
+	// Written even when zero: zero is what overrides the library's 10MB default.
+	if rc := C.ghosttyvt_set_kitty_limit(t.term, C.uint64_t(opts.KittyImageStorageLimit)); rc != C.GHOSTTY_SUCCESS {
+		C.ghostty_terminal_free(t.term)
+		return nil, fmt.Errorf("ghosttyvt: set kitty image storage limit failed: rc=%d", int(rc))
 	}
 	// The handle references the sink (not t) so it does not pin the Terminal.
 	// C retains the userdata past this call, so give it the *address* of the

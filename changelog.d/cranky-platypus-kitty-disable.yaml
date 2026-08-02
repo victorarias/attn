@@ -1,0 +1,18 @@
+kind: fixed
+area: terminal
+change: >
+  The worker terminal no longer advertises kitty-graphics image support it
+  cannot render. Its native VT core had the protocol live with the library's
+  default 10MB image storage limit, so it answered support queries with an OK
+  and accepted image placements; kitty graphics are now disabled at terminal
+  construction until real image support ships.
+symptom: >
+  Feature-detecting tools (kitten icat, timg, chafa) saw image support and
+  emitted kitty escapes that displayed nothing. Worse, an accepted placement
+  moved the cursor in the worker's authoritative grid but not in the client's,
+  and a detach/reattach restore served that diverged grid — so the visible
+  terminal could come back corrupted after running such a tool.
+notes: >
+  Phase A1 of docs/plans/2026-08-02-terminal-kitty-images.md; the remaining
+  phases add real worker-authoritative rendering. The grid effect requires cell
+  pixel metrics, which every resized production terminal has.
