@@ -427,14 +427,36 @@ until the storage limit flips in A4.
       alternative was to make extraction require true ground — VT ground AND not
       mid-codepoint — via a rolling UTF-8 tail tracker, leaving a mid-character
       APC on the wire for both sides to abort on identically. It was measured
-      and it does work for classes 1 and 2: a raw kitty APC is a perfect grid
-      no-op in the shipped wasm at any payload size and either terminator, and a
-      hand-rolled tracker agreed with ghostty's decoder on 21 of 23 probed
-      prefixes (the two misses, surrogate halves and overlongs, both fail safe).
-      It was rejected because it cannot reach class 3 — a marker cannot replay
-      as plain, since feeding it to the native worker breaks the line — and
-      because it would add a measured UTF-8 rule surface that has to stay in
-      step with ghostty's decoder forever, where the ESC-parity rule needs none.
+      and it does work for classes 1 and 2. Both halves were measured, and the
+      numbers are recorded here so nobody has to re-run them:
+
+      - A raw kitty APC is a perfect grid no-op in the shipped wasm, at any
+        payload size and either terminator, and its leading ESC ends a held
+        decode exactly as a bare ST does. `ab` + APC + `c` lands on `(3,0)`
+        `abc`, the same as `abc` alone, for a small APC, a real 1.5 KB
+        placement, and a `0x9c`-terminated one alike.
+      - A hand-rolled lead-byte tracker agrees with ghostty's decoder on 20 of
+        23 probed prefixes. The three misses are `\xed\xa0` (a surrogate half),
+        `\xe0\x80` (an overlong) and `\xf4\x90` (above U+10FFFF), which ghostty
+        rejects at the second byte while the tracker still counts one owing.
+        All three fail safe — over-reporting "pending" only ever declines an
+        extraction.
+
+      An earlier revision of this paragraph recorded "21 of 23, two misses". That
+      was measured over too narrow a prefix set; widening it found the third
+      mechanism above. The correction matters to the rejection rather than
+      against it: the imprecision is not two special cases but the whole class of
+      second-byte range restrictions UTF-8 places on the four constrained leads
+      (`0xe0`, `0xed`, `0xf0`, `0xf4`), and a hand-written table missed one of
+      them on the first pass.
+
+      Rejected because it cannot reach class 3 — a marker cannot replay as
+      plain, since feeding it to the native worker breaks the line — so the
+      ESC-led no-op has to exist anyway. Choosing it would therefore mean TWO
+      mechanisms: the marker substitute plus a decoder tracker that models
+      ghostty's UTF-8 handling forever, which is the same parallel-model trap
+      this file's framing rules exist to kill. The ESC-parity rule is one rule at
+      three sites and needs no model of the decoder at all.
 
       **Mutation receipts**, each landing on a named case:
 
@@ -450,6 +472,27 @@ until the storage limit flips in A4.
       `kittyWireRewrite.parity.test.ts` against the REAL shipped wasm — expected
       `000<FFFD><FFFD> done`, recorded `000<FFFD> done` — with the other 34
       passing.
+
+      **Live verification.** Class 3 is a shipping fix rather than a dark one,
+      so it was exercised against a real daemon and a real PTY built from this
+      branch, on a throwaway `kittyseg` profile (`~/.attn-kittyseg`, port 22964,
+      removed with `attn profile clean` afterwards):
+
+      - A program writing `000\xe1` + `OSC 133;A` + `\xa5 done` in one call,
+        through a real fish session, leaves the worker's authoritative grid
+        (`get_screen_snapshot`) reading `000␦␦ done` — ten cells, the TWO
+        replacement characters the wasm client also produces. Without the
+        substitute the worker keeps decoding and shows one.
+      - Smoke, because the feed path sees every byte of every session:
+        `café 日本語 ── 😀 ✓` lands intact — accents, wide CJK cells, box
+        drawing and an emoji all correct.
+
+      A trap worth recording: `ATTN_DATA_DIR` alone does NOT move a daemon off
+      production. With it — plus `ATTN_DB_PATH`, `ATTN_SOCKET_PATH` and
+      `ATTN_WS_PORT` — exported, `attn profile resolve --json` still reported
+      `~/.attn` and port 9849, so `attn daemon ensure` would have driven the
+      production daemon. Only `ATTN_PROFILE` relocates it. Resolve and check
+      before any lifecycle command, not after.
 
       **Harness fidelity.** `writeAsClient` now substitutes an ST for each
       dropped marker instead of dropping the bytes outright. Dropping them
