@@ -288,8 +288,13 @@ func FindCopilotTranscript(cwd string, startedAt time.Time) string {
 			return filepath.SkipDir
 		}
 
+		// Compared through symlinks, as codex's finder is: copilot records the
+		// resolved cwd, so a session launched under /tmp writes /private/tmp and a
+		// literal comparison finds nothing. Copilot's live state comes from the
+		// watcher, so a transcript it cannot find leaves the session showing
+		// `launching` for as long as it runs.
 		matchedCWD := readCopilotWorkspaceCWD(workspacePath)
-		if matchedCWD == "" || matchedCWD != cwdClean {
+		if matchedCWD == "" || !pathsEquivalent(matchedCWD, cwdClean) {
 			return filepath.SkipDir
 		}
 

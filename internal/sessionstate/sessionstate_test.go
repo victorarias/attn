@@ -623,6 +623,80 @@ func TestResolve(t *testing.T) {
 			wantState:  protocol.SessionStateUnknown,
 			wantReason: ReasonNoEvidence,
 		},
+
+		// --- the user halting a turn ---------------------------------------
+
+		{
+			// No agent fires a hook on an interrupt, so the turn bracket is still
+			// open and its heartbeat has only just gone quiet: every other clause
+			// reads this as a turn in progress.
+			name: "an aborted turn settles immediately, with its bracket still open",
+			evidence: Evidence{
+				TurnOpen:         true,
+				TurnEverOpened:   true,
+				Heartbeat:        seen(SourceHeartbeat, ClaimSettled, 200*time.Millisecond),
+				LastBusyAt:       now.Add(-300 * time.Millisecond),
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimTurnAborted, 200*time.Millisecond),
+				LastMovement:     now.Add(-200 * time.Millisecond),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonTurnAborted,
+		},
+		{
+			// The abort outranks a classification still running: an interrupted turn
+			// left a fragment, and holding for a verdict on it would sit on the
+			// settle for the classifier's whole timeout.
+			name: "an aborted turn does not wait for a verdict",
+			evidence: Evidence{
+				TurnEverOpened:   true,
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimTurnAborted, time.Second),
+				ClassifyingSince: now.Add(-time.Second),
+				LastMovement:     now.Add(-time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonTurnAborted,
+		},
+		{
+			// Interrupting a compaction is the case with no other way out: nothing
+			// but total silence retires `Compacting`, so it would hold the session
+			// working for 90s.
+			name: "an aborted turn outranks compaction",
+			evidence: Evidence{
+				TurnEverOpened:   true,
+				Compacting:       true,
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimTurnAborted, time.Second),
+				LastMovement:     now.Add(-time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonTurnAborted,
+		},
+		{
+			// The user halted the turn and then started another one. The agent is
+			// visibly running, so the abort is spent.
+			name: "a busy frame after an abort retires it",
+			evidence: Evidence{
+				TurnOpen:         true,
+				TurnEverOpened:   true,
+				Heartbeat:        seen(SourceHeartbeat, ClaimBusy, 100*time.Millisecond),
+				LastBusyAt:       now.Add(-100 * time.Millisecond),
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimTurnAborted, 3*time.Second),
+				LastMovement:     now.Add(-100 * time.Millisecond),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonHeartbeatFresh,
+		},
+		{
+			// An abort is not an approval: the agent asked nothing, so the session
+			// must not be reported as blocked on a person.
+			name: "an aborted turn is not read as an outstanding approval",
+			evidence: Evidence{
+				TurnEverOpened:   true,
+				LastHarnessEvent: seen(SourceHarnessEvent, ClaimTurnAborted, time.Second),
+				LastMovement:     now.Add(-time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonTurnAborted,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Resolve(tc.evidence, testPolicy(), now)
@@ -1040,5 +1114,52 @@ func TestATurnKilledByTheAPIAsksForTheUser(t *testing.T) {
 	e.LastBusyAt = now.Add(-100 * time.Millisecond)
 	if got := Resolve(e, policy, now); got.State != protocol.SessionStateWorking {
 		t.Fatalf("resolved %s/%s once the agent ran again, want working", got.State, got.Reason)
+	}
+}
+
+// The regression this whole clause exists for. An interrupt fires no hook on any
+// agent, so the turn bracket opened by the prompt is never closed: without the
+// abort edge, the only thing that retires it is StaleAfter, and the session shows
+// the halted agent as working for that entire window. Written against the clock
+// rather than against a single instant because the wrong answer here was not a
+// wrong state, it was a right state that arrived a minute late.
+func TestHaltingATurnSettlesItWithoutWaitingOutTheStaleWindow(t *testing.T) {
+	policy := testPolicy()
+	// Measured on claude 2.1.220: the last busy frame lands just before ESC, the
+	// idle glyph 0.07s after it, and nothing at all after that.
+	abortedAt := now
+	e := Evidence{
+		TurnOpen:       true,
+		TurnEverOpened: true,
+		LastBusyAt:     abortedAt.Add(-300 * time.Millisecond),
+		Heartbeat: &Observation{
+			Source:     SourceHeartbeat,
+			Claim:      ClaimSettled,
+			ObservedAt: abortedAt.Add(70 * time.Millisecond),
+		},
+		LastHarnessEvent: &Observation{
+			Source:     SourceHarnessEvent,
+			Claim:      ClaimTurnAborted,
+			Detail:     "[Request interrupted by user]",
+			ObservedAt: abortedAt,
+		},
+		LastMovement: abortedAt.Add(70 * time.Millisecond),
+	}
+
+	// Every point across the window the bracket would otherwise have held, and
+	// past the one where evidence silence would have called it stuck.
+	for _, age := range []time.Duration{
+		time.Second,
+		policy.StaleAfter,
+		policy.StaleAfter + policy.SettleGrace + time.Second,
+		policy.StuckAfter + time.Second,
+	} {
+		got := Resolve(e, policy, abortedAt.Add(age))
+		if got.State != protocol.SessionStateIdle || got.Reason != ReasonTurnAborted {
+			t.Fatalf("%s after the halt: resolved %s/%s, want idle/turn_aborted", age, got.State, got.Reason)
+		}
+		if got.Detail != "[Request interrupted by user]" {
+			t.Fatalf("%s after the halt: detail = %q, want what the transcript said", age, got.Detail)
+		}
 	}
 }

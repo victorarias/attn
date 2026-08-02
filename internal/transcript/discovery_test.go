@@ -192,6 +192,32 @@ func TestFindCopilotTranscript_PrefersClosestStartTime(t *testing.T) {
 	}
 }
 
+// Copilot records the cwd it resolved, not the one it was handed. On macOS a
+// session launched under /tmp writes /private/tmp, and a literal comparison finds
+// nothing — which leaves the session showing `launching` for as long as it runs,
+// because copilot's live state comes from the watcher.
+func TestFindCopilotTranscript_MatchesThroughASymlinkedCWD(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(toolhome.EnvVar, homeDir)
+
+	real := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link-to-project")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+
+	startedAt := time.Date(2026, 2, 8, 15, 30, 0, 0, time.UTC)
+	// Copilot writes the resolved path...
+	expected := writeCopilotSessionState(t, homeDir, "session-a", real, startedAt, true, true, startedAt.Add(time.Minute))
+	// ...and attn asks with the path the session was launched from.
+	if got := FindCopilotTranscript(link, startedAt); got != expected {
+		t.Fatalf("FindCopilotTranscript() = %q, want %q", got, expected)
+	}
+}
+
 func TestFindCopilotTranscript_FallsBackToNewestModTime(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(toolhome.EnvVar, homeDir)

@@ -96,6 +96,106 @@ entirely. Unwired hooks: Claude **`Notification`** (fires on permission-needed a
 on 60s-idle-waiting), `SessionEnd`, `SubagentStop`; Codex's `notify` program
 (`agent-turn-complete`).
 
+### No hook reports a turn the user halted (measured 2026-08-01)
+
+Hitting ESC mid-turn fires **nothing**. Measured on claude 2.1.220 with all 31 of
+its hook events wired to a logger, on codex 0.146.0 with attn's own trusted-hash
+overrides on every hook it supports, and on copilot 1.0.77: no `Stop`, no
+`StopFailure`, no `Notification`, nothing, for as long as you care to wait.
+Claude's `idle_prompt` `Notification` — the resolver's designed rescue for a lost
+`Stop` — does not fire either.
+
+This is a hole in the bracket model, not a late signal: the `UserPromptSubmit`
+that opened the turn has no counterpart coming, so the resolver holds *working*
+until `StaleAfter` (60s) retires the bracket, and because an interrupt writes no
+further evidence, `LastMovement` freezes and the session then flips to *unknown*
+/ *stuck* at 90s.
+
+What all three *do* write, in the same second, is a line in their own transcript:
+
+```text
+claude:  {"type":"user","message":{"content":[{"type":"text",
+          "text":"[Request interrupted by user]"}]},"interruptedMessageId":"msg_…"}
+codex:   {"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}
+copilot: {"type":"abort","data":{"reason":"user_initiated"}}
+```
+
+So the transcript is the only place a halt can be read from. `ClaimTurnAborted`
+is filed from there by the transcript watcher and resolved by its own clause to
+*idle* / `turn_aborted` — above compaction and background work, because an abort
+ends everything the turn had running, and below the busy heartbeat, because the
+agent visibly running again is the one thing that contradicts it. It settles
+without consulting the classifier: a halted turn left a truncated fragment and no
+answer, and a verdict drawn from that reports a question the agent never finished
+asking.
+
+Codex's live state is otherwise hook-owned. Its transcript watcher exists for
+this signal alone and its behavior declines classification unconditionally, so it
+cannot race the `Stop` hook's verdict.
+
+Copilot is the worst of the three, and for a second reason: an abort is the one
+turn ending it does **not** follow with `assistant.turn_end`. Its watcher keeps
+its own turn bracket, so before this a halted copilot session was pinned *working*
+for the rest of its life — not for 60s. Every abort closes that bracket whatever
+caused it; only `user_initiated` settles the session.
+
+Live on a non-production profile, halt → *idle* / `turn_aborted`: **1.0s**
+(claude), **1.3s** (codex), **1.2s** (copilot), against 64s before. Pasting the
+marker as a prompt on the same live claude session goes *working* → *waiting_input*
+and never `turn_aborted`.
+
+Two things worth knowing before re-running that verification. Codex 0.146.0 on
+`gpt-5.6-sol` interrupts on **Ctrl+C**, not ESC — ESC is consumed by the composer,
+and a probe that sends it watches codex finish the turn and concludes, wrongly,
+that detection is broken. And copilot's discovery matches on the cwd it *resolved*,
+so a session launched under `/tmp` (a symlink to `/private/tmp` on macOS) found no
+transcript at all until `FindCopilotTranscript` was taught to compare through
+symlinks the way the codex finder already did. That one is not cosmetic: copilot
+has no heartbeat, so a transcript it cannot find leaves the session at *launching*
+for its whole life.
+
+#### Not every abort is a halt, and not every halt is this session's
+
+Three ways the naive reading of those lines is wrong, all measured:
+
+- **The marker is text a user can type.** Claude writes an interrupt as a lone
+  text *block* in an entry carrying none of `promptSource` / `origin` /
+  `permissionMode`; a prompt the user submitted is a *string* stamped with them.
+  Without both guards, pasting the marker settles the session you are talking to.
+  Halting at a tool-use prompt writes the marker with no `interruptedMessageId`
+  at all, so the field cannot be the only signal either.
+- **Codex `turn_aborted` covers four reasons.** The enum in the 0.146.0 binary
+  carries `interrupted`, `replaced`, `review_ended`, and `budget_limited`. Only
+  the first is a user halt — `replaced` means another turn took over, and the
+  session is working again a moment later. (378 real `turn_aborted` events in
+  `~/.codex/sessions` here are all `interrupted`; the others are rarer, not
+  absent.)
+- **The watcher re-reads history routinely.** It rewinds a bootstrap window
+  (256KB, 512KB for copilot) behind the end of the file at discovery, and starts
+  over at offset zero whenever a transcript shrinks. A codex session resumed onto
+  an existing rollout therefore replays old halts. Every agent dates its lines, so
+  the halt is dated by the agent and dropped if it predates the session; an
+  undated halt is dropped outright, because it cannot be told from history.
+  Dating it by the agent rather than the read also settles the 500ms-poll race
+  with the next prompt: a halt the user has already typed past is outranked by the
+  busy frames that follow it.
+
+#### The heartbeat cannot stand in for the transcript
+
+Worth recording because it is the obvious fallback for an agent whose transcript
+attn cannot find. Measured on claude 2.1.220 through a real PTY, watching OSC 0:
+
+```text
+halt, no tool:   28.80s ESC        → 28.86s "✳ Write typewriter history essay" → silence
+60s foreground:  11.23s tool start → 19.99s "✳ Run sleep command for 60 seconds" → silence 64s
+```
+
+A halted turn and a blocking tool call are the same frames in the same order: the
+not-busy glyph carrying the task description, then nothing. No silence threshold
+separates them, which is why `StaleAfter` is sized to the longest tool call and
+why nothing shorter can be layered underneath it. The transcript is the only
+signal.
+
 ## Spike results (2026-07-25)
 
 Throwaway spike in `internal/pty/spike_state_replay_test.go` and

@@ -15,7 +15,32 @@ const (
 	transcriptPollInterval = 500 * time.Millisecond
 	transcriptQuietWindow  = 1500 * time.Millisecond
 	assistantDedupWindow   = 2 * time.Second
+
+	// Discovery is a directory walk — codex and copilot search their whole session
+	// tree, thousands of files on a working machine — and it repeats every poll
+	// until it lands. A session that never gets a transcript (one parked at a trust
+	// prompt, one whose agent writes nowhere we look) would otherwise walk that
+	// tree twice a second for as long as it lives. Fast while a transcript is
+	// plausibly still being created, then slow, because after a minute it is not
+	// arriving in the next half second either.
+	transcriptDiscoveryFastAttempts = 20
+	transcriptDiscoverySlowAttempts = 40
+	transcriptDiscoverySlowInterval = 2 * time.Second
+	transcriptDiscoveryIdleInterval = 5 * time.Second
 )
+
+// transcriptDiscoveryDelay is how long to wait before the next discovery attempt
+// after `attempts` have failed. Zero means the next poll.
+func transcriptDiscoveryDelay(attempts int) time.Duration {
+	switch {
+	case attempts < transcriptDiscoveryFastAttempts:
+		return 0
+	case attempts < transcriptDiscoverySlowAttempts:
+		return transcriptDiscoverySlowInterval
+	default:
+		return transcriptDiscoveryIdleInterval
+	}
+}
 
 type transcriptWatcher struct {
 	sessionID string
@@ -146,7 +171,9 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 		assistantSeq    int64
 		classifiedSeq   int64
 
-		lastDiscoveryLog time.Time
+		lastDiscoveryLog  time.Time
+		discoveryAttempts int
+		nextDiscoveryAt   time.Time
 	)
 
 	for {
@@ -169,14 +196,21 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 		sessionState := session.State
 
 		if transcriptPath == "" {
+			if !nextDiscoveryAt.IsZero() && time.Now().Before(nextDiscoveryAt) {
+				continue
+			}
 			transcriptPath = d.findTranscriptPathForWatcher(w)
 			if transcriptPath == "" {
+				discoveryAttempts++
+				nextDiscoveryAt = time.Now().Add(transcriptDiscoveryDelay(discoveryAttempts))
 				if time.Since(lastDiscoveryLog) >= 5*time.Second {
-					d.logf("transcript watcher: waiting for transcript session=%s agent=%s cwd=%s", w.sessionID, w.agent, w.cwd)
+					d.logf("transcript watcher: waiting for transcript session=%s agent=%s cwd=%s attempts=%d", w.sessionID, w.agent, w.cwd, discoveryAttempts)
 					lastDiscoveryLog = time.Now()
 				}
 				continue
 			}
+			discoveryAttempts = 0
+			nextDiscoveryAt = time.Time{}
 			info, err := os.Stat(transcriptPath)
 			if err != nil {
 				d.logf("transcript watcher: transcript stat failed session=%s path=%s err=%v", w.sessionID, transcriptPath, err)
@@ -242,6 +276,18 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 				lineResult := w.behavior.HandleLine([]byte(line), now, sessionState)
 				if lineResult.Log != "" {
 					d.logf("%s session=%s", lineResult.Log, w.sessionID)
+				}
+				if lineResult.Aborted {
+					if skip, reason := staleTranscriptAbort(lineResult.AbortAt, w.startedAt); skip {
+						d.logf("transcript watcher: ignoring turn abort session=%s reason=%s abort_at=%s", w.sessionID, reason, lineResult.AbortAt.Format(time.RFC3339Nano))
+					} else {
+						d.recordTurnAbortedEvidence(w.sessionID, lineResult.AbortDetail, lineResult.AbortAt, now)
+						// The halted turn has nothing to classify: what it left on record is
+						// a truncated fragment, and a verdict drawn from that describes a
+						// question the agent never finished asking. Marking the sequence
+						// consumed is what keeps the quiet window below from picking it up.
+						classifiedSeq = assistantSeq
+					}
 				}
 				if lineResult.State != "" && protocol.SessionState(lineResult.State) != sessionState {
 					d.recordTranscriptEvidence(w.sessionID, lineResult.State, "transcript line", now)
@@ -315,6 +361,27 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 			go d.classifySessionState(w.sessionID, transcriptPath)
 		}
 	}
+}
+
+// staleTranscriptAbort decides whether a halt read out of the transcript
+// describes this session's life or someone else's.
+//
+// The watcher re-reads history as a matter of course: it rewinds up to a
+// bootstrap window behind the end of the file at discovery, and starts over at
+// offset zero whenever a transcript shrinks. A codex session resumed onto an
+// existing rollout, or a claude transcript rewritten in place, therefore replays
+// old lines — and a halt among them, filed as if it had just happened, settles a
+// session that is working. Dating the halt is what tells the two apart, so a halt
+// that cannot be dated is not believed at all: losing the feature loudly beats
+// settling live sessions on the strength of last week's ESC.
+func staleTranscriptAbort(abortAt, sessionStartedAt time.Time) (bool, string) {
+	if abortAt.IsZero() {
+		return true, "undated"
+	}
+	if !sessionStartedAt.IsZero() && abortAt.Before(sessionStartedAt) {
+		return true, "predates session"
+	}
+	return false, ""
 }
 
 func readTranscriptDelta(path string, offset int64) ([]byte, error) {

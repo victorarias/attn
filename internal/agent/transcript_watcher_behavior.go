@@ -53,6 +53,16 @@ type TranscriptWatcherBehavior interface {
 type WatcherLineResult struct {
 	State string
 	Log   string
+
+	// Aborted: the line records the user halting the turn. Separate from State
+	// because it is not a state the watcher is asking for — it is a fact about the
+	// turn, which the resolver weighs against everything else it knows. AbortDetail
+	// carries what the agent said about it, for the diagnosis, and AbortAt when the
+	// agent says it happened — the watcher re-reads history often enough that an
+	// undated halt cannot be told from one that just occurred.
+	Aborted     bool
+	AbortDetail string
+	AbortAt     time.Time
 }
 
 // WatcherTickResult captures periodic watcher actions on each poll.
@@ -97,6 +107,14 @@ type claudeTranscriptWatcherBehavior struct{}
 func (b *claudeTranscriptWatcherBehavior) Reset() {}
 
 func (b *claudeTranscriptWatcherBehavior) HandleLine(line []byte, now time.Time, sessionState protocol.SessionState) WatcherLineResult {
+	if abort, ok := transcript.ClaudeTurnAborted(line); ok {
+		return WatcherLineResult{
+			Aborted:     true,
+			AbortDetail: abort.Reason,
+			AbortAt:     abort.At,
+			Log:         "transcript watcher: claude turn aborted by user",
+		}
+	}
 	return WatcherLineResult{}
 }
 
@@ -138,6 +156,56 @@ func (b *claudeTranscriptWatcherBehavior) SkipClassification(sessionState protoc
 	return false, ""
 }
 
+// --- Codex behavior ---
+
+// Codex runs the watcher for one reason: an aborted turn is the only thing its
+// hooks do not report. Everything else about a codex session is hook-owned and
+// already arbitrated by the resolver, so this behavior asks for no states, keeps
+// no lifecycle of its own, and — unlike claude, whose watcher predates the hook
+// path and still classifies when hooks go stale — never classifies. A second
+// classification driver would be racing the Stop hook's verdict to describe the
+// same turn.
+type codexTranscriptWatcherBehavior struct{}
+
+func (b *codexTranscriptWatcherBehavior) Reset() {}
+
+func (b *codexTranscriptWatcherBehavior) HandleLine(line []byte, now time.Time, sessionState protocol.SessionState) WatcherLineResult {
+	abort, ok := transcript.CodexTurnAborted(line)
+	if !ok {
+		return WatcherLineResult{}
+	}
+	if !abort.UserHalt {
+		// Codex owns its own state through hooks; a turn it abandoned for its own
+		// reasons is already described there, and `replaced` in particular is
+		// followed straight away by the turn that replaced it.
+		return WatcherLineResult{
+			Log: fmt.Sprintf("transcript watcher: codex turn aborted without a user halt reason=%s", abort.Reason),
+		}
+	}
+	return WatcherLineResult{
+		Aborted:     true,
+		AbortDetail: abort.Reason,
+		AbortAt:     abort.At,
+		Log:         fmt.Sprintf("transcript watcher: codex turn aborted reason=%s", abort.Reason),
+	}
+}
+
+func (b *codexTranscriptWatcherBehavior) HandleAssistantMessage(now time.Time) {}
+
+func (b *codexTranscriptWatcherBehavior) DeduplicateAssistantEvents() bool { return true }
+
+func (b *codexTranscriptWatcherBehavior) QuietSince(lastAssistantAt time.Time) time.Time {
+	return lastAssistantAt
+}
+
+func (b *codexTranscriptWatcherBehavior) Tick(now time.Time, sessionState protocol.SessionState) WatcherTickResult {
+	return WatcherTickResult{}
+}
+
+func (b *codexTranscriptWatcherBehavior) SkipClassification(sessionState protocol.SessionState, lastSeen string, now time.Time) (bool, string) {
+	return true, "transcript watcher: skipping classification, codex classification is hook-owned"
+}
+
 // --- Copilot behavior ---
 
 type copilotPendingTool struct {
@@ -158,6 +226,29 @@ func (b *copilotTranscriptWatcherBehavior) Reset() {
 }
 
 func (b *copilotTranscriptWatcherBehavior) HandleLine(line []byte, now time.Time, sessionState protocol.SessionState) WatcherLineResult {
+	// An abort is the one turn ending copilot does not follow with
+	// `assistant.turn_end`. Measured on copilot 1.0.77: halting mid-reply writes
+	// `{"type":"abort","data":{"reason":"user_initiated"}}` and nothing else, so
+	// without this the bracket below stays open and Tick pins the session working
+	// for the rest of its life. The bracket closes for every abort; only the user's
+	// own settles the session.
+	if abort, ok := transcript.CopilotTurnAborted(line); ok {
+		b.turnOpen = false
+		b.pendingTools = make(map[string]copilotPendingTool)
+		b.transcriptPendingLive = false
+		if !abort.UserHalt {
+			return WatcherLineResult{
+				Log: fmt.Sprintf("transcript watcher: copilot turn aborted without a user halt reason=%s", abort.Reason),
+			}
+		}
+		return WatcherLineResult{
+			Aborted:     true,
+			AbortDetail: abort.Reason,
+			AbortAt:     abort.At,
+			Log:         fmt.Sprintf("transcript watcher: copilot turn aborted reason=%s", abort.Reason),
+		}
+	}
+
 	switch extractTranscriptEventType(line) {
 	case "assistant.turn_start":
 		b.turnOpen = true

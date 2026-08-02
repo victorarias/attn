@@ -6,6 +6,31 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-08-02]
+
+### Fixed
+- **Interrupting an agent settles its session right away.** Hitting ESC to halt
+  claude, codex, or copilot mid-turn used to leave the session showing *working*
+  for a full minute, then briefly *idle*, then *unknown* — because none of them
+  fires any hook when a turn is interrupted, so nothing ever closed the turn.
+  attn now reads the halt out of the agent's own transcript and settles the
+  session to *idle* within a second or two, with `turn_aborted` as the reason in
+  `attn state explain`. A halted copilot session was the worst of the three: it
+  writes no turn-end event either, so the session stayed green for the rest of
+  its life.
+- **Copilot sessions launched through a symlinked directory no longer sit at
+  *launching* forever.** Copilot records the directory it resolved rather than the
+  one it was given, so a session started under a symlinked path — `/tmp` on macOS,
+  for instance — was never matched to its own transcript, and copilot's live state
+  comes from that transcript.
+- **A halted turn is only ever your own.** Quoting or pasting claude's
+  `[Request interrupted by user]` marker into a prompt no longer settles the
+  session you are talking to, a turn codex ended for its own reasons is no longer
+  read as you halting it, and a session that resumes onto a transcript with older
+  halts in it no longer settles on one of them.
+
+---
+
 ## [2026-08-01]
 
 ### Fixed
