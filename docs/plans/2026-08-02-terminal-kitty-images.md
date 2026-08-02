@@ -435,20 +435,28 @@ until the storage limit flips in A4.
         decode exactly as a bare ST does. `ab` + APC + `c` lands on `(3,0)`
         `abc`, the same as `abc` alone, for a small APC, a real 1.5 KB
         placement, and a `0x9c`-terminated one alike.
-      - A hand-rolled lead-byte tracker agrees with ghostty's decoder on 20 of
-        23 probed prefixes. The three misses are `\xed\xa0` (a surrogate half),
-        `\xe0\x80` (an overlong) and `\xf4\x90` (above U+10FFFF), which ghostty
-        rejects at the second byte while the tracker still counts one owing.
-        All three fail safe — over-reporting "pending" only ever declines an
-        extraction.
+      - A hand-rolled lead-byte tracker declines an extraction ghostty would
+        allow on 5 of 27 probed prefixes: `\xe0\x9f`, `\xe0\x80`, `\xed\xa0`,
+        `\xf0\x8f` and `\xf4\x90`. Each is a second byte UTF-8 forbids under one
+        of the four constrained leads — an overlong, a surrogate half, or a
+        codepoint above U+10FFFF — which ghostty rejects at that second byte
+        while the lead-byte tracker still counts one owing. All five err the
+        same way: over-reporting "pending" only ever declines an extraction,
+        never permits a wrong one.
 
-      An earlier revision of this paragraph recorded "21 of 23, two misses". That
-      was measured over too narrow a prefix set; widening it found the third
-      mechanism above. The correction matters to the rejection rather than
-      against it: the imprecision is not two special cases but the whole class of
-      second-byte range restrictions UTF-8 places on the four constrained leads
-      (`0xe0`, `0xed`, `0xf0`, `0xf4`), and a hand-written table missed one of
-      them on the first pass.
+      That figure is the discarded implementation's own characterization test
+      speaking — it prints the count and names the prefixes on every run, so it
+      re-measures as ghostty moves. It exists only on that line. Here it is a
+      recorded measurement, not a live receipt, because the shipped design has
+      no tracker to characterize.
+
+      Read the number with its history: this paragraph carried two different
+      hand-measured counts before the test settled it, each from a probe set too
+      narrow to reach the next mechanism. That is the argument for the rejection
+      rather than against it — the imprecision was never a couple of special
+      cases but the whole class of second-byte restrictions on the four
+      constrained leads (`0xe0`, `0xed`, `0xf0`, `0xf4`), and a hand-written
+      table missed part of it twice.
 
       Rejected because it cannot reach class 3 — a marker cannot replay as
       plain, since feeding it to the native worker breaks the line — so the
@@ -457,6 +465,23 @@ until the storage limit flips in A4.
       ghostty's UTF-8 handling forever, which is the same parallel-model trap
       this file's framing rules exist to kill. The ESC-parity rule is one rule at
       three sites and needs no model of the decoder at all.
+
+      **Disposition.** Neither design was argued down on paper. Both were built
+      in full and measured on the same gates, and the alternative was rejected
+      from a working implementation rather than from a sketch: the tracker, its
+      characterization tests, mid-codepoint fuzz seeds, mutation receipts per
+      class, a clean three-by-three-minute shipping soak and a live class-3
+      witness on a real daemon — all green. A local archive ref held it for the
+      life of this branch and was dropped at merge, so what survives is this
+      record: anyone revisiting the question is re-deciding it against a design
+      known to work, not guessing whether it would have.
+
+      What settled it beyond the two-mechanisms argument is what the measuring
+      itself exposed. The hand-written tracker disagreed with ghostty on a class
+      its author had not enumerated, and the recorded count had to be corrected
+      twice before it held. A model of someone else's decoder drifts before it
+      even ships; here that arrived as evidence rather than as prediction, which
+      is the strongest form the argument can take.
 
       **Mutation receipts**, each landing on a named case:
 
