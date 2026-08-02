@@ -188,27 +188,32 @@ export function buildQueueBands<TSession extends QueueBandSession>(
 }
 
 /**
- * The agent to land on once `settledSessionId`'s turn is closed: the next row in
- * queue order, wrapping to the top, and never the row just settled.
+ * The row after `settledSessionId` in queue order, wrapping to the top, that is
+ * still owed according to `stillOwed`.
  *
- * `turns` must be the band as it stood while that turn was still owed — the row
- * being present is what gives the scan a position to continue from. Callers get
- * that from advanceAfterTurnClosed, which holds the earlier snapshot for exactly
- * this reason.
+ * Two snapshots, two jobs. `turns` is the band as it stood while that turn was
+ * still owed, and is consulted only for *order* — the settled row being present
+ * is what gives the scan a position to continue from. `stillOwed` is the current
+ * band, and decides *eligibility*: a broadcast can close several turns at once,
+ * so a successor that looked owed in the old snapshot may have settled in the
+ * very same update, and landing on it would hand the user another finished
+ * agent.
  *
- * A session that is not in the band (already settled, pinned, muted, the chief)
+ * A session that is not in `turns` (already settled, pinned, muted, the chief)
  * has no position to move on from, so the scan simply starts at the top. Null
- * means nothing is left to go to and selection should stay where it is.
+ * means the old snapshot holds nobody still owed — which is not the same as
+ * nothing being owed at all; see advanceAfterTurnClosed.
  */
-export function nextTurnAfterSettle<TSession extends QueueBandSession>(
+function nextOwedAfter<TSession extends QueueBandSession>(
   turns: QueueRow<TSession>[],
-  settledSessionId: string | null,
+  settledSessionId: string,
+  stillOwed: ReadonlySet<string>,
 ): QueueRow<TSession> | null {
   const current = turns.findIndex((row) => row.session.id === settledSessionId);
   const start = current === -1 ? 0 : current + 1;
   for (let offset = 0; offset < turns.length; offset += 1) {
     const row = turns[(start + offset) % turns.length];
-    if (row.session.id !== settledSessionId) {
+    if (row.session.id !== settledSessionId && stillOwed.has(row.session.id)) {
       return row;
     }
   }
@@ -237,6 +242,19 @@ export type QueueAdvance<TSession extends QueueBandSession> =
  * bands entirely rather than landing in settled — so requiring the arrival,
  * rather than just the departure, is what keeps a pin from carrying the user
  * away from the workspace they pinned to keep in view.
+ *
+ * Only the position comes from the old snapshot; whether a row is still worth
+ * going to is always read from `bands`. One broadcast can close several turns —
+ * an auto-settle countdown and a settle from another client landing together,
+ * or two countdowns firing in the same tick — and a successor that was owed in
+ * the old snapshot may be settled in this one. Answering from the old snapshot
+ * alone would hand the user an agent that is already finished with them, which
+ * is the very thing this function exists to avoid.
+ *
+ * Home is therefore reached from the *current* band being empty, never from the
+ * old one running out. A turn that opened in the same broadcast that closed
+ * this one has no position in the old snapshot, so the scan cannot find it; the
+ * head of the current band is where the queue continues.
  */
 export function advanceAfterTurnClosed<TSession extends QueueBandSession>(
   previousTurns: QueueRow<TSession>[],
@@ -247,6 +265,7 @@ export function advanceAfterTurnClosed<TSession extends QueueBandSession>(
   const owedBefore = previousTurns.some((row) => row.session.id === sessionId);
   const settledNow = bands.settled.some((row) => row.session.id === sessionId);
   if (!owedBefore || !settledNow) return null;
-  const next = nextTurnAfterSettle(previousTurns, sessionId);
+  const stillOwed = new Set(bands.turns.map((row) => row.session.id));
+  const next = nextOwedAfter(previousTurns, sessionId, stillOwed) ?? bands.turns[0] ?? null;
   return next ? { to: 'session', row: next } : { to: 'dashboard' };
 }
