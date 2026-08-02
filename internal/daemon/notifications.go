@@ -185,18 +185,16 @@ func renderTaskFailureNotification(t *tasks.Task) store.NotificationRecord {
 // is safe to invoke concurrently — including from the task runner's terminal-
 // failure callback. A nil store broadcasts an unread count of 0.
 func (d *Daemon) projectNotificationsUpdated() {
-	d.projectSnapshot(snapshotNotifs, d.pushNotificationsUpdated)
-}
-
-func (d *Daemon) pushNotificationsUpdated() {
-	unread := 0
-	if d.store != nil {
-		if n, err := d.store.UnreadNotificationCount(); err == nil {
-			unread = n
+	d.projectSnapshot(snapshotNotifs, func() {
+		unread := 0
+		if d.store != nil {
+			if n, err := d.store.UnreadNotificationCount(); err == nil {
+				unread = n
+			}
 		}
-	}
-	d.broadcastMessage(protocol.NotificationsUpdatedMessage{
-		Event:       protocol.EventNotificationsUpdated,
-		UnreadCount: unread,
+		d.broadcastMessage(protocol.NotificationsUpdatedMessage{
+			Event:       protocol.EventNotificationsUpdated,
+			UnreadCount: unread,
+		})
 	})
 }

@@ -272,10 +272,10 @@ func (d *Daemon) startCompactRunner() {
 	}
 	// Surface lifecycle transitions to any open task panel. OnChange may fire
 	// CONCURRENTLY from the runner's dispatch goroutine and its in-flight runs, so
-	// the callback must be cheap, non-blocking, and concurrency-safe:
-	// broadcastTasksChanged -> broadcastMessage -> wsHub.BroadcastValue
-	// builds a fresh message and uses a non-blocking send that drops on a full
-	// broadcast channel, so it can never stall a run.
+	// the callback must be cheap and concurrency-safe. Publishing appends one row
+	// to the bus and then projects to a non-blocking broadcast that drops on a
+	// full channel, so it can never stall a run — but it IS a durable write on
+	// the runner's goroutine, of the same order as the store.Save it follows.
 	runner.OnChange(func(taskID string) { d.publishFact(FactTaskChanged, taskID, nil) })
 	// Surface a durable notification when a task exhausts its retries (reaches the
 	// terminal dead state). OnTerminalFailure fires exactly once per task, on the

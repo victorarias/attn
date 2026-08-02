@@ -270,3 +270,73 @@
     "status": "succeeded"
   }
 }
+--- 25 worktree_created
+{
+  "event": "worktree_created",
+  "worktrees": [
+    {
+      "branch": "feature",
+      "created_at": "<timestamp>",
+      "main_repo": "<tmp>/workspace",
+      "path": "<tmp>/worktree"
+    }
+  ]
+}
+--- 26 worktree_deleted
+{
+  "event": "worktree_deleted",
+  "worktrees": [
+    {
+      "branch": "",
+      "main_repo": "",
+      "path": "<tmp>/worktree"
+    }
+  ]
+}
+--- 27 worktrees_updated
+{
+  "event": "worktrees_updated",
+  "worktrees": [
+    {
+      "branch": "feature",
+      "created_at": "<timestamp>",
+      "main_repo": "<tmp>/workspace",
+      "path": "<tmp>/worktree"
+    }
+  ]
+}
+--- 28 session_exited
+{
+  "event": "session_exited",
+  "exit_code": 3,
+  "id": "sess-1",
+  "signal": "SIGTERM"
+}
+--- 29 endpoint_status_changed
+{
+  "endpoint": {
+    "id": "endpoint-1",
+    "name": "remote",
+    "ssh_target": "",
+    "status": "connected"
+  },
+  "event": "endpoint_status_changed"
+}
+--- 30 notebook_changed
+{
+  "event": "notebook_changed",
+  "origin": "agent",
+  "paths": [
+    "journal/2026-08-01.md"
+  ]
+}
+--- 31 notebook_changed
+{
+  "event": "notebook_changed",
+  "origin": "ui",
+  "paths": [
+    "a.md",
+    "b.md",
+    "c.md"
+  ]
+}

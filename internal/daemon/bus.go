@@ -36,10 +36,20 @@ import (
 // workspace's rolled-up status, say — that part stays on the producer side,
 // where it is a fact of its own.
 //
-// What does NOT move: byte streams. PTY output, PTY desync, attach results,
-// workspace tile content, and fs change bursts keep their direct paths. They are
-// high volume, and attach traffic is routed by a per-client predicate
-// (SendRawTextToMatchingClients), which pub/sub cannot express.
+// WHAT DOES NOT MOVE. Every state change goes through the bus. The exceptions
+// are enumerated, and the list is enforced by TestWireTrafficComesFromProjections
+// (bus_wire_boundary_test.go), which fails on a new broadcaster that skips the
+// bus:
+//
+//   - Byte streams. PTY output, PTY desync, attach results, and workspace tile
+//     content are high volume and carry no entity worth subscribing to. Attach
+//     and tile traffic is also routed by a per-client predicate
+//     (SendRawTextToMatchingClients), which pub/sub cannot express.
+//   - Filesystem change bursts (broadcastFsChanged), coalesced per watcher
+//     rather than per file.
+//   - The remote relay (broadcastRawWSMessage). Those events were already
+//     published as facts on the remote daemon's own bus; re-publishing them
+//     here would duplicate them.
 //
 // See docs/plans/2026-08-01-ext-a1-event-bus.md.
 

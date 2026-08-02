@@ -53,6 +53,8 @@ func TestWireTraceProducerGolden(t *testing.T) {
 		t.Fatalf("ensureWorkspaceLayout: %v", err)
 	}
 
+	worktreeDir := filepath.Join(dir, "worktree")
+
 	// Everything published before this point is fixture noise.
 	trace.Clear()
 
@@ -102,6 +104,24 @@ func TestWireTraceProducerGolden(t *testing.T) {
 		{"git_operation", func() {
 			finish := d.beginGitOperation(protocol.GitOperationKindDeleteWorktree, workspaceDir, nil)
 			finish(nil)
+		}},
+		{"worktree_created", func() { d.registerCreatedWorktree(workspaceDir, worktreeDir, "feature") }},
+		{"worktree_deleted", func() { d.publishFact(FactWorktreeDeleted, worktreeDir, nil) }},
+		{"worktrees_updated", func() {
+			d.publishFact(FactWorktreeListReconciled, workspaceDir, []protocol.Worktree{{
+				Path: worktreeDir, Branch: "feature", MainRepo: workspaceDir,
+				CreatedAt: protocol.Ptr(now),
+			}})
+		}},
+		{"session_exited", func() {
+			d.publishFact(FactSessionPTYExited, "sess-1", ptyExit{ExitCode: 3, Signal: "SIGTERM"})
+		}},
+		{"endpoint_status_changed", func() {
+			d.broadcastEndpointStatusChanged(protocol.EndpointInfo{ID: "endpoint-1", Name: "remote", Status: "connected"})
+		}},
+		{"notebook_changed one path", func() { d.broadcastNotebookChanged(originAgent, "journal/2026-08-01.md") }},
+		{"notebook_changed many paths", func() {
+			d.broadcastNotebookChanged(originUI, "a.md", "b.md", "c.md")
 		}},
 	}
 	for _, step := range steps {

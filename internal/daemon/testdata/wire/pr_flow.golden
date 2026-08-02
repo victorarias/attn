@@ -1,0 +1,151 @@
+--- 01 prs_updated
+{
+  "event": "prs_updated",
+  "prs": [
+    {
+      "approved_by_me": false,
+      "author": "octocat",
+      "comment_count": 0,
+      "details_fetched": false,
+      "has_new_changes": false,
+      "heat_state": "cold",
+      "host": "github.com",
+      "id": "github.com:owner/repo#1",
+      "last_polled": "",
+      "last_updated": "",
+      "muted": false,
+      "number": 1,
+      "reason": "",
+      "repo": "owner/repo",
+      "role": "",
+      "state": "waiting",
+      "title": "Add the thing",
+      "url": "https://github.com/owner/repo/pull/1"
+    }
+  ]
+}
+--- 02 prs_updated
+{
+  "event": "prs_updated",
+  "prs": [
+    {
+      "approved_by_me": false,
+      "author": "octocat",
+      "comment_count": 0,
+      "details_fetched": false,
+      "has_new_changes": false,
+      "heat_state": "cold",
+      "host": "github.com",
+      "id": "github.com:owner/repo#1",
+      "last_polled": "",
+      "last_updated": "",
+      "muted": false,
+      "number": 1,
+      "reason": "",
+      "repo": "owner/repo",
+      "role": "",
+      "state": "waiting",
+      "title": "Add the thing",
+      "url": "https://github.com/owner/repo/pull/1"
+    }
+  ]
+}
+--- 03 prs_updated
+{
+  "event": "prs_updated",
+  "prs": [
+    {
+      "approved_by_me": false,
+      "author": "octocat",
+      "comment_count": 0,
+      "details_fetched": false,
+      "has_new_changes": false,
+      "heat_state": "cold",
+      "host": "github.com",
+      "id": "github.com:owner/repo#1",
+      "last_polled": "",
+      "last_updated": "",
+      "muted": false,
+      "number": 1,
+      "reason": "",
+      "repo": "owner/repo",
+      "role": "",
+      "state": "waiting",
+      "title": "Add the thing",
+      "url": "https://github.com/owner/repo/pull/1"
+    }
+  ]
+}
+--- 04 prs_updated
+{
+  "event": "prs_updated",
+  "prs": [
+    {
+      "approved_by_me": false,
+      "author": "octocat",
+      "comment_count": 0,
+      "details_fetched": false,
+      "has_new_changes": false,
+      "heat_state": "cold",
+      "host": "github.com",
+      "id": "github.com:owner/repo#1",
+      "last_polled": "",
+      "last_updated": "",
+      "muted": false,
+      "number": 1,
+      "reason": "",
+      "repo": "owner/repo",
+      "role": "",
+      "state": "waiting",
+      "title": "Add the thing",
+      "url": "https://github.com/owner/repo/pull/1"
+    }
+  ]
+}
+--- 05 prs_updated
+{
+  "event": "prs_updated",
+  "prs": [
+    {
+      "approved_by_me": false,
+      "author": "octocat",
+      "comment_count": 0,
+      "details_fetched": false,
+      "has_new_changes": false,
+      "heat_state": "cold",
+      "host": "github.com",
+      "id": "github.com:owner/repo#1",
+      "last_polled": "",
+      "last_updated": "",
+      "muted": false,
+      "number": 1,
+      "reason": "",
+      "repo": "owner/repo",
+      "role": "",
+      "state": "waiting",
+      "title": "Add the thing",
+      "url": "https://github.com/owner/repo/pull/1"
+    }
+  ]
+}
+--- 06 repos_updated
+{
+  "event": "repos_updated",
+  "repos": [
+    {
+      "collapsed": false,
+      "muted": true,
+      "repo": "owner/repo"
+    }
+  ]
+}
+--- 07 authors_updated
+{
+  "authors": [
+    {
+      "author": "octocat",
+      "muted": true
+    }
+  ],
+  "event": "authors_updated"
+}
