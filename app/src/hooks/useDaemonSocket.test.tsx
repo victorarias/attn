@@ -3079,6 +3079,216 @@ describe('useDaemonSocket notebook and annotation events', () => {
     return JSON.parse(ws.sent[ws.sent.length - 1]);
   }
 
+  it('resolves session_messages_get with the annotatable window', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionMessagesGet('session-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'session_messages_get', session_id: 'session-1' });
+
+    ws.emit({
+      event: 'session_messages_get_result',
+      request_id: sent.request_id,
+      session_id: 'session-1',
+      success: true,
+      messages: [
+        { key: 'turn-1', markdown: 'The first answer.' },
+        { key: 'turn-2', markdown: 'The second answer.' },
+      ],
+      truncated: true,
+    });
+    await expect(promise).resolves.toEqual({
+      messages: [
+        { key: 'turn-1', markdown: 'The first answer.' },
+        { key: 'turn-2', markdown: 'The second answer.' },
+      ],
+      truncated: true,
+    });
+    unmount();
+  });
+
+  it('resolves session_messages_get with an empty window rather than rejecting', async () => {
+    // A session with no annotatable prose yet is a success with nothing to
+    // annotate. Rejecting would report a failure that did not happen.
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionMessagesGet('session-1');
+    await Promise.resolve();
+    ws.emit({
+      event: 'session_messages_get_result',
+      request_id: lastSent(ws).request_id,
+      session_id: 'session-1',
+      success: true,
+      messages: [],
+      truncated: false,
+    });
+
+    await expect(promise).resolves.toEqual({ messages: [], truncated: false });
+    unmount();
+  });
+
+  it('rejects session_messages_get when the daemon reports a failure', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionMessagesGet('session-1');
+    await Promise.resolve();
+    ws.emit({
+      event: 'session_messages_get_result',
+      request_id: lastSent(ws).request_id,
+      session_id: 'session-1',
+      success: false,
+      error: 'no transcript for session session-1',
+    });
+
+    await expect(promise).rejects.toThrow('no transcript for session session-1');
+    unmount();
+  });
+
+  it('resolves session_annotations_get with the stored list and its generation', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionAnnotationsGet('session-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'session_annotations_get', session_id: 'session-1' });
+
+    ws.emit({
+      event: 'session_annotations_get_result',
+      request_id: sent.request_id,
+      session_id: 'session-1',
+      success: true,
+      annotations: [{
+        id: 'anno-1',
+        message_key: 'turn-1',
+        start: 4,
+        end: 10,
+        quote: 'parser',
+        emoji: '❓',
+        comment: 'why this?',
+      }],
+      generation: 7,
+    });
+
+    // The wire is snake_case and the store is not; the boundary is here, so a
+    // stored annotation arrives usable rather than half-translated.
+    await expect(promise).resolves.toEqual({
+      annotations: [{
+        id: 'anno-1',
+        messageKey: 'turn-1',
+        start: 4,
+        end: 10,
+        quote: 'parser',
+        emoji: '❓',
+        comment: 'why this?',
+      }],
+      generation: 7,
+    });
+    unmount();
+  });
+
+  it('sends a save as the whole list under its generation', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionAnnotationsSave('session-1', [{
+      id: 'anno-1',
+      messageKey: 'turn-1',
+      start: 4,
+      end: 10,
+      quote: 'parser',
+      emoji: '❓',
+      comment: 'why this?',
+    }], 3);
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({
+      cmd: 'session_annotations_save',
+      session_id: 'session-1',
+      generation: 3,
+      annotations: [{
+        id: 'anno-1',
+        message_key: 'turn-1',
+        start: 4,
+        end: 10,
+        quote: 'parser',
+        emoji: '❓',
+        comment: 'why this?',
+      }],
+    });
+
+    ws.emit({
+      event: 'session_annotations_save_result',
+      request_id: sent.request_id,
+      session_id: 'session-1',
+      success: true,
+      generation: 3,
+    });
+    await expect(promise).resolves.toEqual({ stale: false });
+    unmount();
+  });
+
+  it('resolves a stale save rather than rejecting it', async () => {
+    // Losing to a newer write is a routine outcome the caller handles by
+    // re-hydrating; surfacing it as an error would put a race in front of the
+    // user as a failure.
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionAnnotationsSave('session-1', [], 2);
+    await Promise.resolve();
+    ws.emit({
+      event: 'session_annotations_save_result',
+      request_id: lastSent(ws).request_id,
+      session_id: 'session-1',
+      success: false,
+      stale: true,
+      generation: 9,
+    });
+
+    await expect(promise).resolves.toEqual({ stale: true });
+    unmount();
+  });
+
+  it('rejects a save the daemon failed for any other reason', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionAnnotationsSave('session-1', [], 2);
+    await Promise.resolve();
+    ws.emit({
+      event: 'session_annotations_save_result',
+      request_id: lastSent(ws).request_id,
+      session_id: 'session-1',
+      success: false,
+      error: 'database is locked',
+      generation: 0,
+    });
+
+    await expect(promise).rejects.toThrow('database is locked');
+    unmount();
+  });
+
+  it('resolves session_annotations_clear with the tombstone the daemon settled on', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionAnnotationsClear('session-1', 5);
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({
+      cmd: 'session_annotations_clear',
+      session_id: 'session-1',
+      generation: 5,
+    });
+
+    ws.emit({
+      event: 'session_annotations_clear_result',
+      request_id: sent.request_id,
+      session_id: 'session-1',
+      success: true,
+      generation: 5,
+    });
+    await expect(promise).resolves.toEqual({ generation: 5 });
+    unmount();
+  });
+
   it('resolves notebook_read with the daemon result', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 

@@ -42,6 +42,7 @@ import { NotificationsPanel } from './components/NotificationsPanel';
 import { ErrorToast, useErrorToast } from './components/ErrorToast';
 import { ChordLeaderHud } from './components/ChordLeaderHud';
 import { DaemonProvider } from './contexts/DaemonContext';
+import { DaemonApiProvider, useDaemonApi } from './contexts/DaemonApiContext';
 import { setMarkdownAnnotationsTransport } from './components/MarkdownReader/annotations/transport';
 import { NotebookSurfaceProvider } from './contexts/NotebookSurfaceContext';
 import { SettingsProvider } from './contexts/SettingsContext';
@@ -58,7 +59,7 @@ import {
   readWorkspaceSelectionStyle,
   type WorkspaceSelectionStyle,
 } from './utils/workspaceSelectionStyle';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, DaemonWarning, SessionExitInfo } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, SessionExitInfo } from './hooks/useDaemonSocket';
 import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState, type UISessionState } from './types/sessionState';
@@ -541,14 +542,201 @@ function App() {
   const [notificationsUnread, setNotificationsUnread] = useState(0);
   const [notificationsChangeSignal, setNotificationsChangeSignal] = useState(0);
 
-  // Connect to daemon WebSocket
+  // Connect to daemon WebSocket. The whole return value goes into context
+  // below, for everything under AppContent; App destructures only the names
+  // its own effects use.
+  const daemon = useDaemonSocket({
+    onSessionsUpdate: setDaemonSessions,
+    onPresentationAdded: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
+    onPresentationUpdated: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
+    // The daemon tags each fs_changed with an origin ("ui"/"agent"/"external"), but
+    // every origin is treated the same here: bump the signal for whichever root
+    // changed, so only browsers/tiles bound to that root re-list and reload. An
+    // empty/missing root (treated as notebook-root for safety) is normalized to
+    // the effective notebook root, matching how a rootless tile/the fullscreen
+    // browser key their own lookups (see notebookSurfaceDaemon below).
+    onFsChanged: (_origin, _paths, root) => {
+      setFsChangeSignals((prev) => bumpFsChangeSignal(prev, root, settings['notebook.root.effective'] || ''));
+    },
+    // A task lifecycle transition broadcast bumps the signal so an open Tasks panel
+    // refetches the runner's list (the broadcast itself is payload-free).
+    onTasksChanged: () => setTaskChangeSignal((n) => n + 1),
+    // A notifications_updated broadcast carries the authoritative unread count;
+    // set the badge and bump the signal so an open panel re-lists.
+    onNotificationsUpdated: (unread) => {
+      setNotificationsUnread(unread);
+      setNotificationsChangeSignal((n) => n + 1);
+    },
+    onTicketsUpdate: setTickets,
+    onWorkspacesUpdate: setDaemonWorkspaces,
+    onPRsUpdate: setPRs,
+    onEndpointsUpdate: setDaemonEndpoints,
+    onPluginsUpdate: handlePluginsUpdate,
+    onGitHubHostsUpdate: setDaemonGitHubHosts,
+    onReposUpdate: setRepoStates,
+    onAuthorsUpdate: setAuthorStates,
+    onSettingsUpdate: setSettings,
+    onSettingError: setSettingError,
+    onWorktreesUpdate: setWorktrees,
+    onGitStatusUpdate: setGitStatus,
+    onSessionExited: handleSessionExited,
+  });
+
   const {
-    sendPRAction,
-    getScreenSnapshot,
     getMarkdownAnnotations,
     saveMarkdownAnnotations,
     clearMarkdownAnnotations,
     submitMarkdownAnnotations,
+    sendSetSetting,
+    sendNotificationList,
+    getPresentations,
+    hasReceivedInitialState,
+  } = daemon;
+
+  // Memoize clearGitStatus to prevent subscription effect from re-running
+  const clearGitStatus = useCallback(() => setGitStatus(null), []);
+
+  // Register the markdown-annotation draft transport (module-level seam, the
+  // plannotator DraftTransport pattern): markdown tiles read it at call time
+  // instead of threading three helpers through the whole tile prop chain.
+  useEffect(() => {
+    setMarkdownAnnotationsTransport({
+      getMarkdownAnnotations,
+      saveMarkdownAnnotations,
+      clearMarkdownAnnotations,
+      submitMarkdownAnnotations,
+    });
+    return () => {
+      setMarkdownAnnotationsTransport(null);
+    };
+  }, [getMarkdownAnnotations, saveMarkdownAnnotations, clearMarkdownAnnotations, submitMarkdownAnnotations]);
+
+  // Seed the notifications unread badge once the socket is up. The
+  // notifications_updated broadcast keeps it live thereafter; this one read
+  // primes the count for notifications that already existed at connect time.
+  useEffect(() => {
+    if (!hasReceivedInitialState) return;
+    let cancelled = false;
+    sendNotificationList()
+      .then((r) => {
+        if (!cancelled) setNotificationsUnread(r.unreadCount);
+      })
+      .catch(() => {
+        /* transient (not connected / timeout); the next broadcast reseeds */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasReceivedInitialState, sendNotificationList]);
+
+  // Seed the presentation-notice list once the socket is up. The
+  // presentation_added/updated broadcasts keep it live thereafter.
+  useEffect(() => {
+    if (!hasReceivedInitialState) return;
+    let cancelled = false;
+    getPresentations()
+      .then((all) => {
+        if (!cancelled) setPresentationNotices(seedPresentationNotices(all));
+      })
+      .catch(() => {
+        /* transient (not connected / timeout); the next broadcast reseeds */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasReceivedInitialState, getPresentations]);
+
+  // Wrap the app content with SettingsProvider so useUIScale can access settings.
+  // KeybindingsProvider (inside it) syncs shortcut overrides into the resolver.
+  return (
+    <SettingsProvider settings={settings} setSetting={sendSetSetting}>
+      <KeybindingsProvider>
+      <DaemonApiProvider api={daemon}>
+        <AppContent
+          daemonSessions={daemonSessions}
+          daemonWorkspaces={daemonWorkspaces}
+          prs={prs}
+          daemonEndpoints={daemonEndpoints}
+          daemonPlugins={daemonPlugins}
+          daemonPluginIssues={daemonPluginIssues}
+          daemonGitHubHosts={daemonGitHubHosts}
+          settings={settings}
+          updateAvailableVersion={updateAvailableVersion}
+          onOpenLatestRelease={handleOpenLatestRelease}
+          onDismissLatestRelease={handleDismissLatestRelease}
+          presentationNotices={presentationNotices}
+          settingError={settingError}
+          clearSettingError={() => setSettingError(null)}
+          notificationsUnread={notificationsUnread}
+          notificationsChangeSignal={notificationsChangeSignal}
+          fsChangeSignals={fsChangeSignals}
+          notebookTaskChangeSignal={notebookTaskChangeSignal}
+          clearGitStatus={clearGitStatus}
+          registerSessionExitHandler={registerSessionExitHandler}
+        />
+      </DaemonApiProvider>
+      </KeybindingsProvider>
+    </SettingsProvider>
+  );
+}
+
+// Props interface for AppContent - receives daemon state and functions from App
+interface AppContentProps {
+  daemonSessions: DaemonSession[];
+  daemonWorkspaces: DaemonWorkspace[];
+  prs: DaemonPR[];
+  daemonEndpoints: DaemonEndpoint[];
+  daemonPlugins: DaemonPlugin[];
+  daemonPluginIssues: DaemonPluginIssue[];
+  daemonGitHubHosts: string[];
+  settings: Record<string, string>;
+  updateAvailableVersion: string | null;
+  onOpenLatestRelease: () => Promise<void>;
+  onDismissLatestRelease: () => void;
+  presentationNotices: Presentation[];
+  settingError: string | null;
+  clearSettingError: () => void;
+  notificationsUnread: number;
+  notificationsChangeSignal: number;
+  fsChangeSignals: Record<string, number>;
+  notebookTaskChangeSignal: number;
+  clearGitStatus: () => void;
+  registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
+}
+
+function AppContent({
+  daemonSessions,
+  daemonWorkspaces,
+  prs,
+  daemonEndpoints,
+  daemonPlugins,
+  daemonPluginIssues,
+  daemonGitHubHosts,
+  settings,
+  updateAvailableVersion,
+  onOpenLatestRelease,
+  onDismissLatestRelease,
+  presentationNotices,
+  settingError,
+  clearSettingError,
+  notificationsUnread,
+  notificationsChangeSignal,
+  fsChangeSignals,
+  notebookTaskChangeSignal,
+  clearGitStatus,
+  registerSessionExitHandler,
+}: AppContentProps) {
+  // Every daemon command, read from the context App publishes rather than
+  // threaded down as a hundred props.
+  const {
+    connectionError,
+    connectionGeneration,
+    hasReceivedInitialState,
+    rateLimit,
+    warnings,
+    clearWarnings,
+    sendPRAction,
+    getScreenSnapshot,
     sendMutePR,
     sendMuteRepo,
     sendMuteAuthor,
@@ -616,6 +804,10 @@ function App() {
     sendWorkspaceUndockTile,
     sendWorkspaceUpdateTile,
     sendOpenMarkdown,
+    sendSessionMessagesGet,
+    sendSessionAnnotationsGet,
+    sendSessionAnnotationsSave,
+    sendSessionAnnotationsClear,
     sendWorkspaceMoveLeaf,
     sendWorkspaceMoveLeafToWorkspace,
     sendWorkspaceMoveLeafToNewWorkspace,
@@ -641,483 +833,8 @@ function App() {
     sendTicketEditDescription,
     sendTicketAttach,
     sendTicketResume,
-    getPresentations,
-    connectionError,
-    connectionGeneration,
-    hasReceivedInitialState,
-    rateLimit,
-    warnings,
-    clearWarnings,
-  } = useDaemonSocket({
-    onSessionsUpdate: setDaemonSessions,
-    onPresentationAdded: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
-    onPresentationUpdated: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
-    // The daemon tags each fs_changed with an origin ("ui"/"agent"/"external"), but
-    // every origin is treated the same here: bump the signal for whichever root
-    // changed, so only browsers/tiles bound to that root re-list and reload. An
-    // empty/missing root (treated as notebook-root for safety) is normalized to
-    // the effective notebook root, matching how a rootless tile/the fullscreen
-    // browser key their own lookups (see notebookSurfaceDaemon below).
-    onFsChanged: (_origin, _paths, root) => {
-      setFsChangeSignals((prev) => bumpFsChangeSignal(prev, root, settings['notebook.root.effective'] || ''));
-    },
-    // A task lifecycle transition broadcast bumps the signal so an open Tasks panel
-    // refetches the runner's list (the broadcast itself is payload-free).
-    onTasksChanged: () => setTaskChangeSignal((n) => n + 1),
-    // A notifications_updated broadcast carries the authoritative unread count;
-    // set the badge and bump the signal so an open panel re-lists.
-    onNotificationsUpdated: (unread) => {
-      setNotificationsUnread(unread);
-      setNotificationsChangeSignal((n) => n + 1);
-    },
-    onTicketsUpdate: setTickets,
-    onWorkspacesUpdate: setDaemonWorkspaces,
-    onPRsUpdate: setPRs,
-    onEndpointsUpdate: setDaemonEndpoints,
-    onPluginsUpdate: handlePluginsUpdate,
-    onGitHubHostsUpdate: setDaemonGitHubHosts,
-    onReposUpdate: setRepoStates,
-    onAuthorsUpdate: setAuthorStates,
-    onSettingsUpdate: setSettings,
-    onSettingError: setSettingError,
-    onWorktreesUpdate: setWorktrees,
-    onGitStatusUpdate: setGitStatus,
-    onSessionExited: handleSessionExited,
-  });
+  } = useDaemonApi();
 
-  // Memoize clearGitStatus to prevent subscription effect from re-running
-  const clearGitStatus = useCallback(() => setGitStatus(null), []);
-
-  // Register the markdown-annotation draft transport (module-level seam, the
-  // plannotator DraftTransport pattern): markdown tiles read it at call time
-  // instead of threading three helpers through the whole tile prop chain.
-  useEffect(() => {
-    setMarkdownAnnotationsTransport({
-      getMarkdownAnnotations,
-      saveMarkdownAnnotations,
-      clearMarkdownAnnotations,
-      submitMarkdownAnnotations,
-    });
-    return () => {
-      setMarkdownAnnotationsTransport(null);
-    };
-  }, [getMarkdownAnnotations, saveMarkdownAnnotations, clearMarkdownAnnotations, submitMarkdownAnnotations]);
-
-  // Seed the notifications unread badge once the socket is up. The
-  // notifications_updated broadcast keeps it live thereafter; this one read
-  // primes the count for notifications that already existed at connect time.
-  useEffect(() => {
-    if (!hasReceivedInitialState) return;
-    let cancelled = false;
-    sendNotificationList()
-      .then((r) => {
-        if (!cancelled) setNotificationsUnread(r.unreadCount);
-      })
-      .catch(() => {
-        /* transient (not connected / timeout); the next broadcast reseeds */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [hasReceivedInitialState, sendNotificationList]);
-
-  // Seed the presentation-notice list once the socket is up. The
-  // presentation_added/updated broadcasts keep it live thereafter.
-  useEffect(() => {
-    if (!hasReceivedInitialState) return;
-    let cancelled = false;
-    getPresentations()
-      .then((all) => {
-        if (!cancelled) setPresentationNotices(seedPresentationNotices(all));
-      })
-      .catch(() => {
-        /* transient (not connected / timeout); the next broadcast reseeds */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [hasReceivedInitialState, getPresentations]);
-
-  // Wrap the app content with SettingsProvider so useUIScale can access settings.
-  // KeybindingsProvider (inside it) syncs shortcut overrides into the resolver.
-  return (
-    <SettingsProvider settings={settings} setSetting={sendSetSetting}>
-      <KeybindingsProvider>
-      <AppContent
-        daemonSessions={daemonSessions}
-        daemonWorkspaces={daemonWorkspaces}
-        prs={prs}
-        daemonEndpoints={daemonEndpoints}
-        daemonPlugins={daemonPlugins}
-        daemonPluginIssues={daemonPluginIssues}
-        daemonGitHubHosts={daemonGitHubHosts}
-        settings={settings}
-        connectionError={connectionError}
-        connectionGeneration={connectionGeneration}
-        hasReceivedInitialState={hasReceivedInitialState}
-        rateLimit={rateLimit}
-        warnings={warnings}
-        clearWarnings={clearWarnings}
-        updateAvailableVersion={updateAvailableVersion}
-        onOpenLatestRelease={handleOpenLatestRelease}
-        onDismissLatestRelease={handleDismissLatestRelease}
-        presentationNotices={presentationNotices}
-        settingError={settingError}
-        clearSettingError={() => setSettingError(null)}
-        // Daemon socket functions
-        sendPRAction={sendPRAction}
-        getScreenSnapshot={getScreenSnapshot}
-        sendMutePR={sendMutePR}
-        sendMuteRepo={sendMuteRepo}
-        sendMuteAuthor={sendMuteAuthor}
-        sendMuteWorkspace={sendMuteWorkspace}
-        sendPinWorkspace={sendPinWorkspace}
-        sendPRVisited={sendPRVisited}
-        sendRefreshPRs={sendRefreshPRs}
-        sendRegisterWorkspace={sendRegisterWorkspace}
-        sendUnregisterWorkspace={sendUnregisterWorkspace}
-        sendRenameSession={sendRenameSession}
-        sendRenameWorkspace={sendRenameWorkspace}
-        sendSetChiefOfStaff={sendSetChiefOfStaff}
-        sendUnregisterSession={sendUnregisterSession}
-        sendSetSetting={sendSetSetting}
-        sendCreateWorktree={sendCreateWorktree}
-        sendDeleteWorktree={sendDeleteWorktree}
-        sendListPlugins={sendListPlugins}
-        sendInstallPlugin={sendInstallPlugin}
-        sendInstallBundledPlugin={sendInstallBundledPlugin}
-        sendUninstallPlugin={sendUninstallPlugin}
-        sendRemovePlugin={sendRemovePlugin}
-        sendSetPluginPriority={sendSetPluginPriority}
-        sendAddEndpoint={sendAddEndpoint}
-        sendUpdateEndpoint={sendUpdateEndpoint}
-        sendRemoveEndpoint={sendRemoveEndpoint}
-        sendSetEndpointRemoteWeb={sendSetEndpointRemoteWeb}
-        sendBootstrapEndpoint={sendBootstrapEndpoint}
-        sendListWorkspaceContexts={sendListWorkspaceContexts}
-        sendFsList={sendFsList}
-        sendFsRead={sendFsRead}
-        sendFsWrite={sendFsWrite}
-        sendFsRename={sendFsRename}
-        sendFsDelete={sendFsDelete}
-        sendFsExists={sendFsExists}
-        sendFsReadAsset={sendFsReadAsset}
-        sendFsWatch={sendFsWatch}
-        sendFsUnwatch={sendFsUnwatch}
-        sendFsIndex={sendFsIndex}
-        sendRecentFiles={sendRecentFiles}
-        sendTaskList={sendTaskList}
-        sendTaskRetry={sendTaskRetry}
-        sendNotificationList={sendNotificationList}
-        sendNotificationMarkRead={sendNotificationMarkRead}
-        notificationsUnread={notificationsUnread}
-        notificationsChangeSignal={notificationsChangeSignal}
-        sendNotebookBacklinks={sendNotebookBacklinks}
-        sendNotebookToChief={sendNotebookToChief}
-        fsChangeSignals={fsChangeSignals}
-        notebookTaskChangeSignal={notebookTaskChangeSignal}
-        sendGetRecentLocations={sendGetRecentLocations}
-        sendBrowseDirectory={sendBrowseDirectory}
-        sendInspectPath={sendInspectPath}
-        sendCreateWorktreeFromBranch={sendCreateWorktreeFromBranch}
-        sendFetchPRDetails={sendFetchPRDetails}
-        sendEnsureRepo={sendEnsureRepo}
-        sendSubscribeGitStatus={sendSubscribeGitStatus}
-        sendUnsubscribeGitStatus={sendUnsubscribeGitStatus}
-        sendSessionSelected={sendSessionSelected}
-        sendTriggerNudge={sendTriggerNudge}
-        sendSettleTurn={sendSettleTurn}
-        sendSnoozeTurn={sendSnoozeTurn}
-        sendWakeTurn={sendWakeTurn}
-        sendCancelAutoSettle={sendCancelAutoSettle}
-        sendWorkspaceSelected={sendWorkspaceSelected}
-        sendWorkspaceAddSessionPane={sendWorkspaceAddSessionPane}
-        sendWorkspaceClosePane={sendWorkspaceClosePane}
-        sendWorkspaceSetSplitRatio={sendWorkspaceSetSplitRatio}
-        sendWorkspaceDockTile={sendWorkspaceDockTile}
-        sendWorkspaceUndockTile={sendWorkspaceUndockTile}
-        sendWorkspaceUpdateTile={sendWorkspaceUpdateTile}
-        sendOpenMarkdown={sendOpenMarkdown}
-        sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
-        sendWorkspaceMoveLeafToWorkspace={sendWorkspaceMoveLeafToWorkspace}
-        sendWorkspaceMoveLeafToNewWorkspace={sendWorkspaceMoveLeafToNewWorkspace}
-        sendSetWorkspaceRank={sendSetWorkspaceRank}
-        tileContents={tileContents}
-        requestTileContent={requestTileContent}
-        sendRuntimeInput={sendRuntimeInput}
-        sendSetTerminalTheme={sendSetTerminalTheme}
-        isRuntimeAttached={isRuntimeAttached}
-        getRepoInfo={getRepoInfo}
-        listWorkflowRuns={listWorkflowRuns}
-        getWorkflowRun={getWorkflowRun}
-        listAutomationDefinitions={listAutomationDefinitions}
-        listAutomationRuns={listAutomationRuns}
-        setAutomationEnabled={setAutomationEnabled}
-        runAutomationNow={runAutomationNow}
-        getAutomationDefinition={getAutomationDefinition}
-        applyAutomationDefinition={applyAutomationDefinition}
-        deleteAutomationDefinition={deleteAutomationDefinition}
-        fetchTicket={fetchTicket}
-        sendTicketChangeStatus={sendTicketChangeStatus}
-        sendTicketAddComment={sendTicketAddComment}
-        sendTicketEditDescription={sendTicketEditDescription}
-        sendTicketAttach={sendTicketAttach}
-        sendTicketResume={sendTicketResume}
-        clearGitStatus={clearGitStatus}
-        registerSessionExitHandler={registerSessionExitHandler}
-      />
-      </KeybindingsProvider>
-    </SettingsProvider>
-  );
-}
-
-// Props interface for AppContent - receives daemon state and functions from App
-interface AppContentProps {
-  daemonSessions: DaemonSession[];
-  daemonWorkspaces: DaemonWorkspace[];
-  prs: DaemonPR[];
-  daemonEndpoints: DaemonEndpoint[];
-  daemonPlugins: DaemonPlugin[];
-  daemonPluginIssues: DaemonPluginIssue[];
-  daemonGitHubHosts: string[];
-  settings: Record<string, string>;
-  connectionError: string | null;
-  connectionGeneration: number;
-  hasReceivedInitialState: boolean;
-  rateLimit: import('./hooks/useDaemonSocket').RateLimitState | null;
-  warnings: DaemonWarning[];
-  clearWarnings: () => void;
-  updateAvailableVersion: string | null;
-  onOpenLatestRelease: () => Promise<void>;
-  onDismissLatestRelease: () => void;
-  presentationNotices: Presentation[];
-  settingError: string | null;
-  clearSettingError: () => void;
-  // All the daemon socket functions
-  sendPRAction: ReturnType<typeof useDaemonSocket>['sendPRAction'];
-  getScreenSnapshot: ReturnType<typeof useDaemonSocket>['getScreenSnapshot'];
-  sendMutePR: ReturnType<typeof useDaemonSocket>['sendMutePR'];
-  sendMuteRepo: ReturnType<typeof useDaemonSocket>['sendMuteRepo'];
-  sendMuteAuthor: ReturnType<typeof useDaemonSocket>['sendMuteAuthor'];
-  sendMuteWorkspace: ReturnType<typeof useDaemonSocket>['sendMuteWorkspace'];
-  sendPinWorkspace: ReturnType<typeof useDaemonSocket>['sendPinWorkspace'];
-  sendPRVisited: ReturnType<typeof useDaemonSocket>['sendPRVisited'];
-  sendRefreshPRs: ReturnType<typeof useDaemonSocket>['sendRefreshPRs'];
-  sendRegisterWorkspace: ReturnType<typeof useDaemonSocket>['sendRegisterWorkspace'];
-  sendUnregisterWorkspace: ReturnType<typeof useDaemonSocket>['sendUnregisterWorkspace'];
-  sendRenameSession: ReturnType<typeof useDaemonSocket>['sendRenameSession'];
-  sendRenameWorkspace: ReturnType<typeof useDaemonSocket>['sendRenameWorkspace'];
-  sendSetChiefOfStaff: ReturnType<typeof useDaemonSocket>['sendSetChiefOfStaff'];
-  sendUnregisterSession: ReturnType<typeof useDaemonSocket>['sendUnregisterSession'];
-  sendSetSetting: ReturnType<typeof useDaemonSocket>['sendSetSetting'];
-  sendCreateWorktree: ReturnType<typeof useDaemonSocket>['sendCreateWorktree'];
-  sendDeleteWorktree: ReturnType<typeof useDaemonSocket>['sendDeleteWorktree'];
-  sendListPlugins: ReturnType<typeof useDaemonSocket>['sendListPlugins'];
-  sendInstallPlugin: ReturnType<typeof useDaemonSocket>['sendInstallPlugin'];
-  sendInstallBundledPlugin: ReturnType<typeof useDaemonSocket>['sendInstallBundledPlugin'];
-  sendUninstallPlugin: ReturnType<typeof useDaemonSocket>['sendUninstallPlugin'];
-  sendRemovePlugin: ReturnType<typeof useDaemonSocket>['sendRemovePlugin'];
-  sendSetPluginPriority: ReturnType<typeof useDaemonSocket>['sendSetPluginPriority'];
-  sendAddEndpoint: ReturnType<typeof useDaemonSocket>['sendAddEndpoint'];
-  sendUpdateEndpoint: ReturnType<typeof useDaemonSocket>['sendUpdateEndpoint'];
-  sendRemoveEndpoint: ReturnType<typeof useDaemonSocket>['sendRemoveEndpoint'];
-  sendSetEndpointRemoteWeb: ReturnType<typeof useDaemonSocket>['sendSetEndpointRemoteWeb'];
-  sendBootstrapEndpoint: ReturnType<typeof useDaemonSocket>['sendBootstrapEndpoint'];
-  sendListWorkspaceContexts: ReturnType<typeof useDaemonSocket>['sendListWorkspaceContexts'];
-  sendFsList: ReturnType<typeof useDaemonSocket>['sendFsList'];
-  sendFsRead: ReturnType<typeof useDaemonSocket>['sendFsRead'];
-  sendFsWrite: ReturnType<typeof useDaemonSocket>['sendFsWrite'];
-  sendFsRename: ReturnType<typeof useDaemonSocket>['sendFsRename'];
-  sendFsDelete: ReturnType<typeof useDaemonSocket>['sendFsDelete'];
-  sendFsExists: ReturnType<typeof useDaemonSocket>['sendFsExists'];
-  sendFsReadAsset: ReturnType<typeof useDaemonSocket>['sendFsReadAsset'];
-  sendFsWatch: ReturnType<typeof useDaemonSocket>['sendFsWatch'];
-  sendFsUnwatch: ReturnType<typeof useDaemonSocket>['sendFsUnwatch'];
-  sendFsIndex: ReturnType<typeof useDaemonSocket>['sendFsIndex'];
-  sendRecentFiles: ReturnType<typeof useDaemonSocket>['sendRecentFiles'];
-  sendTaskList: ReturnType<typeof useDaemonSocket>['sendTaskList'];
-  sendTaskRetry: ReturnType<typeof useDaemonSocket>['sendTaskRetry'];
-  sendNotificationList: ReturnType<typeof useDaemonSocket>['sendNotificationList'];
-  sendNotificationMarkRead: ReturnType<typeof useDaemonSocket>['sendNotificationMarkRead'];
-  notificationsUnread: number;
-  notificationsChangeSignal: number;
-  sendNotebookBacklinks: ReturnType<typeof useDaemonSocket>['sendNotebookBacklinks'];
-  sendNotebookToChief: ReturnType<typeof useDaemonSocket>['sendNotebookToChief'];
-  fsChangeSignals: Record<string, number>;
-  notebookTaskChangeSignal: number;
-  sendGetRecentLocations: ReturnType<typeof useDaemonSocket>['sendGetRecentLocations'];
-  sendBrowseDirectory: ReturnType<typeof useDaemonSocket>['sendBrowseDirectory'];
-  sendInspectPath: ReturnType<typeof useDaemonSocket>['sendInspectPath'];
-  sendCreateWorktreeFromBranch: ReturnType<typeof useDaemonSocket>['sendCreateWorktreeFromBranch'];
-  sendFetchPRDetails: ReturnType<typeof useDaemonSocket>['sendFetchPRDetails'];
-  sendEnsureRepo: ReturnType<typeof useDaemonSocket>['sendEnsureRepo'];
-  sendSubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendSubscribeGitStatus'];
-  sendUnsubscribeGitStatus: ReturnType<typeof useDaemonSocket>['sendUnsubscribeGitStatus'];
-  sendSessionSelected: ReturnType<typeof useDaemonSocket>['sendSessionSelected'];
-  sendTriggerNudge: ReturnType<typeof useDaemonSocket>['sendTriggerNudge'];
-  sendSettleTurn: ReturnType<typeof useDaemonSocket>['sendSettleTurn'];
-  sendSnoozeTurn: ReturnType<typeof useDaemonSocket>['sendSnoozeTurn'];
-  sendWakeTurn: ReturnType<typeof useDaemonSocket>['sendWakeTurn'];
-  sendCancelAutoSettle: ReturnType<typeof useDaemonSocket>['sendCancelAutoSettle'];
-  sendWorkspaceSelected: ReturnType<typeof useDaemonSocket>['sendWorkspaceSelected'];
-  sendWorkspaceAddSessionPane: ReturnType<typeof useDaemonSocket>['sendWorkspaceAddSessionPane'];
-  sendWorkspaceClosePane: ReturnType<typeof useDaemonSocket>['sendWorkspaceClosePane'];
-  sendWorkspaceSetSplitRatio: ReturnType<typeof useDaemonSocket>['sendWorkspaceSetSplitRatio'];
-  sendWorkspaceDockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceDockTile'];
-  sendWorkspaceUndockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockTile'];
-  sendWorkspaceUpdateTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUpdateTile'];
-  sendOpenMarkdown: ReturnType<typeof useDaemonSocket>['sendOpenMarkdown'];
-  sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
-  sendWorkspaceMoveLeafToWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToWorkspace'];
-  sendWorkspaceMoveLeafToNewWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToNewWorkspace'];
-  sendSetWorkspaceRank: ReturnType<typeof useDaemonSocket>['sendSetWorkspaceRank'];
-  tileContents: ReturnType<typeof useDaemonSocket>['tileContents'];
-  requestTileContent: ReturnType<typeof useDaemonSocket>['requestTileContent'];
-  sendRuntimeInput: ReturnType<typeof useDaemonSocket>['sendRuntimeInput'];
-  sendSetTerminalTheme: ReturnType<typeof useDaemonSocket>['sendSetTerminalTheme'];
-  isRuntimeAttached: ReturnType<typeof useDaemonSocket>['isRuntimeAttached'];
-  getRepoInfo: ReturnType<typeof useDaemonSocket>['getRepoInfo'];
-  listWorkflowRuns: ReturnType<typeof useDaemonSocket>['listWorkflowRuns'];
-  getWorkflowRun: ReturnType<typeof useDaemonSocket>['getWorkflowRun'];
-  listAutomationDefinitions: ReturnType<typeof useDaemonSocket>['listAutomationDefinitions'];
-  listAutomationRuns: ReturnType<typeof useDaemonSocket>['listAutomationRuns'];
-  setAutomationEnabled: ReturnType<typeof useDaemonSocket>['setAutomationEnabled'];
-  runAutomationNow: ReturnType<typeof useDaemonSocket>['runAutomationNow'];
-  getAutomationDefinition: ReturnType<typeof useDaemonSocket>['getAutomationDefinition'];
-  applyAutomationDefinition: ReturnType<typeof useDaemonSocket>['applyAutomationDefinition'];
-  deleteAutomationDefinition: ReturnType<typeof useDaemonSocket>['deleteAutomationDefinition'];
-  fetchTicket: ReturnType<typeof useDaemonSocket>['fetchTicket'];
-  sendTicketChangeStatus: ReturnType<typeof useDaemonSocket>['sendTicketChangeStatus'];
-  sendTicketAddComment: ReturnType<typeof useDaemonSocket>['sendTicketAddComment'];
-  sendTicketEditDescription: ReturnType<typeof useDaemonSocket>['sendTicketEditDescription'];
-  sendTicketAttach: ReturnType<typeof useDaemonSocket>['sendTicketAttach'];
-  sendTicketResume: ReturnType<typeof useDaemonSocket>['sendTicketResume'];
-  clearGitStatus: () => void;
-  registerSessionExitHandler: (handler: ((info: SessionExitInfo) => void) | null) => void;
-}
-
-function AppContent({
-  daemonSessions,
-  daemonWorkspaces,
-  prs,
-  daemonEndpoints,
-  daemonPlugins,
-  daemonPluginIssues,
-  daemonGitHubHosts,
-  settings,
-  connectionError,
-  connectionGeneration,
-  hasReceivedInitialState,
-  rateLimit,
-  warnings,
-  clearWarnings,
-  updateAvailableVersion,
-  onOpenLatestRelease,
-  onDismissLatestRelease,
-  presentationNotices,
-  settingError,
-  clearSettingError,
-  sendPRAction,
-  getScreenSnapshot,
-  sendMutePR,
-  sendMuteRepo,
-  sendMuteAuthor,
-  sendMuteWorkspace,
-  sendPinWorkspace,
-  sendPRVisited,
-  sendRefreshPRs,
-  sendRegisterWorkspace,
-  sendUnregisterWorkspace,
-  sendRenameSession,
-  sendRenameWorkspace,
-  sendSetChiefOfStaff,
-  sendUnregisterSession,
-  sendSetSetting,
-  sendCreateWorktree,
-  sendDeleteWorktree,
-  sendListPlugins,
-  sendInstallPlugin,
-  sendInstallBundledPlugin,
-  sendUninstallPlugin,
-  sendRemovePlugin,
-  sendSetPluginPriority,
-  sendAddEndpoint,
-  sendUpdateEndpoint,
-  sendRemoveEndpoint,
-  sendSetEndpointRemoteWeb,
-  sendBootstrapEndpoint,
-  sendListWorkspaceContexts,
-  sendFsList,
-  sendFsRead,
-  sendFsWrite,
-  sendFsRename,
-  sendFsDelete,
-  sendFsExists,
-  sendFsReadAsset,
-  sendFsWatch,
-  sendFsUnwatch,
-  sendFsIndex,
-  sendRecentFiles,
-  sendTaskList,
-  sendTaskRetry,
-  sendNotificationList,
-  sendNotificationMarkRead,
-  notificationsUnread,
-  notificationsChangeSignal,
-  sendNotebookBacklinks,
-  sendNotebookToChief,
-  fsChangeSignals,
-  notebookTaskChangeSignal,
-  sendGetRecentLocations,
-  sendBrowseDirectory,
-sendInspectPath,
-    sendCreateWorktreeFromBranch,
-sendFetchPRDetails,
-  sendEnsureRepo,
-  sendSubscribeGitStatus,
-  sendUnsubscribeGitStatus,
-  sendSessionSelected,
-  sendTriggerNudge,
-  sendSettleTurn,
-  sendSnoozeTurn,
-  sendWakeTurn,
-  sendCancelAutoSettle,
-  sendWorkspaceSelected,
-  sendWorkspaceAddSessionPane,
-  sendWorkspaceClosePane,
-  sendWorkspaceSetSplitRatio,
-  sendWorkspaceDockTile,
-  sendWorkspaceUndockTile,
-  sendWorkspaceUpdateTile,
-  sendOpenMarkdown,
-  sendWorkspaceMoveLeaf,
-  sendWorkspaceMoveLeafToWorkspace,
-  sendWorkspaceMoveLeafToNewWorkspace,
-  sendSetWorkspaceRank,
-  tileContents,
-  requestTileContent,
-  sendRuntimeInput,
-  sendSetTerminalTheme,
-  isRuntimeAttached,
-  getRepoInfo,
-  listWorkflowRuns,
-  getWorkflowRun,
-  listAutomationDefinitions,
-  listAutomationRuns,
-  setAutomationEnabled,
-  runAutomationNow,
-  getAutomationDefinition,
-  applyAutomationDefinition,
-  deleteAutomationDefinition,
-  fetchTicket,
-  sendTicketChangeStatus,
-  sendTicketAddComment,
-  sendTicketEditDescription,
-  sendTicketAttach,
-  sendTicketResume,
-  clearGitStatus,
-  registerSessionExitHandler,
-}: AppContentProps) {
   // The presentation notice lives in the triggering session's pane header
   // (HeaderPresentationChip), not a window-wide banner — look it up per
   // session id, newest first.
@@ -3499,6 +3216,16 @@ sendFetchPRDetails,
     onResume: handleResumeTicket,
   }), [fetchTicket, sendTicketChangeStatus, sendTicketAddComment, sendTicketEditDescription, sendTicketAttach, sendFsRename, sendFsDelete, handleResumeTicket]);
 
+  // The daemon calls the terminal annotation surface needs, as one stable
+  // object: the surface re-fetches on identity change, so four separate props
+  // would refire it on every unrelated render of App.
+  const annotationApi = useMemo(() => ({
+    fetchMessages: sendSessionMessagesGet,
+    fetchAnnotations: sendSessionAnnotationsGet,
+    saveAnnotations: sendSessionAnnotationsSave,
+    clearAnnotations: sendSessionAnnotationsClear,
+  }), [sendSessionMessagesGet, sendSessionAnnotationsGet, sendSessionAnnotationsSave, sendSessionAnnotationsClear]);
+
   const isZedEditorConfigured = useMemo(() => {
     const editor = (settings.editor_executable || '').trim().toLowerCase();
     if (!editor) {
@@ -3962,6 +3689,7 @@ sendFetchPRDetails,
                       ticket: boundTicketForSession(tickets ?? [], entry.id),
                     }))}
                     ticketActions={ticketActions}
+                    annotationApi={annotationApi}
                     onTriggerNudge={sendTriggerNudge}
                     onCancelAutoSettle={sendCancelAutoSettle}
                     onOpenPresentation={handleOpenPresentationWindow}

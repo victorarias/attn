@@ -112,6 +112,11 @@ import {
   viewportRowFromBufferRow,
   type ApplicationSelectionAnchor,
 } from '../utils/ghosttyScroll';
+import {
+  type MessageAnchor,
+  type MessageRowAccess,
+  type TerminalAnnotationStore,
+} from '../utils/terminalAnnotations';
 import { installTerminalKeyHandler } from './SessionTerminalWorkspace/terminalKeyHandler';
 import { ensureTerminalIconFont } from '../utils/terminalIconFont';
 import {
@@ -120,7 +125,7 @@ import {
 } from './GhosttyWebGlRenderer';
 import './GhosttyTerminal.css';
 
-interface GhosttyTerminalProps {
+export interface GhosttyTerminalProps {
   fontSize: number;
   resolvedTheme?: ResolvedTheme;
   debugName: string;
@@ -151,6 +156,29 @@ interface GhosttyTerminalProps {
   // A corrupt Ghostty WASM model was discarded and replaced. The owner uses
   // this only for the user-facing notice; onReady performs the actual reattach.
   onTerminalModelRecovered?: () => void;
+  // Annotations on the agent's last message, anchored to offsets in that
+  // message's markdown rather than to rows. The terminal paints whichever of
+  // them still pass the store's containment gate against the live grid, and
+  // routes alt-drags through it; it never owns or mutates the set.
+  annotations?: TerminalAnnotationStore;
+  // Bumped by the owner after mutating the store. The store is a mutable
+  // object, so React has nothing to compare — this is what tells the terminal
+  // an added, edited, or removed annotation needs a repaint.
+  annotationsVersion?: number;
+  // An alt-drag landed on text that belongs to one of the annotatable
+  // messages. The terminal reports which message, the resolved markdown span,
+  // and where the release happened; the owner opens its editor and decides
+  // whether to keep it.
+  onAnnotationAnchor?: (
+    anchor: MessageAnchor,
+    at: { clientX: number; clientY: number },
+  ) => void;
+  // An alt-click landed on an existing wash. The owner reopens that annotation
+  // for editing; the terminal only says which one was pointed at.
+  onAnnotationActivate?: (
+    annotationId: string,
+    at: { clientX: number; clientY: number },
+  ) => void;
 }
 
 export interface GhosttyTerminalHandle {
@@ -242,6 +270,11 @@ interface SelectionRange {
 // Ghostty's native renderer resets synchronized-output mode after 1000ms so
 // one bad producer cannot freeze rendering indefinitely.
 const SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS = 1000;
+
+// The annotation wash and its rail. A fixed hue rather than a theme token: the
+// grid's own colors belong to the agent's output, and an annotation has to read
+// as something laid over that output by the user in every theme.
+const ANNOTATION_COLOR = '#a78bfa';
 
 // Hover-time link detection state (Warp's fragment-boundary model): the word
 // fragment under the pointer is analyzed once and cached; pointer movement
@@ -532,7 +565,7 @@ function cellText(
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
-  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onOpenMarkdown, onReady, onResize, onReplayInterrupted, onTerminalModelRecovered }, ref) {
+  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onOpenMarkdown, onReady, onResize, onReplayInterrupted, onTerminalModelRecovered, annotations, annotationsVersion = 0, onAnnotationAnchor, onAnnotationActivate }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const terminalRef = useRef<GhosttyModel | null>(null);
@@ -621,6 +654,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const onResizeRef = useRef(onResize);
     const onReplayInterruptedRef = useRef(onReplayInterrupted);
     const onTerminalModelRecoveredRef = useRef(onTerminalModelRecovered);
+    const annotationsRef = useRef(annotations);
+    const onAnnotationAnchorRef = useRef(onAnnotationAnchor);
+    const onAnnotationActivateRef = useRef(onAnnotationActivate);
+    // Set on mousedown when alt was held over a pane that has a message under
+    // annotation, so the release knows to resolve an anchor instead of just
+    // copying. Cleared on every mousedown.
+    const annotationDragRef = useRef(false);
+    // The annotation the pointer went down on with alt held, if any. A release
+    // that never became a drag reopens it instead of starting a new one.
+    const annotationClickRef = useRef<string | null>(null);
+    // The annotation under the pointer while alt is held. Drives the hover
+    // treatment that tells the user the wash is a thing they can click.
+    const annotationHoverRef = useRef<string | null>(null);
+    const altHeldRef = useRef(false);
     const runtimeMetaRef = useRef(runtimeLogMeta);
     const debugNameRef = useRef(debugName);
     const diagKeyRef = useRef<string>(runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName);
@@ -649,6 +696,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const modelRecoveryPendingRef = useRef(false);
     const [error, setError] = useState<string | null>(null);
     const [linkCursorActive, setLinkCursorActive] = useState(false);
+    const [annotationCursorActive, setAnnotationCursorActive] = useState(false);
     const [findUi, setFindUi] = useState({ open: false, matchCount: 0, focusedIndex: -1, scanning: false, caseSensitive: false });
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; blockId: number | null } | null>(null);
     const [filterUi, setFilterUi] = useState<{ open: boolean; blockId: number | null; caseSensitive: boolean }>({ open: false, blockId: null, caseSensitive: false });
@@ -667,6 +715,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     onResizeRef.current = onResize;
     onReplayInterruptedRef.current = onReplayInterrupted;
     onTerminalModelRecoveredRef.current = onTerminalModelRecovered;
+    annotationsRef.current = annotations;
+    onAnnotationAnchorRef.current = onAnnotationAnchor;
+    onAnnotationActivateRef.current = onAnnotationActivate;
     runtimeMetaRef.current = runtimeLogMeta;
     debugNameRef.current = debugName;
     cwdRef.current = cwd;
@@ -870,6 +921,48 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           });
         }
       }
+      const annotationStore = annotationsRef.current;
+      const annotationAccess = annotationStore ? messageRowAccess() : null;
+      if (annotationStore && annotationAccess) {
+        const firstRow = viewportBufferStart(scrollbackLength, viewportOffsetRef.current);
+        // project() is the gate: it hands back only the rows that still quote
+        // the text each annotation was anchored to. A wash that fails is simply
+        // absent for this frame — never redrawn at whatever moved into its old
+        // place. Rows outside the viewport are dropped here rather than in the
+        // store, so scrolling back to the message brings the wash with it.
+        for (const wash of annotationStore.project(annotationAccess)) {
+          // Alt over a wash is the gesture that reopens it, so the hover
+          // treatment only appears when alt is actually down: without it the
+          // highlight would promise a click that does nothing.
+          const hovered = altHeldRef.current && annotationHoverRef.current === wash.annotationId;
+          for (const range of wash.rows) {
+            const viewportRow = range.row - firstRow;
+            if (viewportRow < 0 || viewportRow >= terminal.rows) continue;
+            // A violet wash plus a solid rail under the text. The wash alone
+            // washed out against bright TUI output; the rail is what survives
+            // it, and it stays clear of the palette already spoken for by
+            // command blocks (blue) and find matches (amber).
+            overlays.push({
+              startRow: viewportRow,
+              startCol: range.startCol,
+              endRow: viewportRow,
+              endCol: range.endCol,
+              color: ANNOTATION_COLOR,
+              alpha: hovered ? 0.42 : 0.24,
+              kind: 'background',
+            });
+            overlays.push({
+              startRow: viewportRow,
+              startCol: range.startCol,
+              endRow: viewportRow,
+              endCol: range.endCol,
+              color: ANNOTATION_COLOR,
+              alpha: hovered ? 1 : 0.75,
+              kind: 'underline',
+            });
+          }
+        }
+      }
       const sample = renderer.render(terminal, force, getViewportCells(), overlays, viewportOffsetRef.current);
       if (sample) {
         renderCountRef.current += 1;
@@ -899,6 +992,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         return false;
       }
     }, [getViewportCells, recoverFromModelFault, resolvedTheme]);
+
+    // The annotation store is a mutable object, so adding, editing, or removing
+    // an annotation changes nothing React can see. The owner bumps the version
+    // instead, and that is the repaint signal.
+    useEffect(() => {
+      renderSurface(true);
+    }, [annotations, annotationsVersion, renderSurface]);
 
     const clearSynchronizedOutputRenderTimer = useCallback(() => {
       if (!synchronizedOutputRenderTimerRef.current) return;
@@ -970,6 +1070,34 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         false,
       );
     }, []);
+
+    // The grid, reduced to what the annotation projection reads. Every call
+    // goes at the LIVE buffer, which is the whole point: the store re-derives
+    // rows from the message text each time and re-reads the cells it is about
+    // to paint, so nothing about a row survives a write or a reflow.
+    const messageRowAccess = useCallback((): MessageRowAccess | null => {
+      const terminal = terminalRef.current;
+      if (!terminal) return null;
+      return {
+        cols: () => terminal.cols,
+        totalRows: () => terminal.getScrollbackLength() + terminal.rows,
+        rowText: (row) => selectionLineAtBufferRow(row, 0, terminal.cols),
+        rowTextRange: (row, startCol, endCol) => selectionLineAtBufferRow(row, startCol, endCol),
+      };
+    }, [selectionLineAtBufferRow]);
+
+    // The annotation under a viewport cell, if any. Asking the store rather
+    // than caching the painted rows keeps the hit test and the paint reading
+    // the same gated projection.
+    const annotationAtCell = useCallback((cell: { row: number; col: number } | null): string | null => {
+      const terminal = terminalRef.current;
+      const store = annotationsRef.current;
+      if (!terminal || !cell || !store || !store.hasWork()) return null;
+      const access = messageRowAccess();
+      if (!access) return null;
+      const bufferRow = bufferRowFromViewportRow(cell.row, terminal.getScrollbackLength(), viewportOffsetRef.current);
+      return store.annotationAt(access, bufferRow, cell.col);
+    }, [messageRowAccess]);
 
     const textForSelectionRange = useCallback((selection: SelectionRange | null) => {
       const terminal = terminalRef.current;
@@ -1505,6 +1633,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         );
         // Content changed under the pointer: drop the hover-link fragment cache.
         hoverGenerationRef.current += 1;
+        // Anything written can have moved the annotated message — a TUI redraw
+        // rewrites it in place, and appended output pushes it up the buffer.
+        // The cached alignment is only good for the buffer it was measured in.
+        annotationsRef.current?.noteWrite();
         if (findOpenRef.current && findQueryRef.current) {
           // New output while find is open: refresh matches once writes settle.
           if (findRescanTimerRef.current) clearTimeout(findRescanTimerRef.current);
@@ -1587,6 +1719,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // and screen) — re-anchor each block and keep it.
     const reconcileBlocksAfterResize = useCallback((widthChanged: boolean) => {
       if (widthChanged) {
+        // Blocks are stored as rows, so a reflow destroys them. Annotations are
+        // stored as message offsets and survive — but the alignment that maps
+        // them onto rows does not, and its bounded search window is seeded from
+        // rows that no longer hold the same text.
+        annotationsRef.current?.noteGeometryChange();
         blockStoreRef.current.clear();
         selectedBlockIdRef.current = null;
         return;
@@ -1906,7 +2043,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       write,
       resizeLocal,
       seedBlocks,
-      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
+      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); annotationsRef.current?.reset(); selectedBlockIdRef.current = null; void write('\x1bc'); },
       scrollToTop: () => {
         const terminal = terminalRef.current;
         if (!terminal) return false;
@@ -1992,6 +2129,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // are meaningless.
         osc133StateRef.current = emptyOsc133State();
         blockStoreRef.current.clear();
+        // The buffer the annotations were resolved against is gone. Keeping
+        // them would leave anchors pointing into whatever replaces it.
+        annotationsRef.current?.reset();
         selectedBlockIdRef.current = null;
         findScanRef.current?.cancel();
         findScanRef.current = null;
@@ -2109,7 +2249,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           write,
           resizeLocal,
           seedBlocks,
-          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
+          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); annotationsRef.current?.reset(); selectedBlockIdRef.current = null; void write('\x1bc'); },
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; hoverGenerationRef.current += 1; renderSurface(true); return true; },
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
@@ -2436,6 +2576,21 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       setLinkCursorActive(Boolean(hoverLinkAtCell(cell) && acceleratorHeld));
     }, [hoverLinkAtCell]);
 
+    // Repaint only when the hovered annotation actually changes: this runs on
+    // every pointer move, and the projection behind it is not free.
+    const syncAnnotationHover = useCallback((
+      cell: { row: number; col: number } | null,
+      altHeld: boolean,
+    ) => {
+      const next = altHeld ? annotationAtCell(cell) : null;
+      if (next === annotationHoverRef.current) return;
+      annotationHoverRef.current = next;
+      // A pointer cursor on top of the brightened wash: the wash says "this is
+      // annotated", the cursor says "and you can open it".
+      setAnnotationCursorActive(next !== null);
+      renderSurface(true);
+    }, [annotationAtCell, renderSurface]);
+
     const cachedPathExists = useCallback((absolutePath: string): Promise<boolean> => {
       const cache = pathExistsCacheRef.current;
       const cached = cache.get(absolutePath);
@@ -2635,6 +2790,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     useEffect(() => {
       const handleModifierChange = (event: KeyboardEvent) => {
+        if (event.key === 'Alt') {
+          // Alt is the annotation modifier, and holding it without moving the
+          // pointer is the normal way to reach for a wash. Light it up on the
+          // keypress rather than waiting for a move that may never come.
+          altHeldRef.current = event.altKey;
+          syncAnnotationHover(hoveredCellRef.current, event.altKey);
+          return;
+        }
         if (event.key !== 'Meta' && event.key !== 'Control') return;
         acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
         // A fit/scroll between the last pointer move and this keypress bumps
@@ -2652,7 +2815,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         window.removeEventListener('keydown', handleModifierChange);
         window.removeEventListener('keyup', handleModifierChange);
       };
-    }, [detectHoverLink, updateLinkCursor]);
+    }, [detectHoverLink, syncAnnotationHover, updateLinkCursor]);
 
     useEffect(() => () => {
       selectionDragCleanupRef.current?.();
@@ -2780,9 +2943,42 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       selectingRef.current = false;
       selectionPointerStartRef.current = null;
       const wasClick = !selectionDragThresholdMetRef.current;
+      const annotationDrag = annotationDragRef.current && !wasClick;
+      const annotationClick = wasClick ? annotationClickRef.current : null;
+      annotationDragRef.current = false;
+      annotationClickRef.current = null;
       if (wasClick) {
         selectionRef.current = null;
         renderSurface(true);
+      }
+      // Alt-clicking a wash reopens that annotation. It is the only way back to
+      // one already made — the wash is on the message, not in a list, so the
+      // message is where it has to be editable.
+      if (annotationClick !== null) {
+        onAnnotationActivateRef.current?.(annotationClick, {
+          clientX: event.clientX,
+          clientY: event.clientY,
+        });
+        return;
+      }
+      // An alt-drag over an annotatable message asks a different question than a
+      // copy: which message did the user point at, and where in it. The store
+      // answers with markdown offsets or refuses — a drag over the TUI's own
+      // chrome, a user turn, or a message outside the annotatable window
+      // resolves to nothing, and then this is an ordinary selection.
+      if (annotationDrag && selectionRef.current) {
+        const store = annotationsRef.current;
+        const access = messageRowAccess();
+        const anchor = store && access
+          ? store.anchorForSelection(access, normalizeSelection(selectionRef.current))
+          : null;
+        if (anchor) {
+          selectionRef.current = null;
+          selectedTextRef.current = null;
+          renderSurface(true);
+          onAnnotationAnchorRef.current?.(anchor, { clientX: event.clientX, clientY: event.clientY });
+          return;
+        }
       }
       const text = textForSelectionRange(selectionRef.current);
       selectedTextRef.current = text || null;
@@ -2850,6 +3046,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (!selectingRef.current) return;
       selectingRef.current = false;
       selectionPointerStartRef.current = null;
+      annotationDragRef.current = false;
+      annotationClickRef.current = null;
       if (!selectionDragThresholdMetRef.current) {
         selectionRef.current = null;
         renderSurface(true);
@@ -3006,7 +3204,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       <div className="ghostty-terminal-frame">
       <div
         ref={containerRef}
-        className={`terminal-container ghostty-terminal${linkCursorActive ? ' ghostty-terminal-link-hover' : ''}`}
+        className={`terminal-container ghostty-terminal${linkCursorActive ? ' ghostty-terminal-link-hover' : ''}${annotationCursorActive ? ' ghostty-terminal-annotation-hover' : ''}`}
         data-terminal-renderer="ghostty-webgl"
         tabIndex={0}
         contentEditable
@@ -3125,6 +3323,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           selectedTextRef.current = null;
           applicationSelectionAnchorRef.current = null;
           selectedBlockIdRef.current = null;
+          // Alt claims the drag for annotation only when there is a message to
+          // annotate; otherwise it stays the plain selection it has always been.
+          annotationDragRef.current = event.altKey && Boolean(annotationsRef.current?.hasMessages());
+          annotationClickRef.current = event.altKey ? annotationAtCell(cell) : null;
           selectingRef.current = true;
           selectionPointerStartRef.current = { clientX: event.clientX, clientY: event.clientY };
           selectionDragThresholdMetRef.current = false;
@@ -3144,6 +3346,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           const hoveredCell = cellFromPointer(event);
           hoveredCellRef.current = hoveredCell;
           acceleratorHeldRef.current = event.metaKey || event.ctrlKey;
+          altHeldRef.current = event.altKey;
+          syncAnnotationHover(hoveredCell, event.altKey);
           detectHoverLink(hoveredCell);
           updateLinkCursor(hoveredCell, acceleratorHeldRef.current);
           const hoveredLink = hoverLinkAtCell(hoveredCell);
@@ -3161,6 +3365,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           hoveredCellRef.current = null;
           detectHoverLink(null);
           setLinkCursorActive(false);
+          syncAnnotationHover(null, false);
         }}
         onContextMenu={(event) => {
           // Always suppress the webview's own menu inside the terminal.

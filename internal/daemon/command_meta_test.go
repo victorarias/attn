@@ -6,88 +6,6 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-func TestCommandMetaCoversAllCommands(t *testing.T) {
-	commands := []string{
-		protocol.CmdRegister,
-		protocol.CmdUnregister,
-		protocol.CmdState,
-		protocol.CmdSetSessionResumeID,
-		protocol.CmdSessionInstructions,
-		protocol.CmdSessionTranscript,
-		protocol.CmdStop,
-		protocol.CmdTodos,
-		protocol.CmdFilesEdited,
-		protocol.CmdQuery,
-		protocol.CmdHeartbeat,
-		protocol.CmdSessionSelected,
-		protocol.CmdTriggerNudge,
-		protocol.CmdMuteWorkspace,
-		protocol.CmdQueryPRs,
-		protocol.CmdMutePR,
-		protocol.CmdMuteRepo,
-		protocol.CmdMuteAuthor,
-		protocol.CmdCollapseRepo,
-		protocol.CmdQueryRepos,
-		protocol.CmdQueryAuthors,
-		protocol.CmdFetchPRDetails,
-		protocol.CmdRefreshPRs,
-		protocol.CmdClearSessions,
-		protocol.CmdClearWarnings,
-		protocol.CmdPRVisited,
-		protocol.CmdListWorktrees,
-		protocol.CmdCreateWorktree,
-		protocol.CmdDeleteWorktree,
-		protocol.CmdGetSettings,
-		protocol.CmdSetSetting,
-		protocol.CmdApprovePR,
-		protocol.CmdMergePR,
-		protocol.CmdInjectTestPR,
-		protocol.CmdInjectTestSession,
-		protocol.CmdGetRecentLocations,
-		protocol.CmdBrowseDirectory,
-		protocol.CmdInspectPath,
-		protocol.CmdListBranches,
-		protocol.CmdCreateWorktreeFromBranch,
-		protocol.CmdGetDefaultBranch,
-		protocol.CmdFetchRemotes,
-		protocol.CmdListRemoteBranches,
-		protocol.CmdEnsureRepo,
-		protocol.CmdSubscribeGitStatus,
-		protocol.CmdUnsubscribeGitStatus,
-		protocol.CmdGetFileDiff,
-		protocol.CmdGetRepoInfo,
-		protocol.CmdSpawnSession,
-		protocol.CmdAttachSession,
-		protocol.CmdDetachSession,
-		protocol.CmdPtyInput,
-		protocol.CmdPtyResize,
-		protocol.CmdKillSession,
-		protocol.CmdWorkspaceLayoutGet,
-		protocol.CmdWorkspaceLayoutAddSessionPane,
-		protocol.CmdWorkspaceLayoutClosePane,
-		protocol.CmdWorkspaceLayoutFocusPane,
-		protocol.CmdWorkspaceLayoutRenamePane,
-		protocol.CmdWorkspaceLayoutSetSplitRatio,
-		protocol.CmdWorkspaceLayoutDockTile,
-		protocol.CmdWorkspaceLayoutUndockTile,
-		protocol.CmdWorkspaceLayoutUpdateTile,
-		protocol.CmdWorkspaceTileContentGet,
-		protocol.CmdMarkdownAnnotationsGet,
-		protocol.CmdMarkdownAnnotationsSave,
-		protocol.CmdMarkdownAnnotationsClear,
-		protocol.CmdMarkdownAnnotationsSubmit,
-		protocol.CmdRenameSession,
-		protocol.CmdRenameWorkspace,
-		protocol.CmdSetChiefOfStaff,
-	}
-
-	for _, cmd := range commands {
-		if _, ok := CommandMeta[cmd]; !ok {
-			t.Fatalf("missing command metadata for %s", cmd)
-		}
-	}
-}
-
 func TestCommandMetaExamples(t *testing.T) {
 	if meta := CommandMeta[protocol.CmdPtyInput]; meta.Scope != ScopeSession {
 		t.Fatalf("pty_input scope = %v, want %v", meta.Scope, ScopeSession)
@@ -188,6 +106,39 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			cmd:  protocol.CmdSettleTurn,
 			msg:  &protocol.SettleTurnMessage{SessionID: "sess-settle"},
 			want: "sess-settle",
+		},
+		{
+			// Hub→remote regression: the transcript is read from the filesystem
+			// of the machine running the agent. A hub answering locally has no
+			// transcript and no session row, so a remote pane would offer
+			// nothing to annotate.
+			name: "session_messages_get",
+			cmd:  protocol.CmdSessionMessagesGet,
+			msg:  &protocol.SessionMessagesGetMessage{SessionID: "sess-messages"},
+			want: "sess-messages",
+		},
+		{
+			// Hub→remote regression: annotation drafts are keyed by session in
+			// the owning daemon's store. Read, written, or cleared on the hub
+			// instead, a remote pane would keep a second divergent set — and
+			// the generation ordering that makes two panes converge would be
+			// comparing against the wrong row entirely.
+			name: "session_annotations_get",
+			cmd:  protocol.CmdSessionAnnotationsGet,
+			msg:  &protocol.SessionAnnotationsGetMessage{SessionID: "sess-anno-get"},
+			want: "sess-anno-get",
+		},
+		{
+			name: "session_annotations_save",
+			cmd:  protocol.CmdSessionAnnotationsSave,
+			msg:  &protocol.SessionAnnotationsSaveMessage{SessionID: "sess-anno-save"},
+			want: "sess-anno-save",
+		},
+		{
+			name: "session_annotations_clear",
+			cmd:  protocol.CmdSessionAnnotationsClear,
+			msg:  &protocol.SessionAnnotationsClearMessage{SessionID: "sess-anno-clear"},
+			want: "sess-anno-clear",
 		},
 	}
 

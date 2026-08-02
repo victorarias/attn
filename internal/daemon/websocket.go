@@ -1167,6 +1167,14 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
 	case protocol.CmdOpenMarkdown: // wire: open_markdown
 		d.handleOpenMarkdownWS(client, msg.(*protocol.OpenMarkdownMessage))
+	case protocol.CmdSessionMessagesGet: // wire: session_messages_get
+		d.handleSessionMessagesGet(client, msg.(*protocol.SessionMessagesGetMessage))
+	case protocol.CmdSessionAnnotationsGet: // wire: session_annotations_get
+		d.handleSessionAnnotationsGet(client, msg.(*protocol.SessionAnnotationsGetMessage))
+	case protocol.CmdSessionAnnotationsSave: // wire: session_annotations_save
+		d.handleSessionAnnotationsSave(client, msg.(*protocol.SessionAnnotationsSaveMessage))
+	case protocol.CmdSessionAnnotationsClear: // wire: session_annotations_clear
+		d.handleSessionAnnotationsClear(client, msg.(*protocol.SessionAnnotationsClearMessage))
 	case protocol.CmdMarkdownAnnotationsGet: // wire: markdown_annotations_get
 		d.handleMarkdownAnnotationsGet(client, msg.(*protocol.MarkdownAnnotationsGetMessage))
 	case protocol.CmdMarkdownAnnotationsSave: // wire: markdown_annotations_save
@@ -1346,6 +1354,29 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWakeTurn: // wire: wake_turn
 		if typed, ok := msg.(*protocol.WakeTurnMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdSessionMessagesGet: // wire: session_messages_get
+		// The transcript is read from the filesystem of the machine running the
+		// agent, and the session row lives in that daemon's store. A hub that
+		// answered locally would find neither.
+		if typed, ok := msg.(*protocol.SessionMessagesGetMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdSessionAnnotationsGet: // wire: session_annotations_get
+		// Annotation drafts are keyed by session in the owning daemon's store,
+		// so all three of get/save/clear have to reach the same daemon the
+		// messages came from. Answered locally the hub would keep a second,
+		// divergent set that the pane's own terminal never sees.
+		if typed, ok := msg.(*protocol.SessionAnnotationsGetMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdSessionAnnotationsSave: // wire: session_annotations_save
+		if typed, ok := msg.(*protocol.SessionAnnotationsSaveMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdSessionAnnotationsClear: // wire: session_annotations_clear
+		if typed, ok := msg.(*protocol.SessionAnnotationsClearMessage); ok {
 			return typed.SessionID
 		}
 	}

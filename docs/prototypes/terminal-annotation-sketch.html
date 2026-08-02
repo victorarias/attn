@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>PROTOTYPE — highlight-and-annotate the agent's last message in place</title>
+<style>
+  /* Tokens lifted from app/src/components/MarkdownReader/MarkdownReader.css so
+     this sketch reads as the same feature, not a second design language.
+     Class names mirror the real ones (md-selection-toolbar, md-toolbar-btn,
+     md-annotation-popover, md-annotation-card, md-mark…) to make the mapping
+     to production obvious. */
+  :root {
+    --color-bg-app: #0d0d0f;
+    --color-bg-panel: #111113;
+    --color-bg-elevated: #1a1a1d;
+    --color-bg-button: #252528;
+    --color-border: #2a2a2d;
+    --color-border-hover: #3a3a3d;
+    --color-text-primary: #e8e8e8;
+    --color-text-secondary: #bbb;
+    --color-text-muted: #888;
+    --color-accent: #5b8cff;
+    --color-warning: #eab308;
+    --cell-h: 20px;
+    --mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding-bottom: 56px;
+    background: var(--color-bg-app); color: var(--color-text-primary);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  header {
+    padding: 14px 20px; border-bottom: 1px solid var(--color-border);
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+  header .tag {
+    font: 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em;
+    color: var(--color-warning); border: 1px solid #6b4a1f;
+    padding: 4px 7px; border-radius: 4px;
+  }
+  header p { margin: 0; color: var(--color-text-muted); font-size: 12px; }
+
+  main { padding: 20px; display: flex; gap: 20px; align-items: flex-start; }
+  .left { flex: 1 1 auto; min-width: 0; }
+
+  /* ---------- terminal ---------- */
+  .frame {
+    position: relative; background: var(--color-bg-app);
+    border: 1px solid var(--color-border); border-radius: 8px; padding: 12px 0;
+    font: 13px/var(--cell-h) var(--mono); overflow: hidden; user-select: none;
+  }
+  .row { position: relative; height: var(--cell-h); padding-left: 34px; padding-right: 12px; }
+  .row .txt { position: relative; z-index: 2; white-space: pre; user-select: text; }
+  .row.dimmed .txt { color: #33333a; }
+  .row.chrome .txt { color: var(--color-text-muted); }
+
+  /* message wash + rails — the cell-space overlay idiom */
+  .row.msg::before {
+    content: ""; position: absolute; inset: 0 12px 0 26px;
+    background: color-mix(in srgb, var(--color-accent) 5%, transparent); z-index: 1;
+  }
+  .row.msg.first::before {
+    border-top: 1px solid color-mix(in srgb, var(--color-accent) 32%, transparent);
+  }
+  .row.msg.last::before {
+    border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 32%, transparent);
+  }
+  .row.msg::after {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 26px; right: 12px;
+    border-left: 1px solid color-mix(in srgb, var(--color-accent) 32%, transparent);
+    border-right: 1px solid color-mix(in srgb, var(--color-accent) 32%, transparent);
+    pointer-events: none; z-index: 1;
+  }
+  .gutter {
+    position: absolute; left: 0; top: 0; width: 26px; height: var(--cell-h);
+    text-align: center; font-size: 11px; z-index: 3; user-select: none;
+  }
+  .frame ::selection { background: color-mix(in srgb, var(--color-accent) 35%, transparent); }
+
+  /* an applied annotation — .md-mark: wash only, no underline, and the
+     padding/negative-margin pair paints past the glyphs without shifting cells */
+  mark.md-mark {
+    background-color: var(--anno-wash); color: inherit;
+    padding: 0 2px; margin: 0 -2px; border-radius: 2px; cursor: pointer;
+  }
+  mark.md-mark:hover { filter: brightness(1.25); }
+  mark.md-mark.focused { background-color: var(--anno-wash-strong); }
+
+  /* ---------- popup: .md-selection-toolbar ---------- */
+  .md-selection-toolbar {
+    position: fixed; z-index: 10020; display: none;
+    align-items: center; gap: 2px; padding: 4px; border-radius: 8px;
+    background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+    animation: md-toolbar-in .15s ease-out;
+  }
+  .md-selection-toolbar.open { display: block; }
+  @keyframes md-toolbar-in {
+    from { opacity: 0; translate: 0 12px; }
+    to { opacity: 1; translate: 0 0; }
+  }
+  .md-toolbar-row { display: flex; align-items: center; gap: 2px; }
+  .md-toolbar-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; padding: 5px; border: none; border-radius: 6px;
+    background: transparent; color: var(--color-text-secondary); cursor: pointer;
+    transition: background .12s ease, color .12s ease;
+    font-size: 14px; line-height: 1;
+  }
+  .md-toolbar-btn:hover {
+    background: var(--color-bg-button); color: var(--color-text-primary);
+  }
+  .md-toolbar-btn--comment { color: var(--color-warning); }
+  .md-toolbar-btn--comment:hover {
+    background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+    color: var(--color-warning);
+  }
+  .md-toolbar-btn--delete { display: none; color: #f87171; }
+  .md-selection-toolbar.editing .md-toolbar-btn--delete { display: inline-flex; }
+  .md-toolbar-btn--delete:hover { background: rgba(239, 68, 68, .12); color: #f87171; }
+  .md-toolbar-divider {
+    width: 1px; height: 18px; margin: 0 2px; background: var(--color-border);
+  }
+  .md-toolbar-tip {
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: var(--color-bg-app); border: 1px solid var(--color-border);
+    border-radius: 6px; padding: 3px 8px; font-size: 11px; white-space: nowrap;
+    color: var(--color-text-primary); display: none;
+  }
+  .md-selection-toolbar.show-tip .md-toolbar-tip { display: block; }
+
+  /* ---------- compose mode: .md-annotation-popover ---------- */
+  .md-selection-toolbar.compose {
+    padding: 0; border-radius: 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, .5);
+  }
+  .md-selection-toolbar.compose .md-toolbar-row,
+  .md-selection-toolbar.compose .md-toolbar-tip { display: none; }
+  .md-popover-body { display: none; flex-direction: column; width: 340px; }
+  .md-selection-toolbar.compose .md-popover-body { display: flex; }
+  .md-popover-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  }
+  .md-popover-quote {
+    font-size: 11px; color: var(--color-text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .md-popover-close {
+    flex: none; width: 20px; height: 20px; padding: 3px; border: none;
+    border-radius: 4px; background: transparent; color: var(--color-text-muted);
+    cursor: pointer; font-size: 11px; line-height: 1;
+  }
+  .md-popover-close:hover {
+    background: var(--color-bg-button); color: var(--color-text-primary);
+  }
+  .md-popover-textarea {
+    margin: 8px 12px 0; min-height: 4.5rem; max-height: 16rem; resize: none;
+    border: none; outline: none; background: transparent;
+    color: var(--color-text-primary); font-size: 13px; font-family: inherit;
+    line-height: 1.5;
+  }
+  .md-popover-textarea::placeholder { color: var(--color-text-muted); }
+  .md-popover-footer {
+    display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+    padding: 8px 12px;
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  }
+  .md-popover-submit {
+    padding: 5px 12px; border: none; border-radius: 6px;
+    background: var(--color-accent); color: #fff; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: opacity .12s ease;
+  }
+  .md-popover-submit:hover { opacity: .9; }
+  .md-popover-submit:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ---------- floating annotations panel ----------
+   * Floats rather than sitting in the layout on purpose: a panel that grows
+   * with the list would resize the terminal pane, and a terminal resize means
+   * new cols/rows and a reflow — the one thing worth avoiding mid-review. */
+  .md-float {
+    position: fixed; z-index: 10010; width: 300px;
+    background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+    border-radius: 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, .5); overflow: hidden;
+  }
+  .md-float.hidden { display: none; }   /* no annotations, no panel */
+  .md-float-head {
+    display: flex; align-items: center; gap: 6px; padding: 8px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+    cursor: grab; user-select: none;
+  }
+  .md-float.dragging .md-float-head { cursor: grabbing; }
+  .md-float-head .grip { color: var(--color-text-muted); font-size: 12px; letter-spacing: -1px; }
+  .md-sidebar-title {
+    font-size: 12px; font-weight: 600; color: var(--color-text-secondary);
+    text-transform: uppercase; letter-spacing: .04em; flex: 1 1 auto;
+  }
+  .md-sidebar-count {
+    font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+    background: var(--color-bg-button); color: var(--color-text-secondary); border: none;
+  }
+  .md-float-head button.icon {
+    background: transparent; border: none; color: var(--color-text-muted);
+    border-radius: 4px; width: 20px; height: 20px; padding: 3px; cursor: pointer;
+    font-size: 12px; line-height: 1;
+  }
+  .md-float-head button.icon:hover {
+    background: var(--color-bg-button); color: var(--color-text-primary);
+  }
+  .md-float-body {
+    padding: 10px 12px; max-height: 44vh; overflow: auto;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .md-float.collapsed .md-float-body { display: none; }
+
+  /* .md-annotation-card */
+  .md-annotation-card {
+    position: relative; padding: 10px; border-radius: 8px;
+    border: 1px solid var(--color-border); background: var(--color-bg-panel);
+    cursor: pointer; transition: border-color .12s ease, box-shadow .12s ease;
+  }
+  .md-annotation-card:hover { border-color: var(--color-border-hover); }
+  .md-annotation-card--selected {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  }
+  .md-card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .md-ql-chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px;
+    font-weight: 600; padding: 1px 7px; border-radius: 999px; color: var(--anno-fg);
+  }
+  .md-card-badge {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; padding: 1px 6px; border-radius: 4px;
+  }
+  .md-card-badge--comment {
+    background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+    color: var(--color-warning);
+  }
+  .md-card-delete {
+    margin-left: auto; width: 20px; height: 20px; padding: 3px; border: none;
+    border-radius: 4px; background: transparent; color: var(--color-text-muted);
+    cursor: pointer; opacity: 0; transition: opacity .12s ease;
+    font-size: 11px; line-height: 1;
+  }
+  .md-annotation-card:hover .md-card-delete,
+  .md-card-delete:focus-visible { opacity: 1; }
+  .md-card-delete:hover { color: #f87171; background: rgba(239, 68, 68, .12); }
+  .md-card-body { font-size: 12px; color: var(--color-text-primary); margin-bottom: 6px; }
+  .md-card-quote {
+    font-family: var(--mono); font-size: 11px; color: var(--color-text-secondary);
+    background: var(--color-bg-app); border-radius: 6px; padding: 6px 8px;
+    max-height: 42px; overflow: hidden;
+  }
+
+  /* Deliberately OUTSIDE .md-float-body: collapsing folds the list away,
+     never the commit action. */
+  .md-float-foot {
+    display: flex; align-items: center; gap: 9px; padding: 8px 12px;
+    border-top: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  }
+  .md-float-foot .n {
+    font-size: 11px; color: var(--color-text-muted); flex: 1 1 auto;
+  }
+  .md-float-foot.sent .n { color: #3fb950; }
+
+  /* ---------- prototype scaffolding (not product chrome) ---------- */
+  .side { width: 300px; flex: 0 0 300px; }
+  .box {
+    background: var(--color-bg-panel); border: 1px solid var(--color-border);
+    border-radius: 8px; padding: 11px 13px;
+  }
+  .box h4 {
+    margin: 0 0 8px; font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--color-text-secondary);
+  }
+  pre.payload {
+    font: 11px/1.5 var(--mono); background: var(--color-bg-app);
+    border: 1px solid var(--color-border); border-radius: 6px; padding: 10px;
+    white-space: pre-wrap; color: var(--color-text-secondary);
+    max-height: 330px; overflow: auto; margin: 0;
+  }
+  .bar {
+    position: fixed; bottom: 0; left: 0; right: 0; background: rgba(13, 13, 15, .97);
+    border-top: 1px solid var(--color-border); padding: 9px 20px; display: flex;
+    gap: 10px; align-items: center; backdrop-filter: blur(6px); z-index: 10000;
+  }
+  .bar button {
+    background: var(--color-bg-button); color: var(--color-text-primary);
+    border: 1px solid var(--color-border); border-radius: 6px; padding: 5px 11px;
+    font-size: 12px; cursor: pointer;
+  }
+  .bar .keys { color: var(--color-text-muted); font: 11px var(--mono); margin-left: auto; }
+</style>
+</head>
+<body>
+<header>
+  <span class="tag">prototype — throwaway</span>
+  <h1>Highlight the agent's message, annotate it in place</h1>
+  <p>Drag across any part of the message. The emoji popup follows the selection; 💬 opens a comment box.</p>
+</header>
+
+<main>
+  <div class="left">
+    <div class="frame" id="frame"></div>
+  </div>
+  <div class="side">
+    <div class="box">
+      <h4>Payload the agent would receive</h4>
+      <pre class="payload" id="payload"></pre>
+    </div>
+  </div>
+</main>
+
+<div class="md-float hidden" id="floatPanel">
+  <div class="md-float-head" id="floatHead">
+    <span class="grip">⠿</span>
+    <span class="md-sidebar-title">Annotations</span>
+    <span class="md-sidebar-count" id="headCount">0</span>
+    <button class="icon" id="floatCollapse" title="Collapse">–</button>
+  </div>
+  <div class="md-float-body" id="list"></div>
+  <div class="md-float-foot" id="floatFoot">
+    <span class="n" id="footCount"></span>
+    <button class="md-popover-submit" id="send">Send all</button>
+  </div>
+</div>
+
+<div class="md-selection-toolbar" id="popup">
+  <div class="md-toolbar-tip" id="tip"></div>
+  <div class="md-toolbar-row" id="emojis"></div>
+  <div class="md-popover-body">
+    <div class="md-popover-header">
+      <span class="md-popover-quote" id="composerQuote"></span>
+      <button class="md-popover-close" id="composerCancel" title="Cancel">✕</button>
+    </div>
+    <textarea class="md-popover-textarea" id="composerText"
+      placeholder="What should the agent do differently here?"></textarea>
+    <div class="md-popover-footer">
+      <button class="md-popover-submit" id="composerSave">Comment</button>
+    </div>
+  </div>
+</div>
+
+<div class="bar">
+  <button id="clear">Clear all</button>
+  <span class="keys">drag across the message to highlight · pick a label or 💬 · esc dismisses</span>
+</div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * PROTOTYPE. Throwaway. Answers "what should this FEEL like".
+ * Feasibility is measured separately in spikes/msg-grid-align.
+ *
+ * Two things here are deliberately faithful rather than mocked:
+ *
+ * 1. The rendered rows reproduce the transforms actually observed in real
+ *    Claude output (see the spike NOTES): markdown syntax stripped, a
+ *    leading marker glyph, 2-space indent on continuation rows, and
+ *    markdown tables drawn as box-drawing chrome.
+ *
+ * 2. The payload quotes the MARKDOWN, recovered from the highlighted
+ *    cells by a miniature of the spike's word-level aligner. Quoting the
+ *    rendered rows instead would hand the agent its own words with the
+ *    formatting stripped out — the whole reason the anchor lives on the
+ *    transcript and not on the grid.
+ * ------------------------------------------------------------------ */
+
+const QUICK_LABELS = [
+  { id:'clarify-this',            emoji:'❓',  text:'Clarify this',            color:'yellow' },
+  { id:'verify-this',             emoji:'🔍',  text:'Verify this',             color:'orange',
+    tip:'This seems like an assumption. Verify by reading the actual code before proceeding.' },
+  { id:'give-me-an-example',      emoji:'🔬',  text:'Give me an example',      color:'cyan',
+    tip:'This is too abstract. Show a before/after, a sample input/output, or a specific scenario.' },
+  { id:'match-existing-patterns', emoji:'🧬',  text:'Match existing patterns', color:'teal',
+    tip:'Search the codebase for existing patterns that already solve this. Reuse what exists.' },
+  { id:'consider-alternatives',   emoji:'🔄',  text:'Consider alternatives',   color:'pink',
+    tip:'Propose 2-3 alternative approaches with trade-offs based on the actual codebase.' },
+  { id:'ensure-no-regression',    emoji:'📉',  text:'Ensure no regression',    color:'amber',
+    tip:'Verify this will not break existing behavior. Identify what could regress.' },
+  { id:'out-of-scope',            emoji:'🚫',  text:'Out of scope',            color:'red',
+    tip:'This is not part of the current task. Remove it and stay focused on what was requested.' },
+  { id:'needs-tests',             emoji:'🧪',  text:'Needs tests',             color:'blue' },
+  { id:'nice-approach',           emoji:'👍',  text:'Nice approach',           color:'green' },
+];
+/* The dark-theme text colours from LABEL_COLOR_MAP in
+   app/src/components/MarkdownReader/annotations/quickLabels.ts. */
+const COLORS = {
+  blue:   { fg:'#60a5fa' }, red:   { fg:'#f87171' }, orange: { fg:'#fb923c' },
+  yellow: { fg:'#facc15' }, purple:{ fg:'#a78bfa' }, teal:   { fg:'#2dd4bf' },
+  pink:   { fg:'#f472b6' }, green: { fg:'#4ade80' }, cyan:   { fg:'#22d3ee' },
+  amber:  { fg:'#fbbf24' },
+};
+/* A plain comment is warning-yellow, matching .md-card-badge--comment and
+   .md-mark-comment in the real feature. */
+const COMMENT_STYLE = { fg:'#eab308' };
+const labelById = id => QUICK_LABELS.find(l => l.id === id);
+
+/* kind: 'other' = not the message · 'text' = annotatable · 'chrome' = in the
+   message but carries no words (table borders) */
+const ROWS = [
+  { kind:'other', text:'  ⎿  Read client.ts (214 lines)' },
+  { kind:'other', text:'' },
+  { kind:'other', text:'❯ add retries to the flaky upload path' },
+  { kind:'other', text:'' },
+  { kind:'text',  text:"⏺ Here's the plan — three changes, smallest first.",
+    md:"Here's the plan — three changes, smallest first." },
+  { kind:'text',  text:'' },
+  { kind:'text',  text:'  Plan', md:'## Plan' },
+  { kind:'text',  text:'' },
+  { kind:'text',  text:'  1. Add the retry wrapper around the fetch call in client.ts.',
+    md:'1. **Add the retry wrapper** around the `fetch` call in `client.ts`.' },
+  { kind:'text',  text:'  2. Thread the timeout through RequestOptions so callers can override it.',
+    md:'2. **Thread the timeout** through `RequestOptions` so callers can override it.' },
+  { kind:'text',  text:'  3. Update the tests to cover the 429 path.',
+    md:'3. **Update the tests** to cover the 429 path.' },
+  { kind:'text',  text:'' },
+  { kind:'text',  text:'  const res = await withRetry(() => fetch(url, { signal }), { attempts: 3 });',
+    md:'```ts\nconst res = await withRetry(() => fetch(url, { signal }), { attempts: 3 });\n```' },
+  { kind:'text',  text:'' },
+  { kind:'chrome',text:'  ┌────────────────────┬────────┬─────────┐' },
+  { kind:'text',  text:'  │ Change             │ Risk   │ Tested  │', md:'| Change | Risk | Tested |' },
+  { kind:'chrome',text:'  ├────────────────────┼────────┼─────────┤' },
+  { kind:'text',  text:'  │ retry wrapper      │ low    │ yes     │', md:'| retry wrapper | low | yes |' },
+  { kind:'text',  text:'  │ timeout threading  │ medium │ partial │', md:'| timeout threading | medium | partial |' },
+  { kind:'chrome',text:'  └────────────────────┴────────┴─────────┘' },
+  { kind:'text',  text:'' },
+  { kind:'text',  text:"  I'd land these as one PR since the tests span all three changes.",
+    md:"I'd land these as one PR since the tests span all three changes." },
+  { kind:'other', text:'' },
+  { kind:'other', text:'❯ ▊' },
+];
+const MSG_FIRST = ROWS.findIndex(r => r.kind !== 'other');
+const MSG_LAST  = ROWS.reduce((a, r, i) => (r.kind !== 'other' ? i : a), 0);
+
+/* annotations: { id, start:{row,col}, end:{row,col}, labelId?, text? } */
+const state = { annotations: [], pending: null, editing: null, rect: null };
+
+/* ---------------- markdown recovery (mini aligner) ----------------
+ * Same idea as spikes/msg-grid-align: reduce both sides to words, strip the
+ * syntax the renderer drops, then locate the highlighted words in the source
+ * and quote between them. */
+const CUT = /[*_`~#|>┌─┬┐│├┼┤└┴┘⏺✻❯⎿·]/g;
+const norm = w => w.replace(CUT, '');
+
+function mdWords(md) {
+  const out = [];
+  const re = /\S+/g;
+  let m;
+  while ((m = re.exec(md)) !== null) {
+    const n = norm(m[0]);
+    if (n) out.push({ n, start: m.index, end: m.index + m[0].length });
+  }
+  return out;
+}
+
+/** Quote the markdown behind a highlighted slice of one rendered row. */
+function mdQuoteForSlice(rowIdx, from, to) {
+  const row = ROWS[rowIdx];
+  if (!row || !row.md) return null;
+  const slice = row.text.slice(from, to);
+  const want = slice.split(/\s+/).map(norm).filter(Boolean);
+  if (!want.length) return null;
+
+  const words = mdWords(row.md);
+  // find the first run in the source that starts with the first highlighted word
+  for (let i = 0; i < words.length; i++) {
+    if (words[i].n !== want[0]) continue;
+    let j = i, k = 0;
+    while (j < words.length && k < want.length && words[j].n === want[k]) { j++; k++; }
+    if (k === want.length) return row.md.slice(words[i].start, words[j - 1].end);
+  }
+  return row.md; // partial-word highlight: fall back to the whole source line
+}
+
+function quoteFor(anno) {
+  const parts = [];
+  for (let r = anno.start.row; r <= anno.end.row; r++) {
+    if (!ROWS[r] || !ROWS[r].md) continue;
+    const from = r === anno.start.row ? anno.start.col : 0;
+    const to = r === anno.end.row ? anno.end.col : ROWS[r].text.length;
+    const q = mdQuoteForSlice(r, from, to);
+    if (q) parts.push(q);
+  }
+  return parts.join('\n');
+}
+
+function renderedFor(anno) {
+  const parts = [];
+  for (let r = anno.start.row; r <= anno.end.row; r++) {
+    const from = r === anno.start.row ? anno.start.col : 0;
+    const to = r === anno.end.row ? anno.end.col : ROWS[r].text.length;
+    const s = ROWS[r].text.slice(from, to).trim();
+    if (s) parts.push(s);
+  }
+  return parts.join(' ');
+}
+
+/* ---------------- selection ---------------- */
+function rowElFor(node) {
+  let el = node.nodeType === 3 ? node.parentNode : node;
+  while (el && el !== document.body) {
+    if (el.classList && el.classList.contains('txt')) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+/** char offset of (node, offset) within the row's full text */
+function offsetWithin(txtEl, node, offset) {
+  const walker = document.createTreeWalker(txtEl, NodeFilter.SHOW_TEXT);
+  let acc = 0, n;
+  while ((n = walker.nextNode())) {
+    if (n === node) return acc + offset;
+    acc += n.nodeValue.length;
+  }
+  return acc;
+}
+function readSelection() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  const startTxt = rowElFor(range.startContainer);
+  const endTxt = rowElFor(range.endContainer);
+  if (!startTxt || !endTxt) return null;
+
+  let start = {
+    row: +startTxt.parentNode.dataset.row,
+    col: offsetWithin(startTxt, range.startContainer, range.startOffset),
+  };
+  let end = {
+    row: +endTxt.parentNode.dataset.row,
+    col: offsetWithin(endTxt, range.endContainer, range.endOffset),
+  };
+  if (start.row > end.row || (start.row === end.row && start.col > end.col)) {
+    [start, end] = [end, start];
+  }
+  // only the agent's message is annotatable
+  if (end.row < MSG_FIRST || start.row > MSG_LAST) return null;
+  start.row = Math.max(start.row, MSG_FIRST);
+  end.row = Math.min(end.row, MSG_LAST);
+  if (start.row === end.row && start.col === end.col) return null;
+  return { start, end, rect: range.getBoundingClientRect() };
+}
+
+/* ---------------- popup ---------------- */
+const popup = document.getElementById('popup');
+const tip = document.getElementById('tip');
+
+function placePopup(rect) {
+  popup.classList.add('open');
+  const pr = popup.getBoundingClientRect();
+  let left = rect.left + rect.width / 2 - pr.width / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - pr.width - 8));
+  let top = rect.top - pr.height - 8;
+  if (top < 8) top = rect.bottom + 8;
+  popup.style.left = left + 'px';
+  popup.style.top = top + 'px';
+}
+
+function openPopup(target, rect, opts = {}) {
+  state.rect = rect;
+  popup.classList.remove('compose', 'show-tip', 'editing');
+  if (state.editing) popup.classList.add('editing');
+  if (opts.compose) {
+    popup.classList.add('compose');
+    document.getElementById('composerQuote').textContent = renderedFor(target);
+    const ta = document.getElementById('composerText');
+    ta.value = target.text || opts.seed || '';
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 0);
+  }
+  placePopup(rect);
+}
+
+function closePopup() {
+  popup.classList.remove('open', 'compose', 'show-tip', 'editing');
+  state.pending = null;
+  state.editing = null;
+  render();
+}
+
+function currentTarget() { return state.editing || state.pending; }
+
+function applyLabel(label) {
+  const t = currentTarget();
+  if (!t) return;
+  if (state.editing) {
+    state.editing.labelId = label.id;
+    delete state.editing.text;
+  } else {
+    state.annotations.push({ id: crypto.randomUUID(), start: t.start, end: t.end, labelId: label.id });
+  }
+  window.getSelection().removeAllRanges();
+  closePopup();
+}
+
+function saveComment() {
+  const body = document.getElementById('composerText').value.trim();
+  const t = currentTarget();
+  if (!t) return;
+  if (!body) { closePopup(); return; }
+  if (state.editing) {
+    state.editing.text = body;
+    delete state.editing.labelId;
+  } else {
+    state.annotations.push({ id: crypto.randomUUID(), start: t.start, end: t.end, text: body });
+  }
+  window.getSelection().removeAllRanges();
+  closePopup();
+}
+
+/* One removal path for both entry points — the popup's Remove and the panel's
+ * per-row ✕ — so they cannot drift apart. */
+function deleteAnnotation(anno) {
+  state.annotations = state.annotations.filter(a => a !== anno);
+  if (state.editing === anno) {
+    closePopup(); // also clears the editing state and re-renders
+    return;
+  }
+  render();
+}
+
+function removeCurrent() {
+  if (state.editing) deleteAnnotation(state.editing);
+}
+
+/* ---------------- render ---------------- */
+/* Washes are derived from the label colour with color-mix at the same 28% the
+   real .md-mark-comment uses, rather than hand-picked rgba values. */
+function styleFor(anno) {
+  const c = colorFor(anno);
+  return `--anno-fg:${c.fg};` +
+    `--anno-wash:color-mix(in srgb, ${c.fg} 28%, transparent);` +
+    `--anno-wash-strong:color-mix(in srgb, ${c.fg} 42%, transparent)`;
+}
+function colorFor(anno) {
+  const lab = anno.labelId ? labelById(anno.labelId) : null;
+  return lab ? COLORS[lab.color] : COMMENT_STYLE;
+}
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
+/** the [from,to) slices of one row covered by annotations */
+function segmentsForRow(rowIdx) {
+  const len = ROWS[rowIdx].text.length;
+  const segs = [];
+  state.annotations.forEach(a => {
+    if (rowIdx < a.start.row || rowIdx > a.end.row) return;
+    const from = rowIdx === a.start.row ? a.start.col : 0;
+    const to = rowIdx === a.end.row ? a.end.col : len;
+    if (to > from) segs.push({ from, to: Math.min(to, len), anno: a });
+  });
+  return segs.sort((x, y) => x.from - y.from);
+}
+
+function rowHTML(rowIdx) {
+  const text = ROWS[rowIdx].text || ' ';
+  const segs = segmentsForRow(rowIdx);
+  if (!segs.length) return esc(text);
+  let html = '', cursor = 0;
+  segs.forEach(s => {
+    if (s.from > cursor) html += esc(text.slice(cursor, s.from));
+    const focused = state.editing === s.anno ? ' focused' : '';
+    html += `<mark class="md-mark${focused}" style="${styleFor(s.anno)}" data-id="${s.anno.id}">` +
+            esc(text.slice(Math.max(s.from, cursor), s.to)) + '</mark>';
+    cursor = Math.max(cursor, s.to);
+  });
+  if (cursor < text.length) html += esc(text.slice(cursor));
+  return html;
+}
+
+function renderTerminal() {
+  const frame = document.getElementById('frame');
+  frame.innerHTML = '';
+  ROWS.forEach((row, i) => {
+    const inMsg = i >= MSG_FIRST && i <= MSG_LAST;
+    const el = document.createElement('div');
+    el.className = 'row' + (inMsg ? ' msg' : ' dimmed') +
+      (i === MSG_FIRST ? ' first' : '') + (i === MSG_LAST ? ' last' : '') +
+      (row.kind === 'chrome' ? ' chrome' : '');
+    el.dataset.row = i;
+
+    const g = document.createElement('span');
+    g.className = 'gutter';
+    const marks = segmentsForRow(i);
+    if (marks.length) {
+      const a = marks[0].anno;
+      const lab = a.labelId ? labelById(a.labelId) : null;
+      g.textContent = lab ? lab.emoji : '💬';
+    }
+    el.appendChild(g);
+
+    const t = document.createElement('span');
+    t.className = 'txt';
+    t.innerHTML = rowHTML(i);
+    el.appendChild(t);
+    frame.appendChild(el);
+  });
+}
+
+function renderList() {
+  const host = document.getElementById('list');
+  host.innerHTML = '';
+  if (!state.annotations.length) return;
+  [...state.annotations]
+    .sort((a, b) => a.start.row - b.start.row || a.start.col - b.start.col)
+    .forEach(a => {
+      const lab = a.labelId ? labelById(a.labelId) : null;
+      const el = document.createElement('div');
+      el.className = 'md-annotation-card' +
+        (state.editing === a ? ' md-annotation-card--selected' : '');
+      el.dataset.id = a.id;
+      el.setAttribute('style', styleFor(a));
+
+      // .md-card-top: the label chip (or a COMMENT badge) plus the delete affordance
+      const top = document.createElement('div');
+      top.className = 'md-card-top';
+      top.innerHTML = lab
+        ? `<span class="md-ql-chip">${lab.emoji} ${esc(lab.text)}</span>`
+        : '<span class="md-card-badge md-card-badge--comment">Comment</span>';
+
+      const del = document.createElement('button');
+      del.className = 'md-card-delete';
+      del.textContent = '✕';
+      del.title = 'Remove this annotation';
+      del.addEventListener('click', ev => {
+        ev.stopPropagation(); // do not also focus the annotation
+        deleteAnnotation(a);
+      });
+      top.appendChild(del);
+      el.appendChild(top);
+
+      if (a.text) {
+        const body = document.createElement('div');
+        body.className = 'md-card-body';
+        body.textContent = a.text;
+        el.appendChild(body);
+      }
+
+      const quote = document.createElement('div');
+      quote.className = 'md-card-quote';
+      quote.textContent = renderedFor(a);
+      el.appendChild(quote);
+
+      // clicking a card reopens the popup on the cells it points at
+      el.addEventListener('click', () => focusAnnotation(a));
+      host.appendChild(el);
+    });
+}
+
+function buildPayload() {
+  if (!state.annotations.length) return '(highlight something and pick a label)';
+  const sorted = [...state.annotations].sort((a, b) => a.start.row - b.start.row || a.start.col - b.start.col);
+  const out = ['Feedback on your last message. Address each annotation.', ''];
+  sorted.forEach((a, i) => {
+    const lab = a.labelId ? labelById(a.labelId) : null;
+    out.push(`## ${i + 1}. ${lab ? lab.emoji + ' ' + lab.text : '💬 Comment'}`);
+    out.push('');
+    out.push('> ' + quoteFor(a).split('\n').join('\n> '));
+    out.push('');
+    if (lab && lab.tip) out.push(lab.tip);
+    if (a.text) out.push(a.text);
+    out.push('');
+  });
+  return out.join('\n');
+}
+
+/* The panel has no empty state: it is hidden until the first annotation, and
+ * stays up a moment after a send so the confirmation is actually seen. */
+function syncFloatVisibility() {
+  const showing = state.annotations.length > 0 || floatPanel.classList.contains('sentHold');
+  floatPanel.classList.toggle('hidden', !showing);
+  if (showing && !floatMoved) placeFloatDefault();
+}
+
+function renderFooter() {
+  const n = state.annotations.length;
+  const foot = document.getElementById('floatFoot');
+  document.getElementById('headCount').textContent = String(n);
+  if (!foot.classList.contains('sent')) {
+    document.getElementById('footCount').textContent =
+      `${n} annotation${n === 1 ? '' : 's'}`;
+  }
+  syncFloatVisibility();
+}
+
+/* In the app this is the moment the payload is typed into the target session's
+ * PTY as a bracketed paste. The real submit path clears the saved draft ONLY
+ * on successful delivery, so the annotations survive a failed send. */
+function send() {
+  if (!state.annotations.length) return;
+  const n = state.annotations.length;
+  closePopup();
+  state.annotations = [];
+  const foot = document.getElementById('floatFoot');
+  foot.classList.add('sent');
+  floatPanel.classList.add('sentHold');
+  document.getElementById('footCount').textContent = `✓ typed ${n} into the session`;
+  document.getElementById('send').disabled = true;
+  render();
+  setTimeout(() => {
+    foot.classList.remove('sent');
+    floatPanel.classList.remove('sentHold');
+    document.getElementById('send').disabled = false;
+    renderFooter();
+  }, 2200);
+}
+
+function render() {
+  renderTerminal();
+  renderList();
+  renderFooter();
+  document.getElementById('payload').textContent = buildPayload();
+}
+
+/* ---------------- floating panel: drag + collapse ---------------- */
+const floatPanel = document.getElementById('floatPanel');
+const floatHead = document.getElementById('floatHead');
+
+function placeFloatDefault() {
+  const r = floatPanel.getBoundingClientRect();
+  floatPanel.style.left = Math.max(12, window.innerWidth - r.width - 24) + 'px';
+  floatPanel.style.top = '96px';
+}
+
+function clampFloat() {
+  const r = floatPanel.getBoundingClientRect();
+  const left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - r.width - 8));
+  const top = Math.min(Math.max(8, r.top), Math.max(8, window.innerHeight - 44));
+  floatPanel.style.left = left + 'px';
+  floatPanel.style.top = top + 'px';
+}
+
+let drag = null;
+let floatMoved = false; // once dragged, the panel keeps where it was put
+floatHead.addEventListener('mousedown', ev => {
+  if (ev.target.closest('button')) return;
+  const r = floatPanel.getBoundingClientRect();
+  drag = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
+  floatPanel.classList.add('dragging');
+  floatMoved = true;
+  ev.preventDefault();
+});
+document.addEventListener('mousemove', ev => {
+  if (!drag) return;
+  floatPanel.style.left = (ev.clientX - drag.dx) + 'px';
+  floatPanel.style.top = (ev.clientY - drag.dy) + 'px';
+});
+document.addEventListener('mouseup', () => {
+  if (!drag) return;
+  drag = null;
+  floatPanel.classList.remove('dragging');
+  clampFloat();
+});
+window.addEventListener('resize', clampFloat);
+
+document.getElementById('floatCollapse').addEventListener('click', () => {
+  const collapsed = floatPanel.classList.toggle('collapsed');
+  document.getElementById('floatCollapse').textContent = collapsed ? '+' : '–';
+});
+
+/** Reopen the popup on an annotation, anchored to the cells it covers. */
+function focusAnnotation(anno) {
+  state.pending = null;
+  state.editing = anno;
+  render();
+  // re-query AFTER the render: the previous nodes have been replaced
+  const mark = document.querySelector(`mark.anno[data-id="${anno.id}"]`);
+  const rect = mark ? mark.getBoundingClientRect() : floatPanel.getBoundingClientRect();
+  openPopup(anno, rect, { compose: !!anno.text });
+}
+
+/* ---------------- wiring ---------------- */
+const emojis = document.getElementById('emojis');
+/* Every button in the row is the same 28x28 .md-toolbar-btn icon square. The
+   label name lives in the tooltip, the way the real toolbar does it. */
+function toolbarButton(glyph, label, extraClass, onClick) {
+  const b = document.createElement('button');
+  b.className = 'md-toolbar-btn' + (extraClass ? ' ' + extraClass : '');
+  b.textContent = glyph;
+  b.title = label;
+  b.addEventListener('mouseenter', () => {
+    tip.textContent = label;
+    popup.classList.add('show-tip');
+  });
+  b.addEventListener('mouseleave', () => popup.classList.remove('show-tip'));
+  b.addEventListener('mousedown', ev => ev.preventDefault());
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+QUICK_LABELS.forEach(l => {
+  emojis.appendChild(toolbarButton(l.emoji, l.text, null, () => applyLabel(l)));
+});
+
+const sep = document.createElement('span');
+sep.className = 'md-toolbar-divider';
+emojis.appendChild(sep);
+
+emojis.appendChild(toolbarButton('\uD83D\uDCAC', 'Write a comment', 'md-toolbar-btn--comment',
+  () => openPopup(currentTarget(), state.rect, { compose: true })));
+
+// only rendered while editing an existing annotation (CSS gates it)
+emojis.appendChild(toolbarButton('\uD83D\uDDD1', 'Remove this annotation',
+  'md-toolbar-btn--delete', removeCurrent));
+
+document.getElementById('composerSave').addEventListener('click', saveComment);
+document.getElementById('composerCancel').addEventListener('click', () => {
+  window.getSelection().removeAllRanges();
+  closePopup();
+});
+document.getElementById('composerText').addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') { closePopup(); ev.preventDefault(); }
+  ev.stopPropagation();
+});
+
+/* highlight → popup */
+document.getElementById('frame').addEventListener('mouseup', () => {
+  setTimeout(() => {
+    const sel = readSelection();
+    if (!sel) return;
+    state.editing = null;
+    state.pending = { start: sel.start, end: sel.end };
+    openPopup(state.pending, sel.rect);
+  }, 0);
+});
+
+/* click an existing annotation → reopen the popup on it */
+document.getElementById('frame').addEventListener('click', ev => {
+  const mark = ev.target.closest && ev.target.closest('mark.anno');
+  if (!mark) return;
+  const anno = state.annotations.find(a => a.id === mark.dataset.id);
+  if (!anno) return;
+  ev.stopPropagation();
+  state.pending = null;
+  state.editing = anno;
+  render();
+  openPopup(anno, mark.getBoundingClientRect(), { compose: !!anno.text });
+});
+
+document.addEventListener('mousedown', ev => {
+  if (!popup.classList.contains('open')) return;
+  if (popup.contains(ev.target)) return;
+  // Not the floating panel either: closing re-renders the list, which would
+  // replace the node mid-gesture and swallow the click that follows.
+  if (floatPanel.contains(ev.target)) return;
+  closePopup();
+});
+
+/* Escape only. It is baseline dismiss behaviour, not a shortcut to learn — a
+   popup you cannot back out of with Escape reads as broken. */
+document.addEventListener('keydown', ev => {
+  if (!popup.classList.contains('open')) return;
+  if (ev.key === 'Escape') { window.getSelection().removeAllRanges(); closePopup(); }
+});
+
+document.getElementById('send').addEventListener('click', send);
+
+document.getElementById('clear').addEventListener('click', () => {
+  state.annotations = [];
+  closePopup();
+});
+
+render();
+</script>
+</body>
+</html>
