@@ -18,3 +18,8 @@ notes: >
   production terminal keeps the zero kitty storage limit from A1, so ghostty
   refuses every transmission and the only observable effect is that kitty escape
   bytes stop reaching clients that could never render them. No protocol change.
+  A generated parity corpus records the substituted bytes and the grid the
+  worker ended up with for each case, and is replayed twice — into a native
+  ghostty that cannot parse kitty, and into the shipped wasm model the app
+  actually renders — so the substitution is proven to mean the same thing in
+  both runtimes; a Go fuzzer searches the same property over arbitrary streams.
