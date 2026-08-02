@@ -2924,8 +2924,13 @@ func (d *Daemon) remoteSessionsForBroadcast() []protocol.Session {
 // broadcastSessionStateChanged publishes the fact. Its old body is now
 // projectSessionStateChanged, run by the hub's projection (see bus.go). Because
 // the method already received the entity id, migrating it changed no call site.
+//
+// The workspace recompute stays here, on the producer side, rather than moving
+// into the projection with the rest of the old body: it mutates the workspace's
+// rolled-up status and publishes a second fact, and a projection may do neither.
 func (d *Daemon) broadcastSessionStateChanged(sessionID string) {
 	d.publishFact(FactSessionStateChanged, sessionID, nil)
+	d.recomputeAndBroadcastWorkspaceForSession(sessionID)
 }
 
 func (d *Daemon) projectSessionStateChanged(sessionID string) {
@@ -2938,7 +2943,6 @@ func (d *Daemon) projectSessionStateChanged(sessionID string) {
 		Event:   protocol.EventSessionStateChanged,
 		Session: decorated,
 	})
-	d.recomputeAndBroadcastWorkspaceForSession(sessionID)
 }
 
 // broadcastRateLimited broadcasts a rate limit event to WebSocket clients

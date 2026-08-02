@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"sync"
 
 	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/protocol"
@@ -26,6 +27,13 @@ import (
 // runs the matching projections inline on the publishing goroutine, so a fact
 // still produces exactly the same wire traffic, in the same order, as the direct
 // call it replaced.
+//
+// A projection writes to the wire and does nothing else. It must not mutate
+// state and it must not publish: the bus holds its publish lock across the
+// inline fan-out, so a fact published from inside a projection deadlocks. When
+// the old broadcaster body did something beyond pushing bytes — recomputing a
+// workspace's rolled-up status, say — that part stays on the producer side,
+// where it is a fact of its own.
 //
 // What does NOT move: byte streams. PTY output, PTY desync, attach results,
 // workspace tile content, and fs change bursts keep their direct paths. They are
@@ -73,6 +81,27 @@ const (
 	// the one an extension watching a remote fleet would filter on.
 	FactEndpointSessionsChanged = "endpoint.sessions.changed"
 
+	// Workspace facts; subject is the workspace id.
+	//
+	// Eight of these project to the same wire event. They are still eight facts:
+	// "the workspace was muted" and "a session joined it" are different things to
+	// subscribe to, and only the producer knows which happened. Collapsing them
+	// into one workspace.changed would hand every consumer the diffing problem
+	// the bus exists to remove.
+	FactWorkspaceRegistered         = "workspace.registered"
+	FactWorkspaceReregistered       = "workspace.reregistered"
+	FactWorkspaceRenamed            = "workspace.renamed"
+	FactWorkspaceStatusChanged      = "workspace.status.changed"
+	FactWorkspaceMuteChanged        = "workspace.mute.changed"
+	FactWorkspacePinChanged         = "workspace.pin.changed"
+	FactWorkspaceRankChanged        = "workspace.rank.changed"
+	FactWorkspaceSessionAssociated  = "workspace.session.associated"
+	FactWorkspaceSessionDissociated = "workspace.session.dissociated"
+	FactWorkspaceUnregistered       = "workspace.unregistered"
+	FactWorkspaceLayoutChanged      = "workspace.layout.changed"
+	FactWorkspaceLayoutRepublished  = "workspace.layout.republished"
+	FactWorkspaceContextChanged     = "workspace.context.changed"
+
 	// Ticket facts; subject is the ticket id.
 	FactTicketCreated       = "ticket.created"
 	FactTicketStatusChanged = "ticket.status_changed"
@@ -94,69 +123,126 @@ type projection struct {
 
 // wireProjections is the whole fact -> WebSocket mapping. A2 grows this table as
 // each broadcaster migrates.
-var wireProjections = []projection{
-	{
-		filter: bus.Filter{FactSessionStateChanged},
-		apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
-	},
-	{
-		filter: bus.Filter{FactSessionRegistered},
-		apply: func(d *Daemon, ev bus.Event) {
-			d.projectSessionEvent(protocol.EventSessionRegistered, ev.Subject)
+//
+// Built once on first use rather than at package init: the table's closures call
+// projections, projections publish further facts (a session state change
+// recomputes its workspace), and publishing reads the table — a cycle the
+// compiler rejects in a package-level initializer even though it is fine at
+// runtime.
+var (
+	wireProjectionsOnce  sync.Once
+	wireProjectionsTable []projection
+)
+
+func wireProjections() []projection {
+	wireProjectionsOnce.Do(func() { wireProjectionsTable = buildWireProjections() })
+	return wireProjectionsTable
+}
+
+func buildWireProjections() []projection {
+	return []projection{
+		{
+			filter: bus.Filter{FactSessionStateChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
-	},
-	{
-		// A re-announced session and a renamed one both reach clients as a state
-		// change carrying the session; neither recomputes the workspace, which is
-		// what separates them from FactSessionStateChanged.
-		filter: bus.Filter{FactSessionReregistered, FactSessionRenamed},
-		apply: func(d *Daemon, ev bus.Event) {
-			d.projectSessionEvent(protocol.EventSessionStateChanged, ev.Subject)
+		{
+			filter: bus.Filter{FactSessionRegistered},
+			apply: func(d *Daemon, ev bus.Event) {
+				d.projectSessionEvent(protocol.EventSessionRegistered, ev.Subject)
+			},
 		},
-	},
-	{
-		filter: bus.Filter{FactSessionTodosChanged},
-		apply: func(d *Daemon, ev bus.Event) {
-			d.projectSessionEvent(protocol.EventSessionTodosUpdated, ev.Subject)
+		{
+			// A re-announced session and a renamed one both reach clients as a state
+			// change carrying the session; neither recomputes the workspace, which is
+			// what separates them from FactSessionStateChanged.
+			filter: bus.Filter{FactSessionReregistered, FactSessionRenamed},
+			apply: func(d *Daemon, ev bus.Event) {
+				d.projectSessionEvent(protocol.EventSessionStateChanged, ev.Subject)
+			},
 		},
-	},
-	{
-		filter: bus.Filter{FactSessionUnregistered},
-		apply:  func(d *Daemon, ev bus.Event) { d.projectSessionUnregistered(ev) },
-	},
-	{
-		filter: bus.Filter{FactSessionRespawned},
-		apply: func(d *Daemon, ev bus.Event) {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event: protocol.EventRuntimeRespawned,
-				ID:    protocol.Ptr(ev.Subject),
-			})
+		{
+			filter: bus.Filter{FactSessionTodosChanged},
+			apply: func(d *Daemon, ev bus.Event) {
+				d.projectSessionEvent(protocol.EventSessionTodosUpdated, ev.Subject)
+			},
 		},
-	},
-	{
-		filter: bus.Filter{FactSessionPTYResized},
-		apply:  func(d *Daemon, ev bus.Event) { d.projectSessionPTYResized(ev) },
-	},
-	{
-		// Everything whose only client-visible effect is "the session list moved".
-		// Each is a real fact about one session; the wire sees one list push.
-		filter: bus.Filter{
-			FactSessionTerminated,
-			FactSessionBranchChanged,
-			FactSessionChiefRoleChanged,
-			FactSessionReconciled,
-			FactWorktreeSessionsRemoved,
-			FactEndpointSessionsChanged,
+		{
+			filter: bus.Filter{FactSessionUnregistered},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionUnregistered(ev) },
 		},
-		apply: func(d *Daemon, _ bus.Event) { d.projectSessionsUpdated() },
-	},
-	{
-		// Every ticket fact re-pushes the board. The board push is the wire
-		// shape clients already expect; the facts are what a consumer can
-		// actually reason about.
-		filter: bus.Filter{"ticket.*"},
-		apply:  func(d *Daemon, _ bus.Event) { d.projectTicketsUpdated() },
-	},
+		{
+			filter: bus.Filter{FactSessionRespawned},
+			apply: func(d *Daemon, ev bus.Event) {
+				d.wsHub.Broadcast(&protocol.WebSocketEvent{
+					Event: protocol.EventRuntimeRespawned,
+					ID:    protocol.Ptr(ev.Subject),
+				})
+			},
+		},
+		{
+			filter: bus.Filter{FactSessionPTYResized},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionPTYResized(ev) },
+		},
+		{
+			// Everything whose only client-visible effect is "the session list moved".
+			// Each is a real fact about one session; the wire sees one list push.
+			filter: bus.Filter{
+				FactSessionTerminated,
+				FactSessionBranchChanged,
+				FactSessionChiefRoleChanged,
+				FactSessionReconciled,
+				FactWorktreeSessionsRemoved,
+				FactEndpointSessionsChanged,
+			},
+			apply: func(d *Daemon, _ bus.Event) { d.projectSessionsUpdated() },
+		},
+		{
+			filter: bus.Filter{FactWorkspaceRegistered},
+			apply: func(d *Daemon, ev bus.Event) {
+				d.projectWorkspaceEvent(protocol.EventWorkspaceRegistered, ev.Subject)
+			},
+		},
+		{
+			// Eight distinct facts, one wire event: clients have always been told
+			// "this workspace changed, here it is" whatever the reason.
+			filter: bus.Filter{
+				FactWorkspaceReregistered,
+				FactWorkspaceRenamed,
+				FactWorkspaceStatusChanged,
+				FactWorkspaceMuteChanged,
+				FactWorkspacePinChanged,
+				FactWorkspaceRankChanged,
+				FactWorkspaceSessionAssociated,
+				FactWorkspaceSessionDissociated,
+			},
+			apply: func(d *Daemon, ev bus.Event) {
+				d.projectWorkspaceEvent(protocol.EventWorkspaceStateChanged, ev.Subject)
+			},
+		},
+		{
+			filter: bus.Filter{FactWorkspaceUnregistered},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectWorkspaceUnregistered(ev) },
+		},
+		{
+			filter: bus.Filter{FactWorkspaceLayoutChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectWorkspaceLayoutChanged(ev) },
+		},
+		{
+			filter: bus.Filter{FactWorkspaceLayoutRepublished},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectWorkspaceLayoutRepublished(ev.Subject) },
+		},
+		{
+			filter: bus.Filter{FactWorkspaceContextChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectWorkspaceContextChanged(ev) },
+		},
+		{
+			// Every ticket fact re-pushes the board. The board push is the wire
+			// shape clients already expect; the facts are what a consumer can
+			// actually reason about.
+			filter: bus.Filter{"ticket.*"},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectTicketsUpdated() },
+		},
+	}
 }
 
 // ensureEventBus constructs the bus over the profile store and registers the hub
@@ -195,7 +281,7 @@ func (d *Daemon) stopEventBus() {
 
 // projectToClients is the hub's ephemeral handler.
 func (d *Daemon) projectToClients(ev bus.Event) {
-	for _, p := range wireProjections {
+	for _, p := range wireProjections() {
 		if p.filter.Matches(ev.Name) {
 			p.apply(d, ev)
 		}

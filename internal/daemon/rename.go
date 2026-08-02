@@ -52,16 +52,12 @@ func (d *Daemon) handleRenameWorkspace(client *wsClient, msg *protocol.RenameWor
 		d.sendRenameResult(client, protocol.CmdRenameWorkspace, workspaceID, fmt.Errorf("workspace registry unavailable"))
 		return
 	}
-	snapshot, ok := d.workspaces.rename(workspaceID, title)
-	if !ok {
+	if _, ok := d.workspaces.rename(workspaceID, title); !ok {
 		d.sendRenameResult(client, protocol.CmdRenameWorkspace, workspaceID, fmt.Errorf("workspace not found: %s", workspaceID))
 		return
 	}
 	d.store.UpdateWorkspaceTitle(workspaceID, title)
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &snapshot,
-	})
+	d.publishFact(FactWorkspaceRenamed, workspaceID, nil)
 	d.sendRenameResult(client, protocol.CmdRenameWorkspace, workspaceID, nil)
 }
 

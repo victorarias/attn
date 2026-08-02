@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/tasks"
 )
@@ -649,13 +650,24 @@ func markdownSectionContent(lines []string, heading string) string {
 }
 
 func (d *Daemon) broadcastWorkspaceContextChanged(canonical *protocol.WorkspaceContext) {
-	d.broadcastMessage(protocol.WorkspaceContextChangedMessage{
+	if canonical == nil {
+		return
+	}
+	d.publishFact(FactWorkspaceContextChanged, canonical.WorkspaceID, protocol.WorkspaceContextChangedMessage{
 		Event:              protocol.EventWorkspaceContextChanged,
 		WorkspaceID:        canonical.WorkspaceID,
 		Revision:           canonical.Revision,
 		UpdatedBySessionID: canonical.UpdatedBySessionID,
 		UpdatedAt:          canonical.UpdatedAt,
 	})
+}
+
+func (d *Daemon) projectWorkspaceContextChanged(ev bus.Event) {
+	msg, ok := decodeFact[protocol.WorkspaceContextChangedMessage](d, ev)
+	if !ok {
+		return
+	}
+	d.broadcastMessage(msg)
 }
 
 func (d *Daemon) compactWorkspaceContextForSession(

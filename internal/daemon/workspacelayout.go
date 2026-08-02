@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/google/uuid"
+	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/rankkey"
 	"github.com/victorarias/attn/internal/workspacelayout"
@@ -224,19 +225,41 @@ func (d *Daemon) broadcastWorkspaceLayoutUpdated(workspaceID string) {
 	d.broadcastWorkspaceLayoutSnapshotUpdated(snapshot)
 }
 
+// broadcastWorkspaceLayoutSnapshotUpdated publishes a layout change. The layout
+// travels in the payload rather than being re-read at projection time: callers
+// hand in a snapshot they just computed, including the deliberately empty one a
+// workspace gets when its last pane closes, which a re-read cannot reproduce.
 func (d *Daemon) broadcastWorkspaceLayoutSnapshotUpdated(snapshot *protocol.WorkspaceLayout) {
 	if snapshot == nil {
 		return
 	}
-	workspaceID := snapshot.WorkspaceID
-	d.pruneTileContentSubscriptionsForWorkspace(workspaceID)
+	d.publishFact(FactWorkspaceLayoutChanged, snapshot.WorkspaceID, snapshot)
+}
+
+func (d *Daemon) projectWorkspaceLayoutChanged(ev bus.Event) {
+	snapshot, ok := decodeFact[*protocol.WorkspaceLayout](d, ev)
+	if !ok || snapshot == nil {
+		return
+	}
+	d.pruneTileContentSubscriptionsForWorkspace(snapshot.WorkspaceID)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:           protocol.EventWorkspaceLayoutUpdated,
 		WorkspaceLayout: snapshot,
 	})
 }
 
+// broadcastWorkspaceLayout re-publishes a workspace's current layout — what a
+// newly registered session needs to see. Nothing changed, so the projection
+// reads the layout itself.
 func (d *Daemon) broadcastWorkspaceLayout(workspaceID string) {
+	if _, err := d.protocolWorkspaceLayout(workspaceID); err != nil {
+		d.logf("workspace layout snapshot failed for workspace %s: %v", workspaceID, err)
+		return
+	}
+	d.publishFact(FactWorkspaceLayoutRepublished, workspaceID, nil)
+}
+
+func (d *Daemon) projectWorkspaceLayoutRepublished(workspaceID string) {
 	snapshot, err := d.protocolWorkspaceLayout(workspaceID)
 	if err != nil {
 		d.logf("workspace layout snapshot failed for workspace %s: %v", workspaceID, err)
@@ -830,15 +853,11 @@ func (d *Daemon) handleSetWorkspaceRank(client *wsClient, msg *protocol.SetWorks
 	}
 
 	d.store.UpdateWorkspaceRank(workspaceID, rank)
-	snapshot, ok := d.workspaces.applyRank(workspaceID, rank)
-	if !ok {
+	if _, ok := d.workspaces.applyRank(workspaceID, rank); !ok {
 		d.sendWorkspaceLayoutActionResult(client, protocol.CmdSetWorkspaceRank, workspaceID, nil, fmt.Errorf("workspace not found: %s", workspaceID))
 		return
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &snapshot,
-	})
+	d.publishFact(FactWorkspaceRankChanged, workspaceID, nil)
 	d.sendWorkspaceLayoutActionResult(client, protocol.CmdSetWorkspaceRank, workspaceID, nil, nil)
 }
 
@@ -1052,18 +1071,12 @@ func (d *Daemon) recomputeAndBroadcastWorkspace(workspaceID string) {
 	if d.workspaces == nil || strings.TrimSpace(workspaceID) == "" {
 		return
 	}
-	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
-	if !changed {
-		var ok bool
-		updated, ok = d.workspaces.snapshot(workspaceID)
-		if !ok {
+	if _, changed := d.recomputeWorkspaceStatus(workspaceID); !changed {
+		if _, ok := d.workspaces.snapshot(workspaceID); !ok {
 			return
 		}
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &updated,
-	})
+	d.publishFact(FactWorkspaceStatusChanged, workspaceID, nil)
 }
 
 func (d *Daemon) handleWorkspaceLayoutAddSessionPane(client *wsClient, msg *protocol.WorkspaceLayoutAddSessionPaneMessage) {
