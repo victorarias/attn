@@ -3,6 +3,7 @@ package daemon
 
 import (
 	"errors"
+	"github.com/victorarias/attn/internal/bus"
 	"net"
 	"os"
 	"slices"
@@ -168,15 +169,11 @@ func (d *Daemon) registerCreatedWorktree(mainRepo, path, branch string) {
 	}
 	d.store.AddWorktree(wt)
 
-	// Broadcast created event to all clients
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventWorktreeCreated,
-		Worktrees: []protocol.Worktree{{
-			Path:      wt.Path,
-			Branch:    wt.Branch,
-			MainRepo:  wt.MainRepo,
-			CreatedAt: protocol.Ptr(wt.CreatedAt.Format(time.RFC3339)),
-		}},
+	d.publishFact(FactWorktreeCreated, wt.Path, protocol.Worktree{
+		Path:      wt.Path,
+		Branch:    wt.Branch,
+		MainRepo:  wt.MainRepo,
+		CreatedAt: protocol.Ptr(wt.CreatedAt.Format(time.RFC3339)),
 	})
 }
 
@@ -260,12 +257,7 @@ func (d *Daemon) doDeleteWorktree(path string, endpointID *string, opts deleteWo
 				// Path doesn't exist and not in registry - nothing to delete
 				// Broadcast deleted event anyway so UI removes it
 				d.logf("Worktree %s doesn't exist and not in registry, treating as already deleted", path)
-				d.wsHub.Broadcast(&protocol.WebSocketEvent{
-					Event: protocol.EventWorktreeDeleted,
-					Worktrees: []protocol.Worktree{{
-						Path: path,
-					}},
-				})
+				d.publishFact(FactWorktreeDeleted, path, nil)
 				d.cleanupDeletedWorktreeSessions(path)
 				return nil
 			}
@@ -308,13 +300,7 @@ func (d *Daemon) finalizeDeletedWorktree(path, mainRepo, branch string) {
 		}
 	}
 
-	// Broadcast deleted event to all clients.
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventWorktreeDeleted,
-		Worktrees: []protocol.Worktree{{
-			Path: path,
-		}},
-	})
+	d.publishFact(FactWorktreeDeleted, path, nil)
 }
 
 func (d *Daemon) cleanupDeletedWorktreeSessions(path string) {
@@ -387,10 +373,11 @@ func (e *worktreeNotFoundError) Error() string {
 
 func (d *Daemon) handleListWorktrees(conn net.Conn, msg *protocol.ListWorktreesMessage) {
 	protoWorktrees := d.doListWorktrees(msg.MainRepo)
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorktreesUpdated,
-		Worktrees: protoWorktrees,
-	})
+	// Listing reconciles the registry against git: it prunes worktrees that are
+	// gone and adopts ones created outside attn. The reconciled list travels as
+	// the payload rather than being re-read in the projection, so the push is
+	// exactly what this call computed.
+	d.publishFact(FactWorktreeListReconciled, msg.MainRepo, protoWorktrees)
 	d.sendOK(conn)
 }
 
@@ -472,4 +459,35 @@ func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWo
 		}
 		d.sendToClient(client, result)
 	}()
+}
+
+func (d *Daemon) projectWorktreeCreated(ev bus.Event) {
+	worktree, ok := decodeFact[protocol.Worktree](d, ev)
+	if !ok {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorktreeCreated,
+		Worktrees: []protocol.Worktree{worktree},
+	})
+}
+
+// projectWorktreeDeleted needs no payload: the wire event has only ever carried
+// the path, which is the fact's subject.
+func (d *Daemon) projectWorktreeDeleted(ev bus.Event) {
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorktreeDeleted,
+		Worktrees: []protocol.Worktree{{Path: ev.Subject}},
+	})
+}
+
+func (d *Daemon) projectWorktreesUpdated(ev bus.Event) {
+	worktrees, ok := decodeFact[[]protocol.Worktree](d, ev)
+	if !ok {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorktreesUpdated,
+		Worktrees: worktrees,
+	})
 }

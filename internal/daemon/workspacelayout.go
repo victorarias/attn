@@ -1027,12 +1027,7 @@ func (d *Daemon) moveLeafToWorkspace(sourceWorkspaceID, targetWorkspaceID, leafI
 			d.workspaces.associateSession(movedPane.SessionID, targetWorkspaceID, movedPane.Title)
 		}
 		d.store.AssignSessionWorkspace(movedPane.SessionID, targetWorkspaceID)
-		if session := d.store.Get(movedPane.SessionID); session != nil {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:   protocol.EventSessionStateChanged,
-				Session: d.sessionForBroadcast(session),
-			})
-		}
+		d.publishFact(FactSessionWorkspaceChanged, movedPane.SessionID, nil)
 	}
 
 	if sourceEmpty {

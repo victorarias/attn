@@ -56,11 +56,14 @@ func (d *Daemon) handleMutePRWS(msg *protocol.MutePRMessage) {
 
 	d.store.ToggleMutePR(msg.ID)
 
-	if wasMuted {
-		d.store.SetPRHot(msg.ID)
-		go d.fetchPRDetailsImmediate(msg.ID)
-	}
-	d.broadcastPRs()
+	d.coalesceSnapshots(func() {
+		d.publishFact(FactPRMuteChanged, msg.ID, nil)
+		if wasMuted {
+			d.store.SetPRHot(msg.ID)
+			go d.fetchPRDetailsImmediate(msg.ID)
+			d.publishFact(FactPRHeatChanged, msg.ID, nil)
+		}
+	})
 }
 
 func (d *Daemon) handleMuteRepoWS(msg *protocol.MuteRepoMessage) {
@@ -69,22 +72,23 @@ func (d *Daemon) handleMuteRepoWS(msg *protocol.MuteRepoMessage) {
 
 	d.store.ToggleMuteRepo(msg.Repo)
 
-	if wasMuted {
-		prs := d.store.ListPRsByRepo(msg.Repo)
-		for _, pr := range prs {
-			d.store.SetPRHot(pr.ID)
-			go d.fetchPRDetailsImmediate(pr.ID)
+	// One coalesced push per wire message, in the order the old direct calls
+	// made them: the PRs that went hot, then the repo list.
+	d.coalesceSnapshots(func() {
+		if wasMuted {
+			for _, pr := range d.store.ListPRsByRepo(msg.Repo) {
+				d.store.SetPRHot(pr.ID)
+				go d.fetchPRDetailsImmediate(pr.ID)
+				d.publishFact(FactPRHeatChanged, pr.ID, nil)
+			}
 		}
-		if len(prs) > 0 {
-			d.broadcastPRs()
-		}
-	}
-	d.broadcastRepoStates()
+		d.publishFact(FactRepoMuteChanged, msg.Repo, nil)
+	})
 }
 
 func (d *Daemon) handleMuteAuthorWS(msg *protocol.MuteAuthorMessage) {
 	d.store.ToggleMuteAuthor(msg.Author)
-	d.broadcastAuthorStates()
+	d.publishFact(FactAuthorMuteChanged, msg.Author, nil)
 }
 
 func (d *Daemon) handleRefreshPRsWS(client *wsClient) {
@@ -118,7 +122,11 @@ func (d *Daemon) handleFetchPRDetailsWS(client *wsClient, msg *protocol.FetchPRD
 			d.logf("Fetch PR details failed: %v", err)
 		} else {
 			result.Prs = protocol.PRsToValues(updatedPRs)
-			d.broadcastPRs()
+			d.coalesceSnapshots(func() {
+				for _, pr := range updatedPRs {
+					d.publishFact(FactPRDetailsChanged, pr.ID, nil)
+				}
+			})
 			d.logf("Fetch PR details succeeded")
 		}
 		d.sendToClient(client, result)
@@ -128,37 +136,88 @@ func (d *Daemon) handleFetchPRDetailsWS(client *wsClient, msg *protocol.FetchPRD
 func (d *Daemon) handlePRVisitedWS(msg *protocol.PRVisitedMessage) {
 	d.logf("Marking PR %s as visited", msg.ID)
 	d.store.MarkPRVisited(msg.ID)
-	if _, repo, _, err := protocol.ParsePRID(msg.ID); err == nil {
-		for _, pr := range d.store.ListPRs("") {
-			if pr.Repo == repo {
-				d.store.SetPRHot(pr.ID)
-				go d.fetchPRDetailsImmediate(pr.ID)
+	d.coalesceSnapshots(func() {
+		d.publishFact(FactPRVisited, msg.ID, nil)
+		// Visiting one PR warms every PR in its repo, so each of those changed too.
+		if _, repo, _, err := protocol.ParsePRID(msg.ID); err == nil {
+			for _, pr := range d.store.ListPRs("") {
+				if pr.Repo == repo {
+					d.store.SetPRHot(pr.ID)
+					go d.fetchPRDetailsImmediate(pr.ID)
+					d.publishFact(FactPRHeatChanged, pr.ID, nil)
+				}
+			}
+		} else {
+			d.store.SetPRHot(msg.ID)
+			go d.fetchPRDetailsImmediate(msg.ID)
+			d.publishFact(FactPRHeatChanged, msg.ID, nil)
+		}
+	})
+}
+
+// publishPRSetChanges recovers per-PR facts from a bulk replacement of the PR
+// set. A poll or refresh overwrites the whole list, so nothing in the call
+// itself says which PRs moved — the diff around it does, and one fact per moved
+// PR is what a consumer can act on.
+//
+// The wire push is unchanged in shape: every pr.* fact projects to the same
+// whole-list prs_updated, coalesced here so a refresh that touched twenty PRs
+// still sends one message. It does change in frequency: a poll that found
+// nothing new now publishes nothing and therefore sends nothing, where before
+// it re-pushed the identical list to every client on every tick.
+func (d *Daemon) publishPRSetChanges(before, after []*protocol.PR) {
+	beforeByID := make(map[string]*protocol.PR, len(before))
+	for _, pr := range before {
+		beforeByID[pr.ID] = pr
+	}
+	afterByID := make(map[string]struct{}, len(after))
+	for _, pr := range after {
+		afterByID[pr.ID] = struct{}{}
+	}
+
+	d.coalesceSnapshots(func() {
+		// Slice order, not map order: the facts land in the durable log, and a
+		// consumer replaying them should see the same sequence the daemon saw.
+		for _, pr := range after {
+			previous, existed := beforeByID[pr.ID]
+			switch {
+			case !existed:
+				d.publishFact(FactPRAppeared, pr.ID, nil)
+			case !wireEqual(previous, pr):
+				d.publishFact(FactPRUpdated, pr.ID, nil)
 			}
 		}
-	} else {
-		d.store.SetPRHot(msg.ID)
-		go d.fetchPRDetailsImmediate(msg.ID)
-	}
-	d.broadcastPRs()
-}
-
-func (d *Daemon) broadcastPRs() {
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventPRsUpdated,
-		Prs:   protocol.PRsToValues(d.store.ListPRs("")),
+		for _, pr := range before {
+			if _, still := afterByID[pr.ID]; !still {
+				d.publishFact(FactPRDisappeared, pr.ID, nil)
+			}
+		}
 	})
 }
 
-func (d *Daemon) broadcastRepoStates() {
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventReposUpdated,
-		Repos: protocol.RepoStatesToValues(d.store.ListRepoStates()),
+func (d *Daemon) projectPRsUpdated() {
+	d.projectSnapshot(snapshotPRs, func() {
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event: protocol.EventPRsUpdated,
+			Prs:   protocol.PRsToValues(d.store.ListPRs("")),
+		})
 	})
 }
 
-func (d *Daemon) broadcastAuthorStates() {
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:   protocol.EventAuthorsUpdated,
-		Authors: protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
+func (d *Daemon) projectRepoStatesUpdated() {
+	d.projectSnapshot(snapshotRepos, func() {
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event: protocol.EventReposUpdated,
+			Repos: protocol.RepoStatesToValues(d.store.ListRepoStates()),
+		})
+	})
+}
+
+func (d *Daemon) projectAuthorStatesUpdated() {
+	d.projectSnapshot(snapshotAuthors, func() {
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:   protocol.EventAuthorsUpdated,
+			Authors: protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
+		})
 	})
 }

@@ -1686,13 +1686,31 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		d.reconcileTicketsOnSessionEnd(info.ID, string(session.State))
 	}
 
+	d.publishFact(FactSessionPTYExited, info.ID, ptyExit{
+		ExitCode: info.ExitCode,
+		Signal:   info.Signal,
+	})
+}
+
+// ptyExit is the payload of FactSessionPTYExited. How a process ended is not
+// recoverable from the session row, so it travels with the fact.
+type ptyExit struct {
+	ExitCode int    `json:"exit_code"`
+	Signal   string `json:"signal,omitempty"`
+}
+
+func (d *Daemon) projectSessionPTYExited(ev bus.Event) {
+	exit, ok := decodeFact[ptyExit](d, ev)
+	if !ok {
+		return
+	}
 	event := &protocol.WebSocketEvent{
 		Event:    protocol.EventSessionExited,
-		ID:       protocol.Ptr(info.ID),
-		ExitCode: protocol.Ptr(info.ExitCode),
+		ID:       protocol.Ptr(ev.Subject),
+		ExitCode: protocol.Ptr(exit.ExitCode),
 	}
-	if info.Signal != "" {
-		event.Signal = protocol.Ptr(info.Signal)
+	if exit.Signal != "" {
+		event.Signal = protocol.Ptr(exit.Signal)
 	}
 	d.wsHub.Broadcast(event)
 }
@@ -1992,13 +2010,14 @@ func (d *Daemon) refreshGitHubHosts() error {
 	if d.ghRegistry == nil {
 		d.ghRegistry = github.NewClientRegistry()
 	}
+	hostsBefore := d.gitHubHosts()
 
 	mockURL := strings.TrimSpace(os.Getenv("ATTN_MOCK_GH_URL"))
 	if mockURL != "" {
 		if err := d.registerMockClient(mockURL); err != nil {
 			d.logf("Mock GitHub client not available: %v", err)
 		}
-		d.broadcastGitHubHosts()
+		d.broadcastGitHubHosts(hostsBefore)
 		return nil
 	}
 
@@ -2048,7 +2067,7 @@ func (d *Daemon) refreshGitHubHosts() error {
 		}
 	}
 
-	d.broadcastGitHubHosts()
+	d.broadcastGitHubHosts(hostsBefore)
 	return nil
 }
 
@@ -2059,8 +2078,39 @@ func (d *Daemon) gitHubHosts() []string {
 	return d.ghRegistry.Hosts()
 }
 
-func (d *Daemon) broadcastGitHubHosts() {
-	d.wsHub.BroadcastValue(d.gitHubHostsUpdatedMessage())
+// broadcastGitHubHosts diffs the registry against a list taken before the
+// mutation and publishes one fact per host that came or went. Host discovery
+// runs on a schedule and usually finds the same hosts; those runs now publish
+// nothing and push nothing, where before every run re-sent the same list.
+func (d *Daemon) broadcastGitHubHosts(before []string) {
+	previous := make(map[string]struct{}, len(before))
+	for _, host := range before {
+		previous[host] = struct{}{}
+	}
+	current := d.gitHubHosts()
+	currentSet := make(map[string]struct{}, len(current))
+	for _, host := range current {
+		currentSet[host] = struct{}{}
+	}
+
+	d.coalesceSnapshots(func() {
+		for _, host := range current {
+			if _, had := previous[host]; !had {
+				d.publishFact(FactGitHubHostAdded, host, nil)
+			}
+		}
+		for _, host := range before {
+			if _, still := currentSet[host]; !still {
+				d.publishFact(FactGitHubHostRemoved, host, nil)
+			}
+		}
+	})
+}
+
+func (d *Daemon) projectGitHubHostsUpdated() {
+	d.projectSnapshot(snapshotGHHosts, func() {
+		d.wsHub.BroadcastValue(d.gitHubHostsUpdatedMessage())
+	})
 }
 
 func (d *Daemon) gitHubHostsUpdatedMessage() *protocol.GitHubHostsUpdatedMessage {
@@ -2945,13 +2995,28 @@ func (d *Daemon) projectSessionStateChanged(sessionID string) {
 	})
 }
 
-// broadcastRateLimited broadcasts a rate limit event to WebSocket clients
+// rateLimitWindow is the payload of FactRateLimited: when the limit lifts. The
+// resource is the subject.
+type rateLimitWindow struct {
+	ResetAt string `json:"reset_at"`
+}
+
+// broadcastRateLimited reports that a GitHub resource is rate limited.
 func (d *Daemon) broadcastRateLimited(resource string, resetAt time.Time) {
-	resetAtStr := string(protocol.NewTimestamp(resetAt))
+	d.publishFact(FactRateLimited, resource, rateLimitWindow{
+		ResetAt: string(protocol.NewTimestamp(resetAt)),
+	})
+}
+
+func (d *Daemon) projectRateLimited(ev bus.Event) {
+	window, ok := decodeFact[rateLimitWindow](d, ev)
+	if !ok {
+		return
+	}
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{
 		Event:             protocol.EventRateLimited,
-		RateLimitResource: protocol.Ptr(resource),
-		RateLimitResetAt:  protocol.Ptr(resetAtStr),
+		RateLimitResource: protocol.Ptr(ev.Subject),
+		RateLimitResetAt:  protocol.Ptr(window.ResetAt),
 	})
 }
 
@@ -3215,14 +3280,11 @@ func (d *Daemon) doPRPoll() {
 		}
 	}
 
+	previousPRs := d.store.ListPRs("")
 	d.store.SetPRs(allPRs)
 
-	// Broadcast to WebSocket clients
 	currentPRs := d.store.ListPRs("")
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventPRsUpdated,
-		Prs:   protocol.PRsToValues(currentPRs),
-	})
+	d.publishPRSetChanges(previousPRs, currentPRs)
 
 	// Count waiting (non-muted) PRs for logging
 	waiting := 0
@@ -3262,7 +3324,7 @@ func (d *Daemon) doDetailRefresh() {
 
 	d.logf("Detail refresh: %d PRs need refresh", len(prs))
 
-	refreshedCount := 0
+	var refreshedIDs []string
 	limitedHosts := make(map[string]time.Time)
 	for _, pr := range prs {
 		host := pr.Host
@@ -3316,7 +3378,7 @@ func (d *Daemon) doDetailRefresh() {
 		}
 
 		d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA, details.HeadBranch)
-		refreshedCount++
+		refreshedIDs = append(refreshedIDs, pr.ID)
 	}
 
 	if len(limitedHosts) > 0 {
@@ -3334,10 +3396,14 @@ func (d *Daemon) doDetailRefresh() {
 		}
 	}
 
-	if refreshedCount > 0 {
-		d.logf("Detail refresh: updated %d PRs", refreshedCount)
-		// Broadcast updated PRs
-		d.broadcastPRs()
+	if len(refreshedIDs) > 0 {
+		d.logf("Detail refresh: updated %d PRs", len(refreshedIDs))
+		// One coalesced prs_updated for the whole sweep, as before.
+		d.coalesceSnapshots(func() {
+			for _, id := range refreshedIDs {
+				d.publishFact(FactPRDetailsChanged, id, nil)
+			}
+		})
 	}
 }
 
@@ -3355,7 +3421,7 @@ func (d *Daemon) fetchAllPRDetails() {
 
 	d.logf("App launch: fetching details for %d PRs", len(allPRs))
 
-	refreshedCount := 0
+	var refreshedIDs []string
 	limitedHosts := make(map[string]time.Time)
 	for _, pr := range allPRs {
 		// Skip muted PRs and PRs from muted repos
@@ -3412,7 +3478,7 @@ func (d *Daemon) fetchAllPRDetails() {
 		}
 
 		d.store.UpdatePRDetails(pr.ID, details.Mergeable, details.MergeableState, details.CIStatus, details.ReviewStatus, details.HeadSHA, details.HeadBranch)
-		refreshedCount++
+		refreshedIDs = append(refreshedIDs, pr.ID)
 	}
 
 	if len(limitedHosts) > 0 {
@@ -3430,9 +3496,13 @@ func (d *Daemon) fetchAllPRDetails() {
 		}
 	}
 
-	if refreshedCount > 0 {
-		d.logf("App launch: updated %d PRs", refreshedCount)
-		d.broadcastPRs()
+	if len(refreshedIDs) > 0 {
+		d.logf("App launch: updated %d PRs", len(refreshedIDs))
+		d.coalesceSnapshots(func() {
+			for _, id := range refreshedIDs {
+				d.publishFact(FactPRDetailsChanged, id, nil)
+			}
+		})
 	}
 }
 
@@ -3443,15 +3513,15 @@ func (d *Daemon) handleInjectTestPR(conn net.Conn, msg *protocol.InjectTestPRMes
 	}
 
 	// Add PR directly to store
+	existing := d.store.GetPR(msg.PR.ID)
 	d.store.AddPR(&msg.PR)
 	d.sendOK(conn)
 
-	// Broadcast to WebSocket clients
-	allPRs := d.store.ListPRs("")
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventPRsUpdated,
-		Prs:   protocol.PRsToValues(allPRs),
-	})
+	if existing == nil {
+		d.publishFact(FactPRAppeared, msg.PR.ID, nil)
+	} else {
+		d.publishFact(FactPRUpdated, msg.PR.ID, nil)
+	}
 }
 
 func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTestSessionMessage) {
@@ -3522,11 +3592,7 @@ func (d *Daemon) handleInjectTestSession(conn net.Conn, msg *protocol.InjectTest
 	}
 	d.sendOK(conn)
 
-	// Broadcast to WebSocket clients
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:   protocol.EventSessionRegistered,
-		Session: d.sessionForBroadcast(&msg.Session),
-	})
+	d.publishFact(FactSessionRegistered, msg.Session.ID, nil)
 	d.broadcastWorkspaceLayout(workspaceID)
 }
 
@@ -3585,14 +3651,11 @@ func (d *Daemon) doRefreshPRsWithResult() error {
 		}
 	}
 
+	previousPRs := d.store.ListPRs("")
 	d.store.SetPRs(allPRs)
 
-	// Broadcast to WebSocket clients
 	currentPRs := d.store.ListPRs("")
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventPRsUpdated,
-		Prs:   protocol.PRsToValues(currentPRs),
-	})
+	d.publishPRSetChanges(previousPRs, currentPRs)
 
 	d.logf("PR refresh: %d PRs fetched", len(currentPRs))
 	for host, observation := range observedByHost {

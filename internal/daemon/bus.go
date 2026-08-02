@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"encoding/json"
 	"sync"
 
@@ -71,6 +72,10 @@ const (
 	FactSessionChiefRoleChanged = "session.chief_role.changed"
 	// FactSessionReconciled: startup/recovery reconciliation changed this session.
 	FactSessionReconciled = "session.reconciled"
+	// FactSessionPTYExited: this session's PTY process exited.
+	FactSessionPTYExited = "session.pty.exited"
+	// FactSessionWorkspaceChanged: this session moved to another workspace.
+	FactSessionWorkspaceChanged = "session.workspace.changed"
 
 	// FactWorktreeSessionsRemoved: deleting this worktree took its sessions with
 	// it. Subject is the worktree path.
@@ -101,6 +106,44 @@ const (
 	FactWorkspaceLayoutChanged      = "workspace.layout.changed"
 	FactWorkspaceLayoutRepublished  = "workspace.layout.republished"
 	FactWorkspaceContextChanged     = "workspace.context.changed"
+
+	// PR facts; subject is the PR id.
+	//
+	// The three set facts come from diffing the PR list around a bulk refresh.
+	// The daemon replaces the whole set on every poll, so the diff is what
+	// recovers the facts: without it a poll could only say "the list changed",
+	// which is the invalidation this design removes.
+	FactPRAppeared    = "pr.appeared"
+	FactPRUpdated     = "pr.updated"
+	FactPRDisappeared = "pr.disappeared"
+	// The rest name a single PR the user or the daemon acted on directly.
+	FactPRMuteChanged    = "pr.mute.changed"
+	FactPRVisited        = "pr.visited"
+	FactPRHeatChanged    = "pr.heat.changed"
+	FactPRDetailsChanged = "pr.details.changed"
+
+	// Worktree facts. Subject is the worktree path, except the reconcile, whose
+	// subject is the main repo: reading git prunes worktrees that are gone and
+	// adopts ones created outside attn, and the resulting list is per repo.
+	FactWorktreeCreated        = "worktree.created"
+	FactWorktreeDeleted        = "worktree.deleted"
+	FactWorktreeListReconciled = "worktree.list.reconciled"
+
+	// Git operation facts; subject is the operation id.
+	FactGitOperationStarted  = "git.operation.started"
+	FactGitOperationFinished = "git.operation.finished"
+
+	// FactRateLimited: subject is the rate-limited resource ("core", "search").
+	FactRateLimited = "ratelimit.hit"
+
+	// GitHub host facts; subject is the host.
+	FactGitHubHostAdded   = "github.host.added"
+	FactGitHubHostRemoved = "github.host.removed"
+
+	// FactRepoMuteChanged: subject is the repo, `owner/name`.
+	FactRepoMuteChanged = "repo.mute.changed"
+	// FactAuthorMuteChanged: subject is the author's login.
+	FactAuthorMuteChanged = "author.mute.changed"
 
 	// Ticket facts; subject is the ticket id.
 	FactTicketCreated       = "ticket.created"
@@ -241,6 +284,52 @@ func buildWireProjections() []projection {
 			// actually reason about.
 			filter: bus.Filter{"ticket.*"},
 			apply:  func(d *Daemon, _ bus.Event) { d.projectTicketsUpdated() },
+		},
+		{
+			filter: bus.Filter{"pr.*"},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectPRsUpdated() },
+		},
+		{
+			filter: bus.Filter{FactRepoMuteChanged},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectRepoStatesUpdated() },
+		},
+		{
+			filter: bus.Filter{FactAuthorMuteChanged},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectAuthorStatesUpdated() },
+		},
+		{
+			filter: bus.Filter{FactSessionPTYExited},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionPTYExited(ev) },
+		},
+		{
+			filter: bus.Filter{FactSessionWorkspaceChanged},
+			apply: func(d *Daemon, ev bus.Event) {
+				d.projectSessionEvent(protocol.EventSessionStateChanged, ev.Subject)
+			},
+		},
+		{
+			filter: bus.Filter{FactWorktreeCreated},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectWorktreeCreated(ev) },
+		},
+		{
+			filter: bus.Filter{FactWorktreeDeleted},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectWorktreeDeleted(ev) },
+		},
+		{
+			filter: bus.Filter{FactWorktreeListReconciled},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectWorktreesUpdated(ev) },
+		},
+		{
+			filter: bus.Filter{FactGitOperationStarted, FactGitOperationFinished},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectGitOperation(ev) },
+		},
+		{
+			filter: bus.Filter{FactRateLimited},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectRateLimited(ev) },
+		},
+		{
+			filter: bus.Filter{"github.host.*"},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectGitHubHostsUpdated() },
 		},
 	}
 }
@@ -394,7 +483,23 @@ func (d *Daemon) projectSnapshot(key string, push func()) {
 const (
 	snapshotSessions = "sessions_updated"
 	snapshotTickets  = "tickets_updated"
+	snapshotPRs      = "prs_updated"
+	snapshotRepos    = "repos_updated"
+	snapshotAuthors  = "authors_updated"
+	snapshotGHHosts  = "github_hosts_updated"
 )
+
+// wireEqual reports whether two values reach clients as the same JSON. It is the
+// equality a diff-driven producer wants: "changed" should mean the client would
+// see something different, not that some unexported or unserialized field moved.
+func wireEqual(a, b any) bool {
+	rawA, errA := json.Marshal(a)
+	rawB, errB := json.Marshal(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return bytes.Equal(rawA, rawB)
+}
 
 // BusStatus snapshots the bus for operator inspection.
 func (d *Daemon) BusStatus() (bus.Status, error) {
