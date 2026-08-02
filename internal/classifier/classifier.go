@@ -281,6 +281,13 @@ func runCodexClassifierAttempt(ctx context.Context, executable, model, reasoning
 	args := []string{
 		"exec",
 		"--json",
+		// Never persist a rollout under ~/.codex/sessions: the classifier runs
+		// from the session's own cwd, so a persisted rollout is a decoy that
+		// cwd-based transcript discovery can resolve instead of the session's
+		// real conversation — the classifier would then classify its own prior
+		// verdict. The verdict is read from --output-last-message and stdout;
+		// nothing reads the rollout.
+		"--ephemeral",
 		"--output-last-message", lastMessagePath,
 		// Classify regardless of the session's cwd. Codex refuses `exec` outside a
 		// trusted git repo otherwise, which is how a codex turn that ends in an

@@ -66,19 +66,41 @@ func writeCodexTranscript(
 	modTime time.Time,
 ) string {
 	t.Helper()
+	return writeCodexTranscriptWithSource(t, homeDir, sessionID, cwd, "", startTime, modTime)
+}
+
+// writeCodexTranscriptWithSource writes a codex rollout whose session_meta
+// carries an explicit payload.source ("cli" for interactive sessions, "exec"
+// for headless `codex exec` runs). An empty source omits the field, matching
+// rollouts from codex versions that predate it.
+func writeCodexTranscriptWithSource(
+	t *testing.T,
+	homeDir,
+	sessionID,
+	cwd,
+	source string,
+	startTime time.Time,
+	modTime time.Time,
+) string {
+	t.Helper()
 
 	sessionDir := filepath.Join(homeDir, ".codex", "sessions", "2026", "05", "17")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		t.Fatalf("mkdir codex session dir: %v", err)
 	}
 
+	sourceField := ""
+	if source != "" {
+		sourceField = fmt.Sprintf(`,"source":"%s"`, source)
+	}
 	transcriptPath := filepath.Join(sessionDir, fmt.Sprintf("rollout-%s-%s.jsonl", startTime.UTC().Format("2006-01-02T15-04-05"), sessionID))
 	lines := fmt.Sprintf(
-		`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","timestamp":"%s","cwd":"%s"}}`+"\n",
+		`{"timestamp":"%s","type":"session_meta","payload":{"id":"%s","timestamp":"%s","cwd":"%s"%s}}`+"\n",
 		startTime.UTC().Format(time.RFC3339Nano),
 		sessionID,
 		startTime.UTC().Format(time.RFC3339Nano),
 		cwd,
+		sourceField,
 	)
 	if err := os.WriteFile(transcriptPath, []byte(lines), 0o644); err != nil {
 		t.Fatalf("write codex transcript: %v", err)
@@ -119,6 +141,60 @@ func TestFindCodexTranscript_MatchesSymlinkEquivalentCWD(t *testing.T) {
 	got := FindCodexTranscript(linkCWD, startedAt)
 	if got != expected {
 		t.Fatalf("FindCodexTranscript() = %q, want %q", got, expected)
+	}
+}
+
+// Regression for the classifier-decoy bug: attn's stop-time classifier used to
+// run `codex exec` from the session's own cwd and persist a rollout there, so
+// "newest rollout matching cwd" resolved attn's internal bookkeeping instead of
+// the user's conversation. Headless rollouts carry payload.source "exec" and
+// must never win interactive discovery, no matter how fresh they are.
+func TestFindCodexTranscript_IgnoresExecSourcedRollouts(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(toolhome.EnvVar, homeDir)
+
+	cwd := "/repo/project"
+	startedAt := time.Date(2026, 5, 17, 14, 0, 0, 0, time.UTC)
+
+	session := writeCodexTranscriptWithSource(
+		t, homeDir, "codex-session-real", cwd, "cli",
+		startedAt.Add(5*time.Second), startedAt.Add(5*time.Second),
+	)
+	// The classifier's rollout: same cwd, written seconds later.
+	classifier := writeCodexTranscriptWithSource(
+		t, homeDir, "codex-classifier-decoy", cwd, "exec",
+		startedAt.Add(11*time.Second), startedAt.Add(11*time.Second),
+	)
+
+	if got := FindCodexTranscript(cwd, startedAt); got != session {
+		t.Fatalf("FindCodexTranscript() = %q, want session rollout %q (classifier decoy=%q)", got, session, classifier)
+	}
+}
+
+// Exec-sourced rollouts are excluded from the mod-time fallback too, not just
+// the timestamp-ranked path.
+func TestFindCodexTranscript_FallbackIgnoresExecSourcedRollouts(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv(toolhome.EnvVar, homeDir)
+
+	cwd := "/repo/project"
+	startedAt := time.Date(2026, 5, 17, 14, 0, 0, 0, time.UTC)
+
+	// A resumed session: session_meta timestamp is old, but the file is still
+	// actively written (fresh mod time), so it resolves via the fallback.
+	session := writeCodexTranscriptWithSource(
+		t, homeDir, "codex-session-resumed", cwd, "cli",
+		startedAt.Add(-2*time.Hour), startedAt.Add(1*time.Minute),
+	)
+	classifier := writeCodexTranscriptWithSource(
+		t, homeDir, "codex-classifier-decoy", cwd, "exec",
+		startedAt.Add(-1*time.Hour), startedAt.Add(2*time.Minute),
+	)
+
+	if got := FindCodexTranscript(cwd, startedAt); got != session {
+		t.Fatalf("FindCodexTranscript() = %q, want session rollout %q (classifier decoy=%q)", got, session, classifier)
 	}
 }
 

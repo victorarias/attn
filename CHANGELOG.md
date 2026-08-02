@@ -21,6 +21,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   pick the first waiting session in sidebar workspace order, which made its
   target feel arbitrary. It now follows the queue's own order — the turn owed
   longest, the same row the "Your turn" band lists first.
+- **Codex sessions no longer mistake attn's own bookkeeping for their
+  conversation.** attn's stop-time classifier runs a small codex call from the
+  session's directory, and its saved log could be picked up as the session's
+  transcript — so state classification, session digests in the Notebook, and
+  orphaned-ticket reconciliation could read an internal `{"verdict":...}` note
+  instead of what the agent actually said. Transcripts now resolve by the codex
+  session's own id, the classifier no longer saves a log at all, and headless
+  codex runs are excluded from transcript discovery.
 - **A workspace that holds only a tile can be closed again.** Closing the last
   notebook, markdown, or browser tile in a workspace with no agents left the
   workspace in the sidebar — and every later click on its × did nothing, so the

@@ -2577,6 +2577,12 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	go d.classifySessionState(msg.ID, msg.TranscriptPath)
 }
 
+// resolveTranscriptPathForSession resolves a session's transcript by the
+// strongest identity available: the path the agent's own hook reported, then
+// the agent-native resume id synced from hooks, and only then the finder's
+// cwd/time guess. The guess must stay last for codex: several codex processes
+// can share one cwd (a second attn pane, a user's own `codex exec`), and
+// "newest matching cwd" cannot tell them apart.
 func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
 	path := strings.TrimSpace(transcriptPath)
 	if session == nil {
@@ -2589,12 +2595,20 @@ func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, tran
 		}
 	}
 
-	if driver := agentdriver.Get(string(session.Agent)); driver != nil {
-		if tf, ok := agentdriver.GetTranscriptFinder(driver); ok {
-			if discovered := strings.TrimSpace(tf.FindTranscript(session.ID, session.Directory, time.Now())); discovered != "" {
-				return discovered
-			}
+	driver := agentdriver.Get(string(session.Agent))
+	tf, ok := agentdriver.GetTranscriptFinder(driver)
+	if !ok {
+		return path
+	}
+
+	if resumeID := strings.TrimSpace(d.store.GetResumeSessionID(session.ID)); resumeID != "" {
+		if resolved := strings.TrimSpace(tf.FindTranscriptForResume(resumeID)); resolved != "" {
+			return resolved
 		}
+	}
+
+	if discovered := strings.TrimSpace(tf.FindTranscript(session.ID, session.Directory, time.Now())); discovered != "" {
+		return discovered
 	}
 
 	return path
