@@ -22,23 +22,6 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   and exit code instead of waiting on the once-a-second foreground check. An
   ssh session to a host whose shell emits the marks reports its remote prompt
   and commands the same way. Set `ATTN_NO_SHELL_INTEGRATION=1` to opt out.
-- **Hover a sidebar row to read its whole session name.** Names generated from
-  your conversation are longer than the sidebar is wide, so rows still trim them.
-  Hovering one now unfurls the full name out of the sidebar's edge, on that row's
-  own line and clear of the rail — so the row's `•••` actions, which appear on
-  the same hover, stay visible and clickable. No dwell before it appears, and
-  nothing in the list moves. Rows whose name already fits are left alone.
-
-### Changed
-- **The agent pane header is always on, and always names the session.** It used
-  to appear only in a split view, or when a nudge, ticket, presentation, or
-  settle countdown needed somewhere to sit — so a single agent on screen showed
-  no name at all. It is now permanent, which also makes the chips it hosts
-  permanent. The name is set in sentence case rather than the small-caps heading
-  it used to be, and carries the same state dot the sidebar puts beside that
-  session, so the pane says what its agent is doing without a look back at the
-  rail. The rename control is reachable from it whether or not the view is split,
-  so a title you don't like can be fixed where you read it.
 
 ### Fixed
 - **Interrupting an agent settles its session right away.** Hitting ESC to halt
