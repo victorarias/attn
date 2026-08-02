@@ -19,8 +19,12 @@ app/src-tauri/binaries/
 app/src-tauri/bundled-plugins/*
 !app/src-tauri/bundled-plugins/.gitkeep
 
-# Claude Code local config
-.claude/
+# Claude Code local config. settings.json is the shared, checked-in part (repo
+# hooks); everything else here is per-machine. The pattern must exclude the
+# directory's contents rather than the directory itself — git cannot re-include a
+# file whose parent directory is excluded.
+.claude/*
+!.claude/settings.json
 
 # Generated per-profile Tauri config overlays (see scripts/build-app-profile.sh)
 app/src-tauri/*.gen.conf.json

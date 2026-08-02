@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev test test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -113,8 +113,13 @@ GOTESTSUM=$(HOME)/go/bin/gotestsum
 $(GOTESTSUM):
 	go install gotest.tools/gotestsum@latest
 
-test: $(NATIVE_VT_DEP)
+test: $(NATIVE_VT_DEP) test-hooks
 	./scripts/test-go.sh
+
+# Repository Claude Code hooks are shell, so they are invisible to the Go suite
+# and would otherwise rot unnoticed.
+test-hooks:
+	@bash ./scripts/claude/attn-profile-nudge_test.sh
 
 # Verbose test output (shows all test names as they run)
 test-v: $(NATIVE_VT_DEP)
@@ -201,6 +206,9 @@ install: build-app
 	cp -r "app/src-tauri/target/release/bundle/macos/$$app_name.app" ~/Applications/; \
 	if [ -n "$$profile" ]; then \
 		env $(PROFILE_DAEMON_UNSET) ATTN_PROFILE="$$profile" "$$app_binary" daemon ensure >/dev/null; \
+		: "Install time is the only moment the worktree behind a profile is known"; \
+		: "for certain, so record it here for cleanup tooling to read back."; \
+		"$$attn" profile set-origin "$$profile" --worktree "$(CURDIR)" >/dev/null || true; \
 	else \
 		"$$app_binary" daemon ensure >/dev/null; \
 	fi; \
@@ -231,6 +239,9 @@ install-daemon: ensure-codesign-identity build
 	fi; \
 	if [ -n "$$profile" ]; then \
 		env $(PROFILE_DAEMON_UNSET) ATTN_PROFILE="$$profile" "$$app_binary" daemon ensure >/dev/null; \
+		: "Same provenance record as the full install: a daemon-only install is"; \
+		: "still this worktree claiming the profile."; \
+		"$$attn" profile set-origin "$$profile" --worktree "$(CURDIR)" >/dev/null || true; \
 	else \
 		"$$app_binary" daemon ensure >/dev/null; \
 	fi; \

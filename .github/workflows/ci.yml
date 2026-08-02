@@ -31,6 +31,7 @@ jobs:
               - 'go.sum'
               - 'Makefile'
               - 'scripts/source-fingerprint.sh'
+              - 'scripts/claude/**'
               - '.github/workflows/ci.yml'
             frontend:
               - 'app/src/**'
@@ -96,6 +97,10 @@ jobs:
 
       - name: Test
         run: ./scripts/test-go.sh
+
+      # Repository Claude Code hooks are shell, so the Go suite cannot see them.
+      - name: Test repository hooks
+        run: bash ./scripts/claude/attn-profile-nudge_test.sh
 
   frontend:
     name: Frontend

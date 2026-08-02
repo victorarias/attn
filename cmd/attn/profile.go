@@ -11,6 +11,7 @@ import (
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemonctl"
+	"github.com/victorarias/attn/internal/ptyworker"
 )
 
 // runProfile is the `attn profile <subcommand>` group: the human-facing surface
@@ -36,8 +37,10 @@ func runProfile() {
 		runProfileTauriConfig(os.Args[3:])
 	case "clean":
 		runProfileClean(os.Args[3:])
+	case "set-origin":
+		runProfileSetOrigin(os.Args[3:])
 	case "list":
-		runProfileList()
+		runProfileList(os.Args[3:])
 	case "env":
 		// `attn profile env …` mirrors the top-level `attn profile-env …`.
 		runProfileEnvArgs(os.Args[3:])
@@ -308,6 +311,12 @@ func runProfileClean(args []string) {
 		fmt.Printf("  daemon   stopped\n")
 	}
 
+	// Workers outlive the daemon on purpose, so stopping it is not enough: the
+	// data dir removal below destroys the registry they are found through, and
+	// any worker still alive at that point is stranded with no daemon that could
+	// ever adopt it. Reap before the registry goes.
+	reportWorkerReap(ptyworker.ReapDataDir(r.DataDir))
+
 	// App bundle: forget it in LaunchServices (so the deep-link scheme and
 	// bundle id stop resolving to a path we're about to delete), then remove it.
 	if fileExists(r.AppPath) {
@@ -331,6 +340,45 @@ func runProfileClean(args []string) {
 	}
 
 	fmt.Printf("Cleaned profile %s.\n", r.Label)
+}
+
+// reportWorkerReap prints one line per registered worker. An unidentified
+// worker is the one outcome that needs a human: the reaper refused to signal a
+// PID it could not confirm, so the process is named rather than silently left
+// behind for someone to find days later at the top of `ps`.
+func reportWorkerReap(results []ptyworker.ReapResult) {
+	if len(results) == 0 {
+		fmt.Printf("  workers  none registered\n")
+		return
+	}
+	byOutcome := map[ptyworker.ReapOutcome]int{}
+	for _, res := range results {
+		byOutcome[res.Outcome]++
+	}
+	fmt.Printf("  workers  %d registered (%s)\n", len(results), summarizeReap(byOutcome))
+	for _, res := range results {
+		if res.Outcome != ptyworker.ReapUnidentified {
+			continue
+		}
+		fmt.Printf("           ! session %s: pid %d could not be confirmed as its worker (%v); left running — check it with `ps -p %d` and kill it yourself if it is stale\n",
+			res.SessionID, res.WorkerPID, res.Err, res.WorkerPID)
+	}
+}
+
+func summarizeReap(byOutcome map[ptyworker.ReapOutcome]int) string {
+	order := []ptyworker.ReapOutcome{
+		ptyworker.ReapRemoved,
+		ptyworker.ReapSignalled,
+		ptyworker.ReapAlreadyGone,
+		ptyworker.ReapUnidentified,
+	}
+	parts := make([]string, 0, len(order))
+	for _, outcome := range order {
+		if n := byOutcome[outcome]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, outcome))
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // stopProfileDaemon stops a profile's daemon via its pid file, for an
@@ -383,7 +431,20 @@ func lsregisterForget(appPath string) {
 	_ = exec.Command(lsregisterPath, "-u", appPath).Run()
 }
 
-func runProfileList() {
+func runProfileList(args []string) {
+	asJSON := false
+	for _, a := range args {
+		switch a {
+		case "--json":
+			asJSON = true
+		case "-h", "--help":
+			printProfileHelp(os.Stdout)
+			return
+		default:
+			profileFatal(fmt.Sprintf("unknown flag %q for `attn profile list`", a))
+		}
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		profileFatal("cannot resolve home directory: " + err.Error())
@@ -434,19 +495,38 @@ func runProfileList() {
 	sort.Strings(names) // "" sorts first → default listed first
 
 	active := config.Profile()
-	fmt.Printf("%-3s %-16s %-7s %-9s %s\n", "", "PROFILE", "PORT", "DATA", "APP")
+
+	if asJSON {
+		entries := make([]profileListEntry, 0, len(names))
+		for _, p := range names {
+			entries = append(entries, newProfileListEntry(p, active))
+		}
+		out, err := json.MarshalIndent(map[string]any{"profiles": entries}, "", "  ")
+		if err != nil {
+			profileFatal(err.Error())
+		}
+		fmt.Println(string(out))
+		return
+	}
+
+	fmt.Printf("%-3s %-16s %-7s %-9s %-11s %s\n", "", "PROFILE", "PORT", "DATA", "APP", "ORIGIN")
 	for _, p := range names {
 		r := resolveProfile(p)
 		marker := "  "
 		if p == active {
 			marker = "* "
 		}
-		fmt.Printf("%-3s %-16s %-7s %-9s %s\n",
+		origin := "—"
+		if o := readProfileOrigin(r.DataDir); o != nil {
+			origin = filepath.Base(o.Worktree)
+		}
+		fmt.Printf("%-3s %-16s %-7s %-9s %-11s %s\n",
 			marker,
 			r.Label,
 			r.WSPort,
 			ynLabel(fileExists(r.DataDir), "yes", "—"),
 			ynLabel(fileExists(r.AppPath), "installed", "—"),
+			origin,
 		)
 	}
 	fmt.Println("\n* = active (ATTN_PROFILE)")
@@ -466,8 +546,11 @@ Usage:
   attn profile resolve --field wsPort      print one resolved value
   attn profile resolve --profile agent7    resolve a different profile
   attn profile tauri-config    Tauri --config overlay for the profile's build
-  attn profile clean <name>    stop daemon, quit app, remove its app + data dir
+  attn profile clean <name>    reap workers, stop daemon, quit app, remove its app + data dir
   attn profile list            every profile with data and/or an installed app
+  attn profile list --json     same, machine-readable, with origin and what is running
+  attn profile set-origin <name> [--worktree <dir>]
+                               record the worktree a profile was installed from
   attn profile env <name>      alias of: attn profile-env <name>
 
 Profile names must match [a-z0-9][a-z0-9-]{0,15}. "dev" is the development
