@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "201"
+const ProtocolVersion = "202"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -199,6 +199,10 @@ const (
 	CmdWorkspaceLayoutMoveLeafToNewWorkspace = "workspace_layout_move_leaf_to_new_workspace"
 	CmdWorkspaceTileContentGet               = "workspace_tile_content_get"
 	CmdOpenMarkdown                          = "open_markdown"
+	CmdSessionMessagesGet                    = "session_messages_get"
+	CmdSessionAnnotationsGet                 = "session_annotations_get"
+	CmdSessionAnnotationsSave                = "session_annotations_save"
+	CmdSessionAnnotationsClear               = "session_annotations_clear"
 	CmdMarkdownAnnotationsGet                = "markdown_annotations_get"
 	CmdMarkdownAnnotationsSave               = "markdown_annotations_save"
 	CmdMarkdownAnnotationsClear              = "markdown_annotations_clear"
@@ -335,6 +339,10 @@ const (
 	EventWorkspaceLayoutActionResult     = "workspace_layout_action_result"
 	EventWorkspaceTileContent            = "workspace_tile_content"
 	EventOpenMarkdownResult              = "open_markdown_result"
+	EventSessionMessagesGetResult        = "session_messages_get_result"
+	EventSessionAnnotationsGetResult     = "session_annotations_get_result"
+	EventSessionAnnotationsSaveResult    = "session_annotations_save_result"
+	EventSessionAnnotationsClearResult   = "session_annotations_clear_result"
 	EventMarkdownAnnotationsGetResult    = "markdown_annotations_get_result"
 	EventMarkdownAnnotationsSaveResult   = "markdown_annotations_save_result"
 	EventMarkdownAnnotationsClearResult  = "markdown_annotations_clear_result"
@@ -1526,6 +1534,34 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg OpenMarkdownMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal open_markdown: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSessionMessagesGet:
+		var msg SessionMessagesGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal session_messages_get: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSessionAnnotationsGet:
+		var msg SessionAnnotationsGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal session_annotations_get: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSessionAnnotationsSave:
+		var msg SessionAnnotationsSaveMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal session_annotations_save: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSessionAnnotationsClear:
+		var msg SessionAnnotationsClearMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal session_annotations_clear: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

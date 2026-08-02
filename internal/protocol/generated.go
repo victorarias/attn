@@ -4007,6 +4007,137 @@ type Session struct {
 	WorkspaceMuted *bool `json:"workspace_muted,omitempty,omitzero"`
 }
 
+type SessionAnnotation struct {
+	// Comment corresponds to the JSON schema field "comment".
+	Comment string `json:"comment"`
+
+	// Emoji corresponds to the JSON schema field "emoji".
+	Emoji string `json:"emoji"`
+
+	// End corresponds to the JSON schema field "end".
+	End int `json:"end"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// MessageKey corresponds to the JSON schema field "message_key".
+	MessageKey string `json:"message_key"`
+
+	// Quote corresponds to the JSON schema field "quote".
+	Quote string `json:"quote"`
+
+	// Start corresponds to the JSON schema field "start".
+	Start int `json:"start"`
+}
+
+type SessionAnnotationsClearMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
+type SessionAnnotationsClearResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type SessionAnnotationsGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
+type SessionAnnotationsGetResultMessage struct {
+	// Annotations corresponds to the JSON schema field "annotations".
+	Annotations []SessionAnnotation `json:"annotations"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type SessionAnnotationsSaveMessage struct {
+	// Annotations corresponds to the JSON schema field "annotations".
+	Annotations []SessionAnnotation `json:"annotations"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
+type SessionAnnotationsSaveResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Stale corresponds to the JSON schema field "stale".
+	Stale *bool `json:"stale,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type SessionExitedMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -4054,6 +4185,48 @@ type SessionInstructionsResult struct {
 
 	// TranscriptPath corresponds to the JSON schema field "transcript_path".
 	TranscriptPath string `json:"transcript_path"`
+}
+
+type SessionMessage struct {
+	// Key corresponds to the JSON schema field "key".
+	Key string `json:"key"`
+
+	// Markdown corresponds to the JSON schema field "markdown".
+	Markdown string `json:"markdown"`
+}
+
+type SessionMessagesGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
+type SessionMessagesGetResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Messages corresponds to the JSON schema field "messages".
+	Messages []SessionMessage `json:"messages"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Truncated corresponds to the JSON schema field "truncated".
+	Truncated bool `json:"truncated"`
 }
 
 type SessionRegisteredMessage struct {

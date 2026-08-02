@@ -150,7 +150,8 @@
   display: block;
 }
 
-.ghostty-terminal-link-hover {
+.ghostty-terminal-link-hover,
+.ghostty-terminal-annotation-hover {
   cursor: pointer;
 }
 

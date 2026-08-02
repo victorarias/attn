@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { GhosttyTerminal, type BlockStateSnapshot, type GhosttyTerminalHandle } from '../GhosttyTerminal';
+import { type BlockStateSnapshot, type GhosttyTerminalHandle } from '../GhosttyTerminal';
+import { AnnotatedTerminal, type SessionAnnotationApi } from '../TerminalAnnotations/AnnotatedTerminal';
 import { RenamePopover } from '../RenamePopover';
 import { StateIndicator } from '../StateIndicator';
 import { useShortcut } from '../../shortcuts/useShortcut';
@@ -142,6 +143,10 @@ interface SessionTerminalWorkspaceProps {
     onOpenArtifact?: (path: string) => void;
     onResume: (ticketId: string) => void;
   };
+  // Reads a session's last assistant message for annotation. Absent means the
+  // pane's terminal offers no annotation surface at all.
+  // The daemon calls the annotation surface needs. Absent disables it.
+  annotationApi?: SessionAnnotationApi;
   workspace: TerminalWorkspaceState;
   workspaceSelectionStyle?: WorkspaceSelectionStyle;
   activePaneId: string;
@@ -202,6 +207,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     workspaceDirectory,
     workspaceSessions = [],
     ticketActions,
+    annotationApi,
     workspace,
     workspaceSelectionStyle = 'rail',
     activePaneId,
@@ -999,8 +1005,18 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 // renderer. Rehydrates from daemon replay when it remounts.
                 <div className="workspace-pane-virtualized" aria-hidden="true" data-testid={`pane-virtualized-${agentPane.id}`} />
               ) : (
-                <GhosttyTerminal
+                <AnnotatedTerminal
                   ref={terminalRefForPane(agentPane.id)}
+                  sessionId={agentPane.sessionId}
+                  sessionState={paneSession?.state}
+                  annotationApi={annotationApi}
+                  onSubmitAnnotations={(text) => {
+                    // Bracketed paste, not a plain write: the payload is
+                    // multi-line, and without the guard every newline submits
+                    // the partial feedback as its own turn. It lands in the
+                    // agent's prompt for the user to read and send.
+                    runtime.handleTerminalInput(agentPane.id)(`\u001b[200~${text}\u001b[201~`);
+                  }}
                   fontSize={fontSize}
                   resolvedTheme={resolvedTheme}
                   cwd={paneSession?.cwd}
@@ -1128,6 +1144,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       showPaneHeader,
       ticketOverlayPaneId,
       ticketActions,
+      annotationApi,
       closeTicketOverlay,
     ]);
 

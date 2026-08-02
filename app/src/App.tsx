@@ -616,6 +616,10 @@ function App() {
     sendWorkspaceUndockTile,
     sendWorkspaceUpdateTile,
     sendOpenMarkdown,
+    sendSessionMessagesGet,
+    sendSessionAnnotationsGet,
+    sendSessionAnnotationsSave,
+    sendSessionAnnotationsClear,
     sendWorkspaceMoveLeaf,
     sendWorkspaceMoveLeafToWorkspace,
     sendWorkspaceMoveLeafToNewWorkspace,
@@ -838,6 +842,10 @@ function App() {
         sendWorkspaceUndockTile={sendWorkspaceUndockTile}
         sendWorkspaceUpdateTile={sendWorkspaceUpdateTile}
         sendOpenMarkdown={sendOpenMarkdown}
+        sendSessionMessagesGet={sendSessionMessagesGet}
+        sendSessionAnnotationsGet={sendSessionAnnotationsGet}
+        sendSessionAnnotationsSave={sendSessionAnnotationsSave}
+        sendSessionAnnotationsClear={sendSessionAnnotationsClear}
         sendWorkspaceMoveLeaf={sendWorkspaceMoveLeaf}
         sendWorkspaceMoveLeafToWorkspace={sendWorkspaceMoveLeafToWorkspace}
         sendWorkspaceMoveLeafToNewWorkspace={sendWorkspaceMoveLeafToNewWorkspace}
@@ -967,6 +975,10 @@ interface AppContentProps {
   sendWorkspaceUndockTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUndockTile'];
   sendWorkspaceUpdateTile: ReturnType<typeof useDaemonSocket>['sendWorkspaceUpdateTile'];
   sendOpenMarkdown: ReturnType<typeof useDaemonSocket>['sendOpenMarkdown'];
+  sendSessionMessagesGet: ReturnType<typeof useDaemonSocket>['sendSessionMessagesGet'];
+  sendSessionAnnotationsGet: ReturnType<typeof useDaemonSocket>['sendSessionAnnotationsGet'];
+  sendSessionAnnotationsSave: ReturnType<typeof useDaemonSocket>['sendSessionAnnotationsSave'];
+  sendSessionAnnotationsClear: ReturnType<typeof useDaemonSocket>['sendSessionAnnotationsClear'];
   sendWorkspaceMoveLeaf: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeaf'];
   sendWorkspaceMoveLeafToWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToWorkspace'];
   sendWorkspaceMoveLeafToNewWorkspace: ReturnType<typeof useDaemonSocket>['sendWorkspaceMoveLeafToNewWorkspace'];
@@ -1090,6 +1102,10 @@ sendFetchPRDetails,
   sendWorkspaceUndockTile,
   sendWorkspaceUpdateTile,
   sendOpenMarkdown,
+  sendSessionMessagesGet,
+  sendSessionAnnotationsGet,
+  sendSessionAnnotationsSave,
+  sendSessionAnnotationsClear,
   sendWorkspaceMoveLeaf,
   sendWorkspaceMoveLeafToWorkspace,
   sendWorkspaceMoveLeafToNewWorkspace,
@@ -3499,6 +3515,16 @@ sendFetchPRDetails,
     onResume: handleResumeTicket,
   }), [fetchTicket, sendTicketChangeStatus, sendTicketAddComment, sendTicketEditDescription, sendTicketAttach, sendFsRename, sendFsDelete, handleResumeTicket]);
 
+  // The daemon calls the terminal annotation surface needs, as one stable
+  // object: the surface re-fetches on identity change, so four separate props
+  // would refire it on every unrelated render of App.
+  const annotationApi = useMemo(() => ({
+    fetchMessages: sendSessionMessagesGet,
+    fetchAnnotations: sendSessionAnnotationsGet,
+    saveAnnotations: sendSessionAnnotationsSave,
+    clearAnnotations: sendSessionAnnotationsClear,
+  }), [sendSessionMessagesGet, sendSessionAnnotationsGet, sendSessionAnnotationsSave, sendSessionAnnotationsClear]);
+
   const isZedEditorConfigured = useMemo(() => {
     const editor = (settings.editor_executable || '').trim().toLowerCase();
     if (!editor) {
@@ -3962,6 +3988,7 @@ sendFetchPRDetails,
                       ticket: boundTicketForSession(tickets ?? [], entry.id),
                     }))}
                     ticketActions={ticketActions}
+                    annotationApi={annotationApi}
                     onTriggerNudge={sendTriggerNudge}
                     onCancelAutoSettle={sendCancelAutoSettle}
                     onOpenPresentation={handleOpenPresentationWindow}

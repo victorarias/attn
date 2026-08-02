@@ -1,0 +1,23 @@
+kind: added
+area: terminal
+change: >
+  Annotate an agent's answer in the terminal where you read it. Hold Option and
+  drag across part of any recent message from the agent to highlight it, then
+  pick a label ("Verify this", "Out of scope", "Needs tests", …) or write a
+  comment. A floating panel collects the set, and "Send all" types every
+  annotation — each quoting the exact words it is about — into that session's
+  prompt for review. Holding Option lights a highlight under the pointer;
+  clicking it reopens that annotation to swap its label, edit its comment, or
+  delete it.
+notes: >
+  Two properties are the design, and both are worth a sentence in the release
+  copy. Highlights are anchored to offsets in the message's markdown rather
+  than to terminal rows, so they survive the TUI redrawing, output scrolling
+  past, a resize, or a font-size change; before painting, attn re-reads the
+  cells it is about to cover and confirms they still quote what was
+  highlighted, so a highlight that can no longer be placed disappears rather
+  than landing on words the agent did not write. And nothing is lost to
+  something the user did not do: annotations on earlier turns survive the agent
+  answering again, and they are persisted by the daemon on every change, so
+  closing the pane, switching sessions, or quitting attn leaves them intact.
+  Design record: docs/decisions/2026-08-02-terminal-annotations-anchor-to-the-transcript.md.

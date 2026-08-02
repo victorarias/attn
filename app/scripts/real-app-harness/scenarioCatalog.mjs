@@ -127,6 +127,14 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],
   },
   {
+    id: 'terminal-annotations',
+    label: 'Annotate a live claude turn; it survives the next turn and an app relaunch',
+    command: ['pnpm', 'run', 'real-app:scenario-terminal-annotations'],
+    // Two live agent turns plus a full app relaunch and rehydrate. The agent
+    // decides how long it thinks; that is not what is under test here.
+    timeoutMs: 600_000,
+  },
+  {
     id: 'terminal-context-menu',
     label: 'Terminal context menu via native right-click + clipboard',
     command: ['pnpm', 'run', 'real-app:scenario-terminal-context-menu'],
