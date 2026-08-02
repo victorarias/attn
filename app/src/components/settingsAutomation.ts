@@ -10,6 +10,7 @@ const SETTINGS_SECTION_IDS = [
   'connectivity',
   'plugins',
   'agents',
+  'data',
   'review',
   'hygiene',
   'backgroundTasks',

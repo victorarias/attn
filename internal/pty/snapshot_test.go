@@ -25,6 +25,12 @@ func TestScreenSnapshot_IncludesScreenSnapshotWhenAvailable(t *testing.T) {
 	if info.Screen.Cols != 12 || info.Screen.Rows != 4 {
 		t.Fatalf("screen size = %dx%d, want 12x4", info.Screen.Cols, info.Screen.Rows)
 	}
+	if got, want := info.Screen.Text, gt.ViewportText(); got != want {
+		t.Fatalf("screen text = %q, want %q", got, want)
+	}
+	if !info.Screen.HasText {
+		t.Fatal("screen snapshot should mark plain text available")
+	}
 	assertScreenSnapshotReplays(t, gt, info)
 }
 

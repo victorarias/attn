@@ -637,10 +637,13 @@ func (s *Session) screenSnapshot() SnapshotInfo {
 	}
 	s.replayMu.Lock()
 	if s.ghostty != nil {
+		viewportText := s.ghostty.ViewportText()
 		snapshot := s.ghostty.SerializeViewport()
 		if snapshot.VTDump != nil {
 			info.Screen = &ViewportSnapshot{
 				Payload: snapshot.VTDump,
+				Text:    viewportText,
+				HasText: true,
 				Cols:    uint16(snapshot.Cols),
 				Rows:    uint16(snapshot.Rows),
 			}

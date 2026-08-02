@@ -94,11 +94,22 @@ interface SettingsModalProps {
   taskChangeSignal?: number;
 }
 
-type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'review' | 'hygiene' | 'backgroundTasks';
+type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'data' | 'review' | 'hygiene' | 'backgroundTasks';
 
 // Fallback shown when the daemon has not yet sent a normalized value; the daemon
 // mirrors this default (agent.DefaultContextWindowCap) for both context-window caps.
 const DEFAULT_CONTEXT_WINDOW_CAP = 128000;
+const MODEL_CAPTURE_INTERVAL_OPTIONS = [5, 10, 30, 60];
+const MODEL_CAPTURE_MAX_GB_OPTIONS = [1, 2, 5, 10, 25];
+
+function formatByteCount(raw: string | undefined): string {
+  const bytes = Number(raw || '0');
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / (1024 ** unit);
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
 
 // Reasoning-effort levels the chief_effort_<agent> and default_effort_<agent>
 // settings accept, per agent. Blank (agent default) is added separately as the
@@ -256,6 +267,11 @@ export function SettingsModal({
   const tailscaleEnabled = (settings.tailscale_enabled || 'false') === 'true';
   const workflowsEnabled = (settings.workflows_enabled || 'false') === 'true';
   const autoApproveEnabled = (settings.auto_approve_enabled || 'false') === 'true';
+  const modelCaptureEnabled = (settings['model_capture.enabled'] || 'false') === 'true';
+  const modelCaptureInterval = settings['model_capture.interval_seconds'] || '10';
+  const modelCaptureMaxGB = settings['model_capture.max_gb'] || '5';
+  const modelCapturePath = settings['model_capture.path'] || '';
+  const modelCaptureBytes = formatByteCount(settings['model_capture.bytes']);
   const tailscaleStatus = settings.tailscale_status || 'disabled';
   const tailscaleURL = settings.tailscale_url || '';
   const tailscaleDomain = settings.tailscale_domain || '';
@@ -499,6 +515,10 @@ export function SettingsModal({
   const handleToggleWorkflows = useCallback(() => {
     onSetSetting('workflows_enabled', workflowsEnabled ? 'false' : 'true');
   }, [onSetSetting, workflowsEnabled]);
+
+  const handleToggleModelCapture = useCallback(() => {
+    onSetSetting('model_capture.enabled', modelCaptureEnabled ? 'false' : 'true');
+  }, [modelCaptureEnabled, onSetSetting]);
 
   const handleInputBlur = useCallback(() => {
     if (projectsDir !== actualProjectsDir) {
@@ -995,6 +1015,19 @@ export function SettingsModal({
       ],
     },
     {
+      label: 'Data',
+      items: [
+        {
+          id: 'data',
+          label: 'Model data capture',
+          title: 'Local model data capture',
+          description: 'Opt-in collection of visible Codex and Claude terminal viewports for local model evaluation and training.',
+          count: 3,
+          keywords: 'model training dataset capture privacy terminal viewport local retention sampling',
+        },
+      ],
+    },
+    {
       label: 'Review',
       items: [
         {
@@ -1088,6 +1121,15 @@ export function SettingsModal({
             <span className={`settings-pill ${hasReviewModelChange ? 'warn' : 'good'}`}>
               {hasReviewModelChange ? 'unsaved edits' : 'model saved'}
             </span>
+          </>
+        );
+      case 'data':
+        return (
+          <>
+            <span className={`settings-pill ${modelCaptureEnabled ? 'warn' : 'good'}`}>
+              {modelCaptureEnabled ? 'capture on' : 'capture off'}
+            </span>
+            <span className="settings-pill">{modelCaptureBytes}</span>
           </>
         );
       case 'hygiene':
@@ -2441,6 +2483,97 @@ export function SettingsModal({
     </>
   );
 
+  const renderDataSettings = () => (
+    <>
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Local models</div>
+          <h3>Terminal viewport capture</h3>
+          <p className="settings-description">
+            Builds a local corpus for evaluating and training models that understand
+            Codex and Claude terminal screens. Collection is off by default.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-warning">
+            Captures exact visible terminal text. Records may contain source code,
+            conversations, command output, and secrets. Files stay in this attn profile
+            and are never uploaded automatically.
+          </div>
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Capture local Codex and Claude sessions</p>
+              <p className="settings-row-copy">
+                Applies to sessions already running and sessions launched later. Disabling
+                collection stops new records but keeps the corpus already on disk.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-model-capture-toggle"
+              onClick={handleToggleModelCapture}
+            >
+              {modelCaptureEnabled ? 'Stop capture' : 'Enable capture'}
+            </button>
+          </div>
+          <div className="settings-field-grid">
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-model-capture-interval">
+                Changed-frame interval
+              </label>
+              <select
+                id="settings-model-capture-interval"
+                data-testid="settings-model-capture-interval"
+                className="settings-input"
+                value={modelCaptureInterval}
+                onChange={(event) => onSetSetting('model_capture.interval_seconds', event.target.value)}
+              >
+                {!MODEL_CAPTURE_INTERVAL_OPTIONS.includes(Number(modelCaptureInterval)) && (
+                  <option value={modelCaptureInterval}>{modelCaptureInterval} seconds</option>
+                )}
+                {MODEL_CAPTURE_INTERVAL_OPTIONS.map((seconds) => (
+                  <option key={seconds} value={seconds}>{seconds} seconds</option>
+                ))}
+              </select>
+              <span className="settings-hint">
+                State changes are captured immediately; unchanged viewports are deduplicated.
+              </span>
+            </div>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor="settings-model-capture-max-gb">
+                Storage cap
+              </label>
+              <select
+                id="settings-model-capture-max-gb"
+                data-testid="settings-model-capture-max-gb"
+                className="settings-input"
+                value={modelCaptureMaxGB}
+                onChange={(event) => onSetSetting('model_capture.max_gb', event.target.value)}
+              >
+                {!MODEL_CAPTURE_MAX_GB_OPTIONS.includes(Number(modelCaptureMaxGB)) && (
+                  <option value={modelCaptureMaxGB}>{modelCaptureMaxGB} GB</option>
+                )}
+                {MODEL_CAPTURE_MAX_GB_OPTIONS.map((gb) => (
+                  <option key={gb} value={gb}>{gb} GB</option>
+                ))}
+              </select>
+              <span className="settings-hint">Oldest hourly files are removed first.</span>
+            </div>
+          </div>
+          <div className="settings-meta-row">
+            <span className="settings-meta-label">Captured</span>
+            <code data-testid="settings-model-capture-size">{modelCaptureBytes}</code>
+          </div>
+          <div className="settings-meta-row">
+            <span className="settings-meta-label">Folder</span>
+            <code data-testid="settings-model-capture-path">{modelCapturePath || 'Waiting for daemon settings…'}</code>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+
   const renderHygieneSettings = () => (
     <>
       <section className="settings-block">
@@ -2533,6 +2666,8 @@ export function SettingsModal({
         return renderPluginSettings();
       case 'agents':
         return renderAgentSettings();
+      case 'data':
+        return renderDataSettings();
       case 'review':
         return renderReviewSettings();
       case 'hygiene':

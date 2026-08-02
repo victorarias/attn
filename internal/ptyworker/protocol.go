@@ -160,8 +160,11 @@ type SnapshotResult struct {
 	Rows           uint16 `json:"rows"`
 	Running        bool   `json:"running"`
 	ScreenSnapshot []byte `json:"screen_snapshot,omitempty"`
-	ScreenCols     uint16 `json:"screen_cols,omitempty"`
-	ScreenRows     uint16 `json:"screen_rows,omitempty"`
+	// ScreenText is a pointer so an old worker omitting the additive field is
+	// distinguishable from a genuinely blank viewport.
+	ScreenText *string `json:"screen_text,omitempty"`
+	ScreenCols uint16  `json:"screen_cols,omitempty"`
+	ScreenRows uint16  `json:"screen_rows,omitempty"`
 }
 
 // AttachBlock is the wire form of one resolved command block (see
