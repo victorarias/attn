@@ -59,16 +59,24 @@ func TestCreateDelegatedTicketFallsBackPastSequentialRange(t *testing.T) {
 		}
 	}
 
-	session := &protocol.Session{ID: "sess-1", Directory: "/tmp/x"}
-	id, err := d.createDelegatedTicket("sess-a", false, session, "the brief", "attn", "codex")
-	if err != nil {
-		t.Fatalf("createDelegatedTicket past sequential range: %v", err)
+	// Two allocations: the fallback must be random, so it neither repeats itself nor
+	// resumes counting. The suffix is hex and so is all digits about 6% of the time —
+	// its fixed width, not its non-numeric-ness, is what separates it from the walk.
+	var ids []string
+	for i, sessionID := range []string{"sess-1", "sess-2"} {
+		session := &protocol.Session{ID: sessionID, Directory: "/tmp/x"}
+		id, err := d.createDelegatedTicket("sess-a", false, session, "the brief", "attn", "codex")
+		if err != nil {
+			t.Fatalf("createDelegatedTicket %d past sequential range: %v", i, err)
+		}
+		suffix, ok := strings.CutPrefix(id, "attn-")
+		if !ok || len(suffix) != ticketSlugRandomSuffixLen {
+			t.Fatalf("fallback id = %q, want attn- plus a %d-character random suffix, not the sequential walk continuing", id, ticketSlugRandomSuffixLen)
+		}
+		ids = append(ids, id)
 	}
-	if !strings.HasPrefix(id, "attn-") || id == "attn-2" {
-		t.Fatalf("fallback id = %q, want a random attn-<suffix>", id)
-	}
-	if _, err := strconv.Atoi(strings.TrimPrefix(id, "attn-")); err == nil {
-		t.Fatalf("fallback id = %q, want a non-numeric suffix past the sequential range", id)
+	if ids[0] == ids[1] {
+		t.Fatalf("both fallbacks allocated %q, want distinct random suffixes", ids[0])
 	}
 }
 
