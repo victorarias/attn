@@ -332,6 +332,7 @@ export function QueueSnoozedSection({
   return (
     <div className="muted-sessions-section" data-testid="sidebar-snoozed">
       <button
+        type="button"
         className="muted-sessions-header"
         onClick={onToggleExpanded}
         aria-expanded={expanded}

@@ -26,7 +26,13 @@ const VIEWPORT_MARGIN = 8;
 export function SnoozeMenu({ sessionLabel, anchor, onSnooze, onClose }: SnoozeMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(anchor);
-  const openedAt = useRef(new Date());
+  // Lazily, so the Date is built once when the menu opens rather than on every
+  // render and thrown away — the frozen instant is the point, and a rebuilt one
+  // would be the very thing this ref exists to avoid if useRef ever took the
+  // second value.
+  const openedAtRef = useRef<Date | null>(null);
+  if (openedAtRef.current === null) openedAtRef.current = new Date();
+  const openedAt = openedAtRef.current;
 
   useEscapeStack(onClose, true);
 
@@ -61,7 +67,7 @@ export function SnoozeMenu({ sessionLabel, anchor, onSnooze, onClose }: SnoozeMe
 
   const choose = (id: SnoozeChoiceId) => {
     onClose();
-    onSnooze(snoozeInstant(id, openedAt.current));
+    onSnooze(snoozeInstant(id, openedAt));
   };
 
   return (
@@ -83,7 +89,7 @@ export function SnoozeMenu({ sessionLabel, anchor, onSnooze, onClose }: SnoozeMe
           onClick={() => choose(choice.id)}
         >
           <span className="snooze-menu-label">{choice.label}</span>
-          <span className="snooze-menu-detail">{choice.detail(openedAt.current)}</span>
+          <span className="snooze-menu-detail">{choice.detail(openedAt)}</span>
         </button>
       ))}
     </div>
