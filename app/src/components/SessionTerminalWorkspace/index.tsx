@@ -1147,6 +1147,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       ticketActions,
       annotationApi,
       closeTicketOverlay,
+      onCancelCountdown,
     ]);
 
     const focusModeTitle = useMemo(() => {
