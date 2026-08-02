@@ -1868,6 +1868,9 @@ export function useUiAutomationBridge({
             state: row.getAttribute('data-state') || '',
             workspaceId: row.getAttribute('data-workspace-id') || '',
             age: row.querySelector('.queue-row-age')?.textContent?.trim() || '',
+            // When a deferred agent comes back, as the row says it. Empty on
+            // every row that is not snoozed.
+            wake: row.querySelector('.queue-row-wake-at')?.textContent?.trim() || '',
             selected: row.classList.contains('selected'),
             open: open
               ? {
@@ -1879,6 +1882,11 @@ export function useUiAutomationBridge({
           };
         };
         const chiefRow = band?.querySelector('[data-testid^="queue-chief-"]');
+        // The snoozed section is a sibling of the bands, not part of them —
+        // deferred agents answer "what did I put off", not "whose turn is it" —
+        // so it is read from the document rather than from within the band.
+        const snoozedSection = document.querySelector('[data-testid="sidebar-snoozed"]');
+        const snoozedHeader = snoozedSection?.querySelector('[data-testid="snoozed-section-header"]');
         return {
           present: Boolean(band),
           empty: Boolean(band?.querySelector('[data-testid="queue-empty"]')),
@@ -1887,6 +1895,15 @@ export function useUiAutomationBridge({
             .map((row) => readRow(row, 'queue-turn-')),
           settled: Array.from(band?.querySelectorAll('[data-testid^="queue-settled-"]') || [])
             .map((row) => readRow(row, 'queue-settled-')),
+          snoozed: {
+            present: Boolean(snoozedSection),
+            header: snoozedHeader?.textContent?.trim() || '',
+            expanded: snoozedHeader?.getAttribute('aria-expanded') === 'true',
+            // Empty while the section is collapsed, which is a real answer: a
+            // collapsed section is what the user sees.
+            rows: Array.from(snoozedSection?.querySelectorAll('[data-testid^="queue-snoozed-"]') || [])
+              .map((row) => readRow(row, 'queue-snoozed-')),
+          },
           // What is left of the tree while the queue is on: pinned and tile-only
           // workspaces. An agent in a band must not also be here — appearing
           // twice is what made a row look like it moved.

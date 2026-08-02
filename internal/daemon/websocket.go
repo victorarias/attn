@@ -1013,6 +1013,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 	case protocol.CmdWorkspaceSelected: // wire: workspace_selected
 	case protocol.CmdSettleTurn: // wire: settle_turn
 		d.handleSettleTurn(msg.(*protocol.SettleTurnMessage))
+	case protocol.CmdSnoozeTurn: // wire: snooze_turn
+		d.handleSnoozeTurn(msg.(*protocol.SnoozeTurnMessage))
+	case protocol.CmdWakeTurn: // wire: wake_turn
+		d.handleWakeTurn(msg.(*protocol.WakeTurnMessage))
 	case protocol.CmdCancelAutoSettle: // wire: cancel_auto_settle
 		d.handleCancelAutoSettle(msg.(*protocol.CancelAutoSettleMessage))
 	case protocol.CmdTriggerNudge: // wire: trigger_nudge
@@ -1331,6 +1335,17 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		// Same reasoning as settle_turn: the countdown that would close the turn
 		// runs in the daemon that owns the session, so the cancel has to reach it.
 		if typed, ok := msg.(*protocol.CancelAutoSettleMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdSnoozeTurn: // wire: snooze_turn
+		// Same again: the deadline is stored beside the turn stamps and the wake
+		// timer runs in the owning daemon. `until` is already absolute, so it
+		// crosses endpoints without any timezone reinterpretation.
+		if typed, ok := msg.(*protocol.SnoozeTurnMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdWakeTurn: // wire: wake_turn
+		if typed, ok := msg.(*protocol.WakeTurnMessage); ok {
 			return typed.SessionID
 		}
 	}

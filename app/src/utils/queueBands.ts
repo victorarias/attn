@@ -1,4 +1,5 @@
 import type { WorkspaceWithSessions, WorkspaceViewSession } from './workspaceViewModels';
+import { isSnoozed } from './snoozeDurations';
 
 /**
  * The daemon-owned setting selecting the sidebar arrangement: off (the default)
@@ -56,6 +57,7 @@ export interface QueueBandSession extends WorkspaceViewSession {
   chiefOfStaff?: boolean;
   turnOwed?: boolean;
   turnOpenedAt?: string;
+  turnSnoozedUntil?: string;
 }
 
 export interface QueueRow<TSession extends QueueBandSession> {
@@ -126,6 +128,14 @@ export interface QueueBands<TSession extends QueueBandSession> {
   turns: QueueRow<TSession>[];
   /** Everything else you could go and look at, in a stable order. */
   settled: QueueRow<TSession>[];
+  /**
+   * Agents the user deferred, soonest wake first. They are in neither band: a
+   * snooze is an answer to "whose turn is it" — not yours, not yet — and it has
+   * a return time, which is what the section below the settled band exists to
+   * show. Soonest first because the only question a snoozed row answers is when
+   * it comes back.
+   */
+  snoozed: QueueRow<TSession>[];
 }
 
 /**
@@ -153,10 +163,12 @@ export interface QueueBands<TSession extends QueueBandSession> {
  */
 export function buildQueueBands<TSession extends QueueBandSession>(
   workspaces: WorkspaceWithSessions<TSession>[],
+  now: number = Date.now(),
 ): QueueBands<TSession> {
   let chief: QueueRow<TSession> | null = null;
   const turns: QueueRow<TSession>[] = [];
   const settled: QueueRow<TSession>[] = [];
+  const snoozed: QueueRow<TSession>[] = [];
 
   for (const workspace of workspaces) {
     for (const session of workspace.sessions) {
@@ -174,7 +186,13 @@ export function buildQueueBands<TSession extends QueueBandSession>(
       if (workspace.pinned || workspace.muted) {
         continue;
       }
-      if (session.turnOwed) {
+      // Before the turn check, though the two cannot both be true: the daemon
+      // settles as it snoozes, so a snoozed session never carries turnOwed. The
+      // order makes the row's home independent of that invariant holding in a
+      // snapshot taken mid-broadcast.
+      if (isSnoozed(session.turnSnoozedUntil, now)) {
+        snoozed.push(row);
+      } else if (session.turnOwed) {
         turns.push(row);
       } else {
         settled.push(row);
@@ -183,8 +201,19 @@ export function buildQueueBands<TSession extends QueueBandSession>(
   }
 
   turns.sort((a, b) => compareTurnOrder(a.session, b.session));
+  snoozed.sort((a, b) => compareWakeOrder(a.session, b.session));
 
-  return { chief, turns, settled };
+  return { chief, turns, settled, snoozed };
+}
+
+/** Soonest wake first, tie-broken by id so the order is total. */
+function compareWakeOrder(a: QueueBandSession, b: QueueBandSession): number {
+  const untilA = a.turnSnoozedUntil ?? '';
+  const untilB = b.turnSnoozedUntil ?? '';
+  if (untilA !== untilB) {
+    return untilA < untilB ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : 1;
 }
 
 /**
@@ -237,11 +266,15 @@ export type QueueAdvance<TSession extends QueueBandSession> =
  * was ever there, and the earlier one is also the only place the user's
  * position in the queue still exists.
  *
- * The move that matters is turns → settled specifically. Pinning or muting a
- * workspace clears turn_owed on its sessions too, and those rows leave the
- * bands entirely rather than landing in settled — so requiring the arrival,
+ * The move that matters is turns → settled or turns → snoozed. Pinning or muting
+ * a workspace clears turn_owed on its sessions too, and those rows leave the
+ * bands entirely rather than landing in either — so requiring the arrival,
  * rather than just the departure, is what keeps a pin from carrying the user
  * away from the workspace they pinned to keep in view.
+ *
+ * Snoozed counts because a snooze is a turn-closing act performed on the agent
+ * the user is looking at, exactly like a settle: leaving them parked in an agent
+ * they just deferred is the bookkeeping move-on exists to remove.
  *
  * Only the position comes from the old snapshot; whether a row is still worth
  * going to is always read from `bands`. One broadcast can close several turns —
@@ -263,8 +296,10 @@ export function advanceAfterTurnClosed<TSession extends QueueBandSession>(
 ): QueueAdvance<TSession> | null {
   if (!sessionId || !bands) return null;
   const owedBefore = previousTurns.some((row) => row.session.id === sessionId);
-  const settledNow = bands.settled.some((row) => row.session.id === sessionId);
-  if (!owedBefore || !settledNow) return null;
+  const closedNow =
+    bands.settled.some((row) => row.session.id === sessionId) ||
+    bands.snoozed.some((row) => row.session.id === sessionId);
+  if (!owedBefore || !closedNow) return null;
   const stillOwed = new Set(bands.turns.map((row) => row.session.id));
   const next = nextOwedAfter(previousTurns, sessionId, stillOwed) ?? bands.turns[0] ?? null;
   return next ? { to: 'session', row: next } : { to: 'dashboard' };

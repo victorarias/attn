@@ -14,6 +14,7 @@ interface KeyboardShortcutsConfig {
   onJumpToWaiting: () => void;
   /** Undefined while the queue arrangement is off; the keystroke is then unbound. */
   onSettleTurn?: () => void;
+  onSnoozeTurn?: () => void;
   onCancelAutoSettle?: () => void;
   onSelectWorkspaceByIndex: (index: number) => void;
   onPrevSession: () => void;
@@ -44,6 +45,7 @@ export function useKeyboardShortcuts({
   onToggleGridMode,
   onJumpToWaiting,
   onSettleTurn,
+  onSnoozeTurn,
   onCancelAutoSettle,
   onSelectWorkspaceByIndex,
   onPrevSession,
@@ -79,6 +81,9 @@ export function useKeyboardShortcuts({
   // keystroke has nothing visible to act on, and an invisible verb that silently
   // stamps state is worse than no verb.
   useShortcut('session.settle', onSettleTurn ?? (() => {}), enabled && !!onSettleTurn);
+  // Same gate: snooze defers a turn, and there is no queue to defer out of while
+  // the arrangement is off.
+  useShortcut('session.snooze', onSnoozeTurn ?? (() => {}), enabled && !!onSnoozeTurn);
   useShortcut('session.cancelAutoSettle', onCancelAutoSettle ?? (() => {}), enabled && !!onCancelAutoSettle);
   useShortcut('session.toggleSidebar', onToggleSidebar ?? (() => {}), enabled && !!onToggleSidebar);
   useShortcut('session.refreshPRs', onRefreshPRs ?? (() => {}), enabled && !!onRefreshPRs);

@@ -5,6 +5,7 @@ import { SidebarSettlingBar } from './SettlingIndicator';
 import { formatShortcut } from '../shortcuts/formatShortcut';
 import type { UISessionState } from '../types/sessionState';
 import { formatTurnAge, type QueueBands as QueueBandsModel, type QueueRow } from '../utils/queueBands';
+import { formatWakeTime } from '../utils/snoozeDurations';
 import { useNow, TURN_AGE_TICK_MS } from '../hooks/useNow';
 
 export interface QueueBandSessionView {
@@ -15,6 +16,7 @@ export interface QueueBandSessionView {
   chiefOfStaff?: boolean;
   turnOwed?: boolean;
   turnOpenedAt?: string;
+  turnSnoozedUntil?: string;
   autoSettleFiresAt?: string;
 }
 
@@ -43,14 +45,24 @@ interface QueueBandsProps {
    * reach for anything in a band.
    */
   onOpenActions?: (session: { id: string; label: string; chiefOfStaff?: boolean }, event: ReactMouseEvent) => void;
+  /**
+   * Open the duration menu for a row. Offered on turns and on settled rows
+   * alike: deferring a run before it finishes — so the turn it would open never
+   * opens — is the case snooze exists for, and that row is by definition not in
+   * the turns band yet.
+   */
+  onOpenSnooze?: (session: { id: string; label: string }, event: ReactMouseEvent) => void;
 }
 
 function QueueRowView({
   row,
   selected,
   age,
+  wake,
   onSelect,
   onSettle,
+  onSnooze,
+  onWake,
   onPin,
   onOpenActions,
   showSettling,
@@ -59,8 +71,12 @@ function QueueRowView({
   row: QueueRow<QueueBandSessionView>;
   selected: boolean;
   age?: string;
+  /** When a deferred agent comes back. Only snoozed rows carry one. */
+  wake?: string;
   onSelect: () => void;
   onSettle?: () => void;
+  onSnooze?: (event: ReactMouseEvent) => void;
+  onWake?: () => void;
   onPin?: () => void;
   onOpenActions?: (event: ReactMouseEvent) => void;
   showSettling?: boolean;
@@ -103,8 +119,39 @@ function QueueRowView({
       <span className="session-label">{session.label}</span>
       {session.chiefOfStaff && <ChiefOfStaffBadge />}
       {age && <span className="queue-row-age">{age}</span>}
-      {(onOpenActions || onPin || onSettle) && (
+      {wake && <span className="queue-row-wake-at">{wake}</span>}
+      {(onOpenActions || onPin || onSettle || onSnooze || onWake) && (
         <div className="queue-row-controls">
+          {onWake && (
+            <button
+              type="button"
+              className="queue-row-wake"
+              data-testid={`queue-wake-${session.id}`}
+              title="Wake now — bring it back to the queue"
+              aria-label={`Wake ${session.label}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onWake();
+              }}
+            >
+              ↩
+            </button>
+          )}
+          {onSnooze && (
+            <button
+              type="button"
+              className="queue-row-snooze"
+              data-testid={`queue-snooze-${session.id}`}
+              title={`Snooze this agent (${formatShortcut('session.snooze')})`}
+              aria-label={`Snooze ${session.label}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSnooze(event);
+              }}
+            >
+              ☾
+            </button>
+          )}
           {onOpenActions && (
             <div className="session-actions">
               <button
@@ -170,9 +217,20 @@ function QueueRowView({
  * Only pinned and muted workspaces still render as groups, below; they are
  * places you go and get work rather than a list handed to you.
  */
-export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, onScreenSessionIds, onPinWorkspace, onOpenActions }: QueueBandsProps) {
+export function QueueBands({
+  bands,
+  selectedId,
+  onSelectSession,
+  onSettleTurn,
+  onScreenSessionIds,
+  onPinWorkspace,
+  onOpenActions,
+  onOpenSnooze,
+}: QueueBandsProps) {
   const now = useNow(TURN_AGE_TICK_MS);
   const offScreen = (id: string) => !onScreenSessionIds?.has(id);
+  const snoozeHandler = (session: QueueBandSessionView) =>
+    onOpenSnooze && ((event: ReactMouseEvent) => onOpenSnooze(session, event));
 
   return (
     <div className="queue-bands" data-testid="sidebar-queue">
@@ -200,6 +258,7 @@ export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, o
             age={formatTurnAge(row.session.turnOpenedAt, now)}
             onSelect={() => onSelectSession(row.session.id)}
             onSettle={() => onSettleTurn(row.session.id)}
+            onSnooze={snoozeHandler(row.session)}
             onPin={onPinWorkspace && (() => onPinWorkspace(row.workspaceId, true))}
             onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
             showSettling={offScreen(row.session.id)}
@@ -220,12 +279,83 @@ export function QueueBands({ bands, selectedId, onSelectSession, onSettleTurn, o
               row={row}
               selected={selectedId === row.session.id}
               onSelect={() => onSelectSession(row.session.id)}
+              // Snooze is offered here too: deferring an agent that is still
+              // running, so the turn it would open on finishing never opens, is
+              // the reach the verb was designed for — and that agent is settled,
+              // not owed.
+              onSnooze={snoozeHandler(row.session)}
               onPin={onPinWorkspace && (() => onPinWorkspace(row.workspaceId, true))}
               onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
               testIdPrefix="queue-settled"
             />
           ))}
         </>
+      )}
+    </div>
+  );
+}
+
+interface QueueSnoozedSectionProps {
+  rows: QueueRow<QueueBandSessionView>[];
+  selectedId: string | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onSelectSession: (id: string) => void;
+  onWakeTurn: (id: string) => void;
+}
+
+/**
+ * Deferred agents, collapsed at the foot of the sidebar above the muted
+ * workspaces.
+ *
+ * Not a band. The bands answer "whose turn is it"; this answers "what did I put
+ * off", which is a different question with a different lifetime — every row here
+ * leaves on its own, at a time the user named. It sits with muted rather than
+ * with settled because both are the quiet end of the sidebar, and it sits above
+ * muted because *not yet* is nearer to your attention than *not ever*.
+ *
+ * Collapsed by default, with a count. A snooze surfaces itself when it wakes, so
+ * the section is for checking on a promise or breaking it early — neither of
+ * which is worth standing room.
+ */
+export function QueueSnoozedSection({
+  rows,
+  selectedId,
+  expanded,
+  onToggleExpanded,
+  onSelectSession,
+  onWakeTurn,
+}: QueueSnoozedSectionProps) {
+  const now = useNow(TURN_AGE_TICK_MS);
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="muted-sessions-section" data-testid="sidebar-snoozed">
+      <button
+        className="muted-sessions-header"
+        onClick={onToggleExpanded}
+        aria-expanded={expanded}
+        data-testid="snoozed-section-header"
+      >
+        <span className={`muted-sessions-chevron ${expanded ? 'expanded' : ''}`}>▸</span>
+        Snoozed ({rows.length})
+      </button>
+      {expanded && (
+        <div className="muted-sessions-list">
+          {rows.map((row) => (
+            // No settle: a snoozed turn is already closed. Waking is the only
+            // act, and it is the undo rather than a second way to dismiss.
+            <QueueRowView
+              key={row.session.id}
+              row={row}
+              selected={selectedId === row.session.id}
+              wake={formatWakeTime(row.session.turnSnoozedUntil, now)}
+              onSelect={() => onSelectSession(row.session.id)}
+              onWake={() => onWakeTurn(row.session.id)}
+              testIdPrefix="queue-snoozed"
+            />
+          ))}
+        </div>
       )}
     </div>
   );

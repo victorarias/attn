@@ -1263,6 +1263,8 @@
    otherwise visible strip. */
 .queue-row-controls .session-actions,
 .queue-row-controls .queue-row-pin,
+.queue-row-controls .queue-row-snooze,
+.queue-row-controls .queue-row-wake,
 .queue-row-controls .queue-row-settle {
   opacity: 1;
   pointer-events: auto;
@@ -1277,6 +1279,8 @@
 }
 
 .queue-row-settle,
+.queue-row-snooze,
+.queue-row-wake,
 .queue-row-pin {
   flex: 0 0 auto;
   background: none;
@@ -1289,13 +1293,30 @@
 }
 
 .queue-row:hover .queue-row-settle,
+.queue-row:hover .queue-row-snooze,
+.queue-row:hover .queue-row-wake,
 .queue-row:hover .queue-row-pin,
 .queue-row-settle:focus-visible,
+.queue-row-snooze:focus-visible,
+.queue-row-wake:focus-visible,
 .queue-row-pin:focus-visible {
   opacity: 1;
 }
 
 .queue-row-settle:hover,
+.queue-row-snooze:hover,
+.queue-row-wake:hover,
 .queue-row-pin:hover {
   color: var(--color-text-primary);
+}
+
+/* When a deferred agent comes back. It sits where the turn age sits on a queued
+   row — same column, same weight — because both answer the row's one question:
+   a turn's is how long you have owed it, a snooze's is when it returns. */
+.queue-row-wake-at {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
 }

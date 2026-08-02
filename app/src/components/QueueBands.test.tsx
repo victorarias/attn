@@ -12,6 +12,7 @@ interface TestSession {
   chiefOfStaff?: boolean;
   turnOwed?: boolean;
   turnOpenedAt?: string;
+  turnSnoozedUntil?: string;
 }
 
 const baseProps = {
@@ -232,6 +233,100 @@ describe('the queue arrangement', () => {
       .map((icon) => icon.getAttribute('title'));
     expect(badgedTitles).toHaveLength(1);
     expect(badgedTitles[0]).toContain('beta');
+  });
+});
+
+describe('snoozing from the sidebar', () => {
+  // A real clock, because buildQueueBands compares the deadline against now.
+  const inAnHour = () => new Date(Date.now() + 3600_000).toISOString();
+
+  it('offers snooze on an owed turn and on a settled row alike', () => {
+    // Deferring a run *before* it finishes — so the turn it would open never
+    // opens — is the case the verb exists for, and that agent is settled.
+    const onOpenSnooze = vi.fn();
+    renderSidebar(sessions, true, { onOpenSnooze });
+
+    fireEvent.click(screen.getByTestId('queue-snooze-older'));
+    expect(onOpenSnooze).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'older' }),
+      expect.anything(),
+    );
+
+    fireEvent.click(screen.getByTestId('queue-snooze-settled'));
+    expect(onOpenSnooze).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: 'settled' }),
+      expect.anything(),
+    );
+  });
+
+  it('does not offer snooze on the chief, which never queues', () => {
+    renderSidebar(sessions, true, { onOpenSnooze: vi.fn() });
+    expect(screen.queryByTestId('queue-snooze-chief')).toBeNull();
+  });
+
+  it('takes a deferred agent out of the bands into its own collapsed section', () => {
+    const deferred: TestSession[] = [
+      ...sessions,
+      { id: 'later', label: 'later', state: 'idle', workspaceId: 'ws-a', turnSnoozedUntil: inAnHour() },
+    ];
+    const { container } = renderSidebar(deferred, true, { onWakeTurn: vi.fn() });
+
+    const bandRows = Array.from(container.querySelectorAll('.queue-bands .queue-row'))
+      .map((row) => row.getAttribute('data-testid'));
+    expect(bandRows).not.toContain('queue-settled-later');
+    expect(bandRows).not.toContain('queue-turn-later');
+
+    // Collapsed by default: a snooze surfaces itself when it wakes, so the
+    // section is for checking on a promise rather than standing room.
+    expect(screen.getByTestId('snoozed-section-header').textContent).toContain('Snoozed (1)');
+    expect(screen.queryByTestId('queue-snoozed-later')).toBeNull();
+  });
+
+  it('shows when each deferred agent comes back, and wakes it without selecting it', () => {
+    const onWakeTurn = vi.fn();
+    const onSelectSession = vi.fn();
+    const deferred: TestSession[] = [
+      { id: 'later', label: 'later', state: 'idle', workspaceId: 'ws-a', turnSnoozedUntil: inAnHour() },
+    ];
+    renderSidebar(deferred, true, { onWakeTurn, onSelectSession });
+
+    fireEvent.click(screen.getByTestId('snoozed-section-header'));
+    const row = screen.getByTestId('queue-snoozed-later');
+    expect(row.querySelector('.queue-row-wake-at')?.textContent).toBeTruthy();
+    // Already closed: waking is the undo, not a second way to dismiss.
+    expect(screen.queryByTestId('queue-settle-later')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('queue-wake-later'));
+    expect(onWakeTurn).toHaveBeenCalledWith('later');
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('sits above the muted workspaces', () => {
+    // *Not yet* is nearer to your attention than *not ever*.
+    const deferred: TestSession[] = [
+      { id: 'later', label: 'later', state: 'idle', workspaceId: 'ws-a', turnSnoozedUntil: inAnHour() },
+      { id: 'quiet', label: 'quiet', state: 'idle', workspaceId: 'ws-b' },
+    ];
+    const data = sidebarData(deferred, { 'ws-b': { muted: true } });
+    const { container } = render(
+      <Sidebar
+        {...baseProps}
+        {...data}
+        workspaces={data.workspaces.filter((workspace) => !workspace.muted)}
+        mutedWorkspaces={data.workspaces.filter((workspace) => workspace.muted)}
+        onWakeTurn={vi.fn()}
+        queue={buildQueueBands(data.workspaces)}
+      />
+    );
+
+    const sections = Array.from(container.querySelectorAll('.muted-sessions-header'))
+      .map((header) => header.textContent?.trim());
+    expect(sections).toEqual(['▸Snoozed (1)', '▸Muted Workspaces (1)']);
+  });
+
+  it('draws no section at all while nothing is deferred', () => {
+    renderSidebar(sessions, true, { onWakeTurn: vi.fn() });
+    expect(screen.queryByTestId('sidebar-snoozed')).toBeNull();
   });
 });
 

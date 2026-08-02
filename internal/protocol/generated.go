@@ -3997,6 +3997,9 @@ type Session struct {
 	// TurnOwed corresponds to the JSON schema field "turn_owed".
 	TurnOwed *bool `json:"turn_owed,omitempty,omitzero"`
 
+	// TurnSnoozedUntil corresponds to the JSON schema field "turn_snoozed_until".
+	TurnSnoozedUntil *string `json:"turn_snoozed_until,omitempty,omitzero"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
 
@@ -4286,6 +4289,17 @@ type SettleTurnMessage struct {
 
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID string `json:"session_id"`
+}
+
+type SnoozeTurnMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Until corresponds to the JSON schema field "until".
+	Until string `json:"until"`
 }
 
 type SpawnResultMessage struct {
@@ -5144,6 +5158,14 @@ type UpdateEndpointMessage struct {
 
 	// SshTarget corresponds to the JSON schema field "ssh_target".
 	SshTarget *string `json:"ssh_target,omitempty,omitzero"`
+}
+
+type WakeTurnMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
 }
 
 type WebSocketEvent struct {

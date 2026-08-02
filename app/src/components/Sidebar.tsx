@@ -8,7 +8,7 @@ import { SessionActionsPopover } from './SessionActionsPopover';
 import { GridLayoutControl } from './grid/GridLayoutControl';
 import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
-import { QueueBands } from './QueueBands';
+import { QueueBands, QueueSnoozedSection } from './QueueBands';
 import { SidebarNudgeBar, deriveNudgeMode } from './NudgeIndicator';
 import { SidebarSettlingBar } from './SettlingIndicator';
 import { formatShortcut } from '../shortcuts/formatShortcut';
@@ -141,6 +141,9 @@ interface SidebarProps {
   // tile-only workspaces.
   queue?: QueueBandsModel<LocalSession> | null;
   onSettleTurn?: (id: string) => void;
+  /** Open the snooze duration menu for a row, anchored at the click. */
+  onOpenSnooze?: (session: { id: string; label: string }, event: ReactMouseEvent) => void;
+  onWakeTurn?: (id: string) => void;
   /**
    * Sessions whose terminal tile is on screen right now. The auto-settle
    * countdown lives on the tile, so the sidebar draws it only for the sessions
@@ -348,6 +351,8 @@ export function Sidebar({
   onToggleDockCollapsed,
   queue = null,
   onSettleTurn,
+  onOpenSnooze,
+  onWakeTurn,
   onScreenSessionIds,
   mutedWorkspaces = [],
   mutedExpanded: mutedExpandedProp,
@@ -393,6 +398,10 @@ export function Sidebar({
   );
 
   const [mutedExpandedLocal, setMutedExpandedLocal] = useState(false);
+  // Local, not lifted: unlike muted, nothing outside the sidebar needs to know
+  // whether the snoozed section is open, and it collapses again on its own as
+  // rows wake out of it.
+  const [snoozedExpanded, setSnoozedExpanded] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [displayMode, setDisplayMode] = useState<'open' | 'tight' | 'boxed'>('boxed');
   const [renameTarget, setRenameTarget] = useState<{
@@ -1002,6 +1011,7 @@ export function Sidebar({
           onScreenSessionIds={onScreenSessionIds}
           onPinWorkspace={onPinWorkspace}
           onOpenActions={openSessionActions}
+          onOpenSnooze={onOpenSnooze}
         />
       )}
 
@@ -1215,6 +1225,19 @@ export function Sidebar({
           </div>
         )}
       </div>
+
+      {/* Above muted, below everything else: *not yet* is nearer to your
+          attention than *not ever*. */}
+      {queue && onWakeTurn && (
+        <QueueSnoozedSection
+          rows={queue.snoozed}
+          selectedId={selectedId}
+          expanded={snoozedExpanded}
+          onToggleExpanded={() => setSnoozedExpanded(!snoozedExpanded)}
+          onSelectSession={onSelectSession}
+          onWakeTurn={onWakeTurn}
+        />
+      )}
 
       {mutedWorkspaces.length > 0 && (
         <div className="muted-sessions-section">

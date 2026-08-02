@@ -103,6 +103,15 @@ export const scenarioCatalog = [
     timeoutMs: 900_000,
   },
   {
+    id: 'agent-queue-snooze',
+    label: 'Agent queue snooze: a deferral closes the turn, suppresses the next one, and wakes to the tail',
+    command: ['pnpm', 'run', 'real-app:scenario-agent-queue-snooze'],
+    // Boots two real Claude agents, defers one through the row menu, drives it
+    // through a second run under the deferral, restarts the daemon, and kills
+    // an agent process to prove the break-through.
+    timeoutMs: 900_000,
+  },
+  {
     id: 'automation-lifecycle',
     label: 'Automation lifecycle: edit-rebind, delete-resurrect, cleanup-dirty-safe',
     command: ['pnpm', 'run', 'real-app:scenario-automation-lifecycle'],

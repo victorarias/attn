@@ -264,6 +264,13 @@ type Daemon struct {
 	// Called inside the fire-time decision, between confirming the turn is still
 	// owed and settling it. Tests only; nil in production. See auto_settle.go.
 	autoSettlePreSettleHook func()
+
+	// snoozeMu guards the pending wake timers. A snooze's deadline lives in the
+	// store; only the timer that fires on it is in memory. See snooze.go.
+	snoozeMu       sync.Mutex
+	snoozeTimers   map[string]*snoozeTimer
+	snoozeWakeHook func(sessionID string) // tests only; nil in production
+
 	recoveryMu              sync.RWMutex
 	recovering              bool
 	notebookMu              sync.Mutex
@@ -962,6 +969,7 @@ func (d *Daemon) Start() error {
 	d.removeLegacyEmbeddedTailscaleState()
 	d.migrateKeeperCompactSettingKey() // one-time settings key rename (workspace_context_janitor -> workspace_keeper_compact)
 	d.migrateNotebookCronSettingKeys() // one-time settings key rename (notebook.dreaming.* -> notebook.cron.*)
+	d.rescheduleSnoozeWakes()          // deadlines are persisted; the timers that fire on them are not
 	go d.ensureTailscaleServeFromSettingsAndBroadcast()
 	d.hubManager.Start(d.doneContext())
 
@@ -1610,6 +1618,7 @@ func (d *Daemon) Stop() {
 	d.stopAllTranscriptWatchers()
 	d.stopNudgeCountdowns()
 	d.stopAutoSettleTimers()
+	d.stopSnoozeTimers()
 	if d.ptyBackend != nil {
 		_ = d.ptyBackend.Shutdown(context.Background())
 	}
@@ -1856,6 +1865,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 	}
 	d.clearNudgeState(sessionID)
 	d.clearAutoSettleState(sessionID)
+	d.clearSnoozeState(sessionID)
 	d.clearPTYWriteFence(sessionID)
 	d.store.Remove(sessionID)
 	// After the row is gone, not before: recordStateObservation gates on the row,
@@ -2934,6 +2944,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	d.decorateSessionWithStateReason(clone)
 	d.decorateSessionWithNudge(clone)
 	d.decorateSessionWithAutoSettle(clone)
+	d.decorateSessionWithSnooze(clone)
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
 	d.decorateSessionWithWorkspace(clone)
