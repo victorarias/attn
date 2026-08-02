@@ -5,8 +5,9 @@
 Root-cause and fix the recurring frontend terminal crashes behind the
 "Terminal issue recovered. We reloaded it for you." toast. The crash is a WASM
 trap inside the vendored ghostty VT core (`app/vendor/ghostty-vt/ghostty-vt.wasm`,
-pin `29d4aba`), not a rendering or lifecycle bug in the React layer. Recovery
-already works (server-authoritative snapshot remount in ~20ms, no data loss);
+pinned at `29d4aba` when this plan opened; now `56237efee`), not a rendering
+or lifecycle bug in the React layer. Recovery already works
+(server-authoritative snapshot remount in ~20ms, no data loss);
 the goal is that the model stops faulting, plus permanent instrumentation so
 any future fault of this class arrives with its own repro.
 
@@ -123,6 +124,7 @@ trap → recoverFromModelFault → noteRecovery(modelFault) → remount epoch
       signatures did not fall out of ~1500 iterations.
 - [ ] Add **capture-on-fault** instrumentation for the *trap* fault modes and
       wait for the next real fault (this class recurs; 3 faults today).
+      *In flight as a separate change; not in the pin-bump PR.*
       Per-pane bounded ring of raw model inputs, dumped into the existing
       `ghostty_model_fault` diagnostics record:
 
@@ -140,8 +142,9 @@ type ModelOpRing = Array<
       The ring starts at model construction (post-snapshot restore), so a
       replay needs the snapshot dump too — capture the attach snapshot
       (`attach_result.snapshot` dump + grid) alongside, same cap.
-- [ ] Minimize any repro to a fixture and commit it as a vitest regression
-      test (`node` environment, real wasm, no mocks).
+- [x] Minimize any repro to a fixture and commit it as a vitest regression
+      test (`node` environment, real wasm, no mocks) — done for the hang, see
+      Phase 4.
 
 ## Phase 2 — Root-cause discrimination (with repro in hand)
 
@@ -149,33 +152,42 @@ type ModelOpRing = Array<
 and with the mode-7 wrapper alike → pure core bug at `29d4aba`, not enabled by
 the app's resize dance. Option 3C is off the table as a primary fix.
 
-Remaining Phase 2 work:
+Bisect result (2026-08-02) — **the pin itself introduced the hang**:
 
-- [ ] Bisect ghostty `29d4aba..<last old-C-API commit>` using
-      `repro-ghostty-vt-resize-hang.mjs` as the test (wasm-build each step;
-      zig 0.15.2 while the range allows). Find the first commit where the
-      hang disappears — or learn it is unfixed upstream even at the boundary.
-- [ ] Find the bisect ceiling first: the commit where upstream landed the new
-      Terminal C API is where the old ghostty-web wasm-api patch stops
-      applying; it caps how far forward 3B can go.
-- [ ] Hang vs. traps: the hang repro is the bisect vehicle, but the
-      production faults are traps. After building a hang-fixed wasm, run a
-      long fuzz soak + the live divider-drag soak (Phase 4) to test whether
-      the trap family disappears with it. If traps persist, the
-      capture-on-fault ring (Phase 1) produces their own repro and the bisect
-      repeats with that fixture.
+- [x] Bisect ghostty `29d4aba..<ceiling>` using
+      `repro-ghostty-vt-resize-hang.mjs` as the test (wasm-build each step,
+      zig 0.15.2). **Verdict: `29d4aba` is the only commit in ghostty history
+      that reproduces the hang.** It is a *mid-PR* commit inside ghostty PR
+      #10337 and carries a hand-rolled capacity-doubling loop in
+      `cursorSetHyperlink` (the author's own `// FIXME: This SUCKS`). First
+      fixed commit = its direct child `25b7cc9f2` ("terminal: hyperlink state
+      uses increaseCapacity on screen"), which replaces the loop with
+      `increaseCapacity(.string_bytes)` — the same OSC 8 capacity family as
+      the June `startHyperlink` fix.
+- [x] Find the bisect ceiling. Two distinct ceilings, both well past the fix:
+      textual — the ghostty-web wasm-api patch stops applying at `1844a5f7b`
+      (broken by #11506); build — the last commit that builds in this
+      configuration is `4244c38be` (broken by #10383).
+- [ ] Hang vs. traps: the hang repro was the bisect vehicle, but the
+      production faults are traps. Run a long fuzz soak + the live
+      divider-drag soak (Phase 4) against the new pin to test whether the trap
+      family disappears with it. If traps persist, the capture-on-fault ring
+      (Phase 1) produces their own repro and the bisect repeats with that
+      fixture.
 
 ## Phase 3 — Fix options, ranked
 
-- **3A. Cherry-pick the fixing commit onto `29d4aba`** (preferred; exact
-  precedent: the June `startHyperlink` capacity fix, see
-  `app/vendor/ghostty-vt/README.md`). Extend
-  `ghostty-web-v0.4.0-compat.patch`, rebuild via
-  `app/scripts/build-ghostty-vt-wasm.sh`, update the README sha + rationale,
-  regression test green.
-- **3B. Bump the WASM pin forward** to the newest pre-API-redesign commit, if
-  the fixing commit lies within the patchable range and the patch still
-  applies. Same build/README mechanics as 3A.
+- [x] **3A/3B collapsed — pin bump to `56237efee`** (PR #10337 as merged to
+  ghostty main). The bisect made the choice: the fixing commit is the pin's
+  direct child, so cherry-picking it (3A) and bumping the pin (3B) reach the
+  same code, and the merge commit additionally moves us off mid-PR pinning —
+  the practice that made this bug reachable — and brings the rest of #10337's
+  page-overflow hardening. `ghostty_commit` in
+  `app/scripts/build-ghostty-vt-wasm.sh` bumped, wasm rebuilt with zig 0.15.2
+  (both patches apply verbatim; export surface identical at 79 exports;
+  reproducible sha256
+  `6c4f21f514be21b13ff0911817458c69f26d22fb41469c10b68c322627266e85`), README
+  pin/sha/rationale updated.
 - **3C. Client-side avoidance** — *demoted by Phase 2*: the hang reproduces
   through both resize call sites, so changing the mode-7 dance cannot be the
   fix for this bug. Retained only as a shape for any future fault that Phase 2
@@ -187,20 +199,23 @@ Remaining Phase 2 work:
 
 ## Phase 4 — Hardening + verification (any fix path)
 
-- [ ] Regression test: minimized repro as a vitest node-env test against the
-      real wasm (fails on `29d4aba`, passes on the fixed build).
+- [x] Regression test: minimized repro as a vitest node-env test against the
+      real wasm (`app/src/utils/ghosttyVtWasm.resizeHang.test.ts`, spawns
+      `repro-ghostty-vt-resize-hang.mjs` and asserts exit 0). Verified to fail
+      on the old `29d4aba` wasm (exit 1, HANG) and pass on the `56237efee`
+      build.
 - [ ] Keep a slim capture-on-fault ring in production builds permanently
       (bounded; this is the third crash class in this component in two months
       — startup hyperlink corruption in June, `bottom_clip`/`blank_after_resize`
-      incidents ongoing, now this).
+      incidents ongoing, now this). *In flight as a separate change; not in
+      the pin-bump PR.*
 - [ ] Live verification (dev profile, `make dev`): codex session in
       `~/projects/thunk`, divider-drag resize soak across single-column steps
       at 58 rows; confirm zero `model_fault` records in the profile's
       `terminal-diagnostics.jsonl` after a soak that previously trapped twice
       in 23s. Existing packaged scenario `terminal-block-resize` must stay
       green (it exercises the no-reflow path's block semantics).
-- [ ] CHANGELOG entry (user-visible: terminal no longer flashes/reloads
-      during split-divider drags).
+- [x] Changelog fragment (`changelog.d/ghostty-wasm-hang-pin-bump.yaml`).
 
 ## Decisions
 
@@ -220,9 +235,12 @@ Remaining Phase 2 work:
 
 ## Open questions
 
-- Does fixing the hang also fix the production traps? Same
+- Does fixing the hang also fix the production traps? **Still open.** Same
   resize/reflow+OSC-8 territory, but unproven — Phase 2's post-fix soak and
-  the capture-on-fault ring answer this empirically.
+  the capture-on-fault ring answer this empirically. The new pin does ship
+  #10337's PageList overflow detection and protection, which is aimed at
+  exactly the page-state corruption class the traps come from, so the odds
+  improved; that is not evidence, and the capture ring is what will settle it.
 - Is the render-OOB fault (11:52) the same corruption observed at a different
   entry point, or a second bug (upstream #139's page-boundary shape is
   column-width dependent — 120/130 repro, 80/140 don't — suspicious for our

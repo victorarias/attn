@@ -1,0 +1,22 @@
+kind: fixed
+area: terminal
+change: >
+  The terminal's VT engine could enter an infinite loop when resize sequences
+  followed hyperlink-heavy output, leaving the pane frozen at 100% CPU with no
+  crash and so no automatic recovery. The vendored engine pin moves one
+  upstream PR forward, from a mid-PR ghostty commit that introduced the loop to
+  that PR as merged, which contains the fix.
+symptom: >
+  A terminal pane stops updating and the app pegs a core after dragging a split
+  divider, most often on agent output full of clickable links. Typing goes
+  nowhere; only closing or reloading the pane brings it back.
+notes: >
+  Root-caused by a deterministic repro (app/scripts/repro-ghostty-vt-resize-hang.mjs,
+  now a regression test) and a bisect over ghostty history: the old pin was the
+  only commit that reproduced it. The recurring "Terminal issue recovered. We
+  reloaded it for you." toasts are a suspected but unproven member of the same
+  family — those are traps, not hangs, and nothing here proves they share a
+  cause. The new pin also ships upstream's PageList overflow detection and
+  protection, which targets the same page-state corruption class; a
+  capture-on-fault change lands separately and will settle whether the toasts
+  are gone.
