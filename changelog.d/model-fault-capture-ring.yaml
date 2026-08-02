@@ -1,0 +1,19 @@
+kind: internal
+area: terminal
+change: >
+  Each terminal pane now keeps a bounded in-memory ring of the raw inputs fed
+  to its Ghostty WASM model (writes, resizes with their reflow mode, resets,
+  and the attach-restore snapshot it was rebuilt from). When the model traps,
+  the ring is base64-encoded into the existing model_fault record in
+  terminal-diagnostics.jsonl, so a crash arrives with its own replayable repro.
+  app/scripts/replay-ghostty-model-fault.mjs replays such a record against the
+  real vendored wasm (exit 0 clean, 1 hang, 2 trap, 3 unreplayable capture).
+  No user-visible behavior change.
+notes: >
+  Phase 1 of docs/plans/2026-07-27-ghostty-wasm-model-crashes.md: the three
+  production traps on record had no repro, and Phase 4 keeps this capture in
+  production builds permanently. Caps are per pane: 512KB of retained write
+  bytes, 2048 ops, 512KB of restore dump (32x the largest of 106 real attach
+  snapshots measured in a production daemon log), and 2MB of encoded capture
+  per record. A restore dump that does not fit is marked snapshotTruncated and
+  the replay tool refuses it rather than replaying a divergent screen.

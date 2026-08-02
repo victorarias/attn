@@ -91,7 +91,9 @@ import {
   noteResize,
   registerRenderProbe,
   disposePaneDiagnostics,
+  TERMINAL_DIAGNOSTICS_FILE,
 } from '../utils/terminalDiagnosticsLog';
+import { createGhosttyModelOpRing, type ModelFaultCapture } from '../utils/ghosttyModelOpRing';
 import { captureUiSnapshot, recordUiDiag, UI_DIAGNOSTICS_FILE } from '../utils/uiDiagnosticsLog';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import { analyzeTerminalVisibleLines } from '../utils/terminalVisibleContent';
@@ -576,6 +578,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const blockStoreRef = useRef(new TerminalBlockStore());
     const selectedBlockIdRef = useRef<number | null>(null);
     const writeChainRef = useRef(Promise.resolve());
+    // Bounded ring of the raw inputs fed to this pane's model, dumped into the
+    // model_fault diagnostics record so a trap arrives with its own repro. Its
+    // epoch is one model: beginEpoch runs at construction, and a fault's rebuild
+    // starts a new one.
+    const modelOpRingRef = useRef(createGhosttyModelOpRing());
     const historicalReplayGenerationRef = useRef(0);
     const pendingReplayGeometryRef = useRef<PendingReplayGeometry | null>(null);
     // Queued historical-replay operations (writes + resizes) not yet applied.
@@ -701,6 +708,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       } catch {
         // Capturing supplementary DOM state must never defeat containment.
       }
+      // The inputs this model saw, base64-encoded once, here on the rare path.
+      let capture: ModelFaultCapture | undefined;
+      try {
+        capture = modelOpRingRef.current.capture();
+      } catch {
+        // Same rule as the DOM snapshot: evidence is best-effort, containment
+        // is not.
+      }
       noteModelFault(diagKeyRef.current, {
         session,
         paneKind,
@@ -708,6 +723,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         stack,
         cols,
         rows,
+        capture,
       });
       noteRecovery(diagKeyRef.current, {
         session,
@@ -719,6 +735,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       recordUiDiag({
         kind: 'ghostty_model_fault',
         diagnosticFile: UI_DIAGNOSTICS_FILE,
+        // The shell-level record stays small; the model's input capture (the
+        // replayable repro) rides the terminal-diagnostics model_fault record
+        // with the same pane/model/rendererEpoch.
+        captureIn: TERMINAL_DIAGNOSTICS_FILE,
         pane: diagKeyRef.current,
         session,
         paneKind,
@@ -1418,6 +1438,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // preceding it are applied. Without markers this degenerates to a
         // single write of the original bytes.
         const chunkBytes = typeof data === 'string' ? utf8Encoder.encode(data) : data;
+        // Capture-on-fault: record the raw chunk BEFORE the model sees it, so a
+        // trapping write is in the ring, and pre-wrapper, so the ring holds what
+        // the app was asked to write rather than the OSC 133 / grapheme-mode
+        // segmentation of it. `historicalReplay` is the attach restore — the
+        // only replay source since raw replay was deleted — and is the base
+        // state a repro starts from, so it is kept apart from live writes.
+        if (options?.historicalReplay) {
+          modelOpRingRef.current.noteRestoreChunk(chunkBytes, terminal.cols, terminal.rows);
+        } else {
+          modelOpRingRef.current.noteWrite(chunkBytes);
+        }
         const osc133 = parseOsc133(osc133StateRef.current, chunkBytes);
         osc133StateRef.current = osc133.state;
         for (const segment of osc133.segments) {
@@ -1678,6 +1709,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           });
           return;
         }
+        modelOpRingRef.current.noteResize(cols, rows, Boolean(options?.historicalReplay));
         if (options?.historicalReplay) {
           resizeGhosttyWithoutReflow(terminal, cols, rows);
         } else {
@@ -1777,6 +1809,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       try {
         const fromCols = terminal.cols;
         const fromRows = terminal.rows;
+        // Every fit resize takes the no-reflow path; the ring records which of
+        // the two call sites a resize came from because the mode-7 dance writes
+        // extra bytes into the model that a replay has to reproduce.
+        modelOpRingRef.current.noteResize(dims.cols, dims.rows, true);
         resizeGhosttyWithoutReflow(terminal, dims.cols, dims.rows);
         reconcileBlocksAfterResize(dims.cols !== fromCols);
         modelSizeRef.current = dims;
@@ -1867,7 +1903,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       write,
       resizeLocal,
       seedBlocks,
-      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
+      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
       scrollToTop: () => {
         const terminal = terminalRef.current;
         if (!terminal) return false;
@@ -1942,6 +1978,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // Enable grapheme clustering up front so emoji clusters render as whole
         // ligatures from the first frame (see terminalGraphemeMode).
         enableGraphemeClustering(terminal);
+        // One ring epoch per model. Everything the faulted predecessor saw is
+        // gone; the replacement's own history starts at its construction grid.
+        modelOpRingRef.current.beginEpoch(initialSize.cols, initialSize.rows);
         graphemeResetCarryRef.current = false;
         synchronizedOutputStateRef.current = { active: false, pending: '' };
         clearSynchronizedOutputRenderTimer();
@@ -2067,7 +2106,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           write,
           resizeLocal,
           seedBlocks,
-          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
+          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); selectedBlockIdRef.current = null; void write('\x1bc'); },
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; hoverGenerationRef.current += 1; renderSurface(true); return true; },
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
@@ -2187,6 +2226,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         inputRef.current = null;
         rendererRef.current = null;
         terminalRef.current = null;
+        // The model this history belongs to is gone; hand its bytes back to GC
+        // rather than carrying up to ~1MB per discarded pane. A rebuild's
+        // beginEpoch would clear it anyway — this covers a real unmount.
+        modelOpRingRef.current.clear();
         // Release THIS canvas's GL context deterministically the moment it is
         // discarded for good, instead of waiting on non-deterministic GC —
         // browsers cap the number of simultaneously-live WebGL contexts

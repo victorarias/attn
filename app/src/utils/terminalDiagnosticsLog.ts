@@ -29,9 +29,13 @@
 //
 // Disable at runtime with localStorage['attn:terminal-diagnostics']='0'.
 import { isTauri } from '@tauri-apps/api/core';
+import type { ModelFaultCapture } from './ghosttyModelOpRing';
 
 const DEBUG_DIR = 'debug';
 const LIFECYCLE_FILE = `${DEBUG_DIR}/terminal-diagnostics.jsonl`;
+// App-local path of the lifecycle stream, so a record written elsewhere can
+// name the file that holds the rest of the evidence.
+export const TERMINAL_DIAGNOSTICS_FILE = `$APPLOCALDATA/${LIFECYCLE_FILE}`;
 const INCIDENT_FILE = `${DEBUG_DIR}/terminal-incidents.jsonl`;
 const STORAGE_KEY = 'attn:terminal-diagnostics';
 const RING_LIMIT = 3000;
@@ -313,6 +317,23 @@ function ringSnapshot(): DiagEvent[] {
   return [...ring.slice(ringNextIndex), ...ring.slice(0, ringNextIndex)];
 }
 
+// A model_fault's input capture is up to ~2MB, and the in-memory ring is copied
+// wholesale into the `context` of every incident record written afterwards — a
+// blank/clip incident right after a fault is common. Keeping the capture in the
+// ring would therefore duplicate it into terminal-incidents.jsonl once per
+// incident. The ring keeps this summary; the disk line keeps the real thing.
+function summarizeCapture(capture: ModelFaultCapture): Record<string, unknown> {
+  return {
+    inDiskRecordOnly: TERMINAL_DIAGNOSTICS_FILE,
+    opCount: capture.opCount,
+    retainedWriteBytes: capture.retainedWriteBytes,
+    snapshotBytes: capture.snapshot?.len ?? 0,
+    snapshotTruncated: capture.snapshotTruncated,
+    droppedOps: capture.droppedOps,
+    droppedForRecordBudget: capture.droppedForRecordBudget,
+  };
+}
+
 export function recordDiag(event: Omit<DiagEvent, 'at'>): void {
   if (typeof window === 'undefined') {
     return;
@@ -322,7 +343,11 @@ export function recordDiag(event: Omit<DiagEvent, 'at'>): void {
     return;
   }
   const entry = { ...event, at: Date.now() } as DiagEvent;
-  pushRing(entry);
+  pushRing(
+    entry.capture
+      ? { ...entry, capture: summarizeCapture(entry.capture as ModelFaultCapture) }
+      : entry,
+  );
   if (LIFECYCLE_KINDS.has(entry.kind)) {
     enqueueWrite('lifecycle', `${JSON.stringify(entry)}\n`);
   }
@@ -508,6 +533,11 @@ export function noteRecovery(
 // A Ghostty WASM model can become unusable while the renderer is asking it for
 // dirty cells. Persist the fault before the pane rebuilds: after recovery, the
 // replacement model has no knowledge of the invalid instance that triggered it.
+//
+// `capture` is the pane's bounded ring of raw model inputs (see
+// ghosttyModelOpRing.ts) — the restore snapshot the model was built from plus
+// every write/resize/reset since. It makes the record a replayable repro:
+//   node app/scripts/replay-ghostty-model-fault.mjs <terminal-diagnostics.jsonl>
 export function noteModelFault(
   pane: string,
   info: {
@@ -520,6 +550,7 @@ export function noteModelFault(
     cols?: number;
     rows?: number;
     rendererEpoch: number;
+    capture?: ModelFaultCapture;
   },
 ): void {
   recordDiag({ kind: 'model_fault', pane, ...info });

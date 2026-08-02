@@ -109,6 +109,7 @@ vi.mock('../utils/terminalIconFont', () => ({
   ensureTerminalIconFont: () => new Promise<void>(() => undefined),
 }));
 vi.mock('../utils/terminalDiagnosticsLog', () => ({
+  TERMINAL_DIAGNOSTICS_FILE: 'terminal-diagnostics.jsonl',
   disposePaneDiagnostics: () => undefined,
   noteModelFault: mocks.noteModelFault,
   noteRecovery: mocks.noteRecovery,
