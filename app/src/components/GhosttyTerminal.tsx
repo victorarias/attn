@@ -417,6 +417,15 @@ export function recoveryDelayMs(attempt: number): number | null {
   return schedule[attempt - 1] ?? null;
 }
 
+// A ref whose value is built once per mount. `useRef(make())` evaluates its
+// argument on every render and throws all but the first away, which is wasted
+// work when the value is expensive to build.
+function useLazyRef<T>(create: () => T): { current: T } {
+  const ref = useRef<T | null>(null);
+  if (ref.current === null) ref.current = create();
+  return ref as { current: T };
+}
+
 function wordRangeAtColumn(line: string, col: number): { startCol: number; endCol: number } | null {
   const isWordCharacter = (character: string | undefined) => Boolean(character && /[\w-]/.test(character));
   if (!isWordCharacter(line[col])) return null;
@@ -582,7 +591,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // model_fault diagnostics record so a trap arrives with its own repro. Its
     // epoch is one model: beginEpoch runs at construction, and a fault's rebuild
     // starts a new one.
-    const modelOpRingRef = useRef(createGhosttyModelOpRing());
+    const modelOpRingRef = useLazyRef(createGhosttyModelOpRing);
     const historicalReplayGenerationRef = useRef(0);
     const pendingReplayGeometryRef = useRef<PendingReplayGeometry | null>(null);
     // Queued historical-replay operations (writes + resizes) not yet applied.
