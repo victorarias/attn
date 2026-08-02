@@ -270,6 +270,10 @@ type Daemon struct {
 	snoozeMu       sync.Mutex
 	snoozeTimers   map[string]*snoozeTimer
 	snoozeWakeHook func(sessionID string) // tests only; nil in production
+	// Called inside a firing wake, after the timer has proved it is current and
+	// released the lock but before it touches the store — the window a second
+	// snooze can land in. Tests only; nil in production. See snooze.go.
+	snoozeWakeGapHook func(sessionID string)
 
 	recoveryMu    sync.RWMutex
 	recovering    bool

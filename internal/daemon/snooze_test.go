@@ -250,6 +250,57 @@ func TestResnoozingReplacesThePendingWake(t *testing.T) {
 	}
 }
 
+// The narrow window the timer's identity check cannot cover: the wake has
+// already proved it is current and let go of the lock, and the second snooze
+// lands before it reaches the store. Nothing in memory can tell the callback it
+// has been superseded by then — only the stored deadline can, which is why the
+// clear is conditioned on it.
+//
+// Without that condition the expired timer clears the deadline the user just
+// chose and cancels the timer armed for it, so the agent comes back immediately
+// and never comes back again.
+func TestAResnoozeInsideAFiringWakeKeepsTheLaterDeadline(t *testing.T) {
+	d := newTurnDaemon(t)
+	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+	moveTo(d, "s1", protocol.StateWaitingInput)
+
+	later := time.Now().Add(time.Hour)
+	var once bool
+	d.snoozeWakeGapHook = func(sessionID string) {
+		if once {
+			return // the replacement's own wake, an hour from now, must not recurse
+		}
+		once = true
+		snoozeUntil(d, sessionID, later)
+	}
+	woken := make(chan string, 1)
+	d.snoozeWakeHook = func(sessionID string) { woken <- sessionID }
+
+	snoozeUntil(d, "s1", time.Now().Add(20*time.Millisecond))
+	select {
+	case <-woken:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first snooze's timer never fired")
+	}
+
+	if owed(t, d, "s1") {
+		t.Error("the expired timer cashed a promise the user had already replaced")
+	}
+	if got := snoozedUntil(t, d, "s1"); got != later.UTC().Format(time.RFC3339Nano) {
+		t.Errorf("live deadline = %q, want the re-snooze's %q", got, later.UTC().Format(time.RFC3339Nano))
+	}
+	// And the replacement's own timer is still armed, so it does come back.
+	d.snoozeMu.Lock()
+	pending, ok := d.snoozeTimers["s1"]
+	d.snoozeMu.Unlock()
+	if !ok {
+		t.Fatal("the expired timer took the replacement's wake with it; the agent would never return")
+	}
+	if !pending.firesAt.Equal(later) {
+		t.Errorf("pending wake fires at %s, want the re-snooze's %s", pending.firesAt, later)
+	}
+}
+
 // A snooze arriving mid-countdown makes the pending auto-settle moot: the turn
 // it was going to close is already closed, and leaving the deadline on the wire
 // would animate a settle that will never happen.

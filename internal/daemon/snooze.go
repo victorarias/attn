@@ -103,6 +103,14 @@ func (d *Daemon) wakeSnooze(sessionID string, at time.Time, cause string) {
 		// lost a race with a hand wake, say — from broadcasting.
 		return
 	}
+	d.finishSnoozeWake(sessionID, at, cause)
+}
+
+// finishSnoozeWake is everything a wake does once the deadline is cleared: open
+// the turn if the agent is sitting in a state that wants the user, record it,
+// and say so. Shared by the hand wake and the timer, which differ only in how
+// they decide the snooze was theirs to end.
+func (d *Daemon) finishSnoozeWake(sessionID string, at time.Time, cause string) {
 	if session := d.store.Get(sessionID); session != nil && attention.OpensTurn(session.State) {
 		d.store.OpenTurnIfClosed(sessionID, d.turnOpensAtOnWake(sessionID, at))
 	}
@@ -220,9 +228,23 @@ func (d *Daemon) scheduleSnoozeWakeLocked(sessionID string, until time.Time) {
 	close(ready)
 }
 
-// fireSnoozeWake is the timer arriving. The identity check keeps a timer that
-// lost a cancel-or-replace race from waking a session that has since been
-// re-snoozed to a later deadline.
+// fireSnoozeWake is the timer arriving.
+//
+// Two checks, because a fired timer can be stale in two different ways. The
+// identity check under the lock keeps a timer that lost a cancel-or-replace race
+// from waking a session at all. The deadline check in the store keeps one that
+// won that race but was replaced *in the gap between* — the lock is dropped
+// before the wake, and a snooze landing in that window has already written a
+// later deadline and armed its own timer. Clearing unconditionally there would
+// cash a promise the user had just replaced, waking the agent immediately
+// instead of at the time they chose; and the cancel wakeSnooze does would take
+// the replacement's timer with it, so the later deadline would never fire
+// either.
+//
+// So the timer path never cancels — its own entry is already gone, and anything
+// in the map now belongs to a newer snooze — and it clears only the deadline it
+// was armed for. Losing either check means someone else owns this session's
+// deferral now, and the right thing to do is nothing.
 func (d *Daemon) fireSnoozeWake(sessionID string, self *time.Timer, deadline time.Time) {
 	d.snoozeMu.Lock()
 	entry, ok := d.snoozeTimers[sessionID]
@@ -233,10 +255,24 @@ func (d *Daemon) fireSnoozeWake(sessionID string, self *time.Timer, deadline tim
 	delete(d.snoozeTimers, sessionID)
 	d.snoozeMu.Unlock()
 
-	d.wakeSnooze(sessionID, deadline, "deadline")
+	// The hook fires however this ends: it means "this timer has finished", which
+	// is the only thing a test can wait on without knowing which snooze won.
 	if d.snoozeWakeHook != nil {
-		d.snoozeWakeHook(sessionID)
+		defer d.snoozeWakeHook(sessionID)
 	}
+	if d.snoozeWakeGapHook != nil {
+		d.snoozeWakeGapHook(sessionID)
+	}
+	if d.store == nil {
+		return
+	}
+	if !d.store.WakeTurnAt(sessionID, deadline) {
+		if d.debugLogging {
+			d.logf("snooze wake superseded: session=%s deadline=%s", sessionID, deadline.UTC().Format(time.RFC3339Nano))
+		}
+		return
+	}
+	d.finishSnoozeWake(sessionID, deadline, "deadline")
 }
 
 // cancelSnoozeWake drops a session's pending wake without touching the store.

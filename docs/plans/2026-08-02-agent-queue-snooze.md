@@ -232,6 +232,15 @@ most of the work, so there is no honest cut here either.
 - **Steering does not wake.** "A considered act that business as usual does not
   undo." The risk — forgetting a snooze and wondering why an agent never queues
   — is what the visible section with wake times is for.
+- **A fired timer clears only the deadline it was armed for.** The timer proves
+  it is current against the daemon's map, but it releases that lock before it
+  touches the store, and a second snooze landing in that window has already
+  written a later deadline and armed its own timer. An unconditional clear there
+  cashes a promise the user just replaced — the agent wakes immediately and,
+  because the old callback also cancelled the replacement's timer, never comes
+  back at the time it was given. So the store clear is conditioned on the
+  deadline (`WakeTurnAt`) and the timer path never cancels. Witnessed by
+  `TestAResnoozeInsideAFiringWakeKeepsTheLaterDeadline`.
 - **Snoozing hands over the next agent, like settle.** Snooze is a turn-closing
   act performed on the agent you are looking at; leaving the user parked in an
   agent they just deferred would be the exact bookkeeping move-on removes.

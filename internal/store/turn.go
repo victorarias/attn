@@ -152,6 +152,46 @@ func (s *Store) WakeTurn(id string) bool {
 	return err == nil && updated == 1
 }
 
+// WakeTurnAt clears a session's snooze only if the deadline it holds is exactly
+// the one given. It is what a fired timer uses instead of WakeTurn.
+//
+// A timer proves its identity against the daemon's map, but that map says
+// nothing about the store: a snooze written after the timer expired and before
+// it finished waking has already replaced the deadline, and an unconditional
+// clear would cash a promise the user had just replaced with a later one. The
+// stored deadline is the record of which snooze is current, so the clear is
+// conditioned on it.
+//
+// It reports whether the snooze it was told to end was still the live one.
+func (s *Store) WakeTurnAt(id string, deadline time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stamp := deadline.UTC().Format(time.RFC3339Nano)
+
+	if s.db == nil {
+		current, ok := s.turnStamps[id]
+		if !ok || current.SnoozedUntil.IsZero() {
+			return false
+		}
+		if current.SnoozedUntil.UTC().Format(time.RFC3339Nano) != stamp {
+			return false
+		}
+		current.SnoozedUntil = time.Time{}
+		s.setTurnStampsLocked(id, current)
+		return true
+	}
+
+	result, err := s.db.Exec(
+		`UPDATE sessions SET turn_snoozed_until = '' WHERE id = ? AND turn_snoozed_until = ?`, id, stamp)
+	if err != nil {
+		log.Printf("[store] WakeTurnAt: failed for session %s: %v", id, err)
+		return false
+	}
+	updated, err := result.RowsAffected()
+	return err == nil && updated == 1
+}
+
 // SnoozedSessions is every live snooze, by session id. The daemon reads it once
 // at start-up to rebuild its wake timers, which is the only thing that makes a
 // snooze survive a restart — the timers themselves are in memory.

@@ -70,6 +70,56 @@ func TestWakeTurnClearsTheDeadlineOnlyOnce(t *testing.T) {
 	}
 }
 
+// WakeTurnAt is what a fired timer uses, and it clears only the deadline it was
+// armed for. The stored deadline is the record of which snooze is current: a
+// timer that expired before a second snooze landed has no way to know it was
+// replaced except by finding a different deadline there.
+//
+// Both branches, because a daemon without a database is a supported store and a
+// deferral that behaves differently in it is a deferral that behaves differently
+// for that user.
+func TestWakeTurnAtClearsOnlyTheDeadlineItFired(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(t *testing.T) *Store
+	}{
+		{"sqlite", newTurnStore},
+		{"in-memory", func(t *testing.T) *Store { return New() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := tc.build(t)
+			addTurnSession(t, s, "s1", protocol.SessionStateIdle)
+
+			now := time.Now()
+			fired := now.Add(time.Minute)
+			later := now.Add(time.Hour)
+			s.SnoozeTurn("s1", fired, now)
+
+			// The replacement lands while the first timer is on its way to the store.
+			s.SnoozeTurn("s1", later, now)
+
+			if s.WakeTurnAt("s1", fired) {
+				t.Error("the expired timer cleared a deadline that had already been replaced")
+			}
+			if got := s.TurnStamps("s1").SnoozedUntil; !got.Equal(later) {
+				t.Errorf("live deadline = %s, want the replacement's %s", got, later)
+			}
+
+			// The replacement's own timer still ends it.
+			if !s.WakeTurnAt("s1", later) {
+				t.Fatal("the live deadline's own timer could not clear it")
+			}
+			if !s.TurnStamps("s1").SnoozedUntil.IsZero() {
+				t.Error("deadline survived its own wake")
+			}
+			// And nothing is left to clear, so a redelivered timer stays quiet.
+			if s.WakeTurnAt("s1", later) {
+				t.Error("WakeTurnAt reported a change on a session that was not snoozed")
+			}
+		})
+	}
+}
+
 // A wake must not re-open the turn the snooze closed. Whether one opens is the
 // daemon's call, from the state the agent is actually in.
 func TestWakeTurnDoesNotReopenTheTurn(t *testing.T) {
