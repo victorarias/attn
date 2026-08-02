@@ -269,10 +269,9 @@ func TestWorkspaceSessionProtocolShellSpawnsIdleNotWorking(t *testing.T) {
 	})
 	expectSpawnResult(t, client, sessionID, true)
 
-	// A shell has no agent lifecycle, no Stop hook, and no state detector, so it
-	// would be stuck in whatever state it spawns with. It must spawn `idle`, not
-	// `working` — otherwise every shell shows a permanent green dot it can never
-	// leave until the process exits.
+	// A shell has no agent lifecycle and no launch phase to wait out: it is at
+	// its prompt the moment it spawns, so it spawns `idle` and the foreground
+	// heartbeat (see pty/shell_signals.go) moves it from there.
 	session := d.store.Get(sessionID)
 	if session == nil {
 		t.Fatalf("session %s was not registered", sessionID)

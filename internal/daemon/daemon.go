@@ -1857,6 +1857,16 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 		d.traceStateVeto(sessionID, origin, state, "plugin_driver_owns_state")
 		return
 	}
+	if session.Agent == protocol.SessionAgentShell {
+		// The worker poll's job is taking an agent session out of `launching`,
+		// and its cached state defaults to `working` until something sets it —
+		// which for a shell is never: no harness observer ever writes it. A
+		// shell spawns `idle` and the resolver owns it from there on its
+		// foreground heartbeat, so a worker-info claim (the watch-subscribe
+		// replay in particular) would only flip it to a state nothing observed.
+		d.traceStateVeto(sessionID, origin, state, "shell_resolver_owned")
+		return
+	}
 	agent := session.Agent
 	d.logf(
 		"pty state update: session=%s agent=%s state=%s source=%s detail=%q observed_at=%s",

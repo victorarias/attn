@@ -1066,6 +1066,82 @@ func TestPolicyForUsesTheMeasuredPerAgentTTL(t *testing.T) {
 	}
 }
 
+// A shell pane's whole evidence diet is its foreground heartbeat: it opens no
+// brackets, asks no approvals, and is never classified. The existing clauses
+// already cover that shape — this pins the lifecycle under the shell policy so
+// a clause reorder cannot silently change what a terminal pane shows.
+func TestShellLifecycleResolvesOnTheForegroundHeartbeatAlone(t *testing.T) {
+	policy := PolicyFor(string(protocol.SessionAgentShell))
+
+	// Polled once a second: the TTL must survive a missed poll, and the shell
+	// has no approval edges for a long TTL to suppress.
+	if policy.HeartbeatTTL <= time.Second {
+		t.Fatalf("shell HeartbeatTTL %s must exceed the 1s poll interval", policy.HeartbeatTTL)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		evidence   Evidence
+		wantState  protocol.SessionState
+		wantReason Reason
+	}{
+		{
+			// At its prompt, forever: the settled heartbeat with no turn ever
+			// opened is the at-prompt clause, and it is what holds a shell idle
+			// rather than pinning it there at spawn.
+			name: "at the prompt a shell is idle",
+			evidence: Evidence{
+				Heartbeat: seen(SourceHeartbeat, ClaimSettled, 200*time.Millisecond),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonAtPrompt,
+		},
+		{
+			// A foreground command owns the terminal; the fresh busy level is
+			// working exactly as it is for an agent.
+			name: "a foreground command is working",
+			evidence: Evidence{
+				Heartbeat:  seen(SourceHeartbeat, ClaimBusy, time.Second),
+				LastBusyAt: now.Add(-time.Second),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonHeartbeatFresh,
+		},
+		{
+			// The command ended and the shell took the foreground back. No
+			// classifier runs for a shell, so the settle is immediate.
+			name: "the prompt returning settles the shell",
+			evidence: Evidence{
+				Heartbeat:  seen(SourceHeartbeat, ClaimSettled, 200*time.Millisecond),
+				LastBusyAt: now.Add(-2 * time.Second),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonAtPrompt,
+		},
+		{
+			// The exit outranks the heartbeat, exactly as for an agent.
+			name: "an exited shell is idle whatever the heartbeat said",
+			evidence: Evidence{
+				Process:    seen(SourceProcess, ClaimExited, time.Second),
+				Heartbeat:  seen(SourceHeartbeat, ClaimBusy, 500*time.Millisecond),
+				LastBusyAt: now.Add(-500 * time.Millisecond),
+			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonProcessExited,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Resolve(tc.evidence, policy, now)
+			if got.Hold {
+				t.Fatalf("Resolve() held, want %s/%s", tc.wantState, tc.wantReason)
+			}
+			if got.State != tc.wantState || got.Reason != tc.wantReason {
+				t.Fatalf("Resolve() = %s/%s, want %s/%s", got.State, got.Reason, tc.wantState, tc.wantReason)
+			}
+		})
+	}
+}
+
 // The gap a compaction leaves is wide enough to look like a finished turn, and
 // between turns there is no bracket left to say otherwise.
 //

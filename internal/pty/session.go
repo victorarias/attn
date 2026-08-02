@@ -130,7 +130,11 @@ type Session struct {
 	// harnessSignals reads the agent's own OSC state signals off the PTY stream.
 	// Read-only: it never alters the bytes.
 	harnessSignals *harnessSignalObserver
-	onState        func(obs Observation)
+	// shellSignals merges the foreground poll and the OSC 133 marker stream
+	// into one heartbeat claim for shell panes; nil for every other agent.
+	// Read-only on the stream: it never alters the bytes.
+	shellSignals *shellSignalArbiter
+	onState      func(obs Observation)
 
 	exitMu     sync.RWMutex
 	running    bool
@@ -344,6 +348,11 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				s.fanOut(data, seq)
 				if s.harnessSignals != nil && s.onState != nil {
 					for _, obs := range s.harnessSignals.Observe(data, time.Now()) {
+						s.onState(obs)
+					}
+				}
+				if s.shellSignals != nil && s.onState != nil {
+					for _, obs := range s.shellSignals.ObserveOutput(data, time.Now()) {
 						s.onState(obs)
 					}
 				}
