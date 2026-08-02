@@ -86,10 +86,21 @@ func (d *Daemon) sendNotificationMarkReadWSResult(client *wsClient, requestID st
 		fail("notification store unavailable")
 		return
 	}
+	// Collect the ids being marked before the write: "all unread were read" is a
+	// list of notifications, and each one is a fact of its own.
+	var markedIDs []string
 	var markErr error
 	if notificationID != nil && *notificationID != "" {
+		markedIDs = []string{*notificationID}
 		markErr = d.store.MarkNotificationRead(*notificationID, time.Now())
 	} else {
+		if all, err := d.store.ListNotifications(); err == nil {
+			for _, rec := range all {
+				if rec.ReadAt.IsZero() {
+					markedIDs = append(markedIDs, rec.ID)
+				}
+			}
+		}
 		_, markErr = d.store.MarkAllNotificationsRead(time.Now())
 	}
 	if markErr != nil {
@@ -107,7 +118,11 @@ func (d *Daemon) sendNotificationMarkReadWSResult(client *wsClient, requestID st
 		Success:     true,
 		UnreadCount: unread,
 	})
-	d.broadcastNotificationsUpdated()
+	d.coalesceSnapshots(func() {
+		for _, id := range markedIDs {
+			d.publishFact(FactNotificationRead, id, nil)
+		}
+	})
 }
 
 // notificationKindTaskFailed marks a notification produced by a background task
@@ -133,11 +148,12 @@ func (d *Daemon) notifyTaskTerminalFailure(t *tasks.Task) {
 	if t == nil || d.store == nil {
 		return
 	}
-	if _, err := d.store.AddNotification(renderTaskFailureNotification(t), time.Now()); err != nil {
+	record, err := d.store.AddNotification(renderTaskFailureNotification(t), time.Now())
+	if err != nil {
 		d.logf("notifications: add task-failure notification for %s: %v", t.ID, err)
 		return
 	}
-	d.broadcastNotificationsUpdated()
+	d.publishFact(FactNotificationCreated, record.ID, nil)
 }
 
 // renderTaskFailureNotification builds the durable notification for a dead task.
@@ -168,7 +184,11 @@ func renderTaskFailureNotification(t *tasks.Task) store.NotificationRecord {
 // unread count and does a non-blocking broadcast, holding no shared state, so it
 // is safe to invoke concurrently — including from the task runner's terminal-
 // failure callback. A nil store broadcasts an unread count of 0.
-func (d *Daemon) broadcastNotificationsUpdated() {
+func (d *Daemon) projectNotificationsUpdated() {
+	d.projectSnapshot(snapshotNotifs, d.pushNotificationsUpdated)
+}
+
+func (d *Daemon) pushNotificationsUpdated() {
 	unread := 0
 	if d.store != nil {
 		if n, err := d.store.UnreadNotificationCount(); err == nil {

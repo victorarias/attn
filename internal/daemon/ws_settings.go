@@ -180,23 +180,31 @@ func (d *Daemon) handleSetSettingWS(client *wsClient, msg *protocol.SetSettingMe
 			d.cancelAllAutoSettle()
 		}
 	}
-	d.broadcastSettings(msg.Key)
+	d.publishSettingsFact(FactSettingChanged, msg.Key)
 }
 
-func (d *Daemon) broadcastSettings(changedKey string) {
+// publishSettingsFact re-derives the tailscale serve state, which the settings
+// payload carries, and then publishes the caller's fact. Every fact that
+// re-pushes settings goes through here so none of them can forget the refresh.
+func (d *Daemon) publishSettingsFact(name, subject string) {
 	d.refreshTailscaleServeState()
-	d.broadcastCurrentSettings(changedKey)
+	d.publishFact(name, subject, nil)
 }
 
-func (d *Daemon) broadcastCurrentSettings(changedKey string) {
-	event := &protocol.SettingsUpdatedMessage{
-		Event:    protocol.EventSettingsUpdated,
-		Settings: d.settingsWithAgentAvailability(),
-	}
-	if strings.TrimSpace(changedKey) != "" {
-		event.ChangedKey = protocol.Ptr(changedKey)
-	}
-	d.broadcastMessage(event)
+// projectSettingsUpdated pushes the settings snapshot. changedKey is empty when
+// what moved was not a setting the user set — a plugin leaving, a backup
+// landing — and the wire message then carries no changed_key, as before.
+func (d *Daemon) projectSettingsUpdated(changedKey string) {
+	d.projectSnapshot(snapshotSettings, func() {
+		event := &protocol.SettingsUpdatedMessage{
+			Event:    protocol.EventSettingsUpdated,
+			Settings: d.settingsWithAgentAvailability(),
+		}
+		if strings.TrimSpace(changedKey) != "" {
+			event.ChangedKey = protocol.Ptr(changedKey)
+		}
+		d.broadcastMessage(event)
+	})
 }
 
 func executableSettingKey(agent string) string {

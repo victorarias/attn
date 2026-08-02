@@ -188,7 +188,7 @@ func TestDaemon_StartInstalledPlugins_RestartsCleanExitWithNewGeneration(t *test
 				"ATTN_PLUGIN_GENERATION=" + strconv.FormatUint(generation, 10),
 			})
 		},
-		d.broadcastPluginsUpdated,
+		func(pluginName string) { d.publishFact(FactPluginHealthChanged, pluginName, nil) },
 	)
 	go d.Start()
 	defer d.Stop()

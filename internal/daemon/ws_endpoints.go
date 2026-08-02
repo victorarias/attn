@@ -38,7 +38,7 @@ func (d *Daemon) handleAddEndpointWS(client *wsClient, msg *protocol.AddEndpoint
 		d.sendEndpointActionResult(client, "add", "", false, err.Error())
 		return
 	}
-	d.broadcastEndpointsUpdated()
+	d.publishFact(FactEndpointAdded, record.ID, nil)
 	d.sendEndpointActionResult(client, "add", record.ID, true, "")
 }
 
@@ -51,7 +51,7 @@ func (d *Daemon) handleRemoveEndpointWS(client *wsClient, msg *protocol.RemoveEn
 		d.sendEndpointActionResult(client, "remove", msg.EndpointID, false, err.Error())
 		return
 	}
-	d.broadcastEndpointsUpdated()
+	d.publishFact(FactEndpointRemoved, msg.EndpointID, nil)
 	d.sendEndpointActionResult(client, "remove", msg.EndpointID, true, "")
 }
 
@@ -82,7 +82,7 @@ func (d *Daemon) handleUpdateEndpointWS(client *wsClient, msg *protocol.UpdateEn
 		d.sendEndpointActionResult(client, "update", msg.EndpointID, false, err.Error())
 		return
 	}
-	d.broadcastEndpointsUpdated()
+	d.publishFact(FactEndpointChanged, record.ID, nil)
 	d.sendEndpointActionResult(client, "update", record.ID, true, "")
 }
 

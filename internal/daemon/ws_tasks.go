@@ -102,14 +102,15 @@ func (d *Daemon) sendTaskRetryWSResult(client *wsClient, requestID, taskID strin
 	d.sendToClient(client, msg)
 }
 
-// broadcastTasksChanged announces that a task lifecycle transition
-// occurred so an open task panel re-lists. It is wired to the runner's OnChange
-// callback (see startCompactRunner). It builds a fresh message and does a
-// non-blocking broadcastMessage -> wsHub.BroadcastValue (a full broadcast channel
-// drops the message), holding no shared state, so it is safe to invoke
-// CONCURRENTLY from the runner's dispatch goroutine and its in-flight runs.
-func (d *Daemon) broadcastTasksChanged() {
-	d.broadcastMessage(protocol.TasksChangedMessage{
-		Event: protocol.EventTasksChanged,
+// projectTasksChanged re-pushes the "something in the task queue moved" ping an
+// open task panel re-lists on. It runs from the runner's OnChange callback,
+// which may fire CONCURRENTLY from the dispatch goroutine and from each
+// in-flight run; the push itself holds no shared state and drops on a full
+// broadcast channel, so it can never stall a run.
+func (d *Daemon) projectTasksChanged() {
+	d.projectSnapshot(snapshotTasks, func() {
+		d.broadcastMessage(protocol.TasksChangedMessage{
+			Event: protocol.EventTasksChanged,
+		})
 	})
 }

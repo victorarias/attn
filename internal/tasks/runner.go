@@ -135,7 +135,7 @@ type Runner struct {
 	// each in-flight run's finish(), and from Enqueue/Retry/Remove on arbitrary
 	// daemon goroutines — so it must be cheap, non-blocking, and safe to invoke from
 	// multiple goroutines; the daemon's wiring just emits a websocket event.
-	onChange func()
+	onChange func(taskID string)
 
 	// onTerminalFailure, if set, fires exactly once when a task crosses into the
 	// terminal StateDead (retries exhausted) — the actionable "this background work
@@ -239,7 +239,7 @@ func (r *Runner) Disabled() bool { return r.disabled }
 
 // OnChange registers a callback fired after every lifecycle transition. It is
 // optional (the status surface uses it) and must be cheap; pass nil to clear.
-func (r *Runner) OnChange(fn func()) {
+func (r *Runner) OnChange(fn func(taskID string)) {
 	r.mu.Lock()
 	r.onChange = fn
 	r.mu.Unlock()
@@ -465,7 +465,7 @@ func (r *Runner) Enqueue(kind, subject string, opts EnqueueOptions) (*Task, erro
 	if err := r.store.Save(task); err != nil {
 		return nil, err
 	}
-	r.notifyChange()
+	r.notifyChange(task.ID)
 	r.nudge()
 	return task.clone(), nil
 }
@@ -501,7 +501,7 @@ func (r *Runner) Retry(id string) (*Task, error) {
 	if err := r.store.Save(existing); err != nil {
 		return nil, err
 	}
-	r.notifyChange()
+	r.notifyChange(existing.ID)
 	r.nudge()
 	return existing.clone(), nil
 }
@@ -567,7 +567,7 @@ func (r *Runner) Remove(id string) {
 		r.log("tasks: remove %s: %v", id, err)
 		return
 	}
-	r.notifyChange()
+	r.notifyChange(id)
 }
 
 // List returns every persisted task, newest-updated first. Cheap os.ReadDir; safe
@@ -678,7 +678,7 @@ func (r *Runner) dispatch() (progressed bool, err error) {
 	}
 	var launch []launchSpec
 	var deadTasks []*Task
-	failedUnknown := false
+	var failedUnknownIDs []string
 
 	for _, t := range eligible {
 		// Decide + reserve under mu: the executor registry and in-flight counts both
@@ -693,7 +693,7 @@ func (r *Runner) dispatch() (progressed bool, err error) {
 			if r.recordFailureLocked(t, fmt.Errorf("%w: %s", ErrUnknownKind, t.Kind)) {
 				deadTasks = append(deadTasks, t)
 			}
-			failedUnknown = true
+			failedUnknownIDs = append(failedUnknownIDs, t.ID)
 			continue
 		}
 		if r.inflight[t.Kind] >= exec.limit {
@@ -733,8 +733,11 @@ func (r *Runner) dispatch() (progressed bool, err error) {
 
 	r.ioMu.Unlock()
 
-	if failedUnknown || len(launch) > 0 {
-		r.notifyChange()
+	for _, id := range failedUnknownIDs {
+		r.notifyChange(id)
+	}
+	for _, ls := range launch {
+		r.notifyChange(ls.task.ID)
 	}
 	for _, dt := range deadTasks {
 		r.notifyTerminalFailure(dt)
@@ -742,7 +745,7 @@ func (r *Runner) dispatch() (progressed bool, err error) {
 	for _, ls := range launch {
 		go r.execute(ls.task, ls.exec, ls.ctx, ls.run)
 	}
-	return failedUnknown || len(launch) > 0, nil
+	return len(failedUnknownIDs) > 0 || len(launch) > 0, nil
 }
 
 // eligible reports whether a task may run now. Auto-requeue of a failed task is
@@ -901,7 +904,7 @@ func (r *Runner) finish(id string, runErr error) {
 	}
 	r.ioMu.Unlock()
 
-	r.notifyChange()
+	r.notifyChange(id)
 	if wentDead {
 		r.notifyTerminalFailure(cur)
 	}
@@ -1000,12 +1003,16 @@ func (r *Runner) nudge() {
 	}
 }
 
-func (r *Runner) notifyChange() {
+// notifyChange reports one task's lifecycle transition. The id is required: a
+// consumer that is only told "something changed" has to re-list to find out
+// what, which is the whole problem the event bus behind this callback exists to
+// remove.
+func (r *Runner) notifyChange(taskID string) {
 	r.mu.Lock()
 	fn := r.onChange
 	r.mu.Unlock()
 	if fn != nil {
-		fn()
+		fn(taskID)
 	}
 }
 

@@ -77,7 +77,7 @@ func TestWireTraceProducerGolden(t *testing.T) {
 			})
 		}},
 		{"workflow_run_updated", func() {
-			d.broadcastWorkflowRunUpdated(&protocol.WorkflowRun{
+			d.publishFact(FactWorkflowRunUpdated, "run-1", &protocol.WorkflowRun{
 				RunID: "run-1", Status: protocol.WorkflowRunStatusRunning,
 				ScriptPath: filepath.Join(workspaceDir, "flow.js"), ScriptHash: "hash-1",
 				CreatedAt: now, UpdatedAt: now,
@@ -88,14 +88,14 @@ func TestWireTraceProducerGolden(t *testing.T) {
 		{"authors_updated", func() { d.publishFact(FactAuthorMuteChanged, "octocat", nil) }},
 		{"github_hosts_updated", func() { d.publishFact(FactGitHubHostAdded, "github.com", nil) }},
 		{"automations_changed", func() { d.broadcastAutomationsChanged("definition-1") }},
-		{"plugins_updated", func() { d.broadcastPluginsUpdated() }},
-		{"settings_updated", func() { d.broadcastCurrentSettings("claude_executable") }},
-		{"tasks_changed", func() { d.broadcastTasksChanged() }},
-		{"notifications_updated", func() { d.broadcastNotificationsUpdated() }},
+		{"plugins_updated", func() { d.publishFact(FactPluginConnected, "plugin-1", nil) }},
+		{"settings_updated", func() { d.publishFact(FactSettingChanged, "claude_executable", nil) }},
+		{"tasks_changed", func() { d.publishFact(FactTaskChanged, "task-1", nil) }},
+		{"notifications_updated", func() { d.publishFact(FactNotificationCreated, "notif-1", nil) }},
 		{"notebook_changed", func() {
 			d.broadcastNotebookChanged("agent", filepath.Join(workspaceDir, "journal.md"))
 		}},
-		{"endpoints_updated", func() { d.broadcastEndpointsUpdated() }},
+		{"endpoints_updated", func() { d.publishFact(FactEndpointAdded, "endpoint-1", nil) }},
 		{"endpoint_status_changed", func() {
 			d.broadcastEndpointStatusChanged(protocol.EndpointInfo{ID: "endpoint-1", Name: "remote"})
 		}},

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"github.com/victorarias/attn/internal/bus"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -60,7 +61,7 @@ func (d *Daemon) flushWorkflowBroadcasts() {
 		if run == nil {
 			continue
 		}
-		d.broadcastWorkflowRunUpdated(run)
+		d.publishFact(FactWorkflowRunUpdated, run.RunID, run)
 	}
 }
 
@@ -69,8 +70,9 @@ func (d *Daemon) flushWorkflowBroadcasts() {
 // field), so it ships via BroadcastValue. An optional in-process hook lets tests
 // observe broadcasts deterministically without a live socket — the wsHub's
 // WebSocketEvent-only broadcastListener cannot see this message type.
-func (d *Daemon) broadcastWorkflowRunUpdated(run *protocol.WorkflowRun) {
-	if d == nil || run == nil {
+func (d *Daemon) projectWorkflowRunUpdated(ev bus.Event) {
+	run, ok := decodeFact[*protocol.WorkflowRun](d, ev)
+	if !ok || run == nil {
 		return
 	}
 	msg := &protocol.WorkflowRunUpdatedMessage{

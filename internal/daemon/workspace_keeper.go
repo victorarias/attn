@@ -276,7 +276,7 @@ func (d *Daemon) startCompactRunner() {
 	// broadcastTasksChanged -> broadcastMessage -> wsHub.BroadcastValue
 	// builds a fresh message and uses a non-blocking send that drops on a full
 	// broadcast channel, so it can never stall a run.
-	runner.OnChange(func() { d.broadcastTasksChanged() })
+	runner.OnChange(func(taskID string) { d.publishFact(FactTaskChanged, taskID, nil) })
 	// Surface a durable notification when a task exhausts its retries (reaches the
 	// terminal dead state). OnTerminalFailure fires exactly once per task, on the
 	// runner's goroutine with a cloned record; notifyTaskTerminalFailure persists a

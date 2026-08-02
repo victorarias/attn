@@ -84,7 +84,9 @@ func (d *Daemon) ensurePluginSupervisor() *pluginSupervisor {
 				}
 				return d.pluginCommandEnv(overrides...)
 			},
-			d.broadcastPluginsUpdated,
+			func(pluginName string) {
+				d.publishFact(FactPluginHealthChanged, pluginName, nil)
+			},
 		)
 	}
 	return d.pluginSupervisor

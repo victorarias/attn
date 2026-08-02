@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/victorarias/attn/internal/bus"
 	"net"
 	"strconv"
 	"strings"
@@ -226,17 +227,11 @@ func (d *Daemon) handlePresentOpen(conn net.Conn, msg *protocol.PresentOpenMessa
 	// Re-fetch so the broadcast carries the fresh latest-round summary.
 	if refreshed, err := d.store.GetPresentation(pres.ID); err == nil {
 		proto := presentationToProto(refreshed)
+		fact := FactPresentationUpdated
 		if isNewPresentation {
-			d.broadcastMessage(protocol.PresentationAddedMessage{
-				Event:        protocol.EventPresentationAdded,
-				Presentation: proto,
-			})
-		} else {
-			d.broadcastMessage(protocol.PresentationUpdatedMessage{
-				Event:        protocol.EventPresentationUpdated,
-				Presentation: proto,
-			})
+			fact = FactPresentationAdded
 		}
+		d.publishFact(fact, proto.ID, nil)
 	} else {
 		d.logf("present open: failed to refresh presentation %s for broadcast: %v", pres.ID, err)
 	}
@@ -579,11 +574,7 @@ func (d *Daemon) handlePresentSubmitRound(client *wsClient, msg *protocol.Presen
 		return
 	}
 
-	proto := presentationToProto(pres)
-	d.broadcastMessage(protocol.PresentationUpdatedMessage{
-		Event:        protocol.EventPresentationUpdated,
-		Presentation: proto,
-	})
+	d.publishFact(FactPresentationUpdated, pres.ID, nil)
 
 	if !msg.Handback {
 		return
@@ -654,13 +645,28 @@ func (d *Daemon) handlePresentClose(client *wsClient, msg *protocol.PresentClose
 	result.Success = true
 	d.sendToClient(client, result)
 
-	pres, err := d.store.GetPresentation(presentationID)
+	d.publishFact(FactPresentationUpdated, presentationID, nil)
+}
+
+// projectPresentation re-reads the presentation the fact names. The store is
+// the authority and the fan-out is synchronous, so the projection sees exactly
+// what the producer just wrote.
+func (d *Daemon) projectPresentation(ev bus.Event) {
+	pres, err := d.store.GetPresentation(ev.Subject)
 	if err != nil {
-		d.logf("present close: failed to reload presentation %s after close: %v", presentationID, err)
+		d.logf("present: reload presentation %s for %s: %v", ev.Subject, ev.Name, err)
+		return
+	}
+	proto := presentationToProto(pres)
+	if ev.Name == FactPresentationAdded {
+		d.broadcastMessage(protocol.PresentationAddedMessage{
+			Event:        protocol.EventPresentationAdded,
+			Presentation: proto,
+		})
 		return
 	}
 	d.broadcastMessage(protocol.PresentationUpdatedMessage{
 		Event:        protocol.EventPresentationUpdated,
-		Presentation: presentationToProto(pres),
+		Presentation: proto,
 	})
 }

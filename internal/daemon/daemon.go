@@ -391,6 +391,11 @@ type Daemon struct {
 	eventBus       *bus.Bus
 	busUnsubscribe func()
 
+	// Paths accumulated by the notebook_changed projection while a bulk change
+	// is coalescing, keyed by origin. See projectNotebookChanged.
+	notebookPendingMu    sync.Mutex
+	notebookPendingPaths map[string][]string
+
 	// Snapshot coalescing for bulk operations: see coalesceSnapshots in bus.go.
 	snapshotMu           sync.Mutex
 	snapshotDepth        int
@@ -3836,17 +3841,29 @@ func (d *Daemon) listEndpointInfos() []protocol.EndpointInfo {
 	return d.hubManager.List()
 }
 
+// broadcastEndpointStatusChanged carries the status in the payload: it is a
+// transient connection state the endpoint record does not hold.
 func (d *Daemon) broadcastEndpointStatusChanged(info protocol.EndpointInfo) {
+	d.publishFact(FactEndpointStatusChanged, info.ID, info)
+}
+
+func (d *Daemon) projectEndpointStatusChanged(ev bus.Event) {
+	info, ok := decodeFact[protocol.EndpointInfo](d, ev)
+	if !ok {
+		return
+	}
 	d.broadcastMessage(&protocol.EndpointStatusChangedMessage{
 		Event:    protocol.EventEndpointStatusChanged,
 		Endpoint: info,
 	})
 }
 
-func (d *Daemon) broadcastEndpointsUpdated() {
-	d.broadcastMessage(&protocol.EndpointsUpdatedMessage{
-		Event:     protocol.EventEndpointsUpdated,
-		Endpoints: d.listEndpointInfos(),
+func (d *Daemon) projectEndpointsUpdated() {
+	d.projectSnapshot(snapshotEndpoints, func() {
+		d.broadcastMessage(&protocol.EndpointsUpdatedMessage{
+			Event:     protocol.EventEndpointsUpdated,
+			Endpoints: d.listEndpointInfos(),
+		})
 	})
 }
 

@@ -1,6 +1,27 @@
 package daemon
 
-import "github.com/victorarias/attn/internal/protocol"
+import (
+	"strings"
+
+	"github.com/victorarias/attn/internal/protocol"
+)
+
+// broadcastAutomationsChanged publishes one fact per definition. It stays a
+// no-op for an empty id so callers can pass a possibly-empty definitionID
+// without a guard — and because a fact with no subject is not a fact.
+func (d *Daemon) broadcastAutomationsChanged(definitionIDs ...string) {
+	if d == nil {
+		return
+	}
+	d.coalesceSnapshots(func() {
+		for _, id := range definitionIDs {
+			if strings.TrimSpace(id) == "" {
+				continue
+			}
+			d.publishFact(FactAutomationChanged, id, nil)
+		}
+	})
+}
 
 // broadcastAutomationsChanged emits an id-only automations_changed event for
 // the given definition IDs. Automation definitions/runs change at low
@@ -10,7 +31,7 @@ import "github.com/victorarias/attn/internal/protocol"
 // this emits directly on every mutation/transition rather than through a
 // coalescing loop. No-op for an empty id list so callers can pass through a
 // possibly-empty definitionID without a guard.
-func (d *Daemon) broadcastAutomationsChanged(definitionIDs ...string) {
+func (d *Daemon) projectAutomationsChanged(definitionIDs ...string) {
 	if d == nil || len(definitionIDs) == 0 {
 		return
 	}

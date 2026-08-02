@@ -145,6 +145,51 @@ const (
 	// FactAuthorMuteChanged: subject is the author's login.
 	FactAuthorMuteChanged = "author.mute.changed"
 
+	// Endpoint facts; subject is the endpoint id.
+	FactEndpointAdded         = "endpoint.added"
+	FactEndpointRemoved       = "endpoint.removed"
+	FactEndpointChanged       = "endpoint.changed"
+	FactEndpointStatusChanged = "endpoint.status.changed"
+
+	// Plugin facts; subject is the plugin name.
+	FactPluginInstalled       = "plugin.installed"
+	FactPluginUninstalled     = "plugin.uninstalled"
+	FactPluginPriorityChanged = "plugin.priority.changed"
+	FactPluginConnected       = "plugin.connected"
+	FactPluginDisconnected    = "plugin.disconnected"
+	FactPluginHealthChanged   = "plugin.health.changed"
+	// FactPluginDriverRegistered changes which agents are available, which is
+	// part of settings, so it is the one plugin fact that does not re-push the
+	// plugin list.
+	FactPluginDriverRegistered = "plugin.driver.registered"
+
+	// FactSettingChanged: subject is the setting key.
+	FactSettingChanged = "setting.changed"
+	// FactBackupWritten: subject is the backup file path. Clients learn about it
+	// through settings, which carry db.last_backup_at.
+	FactBackupWritten = "backup.written"
+	// FactTailscaleServeChanged: subject is the profile. There is one tailscale
+	// serve per daemon and one daemon per profile, so the profile is its id.
+	FactTailscaleServeChanged = "tailscale.serve.changed"
+
+	// Notification facts; subject is the notification id.
+	FactNotificationCreated = "notification.created"
+	FactNotificationRead    = "notification.read"
+
+	// FactAutomationChanged: subject is the automation definition id.
+	FactAutomationChanged = "automation.changed"
+	// FactWorkflowRunUpdated: subject is the workflow run id.
+	FactWorkflowRunUpdated = "workflow.run.updated"
+	// FactTaskChanged: subject is the background task id.
+	FactTaskChanged = "task.changed"
+
+	// FactNotebookFileChanged: subject is the notebook-relative path.
+	FactNotebookFileChanged = "notebook.file.changed"
+
+	// Presentation facts; subject is the presentation id.
+	FactPresentationAdded   = "presentation.added"
+	FactPresentationUpdated = "presentation.updated"
+
 	// Ticket facts; subject is the ticket id.
 	FactTicketCreated       = "ticket.created"
 	FactTicketStatusChanged = "ticket.status_changed"
@@ -331,6 +376,57 @@ func buildWireProjections() []projection {
 			filter: bus.Filter{"github.host.*"},
 			apply:  func(d *Daemon, _ bus.Event) { d.projectGitHubHostsUpdated() },
 		},
+		{
+			filter: bus.Filter{FactEndpointAdded, FactEndpointRemoved, FactEndpointChanged},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectEndpointsUpdated() },
+		},
+		{
+			filter: bus.Filter{FactEndpointStatusChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectEndpointStatusChanged(ev) },
+		},
+		{
+			filter: bus.Filter{
+				FactPluginInstalled, FactPluginUninstalled, FactPluginPriorityChanged,
+				FactPluginConnected, FactPluginDisconnected, FactPluginHealthChanged,
+			},
+			apply: func(d *Daemon, _ bus.Event) { d.projectPluginsUpdated() },
+		},
+		{
+			// A plugin going away and a driver registering both change which agents
+			// are available, so both re-push settings — without a changed key,
+			// because no setting was set.
+			filter: bus.Filter{FactPluginDisconnected, FactPluginDriverRegistered,
+				FactBackupWritten, FactTailscaleServeChanged},
+			apply: func(d *Daemon, _ bus.Event) { d.projectSettingsUpdated("") },
+		},
+		{
+			filter: bus.Filter{FactSettingChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSettingsUpdated(ev.Subject) },
+		},
+		{
+			filter: bus.Filter{"notification.*"},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectNotificationsUpdated() },
+		},
+		{
+			filter: bus.Filter{FactAutomationChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectAutomationsChanged(ev.Subject) },
+		},
+		{
+			filter: bus.Filter{FactWorkflowRunUpdated},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectWorkflowRunUpdated(ev) },
+		},
+		{
+			filter: bus.Filter{FactTaskChanged},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectTasksChanged() },
+		},
+		{
+			filter: bus.Filter{FactNotebookFileChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectNotebookChanged(ev) },
+		},
+		{
+			filter: bus.Filter{FactPresentationAdded, FactPresentationUpdated},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectPresentation(ev) },
+		},
 	}
 }
 
@@ -481,12 +577,18 @@ func (d *Daemon) projectSnapshot(key string, push func()) {
 
 // Snapshot keys. One per whole-list wire message.
 const (
-	snapshotSessions = "sessions_updated"
-	snapshotTickets  = "tickets_updated"
-	snapshotPRs      = "prs_updated"
-	snapshotRepos    = "repos_updated"
-	snapshotAuthors  = "authors_updated"
-	snapshotGHHosts  = "github_hosts_updated"
+	snapshotSessions    = "sessions_updated"
+	snapshotTickets     = "tickets_updated"
+	snapshotPRs         = "prs_updated"
+	snapshotRepos       = "repos_updated"
+	snapshotAuthors     = "authors_updated"
+	snapshotGHHosts     = "github_hosts_updated"
+	snapshotEndpoints   = "endpoints_updated"
+	snapshotPlugins     = "plugins_updated"
+	snapshotSettings    = "settings_updated"
+	snapshotNotifs      = "notifications_updated"
+	snapshotAutomations = "automations_changed"
+	snapshotTasks       = "tasks_changed"
 )
 
 // wireEqual reports whether two values reach clients as the same JSON. It is the

@@ -51,7 +51,7 @@ func (d *Daemon) handleInstallPluginWS(client *wsClient, msg *protocol.InstallPl
 		d.logf("plugin %s installed but failed to start: %v", manifest.Name, err)
 	}
 
-	d.broadcastPluginsUpdated()
+	d.publishFact(FactPluginInstalled, manifest.Name, nil)
 	d.sendPluginActionResult(client, "install", manifest.Name, true, "")
 }
 
@@ -95,7 +95,7 @@ func (d *Daemon) handleInstallBundledPluginWS(client *wsClient, msg *protocol.In
 		// start and retry diagnostics so Settings can explain a degraded plugin.
 		d.logf("bundled plugin %s installed but failed to start: %v", name, err)
 	}
-	d.broadcastPluginsUpdated()
+	d.publishFact(FactPluginInstalled, name, nil)
 	d.sendPluginActionResult(client, "install_bundled", name, true, "")
 }
 
@@ -138,7 +138,7 @@ func (d *Daemon) uninstallPlugin(client *wsClient, name, action string) {
 			d.sendPluginActionResult(client, action, name, false, fmt.Sprintf("persist bundled plugin uninstall: %v", err))
 			return
 		}
-		d.broadcastPluginsUpdated()
+		d.publishFact(FactPluginUninstalled, name, nil)
 		d.sendPluginActionResult(client, action, name, true, "")
 		return
 	}
@@ -152,7 +152,7 @@ func (d *Daemon) uninstallPlugin(client *wsClient, name, action string) {
 	}
 	d.stopAndUnregisterPlugin(name)
 
-	d.broadcastPluginsUpdated()
+	d.publishFact(FactPluginUninstalled, name, nil)
 	d.sendPluginActionResult(client, action, name, true, "")
 }
 
@@ -179,12 +179,14 @@ func (d *Daemon) handleSetPluginPriorityWS(client *wsClient, msg *protocol.SetPl
 		return
 	}
 
-	d.broadcastPluginsUpdated()
+	d.publishFact(FactPluginPriorityChanged, name, nil)
 	d.sendPluginActionResult(client, "set_priority", name, true, "")
 }
 
-func (d *Daemon) broadcastPluginsUpdated() {
-	d.wsHub.BroadcastValue(d.pluginsUpdatedMessage())
+func (d *Daemon) projectPluginsUpdated() {
+	d.projectSnapshot(snapshotPlugins, func() {
+		d.wsHub.BroadcastValue(d.pluginsUpdatedMessage())
+	})
 }
 
 func (d *Daemon) pluginsUpdatedMessage() *protocol.PluginsUpdatedMessage {
