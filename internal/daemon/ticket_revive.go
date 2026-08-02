@@ -36,7 +36,6 @@ func (d *Daemon) reviveCrashedTicketsForSession(sessionID string) {
 	if len(tickets) == 0 {
 		return
 	}
-	moved := false
 	for _, ticket := range tickets {
 		if ticket == nil {
 			continue
@@ -51,13 +50,11 @@ func (d *Daemon) reviveCrashedTicketsForSession(sessionID string) {
 			d.logf("ticket revive for %s: %v", sessionID, err)
 			continue
 		}
-		moved = true
 		d.logf("ticket %q revived: session %s is live again", ticket.ID, sessionID)
 		// attn authored the move; notify the chief/participants the work is back on.
 		d.notifyTicketObservers(ticket.ID)
-	}
-	if moved {
-		// Refresh the app's board view: the ticket left the Crashed lane.
-		d.broadcastTicketsUpdated()
+		// Each revived ticket is its own status change, so each publishes its own
+		// fact rather than one anonymous board refresh at the end.
+		d.publishTicketFact(FactTicketStatusChanged, ticket.ID)
 	}
 }

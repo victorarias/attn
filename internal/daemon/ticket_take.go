@@ -82,5 +82,5 @@ func (d *Daemon) handleTicketTake(conn net.Conn, msg *protocol.TicketTakeMessage
 	// the previous assignee and the chief.
 	d.notifyTicketObservers(ticketID)
 	// The board's assignee column changed; refresh the app view.
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketAssigned, ticketID)
 }

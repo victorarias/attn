@@ -737,7 +737,7 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 			if ticketID != "" {
 				d.notifyTicketObservers(ticketID)
 			}
-			d.broadcastTicketsUpdated()
+			d.publishTicketFact(FactTicketAssigned, boundTicketID)
 		}
 		return d.completedDelegationResult(existing, placement, worktreeOwned), nil
 	}
@@ -951,7 +951,7 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	if ticketID != "" {
 		d.notifyTicketObservers(ticketID)
 	}
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketAssigned, boundTicketID)
 	result := &protocol.DelegateResult{
 		SessionID:   session.ID,
 		WorkspaceID: workspaceID,

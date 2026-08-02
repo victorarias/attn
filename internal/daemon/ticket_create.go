@@ -77,5 +77,5 @@ func (d *Daemon) handleTicketCreate(conn net.Conn, msg *protocol.TicketCreateMes
 	})
 	// A new backlog card appeared; refresh the app's board. The ticket is unbound
 	// (no assignee/participants), so there is nobody to notify.
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketCreated, created.ID)
 }

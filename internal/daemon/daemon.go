@@ -21,6 +21,7 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/buildinfo"
+	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/diag"
@@ -358,6 +359,19 @@ type Daemon struct {
 
 	workspaceContextCheckoutMu sync.Mutex
 
+	// eventBus is the durable event bus (internal/bus): the spine that carries
+	// domain facts from producers to consumers. The WebSocket hub is an ephemeral
+	// consumer of it via the projection table in bus.go, so a migrated broadcaster
+	// publishes a fact and the projection produces the wire traffic. See
+	// docs/plans/2026-08-01-ext-a1-event-bus.md.
+	//
+	// Built by ensureEventBus at construction (not at Start) because the hub
+	// subscription is what makes a published fact reach clients — a daemon that
+	// publishes without having started must still project. busUnsubscribe drops
+	// that subscription on Stop.
+	eventBus       *bus.Bus
+	busUnsubscribe func()
+
 	// compactRunner is the durable task runner that owns the keeper's
 	// workspace-context compaction duty (kind "compact_context") and the
 	// notebook-narration tasks. It replaces the bespoke time.AfterFunc scheduling +
@@ -655,6 +669,7 @@ func New(socketPath string) *Daemon {
 	// Production wiring for the orphaned-ticket reconciliation classifier. Test
 	// constructors leave this nil so unit tests never shell out to a real CLI.
 	d.ticketReconcileExec = d.execTicketReconcileClassifier
+	d.ensureEventBus()
 	return d
 }
 
@@ -663,7 +678,7 @@ func NewForTesting(socketPath string) *Daemon {
 	dataRoot := filepath.Dir(socketPath)
 	pidPath := filepath.Join(dataRoot, "attn.pid")
 	manager := pty.NewManager(nil)
-	return &Daemon{
+	d := &Daemon{
 		socketPath:         socketPath,
 		pidPath:            pidPath,
 		dataRoot:           dataRoot,
@@ -696,6 +711,8 @@ func NewForTesting(socketPath string) *Daemon {
 		// override this with an enabled runner (see newTestCompactRunner).
 		compactRunner: tasks.New(tasks.Options{}),
 	}
+	d.ensureEventBus()
+	return d
 }
 
 // NewWithGitHubClient creates a daemon with a custom GitHub client for testing
@@ -707,7 +724,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		registry.Register(client.Host(), client)
 	}
 	manager := pty.NewManager(nil)
-	return &Daemon{
+	d := &Daemon{
 		socketPath:         socketPath,
 		pidPath:            pidPath,
 		dataRoot:           dataRoot,
@@ -737,6 +754,8 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		spawnLocks:         make(map[string]*spawnLock),
 		compactRunner:      tasks.New(tasks.Options{}),
 	}
+	d.ensureEventBus()
+	return d
 }
 
 // Start starts the daemon
@@ -779,6 +798,11 @@ func (d *Daemon) Start() error {
 	// before any headless run can start, so the default (or configured) cap
 	// applies from the first keeper/narration/reconcile run.
 	d.applyHeadlessContextWindowCap()
+	// The bus starts before anything that publishes: startup reconciliation
+	// already mutates state that produces facts.
+	if err := d.startEventBus(); err != nil {
+		return fmt.Errorf("start event bus: %w", err)
+	}
 	reapedWorkspaceIDs := d.loadWorkspacesFromStore()
 	if d.daemonInstanceID == "" {
 		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
@@ -1547,6 +1571,7 @@ func (d *Daemon) Stop() {
 	if runner := d.compactRunnerRef(); runner != nil {
 		runner.Stop()
 	}
+	d.stopEventBus()
 	if d.hubManager != nil {
 		d.hubManager.Stop()
 	}
@@ -2820,7 +2845,14 @@ func (d *Daemon) remoteSessionsForBroadcast() []protocol.Session {
 	return sessions
 }
 
+// broadcastSessionStateChanged publishes the fact. Its old body is now
+// projectSessionStateChanged, run by the hub's projection (see bus.go). Because
+// the method already received the entity id, migrating it changed no call site.
 func (d *Daemon) broadcastSessionStateChanged(sessionID string) {
+	d.publishFact(FactSessionStateChanged, sessionID, nil)
+}
+
+func (d *Daemon) projectSessionStateChanged(sessionID string) {
 	session := d.store.Get(sessionID)
 	decorated := d.sessionForBroadcast(session)
 	if decorated == nil {

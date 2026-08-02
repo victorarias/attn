@@ -40,7 +40,7 @@ func (d *Daemon) afterTicketMutation(ticketID string, err error) {
 		return
 	}
 	d.notifyTicketObservers(ticketID)
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketChanged, ticketID)
 }
 
 func (d *Daemon) handleTicketChangeStatus(client *wsClient, msg *protocol.TicketChangeStatusMessage) {

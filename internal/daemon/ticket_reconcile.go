@@ -489,7 +489,7 @@ func (d *Daemon) reconcileTaskExecutor(ctx context.Context, task *tasks.Task) er
 	// The comment notifies participants (the chief is one via the created event);
 	// attn itself is an authoring identity, never an observer.
 	d.notifyTicketObservers(in.TicketID)
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketCommented, in.TicketID)
 	return nil
 }
 
