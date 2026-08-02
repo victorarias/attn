@@ -178,13 +178,15 @@ pnpm run e2e:headed -- e2e/component-harness.spec.ts  # Debug visually
 
 1. **App.tsx two-component pattern**: App.tsx has two components: `App` (outer) and `AppContent` (inner). This split exists because `AppContent` needs to be wrapped in providers (like `DaemonProvider`) that require functions from `useDaemonSocket()`.
 
-   **When adding a new daemon socket function**, update these 4 places in order:
-   1. Destructure from `useDaemonSocket()` return in `App`
-   2. Pass as prop to `<AppContent ... />`
-   3. Add to the `AppContentProps` interface
-   4. Destructure in `AppContent` function parameters
+   **A new daemon socket function needs no wiring in App.tsx.** `App` is the only
+   caller of `useDaemonSocket()`, and it publishes the whole return value through
+   `DaemonApiProvider`; read it with `useDaemonApi()` wherever you need it. Return
+   it from the hook and it is there.
 
-   Missing any step causes the function to be undefined where you try to use it.
+   `AppContentProps` is now only App's own state — sessions, workspaces, PRs,
+   settings, the change signals. A daemon send function does not belong there:
+   passing one as a prop puts its name in four places that have to agree, which
+   is what this replaced.
 
 2. **Worktree action key collision**: `sendCreateWorktree()` and `sendCreateWorktreeFromBranch()` use the same pending action key. Don't call both simultaneously.
 
