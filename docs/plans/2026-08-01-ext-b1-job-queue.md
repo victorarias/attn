@@ -74,3 +74,109 @@ this stage plus A4's sidecar.
 - `internal/tasks` is removed.
 - Periodic work fires from one mechanism; automations' catch-up behavior is
   unchanged.
+
+## Implementation plan
+
+Written at the start of implementation (2026-08-02), after A1 and A2 merged.
+
+### The record
+
+`internal/jobs` is a new leaf package (no `internal/daemon` import), same shape
+of seam as `internal/tasks`: a `Runner` over a `Store` interface, with the
+daemon supplying a SQLite-backed store.
+
+```
+Job{ ID, Kind, UniqueKey, Priority, Payload, Result,
+     State, Attempts, MaxAttempts, ScheduledAt, LastError,
+     Requeued, CreatedAt, UpdatedAt, CommitGuard }
+```
+
+`ID` is opaque and generated. It is **not** derived from kind+key, so nothing
+parses it: identity for coalescing lives in `UniqueKey`, addressed through
+`Runner.RemoveByKey(kind, key)` and a unique index on `(kind, unique_key)`.
+`internal/tasks` conflated the two by making the id `kind:subject`, which is
+why removing a task required the caller to know the id scheme.
+
+`Payload` replaces `Subject` + `Meta`. The four kinds carry their subject in
+the payload and set `UniqueKey` to it, reproducing today's coalescing exactly.
+
+### Deliberately not built
+
+- **A `queue` column.** The gate named it, but per-kind concurrency caps are
+  strictly finer-grained than named queues, and nothing in B1 or B2 needs two
+  worker pools — activities are ordinary jobs. An unused column that the
+  dispatcher does not filter on is dead weight, and adding it later is a
+  one-line migration. Revisit when something actually needs a second pool.
+- **`Priority` is built**, and is a real term in the dispatch ordering rather
+  than a stored-but-ignored field.
+
+### Selection and its bound
+
+Dispatch reads an ordered page of eligible jobs — `priority DESC, scheduled_at
+ASC, created_at ASC` — instead of listing the whole table and sorting in Go,
+which is what `internal/tasks` does. The page is bounded, and hitting the bound
+is logged with the limit and the count so it can never truncate silently.
+
+Receipt for the bound: the real task tables hold 146 rows (`~/.attn`) and 206
+rows (`~/.attn-dev`), of which all but 2–6 are terminal `done`/`dead` and
+therefore never eligible. Eligible rows at any instant are single digits. The
+bound is set at 1000 — three orders of magnitude past the measured working set,
+so only something broken reaches it.
+
+### Retention
+
+Terminal `done` jobs are trimmed past an age window (30 days, mirroring
+`bus.DefaultRetention`), on the same trim-loop shape. `dead` jobs are **kept**:
+they are the actionable "attn gave up" record a notification links to by id,
+they only exist when a human has not acted, and the measured count is 2–6 —
+they are not the unbounded growth trimming exists to bound.
+
+### Slices
+
+1. `internal/jobs` + the SQLite store + migration **86** — the package and its
+   tests, no callers. (85 is claimed by an in-flight branch and already applied
+   to two real profile DBs.)
+2. The daemon builds a `jobs.Runner`, the four kinds move onto it kind by kind
+   against the parity checklist below, `internal/tasks` is deleted, and
+   existing `tasks` rows are imported once. The wire shape does not change:
+   `protocol.Task.Subject` is populated from `UniqueKey`, so no protocol bump
+   and no frontend work.
+3. Cron entries. The queue owns firing; `startNotebookCronEnqueuer` and
+   `startAutomationScheduleLoop` stop hand-rolling `time.NewTicker` and become
+   cron entries. The notebook's `NarrateCronState` anchor is retired in favor
+   of the cron cursor (identical semantics: anchor on first observation, fire
+   only the newest due instant, collapse missed slots into one catch-up).
+   `internal/automation` keeps its per-definition cursor, five-minute skip
+   grace, million-instant storm cap, and startup-recovery interlock inside the
+   fired job — those are product semantics, not queue mechanics.
+
+**The four kinds do not run on two runners at once.** The gate says they
+migrate one at a time against a parity checklist; that is the order of the
+work, not a shipped dual-runner state. All four are reached through a single
+`compactRunnerRef()` and feed a single panel, so coexistence would mean two
+locks, two dead-job notification paths, and a panel unioning two lists — all
+of it thrown away at the end. The per-kind rigor is kept as one commit and one
+checklist pass per kind.
+
+### Parity checklist (applied per kind)
+
+- Coalescing: re-enqueue within the debounce window collapses to one run.
+- Coalesce-during-run: a re-enqueue mid-run re-runs after it instead of being
+  lost, and a `RunNow` re-enqueue is not demoted to a backoff delay.
+- Commit fence: cancel during the durable write waits rather than tearing it.
+- Cancel blocks until the run goroutine has exited.
+- Backoff: capped exponential, then `dead` at the attempt cap, with the
+  terminal-failure notification firing exactly once.
+- Crash recovery: a `running` row at startup returns to `queued`.
+- Removal: a removed subject leaves no row behind.
+- The kind's own inputs survive the move from `Subject`/`Meta` to `Payload` —
+  notably `summarize_session`, whose run reads a transcript path recorded
+  before the session and workspace rows were deleted.
+
+### Verification
+
+Daemon-tier is not enough: task state reaches the app through the background
+tasks panel, the notification feed, and the bus facts A2 routed. Live
+verification runs on a throwaway profile with the panel open — enqueue, watch
+a kind run, force a failure to `dead`, retry from the notification, restart the
+daemon mid-run and confirm recovery.

@@ -862,6 +862,27 @@ CREATE TABLE IF NOT EXISTS bus_consumers (
 		tombstone_generation INTEGER NOT NULL DEFAULT 0,
 		updated_at TEXT NOT NULL
 	)`},
+	{87, "create the durable job queue", `CREATE TABLE IF NOT EXISTS jobs (
+    id           TEXT PRIMARY KEY,
+    kind         TEXT NOT NULL,
+    unique_key   TEXT NOT NULL DEFAULT '',
+    priority     INTEGER NOT NULL DEFAULT 0,
+    payload      TEXT NOT NULL DEFAULT '',
+    result       TEXT NOT NULL DEFAULT '',
+    state        TEXT NOT NULL,
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 0,
+    scheduled_at TEXT NOT NULL,
+    last_error   TEXT NOT NULL DEFAULT '',
+    requeued     INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+-- Coalescing identity. Partial, because a job without a unique key is
+-- deliberately distinct and any number of them may coexist.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_unique_key ON jobs(kind, unique_key) WHERE unique_key <> '';
+-- The dispatch selection: claimable rows in the order they are claimed.
+CREATE INDEX IF NOT EXISTS idx_jobs_eligible ON jobs(state, scheduled_at, priority DESC);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
