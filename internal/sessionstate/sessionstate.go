@@ -60,6 +60,10 @@ const (
 	ClaimNeedsInput Claim = "needs_input"
 	// ClaimIdle: the agent finished and wants nothing.
 	ClaimIdle Claim = "idle"
+	// ClaimParked: the stop-time judge read a yielded turn as waiting on its own
+	// background work, not on the user. Only the background-work clause consumes
+	// it — outside a yield the claim describes nothing.
+	ClaimParked Claim = "parked"
 	// ClaimExited: the process is gone.
 	ClaimExited Claim = "exited"
 	// ClaimStopFailed: the turn ended on an API error rather than on an answer.
@@ -269,6 +273,7 @@ const (
 	ReasonSettleGrace       Reason = "settle_grace"
 	ReasonAwaitingVerdict   Reason = "awaiting_verdict"
 	ReasonBackgroundWork    Reason = "background_work"
+	ReasonBackgroundParked  Reason = "background_parked"
 	ReasonCompacting        Reason = "compacting"
 	ReasonStopFailed        Reason = "stop_failed"
 	ReasonClassifierVerdict Reason = "classifier_verdict"
@@ -335,11 +340,42 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 		return Resolution{State: protocol.SessionStateWorking, Reason: ReasonCompacting}
 	}
 
-	// The turn yielded with work still running, so nobody is being waited on —
-	// until the harness says otherwise. The confirmation is a direct answer to the
-	// question this fact only guesses at, and claude fires it on a flat timer that
-	// reads neither fact, so it can be trusted to arrive.
-	if e.BackgroundWork && !promptIdleConfirmed(e) {
+	// The turn yielded with work still running. The fact alone cannot say whether
+	// anyone is waited on — "I'll continue when the build finishes" and "done, I
+	// left the server running" yield identical payloads — so the stop is judged
+	// with the yield in view, and the verdict outranks every guess below it.
+	//
+	// A waiting/idle verdict means the judge read the ending as the user's turn:
+	// the process still running is a leftover, not a reason the turn will resume,
+	// so it settles (and rings) like any other ending. A parked verdict is the
+	// opposite answer — the turn waits on its own work and will resume without
+	// anyone — and it is affirmative evidence for the silence that follows: an
+	// agent sitting out a background wait paints no frames and fires its
+	// prompt-idle notification exactly as a finished one does, so neither total
+	// silence nor the confirmation says anything the verdict has not already
+	// answered. Parked therefore holds working without decaying to unknown —
+	// `unknown` opens a turn, and ringing the user because a build is slow is the
+	// failure this clause exists to remove. The hold is still bounded: the next
+	// busy frame spends the verdict, and the next turn clears the yield.
+	//
+	// With no verdict — the judge failed, declined, or is still out — the ladder
+	// is the old one: hold working while the judgment may yet land, let the
+	// harness's prompt-idle confirmation retire the yield (the safety valve that
+	// keeps a wrongly-held session from staying green forever), and decay to
+	// stuck on total silence.
+	if e.BackgroundWork {
+		if r, ok := classifierVerdict(e); ok {
+			return r
+		}
+		if parkedVerdict(e) {
+			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundParked}
+		}
+		if verdictPending(e, policy, now) {
+			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundWork}
+		}
+		if promptIdleConfirmed(e) {
+			return settled(e, ReasonPromptIdle, policy, now)
+		}
 		if evidenceStoppedMoving(e, now, policy.StuckAfter) {
 			return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
 		}
@@ -511,8 +547,19 @@ func harnessEdge(e Evidence) (Resolution, bool) {
 	}
 }
 
+// parkedVerdict reports whether the stop-time judge read the current yield as
+// the turn waiting on its own background work rather than on the user. Spent
+// the same way every verdict is: by the agent going busy past it — which for a
+// parked turn is precisely the resume it predicted.
+func parkedVerdict(e Evidence) bool {
+	return e.LastClassifier != nil &&
+		e.LastClassifier.Claim == ClaimParked &&
+		!supersededByBusy(e.LastClassifier, e)
+}
+
 // classifierVerdict reads the stop-time verdict, if one belongs to the current
-// turn.
+// turn. It answers only the two claims that name a state; parked is read by the
+// background-work clause alone, because outside a yield it describes nothing.
 //
 // A verdict describes the turn it was computed for and nothing else. The turn
 // bracket clears it when the next turn opens, but a turn may also start without

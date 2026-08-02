@@ -6,6 +6,22 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ---
 
+## [2026-08-02]
+
+### Fixed
+- **A session waiting on its own background task no longer goes grey — or rings
+  you — a minute in.** When a Claude turn yields with a background process still
+  running ("the build is running; I'll continue when it completes"), attn now
+  asks its stop-time judge to read the ending with that fact in view. A turn
+  that is waiting on its own work stays green for as long as the wait takes,
+  instead of flipping to idle after 60 seconds and putting a false turn in your
+  queue. The judgment cuts the other way too: a turn that finished but left
+  something running (a dev server, a watcher) settles into your queue instead of
+  staying green forever. When no judgment lands, the previous 60-second
+  behaviour remains as the fallback.
+
+---
+
 ## [2026-08-01]
 
 ### Fixed

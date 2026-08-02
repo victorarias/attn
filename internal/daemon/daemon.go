@@ -2495,9 +2495,10 @@ func (d *Daemon) persistResumeSessionID(sessionID, resumeSessionID string) {
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
 
-	// A non-terminal stop is a yield, not an end: do none of the end-of-turn work
-	// below (no resume-id capture, no narration enqueue, no classification), and
-	// leave the color to the facts recorded here. The turn resumes on its own.
+	// A non-terminal stop is a yield, not an end: it skips the end-of-turn work
+	// below (no resume-id capture, no narration enqueue — both belong to a turn
+	// that has actually ended), and the color follows from the facts recorded
+	// here plus the yield-aware judgment kicked off below.
 	//
 	// The facts are recorded as the rules read them, not raw. A background task
 	// the agent has already finished is present in the payload and means nothing,
@@ -2521,6 +2522,22 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 			"",
 		)
 		d.sendOK(conn)
+		if d.consumeForcedStopClassification(msg.ID) {
+			d.logf("handleStop: skipping yield classification for daemon-terminated session=%s", msg.ID)
+			return
+		}
+		// A yield is not excused from judgment. The payload that says the turn can
+		// resume is identical whether the agent is waiting on its own build or
+		// finished and left a process running, and only the turn's own last words
+		// separate the two. The judge sees the yield (three-way verdict: parked
+		// holds the session working with no decay to unknown; waiting/idle settle
+		// it into the user's queue), and a judgment that never lands leaves the
+		// resolver's prompt-idle fallback as the safety valve — exactly the
+		// pre-judgment behavior.
+		go d.classifyStop(msg.ID, msg.TranscriptPath, stopClassification{
+			yielded:                true,
+			runningBackgroundTasks: runningBackgroundTaskCount(msg),
+		})
 		return
 	}
 

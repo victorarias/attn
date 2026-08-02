@@ -29,6 +29,40 @@ func TestParseResponse_Waiting(t *testing.T) {
 	}
 }
 
+func TestParseResponse_Parked(t *testing.T) {
+	tests := []struct {
+		response string
+		want     string
+	}{
+		{"PARKED", VerdictParked},
+		{"parked", VerdictParked},
+		{`{"verdict":"PARKED"}`, VerdictParked},
+		{"Verdict: PARKED", VerdictParked},
+	}
+
+	for _, tt := range tests {
+		got := ParseResponse(tt.response)
+		if got != tt.want {
+			t.Errorf("ParseResponse(%q) = %q, want %q", tt.response, got, tt.want)
+		}
+	}
+}
+
+// The harness-facts line is composed beside the template on purpose: the PARKED
+// rule keys on its marker, so the two must not drift apart.
+func TestComposeYieldInput_CarriesTheMarkerThePromptKeysOn(t *testing.T) {
+	input := ComposeYieldInput("The build is still running; I'll continue when it completes.", 2)
+	if !strings.Contains(input, "[harness facts]") {
+		t.Fatalf("yield input missing the [harness facts] marker: %q", input)
+	}
+	if !strings.Contains(BuildPrompt("x"), "[harness facts]") {
+		t.Fatal("prompt template no longer mentions the [harness facts] marker the yield input carries")
+	}
+	if !strings.Contains(input, "2 background process(es)") {
+		t.Fatalf("yield input missing the running-task count: %q", input)
+	}
+}
+
 func TestParseResponse_Done(t *testing.T) {
 	tests := []struct {
 		response string

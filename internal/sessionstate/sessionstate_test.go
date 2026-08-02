@@ -429,15 +429,62 @@ func TestResolve(t *testing.T) {
 			wantReason: ReasonHeartbeatFresh,
 		},
 		{
-			// An outstanding background task auto-resumes the turn, so the
-			// session keeps working rather than flickering idle and back.
-			name: "background work keeps a yielded turn working",
+			// A yield is judged, and the verdict outranks the yield's own guess. An
+			// idle answer means the judge read the ending as complete — the process
+			// still running is a leftover, not what the turn waits on — so the
+			// session settles into the user's queue instead of sitting green behind
+			// a process that will never exit. (A stale verdict from an earlier turn
+			// cannot masquerade as this: the agent going busy in between spends it.)
+			name: "a judged yield settles on its verdict: the running process is a leftover",
 			evidence: Evidence{
 				BackgroundWork: true,
 				LastClassifier: seen(SourceClassifier, ClaimIdle, time.Second),
 			},
+			wantState:  protocol.SessionStateIdle,
+			wantReason: ReasonClassifierVerdict,
+		},
+		{
+			// The judge read the yielded turn as waiting on its own work: the
+			// session holds working, and — unlike the unjudged yield below — never
+			// decays to unknown, because the verdict is affirmative evidence that
+			// this exact silence is a background wait. LastMovement is well past
+			// StuckAfter to pin that.
+			name: "a parked verdict holds a yielded turn working without decaying to unknown",
+			evidence: Evidence{
+				BackgroundWork: true,
+				TurnEverOpened: true,
+				LastClassifier: seen(SourceClassifier, ClaimParked, 2*time.Minute),
+				LastMovement:   now.Add(-2 * time.Minute),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonBackgroundParked,
+		},
+		{
+			// The resume the parked verdict predicted arrived (a busy frame after
+			// the verdict) and the agent has since gone quiet again without a new
+			// stop: the verdict is spent, and the yield falls back to its unjudged
+			// ladder rather than the old answer.
+			name: "a busy frame spends a parked verdict",
+			evidence: Evidence{
+				BackgroundWork: true,
+				TurnEverOpened: true,
+				LastClassifier: seen(SourceClassifier, ClaimParked, 30*time.Second),
+				LastBusyAt:     now.Add(-10 * time.Second),
+				LastMovement:   now.Add(-10 * time.Second),
+			},
 			wantState:  protocol.SessionStateWorking,
 			wantReason: ReasonBackgroundWork,
+		},
+		{
+			// The judge read the yielded turn as ending on a question. Background
+			// work or not, the user is being waited on.
+			name: "a waiting verdict on a yield asks the user",
+			evidence: Evidence{
+				BackgroundWork: true,
+				LastClassifier: seen(SourceClassifier, ClaimNeedsInput, time.Second),
+			},
+			wantState:  protocol.SessionStateWaitingInput,
+			wantReason: ReasonClassifierVerdict,
 		},
 		{
 			// Both facts arrive together on the same Stop payload, and the order
@@ -764,6 +811,51 @@ func TestAPromptIdleConfirmationRetiresAnOutstandingBackgroundTask(t *testing.T)
 		}
 		if got.State != protocol.SessionStateIdle || got.Reason != ReasonPromptIdle {
 			t.Fatalf("%s in: resolved %s/%s, want idle/%s", d, got.State, got.Reason, ReasonPromptIdle)
+		}
+	}
+}
+
+// Replays the 2026-08-01 incident: a turn yielded on "the build is still
+// running; I'll continue when it completes" with the build as an outstanding
+// background task, claude fired its flat-timer prompt-idle notification sixty
+// seconds in, and the resolver settled the session idle — opening a turn and
+// ringing the user for a build that finished on its own forty seconds later.
+//
+// The confirmation was not wrong about the prompt (the agent does sit at it
+// during a background wait); it was wrong about what that means. With a parked
+// verdict on the table the resolver now has the direct answer, so neither the
+// confirmation nor total silence may retire the yield: no idle, no unknown, all
+// the way until the resume.
+func TestAParkedVerdictOutlastsThePromptIdleConfirmation(t *testing.T) {
+	policy := testPolicy()
+
+	yielded := now
+	at := func(d time.Duration) Evidence {
+		e := Evidence{
+			TurnEverOpened: true,
+			BackgroundWork: true,
+			Heartbeat:      &Observation{Source: SourceHeartbeat, Claim: ClaimSettled, ObservedAt: yielded},
+			LastBusyAt:     yielded.Add(-time.Second),
+			LastMovement:   yielded,
+			// The yield was judged seconds after the stop: parked.
+			LastClassifier: &Observation{Source: SourceClassifier, Claim: ClaimParked, ObservedAt: yielded.Add(5 * time.Second)},
+		}
+		if d >= time.Minute {
+			e.PromptIdleAt = yielded.Add(time.Minute)
+			e.LastMovement = yielded.Add(time.Minute)
+		}
+		return e
+	}
+
+	for _, d := range []time.Duration{
+		30 * time.Second,
+		time.Minute, // the notification the incident settled on
+		time.Minute + policy.StuckAfter + time.Second,
+		10 * time.Minute, // a genuinely long build
+	} {
+		got := Resolve(at(d), policy, yielded.Add(d))
+		if got.State != protocol.SessionStateWorking || got.Reason != ReasonBackgroundParked {
+			t.Fatalf("%s in: resolved %s/%s, want working/%s", d, got.State, got.Reason, ReasonBackgroundParked)
 		}
 	}
 }
