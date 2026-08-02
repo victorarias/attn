@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/victorarias/attn/internal/bus"
 	"net"
 	"os"
 	"path/filepath"
@@ -145,11 +146,49 @@ func (d *Daemon) notebookRoot() (string, error) {
 	return notebook.DefaultRoot(home, config.Profile()), nil
 }
 
+// broadcastNotebookChanged publishes one fact per changed file — the file is
+// the entity, and a caller that changed twelve of them changed twelve things.
+// The projection puts them back into a single notebook_changed per origin, so
+// the wire sees exactly one message per call as before.
 func (d *Daemon) broadcastNotebookChanged(origin string, paths ...string) {
-	d.broadcastMessage(protocol.NotebookChangedMessage{
-		Event:  protocol.EventNotebookChanged,
-		Paths:  paths,
-		Origin: origin,
+	d.coalesceSnapshots(func() {
+		for _, path := range paths {
+			d.publishFact(FactNotebookFileChanged, path, notebookChangeOrigin{Origin: origin})
+		}
+	})
+}
+
+// notebookChangeOrigin is the payload of FactNotebookFileChanged: who wrote the
+// file. It is not recoverable from the file itself.
+type notebookChangeOrigin struct {
+	Origin string `json:"origin"`
+}
+
+func (d *Daemon) projectNotebookChanged(ev bus.Event) {
+	change, ok := decodeFact[notebookChangeOrigin](d, ev)
+	if !ok {
+		return
+	}
+	d.notebookPendingMu.Lock()
+	if d.notebookPendingPaths == nil {
+		d.notebookPendingPaths = map[string][]string{}
+	}
+	d.notebookPendingPaths[change.Origin] = append(d.notebookPendingPaths[change.Origin], ev.Subject)
+	d.notebookPendingMu.Unlock()
+
+	d.projectSnapshot("notebook_changed:"+change.Origin, func() {
+		d.notebookPendingMu.Lock()
+		paths := d.notebookPendingPaths[change.Origin]
+		delete(d.notebookPendingPaths, change.Origin)
+		d.notebookPendingMu.Unlock()
+		if len(paths) == 0 {
+			return
+		}
+		d.broadcastMessage(protocol.NotebookChangedMessage{
+			Event:  protocol.EventNotebookChanged,
+			Paths:  paths,
+			Origin: change.Origin,
+		})
 	})
 }
 

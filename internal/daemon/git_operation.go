@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"github.com/victorarias/attn/internal/bus"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,11 +19,7 @@ func (d *Daemon) beginGitOperation(kind protocol.GitOperationKind, path string, 
 		StartedAt:  startedAt.Format(time.RFC3339),
 	}
 
-	startedOperation := operation
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventGitOperationStarted,
-		Operation: &startedOperation,
-	})
+	d.publishFact(FactGitOperationStarted, operation.ID, operation)
 
 	return func(err error) {
 		finishedAt := time.Now()
@@ -34,11 +31,24 @@ func (d *Daemon) beginGitOperation(kind protocol.GitOperationKind, path string, 
 		operation.FinishedAt = protocol.Ptr(finishedAt.Format(time.RFC3339))
 		operation.DurationMs = protocol.Ptr(int(finishedAt.Sub(startedAt).Milliseconds()))
 
-		finishedOperation := operation
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:     protocol.EventGitOperationFinished,
-			Operation: &finishedOperation,
-		})
+		d.publishFact(FactGitOperationFinished, operation.ID, operation)
 		d.refreshGitStatusSubscribersForPath(path)
 	}
+}
+
+// projectGitOperation carries the operation in the payload: the daemon does not
+// keep a git-operation registry, so the fact is the only record of it.
+func (d *Daemon) projectGitOperation(ev bus.Event) {
+	operation, ok := decodeFact[protocol.GitOperation](d, ev)
+	if !ok {
+		return
+	}
+	event := protocol.EventGitOperationStarted
+	if ev.Name == FactGitOperationFinished {
+		event = protocol.EventGitOperationFinished
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     event,
+		Operation: &operation,
+	})
 }

@@ -29,10 +29,7 @@ func (d *Daemon) handleRenameSession(client *wsClient, msg *protocol.RenameSessi
 	}
 	d.store.UpdateSessionLabel(sessionID, label)
 	session.Label = label
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:   protocol.EventSessionStateChanged,
-		Session: d.sessionForBroadcast(session),
-	})
+	d.publishFact(FactSessionRenamed, sessionID, nil)
 	d.sendRenameResult(client, protocol.CmdRenameSession, sessionID, nil)
 }
 
@@ -55,16 +52,12 @@ func (d *Daemon) handleRenameWorkspace(client *wsClient, msg *protocol.RenameWor
 		d.sendRenameResult(client, protocol.CmdRenameWorkspace, workspaceID, fmt.Errorf("workspace registry unavailable"))
 		return
 	}
-	snapshot, ok := d.workspaces.rename(workspaceID, title)
-	if !ok {
+	if _, ok := d.workspaces.rename(workspaceID, title); !ok {
 		d.sendRenameResult(client, protocol.CmdRenameWorkspace, workspaceID, fmt.Errorf("workspace not found: %s", workspaceID))
 		return
 	}
 	d.store.UpdateWorkspaceTitle(workspaceID, title)
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &snapshot,
-	})
+	d.publishFact(FactWorkspaceRenamed, workspaceID, nil)
 	d.sendRenameResult(client, protocol.CmdRenameWorkspace, workspaceID, nil)
 }
 

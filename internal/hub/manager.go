@@ -22,7 +22,12 @@ import (
 )
 
 type StatusCallback func(info protocol.EndpointInfo)
-type SessionsChangedCallback func()
+
+// SessionsChangedCallback reports that the sessions the hub knows about for one
+// endpoint changed. The endpoint id is the subject of the fact the daemon
+// publishes in response, so it is required: "some remote sessions changed
+// somewhere" is a cache invalidation, not an event.
+type SessionsChangedCallback func(endpointID string)
 type RawEventCallback func(data []byte)
 
 type VersionMismatchError struct {
@@ -168,15 +173,19 @@ func (m *Manager) Start(parent context.Context) {
 }
 
 func (m *Manager) Stop() {
-	changed := false
+	// One id per endpoint that actually had sessions: stopping the hub drops
+	// each endpoint's sessions separately, and each is its own fact.
+	var emptied []string
 	shutdownTargets := make([]isolatedShutdownTarget, 0)
 	seenTargets := make(map[string]struct{})
 	m.mu.Lock()
 	if m.cancel != nil {
 		m.cancel()
 	}
-	for _, runtime := range m.runtimes {
-		changed = changed || len(runtime.sessions) > 0
+	for id, runtime := range m.runtimes {
+		if len(runtime.sessions) > 0 {
+			emptied = append(emptied, id)
+		}
 		if target := isolatedRemoteShutdownTarget(runtime.record); target.Target != "" {
 			key := target.Target + "|" + target.Profile
 			if _, exists := seenTargets[key]; !exists {
@@ -189,8 +198,12 @@ func (m *Manager) Stop() {
 	m.started = false
 	m.mu.Unlock()
 	m.stopIsolatedRemoteDaemons(shutdownTargets)
-	if changed {
-		go m.publishSessionsChanged()
+	if len(emptied) > 0 {
+		go func() {
+			for _, id := range emptied {
+				m.publishSessionsChanged(id)
+			}
+		}()
 	}
 }
 
@@ -326,7 +339,7 @@ func (m *Manager) UpdateEndpoint(id string, update store.EndpointUpdate) (*store
 	m.mu.Unlock()
 
 	if changed {
-		m.publishSessionsChanged()
+		m.publishSessionsChanged(id)
 	}
 	m.publishStatus(id)
 	return record, nil
@@ -347,7 +360,7 @@ func (m *Manager) RemoveEndpoint(id string) error {
 		m.stopIsolatedRemoteDaemons([]isolatedShutdownTarget{shutdownTarget})
 	}
 	if changed {
-		m.publishSessionsChanged()
+		m.publishSessionsChanged(id)
 	}
 	return m.store.RemoveEndpoint(id)
 }
@@ -495,7 +508,7 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		}
 		m.clearConnection(id)
 		if m.clearRemoteSessions(id) {
-			m.publishSessionsChanged()
+			m.publishSessionsChanged(id)
 		}
 		m.clearRemoteWorkspaceLayouts(id)
 
@@ -628,7 +641,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			}
 			m.updateStatus(id, activeStatus, activeMsg, caps, &sessionCount)
 			if changed {
-				m.publishSessionsChanged()
+				m.publishSessionsChanged(id)
 			}
 			connected = true
 		case protocol.EventSettingsUpdated:
@@ -646,7 +659,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			sessionCount := int32(len(msg.Sessions))
 			m.updateStatus(id, activeStatus, activeMsg, nil, &sessionCount)
 			if changed {
-				m.publishSessionsChanged()
+				m.publishSessionsChanged(id)
 			}
 		case protocol.EventSessionRegistered, protocol.EventSessionStateChanged, protocol.EventSessionTodosUpdated:
 			var msg struct {
@@ -659,7 +672,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			countValue := int32(sessionCount)
 			m.updateStatus(id, activeStatus, activeMsg, nil, &countValue)
 			if changed {
-				m.publishSessionsChanged()
+				m.publishSessionsChanged(id)
 			}
 		case protocol.EventSessionUnregistered:
 			var msg struct {
@@ -672,7 +685,7 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			countValue := int32(sessionCount)
 			m.updateStatus(id, activeStatus, activeMsg, nil, &countValue)
 			if changed {
-				m.publishSessionsChanged()
+				m.publishSessionsChanged(id)
 			}
 		case protocol.EventWorkspaceLayout, protocol.EventWorkspaceLayoutUpdated:
 			var msg struct {
@@ -1280,9 +1293,9 @@ func (m *Manager) clearRemoteWorkspaceLayouts(id string) bool {
 	return true
 }
 
-func (m *Manager) publishSessionsChanged() {
+func (m *Manager) publishSessionsChanged(endpointID string) {
 	if m.onSessions != nil {
-		m.onSessions()
+		m.onSessions(endpointID)
 	}
 }
 

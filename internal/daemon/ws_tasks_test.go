@@ -43,7 +43,7 @@ func installInstrumentedTaskRunner(t *testing.T, d *Daemon) (*tasks.Runner, *ato
 	}); err != nil {
 		t.Fatalf("register %s: %v", testTaskKind, err)
 	}
-	runner.OnChange(func() { d.broadcastTasksChanged() })
+	runner.OnChange(func(taskID string) { d.publishFact(FactTaskChanged, taskID, nil) })
 	if err := runner.Start(); err != nil {
 		t.Fatalf("start runner: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestSendTaskRetryWSResultNilRunner(t *testing.T) {
 // through the daemon-wired runner and asserts the live tasks_changed
 // broadcast actually lands on a subscribed websocket client with the correct event
 // name. This covers the end-to-end path startCompactRunner relies on (runner.OnChange
-// -> d.broadcastTasksChanged -> wsHub), which the per-handler result tests
+// -> the task.changed fact -> wsHub), which the per-handler result tests
 // cannot see: a renamed event or a broken broadcast message would slip past them but
 // is caught here. (That the runner invokes OnChange at all is a tasks-package property
 // already covered by internal/tasks; this test owns the daemon's wiring of it.)
@@ -261,7 +261,7 @@ func TestTasksChangedBroadcastReachesClient(t *testing.T) {
 	d.wsHub.clients[client] = true
 	go d.wsHub.run()
 
-	// installInstrumentedTaskRunner wires runner.OnChange -> broadcastTasksChanged
+	// installInstrumentedTaskRunner wires runner.OnChange -> the task.changed fact
 	// exactly as startCompactRunner does, so a real transition exercises the live path.
 	runner, _ := installInstrumentedTaskRunner(t, d)
 	if _, err := runner.Enqueue(testTaskKind, "ws-bcast", tasks.EnqueueOptions{}); err != nil {

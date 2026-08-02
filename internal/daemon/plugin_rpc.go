@@ -560,14 +560,13 @@ func (d *Daemon) handlePluginConnection(conn net.Conn, reader *bufio.Reader, hel
 		d.ensurePluginSupervisor().NoteDisconnected(plugin.name, plugin.generation)
 		registry.unregister(plugin)
 		plugin.closePending(io.EOF)
-		d.broadcastPluginsUpdated()
-		d.broadcastSettings("")
+		d.publishSettingsFact(FactPluginDisconnected, plugin.name)
 	}()
 
 	if err := plugin.send(jsonRPCResult(helloID, pluginHelloResult{OK: true})); err != nil {
 		return
 	}
-	d.broadcastPluginsUpdated()
+	d.publishFact(FactPluginConnected, plugin.name, nil)
 	if d.pluginHealthEnabled {
 		go d.monitorPluginHealth(plugin)
 	}
@@ -663,7 +662,7 @@ func (d *Daemon) checkPluginHealth(plugin *pluginConnection) {
 	if err != nil {
 		plugin.setHealth("unhealthy", err.Error(), now)
 		d.logf("plugin health plugin=%s status=unhealthy error=%s", plugin.name, providerLogValue(err.Error()))
-		d.broadcastPluginsUpdated()
+		d.publishFact(FactPluginHealthChanged, plugin.name, nil)
 		return
 	}
 	if !result.OK {
@@ -673,11 +672,11 @@ func (d *Daemon) checkPluginHealth(plugin *pluginConnection) {
 		}
 		plugin.setHealth("unhealthy", message, now)
 		d.logf("plugin health plugin=%s status=unhealthy error=%s", plugin.name, providerLogValue(message))
-		d.broadcastPluginsUpdated()
+		d.publishFact(FactPluginHealthChanged, plugin.name, nil)
 		return
 	}
 
 	plugin.setHealth("healthy", result.Message, now)
 	d.logf("plugin health plugin=%s status=healthy", plugin.name)
-	d.broadcastPluginsUpdated()
+	d.publishFact(FactPluginHealthChanged, plugin.name, nil)
 }

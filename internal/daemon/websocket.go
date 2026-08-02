@@ -326,6 +326,17 @@ func (c *wsClient) clearRemoteAttach(sessionID string) {
 // BroadcastListener is called for each broadcast event (for testing)
 type BroadcastListener func(event *protocol.WebSocketEvent)
 
+// WireTap observes every text payload the hub puts on the wire, from every send
+// path, after marshalling.
+//
+// BroadcastListener sees only Broadcast — one of five entry points, and the only
+// one that carries a typed *protocol.WebSocketEvent. Everything sent as a typed
+// message (BroadcastValue) or already-marshalled bytes (BroadcastRawText,
+// Send*ToMatchingClients) is invisible to it, which is roughly a fifth of the
+// daemon's production send sites. The tap is what lets a test compare complete
+// wire traces across a refactor.
+type WireTap func(payload []byte)
+
 type messageKind int
 
 const (
@@ -347,6 +358,7 @@ type wsHub struct {
 	mu                sync.RWMutex
 	logf              func(format string, args ...interface{})
 	broadcastListener BroadcastListener // Optional listener for testing
+	wireTap           WireTap           // Optional full-trace listener for testing
 }
 
 const (
@@ -458,6 +470,9 @@ func (h *wsHub) SendRawTextToMatchingClients(payload []byte, match func(*wsClien
 	if len(payload) == 0 {
 		return
 	}
+	if h.wireTap != nil {
+		h.wireTap(payload)
+	}
 	cloned := append([]byte(nil), payload...)
 	message := outboundMessage{kind: messageKindText, payload: cloned}
 
@@ -534,6 +549,9 @@ func (h *wsHub) broadcastValue(message interface{}) {
 	if err != nil {
 		h.logf("WebSocket broadcast marshal error: %v", err)
 		return
+	}
+	if h.wireTap != nil {
+		h.wireTap(data)
 	}
 	out := outboundMessage{kind: messageKindText, payload: data}
 	select {

@@ -264,15 +264,28 @@ hub directly: a producer publishes a **domain fact** (dotted `domain.verb`, an
 indexed subject naming the entity, a small payload), and the hub — an ephemeral
 consumer — runs the matching entry in `wireProjections`
 (`internal/daemon/bus.go`) to produce the wire traffic, often a snapshot
-re-push. Migration is in progress: `internal/daemon/bus.go` documents the
-producer/projection pattern, and unmigrated `broadcastXxx` methods still
-publish directly.
+re-push. Every state-change broadcast goes through it;
+`TestWireTrafficComesFromProjections` fails on a new one that does not, and
+carries the enumerated exception list.
 
 - A fact without a subject is a snapshot invalidation, not a fact. If the
-  producer does not know the entity id, that is the bug to fix.
+  producer does not know the entity id, that is the bug to fix — change the
+  signature, or diff around the mutation to recover what moved.
+- A projection writes to the wire and does nothing else. It must not mutate
+  state and it must not publish: the bus holds its publish lock across the
+  inline fan-out, so a nested publish deadlocks. Anything the old broadcaster
+  did beyond pushing bytes belongs on the producer side.
+- A bulk operation publishes one fact per entity and wraps them in
+  `coalesceSnapshots`, which collapses the resulting whole-list pushes into one
+  wire message per snapshot.
+- Publish subject-only when the entity is store-backed (the projection re-reads
+  it, and the synchronous fan-out means it sees the new value); carry a payload
+  when the entity is gone, transient, or a list the caller computed.
 - Byte streams stay off the bus by design: PTY output, PTY desync, attach
-  results, workspace tile content, and fs bursts keep their direct paths.
-  Attach traffic routes by a per-client predicate, which pub/sub cannot express.
+  results, workspace tile content, and fs bursts keep their direct paths, as
+  does the remote relay (`broadcastRawWSMessage`), whose events were already
+  published as facts on the remote daemon. Attach traffic routes by a
+  per-client predicate, which pub/sub cannot express.
 - Durable consumers get ordered, at-least-once delivery from a persisted cursor,
   so handlers must tolerate redelivery. A failing handler stalls its own
   consumer rather than skipping the event.

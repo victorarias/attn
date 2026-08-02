@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/tasks"
 )
@@ -271,11 +272,11 @@ func (d *Daemon) startCompactRunner() {
 	}
 	// Surface lifecycle transitions to any open task panel. OnChange may fire
 	// CONCURRENTLY from the runner's dispatch goroutine and its in-flight runs, so
-	// the callback must be cheap, non-blocking, and concurrency-safe:
-	// broadcastTasksChanged -> broadcastMessage -> wsHub.BroadcastValue
-	// builds a fresh message and uses a non-blocking send that drops on a full
-	// broadcast channel, so it can never stall a run.
-	runner.OnChange(func() { d.broadcastTasksChanged() })
+	// the callback must be cheap and concurrency-safe. Publishing appends one row
+	// to the bus and then projects to a non-blocking broadcast that drops on a
+	// full channel, so it can never stall a run — but it IS a durable write on
+	// the runner's goroutine, of the same order as the store.Save it follows.
+	runner.OnChange(func(taskID string) { d.publishFact(FactTaskChanged, taskID, nil) })
 	// Surface a durable notification when a task exhausts its retries (reaches the
 	// terminal dead state). OnTerminalFailure fires exactly once per task, on the
 	// runner's goroutine with a cloned record; notifyTaskTerminalFailure persists a
@@ -649,13 +650,24 @@ func markdownSectionContent(lines []string, heading string) string {
 }
 
 func (d *Daemon) broadcastWorkspaceContextChanged(canonical *protocol.WorkspaceContext) {
-	d.broadcastMessage(protocol.WorkspaceContextChangedMessage{
+	if canonical == nil {
+		return
+	}
+	d.publishFact(FactWorkspaceContextChanged, canonical.WorkspaceID, protocol.WorkspaceContextChangedMessage{
 		Event:              protocol.EventWorkspaceContextChanged,
 		WorkspaceID:        canonical.WorkspaceID,
 		Revision:           canonical.Revision,
 		UpdatedBySessionID: canonical.UpdatedBySessionID,
 		UpdatedAt:          canonical.UpdatedAt,
 	})
+}
+
+func (d *Daemon) projectWorkspaceContextChanged(ev bus.Event) {
+	msg, ok := decodeFact[protocol.WorkspaceContextChangedMessage](d, ev)
+	if !ok {
+		return
+	}
+	d.broadcastMessage(msg)
 }
 
 func (d *Daemon) compactWorkspaceContextForSession(

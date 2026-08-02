@@ -5,6 +5,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/rankkey"
 	"github.com/victorarias/attn/internal/workspacelayout"
@@ -377,6 +378,37 @@ func (d *Daemon) reseedWorkspaceStatuses() {
 	}
 }
 
+// projectWorkspaceEvent is the shared body of every projection that pushes one
+// workspace to clients. The registry is the authority for the snapshot: each
+// producer mutates it before publishing, and fan-out is synchronous, so reading
+// it here sees exactly what the producer just wrote.
+func (d *Daemon) projectWorkspaceEvent(event, workspaceID string) {
+	if d.workspaces == nil {
+		return
+	}
+	snapshot, ok := d.workspaces.snapshot(workspaceID)
+	if !ok {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     event,
+		Workspace: &snapshot,
+	})
+}
+
+// projectWorkspaceUnregistered reads the departing workspace from the payload:
+// the registry entry is gone by the time this runs.
+func (d *Daemon) projectWorkspaceUnregistered(ev bus.Event) {
+	snapshot, ok := decodeFact[protocol.Workspace](d, ev)
+	if !ok {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:     protocol.EventWorkspaceUnregistered,
+		Workspace: &snapshot,
+	})
+}
+
 // recomputeAndBroadcastWorkspaceForSession is a convenience used after a
 // session state change: looks up the owning workspace, recomputes its status,
 // and broadcasts WorkspaceStateChanged if the rolled-up status changed.
@@ -388,14 +420,10 @@ func (d *Daemon) recomputeAndBroadcastWorkspaceForSession(sessionID string) {
 	if workspaceID == "" {
 		return
 	}
-	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
-	if !changed {
+	if _, changed := d.recomputeWorkspaceStatus(workspaceID); !changed {
 		return
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &updated,
-	})
+	d.publishFact(FactWorkspaceStatusChanged, workspaceID, nil)
 }
 
 // resolveWorkspaceRank returns the rank key a (re)registered workspace should
@@ -442,22 +470,15 @@ func (d *Daemon) handleRegisterWorkspace(client *wsClient, msg *protocol.Registe
 	d.store.AddWorkspace(&snapshot)
 	// Make workspace directories available in the recent-locations picker.
 	d.store.UpsertRecentLocation(directory)
+	fact := FactWorkspaceRegistered
 	if !isNew {
 		// Re-register: pick up any new associations that occurred while it
 		// was registered, then publish a state-changed event so clients
 		// see the refreshed title/directory.
-		if updated, changed := d.recomputeWorkspaceStatus(id); changed {
-			snapshot = updated
-		}
+		d.recomputeWorkspaceStatus(id)
+		fact = FactWorkspaceReregistered
 	}
-	eventName := protocol.EventWorkspaceRegistered
-	if !isNew {
-		eventName = protocol.EventWorkspaceStateChanged
-	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     eventName,
-		Workspace: &snapshot,
-	})
+	d.publishFact(fact, id, nil)
 }
 
 func (d *Daemon) handleMuteWorkspaceWS(client *wsClient, msg *protocol.MuteWorkspaceMessage) {
@@ -479,10 +500,7 @@ func (d *Daemon) toggleWorkspaceMute(workspaceID string) (protocol.Workspace, st
 		return protocol.Workspace{}, "workspace not found"
 	}
 	d.store.ToggleWorkspaceMute(id)
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &snapshot,
-	})
+	d.publishFact(FactWorkspaceMuteChanged, id, nil)
 	return snapshot, ""
 }
 
@@ -509,10 +527,7 @@ func (d *Daemon) setWorkspaceMuted(workspaceID string, muted bool) (protocol.Wor
 		_ = d.store.SetWorkspaceMuted(id, current.Muted)
 		return protocol.Workspace{}, "workspace disappeared while updating mute state"
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &snapshot,
-	})
+	d.publishFact(FactWorkspaceMuteChanged, id, nil)
 	return snapshot, ""
 }
 
@@ -545,10 +560,7 @@ func (d *Daemon) setWorkspacePinned(workspaceID string, pinned bool) (protocol.W
 		_ = d.store.SetWorkspacePinned(id, current.Pinned)
 		return protocol.Workspace{}, "workspace disappeared while updating pin state"
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &snapshot,
-	})
+	d.publishFact(FactWorkspacePinChanged, id, nil)
 	return snapshot, ""
 }
 
@@ -569,10 +581,9 @@ func (d *Daemon) tearDownRemovedWorkspace(snapshot protocol.Workspace) {
 	d.store.RemoveWorkspace(id)
 	d.enqueueFinalNarrateWorkspace(id)
 	d.pruneTileContentSubscriptionsForLayout(id, nil)
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceUnregistered,
-		Workspace: &snapshot,
-	})
+	// The registry entry is already gone, so the departing workspace rides in
+	// the payload rather than being looked up at projection time.
+	d.publishFact(FactWorkspaceUnregistered, id, snapshot)
 }
 
 // handleUnregisterWorkspace closes the workspace AND every session that
@@ -597,12 +608,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	memberIDs := d.workspaces.sessionIDs(id)
 	for _, sid := range memberIDs {
 		closed := d.unregisterSession(sid, syscall.SIGTERM)
-		if closed != nil {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:   protocol.EventSessionUnregistered,
-				Session: d.sessionForBroadcast(closed),
-			})
-		}
+		d.publishSessionUnregistered(closed)
 	}
 
 	snapshot, removed := d.workspaces.unregister(id)
@@ -734,14 +740,8 @@ func (d *Daemon) associateSessionWithWorkspace(sessionID, workspaceID string) {
 		return
 	}
 	d.store.AssignSessionWorkspace(sessionID, workspaceID)
-	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
-	if !changed {
-		updated, _ = d.workspaces.snapshot(workspaceID)
-	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &updated,
-	})
+	d.recomputeWorkspaceStatus(workspaceID)
+	d.publishFact(FactWorkspaceSessionAssociated, workspaceID, nil)
 }
 
 // dissociateSessionFromWorkspace is called when a session is unregistered, so
@@ -761,14 +761,8 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		// visible in the stored layout.
 		snap, _ := d.workspaces.snapshot(workspaceID)
 		if snap.Pinned || d.workspaceHasSessionlessContent(workspaceID) {
-			updated, changed := d.recomputeWorkspaceStatus(workspaceID)
-			if !changed {
-				updated, _ = d.workspaces.snapshot(workspaceID)
-			}
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:     protocol.EventWorkspaceStateChanged,
-				Workspace: &updated,
-			})
+			d.recomputeWorkspaceStatus(workspaceID)
+			d.publishFact(FactWorkspaceSessionDissociated, workspaceID, nil)
 			return
 		}
 		snapshot, removed := d.workspaces.unregister(workspaceID)
@@ -780,14 +774,8 @@ func (d *Daemon) dissociateSessionFromWorkspace(sessionID string) {
 		d.tearDownRemovedWorkspace(snapshot)
 		return
 	}
-	updated, changed := d.recomputeWorkspaceStatus(workspaceID)
-	if !changed {
-		updated, _ = d.workspaces.snapshot(workspaceID)
-	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:     protocol.EventWorkspaceStateChanged,
-		Workspace: &updated,
-	})
+	d.recomputeWorkspaceStatus(workspaceID)
+	d.publishFact(FactWorkspaceSessionDissociated, workspaceID, nil)
 }
 
 // decorateSessionWithWorkspace refreshes WorkspaceID on a session about to be

@@ -114,10 +114,7 @@ func (d *Daemon) maybeGenerateSessionTitle(sessionID, transcriptPath string) {
 	}
 	d.store.UpdateSessionLabel(sessionID, title)
 	session.Label = title
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:   protocol.EventSessionStateChanged,
-		Session: d.sessionForBroadcast(session),
-	})
+	d.publishFact(FactSessionRenamed, sessionID, nil)
 }
 
 // execSessionTitle dispatches the title generation run per the session's own

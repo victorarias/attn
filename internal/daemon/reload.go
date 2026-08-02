@@ -204,10 +204,7 @@ func (d *Daemon) reloadSessionForClient(sessionID string, cols, rows int) error 
 	if rejection := d.runSpawnPipeline(spawnMsg, policy); rejection != nil {
 		return rejection.err
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventRuntimeRespawned,
-		ID:    protocol.Ptr(sessionID),
-	})
+	d.publishFact(FactSessionRespawned, sessionID, nil)
 	return nil
 }
 
@@ -268,10 +265,7 @@ func (d *Daemon) executePreparedSessionReload(sessionID string, opts ptybackend.
 	// Success. Do NOT clear the flag here — the killed worker's exit consumes it.
 	// AfterFunc is a backstop only (never-arriving exit), so the flag cannot wedge.
 	time.AfterFunc(reloadStuckFlagGrace, func() { d.clearReloading(sessionID) })
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventRuntimeRespawned,
-		ID:    protocol.Ptr(sessionID),
-	})
+	d.publishFact(FactSessionRespawned, sessionID, nil)
 	d.logf("reload: respawned %s (agent=%s resume=%t yolo=%t)", sessionID, opts.Agent, opts.ResumeSessionID != "", opts.YoloMode)
 	return nil
 }

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"net"
 	"path/filepath"
 	"sync"
@@ -176,11 +177,75 @@ func (r *BroadcastRecorder) Count() int {
 	return len(r.events)
 }
 
+// WireTrace is the complete record of what a daemon put on the WebSocket, in
+// order, from every hub send path.
+//
+// BroadcastRecorder is the older and narrower instrument: it holds typed events
+// and only sees hub.Broadcast. WireTrace holds bytes and sees everything, which
+// is what a migration needs — the question "does this refactor change what
+// clients receive?" is a question about bytes, and it is unanswerable from a
+// recorder that a fifth of the send sites bypass.
+type WireTrace struct {
+	mu       sync.Mutex
+	payloads [][]byte
+}
+
+func (t *WireTrace) record(payload []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.payloads = append(t.payloads, append([]byte(nil), payload...))
+}
+
+// Payloads returns every payload sent so far, in send order.
+func (t *WireTrace) Payloads() [][]byte {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([][]byte, len(t.payloads))
+	for i, p := range t.payloads {
+		out[i] = append([]byte(nil), p...)
+	}
+	return out
+}
+
+// EventNames returns the `event` field of each payload, in send order. A payload
+// that is not a JSON object with an `event` string is reported as "?" rather than
+// dropped, so a trace comparison cannot silently lose traffic it failed to parse.
+func (t *WireTrace) EventNames() []string {
+	payloads := t.Payloads()
+	names := make([]string, 0, len(payloads))
+	for _, p := range payloads {
+		var envelope struct {
+			Event string `json:"event"`
+		}
+		if err := json.Unmarshal(p, &envelope); err != nil || envelope.Event == "" {
+			names = append(names, "?")
+			continue
+		}
+		names = append(names, envelope.Event)
+	}
+	return names
+}
+
+// Clear drops everything recorded so far.
+func (t *WireTrace) Clear() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.payloads = nil
+}
+
+// Count returns how many payloads have been sent.
+func (t *WireTrace) Count() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.payloads)
+}
+
 // TestHarness wraps a daemon with test utilities
 type TestHarness struct {
 	Daemon     *Daemon
 	Classifier *FakeClassifier
 	Recorder   *BroadcastRecorder
+	Wire       *WireTrace
 	Store      *store.Store
 	SockPath   string
 }
@@ -224,6 +289,7 @@ func (b *TestHarnessBuilder) WithoutBroadcastRecording() *TestHarnessBuilder {
 func (b *TestHarnessBuilder) Build() *TestHarness {
 	classifier := NewFakeClassifier(b.defaultState)
 	recorder := NewBroadcastRecorder()
+	wire := &WireTrace{}
 	sessionStore := store.New()
 
 	pidPath := b.socketPath + ".pid"
@@ -237,6 +303,10 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 			recorder.Record(event)
 		}
 	}
+	// The wire trace is always on: it is the only complete record of hub output,
+	// and a test that opts out of it cannot tell a migrated broadcast from a
+	// deleted one.
+	hub.wireTap = wire.record
 
 	d := &Daemon{
 		socketPath:       b.socketPath,
@@ -262,6 +332,7 @@ func (b *TestHarnessBuilder) Build() *TestHarness {
 		Daemon:     d,
 		Classifier: classifier,
 		Recorder:   recorder,
+		Wire:       wire,
 		Store:      sessionStore,
 		SockPath:   b.socketPath,
 	}

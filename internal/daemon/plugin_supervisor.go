@@ -184,7 +184,7 @@ type pluginSupervisor struct {
 	launcher pluginProcessLauncher
 	clock    pluginSupervisorClock
 	env      func(pluginManifest, uint64) []string
-	onChange func()
+	onChange func(pluginName string)
 	shutdown bool
 }
 
@@ -192,7 +192,7 @@ func newPluginSupervisor(
 	launcher pluginProcessLauncher,
 	clock pluginSupervisorClock,
 	env func(pluginManifest, uint64) []string,
-	onChange func(),
+	onChange func(pluginName string),
 ) *pluginSupervisor {
 	if launcher == nil {
 		launcher = execPluginProcessLauncher{}
@@ -235,7 +235,7 @@ func (s *pluginSupervisor) Ensure(manifest pluginManifest) error {
 	}
 	err := s.spawnLocked(plugin)
 	s.mu.Unlock()
-	s.notify()
+	s.notify(manifest.Name)
 	return err
 }
 
@@ -260,7 +260,7 @@ func (s *pluginSupervisor) Stop(name string, _ pluginStopReason) {
 	if process != nil {
 		_ = process.Kill()
 	}
-	s.notify()
+	s.notify(name)
 }
 
 func (s *pluginSupervisor) Shutdown() {
@@ -303,7 +303,7 @@ func (s *pluginSupervisor) NoteConnected(name string, generation uint64) bool {
 		s.markStable(name, capturedGeneration)
 	})
 	s.mu.Unlock()
-	s.notify()
+	s.notify(name)
 	return true
 }
 
@@ -324,7 +324,7 @@ func (s *pluginSupervisor) NoteDisconnected(name string, generation uint64) {
 		s.disconnectExpired(name, capturedGeneration, capturedProcess)
 	})
 	s.mu.Unlock()
-	s.notify()
+	s.notify(name)
 }
 
 func (s *pluginSupervisor) Snapshot(name string) (pluginRuntimeSnapshot, bool) {
@@ -403,7 +403,7 @@ func (s *pluginSupervisor) processExited(name string, generation uint64, process
 		plugin.nextRestartAt = time.Time{}
 	}
 	s.mu.Unlock()
-	s.notify()
+	s.notify(name)
 }
 
 func (s *pluginSupervisor) scheduleRestartLocked(plugin *managedPlugin) {
@@ -432,7 +432,7 @@ func (s *pluginSupervisor) restart(name string, generation uint64) {
 	plugin.restartTimer = nil
 	_ = s.spawnLocked(plugin)
 	s.mu.Unlock()
-	s.notify()
+	s.notify(name)
 }
 
 func (s *pluginSupervisor) markStable(name string, generation uint64) {
@@ -445,7 +445,7 @@ func (s *pluginSupervisor) markStable(name string, generation uint64) {
 	plugin.restartAttempt = 0
 	plugin.stabilityTimer = nil
 	s.mu.Unlock()
-	s.notify()
+	s.notify(name)
 }
 
 func (s *pluginSupervisor) disconnectExpired(name string, generation uint64, process pluginProcessHandle) {
@@ -460,9 +460,11 @@ func (s *pluginSupervisor) disconnectExpired(name string, generation uint64, pro
 	_ = process.Kill()
 }
 
-func (s *pluginSupervisor) notify() {
+// notify reports one plugin's supervision state moving. The name is required:
+// the daemon turns it into a fact, and a fact needs the entity it is about.
+func (s *pluginSupervisor) notify(pluginName string) {
 	if s.onChange != nil {
-		s.onChange()
+		s.onChange(pluginName)
 	}
 }
 

@@ -218,7 +218,7 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 			return nil, true, err
 		}
 		d.logf("plugin driver registered plugin=%s agent=%s", plugin.name, normalizePluginAgent(params.Agent))
-		d.broadcastSettings("")
+		d.publishSettingsFact(FactPluginDriverRegistered, plugin.name)
 		active := d.store.ListAgentDriverRuns(plugin.name)
 		runs := make([]activePluginRun, 0, len(active))
 		for _, run := range active {

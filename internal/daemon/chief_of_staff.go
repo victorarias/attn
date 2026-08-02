@@ -306,7 +306,7 @@ func (d *Daemon) handleSetChiefOfStaff(client *wsClient, msg *protocol.SetChiefO
 	}
 	abortPrepared = false
 
-	d.broadcastSessionsUpdated()
+	d.publishFact(FactSessionChiefRoleChanged, sessionID, nil)
 	// Reload the agent(s) whose chief status actually changed so the new status reaches
 	// the system prompt: ChiefGuidance is injected only at agent-launch, so a live
 	// promotion/demotion must re-run the launch path. The reload is destructive

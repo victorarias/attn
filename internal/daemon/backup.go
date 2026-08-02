@@ -63,5 +63,5 @@ func (d *Daemon) performDatabaseBackup() {
 	// Fan out via the same settings-updated broadcast the settings code uses
 	// elsewhere, so live clients see db.last_backup_at move without a
 	// dedicated protocol message.
-	d.broadcastSettings("")
+	d.publishSettingsFact(FactBackupWritten, path)
 }
