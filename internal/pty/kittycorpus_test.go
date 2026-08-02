@@ -679,6 +679,17 @@ func assertGroundAgrees(t *testing.T, input string) {
 // transition in kittyseg.go's machine. A rule that is wrong about which byte
 // ends which sequence shows up here as a disagreement on the exact input that
 // exposes it, which is also the input to add to the corpus.
+//
+// Do not read a pass here as "the segmenter is right". It asks two questions —
+// does the machine agree with ghostty about where a sequence ENDS, and did
+// every byte survive — and neither one can see which DISPOSITION a byte got.
+// Change a rule so a marker is extracted where it should have been replayed as
+// plain, and this gate stays green: the parser lands in the same state either
+// way and the bytes still reconstruct. Measured, not assumed — flipping the
+// CAN/SUB rule in kittySegOSC133Body left every assertion here passing, and
+// only the battery next door went red. Exhaustive over inputs is not
+// exhaustive over behavior; the battery and the parity corpus are what pin
+// which bytes go to the terminal and which go to the wire.
 func TestKittySegmenterGroundMatchesGhostty(t *testing.T) {
 	// Every byte, from every named state: the per-state exit sets.
 	for _, prefix := range kittyGroundNamedPrefixes {
