@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -638,16 +639,19 @@ func (d *Daemon) traceResolutionSkip(sessionID string, resolution sessionstate.R
 	})
 }
 
-// classifierClaim reads a verdict. The classifier judges how a finished turn
-// ended, so it can only say two things, and anything else — including the
-// `unknown` a failed classification used to publish — is no verdict at all
-// rather than a third answer.
+// classifierClaim reads a verdict. The classifier judges how a stopped turn
+// ended — the user is waited on, nothing is, or (on a yield) the turn waits on
+// its own background work — and anything else, including the `unknown` a failed
+// classification used to publish, is no verdict at all rather than a fourth
+// answer.
 func classifierClaim(state string) sessionstate.Claim {
 	switch state {
 	case protocol.StateWaitingInput:
 		return sessionstate.ClaimNeedsInput
 	case protocol.StateIdle:
 		return sessionstate.ClaimIdle
+	case classifier.VerdictParked:
+		return sessionstate.ClaimParked
 	default:
 		return ""
 	}

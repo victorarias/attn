@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -15,9 +16,30 @@ func TestClassifyPreTranscript(t *testing.T) {
 		pendingTodos      int
 		transcriptEnabled bool
 		classifierEnabled bool
+		stop              stopClassification
 		wantAction        classifyAction
 		wantState         string
 	}{
+		{
+			// An agent sitting out its own build mid-plan has open todos precisely
+			// because it is not finished; reading them as "waiting on the user"
+			// would ring on every yielded stop of a multi-step task.
+			name:              "a yield ignores pending todos and reads the transcript",
+			pendingTodos:      3,
+			transcriptEnabled: true,
+			classifierEnabled: true,
+			stop:              stopClassification{yielded: true},
+			wantAction:        classifyReadTranscript,
+		},
+		{
+			// No judgment is possible, so nothing is filed: settling idle here
+			// would queue a turn the payload says will resume on its own.
+			name:              "a yield with no classifier files nothing",
+			transcriptEnabled: true,
+			classifierEnabled: false,
+			stop:              stopClassification{yielded: true},
+			wantAction:        classifySkip,
+		},
 		{
 			name:              "pending todos outrank everything",
 			pendingTodos:      1,
@@ -57,7 +79,7 @@ func TestClassifyPreTranscript(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyPreTranscript(tc.pendingTodos, tc.transcriptEnabled, tc.classifierEnabled)
+			got := classifyPreTranscript(tc.pendingTodos, tc.transcriptEnabled, tc.classifierEnabled, tc.stop)
 			if got.action != tc.wantAction || got.state != tc.wantState {
 				t.Fatalf("classifyPreTranscript() = %+v, want action %v state %q", got, tc.wantAction, tc.wantState)
 			}
@@ -73,6 +95,7 @@ func TestClassifyPostTranscript(t *testing.T) {
 		name        string
 		lastMessage string
 		err         error
+		stop        stopClassification
 		wantAction  classifyAction
 		wantState   string
 		wantReason  string
@@ -82,6 +105,21 @@ func TestClassifyPostTranscript(t *testing.T) {
 			err:        fmt.Errorf("wrapped: %w", agentdriver.ErrNoNewAssistantTurn),
 			wantAction: classifySkip,
 			wantReason: "no_new_assistant_turn",
+		},
+		{
+			// A yield's non-answers all file nothing: unknown or idle here would
+			// move a turn the payload says will resume into the user's queue.
+			name:       "a yield's read error files nothing",
+			err:        errors.New("permission denied"),
+			stop:       stopClassification{yielded: true},
+			wantAction: classifySkip,
+			wantReason: "yield_transcript_parse_error",
+		},
+		{
+			name:       "a yield's empty message files nothing",
+			stop:       stopClassification{yielded: true},
+			wantAction: classifySkip,
+			wantReason: "yield_empty_message",
 		},
 		{
 			name:       "any other read error is unknown",
@@ -111,7 +149,7 @@ func TestClassifyPostTranscript(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyPostTranscript(tc.lastMessage, tc.err)
+			got := classifyPostTranscript(tc.lastMessage, tc.err, tc.stop)
 			if got.action != tc.wantAction || got.state != tc.wantState || got.reason != tc.wantReason {
 				t.Fatalf("classifyPostTranscript() = %+v, want action %v state %q reason %q",
 					got, tc.wantAction, tc.wantState, tc.wantReason)
@@ -125,9 +163,26 @@ func TestClassifyVerdict(t *testing.T) {
 		name       string
 		state      string
 		err        error
+		stop       stopClassification
 		wantState  string
 		wantReason string
 	}{
+		{
+			name:       "a parked verdict on a yield passes through",
+			state:      classifier.VerdictParked,
+			stop:       stopClassification{yielded: true},
+			wantState:  classifier.VerdictParked,
+			wantReason: "classifier",
+		},
+		{
+			// PARKED's precondition — the harness-facts line — is only in a yield's
+			// input; answered without it, the judge misapplied the rule. Unknown
+			// files no evidence, so the session settles on its own fallback.
+			name:       "a parked verdict without a yield is no verdict",
+			state:      classifier.VerdictParked,
+			wantState:  protocol.StateUnknown,
+			wantReason: "classifier_parked_without_yield",
+		},
 		{
 			name:       "classifier failure is unknown, attributed to us",
 			state:      "",
@@ -157,7 +212,7 @@ func TestClassifyVerdict(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyVerdict(tc.state, tc.err)
+			got := classifyVerdict(tc.state, tc.err, tc.stop)
 			if got.action != classifyApply || got.state != tc.wantState || got.reason != tc.wantReason {
 				t.Fatalf("classifyVerdict() = %+v, want state %q reason %q", got, tc.wantState, tc.wantReason)
 			}
