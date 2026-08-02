@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import { GhosttyTerminal, type BlockStateSnapshot, type GhosttyTerminalHandle } from '../GhosttyTerminal';
 import { RenamePopover } from '../RenamePopover';
 import { StateIndicator } from '../StateIndicator';
-import { useShortcut } from '../../shortcuts';
+import { useShortcut } from '../../shortcuts/useShortcut';
 import {
   getNormalizedPaneBounds,
   getSplitDividers,
