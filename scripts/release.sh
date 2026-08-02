@@ -103,6 +103,16 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
+shopt -s nullglob
+PENDING_FRAGMENTS=(changelog.d/*.yaml)
+shopt -u nullglob
+if (( ${#PENDING_FRAGMENTS[@]} > 0 )); then
+  echo "error: ${#PENDING_FRAGMENTS[@]} pending changelog fragment(s) in changelog.d/"
+  echo "compile the changelog first: ./scripts/compile-changelog.sh"
+  echo "(see docs/making-a-release.md)"
+  exit 1
+fi
+
 if git rev-parse -q --verify "refs/tags/${VERSION_TAG}" >/dev/null; then
   echo "error: tag ${VERSION_TAG} already exists locally"
   exit 1

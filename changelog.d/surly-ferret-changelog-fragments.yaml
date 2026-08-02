@@ -1,0 +1,7 @@
+kind: internal
+area: release
+change: >
+  Changelog entries now travel as per-PR fragments under changelog.d/ and are
+  compiled into CHANGELOG.md at release time. CI gates every PR on carrying a
+  fragment (or touching CHANGELOG.md), and scripts/release.sh refuses to cut a
+  release while fragments are pending. No user-visible app change.
