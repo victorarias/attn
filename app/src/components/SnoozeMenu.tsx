@@ -26,13 +26,9 @@ const VIEWPORT_MARGIN = 8;
 export function SnoozeMenu({ sessionLabel, anchor, onSnooze, onClose }: SnoozeMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(anchor);
-  // Lazily, so the Date is built once when the menu opens rather than on every
-  // render and thrown away — the frozen instant is the point, and a rebuilt one
-  // would be the very thing this ref exists to avoid if useRef ever took the
-  // second value.
-  const openedAtRef = useRef<Date | null>(null);
-  if (openedAtRef.current === null) openedAtRef.current = new Date();
-  const openedAt = openedAtRef.current;
+  // A lazy initializer rather than a ref: the instant is read during render, so
+  // it belongs to state. Built once when the menu opens, and render stays pure.
+  const [openedAt] = useState(() => new Date());
 
   useEscapeStack(onClose, true);
 
