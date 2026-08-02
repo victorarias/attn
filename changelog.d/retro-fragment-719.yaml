@@ -1,0 +1,11 @@
+kind: internal
+area: daemon
+change: >
+  State-change broadcasts now route through the durable event bus (PR #719):
+  producers publish domain facts and the hub projects them into wire traffic
+  via wireProjections, replacing direct broadcast calls. No user-visible
+  behavior change.
+notes: >
+  Retroactive fragment: #719 merged in the minutes between the fragment
+  pipeline landing (#720) and the Changelog check becoming required, so its
+  own CI never ran the gate.
