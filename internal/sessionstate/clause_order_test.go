@@ -100,6 +100,23 @@ func TestClauseOrder(t *testing.T) {
 			wantReason: ReasonQuestionOpen,
 		},
 		{
+			// The verdict answered the exact question the confirmation only
+			// gestures at: the agent sits at its prompt during a background wait
+			// and after a finished turn alike, so the notification adds nothing,
+			// while the judge read the turn's own account of which one this is.
+			why: "a parked verdict outranks the prompt-idle confirmation: the " +
+				"judge read the yield, the flat timer read a clock",
+			evidence: Evidence{
+				BackgroundWork: true,
+				LastClassifier: seen(SourceClassifier, ClaimParked, 55*time.Second),
+				PromptIdleAt:   now.Add(-time.Second),
+				LastBusyAt:     now.Add(-time.Minute),
+				LastMovement:   now.Add(-time.Second),
+			},
+			wantState:  protocol.SessionStateWorking,
+			wantReason: ReasonBackgroundParked,
+		},
+		{
 			// This clause used to run the other way, on the reasoning that the
 			// background task would un-park the turn without anyone doing anything.
 			// Two things retired that. It was not what the code delivered — the

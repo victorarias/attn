@@ -825,6 +825,31 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 			ON delegation_operations(ticket_id)
 			WHERE ticket_id != '' AND state IN ('accepted', 'preparing');
 	`},
+	// The durable event bus: the internal spine every consumer reads, generalizing
+	// the ticket event log's (append-only + monotonic seq as cursor space) shape to
+	// the whole daemon. See docs/plans/2026-08-01-ext-a1-event-bus.md.
+	//
+	// Events are domain FACTS, not WebSocket payloads: a name, an indexed subject,
+	// and a small payload. Consumers are registered by name and hold a cursor into
+	// the same seq space; the WebSocket hub is deliberately absent from that table
+	// because it is ephemeral (it starts at head and holds no row).
+	{84, "create event bus log and consumer cursors", `CREATE TABLE IF NOT EXISTS bus_events (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    subject    TEXT NOT NULL DEFAULT '',
+    payload    TEXT NOT NULL DEFAULT '',
+    source     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bus_events_name ON bus_events(name, seq);
+CREATE INDEX IF NOT EXISTS idx_bus_events_subject ON bus_events(subject, seq);
+CREATE TABLE IF NOT EXISTS bus_consumers (
+    name       TEXT PRIMARY KEY,
+    cursor     INTEGER NOT NULL DEFAULT 0,
+    filter     TEXT NOT NULL DEFAULT '',
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT ''
+);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

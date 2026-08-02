@@ -14,20 +14,26 @@ import (
 	"time"
 )
 
-const promptTemplate = `Classify whether this assistant message is waiting for user input.
+const promptTemplate = `Classify how this assistant message ends the agent's turn: waiting for user input, done, or paused on its own background work.
 
 Return STRICT JSON only, matching exactly one of:
 {"verdict":"WAITING"}
 {"verdict":"DONE"}
+{"verdict":"PARKED"}
+
+A line starting with "[harness facts]" after the message, when present, reports what the agent harness observed (e.g. background processes still running). It comes from the harness, not from the assistant.
 
 Decision rules (in order):
 1) WAITING if the assistant asks the user any direct question.
 2) WAITING if the assistant asks for confirmation, permission, choice, clarification, or next direction.
-3) DONE only if the assistant message is complete and does not ask the user for anything.
+3) PARKED only if a [harness facts] line reports background processes still running AND the message says the assistant is waiting on that work and will continue on its own (not waiting on the user).
+4) DONE only if the assistant message is complete and does not ask the user for anything.
 
 Examples:
 - "Hello! What can I help you with today?" -> WAITING
 - "Would you like me to continue?" -> WAITING
+- "The build is still running; I'll continue when it completes." plus a [harness facts] line reporting a running background process -> PARKED
+- "Done — I left the dev server running on port 3000 for you." plus a [harness facts] line reporting a running background process -> DONE
 - "I finished the task and saved the file." -> DONE
 - "I'm here whenever you need me." -> DONE
 
@@ -37,10 +43,28 @@ Text to analyze:
 """
 `
 
+// VerdictParked is the state token for a PARKED verdict: the turn yielded to its
+// own background work and will resume without the user. Deliberately not a
+// protocol state — the daemon files it as classifier evidence and the resolver's
+// background-work clause is the only reader.
+const VerdictParked = "parked"
+
 // ClaudeVerdictSchema is the JSON Schema the Claude backend's final answer must
 // validate against (passed to the CLI as --json-schema). The validated object
 // comes back as the run's structured output; ParseVerdict reads it.
-const ClaudeVerdictSchema = `{"type":"object","properties":{"verdict":{"type":"string","enum":["WAITING","DONE"]}},"required":["verdict"],"additionalProperties":false}`
+const ClaudeVerdictSchema = `{"type":"object","properties":{"verdict":{"type":"string","enum":["WAITING","DONE","PARKED"]}},"required":["verdict"],"additionalProperties":false}`
+
+// ComposeYieldInput builds the classification input for a stop that yielded with
+// background work still running: the assistant's last message plus the harness
+// facts the prompt's PARKED rule keys on. It lives beside the template so the
+// "[harness facts]" marker and the rule that reads it cannot drift apart.
+func ComposeYieldInput(lastMessage string, runningBackgroundTasks int) string {
+	return fmt.Sprintf(
+		"%s\n\n[harness facts] The turn yielded with %d background process(es) still running; the harness will resume the agent when one exits.",
+		lastMessage,
+		runningBackgroundTasks,
+	)
+}
 
 // ClaudeMaxTurns caps the Claude backend's agentic turns. The run is a tool-less
 // single-shot judgment; the cap is a runaway backstop, and 2 leaves room for the
@@ -51,7 +75,7 @@ const ClaudeMaxTurns = 2
 // when ATTN_CLAUDE_CLASSIFIER_MODEL is unset.
 const DefaultClaudeClassifierModel = "haiku"
 
-var verdictLineRegex = regexp.MustCompile(`(?i)^\s*(?:VERDICT\s*[:=]\s*)?(WAITING_INPUT|WAITING|DONE|IDLE)(?:\s*(?:[-:]\s+.*|\([^)]*\)|[.!?]))?\s*$`)
+var verdictLineRegex = regexp.MustCompile(`(?i)^\s*(?:VERDICT\s*[:=]\s*)?(WAITING_INPUT|WAITING|DONE|IDLE|PARKED)(?:\s*(?:[-:]\s+.*|\([^)]*\)|[.!?]))?\s*$`)
 
 const classifierLogSnippetMaxChars = 600
 
@@ -99,6 +123,8 @@ func parseVerdictToken(value string) (string, bool) {
 		return "waiting_input", true
 	case "DONE", "IDLE":
 		return "idle", true
+	case "PARKED":
+		return VerdictParked, true
 	default:
 		return "", false
 	}
@@ -281,6 +307,13 @@ func runCodexClassifierAttempt(ctx context.Context, executable, model, reasoning
 	args := []string{
 		"exec",
 		"--json",
+		// Never persist a rollout under ~/.codex/sessions: the classifier runs
+		// from the session's own cwd, so a persisted rollout is a decoy that
+		// cwd-based transcript discovery can resolve instead of the session's
+		// real conversation — the classifier would then classify its own prior
+		// verdict. The verdict is read from --output-last-message and stdout;
+		// nothing reads the rollout.
+		"--ephemeral",
 		"--output-last-message", lastMessagePath,
 		// Classify regardless of the session's cwd. Codex refuses `exec` outside a
 		// trusted git repo otherwise, which is how a codex turn that ends in an

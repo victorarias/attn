@@ -195,6 +195,7 @@ See [docs/plans/2026-07-18-db-loss-mitigation.md](docs/plans/2026-07-18-db-loss-
 - `internal/ptyworker`: per-session process; production PTYs run here through
   `internal/pty`, not inside the daemon
 - `internal/store`: SQLite plus in-memory cache
+- `internal/bus`: durable event bus (domain facts, per-consumer cursors)
 - `internal/classifier`: stop-time state classification
 - `internal/transcript`: assistant-message extraction from JSONL
 - `app`: Tauri frontend; WebSocket `ws://localhost:9849`
@@ -255,6 +256,35 @@ must fail explicitly.
   `classifierObservation`; reject stale results.
 - Prefer `internal/protocol/helpers.go` pointer/value helpers (`Ptr`, `Deref`,
   `SessionsToValues`, `PRsToValues`).
+
+### Event bus
+
+`internal/bus` is the durable spine. State-change broadcasts do not touch the
+hub directly: a producer publishes a **domain fact** (dotted `domain.verb`, an
+indexed subject naming the entity, a small payload), and the hub — an ephemeral
+consumer — runs the matching entry in `wireProjections`
+(`internal/daemon/bus.go`) to produce the wire traffic, often a snapshot
+re-push. Migration is in progress: `internal/daemon/bus.go` documents the
+producer/projection pattern, and unmigrated `broadcastXxx` methods still
+publish directly.
+
+- A fact without a subject is a snapshot invalidation, not a fact. If the
+  producer does not know the entity id, that is the bug to fix.
+- Byte streams stay off the bus by design: PTY output, PTY desync, attach
+  results, workspace tile content, and fs bursts keep their direct paths.
+  Attach traffic routes by a per-client predicate, which pub/sub cannot express.
+- Durable consumers get ordered, at-least-once delivery from a persisted cursor,
+  so handlers must tolerate redelivery. A failing handler stalls its own
+  consumer rather than skipping the event.
+- Retention trims past the age window but never past an **enabled** consumer's
+  cursor. Disabled consumers do not pin the log; they resume at head with a
+  logged gap.
+- Operator surface: `attn bus status`, `attn bus disable|enable <consumer>`.
+  The enabled bit is database-only on purpose — the kill switch must not depend
+  on the daemon it kills.
+
+Design and gate decisions:
+[docs/plans/2026-08-01-ext-a1-event-bus.md](docs/plans/2026-08-01-ext-a1-event-bus.md).
 
 ### Terminal
 

@@ -188,7 +188,7 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 	}
 	d.noteNotebookSelfWrite(selfWrites...)
 	d.notifyTicketObservers(ticketID)
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketAttached, ticketID)
 	d.broadcastNotebookChanged(originAgent, changedPaths...)
 	if root, rootErr := d.notebookRoot(); rootErr == nil {
 		d.broadcastFsChanged(root, originAgent, changedPaths...)

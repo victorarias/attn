@@ -11,16 +11,23 @@ import (
 // The decision lives here rather than in the hook binary so the facts reach the
 // daemon, which is where state from every other source is arbitrated.
 
-// hasActiveBackgroundTask reports whether the stop still has background work in
-// flight. Status comparison is case-insensitive because it is the agent
+// runningBackgroundTaskCount is how many of the stop's background tasks are
+// still in flight. Status comparison is case-insensitive because it is the agent
 // harness's string, not ours.
-func hasActiveBackgroundTask(msg *protocol.StopMessage) bool {
+func runningBackgroundTaskCount(msg *protocol.StopMessage) int {
+	running := 0
 	for _, status := range msg.BackgroundTaskStatuses {
 		if strings.EqualFold(strings.TrimSpace(status), "running") {
-			return true
+			running++
 		}
 	}
-	return false
+	return running
+}
+
+// hasActiveBackgroundTask reports whether the stop still has background work in
+// flight.
+func hasActiveBackgroundTask(msg *protocol.StopMessage) bool {
+	return runningBackgroundTaskCount(msg) > 0
 }
 
 // hasPendingSessionCron reports whether the stop parked on a scheduled wakeup.
@@ -31,10 +38,12 @@ func hasPendingSessionCron(msg *protocol.StopMessage) bool {
 }
 
 // stopIsNonTerminal reports whether this Stop leaves the turn able to resume on
-// its own, in which case none of the end-of-turn work applies: classifying reads
-// a transcript the agent has not finished writing, and the resume id and
-// narration belong to a turn that has not ended. It says nothing about what color
-// the session should be — that follows from the facts recorded alongside it.
+// its own. The resume id and narration belong to a turn that has actually ended,
+// so a non-terminal stop skips them; it is still judged, with the yield in view,
+// because the payload cannot say whether the running work is what the turn waits
+// on or a leftover it finished around. It says nothing about what color the
+// session should be — that follows from the facts and verdict recorded alongside
+// it.
 //
 // A parked cron is deliberately not one of these. The transcript is flushed and
 // the wakeup may be hours away, so treating it as a yield only meant a cron-parked

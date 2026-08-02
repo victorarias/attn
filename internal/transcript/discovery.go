@@ -26,6 +26,7 @@ func FindCodexTranscript(cwd string, startedAt time.Time) string {
 		Payload   struct {
 			Cwd       string `json:"cwd"`
 			Timestamp string `json:"timestamp"`
+			Source    string `json:"source"`
 		} `json:"payload"`
 	}
 
@@ -72,6 +73,17 @@ func FindCodexTranscript(cwd string, startedAt time.Time) string {
 			return nil
 		}
 		if entry.Type != "session_meta" {
+			return nil
+		}
+
+		// This finder resolves interactive attn panes, which codex records with
+		// source "cli". `codex exec` rollouts (source "exec") are headless runs —
+		// attn's own stop-time classifier among them — that share the pane's cwd
+		// and land seconds after the real conversation, so cwd+newest would pick
+		// them over the pane's rollout. They are categorically not what any
+		// caller is looking for. Rollouts predating the source field keep the old
+		// behavior.
+		if entry.Payload.Source == "exec" {
 			return nil
 		}
 

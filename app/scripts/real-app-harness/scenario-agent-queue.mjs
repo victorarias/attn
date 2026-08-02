@@ -30,9 +30,11 @@
  *   8. the chief of staff occupies its own slot and never the band,
  *   9. turning the arrangement off and back on mid-session restores the whole
  *      workspace tree, then returns the same queue with the same agent selected,
- *  10. settling by keyboard hands over the next agent that still owes a turn,
- *      and leaves selection alone when nothing does,
- *  11. a settle survives a daemon restart.
+ *  10. an auto-settle completing on the agent the user is watching hands over
+ *      the next agent that owes a turn, the same as settling by hand does,
+ *  11. settling by keyboard hands over the next agent that still owes a turn,
+ *      and lands on home when nothing does,
+ *  12. a settle survives a daemon restart.
  *
  * Prereqs: `claude` on PATH; a non-production profile install with the
  * automation layer; a built `./attn` (or ATTN_HARNESS_BIN) for the restart step.
@@ -253,8 +255,8 @@ async function main() {
     await runner.step('band_is_oldest_first_and_each_agent_appears_once', async () => {
       const queue = await waitForTurns(client, [alpha.sessionId, beta.sessionId], 'both turns, oldest first');
       runner.assert(
-        queue.turns[0].workspace !== queue.turns[1].workspace,
-        `the two turns come from different workspaces: ${JSON.stringify(queue.turns.map((row) => row.workspace))}`,
+        queue.turns[0].workspaceId !== queue.turns[1].workspaceId,
+        `the two turns come from different workspaces: ${JSON.stringify(queue.turns.map((row) => row.workspaceId))}`,
       );
       // The bands replace the tree rather than sitting on top of it. An agent
       // drawn in both places is what made a row look like it moved when only one
@@ -402,6 +404,98 @@ async function main() {
         'alpha back at the bottom because its run finished',
         60_000,
       );
+    });
+
+    await runner.step('auto_settle_hands_over_the_next_agent', async () => {
+      // A turn closing hands over the next agent that owes one whoever closed
+      // it — a countdown completing is not a lesser settle than the keystroke.
+      // This is the only path where nobody pressed anything, so it is also the
+      // only one where the app has to react to the settle rather than perform
+      // it, and the only one no unit test can stand in for: the timer lives in
+      // the daemon and the handover is in the app.
+      //
+      // Both windows are set to their floors to keep the step short. They are
+      // still real: the agent has to hold `working` through both.
+      await client.request('set_setting', { key: 'auto_settle_arm_seconds', value: '5' });
+      await client.request('set_setting', { key: 'auto_settle_countdown_seconds', value: '3' });
+      await client.request('set_setting', { key: 'auto_settle_enabled', value: 'true' });
+      try {
+        // Polled rather than read once: the settings above each come back as a
+        // broadcast, and a single read can land between the re-renders they
+        // cause. What the band settles on is the precondition, not whatever it
+        // happened to hold at the first opportunity.
+        const owed = await pollFor(async () => {
+          const ids = turnIds(await queueState(client));
+          return ids.length >= 2 ? ids : null;
+        }, 'two agents owing turns, so there is somewhere to hand over to', 30_000);
+        // The bottom row, so the handover wraps to the top — and so the queue
+        // this step hands to the ones below it comes back in the same order it
+        // was given, once the settled agent is driven back to a turn.
+        const watchedId = owed[owed.length - 1];
+        const nextId = owed[0];
+        const watched = [alpha, beta].find((agent) => agent.sessionId === watchedId);
+        runner.assert(Boolean(watched), `the bottom row is one of the two agents: ${watchedId}`);
+        runner.log('auto-settle will run on the bottom of the queue', { watched: watchedId, next: nextId });
+        await client.request('select_session', { sessionId: watched.sessionId });
+
+        // Resolved now rather than taken from the agent's birth record: a pane
+        // can be replaced under a session, and writing to an id it no longer has
+        // goes nowhere silently.
+        const pane = await waitForFirstWorkspacePane(client, watched.sessionId, `current pane for ${watched.sessionId}`, 20_000);
+
+        // Steering is what arms it. The prompt asks for enough output to outlast
+        // both windows — anything shorter finishes first, and leaving `working`
+        // cancels the settle, so a one-word reply would test nothing.
+        await submitPrompt(
+          client,
+          watched.sessionId,
+          pane.paneId,
+          'Count from 1 to 100, one number per line, nothing else. Do not use any tools.',
+        );
+        // Both preconditions are polled separately from the handover so a run
+        // where the steering never landed, or where the agent finished before
+        // the windows elapsed, reads as the setup failing rather than as the
+        // handover regressing.
+        await pollFor(
+          () => (observer.getSession(watched.sessionId)?.state === 'working' ? true : null),
+          'the steered agent to go back to work',
+          60_000,
+        );
+        await pollFor(
+          () => (observer.getSession(watched.sessionId)?.auto_settle_fires_at ? true : null),
+          'the auto-settle countdown to start on the agent being watched',
+          60_000,
+        );
+
+        const handed = await pollFor(async () => {
+          const state = await client.request('get_state');
+          return state.activeSessionId === nextId ? state : null;
+        }, 'the auto-settle to hand over the next agent that owes a turn', 30_000);
+        runner.assert(
+          handed.activeSessionId === nextId,
+          `auto-settle selected the next owed turn: ${handed.activeSessionId}`,
+        );
+        const after = await waitForTurns(client, [nextId], 'the auto-settled agent out of the band');
+        runner.assert(
+          settledIds(after).includes(watched.sessionId),
+          `auto-settle moved it to Settled like any other settle: ${JSON.stringify(settledIds(after))}`,
+        );
+
+        // Put the turn back so the steps below see the queue they were written
+        // against. Turned off first so the restoring run cannot arm a second
+        // countdown behind this step's back.
+        await client.request('set_setting', { key: 'auto_settle_enabled', value: 'false' });
+        await driveToOwedTurn(
+          client,
+          observer,
+          { ...watched, paneId: pane.paneId },
+          'QUEUE_AFTER_AUTO_SETTLE',
+          'the auto-settled agent to want the user again',
+        );
+        await waitForTurns(client, [nextId, watched.sessionId], 'the queue back in the order it was given', 60_000);
+      } finally {
+        await client.request('set_setting', { key: 'auto_settle_enabled', value: 'false' }).catch(() => {});
+      }
     });
 
     await runner.step('a_shell_pane_never_queues', async () => {
@@ -572,19 +666,23 @@ async function main() {
       );
     });
 
-    await runner.step('settling_the_last_turn_leaves_selection_alone', async () => {
-      // With nothing left to hand over, the keystroke settles and stops there —
-      // jumping somewhere arbitrary would take the user away from the agent they
-      // were just looking at.
+    await runner.step('settling_the_last_turn_lands_on_home', async () => {
+      // With nothing left to hand over, home is where the queue ends: staying
+      // would leave the user on the one agent guaranteed to be finished with
+      // them, and home is the surface that says so.
       await client.request('select_session', { sessionId: alpha.sessionId });
       await driver.activateApp();
       await driver.clickWindow(0.5, 0.5);
       await driver.pressKey('e', { command: true, shift: true });
-      await waitForTurns(client, [], 'the last turn settled by shortcut');
-      const state = await client.request('get_state');
+      const emptied = await waitForTurns(client, [], 'the last turn settled by shortcut');
+      runner.assert(emptied.empty, 'the band says so itself once nothing is owed');
+      const state = await pollFor(async () => {
+        const current = await client.request('get_state');
+        return current.activeSessionId === null ? current : null;
+      }, 'settling the last turn to land on home', 15_000);
       runner.assert(
-        state.activeSessionId === alpha.sessionId,
-        `selection stayed on the agent that was just settled: ${state.activeSessionId}`,
+        state.activeSessionId === null,
+        `no agent is selected once the queue is empty: ${state.activeSessionId}`,
       );
     });
 

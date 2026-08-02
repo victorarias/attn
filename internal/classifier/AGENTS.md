@@ -4,7 +4,7 @@ This policy applies to stop-time assistant-message classification in this module
 
 ## Scope
 
-- In scope: deciding post-turn assistant state from assistant text (`idle`, `waiting_input`, `unknown`).
+- In scope: deciding post-turn assistant state from assistant text (`idle`, `waiting_input`, `unknown`, and — for stops that yielded with background work still running — `parked`).
 - Out of scope: runtime/hook-driven state transitions such as `working` and `pending_approval`.
 
 ## Requirements (In Scope)

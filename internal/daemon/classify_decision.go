@@ -6,6 +6,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -42,16 +43,35 @@ type classifyDecision struct {
 	reason string
 }
 
+// stopClassification is what handleStop knew about the stop being judged.
+//
+// yielded marks a stop whose payload reported background work still running, so
+// the turn can resume on its own. A yielded stop is still judged — its last
+// message is the only thing separating "waiting on my build" from "done, but a
+// process I started is still running" — but with two differences: the judge sees
+// the yield (the harness-facts line the PARKED verdict keys on), and every
+// no-answer outcome files nothing instead of settling, because an unjudgeable
+// message must not put a turn that may be about to resume into the user's queue.
+type stopClassification struct {
+	yielded                bool
+	runningBackgroundTasks int
+}
+
 // classifyPreTranscript decides from what the daemon already holds, before paying
 // for any IO.
 //
-// pendingTodos outranks everything: a turn that stopped with unfinished todos is
-// waiting on the user. transcriptEnabled / classifierEnabled are the per-agent
+// pendingTodos outranks everything on a terminal stop: a turn that stopped with
+// unfinished todos is waiting on the user. On a yield it decides nothing — an
+// agent sitting out its own build mid-plan has open todos precisely because it is
+// not finished. transcriptEnabled / classifierEnabled are the per-agent
 // capability gates; an agent with either disabled settles idle rather than being
-// left in whatever state it was.
-func classifyPreTranscript(pendingTodos int, transcriptEnabled, classifierEnabled bool) classifyDecision {
+// left in whatever state it was — except on a yield, where no judgment means no
+// filing and the resolver's fallback ladder decides.
+func classifyPreTranscript(pendingTodos int, transcriptEnabled, classifierEnabled bool, stop stopClassification) classifyDecision {
 	switch {
-	case pendingTodos > 0:
+	case stop.yielded && (!transcriptEnabled || !classifierEnabled):
+		return classifyDecision{action: classifySkip, reason: "yield_unjudgeable"}
+	case !stop.yielded && pendingTodos > 0:
 		return classifyDecision{action: classifyApply, state: protocol.StateWaitingInput, reason: "pending_todos"}
 	case !transcriptEnabled:
 		return classifyDecision{action: classifyApply, state: protocol.StateIdle, reason: "transcript_disabled"}
@@ -68,15 +88,23 @@ func classifyPreTranscript(pendingTodos int, transcriptEnabled, classifierEnable
 // classified, so there is nothing to say — importantly not "unknown", which would
 // overwrite a good state with a bad one. Any other read error is genuinely
 // unknown. An empty last message means the agent said nothing, which settles idle
-// without paying for a classifier call.
-func classifyPostTranscript(lastMessage string, err error) classifyDecision {
+// without paying for a classifier call. A yield files nothing in every non-answer
+// case, empty message included: silence is not evidence the turn is over when the
+// payload says it will resume.
+func classifyPostTranscript(lastMessage string, err error, stop stopClassification) classifyDecision {
 	if err != nil {
 		if errors.Is(err, agentdriver.ErrNoNewAssistantTurn) {
 			return classifyDecision{action: classifySkip, reason: "no_new_assistant_turn"}
 		}
+		if stop.yielded {
+			return classifyDecision{action: classifySkip, reason: "yield_transcript_parse_error"}
+		}
 		return classifyDecision{action: classifyApply, state: protocol.StateUnknown, reason: "transcript_parse_error"}
 	}
 	if strings.TrimSpace(lastMessage) == "" {
+		if stop.yielded {
+			return classifyDecision{action: classifySkip, reason: "yield_empty_message"}
+		}
 		return classifyDecision{action: classifyApply, state: protocol.StateIdle, reason: "empty_last_message"}
 	}
 	return classifyDecision{action: classifyRunClassifier}
@@ -84,23 +112,38 @@ func classifyPostTranscript(lastMessage string, err error) classifyDecision {
 
 // classifyVerdict maps the classifier's answer to a state. A failed call and an
 // unknown answer both land on unknown, but they are separate reasons: one is our
-// plumbing failing, the other is the classifier declining to decide.
-func classifyVerdict(state string, err error) classifyDecision {
+// plumbing failing, the other is the classifier declining to decide. (Neither
+// files any evidence — there is no unknown claim — so on a yield the resolver's
+// fallback ladder still decides.)
+//
+// A parked verdict outside a yield is the judge misapplying a rule whose
+// precondition — the harness-facts line — was never in its input. Filed as
+// nothing rather than remapped: the session settles on its own fallback, and the
+// trace says what the judge actually answered.
+func classifyVerdict(state string, err error, stop stopClassification) classifyDecision {
 	if err != nil {
 		return classifyDecision{action: classifyApply, state: protocol.StateUnknown, reason: "classifier_error"}
 	}
 	if state == protocol.StateUnknown {
 		return classifyDecision{action: classifyApply, state: protocol.StateUnknown, reason: "classifier_unknown_response"}
 	}
+	if state == classifier.VerdictParked && !stop.yielded {
+		return classifyDecision{action: classifyApply, state: protocol.StateUnknown, reason: "classifier_parked_without_yield"}
+	}
 	return classifyDecision{action: classifyApply, state: state, reason: "classifier"}
 }
 
-// classifySessionState decides what a settled turn means and applies the result.
+// classifySessionState judges a terminal stop. See classifyStop.
+func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
+	d.classifyStop(sessionID, transcriptPath, stopClassification{})
+}
+
+// classifyStop decides what a stopped turn means and files the result.
 // It is the IO shell around the rules in classify_decision.go: it gathers inputs,
 // performs the transcript read and the classifier call between rules, and owns the
 // single store write. The rules themselves make no decision about when to pay for
 // IO — they say what is still needed.
-func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
+func (d *Daemon) classifyStop(sessionID, transcriptPath string, stop stopClassification) {
 	// Capture the timestamp BEFORE any classification work: applyState rejects a
 	// classifierObservation older than the state it would overwrite, so a slow
 	// classifier cannot clobber a newer live signal.
@@ -166,7 +209,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	}
 	d.logf("classifySessionState: session %s has %d total todos, %d pending", sessionID, len(session.Todos), pendingTodos)
 
-	decision := classifyPreTranscript(pendingTodos, transcriptEnabled, classifierEnabled)
+	decision := classifyPreTranscript(pendingTodos, transcriptEnabled, classifierEnabled, stop)
 	if decision.action != classifyReadTranscript {
 		apply(decision)
 		return
@@ -195,7 +238,7 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 		defer d.clearClassifyingTurn(sessionID)
 	}
 
-	decision = classifyPostTranscript(lastMessage, err)
+	decision = classifyPostTranscript(lastMessage, err, stop)
 	if decision.action != classifyRunClassifier {
 		apply(decision)
 		return
@@ -208,13 +251,21 @@ func (d *Daemon) classifySessionState(sessionID, transcriptPath string) {
 	}
 	d.logf("classifySessionState: last message for session %s: %s", sessionID, logMsg)
 
+	// On a yield the judge must see the yield: the harness-facts line is the
+	// precondition of the PARKED verdict, and without it the same message reads
+	// as a plain ending.
+	classifierInput := lastMessage
+	if stop.yielded {
+		classifierInput = classifier.ComposeYieldInput(lastMessage, stop.runningBackgroundTasks)
+	}
+
 	// Can be slow — 30+ seconds.
 	d.logf("classifySessionState: calling classifier for session %s", sessionID)
-	state, err := d.runClassifier(session, lastMessage, 30*time.Second)
+	state, err := d.runClassifier(session, classifierInput, 30*time.Second)
 	if err != nil {
 		d.logf("classifySessionState: classifier error for %s: %v", sessionID, err)
 	}
-	decision = classifyVerdict(state, err)
+	decision = classifyVerdict(state, err, stop)
 	if strings.TrimSpace(assistantTurnID) != "" {
 		d.setClassifiedTurnID(sessionID, assistantTurnID)
 	}

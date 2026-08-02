@@ -98,10 +98,27 @@ func (d *Daemon) handleTicketShow(conn net.Conn, msg *protocol.TicketShowMessage
 	})
 }
 
-// broadcastTicketsUpdated re-pushes the whole non-archived board to every client.
-// Run it after any producer that mutates a ticket (create, status, crash, and the
-// chief edits to come).
-func (d *Daemon) broadcastTicketsUpdated() {
+// publishTicketFact is the producer half of the ticket migration: a mutator
+// publishes the fact it just caused, naming the ticket. It replaced
+// broadcastTicketsUpdated at every call site.
+//
+// The board push that used to happen here is now projectTicketsUpdated, driven by
+// the hub's projection of any `ticket.*` fact — so the wire still sees exactly one
+// board push per mutation, while a consumer sees what actually happened.
+// Publishing a subject-less "the board changed" fact would have been the snapshot
+// invalidation this design rejects, which is why the ticket id is required.
+func (d *Daemon) publishTicketFact(name, ticketID string) {
+	if strings.TrimSpace(ticketID) == "" {
+		// A ticket fact with no ticket IS the invalidation shape. Keep the board
+		// correct, but make the producer's lost id visible rather than quietly
+		// degrading the log.
+		d.logf("bus: %s published without a ticket id", name)
+	}
+	d.publishFact(name, ticketID, nil)
+}
+
+// projectTicketsUpdated re-pushes the whole non-archived board to every client.
+func (d *Daemon) projectTicketsUpdated() {
 	if d.store == nil {
 		return
 	}

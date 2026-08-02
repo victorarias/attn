@@ -64,5 +64,5 @@ func (d *Daemon) handleTicketComment(conn net.Conn, msg *protocol.TicketCommentM
 	// participant of the ticket going forward.
 	d.notifyTicketObservers(ticketID)
 	// Refresh the app's board view: the activity thread changed.
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketCommented, ticketID)
 }

@@ -1,0 +1,270 @@
+package store
+
+import (
+	"database/sql"
+	"time"
+)
+
+// The durable event bus substrate (migration 84). This file is only persistence:
+// an append-only log whose AUTOINCREMENT seq doubles as the cursor space, plus a
+// registry of named consumers holding a position in that space. The delivery
+// semantics — ordering, at-least-once, filters, retention window — live in
+// internal/bus, which reaches this through an interface so neither package
+// depends on the other (the daemon adapts them, as it does for internal/tasks).
+//
+// The shape is lifted from the ticket event log (migration 56), which proved it:
+// a monotonic seq is a cursor space, and a consumer that was down catches up by
+// reading forward from its own bookmark. The difference is scope. Ticket cursors
+// are per-(identity, ticket) because "unread" is a per-ticket question; bus
+// cursors are one per consumer because a consumer is a program, not a reader.
+
+// BusEvent is one fact on the log. Payload is opaque JSON (the empty string when
+// a fact carries nothing beyond its subject). Source names the publisher for
+// diagnosis, not for routing.
+type BusEvent struct {
+	Seq       int64
+	Name      string
+	Subject   string
+	Payload   string
+	Source    string
+	CreatedAt time.Time
+}
+
+// BusConsumer is a durable consumer's registration and position. Filter is the
+// consumer's subscription expression, stored so `bus status` can report what a
+// consumer is watching without the consumer being live. Enabled=false is the kill
+// switch: a disabled consumer is not delivered to, and — deliberately — does not
+// pin the retention window.
+type BusConsumer struct {
+	Name      string
+	Cursor    int64
+	Filter    string
+	Enabled   bool
+	UpdatedAt time.Time
+}
+
+// AppendBusEvent appends a fact and returns its seq.
+//
+// There is no dedup here, unlike the ticket event log. Ticket events dedup
+// against the previous event because a retried mutation must not double-post a
+// comment; bus facts are emitted by code that already decided something changed,
+// and two identical facts in a row are a real occurrence (a session entering the
+// same state twice), not a retry.
+func (s *Store) AppendBusEvent(e BusEvent, now time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return 0, nil
+	}
+	res, err := s.db.Exec(`
+		INSERT INTO bus_events (name, subject, payload, source, created_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, e.Name, e.Subject, e.Payload, e.Source, formatTicketTime(now))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// BusEventsSince returns up to limit events with seq greater than cursor, in seq
+// order. Filtering is the caller's job: a consumer reads the raw forward stream
+// and advances its cursor past events it does not want, which keeps the cursor
+// monotone and the query free of pattern matching.
+func (s *Store) BusEventsSince(cursor int64, limit int) ([]BusEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`
+		SELECT seq, name, subject, payload, source, created_at
+		FROM bus_events WHERE seq > ? ORDER BY seq ASC LIMIT ?
+	`, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []BusEvent
+	for rows.Next() {
+		var (
+			e         BusEvent
+			createdAt string
+		)
+		if err := rows.Scan(&e.Seq, &e.Name, &e.Subject, &e.Payload, &e.Source, &createdAt); err != nil {
+			return nil, err
+		}
+		e.CreatedAt = parseTicketTime(createdAt)
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+// BusBounds returns the lowest and highest seq currently in the log; both are 0
+// when the log is empty. The low bound is what makes a trimmed-past cursor
+// detectable: a consumer whose cursor sits below it has missed events that no
+// longer exist.
+func (s *Store) BusBounds() (earliest, head int64, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return 0, 0, nil
+	}
+	var lo, hi sql.NullInt64
+	if err := s.db.QueryRow(`SELECT MIN(seq), MAX(seq) FROM bus_events`).Scan(&lo, &hi); err != nil {
+		return 0, 0, err
+	}
+	return lo.Int64, hi.Int64, nil
+}
+
+// GetBusConsumer loads a consumer registration by name.
+func (s *Store) GetBusConsumer(name string) (BusConsumer, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return BusConsumer{}, false, nil
+	}
+	var (
+		c         BusConsumer
+		enabled   int
+		updatedAt string
+	)
+	err := s.db.QueryRow(`
+		SELECT name, cursor, filter, enabled, updated_at FROM bus_consumers WHERE name = ?
+	`, name).Scan(&c.Name, &c.Cursor, &c.Filter, &enabled, &updatedAt)
+	switch err {
+	case nil:
+		c.Enabled = enabled != 0
+		c.UpdatedAt = parseTicketTime(updatedAt)
+		return c, true, nil
+	case sql.ErrNoRows:
+		return BusConsumer{}, false, nil
+	default:
+		return BusConsumer{}, false, err
+	}
+}
+
+// SaveBusConsumer creates or updates a registration. An existing row keeps its
+// cursor and enabled bit: re-registering at startup must not rewind a consumer's
+// position, and must not silently re-enable one the operator killed.
+func (s *Store) SaveBusConsumer(c BusConsumer, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	enabled := 0
+	if c.Enabled {
+		enabled = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO bus_consumers (name, cursor, filter, enabled, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET filter = excluded.filter, updated_at = excluded.updated_at
+	`, c.Name, c.Cursor, c.Filter, enabled, formatTicketTime(now))
+	return err
+}
+
+// SetBusConsumerCursor persists a consumer's position. This is the write on the
+// delivery hot path, so it touches only the two columns it owns.
+func (s *Store) SetBusConsumerCursor(name string, cursor int64, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		UPDATE bus_consumers SET cursor = ?, updated_at = ? WHERE name = ?
+	`, cursor, formatTicketTime(now), name)
+	return err
+}
+
+// SetBusConsumerEnabled flips the kill switch for a consumer.
+func (s *Store) SetBusConsumerEnabled(name string, enabled bool, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	flag := 0
+	if enabled {
+		flag = 1
+	}
+	_, err := s.db.Exec(`
+		UPDATE bus_consumers SET enabled = ?, updated_at = ? WHERE name = ?
+	`, flag, formatTicketTime(now), name)
+	return err
+}
+
+// ListBusConsumers returns every registration, by name.
+func (s *Store) ListBusConsumers() ([]BusConsumer, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`
+		SELECT name, cursor, filter, enabled, updated_at FROM bus_consumers ORDER BY name ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []BusConsumer
+	for rows.Next() {
+		var (
+			c         BusConsumer
+			enabled   int
+			updatedAt string
+		)
+		if err := rows.Scan(&c.Name, &c.Cursor, &c.Filter, &enabled, &updatedAt); err != nil {
+			return nil, err
+		}
+		c.Enabled = enabled != 0
+		c.UpdatedAt = parseTicketTime(updatedAt)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// TrimBusEvents deletes events older than cutoff that every ENABLED consumer has
+// already passed, and reports how many rows went. Both conditions must hold: the
+// age window bounds growth, and the cursor floor keeps a live-but-lagging
+// consumer from losing events it has not read.
+//
+// Disabled consumers are excluded from the floor on purpose. A killed extension
+// must not pin the log indefinitely; when it comes back below the floor,
+// internal/bus resumes it at head and logs the gap.
+func (s *Store) TrimBusEvents(cutoff time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return 0, nil
+	}
+	res, err := s.db.Exec(`
+		DELETE FROM bus_events
+		WHERE created_at < ?
+		  AND seq <= COALESCE(
+		      (SELECT MIN(cursor) FROM bus_consumers WHERE enabled = 1),
+		      (SELECT COALESCE(MAX(seq), 0) FROM bus_events)
+		  )
+	`, formatTicketTime(cutoff))
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}

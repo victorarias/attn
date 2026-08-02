@@ -21,6 +21,7 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/buildinfo"
+	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/diag"
@@ -161,6 +162,16 @@ type Daemon struct {
 	// lookup seam: nil in production (reconcileGroundTruth derives the fetcher
 	// from ghRegistry per-host); tests set it to a fake so no network runs.
 	ticketReconcilePRFetch prStateFetcher
+	// sessionTitleExec is the Stop-time auto-title classifier spawn (see
+	// session_title.go) — New() wires the real per-agent headless run
+	// (execSessionTitle); it stays nil on test daemons so unit tests never shell
+	// out (maybeGenerateSessionTitle logs and skips). sessionTitleAttempted
+	// marks sessions that already had one LLM title attempt this daemon
+	// lifetime, success or failure, so a Stop storm never re-bills the same
+	// session; lazily allocated under sessionTitleMu.
+	sessionTitleMu        sync.Mutex
+	sessionTitleExec      func(ctx context.Context, session *protocol.Session, slice transcript.ConversationSlice) (string, error)
+	sessionTitleAttempted map[string]struct{}
 	// ticketArtifactMu serializes attach installation with its durable ticket
 	// receipt so concurrent submissions cannot race on destination names.
 	ticketArtifactMu  sync.Mutex
@@ -357,6 +368,19 @@ type Daemon struct {
 	automationsBroadcastHook func(*protocol.AutomationsChangedMessage)
 
 	workspaceContextCheckoutMu sync.Mutex
+
+	// eventBus is the durable event bus (internal/bus): the spine that carries
+	// domain facts from producers to consumers. The WebSocket hub is an ephemeral
+	// consumer of it via the projection table in bus.go, so a migrated broadcaster
+	// publishes a fact and the projection produces the wire traffic. See
+	// docs/plans/2026-08-01-ext-a1-event-bus.md.
+	//
+	// Built by ensureEventBus at construction (not at Start) because the hub
+	// subscription is what makes a published fact reach clients — a daemon that
+	// publishes without having started must still project. busUnsubscribe drops
+	// that subscription on Stop.
+	eventBus       *bus.Bus
+	busUnsubscribe func()
 
 	// compactRunner is the durable task runner that owns the keeper's
 	// workspace-context compaction duty (kind "compact_context") and the
@@ -655,6 +679,10 @@ func New(socketPath string) *Daemon {
 	// Production wiring for the orphaned-ticket reconciliation classifier. Test
 	// constructors leave this nil so unit tests never shell out to a real CLI.
 	d.ticketReconcileExec = d.execTicketReconcileClassifier
+	d.ensureEventBus()
+	// Production wiring for Stop-time session auto-titling (session_title.go).
+	// Test constructors leave this nil so unit tests never shell out.
+	d.sessionTitleExec = d.execSessionTitle
 	return d
 }
 
@@ -663,7 +691,7 @@ func NewForTesting(socketPath string) *Daemon {
 	dataRoot := filepath.Dir(socketPath)
 	pidPath := filepath.Join(dataRoot, "attn.pid")
 	manager := pty.NewManager(nil)
-	return &Daemon{
+	d := &Daemon{
 		socketPath:         socketPath,
 		pidPath:            pidPath,
 		dataRoot:           dataRoot,
@@ -696,6 +724,8 @@ func NewForTesting(socketPath string) *Daemon {
 		// override this with an enabled runner (see newTestCompactRunner).
 		compactRunner: tasks.New(tasks.Options{}),
 	}
+	d.ensureEventBus()
+	return d
 }
 
 // NewWithGitHubClient creates a daemon with a custom GitHub client for testing
@@ -707,7 +737,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		registry.Register(client.Host(), client)
 	}
 	manager := pty.NewManager(nil)
-	return &Daemon{
+	d := &Daemon{
 		socketPath:         socketPath,
 		pidPath:            pidPath,
 		dataRoot:           dataRoot,
@@ -737,6 +767,8 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		spawnLocks:         make(map[string]*spawnLock),
 		compactRunner:      tasks.New(tasks.Options{}),
 	}
+	d.ensureEventBus()
+	return d
 }
 
 // Start starts the daemon
@@ -779,6 +811,11 @@ func (d *Daemon) Start() error {
 	// before any headless run can start, so the default (or configured) cap
 	// applies from the first keeper/narration/reconcile run.
 	d.applyHeadlessContextWindowCap()
+	// The bus starts before anything that publishes: startup reconciliation
+	// already mutates state that produces facts.
+	if err := d.startEventBus(); err != nil {
+		return fmt.Errorf("start event bus: %w", err)
+	}
 	reapedWorkspaceIDs := d.loadWorkspacesFromStore()
 	if d.daemonInstanceID == "" {
 		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
@@ -1547,6 +1584,7 @@ func (d *Daemon) Stop() {
 	if runner := d.compactRunnerRef(); runner != nil {
 		runner.Stop()
 	}
+	d.stopEventBus()
 	if d.hubManager != nil {
 		d.hubManager.Stop()
 	}
@@ -2495,9 +2533,10 @@ func (d *Daemon) persistResumeSessionID(sessionID, resumeSessionID string) {
 func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	d.logf("handleStop: session=%s, transcript_path=%s", msg.ID, msg.TranscriptPath)
 
-	// A non-terminal stop is a yield, not an end: do none of the end-of-turn work
-	// below (no resume-id capture, no narration enqueue, no classification), and
-	// leave the color to the facts recorded here. The turn resumes on its own.
+	// A non-terminal stop is a yield, not an end: it skips the end-of-turn work
+	// below (no resume-id capture, no narration enqueue — both belong to a turn
+	// that has actually ended), and the color follows from the facts recorded
+	// here plus the yield-aware judgment kicked off below.
 	//
 	// The facts are recorded as the rules read them, not raw. A background task
 	// the agent has already finished is present in the payload and means nothing,
@@ -2521,6 +2560,22 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 			"",
 		)
 		d.sendOK(conn)
+		if d.consumeForcedStopClassification(msg.ID) {
+			d.logf("handleStop: skipping yield classification for daemon-terminated session=%s", msg.ID)
+			return
+		}
+		// A yield is not excused from judgment. The payload that says the turn can
+		// resume is identical whether the agent is waiting on its own build or
+		// finished and left a process running, and only the turn's own last words
+		// separate the two. The judge sees the yield (three-way verdict: parked
+		// holds the session working with no decay to unknown; waiting/idle settle
+		// it into the user's queue), and a judgment that never lands leaves the
+		// resolver's prompt-idle fallback as the safety valve — exactly the
+		// pre-judgment behavior.
+		go d.classifyStop(msg.ID, msg.TranscriptPath, stopClassification{
+			yielded:                true,
+			runningBackgroundTasks: runningBackgroundTaskCount(msg),
+		})
 		return
 	}
 
@@ -2575,8 +2630,15 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 
 	// Async classification
 	go d.classifySessionState(msg.ID, msg.TranscriptPath)
+	go d.maybeGenerateSessionTitle(msg.ID, msg.TranscriptPath)
 }
 
+// resolveTranscriptPathForSession resolves a session's transcript by the
+// strongest identity available: the path the agent's own hook reported, then
+// the agent-native resume id synced from hooks, and only then the finder's
+// cwd/time guess. The guess must stay last for codex: several codex processes
+// can share one cwd (a second attn pane, a user's own `codex exec`), and
+// "newest matching cwd" cannot tell them apart.
 func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
 	path := strings.TrimSpace(transcriptPath)
 	if session == nil {
@@ -2589,12 +2651,20 @@ func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, tran
 		}
 	}
 
-	if driver := agentdriver.Get(string(session.Agent)); driver != nil {
-		if tf, ok := agentdriver.GetTranscriptFinder(driver); ok {
-			if discovered := strings.TrimSpace(tf.FindTranscript(session.ID, session.Directory, time.Now())); discovered != "" {
-				return discovered
-			}
+	driver := agentdriver.Get(string(session.Agent))
+	tf, ok := agentdriver.GetTranscriptFinder(driver)
+	if !ok {
+		return path
+	}
+
+	if resumeID := strings.TrimSpace(d.store.GetResumeSessionID(session.ID)); resumeID != "" {
+		if resolved := strings.TrimSpace(tf.FindTranscriptForResume(resumeID)); resolved != "" {
+			return resolved
 		}
+	}
+
+	if discovered := strings.TrimSpace(tf.FindTranscript(session.ID, session.Directory, time.Now())); discovered != "" {
+		return discovered
 	}
 
 	return path
@@ -2806,7 +2876,14 @@ func (d *Daemon) remoteSessionsForBroadcast() []protocol.Session {
 	return sessions
 }
 
+// broadcastSessionStateChanged publishes the fact. Its old body is now
+// projectSessionStateChanged, run by the hub's projection (see bus.go). Because
+// the method already received the entity id, migrating it changed no call site.
 func (d *Daemon) broadcastSessionStateChanged(sessionID string) {
+	d.publishFact(FactSessionStateChanged, sessionID, nil)
+}
+
+func (d *Daemon) projectSessionStateChanged(sessionID string) {
 	session := d.store.Get(sessionID)
 	decorated := d.sessionForBroadcast(session)
 	if decorated == nil {

@@ -117,6 +117,11 @@ func (d *Daemon) adoptDelegatedTicket(creatorSessionID string, ownedByChiefRole 
 // unbounded at the cost of a less pretty id.
 const ticketSlugSequentialAttempts = 50
 
+// ticketSlugRandomSuffixLen is the width of the random tail. Fixed width is what
+// distinguishes a fallback id from the sequential walk at a glance, and it is what
+// the fallback test asserts on — the tail is hex, so it is sometimes all digits.
+const ticketSlugRandomSuffixLen = 6
+
 // createTicketWithUniqueSlug inserts template under base, falling back to base-2,
 // base-3, ... on slug collision, then to base-<random> once the sequential range is
 // exhausted. The template's ID field is ignored — the slug is allocated here. It
@@ -132,7 +137,7 @@ func (d *Daemon) createTicketWithUniqueSlug(template store.Ticket, base, author,
 		case attempt < ticketSlugSequentialAttempts:
 			template.ID = fmt.Sprintf("%s-%d", base, attempt+1)
 		default:
-			template.ID = fmt.Sprintf("%s-%s", base, strings.ToLower(uuid.NewString()[:6]))
+			template.ID = fmt.Sprintf("%s-%s", base, strings.ToLower(uuid.NewString()[:ticketSlugRandomSuffixLen]))
 		}
 		created, err := d.store.CreateTicketWithSubscribers(template, author, ownerRole, subscribers, now)
 		if err == nil {

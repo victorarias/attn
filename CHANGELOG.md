@@ -28,12 +28,56 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   session you are talking to, a turn codex ended for its own reasons is no longer
   read as you halting it, and a session that resumes onto a transcript with older
   halts in it no longer settles on one of them.
+- **A session waiting on its own background task no longer goes grey — or rings
+  you — a minute in.** When a Claude turn yields with a background process still
+  running ("the build is running; I'll continue when it completes"), attn now
+  asks its stop-time judge to read the ending with that fact in view. A turn
+  that is waiting on its own work stays green for as long as the wait takes,
+  instead of flipping to idle after 60 seconds and putting a false turn in your
+  queue. The judgment cuts the other way too: a turn that finished but left
+  something running (a dev server, a watcher) settles into your queue instead of
+  staying green forever. When no judgment lands, the previous 60-second
+  behaviour remains as the fallback.
 
 ---
 
 ## [2026-08-01]
 
+### Added
+- **Automatic session titles from your first conversation.** When a new session
+  finishes its first exchange, attn generates a descriptive title from what you
+  discussed and replaces the default folder-name label. Manual renames always
+  win — any session you've renamed stays that way.
+
+### Changed
+- **Queue rows give the whole line to the session name.** Sidebar rows in the
+  agent queue no longer show the workspace name, the waiting time sits at the
+  right edge, and the settle/pin/actions buttons appear over the right edge on
+  hover instead of permanently reserving space — so long session names are
+  readable instead of truncating next to empty space. The pin button's tooltip
+  still names the workspace a row would leave the queue by.
+
 ### Fixed
+- **⌘J jumps to the agent that has waited longest.** Jump-to-waiting used to
+  pick the first waiting session in sidebar workspace order, which made its
+  target feel arbitrary. It now follows the queue's own order — the turn owed
+  longest, the same row the "Your turn" band lists first.
+- **Codex sessions no longer mistake attn's own bookkeeping for their
+  conversation.** attn's stop-time classifier runs a small codex call from the
+  session's directory, and its saved log could be picked up as the session's
+  transcript — so state classification, session digests in the Notebook, and
+  orphaned-ticket reconciliation could read an internal `{"verdict":...}` note
+  instead of what the agent actually said. Transcripts now resolve by the codex
+  session's own id, the classifier no longer saves a log at all, and headless
+  codex runs are excluded from transcript discovery.
+- **A turn that closes on its own hands you the next agent.** Auto-settle closes
+  a turn on a timer, and settling from a sidebar row goes straight to the
+  daemon — neither moved you on, so the countdown finishing on the agent you were
+  watching dropped its row from the queue and left you sitting on an agent that
+  was done with you. Closing a turn now hands over the next agent that owes one
+  (or takes you home when none does) however that turn closed, not just when you
+  pressed ⌘⇧E. A turn closing on an agent you are not looking at still leaves
+  your selection alone, and pinning a workspace still keeps you where you are.
 - **A workspace that holds only a tile can be closed again.** Closing the last
   notebook, markdown, or browser tile in a workspace with no agents left the
   workspace in the sidebar — and every later click on its × did nothing, so the

@@ -361,13 +361,13 @@ func (d *Daemon) hasForcedStopMark(sessionID string) bool {
 }
 
 // resolveReconcileTranscript locates the dead session's transcript via the
-// judged agent's driver. Claude transcripts resolve by id — prefer the ticket's
-// mirrored resume id (the latest claude-native id after resumes; the session
-// row's copy dies with the row) and fall back to the attn session id. Codex has
-// no id-based lookup (ResumeSessionIDFromStopTranscriptPath returns ""), so it
-// resolves by cwd + time anchor: time.Now() at the death seam (fresh mod-time
-// window), the ticket's CreatedAt from the sweep (delegation ≈ spawn; an early
-// anchor only widens the window). "" means rule 7: comment, don't vanish.
+// judged agent's driver, preferring the ticket's mirrored resume id (the
+// latest agent-native id — claude's from stop payloads, codex's from its hook
+// session_id sync; the session row's copy dies with the row). Only when no id
+// was mirrored does it fall back to the finder's cwd + time-anchor guess:
+// time.Now() at the death seam (fresh mod-time window), the ticket's CreatedAt
+// from the sweep (delegation ≈ spawn; an early anchor only widens the window).
+// "" means rule 7: comment, don't vanish.
 func (d *Daemon) resolveReconcileTranscript(agentID, sessionID, cwd string, anchor time.Time, assignee string) string {
 	driver := agentdriver.Get(agentID)
 	if driver == nil {
@@ -489,7 +489,7 @@ func (d *Daemon) reconcileTaskExecutor(ctx context.Context, task *tasks.Task) er
 	// The comment notifies participants (the chief is one via the created event);
 	// attn itself is an authoring identity, never an observer.
 	d.notifyTicketObservers(in.TicketID)
-	d.broadcastTicketsUpdated()
+	d.publishTicketFact(FactTicketCommented, in.TicketID)
 	return nil
 }
 
