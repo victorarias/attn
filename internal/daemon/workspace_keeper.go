@@ -299,7 +299,15 @@ func (d *Daemon) startJobQueue() {
 	// notification and broadcasts the new unread count, both non-blocking.
 	runner.OnTerminalFailure(func(j *jobs.Job) { d.notifyTaskTerminalFailure(j) })
 	d.setJobQueue(runner)
-	_ = runner.Start()
+	if err := runner.Start(); err != nil {
+		// A queue that failed to start is not an inert object: it still accepts
+		// Enqueue and still writes rows, but no dispatch loop reads them and no cron
+		// entry is armed. Every background duty and both periodic ticks are gone,
+		// and the only evidence is work that never happens. Say so loudly — this
+		// line is the whole diagnosis for a daemon that has quietly stopped doing
+		// anything in the background.
+		d.logf("jobs: THE JOB QUEUE DID NOT START: %v — no background work and no periodic ticks will run until the daemon is restarted", err)
+	}
 }
 
 // enqueueWorkspaceContextCompaction is THE trigger callsite. It carries the

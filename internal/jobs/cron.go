@@ -53,13 +53,22 @@ func (r *Runner) cronInterval(kind string) time.Duration {
 	return r.handlers[kind].interval
 }
 
-// armCron creates the recurring record for every registered cron kind that does
-// not already have one. It runs once, from Start.
+// armCron gives every registered cron kind a recurring record that will fire. It
+// runs once, from Start.
 //
-// An EXISTING record is left exactly as it is. Arming it again would push its
-// ScheduledAt an interval into the future on every boot, so a daemon restarted
-// more often than the interval would never tick at all — the failure mode a
-// durable schedule exists to rule out.
+// An existing record that is still on schedule — queued, failed, or running — is
+// left exactly as it is. Arming it again would push its ScheduledAt an interval
+// into the future on every boot, so a daemon restarted more often than the
+// interval would never tick at all: the failure mode a durable schedule exists to
+// rule out.
+//
+// An existing record in a TERMINAL state is revived. A cron entry is never
+// supposed to reach one, but it can: run a build that does not register the kind
+// (a rename, a rollback, a registration that errored and was only logged) and
+// dispatch kills its due entry as an unknown kind. Nothing in the queue selects a
+// dead row, and List hides cron entries, so without this the heartbeat is gone
+// for good the next time the kind comes back — silently, which is the one outcome
+// a heartbeat must never have.
 func (r *Runner) armCron() {
 	r.mu.Lock()
 	kinds := make(map[string]time.Duration, len(r.handlers))
@@ -76,9 +85,14 @@ func (r *Runner) armCron() {
 			r.log("jobs: read cron entry for %s: %v", kind, err)
 			continue
 		}
-		if existing != nil {
+		if existing != nil && !existing.State.Terminal() {
 			continue
 		}
+		if existing != nil {
+			r.log("jobs: cron entry for %s was %s (%s); reviving it", kind, existing.State, existing.LastError)
+		}
+		// Enqueue coalesces onto the existing record when there is one, so a revive
+		// resets that same row to queued rather than minting a second entry.
 		if _, err := r.Enqueue(kind, EnqueueOptions{UniqueKey: CronKey, Delay: interval}); err != nil {
 			r.log("jobs: arm cron entry for %s: %v", kind, err)
 		}
@@ -111,6 +125,10 @@ func (r *Runner) rearmCronLocked(j *Job, interval time.Duration, runErr error) {
 // ErrNotCron is returned when a cron-only operation names a kind that does not
 // recur.
 var ErrNotCron = errors.New("jobs: kind is not a cron entry")
+
+// ErrCronKind is returned by Enqueue when a caller tries to enqueue ordinary work
+// onto a recurring kind. See the guard in Enqueue.
+var ErrCronKind = errors.New("jobs: kind is a cron entry and cannot be enqueued directly")
 
 // CronEntry returns the recurring record for kind — what the next fire is
 // scheduled for, and how the last one went. It is the read behind an operator

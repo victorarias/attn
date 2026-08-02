@@ -118,6 +118,89 @@ func TestRestartKeepsAnExistingCronSchedule(t *testing.T) {
 	}
 }
 
+// A cron entry can be killed by a build that does not register its kind:
+// dispatch finds no handler and retires the record. Nothing selects a terminal
+// row and List hides cron entries, so unless arming revives it the heartbeat is
+// gone for good — silently — even after the kind comes back.
+func TestArmingRevivesACronEntryAPriorBuildKilled(t *testing.T) {
+	store := newMemStore()
+	clock := newFakeClock()
+	opts := func() Options {
+		return Options{Store: store, Now: clock.now, PollInterval: testPoll, Log: func(string, ...interface{}) {}}
+	}
+	noop := func(context.Context, *Job) (any, error) { return nil, nil }
+
+	armed := New(opts())
+	if err := armed.RegisterCron(cronKind, time.Hour, noop, HandlerConfig{}); err != nil {
+		t.Fatalf("register cron: %v", err)
+	}
+	mustStart(t, armed)
+	armed.Stop()
+
+	// A build with no handler for the kind: the due entry is retired.
+	clock.advance(2 * time.Hour)
+	stranger := New(opts())
+	if err := stranger.Register("something-else", noop); err != nil {
+		t.Fatalf("register other kind: %v", err)
+	}
+	mustStart(t, stranger)
+	waitFor(t, "the unregistered cron entry to be retired", func() bool {
+		j, _ := store.LoadByKey(cronKind, CronKey)
+		return j != nil && j.State.Terminal()
+	})
+	stranger.Stop()
+
+	// The kind is back. The heartbeat must be beating again.
+	clock.advance(2 * time.Hour)
+	fired := make(chan struct{}, 4)
+	revived := New(opts())
+	if err := revived.RegisterCron(cronKind, time.Hour, func(context.Context, *Job) (any, error) {
+		fired <- struct{}{}
+		return nil, nil
+	}, HandlerConfig{}); err != nil {
+		t.Fatalf("re-register cron: %v", err)
+	}
+	mustStart(t, revived)
+	t.Cleanup(revived.Stop)
+
+	entry, err := revived.CronEntry(cronKind)
+	if err != nil || entry == nil {
+		t.Fatalf("cron entry after revive: %v (%+v)", err, entry)
+	}
+	if entry.State.Terminal() {
+		t.Fatalf("cron entry left in a terminal state (%s); the heartbeat is dead for good", entry.State)
+	}
+	clock.advance(time.Hour)
+	select {
+	case <-fired:
+	case <-time.After(2 * time.Second):
+		j, _ := store.LoadByKey(cronKind, CronKey)
+		t.Fatalf("the revived cron entry never fired; it sits at state=%q scheduled=%s", j.State, j.ScheduledAt)
+	}
+}
+
+// Enqueueing ordinary work onto a recurring kind would mint a second record that
+// finish() also re-arms forever — a duplicate heartbeat that List hides and
+// CronEntry never finds.
+func TestEnqueueRefusesACronKind(t *testing.T) {
+	r, _, _ := newTestRunner(t, nil)
+	noop := func(context.Context, *Job) (any, error) { return nil, nil }
+	if err := r.RegisterCron(cronKind, time.Hour, noop, HandlerConfig{}); err != nil {
+		t.Fatalf("register cron: %v", err)
+	}
+	for name, key := range map[string]string{"no key": "", "some other key": "ws-1"} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := r.Enqueue(cronKind, EnqueueOptions{UniqueKey: key}); !errors.Is(err, ErrCronKind) {
+				t.Fatalf("Enqueue(%q) = %v, want ErrCronKind", key, err)
+			}
+		})
+	}
+	// Arming itself goes through Enqueue, so the guard must not block it.
+	if _, err := r.Enqueue(cronKind, EnqueueOptions{UniqueKey: CronKey, Delay: time.Hour}); err != nil {
+		t.Fatalf("arming a cron entry was refused: %v", err)
+	}
+}
+
 // A zero or negative interval is a registration error, not a kind that fires
 // continuously or never.
 func TestRegisterCronRejectsANonPositiveInterval(t *testing.T) {

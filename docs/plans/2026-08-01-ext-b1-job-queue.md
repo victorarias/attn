@@ -312,3 +312,44 @@ Done on 2026-08-02 against a throwaway profile with a full app install:
   hook, the bus fact, and the snapshot re-push all still connect.
 - A row left in `running` (a killed daemon) was returned to `queued` at the
   next boot and re-dispatched immediately rather than staying stuck.
+
+### Review: three silent-failure paths, closed
+
+A pass over the queue as a long-lived primitive turned up three ways it could
+stop working without saying so. Each is fixed with a regression test, and each
+test was mutation-checked — the fix reverted, the named assertion failed, the
+fix restored.
+
+1. **A failed `Start` left a queue that accepted work and ran none.** The
+   daemon discarded `runner.Start()`'s error. A queue that fails to start is
+   not inert: `Disabled()` is false, so `Enqueue` succeeds and writes rows, but
+   there is no dispatch loop to read them and no cron entry is armed. Every
+   background duty and both periodic ticks stop, and the only evidence is work
+   that never happens. `Start` can fail for real — the single-instance lock
+   refuses when its recorded pid is alive, and pids get recycled after a crash.
+   Now logged loudly, naming the error and what it costs.
+2. **A cron entry that reached a terminal state never came back.** Run a build
+   that does not register a cron kind — a rename, a rollback, a `RegisterCron`
+   that errored and was only logged — and dispatch retires its due entry as an
+   unknown kind. Nothing selects a terminal row, and `List` hides cron entries,
+   so the heartbeat was gone for good even after the kind returned. `armCron`
+   now revives a terminal entry while still leaving a queued/failed/running one
+   exactly as it found it, so the arm-once property is intact.
+3. **Enqueueing onto a cron kind minted a second heartbeat.** `finish()` sends
+   every record of a recurring kind back around the recurrence, so an enqueue
+   carrying any key other than `CronKey` created a second self-perpetuating
+   entry that `List` hides and `CronEntry` never finds. `Enqueue` now refuses
+   with `ErrCronKind`. No caller did this; the guard is so none can.
+
+Live re-verification of (2) on a throwaway profile: a cron entry forced to
+`dead` was revived at the next daemon start, logged the revive, and resumed
+firing on its interval, while the healthy sibling entry's next fire was left
+untouched across the same restart.
+
+Two things were considered and left alone. A handler that hangs inside its
+commit fence blocks shutdown without bound — the fence deliberately disarms the
+run's timeout, and the only fence user commits a store write, so the exposure
+is theoretical. And `Retry` on a job that no longer exists reports success and
+does nothing; that is the retired runner's behavior carried across unchanged,
+and a dead job is never trimmed, so the notification deep-link always has its
+record.

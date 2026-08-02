@@ -402,10 +402,18 @@ func (r *Runner) Enqueue(kind string, opts EnqueueOptions) (*Job, error) {
 	}
 
 	r.mu.Lock()
-	_, known := r.handlers[kind]
+	entry, known := r.handlers[kind]
 	r.mu.Unlock()
 	if !known {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownKind, kind)
+	}
+	// A cron kind has exactly one record, addressed by CronKey, and finish() sends
+	// every record of that kind back around the recurrence. An enqueue carrying any
+	// other key would therefore mint a SECOND self-perpetuating entry — one that
+	// List hides and CronEntry never finds. Refuse instead: recurring work is
+	// scheduled by registering it, not by enqueueing it.
+	if entry.interval > 0 && opts.UniqueKey != CronKey {
+		return nil, fmt.Errorf("%w: %s (use RegisterCron; a cron kind has one entry)", ErrCronKind, kind)
 	}
 
 	payload, err := marshalPayload(opts.Payload)
