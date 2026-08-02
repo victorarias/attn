@@ -6,7 +6,7 @@ app_dir="$(cd "$script_dir/.." && pwd)"
 output="$app_dir/vendor/ghostty-vt/ghostty-vt.wasm"
 compat_patch="$app_dir/vendor/ghostty-vt/ghostty-web-v0.4.0-compat.patch"
 
-ghostty_commit="29d4aba03337d7e9d6a0c357969e8924240b84dd"
+ghostty_commit="56237efeefaf7082a82854eba1fbaa93868925e8"
 ghostty_web_commit="9e4e126d89ac3537d2b2ebec075849851566de9f"
 zig="${ZIG:-/opt/homebrew/bin/zig}"
 sdkroot="${SDKROOT:-$(xcrun --show-sdk-path)}"
