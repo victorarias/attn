@@ -269,7 +269,12 @@ Layers around the gate:
       sixel does not exist in ghostty).
 - [ ] Changelog fragment.
 
-### A2 — worker: segmenter, observation, synthesis (feature dark)
+### A2 — worker: segmenter, observation, synthesis (feature dark, one live fix)
+
+Feature-dark with one exception, and the PR description has to say so: the
+prompt-marker half of the ESC-parity rule below fixes a divergence that is live
+in shipped attn today, unrelated to images. Everything else here is unreachable
+until the storage limit flips in A4.
 
 - [x] `ghosttyvt`: expose the kitty C API — storage-limit/APC-max options, the
       `decode_png` hook, placement iterator + `image_get`, on the same
@@ -283,7 +288,7 @@ Layers around the gate:
       A kitty APC whose introducing ESC also ends the sequence before it cannot
       be cut out without taking that exit with it, so it stays on the wire and
       the feeder resyncs on the image it places (`kitty_undescribed_image`).
-- [x] Parity corpus (29 entries, replayed into native ghostty and the shipped
+- [x] Parity corpus (39 entries, replayed into native ghostty and the shipped
       wasm model) + the unit layers above. No protocol change; the wire still
       carries nothing new (limit stays 0 until A4).
 - [x] **One segmenter for both sequence families.** The OSC 133 scanner used to
@@ -311,87 +316,147 @@ Layers around the gate:
       `FuzzKittySegmenterFraming` soaks the framing rules alone: 3 x 3 min
       clean, 16.9M / 9.6M / 10.3M execs.
 
-      `FuzzKittyWireMirrorShipping` is NOT yet clean, and its gate is the
-      unchecked pending-wrap item below. Latest run, from a warm 289-input
-      corpus after the ST fix: red at 6.3s, 225k execs, on the minimized input
-      `"00000000000000000000\xe1\x1b_G"` — the n=20 row of that item's table,
-      reproduced exactly. A2 is not done until this target soaks 3 x 3 min
-      clean.
-- [x] **Every extracted APC leaves an ST on the wire.** Found by
-      `FuzzKittyWireMirrorShipping`, so a defect in the SHIPPING configuration
-      rather than a deferred one, and fixed here.
+      `FuzzKittyWireMirrorShipping` is clean at 3 x 3 min: 9.4M / 6.6M / 6.8M
+      execs, corpus 296 -> 466 inputs. Each run started from the previous run's
+      warm corpus, which is the harder start — it already carried the inputs
+      that found the earlier defects.
 
-      **The design rule.** Extracting only from ground keeps the two VT PARSERS
-      in step, and that is the property the segmenter was built to give. It is
-      not the whole of the state ground implies: ground also contains a UTF-8
-      decoder, which may be holding an incomplete sequence. The APC's leading
-      ESC aborts that decode for the worker. Drop the APC from the wire and the
-      client never sees an ESC, keeps holding, and the next byte decides whether
-      the grids converge again. So the wire must carry an ESC-led no-op at the
-      same position, and `ESC \` — ST, always the 7-bit form — is the cheapest
-      one: two bytes, no cells, from ground a no-op on both parsers.
+      It took three tries to get there, and the failures are the record worth
+      keeping: the first run died at 96s on the UTF-8 abort, and the second at
+      6.3s on the minimized input `"00000000000000000000\xe1\x1b_G"` — the wrap
+      column. Both are fixed by the ESC-parity rule below; neither was
+      reachable from the seeds alone.
+- [x] **Both streams get an ESC-led no-op wherever they differ.** One rule, three
+      defects, all reachable at storage limit 0 — so all three are SHIPPING
+      defects, not deferred ones. Two were found by
+      `FuzzKittyWireMirrorShipping`; the third was found by following the rule
+      backwards and is a live defect on `main`.
 
-      Measured at 20 columns with the cursor on the last column, feeding
-      `<19 zeros>\xe1` then a stripped APC then the tail, worker against client:
+      **The design rule.**
 
-      | what follows the stripped APC | baseline | with ST |
+      > Wherever the two streams differ, BOTH sides get an ESC-led no-op at that
+      > position, so both parsers cross every extraction point in the same state.
+
+      Extracting only from ground keeps the two VT PARSERS in step, and that is
+      the property the segmenter was built to give. It is not the whole of the
+      state ground implies: ground also holds a UTF-8 decoder, which may be
+      part-way through a character. An ESC ends that decode. So whichever side
+      loses the bytes must be handed an ESC in their place, and `ESC \` — ST,
+      always the 7-bit form — is the cheapest one: two bytes, no cells, a no-op
+      from ground on both parsers.
+
+      The rule is directional, and both directions occur:
+
+      | bytes | reaches | substitute goes to |
       | --- | --- | --- |
-      | nothing (quiesced) | worker has U+FFFD, client has none — transient | agree |
-      | `X` (an ASCII byte) | heals on its own | agree |
-      | `\xa5` (a valid continuation) | **permanent**: worker two U+FFFD, client one character | agree |
-      | `\xa5rest` (continuation, then text) | **permanent**: the text lands, the character stays wrong | agree |
+      | kitty APC | worker, not the wire | the **wire** |
+      | OSC 133 marker | the wire, not the worker | the **worker** |
 
-      The permanent shape is the one that matters: both sides end holding
-      nothing pending, so no later byte heals it, and it survives into the next
-      restore. An earlier revision of this table recorded "more text | heals" —
-      re-measurement contradicts it, and the row above replaces it.
+      **1. The wire ST (class 1).** Measured at 20 columns with the cursor on the
+      last column, feeding `<19 zeros>\xe1`, a stripped APC, then a tail:
 
-      Three properties of the rule, each pinned by a test:
-
-      - **Unconditional.** Aborting a pending decode writes a replacement
-        character, which usually advances the cursor, which synthesis describes
-        with a CSI whose own ESC aborts the client's decode by accident. The
-        last column is where that cover disappears: the replacement character
-        fills the final cell and leaves the cursor put with a pending wrap, so
-        there is no movement to describe and no synthesis runs. Every corpus and
-        battery case named "…the last column" sits there deliberately; at any
-        other column the bug is invisible. The condition that would make the
-        emission conditional is exactly as subtle as the bug, so there is no
-        condition.
-      - **ST first, then synthesis**, so synthesized CSIs parse from ground.
-      - **Always the 7-bit form**, even when the APC the worker consumed ended
-        with C1 ST `0x9c`. On the wire the stream is UTF-8, where a raw `0x9c`
-        in ground is a stray continuation byte that decodes toward U+FFFD and
-        puts a cell on the grid. Pinned by the corpus entry "a c1-terminated apc
-        still leaves the seven-bit st".
-
-      Mutation receipt: deleting the append in `writeAPC` turns
-      `TestWireFeedStripsAPCsWithKittyDisabled` red on the exact bytes, the
-      mirror battery case red on grid equality at both the transient and the
-      permanent chunk (plus a cursor divergence), and — regenerating the corpus
-      under the mutation — exactly the two last-column entries red in
-      `kittyWireRewrite.parity.test.ts` against the real shipped wasm, with the
-      other 28 entries still passing. That last one is the receipt both that the
-      fix is needed by production's actual client and that the client treats a
-      bare ST as a no-op.
-
-- [ ] **The pending-wrap row.** Independent of the UTF-8 abort above, NOT fixed
-      by the ST, and still open. With the cursor at exactly the wrap column and
-      an incomplete UTF-8 byte pending, worker and client end with identical
-      text and cursor rows one apart. Measured at 20 columns, feeding
-      `<n zeros>\xe1\x1b_G`:
-
-      | zeros | baseline | with ST on the wire |
+      | tail | without the ST | with it |
       | --- | --- | --- |
-      | 18 | agree | agree |
-      | 19 | diverge (the UTF-8 abort) | agree |
-      | 20 | diverge: worker `(1,1)`, client `(1,2)`, same text | **still diverges** |
-      | 21 | agree | agree |
+      | nothing | worker has U+FFFD, client none — transient | agree |
+      | `X` | heals on its own | agree |
+      | `\xa5` | **permanent**: worker two U+FFFD, client one character | agree |
+      | `\xa5rest` | **permanent**: text lands, character stays wrong | agree |
 
-      Not root-caused. A cursor-row difference with matching text points at
-      deferred-wrap state the wire has no way to carry: the worker's abort
-      consumes the pending wrap, and the synthesized `CUD`/`CHA` moves the
-      client's cursor without reproducing the wrap it never had.
+      The permanent rows are the point: both sides end holding nothing pending,
+      so no later byte heals them. An earlier revision recorded "more text |
+      heals"; re-measurement contradicts it and the table above replaces it.
+
+      **2. The same ST, written to the WORKER, before anything is measured
+      (class 2).** This one is about measurement, not decoding. Ending a decode
+      is a GRID event: it writes a replacement character, and on the wrap column
+      that character commits the deferred wrap and moves the cursor to the next
+      row. Pinned before the abort, that movement lands inside the measured
+      window and is attributed to the image; the client then performs the same
+      abort itself off the wire's ST **and** applies the synthesized movement,
+      landing a row low. It surfaces only in the row because the column is
+      described absolutely (`CHA`, idempotent) and the row relatively (`CUD`,
+      which double-applies).
+
+      Doing the abort on the worker first leaves the measured window holding
+      only what the image did. Measured, worker delta against what the client
+      actually needs:
+
+      | case | delta pinned before | pinned after | client needs |
+      | --- | --- | --- | --- |
+      | shipping, n=19 | `(0,0)` | `(0,0)` | `(0,0)` |
+      | shipping, n=20 | `(-18,+1)` | `(0,0)` | `(0,0)` |
+      | kitty live, n=19 | `(0,+1)` | `(0,+1)` | `(0,+1)` |
+      | kitty live, n=20 | `(-16,+2)` | `(+2,+1)` | `(+2,+1)` |
+
+      Pinning after makes measured delta equal required delta by construction,
+      because both sides then start the APC from the same state. The worker's
+      grid is byte-identical with and without the pre-ST in all four cases —
+      pinned by `TestWireFeedPreSTOnlyEndsTheDecode` rather than asserted.
+
+      **3. The marker ST, written to the worker (class 3).** The mirror image,
+      and a defect that predates this branch: `main:internal/pty/blockfeed.go`
+      writes only the pre-marker bytes to the terminal, so a marker arriving
+      mid-character ends the CLIENT's decode and not the worker's. Measured
+      against the shipped wasm, feeding `000\xe1`, `OSC 133;A`, `\xa5 done`:
+
+      | | cursor | row |
+      | --- | --- | --- |
+      | worker, no substitute | `(9,0)` | `000<FFFD> done` |
+      | real wasm client | `(10,0)` | `000<FFFD><FFFD> done` |
+
+      One extra cell and a column of drift, permanent in the live session;
+      attach heals it, since the dump is worker-authoritative. Low likelihood —
+      it needs a program truncated mid-character just before the shell prompts —
+      but not kitty-gated, so it is live in shipped attn. Carried here rather
+      than fixed on main: the fix there would have to be written against the
+      byte-scan path this branch deletes, with witness infrastructure that only
+      exists here. It gets its own user-facing changelog fragment; the rest of
+      A2 stays feature-dark.
+
+      The substitute must be an ST and NOT the marker itself. Feeding a real
+      `133;A` to the native worker breaks the line (see the pin-skew section),
+      which is the divergence this whole file exists to prevent.
+
+      **Ordering, twice.** The worker ST precedes the cursor pin AND the tracked
+      ref in `writeAPC`, or the abort is back inside the measured window. The
+      marker ST precedes `blocks.mark`, or the block pins the row the cursor
+      left rather than the row the prompt renders on — the grids agree either
+      way there, so that one is asserted on the pin.
+
+      **Why this and not codepoint-boundary refusal.** The considered
+      alternative was to make extraction require true ground — VT ground AND not
+      mid-codepoint — via a rolling UTF-8 tail tracker, leaving a mid-character
+      APC on the wire for both sides to abort on identically. It was measured
+      and it does work for classes 1 and 2: a raw kitty APC is a perfect grid
+      no-op in the shipped wasm at any payload size and either terminator, and a
+      hand-rolled tracker agreed with ghostty's decoder on 21 of 23 probed
+      prefixes (the two misses, surrogate halves and overlongs, both fail safe).
+      It was rejected because it cannot reach class 3 — a marker cannot replay
+      as plain, since feeding it to the native worker breaks the line — and
+      because it would add a measured UTF-8 rule surface that has to stay in
+      step with ghostty's decoder forever, where the ESC-parity rule needs none.
+
+      **Mutation receipts**, each landing on a named case:
+
+      | removal | what goes red |
+      | --- | --- |
+      | the wire ST | `TestWireFeedStripsAPCsWithKittyDisabled`, on exact bytes |
+      | the worker pre-ST, or pinning before it | `TestWireFeedPinsTheCursorAfterTheDecodeEnds` — wire back to `\x1b\\\x1b[1B\x1b[2G` and client `(1,2)` vs worker `(1,1)` |
+      | the marker ST | the mirror battery's `a prompt marker splitting a character on the wrap column`, and both wasm witnesses |
+      | `blocks.mark` before the substitute | `TestWireFeedPinsTheBlockAfterTheDecodeEnds`, prompt row 0 for 1 |
+
+      The class-3 receipt is the authoritative one: regenerating the corpus with
+      the substitute removed fails exactly the two marker entries in
+      `kittyWireRewrite.parity.test.ts` against the REAL shipped wasm — expected
+      `000<FFFD><FFFD> done`, recorded `000<FFFD> done` — with the other 34
+      passing.
+
+      **Harness fidelity.** `writeAsClient` now substitutes an ST for each
+      dropped marker instead of dropping the bytes outright. Dropping them
+      modelled a client whose decoder never flinches, and that blindness is what
+      hid class 3 from the mirror gate; the substitution keeps `133;A`
+      grid-inert (the pin skew) while reproducing the abort the real wasm
+      performs.
 
 #### Pin skew: `OSC 133;A` is not grid-neutral, and the two ghosttys disagree
 

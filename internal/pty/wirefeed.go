@@ -7,16 +7,22 @@ package pty
 // OSC 133 markers. This file decides where each of those goes, turning one
 // arriving chunk into two different things:
 //
-//   - the TERMINAL feed: every byte, in order. A complete kitty APC goes to
-//     ghostty whole, because ghostty is the system's only kitty parser. An OSC
-//     133 marker goes through too — it is not inert, and blockfeed.go pins a
-//     block-table entry once the terminal has run it.
+//   - the TERMINAL feed: the plain runs and every complete kitty APC, because
+//     ghostty is the system's only kitty parser. OSC 133 markers are WITHHELD —
+//     they are not grid-inert in the ghostty the worker links — and an ST goes
+//     in their place, with blockfeed.go pinning a block-table entry there.
 //   - the WIRE bytes: the same stream with each APC replaced, in position, by
 //     bytes that leave a kitty-ignorant terminal on the same grid — an ST, then
 //     the scroll and the cursor the placement caused. In the shipping
-//     configuration the ST is all of it, and it is there for the client's UTF-8
-//     decoder rather than for the grid (see writeAPC). Markers go out untouched;
-//     the client parses its own.
+//     configuration the ST is all of it. Markers go out untouched; the client
+//     parses its own.
+//
+// So each stream is missing something the other has, and in both directions the
+// gap is filled with an ST. That is one rule, not two accidents: an ESC ends a
+// part-built UTF-8 character, so a side that loses the bytes must be given an
+// ESC in their place or the two decoders resolve the same character differently.
+// The APC also needs its ST on the WORKER, ahead of everything measured, because
+// ending a decode is itself a grid event. See wireST and writeAPC.
 //
 // Both are produced in one call, under the caller's replayMu, in the same
 // critical section that advances the seq watermark. That is what keeps the
@@ -196,7 +202,21 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 			// prevent. The corpus entry "a prompt marker after output with no
 			// trailing newline" is the witness, and is tripwired against a wasm
 			// pin bump: see the pin-skew note in the plan.
+			//
+			// But the marker's own ESC is not grid-inert on either side: it ends
+			// a part-built character. The client gets that ESC and the worker
+			// does not, so a marker arriving mid-character left the worker
+			// holding a decode the client had already resolved — one extra cell
+			// on the client, permanently. This is the same leak as the APC's,
+			// running the other way, so it takes the same substitute: an ST to
+			// the WORKER in the marker's place.
+			//
+			// Written before mark(), so the pin the block table takes lands on
+			// the cursor as it is AFTER the abort — the cell the marker actually
+			// refers to. Pinning first would record the pre-abort cell and put
+			// the block on the wrong row at the wrap column.
 			f.wire = append(f.wire, seg.Bytes...)
+			f.blocks.write(wireST)
 			f.blocks.mark(seg.Marker)
 		}
 		first = false
@@ -227,56 +247,69 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 	return f.wire, f.resync
 }
 
-// wireST is what the wire carries in place of every extracted APC: ST in its
-// 7-bit form, ESC then backslash.
+// wireST is the ESC-led no-op this file substitutes wherever the two streams
+// differ: ST in its 7-bit form, ESC then backslash.
 //
 // Always the 7-bit form, even when the APC the worker consumed was terminated by
 // C1 ST (0x9c). A raw 0x9c on the wire is not an ST to the client — in ground
 // the stream is UTF-8, where 0x9c is a stray continuation byte that decodes
 // toward U+FFFD and puts a cell on the grid. The two-byte form is the only one
 // that means "no-op" on both sides.
+//
+// The rule it serves, which every extraction in this file obeys:
+//
+//	Wherever the two streams differ, BOTH sides get an ESC-led no-op at that
+//	position, so both parsers cross every extraction point in the same state.
+//
+// Extracting only from ground keeps the two VT PARSERS in step, and that is the
+// property the segmenter was built to give. It is not the whole of the state
+// ground implies: ground also holds a UTF-8 decoder, which may be part-way
+// through a character. An ESC ends that decode. So whichever side loses the
+// bytes must be given an ESC in their place, or the two decoders resolve the
+// same character differently and nothing later heals it.
+//
+// Both directions occur. A kitty APC reaches the worker and not the wire, so the
+// WIRE gets one (see writeAPC). An OSC 133 marker reaches the wire and not the
+// worker, so the WORKER gets one (see feed). The APC case needs it on the worker
+// too, for a reason that is about measurement rather than decoding: see writeAPC.
 var wireST = []byte{0x1b, '\\'}
 
 // writeAPC feeds one complete kitty APC to the terminal and appends whatever
-// the wire needs in its place. The ordering is the contract: pin the cursor
-// before the write, because a tracked ref is the only way to see afterwards how
-// far the grid moved under it.
+// the wire needs in its place. The ordering is the contract, and it has two
+// halves: end the pending decode on both sides BEFORE anything is measured, then
+// pin the cursor before the write, because a tracked ref is the only way to see
+// afterwards how far the grid moved under it.
 func (f *wireFeeder) writeAPC(apc []byte) {
+	// The abort, given to both sides, ahead of every measurement below.
+	//
+	// On the WIRE it stands in for the APC's own leading ESC, which the client
+	// would otherwise never see: it would keep holding a part-built character,
+	// and a following continuation byte would complete a different one from the
+	// replacement character the worker already resolved.
+	//
+	// On the WORKER it looks redundant — the APC's ESC would end the decode a
+	// moment later anyway — and it is not, because ending a decode is a GRID
+	// event. It writes a replacement character, and on the last column that
+	// character commits the deferred wrap and moves the cursor to the next row.
+	// Pinned before the abort, that movement falls inside the measured window and
+	// is attributed to the image; the client then performs the same abort itself
+	// off the ESC above AND applies the synthesized movement, landing a row too
+	// far. Doing the abort here, before the pin, leaves the measured window
+	// holding only what the image did. Both sides then start the APC from the
+	// same state, so measured movement is movement the client still needs.
+	//
+	// Safe unconditionally: the segmenter extracts only from ground, and from
+	// ground ghostty treats ST as a no-op, so on a stream with nothing pending
+	// this writes no cell and moves nothing. TestWireFeedPreSTOnlyEndsTheDecode
+	// pins that.
+	f.term.Write(wireST)
+	f.wire = append(f.wire, wireST...)
+
 	generation := f.term.KittyGeneration()
 	col, row := f.term.CursorPos()
 	before := f.term.TrackCursor()
 
 	f.term.Write(apc)
-
-	// ST stands in for the APC, unconditionally and before anything synthesis
-	// adds below.
-	//
-	// Extracting only from ground keeps the two VT PARSERS in step, but ground
-	// has a sub-state the parser rules do not describe: the UTF-8 decoder may be
-	// holding an incomplete sequence. The APC's leading ESC aborts that decode
-	// for the worker. Drop the APC from the wire and the client never sees an
-	// ESC, so it keeps holding — and the next byte decides whether the two grids
-	// converge again or not. A valid continuation byte completes a character for
-	// the client that the worker already resolved as two replacement characters,
-	// and nothing later heals that.
-	//
-	// ST is the cheapest fix that carries a leading ESC: from ground ghostty
-	// treats it as a no-op, so it costs two bytes and no cells, and it aborts the
-	// client's pending decode exactly where the APC aborted the worker's. It goes
-	// first so anything synthesis appends parses from clean ground.
-	//
-	// Unconditional, though the case it saves is narrow. Aborting a pending
-	// decode writes a replacement character, which usually advances the cursor,
-	// which the synthesis below then describes with a CSI — and that CSI's own
-	// ESC aborts the client's decode by accident. The exception is the last
-	// column: there the replacement character fills the final cell and leaves the
-	// cursor where it was with a pending wrap, so there is no movement to
-	// describe, no synthesis, and without this ST no ESC on the wire at all. The
-	// corpus entries named "…at the last column" hold that shape, and they are
-	// the ones that fail against the real wasm client when this line is removed.
-	// The condition that would make this conditional is exactly as subtle as the
-	// bug, so there is no condition.
-	f.wire = append(f.wire, wireST...)
 
 	stamped := f.term.KittyGeneration()
 	// Claimed here rather than at each exit below: every branch from this point

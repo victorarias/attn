@@ -360,35 +360,96 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			chunks: []string{"\x1b\x1b]133;A\x1b\\00 done"},
 		},
 		{
-			// The reason every extracted APC leaves an ST behind, in its
-			// permanent form, on the ONE column where it bites. `\xe1` opens a
-			// three-byte character; the APC's ESC aborts that decode for the
-			// worker, which resolves it as a replacement character, and `\xa5`
-			// then arrives as a stray continuation and becomes a second one.
-			// Send nothing in the APC's place and the client never sees an ESC,
-			// so it holds `\xe1` and joins the continuation into a different
-			// character — permanently, with no later byte able to heal it.
+			// The permanent shape of the decoder leak, on the column where it
+			// bites. `\xe1` opens a three-byte character; the APC's ESC ends that
+			// decode for the worker, which resolves it as a replacement
+			// character, and `\xa5` then arrives as a stray continuation and
+			// becomes a second one. Send nothing in the APC's place and the client
+			// never sees an ESC, so it keeps holding `\xe1` and joins the
+			// continuation into a different character — permanently, with no later
+			// byte able to heal it.
 			//
 			// The cursor sits on the LAST column deliberately. Anywhere else the
-			// aborted character advances the cursor, the feeder observes that
-			// and synthesizes a CHA, and the CHA's own ESC aborts the client's
-			// decode by accident — so the bug is invisible. Here the replacement
-			// character lands in the last cell and leaves the cursor where it
-			// was, pending wrap, so the observed movement is zero and the ST is
-			// the only ESC on the wire.
+			// ended character advances the cursor, the feeder observes that and
+			// synthesizes a CHA, and the CHA's own ESC ends the client's decode by
+			// accident — so the defect is invisible. Here the replacement character
+			// lands in the final cell and leaves the cursor where it was, pending
+			// wrap, so observed movement is zero and the wire ST is the only ESC
+			// the client gets.
 			name: "a character split around a stripped apc at the last column",
 			cols: 20, rows: 8,
 			chunks: []string{strings.Repeat("0", 19) + "\xe1", kittyDirectRGB, "\xa5 done"},
 		},
 		{
-			// The transient half of the same defect: nothing follows the APC,
-			// so the client is left holding an incomplete sequence the worker
-			// has already resolved. An attach would paper over this one — the
-			// dump is the worker's — but the wire should not need rescuing, and
-			// the same ST settles it.
+			// The transient half of the same defect: nothing follows the APC, so
+			// the client is left holding an incomplete sequence the worker has
+			// already resolved. An attach would paper over this one — the dump is
+			// the worker's — but the wire should not need rescuing.
 			name: "an incomplete character left pending by a stripped apc at the last column",
 			cols: 20, rows: 8,
 			chunks: []string{strings.Repeat("0", 19) + "\xe1", kittyDirectRGB},
+		},
+		{
+			// Zeros ladder, 18: two columns short of the wrap: the ended character advances the
+			// cursor, the feeder describes the movement, and the described
+			// column is absolute so applying it after the client's own abort is
+			// idempotent.
+			name: "the zeros ladder at 18, a character split around a stripped apc",
+			cols: 20, rows: 8,
+			chunks: []string{strings.Repeat("0", 18) + "\xe1", kittyDirectRGB, "\xa5 done"},
+		},
+		{
+			// Zeros ladder, 19: the last column: the replacement character fills the final cell and
+			// leaves the cursor put with a pending wrap, so nothing is
+			// synthesized and the wire ST is the only ESC.
+			name: "the zeros ladder at 19, a character split around a stripped apc",
+			cols: 20, rows: 8,
+			chunks: []string{strings.Repeat("0", 19) + "\xe1", kittyDirectRGB, "\xa5 done"},
+		},
+		{
+			// Zeros ladder, 20: the wrap column, where the abort COMMITS the deferred wrap and moves
+			// the cursor to the next row. That movement is the image's only if
+			// the abort happens before the feeder pins the cursor; pinned after,
+			// it is described on the wire and the client — which performs the
+			// same abort itself — applies it a second time and lands a row low.
+			name: "the zeros ladder at 20, a character split around a stripped apc",
+			cols: 20, rows: 8,
+			chunks: []string{strings.Repeat("0", 20) + "\xe1", kittyDirectRGB, "\xa5 done"},
+		},
+		{
+			// Zeros ladder, 21: one past the wrap: the wrap is already committed before the APC
+			// arrives, so the abort is an ordinary in-row advance again.
+			name: "the zeros ladder at 21, a character split around a stripped apc",
+			cols: 20, rows: 8,
+			chunks: []string{strings.Repeat("0", 21) + "\xe1", kittyDirectRGB, "\xa5 done"},
+		},
+		{
+			// The same leak running the other way, and the reason the worker
+			// gets an ST where a marker is withheld from it.
+			//
+			// A marker goes to the WIRE and not to the worker terminal, so its
+			// leading ESC ends the client's part-built character and not the
+			// worker's. Left alone, the worker keeps decoding: it joins
+			// `\xe1\xa5` and the following space into ONE replacement
+			// character, while the client — which saw the ESC — resolves two.
+			// One extra cell on the client, one column of cursor drift,
+			// permanent until the next attach.
+			//
+			// The wasm replay is the authority here rather than a convenience:
+			// the wire carries the marker bytes verbatim, so this entry asserts
+			// that the worker's grid matches what the REAL client's decoder
+			// does with them.
+			name: "a prompt marker splitting a character",
+			cols: 20, rows: 8,
+			chunks: []string{"000\xe1", "\x1b]133;A\x1b\\", "\xa5 done"},
+		},
+		{
+			// The same, at the wrap column, where the ended character also
+			// commits the deferred wrap — so a worker that kept decoding would
+			// differ by a row as well as a cell.
+			name: "a prompt marker splitting a character at the wrap column",
+			cols: 20, rows: 8,
+			chunks: []string{strings.Repeat("0", 20) + "\xe1", "\x1b]133;A\x1b\\", "\xa5 done"},
 		},
 		{
 			// A C1-terminated APC. The worker consumes 0x9c as ST, but the wire
@@ -494,26 +555,40 @@ func runKittyCorpusEntry(t *testing.T, in kittyCorpusInput) kittyCorpusEntry {
 }
 
 // writeAsClient writes wire bytes into a native terminal standing in for the
-// frontend's model, dropping OSC 133 markers on the way in.
+// frontend's model, replacing each OSC 133 marker with an ST on the way in.
 //
-// The drop is what makes the stand-in honest. The worker links libghostty-vt at
-// one ghostty commit and the app renders ghostty-web at an older one (see
-// ghostty-vt-native.pin, which records that converging them is a follow-up), and
-// the two do not agree about OSC 133: the native build breaks the line on a
-// mid-line `OSC 133;A`, the wasm build does not. A native terminal handed the
-// raw wire therefore diverges from the worker on correct code, which is a defect
-// in the model and not in the feed path. The wasm replay in
-// kittyWireRewrite.parity.test.ts is the authority on what the client does; this
-// keeps the Go-side model agreeing with it.
+// The substitution is what makes the stand-in honest, and it is two claims, not
+// one.
 //
-// Only markers the segmenter recognises are dropped. One the feed path replays
-// as plain — a malformed terminator, an introducer that was never in ground —
-// stays in, and this model will act on it exactly as the worker did. That is a
-// known limit of the stand-in, not a claim about the real client; see the pin
-// skew note in the plan.
+// Not the marker's bytes, because of the pin skew. The worker links
+// libghostty-vt at one ghostty commit and the app renders ghostty-web at an
+// older one (see ghostty-vt-native.pin, which records that converging them is a
+// follow-up), and the two do not agree about OSC 133: the native build breaks
+// the line on a mid-line `OSC 133;A`, the wasm build does not. A native terminal
+// handed the raw wire therefore diverges from the worker on correct code, which
+// is a defect in the model and not in the feed path.
+//
+// But an ST rather than nothing, because the marker is not inert to the real
+// client either. Its leading ESC ends a part-built character, and the shipped
+// wasm does perform that abort — measured — even though it ignores the marker's
+// meaning. Dropping the bytes outright modelled a client whose decoder never
+// flinches, and that blindness hid a real divergence: the worker withholds the
+// marker, so without a substitute on its side it kept a decode the client had
+// already resolved. Feeding the ST here is what makes the mirror fuzzer able to
+// see that, so a missing worker-side substitute fails instead of passing.
+//
+// The wasm replay in kittyWireRewrite.parity.test.ts remains the authority on
+// what the client does; this keeps the Go-side model agreeing with it.
+//
+// Only markers the segmenter recognises are substituted. One the feed path
+// replays as plain — a malformed terminator, an introducer that was never in
+// ground — stays in, and this model will act on it exactly as the worker did.
+// That is a known limit of the stand-in, not a claim about the real client; see
+// the pin skew note in the plan.
 func writeAsClient(client *ghosttyvt.Terminal, seg *feedSegmenter, wire []byte) {
 	seg.Feed(wire, func(s feedSegment) {
 		if s.Kind == feedSegOSC133 {
+			client.Write(wireST)
 			return
 		}
 		client.Write(s.Bytes)

@@ -758,6 +758,150 @@
       "cursorRow": 0
     },
     {
+      "name": "the zeros ladder at 18, a character split around a stripped apc",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "MDAwMDAwMDAwMDAwMDAwMDAw4Q==",
+        "G19HYT1ULGY9MjQscz0yLHY9MjtRVUpEUkE9PRtc",
+        "pSBkb25l"
+      ],
+      "wire": [
+        "MDAwMDAwMDAwMDAwMDAwMDAw4Q==",
+        "G1w=",
+        "pSBkb25l"
+      ],
+      "resync": [
+        "",
+        "",
+        ""
+      ],
+      "workerPlainText": "000000000000000000��\n done",
+      "workerViewportText": "000000000000000000��\n done\n\n\n\n\n\n\n",
+      "cursorCol": 5,
+      "cursorRow": 1
+    },
+    {
+      "name": "the zeros ladder at 19, a character split around a stripped apc",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMOE=",
+        "G19HYT1ULGY9MjQscz0yLHY9MjtRVUpEUkE9PRtc",
+        "pSBkb25l"
+      ],
+      "wire": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMOE=",
+        "G1w=",
+        "pSBkb25l"
+      ],
+      "resync": [
+        "",
+        "",
+        ""
+      ],
+      "workerPlainText": "0000000000000000000�\n� done",
+      "workerViewportText": "0000000000000000000�\n� done\n\n\n\n\n\n\n",
+      "cursorCol": 6,
+      "cursorRow": 1
+    },
+    {
+      "name": "the zeros ladder at 20, a character split around a stripped apc",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDDh",
+        "G19HYT1ULGY9MjQscz0yLHY9MjtRVUpEUkE9PRtc",
+        "pSBkb25l"
+      ],
+      "wire": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDDh",
+        "G1w=",
+        "pSBkb25l"
+      ],
+      "resync": [
+        "",
+        "",
+        ""
+      ],
+      "workerPlainText": "00000000000000000000\n�� done",
+      "workerViewportText": "00000000000000000000\n�� done\n\n\n\n\n\n\n",
+      "cursorCol": 7,
+      "cursorRow": 1
+    },
+    {
+      "name": "the zeros ladder at 21, a character split around a stripped apc",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAw4Q==",
+        "G19HYT1ULGY9MjQscz0yLHY9MjtRVUpEUkE9PRtc",
+        "pSBkb25l"
+      ],
+      "wire": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAw4Q==",
+        "G1w=",
+        "pSBkb25l"
+      ],
+      "resync": [
+        "",
+        "",
+        ""
+      ],
+      "workerPlainText": "00000000000000000000\n0�� done",
+      "workerViewportText": "00000000000000000000\n0�� done\n\n\n\n\n\n\n",
+      "cursorCol": 8,
+      "cursorRow": 1
+    },
+    {
+      "name": "a prompt marker splitting a character",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "MDAw4Q==",
+        "G10xMzM7QRtc",
+        "pSBkb25l"
+      ],
+      "wire": [
+        "MDAw4Q==",
+        "G10xMzM7QRtc",
+        "pSBkb25l"
+      ],
+      "resync": [
+        "",
+        "",
+        ""
+      ],
+      "workerPlainText": "000�� done",
+      "workerViewportText": "000�� done\n\n\n\n\n\n\n\n",
+      "cursorCol": 10,
+      "cursorRow": 0
+    },
+    {
+      "name": "a prompt marker splitting a character at the wrap column",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDDh",
+        "G10xMzM7QRtc",
+        "pSBkb25l"
+      ],
+      "wire": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDDh",
+        "G10xMzM7QRtc",
+        "pSBkb25l"
+      ],
+      "resync": [
+        "",
+        "",
+        ""
+      ],
+      "workerPlainText": "00000000000000000000\n�� done",
+      "workerViewportText": "00000000000000000000\n�� done\n\n\n\n\n\n\n",
+      "cursorCol": 7,
+      "cursorRow": 1
+    },
+    {
       "name": "a c1-terminated apc still leaves the seven-bit st",
       "cols": 20,
       "rows": 8,

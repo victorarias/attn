@@ -224,6 +224,22 @@ var mirrorCases = []mirrorCase{
 		chunks: []string{strings.Repeat("0", 19) + "\xe1", "\x1b_Ga=d\x1b\\", "\xa5 done"},
 	},
 	{
+		// The leak in the marker direction. The wire carries the marker and the
+		// worker terminal does not, so the marker's leading ESC ends the
+		// client's part-built character and would leave the worker still
+		// decoding — joining the continuation and the space into one
+		// replacement character where the client resolved two. The worker-side
+		// ST substitute is what keeps them equal.
+		//
+		// On the wrap column, so a missing substitute costs a row as well as a
+		// cell. The client model in writeAsClient substitutes an ST for the
+		// marker rather than dropping it, which is what lets this case — and the
+		// mirror fuzzer — see the difference at all.
+		name: "a prompt marker splitting a character on the wrap column",
+		cols: 20, rows: 8,
+		chunks: []string{strings.Repeat("0", 20) + "\xe1", "\x1b]133;A\x1b\\", "\xa5 done"},
+	},
+	{
 		name: "osc 133 markers interleaved with images",
 		cols: 40, rows: 10,
 		chunks: []string{
@@ -420,4 +436,103 @@ func TestWireFeedKeepsKittyResponsesFlowingToTheProgram(t *testing.T) {
 	if got, want := string(m.lastWire), string(wireST); got != want {
 		t.Errorf("wire = %q for the query APC, want just the ST %q: the query is answered to the program, never to the client", got, want)
 	}
+}
+
+// The pre-ST writeAPC gives the WORKER is licensed by one property: from ground
+// it does nothing to the grid except end a part-built character. Measured rather
+// than asserted from the spec, because everything downstream — the cursor pin,
+// the tracked ref, the early exit — is measured against the state it leaves.
+//
+// Checked at every column, because the one place it is NOT inert is the one that
+// matters: on the last column the replacement character it resolves fills the
+// final cell, and on the wrap column it commits the deferred wrap.
+func TestWireFeedPreSTOnlyEndsTheDecode(t *testing.T) {
+	for _, pending := range []string{"", "\xe1", "\xc2", "\xf0\x9f"} {
+		for n := 17; n <= 21; n++ {
+			prefix := strings.Repeat("0", n) + pending
+
+			plain := newKittyTerminal(t, 20, 6, ghosttyvt.Options{})
+			plain.Write([]byte(prefix))
+
+			withST := newKittyTerminal(t, 20, 6, ghosttyvt.Options{})
+			withST.Write([]byte(prefix))
+			withST.Write(wireST)
+
+			px, py := plain.CursorPos()
+			sx, sy := withST.CursorPos()
+			sameGrid := plain.PlainText() == withST.PlainText() && px == sx && py == sy
+
+			if pending == "" {
+				// Nothing held: the ST must be invisible.
+				if !sameGrid {
+					t.Errorf("n=%d, nothing pending: the ST moved the grid\nplain:  %q (%d,%d)\nwithST: %q (%d,%d)",
+						n, plain.PlainText(), px, py, withST.PlainText(), sx, sy)
+				}
+				continue
+			}
+			// Something held: the ST must resolve it into exactly one
+			// replacement character and nothing else.
+			if sameGrid {
+				t.Errorf("n=%d, %q pending: the ST changed nothing, so the decode was never ended", n, pending)
+				continue
+			}
+			if got, want := len([]rune(strings.ReplaceAll(withST.PlainText(), "\n", ""))),
+				len([]rune(strings.ReplaceAll(plain.PlainText(), "\n", "")))+1; got != want {
+				t.Errorf("n=%d, %q pending: grid gained %d cells, want exactly 1 replacement character\nplain:  %q\nwithST: %q",
+					n, pending, got-want+1, plain.PlainText(), withST.PlainText())
+			}
+		}
+	}
+}
+
+// The ordering the fix rests on, at the shape that exposes it. On the wrap
+// column the pre-ST is what moves the cursor — it commits the deferred wrap —
+// and the APC that follows does nothing at all in the shipping configuration.
+// Pinned AFTER the ST, the feeder therefore measures zero movement and takes the
+// early exit, leaving the wire carrying the ST alone.
+//
+// Pinned before it, that same movement would be read as the image's, described
+// on the wire, and applied a second time by a client that had already performed
+// the abort itself — one row too far. This test is the guard on the ordering,
+// not on the bytes.
+func TestWireFeedPinsTheCursorAfterTheDecodeEnds(t *testing.T) {
+	m := newMirror(t, 20, 8, ghosttyvt.Options{})
+
+	m.write(strings.Repeat("0", 20) + "\xe1")
+	m.write(kittyDirectRGB)
+
+	if got, want := string(m.lastWire), string(wireST); got != want {
+		t.Errorf("wire = %q, want the ST alone (%q): the APC moved nothing, so nothing should be described", got, want)
+	}
+	if m.lastResync != "" {
+		t.Errorf("resync = %q, want none: the early exit handles this", m.lastResync)
+	}
+	if x, y := m.worker.CursorPos(); x != 1 || y != 1 {
+		t.Errorf("worker cursor = (%d,%d), want (1,1): the abort commits the pending wrap", x, y)
+	}
+	m.agree(t, "after an APC on the wrap column")
+}
+
+// The worker-side substitute for a withheld marker must be written BEFORE the
+// block table pins its position, or the block records the cell the cursor sat on
+// before the decode ended rather than the one the marker refers to.
+//
+// Asserted on the pin, not on the grid: the grid agrees either way here, so a
+// text-only check would pass with the write and the pin in the wrong order.
+func TestWireFeedPinsTheBlockAfterTheDecodeEnds(t *testing.T) {
+	m := newMirror(t, 20, 8, ghosttyvt.Options{})
+
+	// A character left part-built on the wrap column, so ending it moves the
+	// cursor to the next row — which is the row the prompt renders on.
+	m.write(strings.Repeat("0", 20) + "\xe1")
+	m.write("\x1b]133;A\x1b\\")
+
+	blocks := m.feed.snapshotBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("snapshotBlocks() = %+v, want the one open prompt", blocks)
+	}
+	if got := blocks[0].PromptRow; got != 1 {
+		t.Errorf("prompt row = %d, want 1: the marker refers to the row the cursor reached after the decode ended, not the row it left", got)
+	}
+	m.agree(t, "after a marker on the wrap column")
 }

@@ -28,8 +28,12 @@ notes: >
   is left alone instead of being cut out of the middle of it. The shell's OSC
   133 prompt markers are now framed by that same tracker rather than by a second
   byte-pattern scan, so a marker pattern appearing inside another sequence, or a
-  real marker cut short by a control byte, is no longer mistaken for one. Each
-  removed escape leaves a two-byte no-op behind in its place, because the escape
-  it replaces was also ending any incomplete UTF-8 character the client happened
-  to be in the middle of; without it a character split across a removed escape
-  could be decoded differently by the two terminals and stay wrong.
+  real marker cut short by a control byte, is no longer mistaken for one.
+  Wherever the two streams differ, both sides now get a two-byte do-nothing
+  escape in place of what the other one saw: an escape also ends any
+  half-received character, so a side that loses the bytes must be given an escape
+  or the two terminals resolve that character differently and stay wrong. The
+  worker's copy also takes its substitute before the feed measures anything,
+  because ending a half-received character writes a cell and can move the cursor
+  to the next row — measured after, that movement was being described to the
+  client, which had already made the same move itself.

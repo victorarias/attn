@@ -1,0 +1,19 @@
+kind: fixed
+area: terminal
+change: >
+  A session's screen no longer picks up a stray extra character when a program is
+  cut off partway through writing a non-ASCII character and the shell draws its
+  next prompt immediately after.
+symptom: >
+  If a program died mid-character — an accented letter, an emoji, a box-drawing
+  line — and the prompt came back right away, one wrong character appeared and
+  everything after it on that line sat one column across. It stayed that way for
+  the rest of the session unless you detached and reattached.
+notes: >
+  attn keeps its own copy of every session's screen, and shell prompt markers are
+  deliberately kept out of that copy while still being sent to the app. A marker
+  also ends any partly-read character, so keeping it out of one copy and not the
+  other let the two disagree about a character split across it. Both copies now
+  see an equivalent do-nothing escape wherever the other sees a sequence, so they
+  stay in step. Not specific to images or to any one shell; the same rule fixes
+  two unreleased divergences on the kitty feed path in this PR.
