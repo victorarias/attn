@@ -71,6 +71,11 @@ const (
 	// was cut off — and a diagnosis that says so is worth more than one that
 	// reports a question nobody asked.
 	ClaimStopFailed Claim = "stop_failed"
+	// ClaimTurnAborted: the user halted the turn. Distinct from every settle above
+	// because nothing announces it — no agent fires a hook when its turn is
+	// interrupted — so it is the one turn ending that must be read out of the
+	// agent's transcript, and the one that leaves no answer to judge.
+	ClaimTurnAborted Claim = "turn_aborted"
 )
 
 // Observation is one recorded piece of evidence.
@@ -276,6 +281,7 @@ const (
 	ReasonBackgroundParked  Reason = "background_parked"
 	ReasonCompacting        Reason = "compacting"
 	ReasonStopFailed        Reason = "stop_failed"
+	ReasonTurnAborted       Reason = "turn_aborted"
 	ReasonClassifierVerdict Reason = "classifier_verdict"
 	ReasonAtPrompt          Reason = "at_prompt"
 	ReasonStuck             Reason = "stuck"
@@ -325,6 +331,25 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	// in the daemon's recorder.
 	if r, ok := harnessEdge(e); ok {
 		return r
+	}
+
+	// The user halted the turn. No agent reports this — the closing bracket is not
+	// late, it is never coming — so without this clause the turn stays open until
+	// the stale window retires it, and a halted agent reads as working for the
+	// whole minute that takes.
+	//
+	// It settles without consulting the classifier: an aborted turn left a
+	// truncated fragment and no answer, and a verdict drawn from that reports a
+	// question the agent never finished asking. It sits above compaction and
+	// background work because an abort ends everything the turn had running, and
+	// below the busy heartbeat because the agent visibly running again is the one
+	// thing that contradicts it.
+	if turnAborted(e) {
+		return Resolution{
+			State:  protocol.SessionStateIdle,
+			Reason: ReasonTurnAborted,
+			Detail: e.LastHarnessEvent.Detail,
+		}
 	}
 
 	// Compaction is work no other clause can see: it opens no turn and no tool
@@ -545,6 +570,21 @@ func harnessEdge(e Evidence) (Resolution, bool) {
 	default:
 		return Resolution{}, false
 	}
+}
+
+// turnAborted reports whether the harness recorded the user halting the turn,
+// with nothing since to spend that.
+//
+// It shares LastHarnessEvent with the edges above rather than taking a field of
+// its own: an abort is a one-shot harness announcement like the others, it
+// retires on the same terms — the agent going busy past it, or the next turn
+// opening — and it cannot coexist with them, because a turn the user halted is
+// not also blocked on an approval. harnessEdge ignores the claim, so the two
+// readers of the slot cannot both fire.
+func turnAborted(e Evidence) bool {
+	return e.LastHarnessEvent != nil &&
+		e.LastHarnessEvent.Claim == ClaimTurnAborted &&
+		!supersededByBusy(e.LastHarnessEvent, e)
 }
 
 // parkedVerdict reports whether the stop-time judge read the current yield as

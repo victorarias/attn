@@ -44,16 +44,20 @@ func (c *Codex) ResolveExecutable(configured string) string {
 }
 
 func (c *Codex) Capabilities() Capabilities {
-	// Transcripts remain needed for Stop-hook classification; live state is hook-owned.
+	// Transcripts remain needed for Stop-hook classification; live state is
+	// hook-owned. The watcher is on for the one fact the hooks never report — a
+	// turn the user halted, which codex records as `turn_aborted` — and its
+	// behavior deliberately does nothing else.
 	return Capabilities{
-		HasHooks:            true,
-		HasTranscript:       true,
-		HasClassifier:       true,
-		HarnessSignals:      HarnessSignalsCodex,
-		HasResume:           true,
-		HasYolo:             true,
-		HasInitialPrompt:    true,
-		HasWorkspaceContext: true,
+		HasHooks:             true,
+		HasTranscript:        true,
+		HasTranscriptWatcher: true,
+		HasClassifier:        true,
+		HarnessSignals:       HarnessSignalsCodex,
+		HasResume:            true,
+		HasYolo:              true,
+		HasInitialPrompt:     true,
+		HasWorkspaceContext:  true,
 		// HasSelfMonitor: false — Codex has no live ticket Monitor. It still uses
 		// the shared daemon nudge for unread ticket activity.
 		HasModelPin:  true,
@@ -474,6 +478,10 @@ func (c *Codex) ResumeAvailable(resumeID string) bool {
 
 func (c *Codex) BootstrapBytes() int64 {
 	return 256 * 1024
+}
+
+func (c *Codex) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
+	return &codexTranscriptWatcherBehavior{}
 }
 
 func (c *Codex) RecoveredRunningState(ptyState string) protocol.SessionState {

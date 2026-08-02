@@ -360,3 +360,212 @@ func TestExtractLastAssistantMessageAfterLastUserSince_Claude_FreshAssistantRetu
 		t.Fatalf("got %q, want %q", result, expected)
 	}
 }
+
+// The abort lines below are verbatim captures: claude 2.1.220, codex 0.146.0 and
+// copilot 1.0.77 each driven through a real PTY and interrupted with ESC
+// mid-turn. They are the only record any of them produces of the user halting a
+// turn — no hook fires — so the exact shape is the contract.
+
+type turnAbortCase struct {
+	name         string
+	line         string
+	wantReason   string
+	wantUserHalt bool
+	wantAt       string
+	wantOK       bool
+}
+
+func runTurnAbortCases(t *testing.T, parse func([]byte) (TurnAbort, bool), cases []turnAbortCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			abort, ok := parse([]byte(tc.line))
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (abort %+v)", ok, tc.wantOK, abort)
+			}
+			if !ok {
+				return
+			}
+			if abort.Reason != tc.wantReason {
+				t.Fatalf("reason = %q, want %q", abort.Reason, tc.wantReason)
+			}
+			if abort.UserHalt != tc.wantUserHalt {
+				t.Fatalf("user halt = %v, want %v", abort.UserHalt, tc.wantUserHalt)
+			}
+			got := ""
+			if !abort.At.IsZero() {
+				got = abort.At.UTC().Format(time.RFC3339Nano)
+			}
+			if got != tc.wantAt {
+				t.Fatalf("at = %q, want %q", got, tc.wantAt)
+			}
+		})
+	}
+}
+
+func TestClaudeTurnAborted(t *testing.T) {
+	runTurnAbortCases(t, ClaudeTurnAborted, []turnAbortCase{
+		{
+			name:         "captured interrupt entry",
+			line:         `{"parentUuid":"60baa6e9-1760-40c8-9f12-134f9051980d","type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]},"uuid":"2f177d9e-15fa-4617-bb8b-fb3d8150027e","timestamp":"2026-08-01T22:08:15.284Z","interruptedMessageId":"msg_011Cdcnp6M5nmsdZuTzGRmaF"}`,
+			wantReason:   "[Request interrupted by user]",
+			wantUserHalt: true,
+			wantAt:       "2026-08-01T22:08:15.284Z",
+			wantOK:       true,
+		},
+		{
+			// Captured: halting at a tool-use prompt writes the marker and no
+			// interruptedMessageId at all, so the marker has to be honored on its own.
+			name:         "captured tool-use interrupt with no dedicated field",
+			line:         `{"parentUuid":"9f5d4154-154b-40c5-9f6a-a4fe7de054f2","type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]},"uuid":"b2cf7717-d87d-4613-bf08-f73edb9e0e07","timestamp":"2026-08-01T12:30:36.311Z","userType":"external","entrypoint":"cli"}`,
+			wantReason:   "[Request interrupted by user for tool use]",
+			wantUserHalt: true,
+			wantAt:       "2026-08-01T12:30:36.311Z",
+			wantOK:       true,
+		},
+		{
+			// The field alone is enough, so a claude release that reworded the
+			// marker still reports the halt.
+			name:         "the dedicated field carries an unrecognized marker",
+			line:         `{"type":"user","message":{"role":"user","content":"[Request stopped]"},"interruptedMessageId":"msg_01"}`,
+			wantReason:   "[Request interrupted by user]",
+			wantUserHalt: true,
+			wantOK:       true,
+		},
+		{
+			// Captured shape of a prompt the user typed. Claude writes submitted
+			// prompts as a plain string and stamps them with promptSource/origin;
+			// its own interrupt entries are a lone text block with neither. Without
+			// that distinction a user who pastes the marker settles their own
+			// working session.
+			name: "the marker pasted as a prompt is not an abort",
+			line: `{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"},"promptSource":"typed","origin":{"kind":"human"},"permissionMode":"auto","timestamp":"2026-08-01T21:48:07.459Z"}`,
+		},
+		{
+			// The same paste as a content block, which is what an attachment or an
+			// image alongside the text produces.
+			name: "the marker submitted as a block is not an abort",
+			line: `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]},"promptSource":"paste","origin":{"kind":"human"}}`,
+		},
+		{
+			// Claude has written user entries without promptSource/origin for as long
+			// as it has written transcripts, so the metadata cannot be the only guard.
+			// The content shape is the other one: claude's own interrupt is a block,
+			// and anything arriving as a bare string was submitted by someone.
+			name: "the marker as a bare string is not an abort",
+			line: `{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"},"uuid":"6d41deb5","timestamp":"2026-08-01T22:06:44.538Z"}`,
+		},
+		{
+			// The whole reason the marker is matched exactly rather than by prefix.
+			name: "a user quoting the marker in a prompt is not an abort",
+			line: `{"type":"user","message":{"role":"user","content":"why does [Request interrupted by user] show up in my logs?"}}`,
+		},
+		{
+			// Captured: tool output that happens to contain the marker arrives as a
+			// user entry too, and a grep result quoting attn's own source must not
+			// halt the session reading it.
+			name: "a tool result quoting the marker is not an abort",
+			line: `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01","type":"tool_result","content":"parser.go:12:[Request interrupted by user]"}]}}`,
+		},
+		{
+			name: "an assistant message is not an abort",
+			line: `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
+		},
+		{
+			name: "a codex line is not a claude abort",
+			line: `{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}`,
+		},
+		{
+			name: "malformed json is not an abort",
+			line: `{"type":"user",`,
+		},
+	})
+}
+
+func TestCodexTurnAborted(t *testing.T) {
+	runTurnAbortCases(t, CodexTurnAborted, []turnAbortCase{
+		{
+			name:         "captured turn_aborted event",
+			line:         `{"timestamp":"2026-08-01T21:58:33.937Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"019fbf55-ef48-70f1-991c-989a330a104a","reason":"interrupted","started_at":1785621507,"completed_at":1785621513,"duration_ms":6019}}`,
+			wantReason:   "interrupted",
+			wantUserHalt: true,
+			wantAt:       "2026-08-01T21:58:33.937Z",
+			wantOK:       true,
+		},
+		{
+			// The reason codex gives when one turn supersedes another. The turn did
+			// end, but the session is working again immediately, so reporting it as
+			// a halt settles a session that is running.
+			name:       "a replaced turn is not a user halt",
+			line:       `{"type":"event_msg","payload":{"type":"turn_aborted","reason":"replaced"}}`,
+			wantReason: "replaced",
+			wantOK:     true,
+		},
+		{
+			name:       "leaving review mode is not a user halt",
+			line:       `{"type":"event_msg","payload":{"type":"turn_aborted","reason":"review_ended"}}`,
+			wantReason: "review_ended",
+			wantOK:     true,
+		},
+		{
+			name:       "running out of budget is not a user halt",
+			line:       `{"type":"event_msg","payload":{"type":"turn_aborted","reason":"budget_limited"}}`,
+			wantReason: "budget_limited",
+			wantOK:     true,
+		},
+		{
+			name:       "a reasonless abort is not a user halt",
+			line:       `{"type":"event_msg","payload":{"type":"turn_aborted"}}`,
+			wantReason: "aborted",
+			wantOK:     true,
+		},
+		{
+			name: "a completed turn is not an abort",
+			line: `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"019fbf55"}}`,
+		},
+		{
+			name: "a response item is not an abort",
+			line: `{"type":"response_item","payload":{"type":"message","role":"assistant"}}`,
+		},
+		{
+			name: "a claude line is not a codex abort",
+			line: `{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"},"interruptedMessageId":"msg_01"}`,
+		},
+	})
+}
+
+func TestCopilotTurnAborted(t *testing.T) {
+	runTurnAbortCases(t, CopilotTurnAborted, []turnAbortCase{
+		{
+			name:         "captured abort event",
+			line:         `{"type":"abort","timestamp":"2026-08-02T08:52:00.344Z","data":{"reason":"user_initiated"}}`,
+			wantReason:   "user_initiated",
+			wantUserHalt: true,
+			wantAt:       "2026-08-02T08:52:00.344Z",
+			wantOK:       true,
+		},
+		{
+			// Reported even though it is not a halt: copilot writes no
+			// assistant.turn_end after an abort, so the watcher's turn bracket has to
+			// be closed by this line whatever caused it.
+			name:       "an abort copilot caused is still reported",
+			line:       `{"type":"abort","data":{"reason":"tool_failure"}}`,
+			wantReason: "tool_failure",
+			wantOK:     true,
+		},
+		{
+			name:       "a reasonless abort is not a user halt",
+			line:       `{"type":"abort","data":{}}`,
+			wantReason: "aborted",
+			wantOK:     true,
+		},
+		{
+			name: "a turn end is not an abort",
+			line: `{"type":"assistant.turn_end","data":{"turnId":"0"}}`,
+		},
+		{
+			name: "a claude line is not a copilot abort",
+			line: `{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"},"interruptedMessageId":"msg_01"}`,
+		},
+	})
+}

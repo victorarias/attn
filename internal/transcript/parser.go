@@ -95,14 +95,7 @@ func extractLineTimestamp(line []byte) time.Time {
 	if err := json.Unmarshal(line, &entry); err != nil {
 		return time.Time{}
 	}
-	if strings.TrimSpace(entry.Timestamp) == "" {
-		return time.Time{}
-	}
-	ts, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
-	if err != nil {
-		return time.Time{}
-	}
-	return ts
+	return parseTranscriptTime(entry.Timestamp)
 }
 
 func extractLineUUID(line []byte) string {
@@ -331,6 +324,201 @@ func ExtractCopilotToolLifecycle(line []byte) (CopilotToolLifecycle, bool) {
 	default:
 		return CopilotToolLifecycle{}, false
 	}
+}
+
+// Turn aborts.
+//
+// No agent reports a turn the user halted. Measured on claude 2.1.220 with all
+// 31 of its hook events wired to a logger, on codex 0.146.0 with attn's own
+// trusted-hash hook overrides, and on copilot 1.0.77: ESC mid-turn produces no
+// Stop, no StopFailure, no Notification — nothing, for as long as you care to
+// wait. All three write the abort to their transcript in the same second, which
+// is the only place it can be read from.
+//
+// Nor can the title heartbeat stand in for the transcript. Measured on claude
+// 2.1.220: halting a turn paints `✳ <task description>` 60ms later and then
+// nothing for as long as you watch; a 60-second foreground `sleep` paints
+// `✳ <task description>` partway through and then nothing for the remaining 64
+// seconds. A halted turn and a blocking tool call are the same frames in the same
+// order, so no silence threshold separates them — which is why the stale window
+// is sized to the longest tool call rather than to the halt it cannot see.
+const (
+	// The two markers claude writes. Matched exactly rather than by prefix: a
+	// user is free to type the text.
+	claudeInterruptMarker           = "[Request interrupted by user]"
+	claudeInterruptMarkerForToolUse = "[Request interrupted by user for tool use]"
+	// The reason copilot gives when the user halts, as against the other ways it
+	// abandons a turn.
+	copilotUserAbortReason = "user_initiated"
+	// The one codex reason that is a user halt. The enum in the 0.146.0 binary
+	// also carries `replaced`, `review_ended`, and `budget_limited`, none of which
+	// are: `replaced` means another turn took over and the session is working
+	// again a moment later.
+	codexUserAbortReason = "interrupted"
+)
+
+// TurnAbort describes a transcript line that ended a turn before it finished.
+type TurnAbort struct {
+	// Reason is what the agent called it, for the diagnosis.
+	Reason string
+
+	// UserHalt: the user did this. Only a user halt settles a session. The other
+	// ways a turn can be abandoned are the harness's own business, and some of
+	// them are followed immediately by another turn.
+	UserHalt bool
+
+	// At is the line's own timestamp, zero when the line carries none. It is what
+	// separates a halt that just happened from one being re-read out of history —
+	// which the watcher does routinely, because it rewinds into the file at
+	// discovery and starts over at zero when a transcript is rewritten.
+	At time.Time
+}
+
+// ClaudeTurnAborted reports whether a Claude transcript line records the user
+// halting the turn.
+//
+// Two shapes, because claude writes two. `interruptedMessageId` is a dedicated
+// field naming the API message ESC cancelled, and nothing else produces it — so
+// it is believed on its own, and a release that reworded the marker would still
+// be caught. Halting during a tool-use prompt writes the marker with no such
+// field, so the marker is honored too, but only in the exact shape claude emits
+// it: a lone text block, in an entry carrying none of the fields that mark a
+// prompt the user submitted. A user who types or pastes the marker gets string
+// content and a promptSource, and must not settle their own session.
+func ClaudeTurnAborted(line []byte) (TurnAbort, bool) {
+	var entry struct {
+		Type                 string          `json:"type"`
+		InterruptedMessageID string          `json:"interruptedMessageId"`
+		Timestamp            string          `json:"timestamp"`
+		PromptSource         string          `json:"promptSource"`
+		PermissionMode       string          `json:"permissionMode"`
+		Origin               json.RawMessage `json:"origin"`
+		Message              struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(line, &entry); err != nil || entry.Type != "user" {
+		return TurnAbort{}, false
+	}
+
+	abort := TurnAbort{UserHalt: true, At: parseTranscriptTime(entry.Timestamp)}
+
+	if strings.TrimSpace(entry.InterruptedMessageID) != "" {
+		abort.Reason = claudeInterruptMarker
+		if marker, ok := claudeInterruptMarkerBlock(entry.Message.Content); ok {
+			abort.Reason = marker
+		}
+		return abort, true
+	}
+
+	submitted := strings.TrimSpace(entry.PromptSource) != "" ||
+		strings.TrimSpace(entry.PermissionMode) != "" ||
+		len(entry.Origin) > 0
+	if submitted {
+		return TurnAbort{}, false
+	}
+	marker, ok := claudeInterruptMarkerBlock(entry.Message.Content)
+	if !ok {
+		return TurnAbort{}, false
+	}
+	abort.Reason = marker
+	return abort, true
+}
+
+// claudeInterruptMarkerBlock matches the content shape claude writes for an
+// interrupt: an array holding exactly one text block that is exactly a marker.
+// The array is required — a marker the user typed arrives as a plain string.
+func claudeInterruptMarkerBlock(raw json.RawMessage) (string, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return "", false
+	}
+	var blocks []contentBlock
+	if err := json.Unmarshal(trimmed, &blocks); err != nil || len(blocks) != 1 {
+		return "", false
+	}
+	if blocks[0].Type != "text" {
+		return "", false
+	}
+	switch text := strings.TrimSpace(blocks[0].Text); text {
+	case claudeInterruptMarker, claudeInterruptMarkerForToolUse:
+		return text, true
+	default:
+		return "", false
+	}
+}
+
+// CodexTurnAborted reports whether a Codex transcript line is a turn_aborted
+// event.
+//
+// Only `interrupted` is reported as a halt. The event itself means the turn ended
+// early, but codex also emits it when one turn replaces another — where the
+// session is working again immediately, and settling it would be wrong.
+func CodexTurnAborted(line []byte) (TurnAbort, bool) {
+	var envelope struct {
+		Type      string          `json:"type"`
+		Timestamp string          `json:"timestamp"`
+		Payload   json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(line, &envelope); err != nil || envelope.Type != "event_msg" {
+		return TurnAbort{}, false
+	}
+	var payload struct {
+		Type   string `json:"type"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil || payload.Type != "turn_aborted" {
+		return TurnAbort{}, false
+	}
+	reason := strings.TrimSpace(payload.Reason)
+	if reason == "" {
+		reason = "aborted"
+	}
+	return TurnAbort{
+		Reason:   reason,
+		UserHalt: reason == codexUserAbortReason,
+		At:       parseTranscriptTime(envelope.Timestamp),
+	}, true
+}
+
+// CopilotTurnAborted reports whether a Copilot transcript line is an abort.
+//
+// Copilot writes a bare top-level `abort` event and — unlike its normal path —
+// no `assistant.turn_end`, so every abort has to be seen whether or not the user
+// caused it: the watcher's own turn bracket would otherwise stay open for the
+// rest of the session, pinning it working. Only `user_initiated` is a halt.
+func CopilotTurnAborted(line []byte) (TurnAbort, bool) {
+	var entry struct {
+		Type      string `json:"type"`
+		Timestamp string `json:"timestamp"`
+		Data      struct {
+			Reason string `json:"reason"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(line, &entry); err != nil || entry.Type != "abort" {
+		return TurnAbort{}, false
+	}
+	reason := strings.TrimSpace(entry.Data.Reason)
+	if reason == "" {
+		reason = "aborted"
+	}
+	return TurnAbort{
+		Reason:   reason,
+		UserHalt: reason == copilotUserAbortReason,
+		At:       parseTranscriptTime(entry.Timestamp),
+	}, true
+}
+
+func parseTranscriptTime(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
 }
 
 // extractTextContent extracts text from the content field which can be:
