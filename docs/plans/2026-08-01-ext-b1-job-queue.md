@@ -291,3 +291,24 @@ tasks panel, the notification feed, and the bus facts A2 routed. Live
 verification runs on a throwaway profile with the panel open — enqueue, watch
 a kind run, force a failure to `dead`, retry from the notification, restart the
 daemon mid-run and confirm recovery.
+
+Done on 2026-08-02 against a throwaway profile with a full app install:
+
+- Both cron entries arm at first boot and re-arm every minute; `attempts` stays
+  0 across fires and `scheduled_at` advances by the interval.
+- Stopping and restarting the daemon left both entries' `scheduled_at`
+  untouched — a restart does not push the next fire out.
+- Three rows seeded into the retired `tasks` table were drained at boot: the
+  two owed ones became jobs with their ids intact and their meta translated to
+  typed payloads (`daily_pass: "1"` → `true`), the `done` one was dropped, and
+  the table was left empty.
+- The panel listed both imported jobs with state, attempts, next-attempt
+  countdown, and error text. Neither cron entry appeared in it.
+- A job driven to the attempt cap reached `dead` and produced exactly one
+  notification, carrying the job id as its source so the feed's Retry
+  deep-links to it. The feed showed it.
+- Retry from the panel revived the dead job, and the row moved
+  `dead → running → failed` in the UI without a manual refresh — the change
+  hook, the bus fact, and the snapshot re-push all still connect.
+- A row left in `running` (a killed daemon) was returned to `queued` at the
+  next boot and re-dispatched immediately rather than staying stuck.
