@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,9 +11,9 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
-	"github.com/victorarias/attn/internal/tasks"
 	"github.com/victorarias/attn/internal/transcript"
 )
 
@@ -23,12 +24,12 @@ import (
 // armReconcileObserver) before triggering.
 func installReconcileRunner(t *testing.T, d *Daemon) {
 	t.Helper()
-	runner := tasks.New(tasks.Options{
-		Root:         filepath.Join(t.TempDir(), "tasks"),
+	runner := jobs.New(jobs.Options{
+		Store:        newTestJobStore(t, d),
 		Log:          func(string, ...interface{}) {},
 		PollInterval: 2 * time.Millisecond,
 	})
-	if err := runner.RegisterWith(reconcileKind, d.reconcileTaskExecutor, tasks.ExecutorConfig{
+	if err := runner.RegisterWith(reconcileKind, d.reconcileJobHandler, jobs.HandlerConfig{
 		Timeout:       ticketReconcileTimeout(),
 		MaxConcurrent: ticketReconcileConcurrency,
 	}); err != nil {
@@ -38,17 +39,21 @@ func installReconcileRunner(t *testing.T, d *Daemon) {
 		t.Fatalf("start runner: %v", err)
 	}
 	t.Cleanup(runner.Stop)
-	d.compactRunner = runner
+	d.jobQueue = runner
 }
 
-// reconcileTask wraps captured inputs into the durable record the executor reads,
-// so a test can drive reconcileTaskExecutor directly without a running runner.
-func reconcileTask(in ticketReconcileInputs) *tasks.Task {
-	return &tasks.Task{
-		ID:      tasks.TaskID(reconcileKind, in.TicketID),
-		Kind:    reconcileKind,
-		Subject: in.TicketID,
-		Meta:    reconcileInputsToMeta(in),
+// reconcileTask wraps captured inputs into the durable record the handler reads,
+// so a test can drive reconcileJobHandler directly without a running queue.
+func reconcileTask(in ticketReconcileInputs) *jobs.Job {
+	payload, err := json.Marshal(in)
+	if err != nil {
+		panic("marshal reconcile inputs: " + err.Error())
+	}
+	return &jobs.Job{
+		ID:        "job-" + in.TicketID,
+		Kind:      reconcileKind,
+		UniqueKey: in.TicketID,
+		Payload:   payload,
 	}
 }
 
@@ -206,7 +211,7 @@ func TestRunTicketReconciliationPostsVerdict(t *testing.T) {
 		}, nil
 	}
 
-	if err := d.reconcileTaskExecutor(context.Background(), reconcileTask(ticketReconcileInputs{
+	if _, err := d.reconcileJobHandler(context.Background(), reconcileTask(ticketReconcileInputs{
 		TicketID:       ticketID,
 		Title:          "Migrate the store to X",
 		Brief:          "Move the store onto the new backend.",
@@ -216,7 +221,7 @@ func TestRunTicketReconciliationPostsVerdict(t *testing.T) {
 		TranscriptPath: transcript,
 		CloseContext:   "the session was closed (user close or teardown) while the ticket was working",
 	})); err != nil {
-		t.Fatalf("reconcileTaskExecutor: %v", err)
+		t.Fatalf("reconcileJobHandler: %v", err)
 	}
 
 	comments := reconcileComments(t, d, ticketID)
@@ -262,14 +267,14 @@ func TestRunTicketReconciliationDropsVerdictWhenStatusMoved(t *testing.T) {
 		}, nil
 	}
 
-	if err := d.reconcileTaskExecutor(context.Background(), reconcileTask(ticketReconcileInputs{
+	if _, err := d.reconcileJobHandler(context.Background(), reconcileTask(ticketReconcileInputs{
 		TicketID:       ticketID,
 		StatusAtClaim:  store.TicketStatusWorking,
 		SessionID:      sessionID,
 		Agent:          "codex",
 		TranscriptPath: transcript,
 	})); err != nil {
-		t.Fatalf("reconcileTaskExecutor: %v", err)
+		t.Fatalf("reconcileJobHandler: %v", err)
 	}
 
 	if comments := reconcileComments(t, d, ticketID); len(comments) != 0 {
@@ -298,14 +303,14 @@ func TestRunTicketReconciliationExecErrorPostsFailureNote(t *testing.T) {
 		}, errors.New("headless agent MCP tool server failed: exit status 1")
 	}
 
-	if err := d.reconcileTaskExecutor(context.Background(), reconcileTask(ticketReconcileInputs{
+	if _, err := d.reconcileJobHandler(context.Background(), reconcileTask(ticketReconcileInputs{
 		TicketID:       ticketID,
 		StatusAtClaim:  store.TicketStatusWorking,
 		SessionID:      sessionID,
 		Agent:          "claude",
 		TranscriptPath: transcript,
 	})); err != nil {
-		t.Fatalf("reconcileTaskExecutor: %v", err)
+		t.Fatalf("reconcileJobHandler: %v", err)
 	}
 
 	comments := reconcileComments(t, d, ticketID)
@@ -443,18 +448,19 @@ func TestSweepSkipsTicketWithExistingTask(t *testing.T) {
 	}, "chief", now.Add(-time.Hour)); err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
-	// A terminal reconcile task already on record stands in for "already handled".
-	runner := d.compactRunnerRef()
-	if _, err := runner.Enqueue(reconcileKind, "already", tasks.EnqueueOptions{
-		Meta: reconcileInputsToMeta(ticketReconcileInputs{TicketID: "already"}),
+	// A reconcile job already on record stands in for "already handled".
+	runner := d.jobQueueRef()
+	if _, err := runner.Enqueue(reconcileKind, jobs.EnqueueOptions{
+		UniqueKey: "already",
+		Payload:   ticketReconcileInputs{TicketID: "already"},
 	}); err != nil {
-		t.Fatalf("seed reconcile task: %v", err)
+		t.Fatalf("seed reconcile job: %v", err)
 	}
 
-	// Even well past grace, the sweep must not re-claim: a task exists.
+	// Even well past grace, the sweep must not re-claim: a job exists.
 	d.ticketReconcileSweepPass(now.Add(ticketReconcileGrace() + time.Hour))
 	if got := reconciledAt(t, d, "already"); got != nil {
-		t.Fatalf("sweep re-claimed a ticket with an existing task (%v)", got)
+		t.Fatalf("sweep re-claimed a ticket with an existing job (%v)", got)
 	}
 }
 

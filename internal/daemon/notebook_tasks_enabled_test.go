@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
-	"github.com/victorarias/attn/internal/tasks"
+	"github.com/victorarias/attn/internal/jobs"
 )
 
 // TestNotebookTasksEnabledDefaultsOn proves the master switch is opt-OUT: a blank
@@ -74,10 +74,10 @@ func TestNotebookTasksDisabledExecutorNoOps(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", tasks.StateDone)
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
 }
 
 // assertNoTask fails if a record exists for the given kind/subject. Unlike
@@ -85,7 +85,7 @@ func TestNotebookTasksDisabledExecutorNoOps(t *testing.T) {
 // a synchronous gate that must never have reached the runner.
 func assertNoTask(t *testing.T, d *Daemon, kind, subject string) {
 	t.Helper()
-	task, err := d.compactRunner.Get(tasks.TaskID(kind, subject))
+	task, err := d.jobQueue.GetByKey(kind, subject)
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}

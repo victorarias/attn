@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
-	"github.com/victorarias/attn/internal/tasks"
 )
 
 // notificationToProtocol converts one durable notification row into the
@@ -138,13 +138,13 @@ var taskFailureTitles = map[string]string{
 	reconcileKind:                "Ticket reconciliation failed",
 }
 
-// notifyTaskTerminalFailure is the task runner's OnTerminalFailure sink: it turns
-// a task that exhausted its retries (reached the terminal dead state) into a
+// notifyTaskTerminalFailure is the job queue's OnTerminalFailure sink: it turns
+// a job that exhausted its retries (reached the terminal dead state) into a
 // durable notification and broadcasts the new unread count. It is wired to the
-// runner in startCompactRunner and runs on the runner's goroutine, so it must not
+// runner in startJobQueue and runs on the runner's goroutine, so it must not
 // block or panic. A nil store drops the notification — the same mode in which the
-// runner does not persist tasks at all.
-func (d *Daemon) notifyTaskTerminalFailure(t *tasks.Task) {
+// runner does not persist jobs at all.
+func (d *Daemon) notifyTaskTerminalFailure(t *jobs.Job) {
 	if t == nil || d.store == nil {
 		return
 	}
@@ -156,10 +156,10 @@ func (d *Daemon) notifyTaskTerminalFailure(t *tasks.Task) {
 	d.publishFact(FactNotificationCreated, record.ID, nil)
 }
 
-// renderTaskFailureNotification builds the durable notification for a dead task.
-// SourceKind/SourceID point back at the task so the detail dialog's Retry can
+// renderTaskFailureNotification builds the durable notification for a dead job.
+// SourceKind/SourceID point back at the job so the detail dialog's Retry can
 // re-queue it; Detail carries the raw last error for diagnosis.
-func renderTaskFailureNotification(t *tasks.Task) store.NotificationRecord {
+func renderTaskFailureNotification(t *jobs.Job) store.NotificationRecord {
 	title := taskFailureTitles[t.Kind]
 	if title == "" {
 		title = fmt.Sprintf("Background task failed: %s", t.Kind)

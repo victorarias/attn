@@ -574,8 +574,10 @@ CREATE TABLE IF NOT EXISTS ticket_event_cursors (
 	// reconciliation, not agent self-report) and the set-if-unset dedupe lock
 	// between the death-hook and the sweep backstop.
 	{60, "add reconciled_at to tickets", "ALTER TABLE tickets ADD COLUMN reconciled_at TEXT NOT NULL DEFAULT ''"},
-	// The durable task runner (internal/tasks) persists its records here instead of
-	// one JSON file per task under the notebook root. See docs/plans/2026-07-02-bg-task-notifications.md.
+	// The durable task runner persisted its records here instead of one JSON file
+	// per task under the notebook root. See docs/plans/2026-07-02-bg-task-notifications.md.
+	// The table is retired: the job queue (migration 86) replaced it, and the daemon
+	// drains whatever it still held at startup. Nothing writes it anymore.
 	{61, "create tasks table", `CREATE TABLE IF NOT EXISTS tasks (
 		id TEXT PRIMARY KEY,
 		kind TEXT NOT NULL,

@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
 	"github.com/victorarias/attn/internal/automation"
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -20,20 +22,29 @@ var scheduleDueInstantCap = 1_000_000
 // missed and is never delivered.
 const scheduleSkipGrace = 5 * time.Minute
 
-// startAutomationScheduleLoop blocks running the scheduled-automation
-// observation tick until done is closed. Intended to be launched in its own
-// goroutine from Start, mirroring startNotebookCronEnqueuer.
-func (d *Daemon) startAutomationScheduleLoop(done <-chan struct{}) {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			d.observeDueSchedules(time.Now())
-		}
-	}
+// automationScheduleKind is the queue kind for the per-minute scheduled-automation
+// observation tick.
+const automationScheduleKind = "automation_schedule"
+
+// automationScheduleInterval is how often the observation runs. Schedules are
+// minutely-grade at finest, so a finer tick would only re-read the same cursors.
+const automationScheduleInterval = time.Minute
+
+// automationScheduleTickTimeout is a tripwire, not a budget. One observation walks
+// the enabled definitions and, at most, claims and delivers one run per definition
+// — store reads and writes, no agent work. It is set far past any healthy pass so
+// only a wedged one (a store that never returns, a delivery that never completes)
+// touches it, freeing the slot for the next minute rather than stalling the kind.
+const automationScheduleTickTimeout = 2 * time.Minute
+
+// automationScheduleHandler is the queue handler for the observation tick.
+//
+// It never returns an error. Every per-definition step already logs and skips its
+// own failure, and the decision is cursor-driven, so the next tick re-decides from
+// durable state rather than needing this one retried.
+func (d *Daemon) automationScheduleHandler(_ context.Context, _ *jobs.Job) (any, error) {
+	d.observeDueSchedules(time.Now())
+	return nil, nil
 }
 
 // observeDueSchedules is the per-tick fan-out over enabled scheduled

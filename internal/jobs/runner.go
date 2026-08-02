@@ -79,6 +79,10 @@ type handler struct {
 	// always >= 1 after registration, so a kind is serialized with itself by
 	// default while different kinds run in parallel.
 	limit int
+	// interval is the recurrence for a cron kind (see cron.go) and zero for
+	// every other kind, which is what tells finish() to re-arm rather than
+	// retire the record.
+	interval time.Duration
 }
 
 // HandlerConfig tunes a registered handler. The zero value is the default:
@@ -342,6 +346,11 @@ func (r *Runner) Start() error {
 		r.log("jobs: recovered %d orphan running job(s)", n)
 	}
 
+	// Arm the recurring entries before the loop starts so a cron kind registered
+	// on a fresh store has its first fire scheduled, not waiting on a trigger
+	// that will never come.
+	r.armCron()
+
 	go r.loop()
 	go r.retentionLoop(done)
 	return nil
@@ -477,7 +486,7 @@ func (r *Runner) Enqueue(kind string, opts EnqueueOptions) (*Job, error) {
 	if err := r.store.Save(job); err != nil {
 		return nil, err
 	}
-	r.notifyChange(job.ID)
+	r.notifyWorkChange(job.Kind, job.ID)
 	r.nudge()
 	return job.clone(), nil
 }
@@ -594,8 +603,13 @@ func (r *Runner) RemoveByKey(kind, uniqueKey string) {
 	r.Remove(existing.ID)
 }
 
-// List returns every persisted job, newest-updated first. Safe (returns nil) on
-// a disabled runner.
+// List returns the work queue — every job something enqueued because it needed
+// doing — newest-updated first. Safe (returns nil) on a disabled runner.
+//
+// Cron entries are excluded. They are the queue's own scheduler rather than work
+// anyone is owed: each is permanently queued for its next fire, so listing them
+// alongside real jobs would put two rows that never resolve at the top of every
+// "what is the daemon working on" answer. Read one with CronEntry.
 func (r *Runner) List() ([]*Job, error) {
 	if r.disabled {
 		return nil, nil
@@ -604,10 +618,17 @@ func (r *Runner) List() ([]*Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	sort.SliceStable(all, func(i, j int) bool {
-		return all[i].UpdatedAt.After(all[j].UpdatedAt)
+	out := all[:0]
+	for _, j := range all {
+		if j != nil && r.cronInterval(j.Kind) > 0 {
+			continue
+		}
+		out = append(out, j)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
 	})
-	return all, nil
+	return out, nil
 }
 
 // Get returns a single job by id, or nil if absent. Safe on a disabled runner.
@@ -761,7 +782,7 @@ func (r *Runner) dispatch() (progressed bool, err error) {
 		r.notifyChange(id)
 	}
 	for _, ls := range launch {
-		r.notifyChange(ls.job.ID)
+		r.notifyWorkChange(ls.job.Kind, ls.job.ID)
 	}
 	for _, dj := range deadJobs {
 		r.notifyTerminalFailure(dj)
@@ -881,6 +902,16 @@ func (r *Runner) finish(id string, result json.RawMessage, runErr error) {
 	}
 	if cur == nil {
 		// The record was deleted out from under the run; nothing to persist.
+		r.ioMu.Unlock()
+		return
+	}
+
+	// A cron kind's record is a recurring entry, not a unit of work that
+	// completes: it goes back to queued for its next fire whatever happened here,
+	// including a failure (see RegisterCron).
+	if interval := r.cronInterval(cur.Kind); interval > 0 {
+		cur.Result = result
+		r.rearmCronLocked(cur, interval, runErr)
 		r.ioMu.Unlock()
 		return
 	}
@@ -1087,6 +1118,20 @@ func (r *Runner) nudge() {
 	case r.wake <- struct{}{}:
 	default:
 	}
+}
+
+// notifyWorkChange reports a transition on the two paths a cron entry travels —
+// its arming and each fire — and drops it for cron kinds. A heartbeat beating
+// every minute forever is not news, and routing it through the change hook would
+// append a durable event and re-push a snapshot per minute per entry for as long
+// as the daemon lives. Every other transition (retry, cancel, removal) is an
+// action someone took, so those report through notifyChange even for a cron
+// entry.
+func (r *Runner) notifyWorkChange(kind, jobID string) {
+	if r.cronInterval(kind) > 0 {
+		return
+	}
+	r.notifyChange(jobID)
 }
 
 // notifyChange reports one job's lifecycle transition. The id is required: a

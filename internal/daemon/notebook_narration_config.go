@@ -10,7 +10,7 @@ import (
 	agentdriver "github.com/victorarias/attn/internal/agent"
 )
 
-// Narration task kinds (runner executor selectors). They live on d.compactRunner
+// Narration task kinds (runner executor selectors). They live on d.jobQueue
 // alongside compactContextKind ("compact_context").
 const (
 	notebookSummarizeSessionKind = "summarize_session"

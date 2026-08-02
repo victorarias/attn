@@ -10,12 +10,12 @@ import (
 // SQLite persistence for the global notifications feed (see
 // docs/plans/2026-07-02-bg-task-notifications.md). A notification is a durable,
 // read/unread record surfaced in the app's notifications panel; its producer is
-// the durable task runner, which emits one when a background task reaches terminal
+// the durable job queue, which emits one when a background job reaches terminal
 // `dead` (retries exhausted). NotificationRecord is a store-local row type — the
 // daemon owns the mapping to the protocol shape — keeping this package a leaf.
 //
 // read_at is persisted as '' while unread and as a timestamp once read. Timestamps
-// reuse the tasks table's RFC3339Nano encoding and parseTaskTime decoder (same
+// reuse the jobs table's RFC3339Nano encoding and parseJobTime decoder (same
 // package), so a blank/garbage value decodes to the zero time.
 
 // NotificationRecord is one durable notification row. ReadAt is the zero time
@@ -126,7 +126,7 @@ func (s *Store) MarkAllNotificationsRead(now time.Time) (int, error) {
 	return int(n), nil
 }
 
-// notificationTimeFormat matches the tasks table so both surfaces round-trip
+// notificationTimeFormat matches the jobs table so both surfaces round-trip
 // timestamps identically.
 const notificationTimeFormat = time.RFC3339Nano
 
@@ -139,7 +139,7 @@ func scanNotificationRow(sc rowScanner) (*NotificationRecord, error) {
 		&rec.SourceKind, &rec.SourceID, &createdStr, &readStr); err != nil {
 		return nil, err
 	}
-	rec.CreatedAt = parseTaskTime(createdStr)
-	rec.ReadAt = parseTaskTime(readStr)
+	rec.CreatedAt = parseJobTime(createdStr)
+	rec.ReadAt = parseJobTime(readStr)
 	return &rec, nil
 }

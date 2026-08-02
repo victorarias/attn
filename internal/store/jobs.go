@@ -18,6 +18,13 @@ import (
 // sorts lexicographically, which is what lets scheduled_at be an index term.
 const jobTimeFormat = time.RFC3339Nano
 
+// rowScanner is satisfied by both *sql.Row and *sql.Rows, so one scan helper
+// serves a single-row lookup and a listing. It lives here because the job queue
+// is its heaviest user; the notification surface shares it.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
 // JobRecord is one durable job row. Payload and Result are carried opaquely as
 // JSON text because the store never interprets them — only the handler that was
 // enqueued with them does.

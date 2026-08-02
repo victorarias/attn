@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
-	"github.com/victorarias/attn/internal/tasks"
 )
 
 const (
@@ -41,23 +41,23 @@ The area-map format is being implemented.
 `
 )
 
-// installTestCompactRunner replaces the daemon's default disabled runner with an
+// installTestCompactQueue replaces the daemon's default disabled runner with an
 // enabled one over a temp root, registers the real compact_context executor (so
 // the executor's load/threshold/validate/commit-under-CommitGuard logic runs for
 // real), and starts the worker. The fake compaction execution is injected via
 // d.workspaceContextCompactionExecution so no real LLM is spawned. A fast poll
 // interval avoids real-time waits.
-func installTestCompactRunner(t *testing.T, d *Daemon) {
+func installTestCompactQueue(t *testing.T, d *Daemon) {
 	t.Helper()
-	runner := tasks.New(tasks.Options{
-		Root:         t.TempDir(),
+	runner := jobs.New(jobs.Options{
+		Store:        newTestJobStore(t, d),
 		Log:          func(string, ...interface{}) {},
 		PollInterval: 2 * time.Millisecond,
 	})
-	if err := runner.RegisterWithTimeout(
+	if err := runner.RegisterWith(
 		compactContextKind,
-		d.compactContextExecutor,
-		d.keeperCompactTimeoutDuration(),
+		d.compactContextHandler,
+		jobs.HandlerConfig{Timeout: d.keeperCompactTimeoutDuration()},
 	); err != nil {
 		t.Fatalf("register compact_context: %v", err)
 	}
@@ -65,7 +65,7 @@ func installTestCompactRunner(t *testing.T, d *Daemon) {
 		t.Fatalf("start runner: %v", err)
 	}
 	t.Cleanup(runner.Stop)
-	d.compactRunner = runner
+	d.jobQueue = runner
 }
 
 func fakeCompaction(candidate string) func(
@@ -283,14 +283,16 @@ func TestManualWorkspaceContextCompactionCancelsPendingRun(t *testing.T) {
 	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
 	d.keeperCompactThreshold = 1
 	d.keeperCompactDebounce = time.Hour
-	installTestCompactRunner(t, d)
+	installTestCompactQueue(t, d)
 	d.workspaceContextCompactionExecution = fakeCompaction(keeperCandidate)
 
 	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
 	// Enqueue a far-future debounced task that must be cancelled by the manual run.
-	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{Debounce: time.Hour}); err != nil {
+	if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{
+		UniqueKey: "workspace-1", Delay: time.Hour,
+	}); err != nil {
 		t.Fatalf("enqueue pending: %v", err)
 	}
 
@@ -301,7 +303,7 @@ func TestManualWorkspaceContextCompactionCancelsPendingRun(t *testing.T) {
 	if !result.Changed || result.ResultRevision != 2 {
 		t.Fatalf("manual result = %+v", result)
 	}
-	pending, err := d.compactRunner.Get(tasks.TaskID(compactContextKind, "workspace-1"))
+	pending, err := d.jobQueue.GetByKey(compactContextKind, "workspace-1")
 	if err != nil {
 		t.Fatalf("get pending: %v", err)
 	}
@@ -309,7 +311,7 @@ func TestManualWorkspaceContextCompactionCancelsPendingRun(t *testing.T) {
 	// the pending record stays queued for the far-future debounce and must not have
 	// run (it would conflict on the stale revision). The deterministic seam here is
 	// that the manual command returned a committed result synchronously.
-	if pending != nil && pending.State == tasks.StateRunning {
+	if pending != nil && pending.State == jobs.StateRunning {
 		t.Fatalf("pending task still running after manual cancel: %+v", pending)
 	}
 }
@@ -352,13 +354,15 @@ func TestWorkspaceContextCompactionRejectsStaleRevision(t *testing.T) {
 	}
 }
 
-// TestCompactRunnerTimeoutAndCancellationProtectContext proves the runner-owned
+// TestCompactContextTimeoutAndCancellationProtectContext proves the runner-owned
 // timeout and a runner.Cancel both abort a stuck compaction without writing the
 // context.
-func TestCompactRunnerTimeoutAndCancellationProtectContext(t *testing.T) {
-	for name, stop := range map[string]func(*Daemon){
-		"timeout":      func(d *Daemon) {},
-		"cancellation": func(d *Daemon) { d.compactRunner.Cancel(tasks.TaskID(compactContextKind, "workspace-1")) },
+func TestCompactContextTimeoutAndCancellationProtectContext(t *testing.T) {
+	for name, stop := range map[string]func(*testing.T, *Daemon){
+		"timeout": func(*testing.T, *Daemon) {},
+		"cancellation": func(t *testing.T, d *Daemon) {
+			d.jobQueue.Cancel(jobIDForKey(t, d.jobQueue, compactContextKind, "workspace-1"))
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
@@ -378,15 +382,15 @@ func TestCompactRunnerTimeoutAndCancellationProtectContext(t *testing.T) {
 				<-ctx.Done()
 				return keeperCompactExecution{}, ctx.Err()
 			}
-			installTestCompactRunner(t, d)
+			installTestCompactQueue(t, d)
 			if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 				t.Fatalf("seed context: %v", err)
 			}
-			if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
+			if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
 				t.Fatalf("enqueue: %v", err)
 			}
 			<-started
-			stop(d)
+			stop(t, d)
 			deadline := time.Now().Add(2 * time.Second)
 			for {
 				current, err := d.store.GetWorkspaceContext("workspace-1")
@@ -396,11 +400,11 @@ func TestCompactRunnerTimeoutAndCancellationProtectContext(t *testing.T) {
 				if current.Content != keeperSource || current.Revision != 1 {
 					t.Fatalf("context changed after aborted run: %+v", current)
 				}
-				task, err := d.compactRunner.Get(tasks.TaskID(compactContextKind, "workspace-1"))
+				task, err := d.jobQueue.GetByKey(compactContextKind, "workspace-1")
 				if err != nil {
 					t.Fatalf("get task: %v", err)
 				}
-				if task != nil && task.State != tasks.StateRunning {
+				if task != nil && task.State != jobs.StateRunning {
 					break
 				}
 				if time.Now().After(deadline) {
@@ -412,10 +416,10 @@ func TestCompactRunnerTimeoutAndCancellationProtectContext(t *testing.T) {
 	}
 }
 
-// TestCompactRunnerCancellationWaitsForAdmittedCommit proves the CommitGuard
+// TestCompactContextCancellationWaitsForAdmittedCommit proves the CommitGuard
 // fence: a Cancel that arrives after the executor has entered its commit waits
 // for the durable write to finish untorn.
-func TestCompactRunnerCancellationWaitsForAdmittedCommit(t *testing.T) {
+func TestCompactContextCancellationWaitsForAdmittedCommit(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
@@ -427,18 +431,19 @@ func TestCompactRunnerCancellationWaitsForAdmittedCommit(t *testing.T) {
 		close(commitStarted)
 		<-releaseCommit
 	}
-	installTestCompactRunner(t, d)
+	installTestCompactQueue(t, d)
 	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
-	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	<-commitStarted
 
+	cancelID := jobIDForKey(t, d.jobQueue, compactContextKind, "workspace-1")
 	cancelDone := make(chan struct{})
 	go func() {
-		d.compactRunner.Cancel(tasks.TaskID(compactContextKind, "workspace-1"))
+		d.jobQueue.Cancel(cancelID)
 		close(cancelDone)
 	}()
 	select {
@@ -478,11 +483,11 @@ func TestWorkspaceDeletionCancelsCompactionBeforeRemovingContext(t *testing.T) {
 		<-ctx.Done()
 		return keeperCompactExecution{}, ctx.Err()
 	}
-	installTestCompactRunner(t, d)
+	installTestCompactQueue(t, d)
 	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
-	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	<-started
@@ -515,7 +520,7 @@ func TestWorkspaceContextCompactionEnqueuesOnThresholdViaTrigger(t *testing.T) {
 		}
 		return keeperCompactExecution{Candidate: keeperCandidate}, nil
 	}
-	installTestCompactRunner(t, d)
+	installTestCompactQueue(t, d)
 
 	checkout, err := d.checkoutWorkspaceContext(&protocol.WorkspaceContextCheckoutMessage{SourceSessionID: "session-1"})
 	if err != nil {
@@ -552,16 +557,16 @@ func TestWorkspaceContextCompactionEnqueuesOnThresholdViaTrigger(t *testing.T) {
 	}
 }
 
-// TestWorkspaceContextCompactionInlineFallbackWhenRunnerDisabled proves that with
+// TestWorkspaceContextCompactionInlineFallbackWhenQueueDisabled proves that with
 // a disabled runner (no notebook root) the trigger compacts inline/synchronously
 // so compaction still happens.
-func TestWorkspaceContextCompactionInlineFallbackWhenRunnerDisabled(t *testing.T) {
+func TestWorkspaceContextCompactionInlineFallbackWhenQueueDisabled(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
 	d.keeperCompactThreshold = 1
 	// NewForTesting installs a disabled runner; keep it.
-	if !d.compactRunner.Disabled() {
+	if !d.jobQueue.Disabled() {
 		t.Fatal("expected disabled runner in test")
 	}
 	d.workspaceContextCompactionExecution = fakeCompaction(keeperCandidate)
@@ -601,22 +606,22 @@ func TestWorkspaceContextCompactionReChecksThresholdAfterDebounce(t *testing.T) 
 		executed = true
 		return keeperCompactExecution{Candidate: keeperCandidate}, nil
 	}
-	installTestCompactRunner(t, d)
+	installTestCompactQueue(t, d)
 	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
 		t.Fatalf("seed context: %v", err)
 	}
 	// Enqueue directly (the trigger would gate it, but a pre-debounce enqueue may
 	// have outlived a shrink); the executor must re-check and no-op.
-	if _, err := d.compactRunner.Enqueue(compactContextKind, "workspace-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
-		task, err := d.compactRunner.Get(tasks.TaskID(compactContextKind, "workspace-1"))
+		task, err := d.jobQueue.GetByKey(compactContextKind, "workspace-1")
 		if err != nil {
 			t.Fatalf("get task: %v", err)
 		}
-		if task != nil && task.State == tasks.StateDone {
+		if task != nil && task.State == jobs.StateDone {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -636,19 +641,19 @@ func TestWorkspaceContextCompactionReChecksThresholdAfterDebounce(t *testing.T) 
 	}
 }
 
-// TestWorkspaceTeardownDoesNotPanicBeforeCompactRunnerExists proves the runtime
-// teardown sites tolerate a nil compactRunner. Production New() leaves
-// compactRunner nil until startCompactRunner() runs late in Start(), but the
+// TestWorkspaceTeardownDoesNotPanicBeforeTheJobQueueExists proves the runtime
+// teardown sites tolerate a nil jobQueue. Production New() leaves
+// jobQueue nil until startJobQueue() runs late in Start(), but the
 // websocket server already accepts connections by then, so an UnregisterWorkspace
 // / session-close / move-out arriving in that window reaches these sites with a
-// nil runner. An unconditional d.compactRunner.Cancel(...) would nil-deref on the
+// nil runner. An unconditional d.jobQueue.Cancel(...) would nil-deref on the
 // first line of Runner.Cancel (it reads r.disabled) and crash the daemon.
-func TestWorkspaceTeardownDoesNotPanicBeforeCompactRunnerExists(t *testing.T) {
+func TestWorkspaceTeardownDoesNotPanicBeforeTheJobQueueExists(t *testing.T) {
 	t.Run("dissociateSessionFromWorkspace", func(t *testing.T) {
 		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
 		// Mimic production New(): the runner is not constructed yet.
-		d.compactRunner = nil
+		d.jobQueue = nil
 
 		d.dissociateSessionFromWorkspace("session-1")
 
@@ -660,7 +665,7 @@ func TestWorkspaceTeardownDoesNotPanicBeforeCompactRunnerExists(t *testing.T) {
 	t.Run("handleUnregisterWorkspace", func(t *testing.T) {
 		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-		d.compactRunner = nil
+		d.jobQueue = nil
 
 		d.handleUnregisterWorkspace(nil, &protocol.UnregisterWorkspaceMessage{ID: "workspace-1"})
 
@@ -675,7 +680,7 @@ func TestWorkspaceTeardownDoesNotPanicBeforeCompactRunnerExists(t *testing.T) {
 		// The session must be gone for the workspace to be considered empty.
 		d.workspaces.dissociateSession("session-1")
 		d.store.Remove("session-1")
-		d.compactRunner = nil
+		d.jobQueue = nil
 
 		d.unregisterWorkspaceIfEmpty("workspace-1")
 

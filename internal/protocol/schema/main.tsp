@@ -1201,7 +1201,7 @@ model JournalAppendResult {
   hash: string;
 }
 
-// Task status surface: list the durable task runner's records, and retry a
+// Task status surface: list the durable job queue's records, and retry a
 // failed/dead one. state and kind are plain strings (not enums) so the on-disk
 // record stays self-describing and a new TypeSpec enum cannot trip the quicktype
 // identical-enum-merge that drops a generated export.

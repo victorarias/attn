@@ -1,23 +1,31 @@
 package daemon
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/notebook"
 )
 
-// Notebook cron enqueuer.
+// Notebook cron.
 //
-// A single per-minute, timezone-aware cron tick drives the notebook's scheduled
-// background work. The tick is a thin schedule-and-dispatch loop: it decides what
-// is due and enqueues onto the durable runner (internal/tasks), which owns
+// A single per-minute, timezone-aware tick drives the notebook's scheduled
+// background work. The tick is a thin schedule-and-dispatch step: it decides what
+// is due and enqueues onto the durable queue (internal/jobs), which owns
 // execution, single-flight, retry/backoff, and crash recovery. Today it dispatches
 // the daily per-workspace narrate backstop (enqueueDueDailyNarrates). The minute
 // granularity is ample for a nightly pass and keeps catch-up logic trivial.
+//
+// The tick itself is a cron entry on that same queue, so its next fire is durable
+// and visible in the background-work panel rather than living in a goroutine.
 
 const (
+	// notebookCronKind is the queue kind for the per-minute notebook tick.
+	notebookCronKind = "notebook_cron"
+
 	// defaultNotebookCronFrequency is the nightly slot (03:00 in the configured
 	// timezone — quiet hours, after a day's journals and dispatches have landed)
 	// the notebook cron fires on by default.
@@ -26,6 +34,13 @@ const (
 	// defaultNotebookCronInterval is how often the cron checks whether work is
 	// due. A daily pass does not need finer granularity.
 	defaultNotebookCronInterval = time.Minute
+
+	// notebookCronTickTimeout is a tripwire, not a budget. The tick reads a few
+	// settings, one small state file, and enqueues; it is sub-millisecond work.
+	// A tick still running after this is wedged on something (a hung filesystem,
+	// a store that never returns), and killing it frees the slot for the next
+	// minute's tick instead of stalling the kind forever.
+	notebookCronTickTimeout = 30 * time.Second
 )
 
 // legacyNotebookDreaming*Key are the pre-rename persisted settings keys.
@@ -111,26 +126,16 @@ func parseNotebookCronTime(s string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// startNotebookCronEnqueuer blocks running the notebook cron tick loop until done
-// is closed. Intended to be launched in its own goroutine from Start, AFTER
-// startCompactRunner so the narrate executor is registered before the first tick
-// can enqueue.
+// notebookCronHandler is the queue handler for the per-minute notebook tick: the
+// fan-out over whatever the notebook schedules. Today that is the daily
+// per-workspace narrate backstop for long-lived (never-removed) workspaces.
 //
-// Shutdown is by done alone (close(d.done) in Stop), like the daemon's other
-// d.done-driven loops; there is no explicit join. The enqueuer holds no run
-// machinery — it only dispatches onto the durable runner, which owns single-flight
-// and crash recovery — so there is nothing to drain on stop.
-func (d *Daemon) startNotebookCronEnqueuer(done <-chan struct{}) {
-	ticker := time.NewTicker(defaultNotebookCronInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			d.notebookCronTick(time.Now())
-		}
-	}
+// It never returns an error. Every step already logs and skips its own failure,
+// and a tick has nothing worth retrying — the next one is a minute away and
+// re-decides from the persisted anchor.
+func (d *Daemon) notebookCronHandler(_ context.Context, _ *jobs.Job) (any, error) {
+	d.notebookCronTick(time.Now())
+	return nil, nil
 }
 
 // notebookCronTick is the per-tick fan-out of the single notebook cron. It enqueues
@@ -178,7 +183,7 @@ func (d *Daemon) enqueueDueDailyNarrates(now time.Time) {
 
 	// Resolve the runner BEFORE touching state, so a missing/disabled runner never
 	// advances the anchor (which would silently skip the day with no work done).
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil || runner.Disabled() {
 		return
 	}

@@ -14,8 +14,8 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/bus"
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/tasks"
 )
 
 const (
@@ -167,107 +167,123 @@ const compactContextKind = "compact_context"
 
 // forgetWorkspaceContextCompaction drops any in-flight or pending compaction for a
 // workspace AND deletes its task record. It is the single nil-safe entry point:
-// the runner is constructed late in Start() (startCompactRunner, after the
+// the runner is constructed late in Start() (startJobQueue, after the
 // websocket server is already accepting connections), so every teardown callsite —
 // including the ones reachable over the websocket before the runner exists — must
-// route through here rather than dereferencing d.compactRunner directly. Remove
+// route through here rather than dereferencing d.jobQueue directly. Remove
 // (not Cancel) is used so a removed workspace leaves no orphan compact_context
 // record behind: Cancel alone is a no-op for a queued task and never deletes the
 // record.
 func (d *Daemon) forgetWorkspaceContextCompaction(workspaceID string) {
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil {
 		return
 	}
-	runner.Remove(tasks.TaskID(compactContextKind, workspaceID))
+	runner.RemoveByKey(compactContextKind, workspaceID)
 }
 
-// compactRunnerRef reads the compaction/narration runner pointer under the
-// read lock, so a concurrent startCompactRunner pointer swap is race-free. It
-// returns the same value the field holds (possibly nil before startCompactRunner
-// runs, possibly a disabled runner when no notebook root resolves) — callers keep
-// their existing nil/Disabled guards.
-func (d *Daemon) compactRunnerRef() *tasks.Runner {
-	d.compactRunnerMu.RLock()
-	defer d.compactRunnerMu.RUnlock()
-	return d.compactRunner
+// jobQueueRef reads the job-queue pointer under the read lock, so a concurrent
+// startJobQueue pointer swap is race-free. It returns the same value the field
+// holds (possibly nil before startJobQueue runs, possibly a disabled queue when
+// there is no store) — callers keep their existing nil/Disabled guards.
+func (d *Daemon) jobQueueRef() *jobs.Runner {
+	d.jobQueueMu.RLock()
+	defer d.jobQueueMu.RUnlock()
+	return d.jobQueue
 }
 
-// setCompactRunner publishes a freshly built runner under the write lock. Only
-// startCompactRunner calls it; everything else reads via compactRunnerRef.
-func (d *Daemon) setCompactRunner(runner *tasks.Runner) {
-	d.compactRunnerMu.Lock()
-	d.compactRunner = runner
-	d.compactRunnerMu.Unlock()
+// setJobQueue publishes a freshly built runner under the write lock. Only
+// startJobQueue calls it; everything else reads via jobQueueRef.
+func (d *Daemon) setJobQueue(runner *jobs.Runner) {
+	d.jobQueueMu.Lock()
+	d.jobQueue = runner
+	d.jobQueueMu.Unlock()
 }
 
-// startCompactRunner constructs and starts the durable compaction runner. The
-// runner root is the notebook root; when it cannot be resolved the runner is
-// disabled and the daemon degrades to the inline fallback (see
-// enqueueWorkspaceContextCompaction). New always returns a non-nil value, so the
-// Cancel/Enqueue callsites can call d.compactRunner unconditionally.
-func (d *Daemon) startCompactRunner() {
-	root, _ := d.notebookRoot()
-	// One-time import of any legacy on-disk JSON task records (the pre-SQLite
-	// <root>/.attn/tasks/*.json format) into the profile DB.
-	if root != "" {
-		d.migrateLegacyTasksToSQLite(root)
-	}
-	// Tasks persist in the profile SQLite DB via the injected store, NOT under the
-	// notebook root — so the runner's enable gate is keyed only on the store now,
-	// not on a resolvable notebook root. That gate-drop is what lets the reconcile
-	// kind (which must run for any dead session, notebook or not) become an
-	// ordinary task (docs/plans/2026-07-02-bg-task-notifications.md). The
-	// notebook-scoped executors (compact_context, summarize_session,
-	// narrate_workspace) keep their own no-op-when-no-notebook guards.
-	opts := tasks.Options{Log: d.logf}
+// startJobQueue constructs and starts the daemon's durable job queue: the four
+// background kinds (compact_context, summarize_session, narrate_workspace,
+// reconcile) plus the two periodic cron entries. It is disabled when there is no
+// store to persist to, in which case compaction degrades to the inline fallback
+// (see enqueueWorkspaceContextCompaction). New always returns a non-nil value,
+// so the Cancel/Enqueue callsites can call d.jobQueue unconditionally.
+func (d *Daemon) startJobQueue() {
+	// Carry anything the retired task runner still owed onto the queue. It empties
+	// the old table, so this is a no-op on every boot after the first.
+	d.importLegacyTasks()
+	// Jobs persist in the profile SQLite DB via the injected store, NOT under the
+	// notebook root — so the queue's enable gate is keyed only on the store, not on
+	// a resolvable notebook root. That gate-drop is what lets the reconcile kind
+	// (which must run for any dead session, notebook or not) be an ordinary job
+	// (docs/plans/2026-07-02-bg-task-notifications.md). The notebook-scoped
+	// handlers (compact_context, summarize_session, narrate_workspace) keep their
+	// own no-op-when-no-notebook guards.
+	opts := jobs.Options{Log: d.logf}
 	if d.store != nil {
-		opts.Store = d.newSQLTaskStore()
+		opts.Store = d.newSQLJobStore()
 	}
 	// Build and register on a LOCAL pointer, then publish it once under the write
 	// lock. Registering on the local (not the published field) keeps a concurrent
 	// reader from ever observing a half-registered runner, and the single
-	// setCompactRunner swap is what Stop()/enqueue/forget synchronize against.
-	runner := tasks.New(opts)
+	// setJobQueue swap is what Stop()/enqueue/forget synchronize against.
+	runner := jobs.New(opts)
 	if !runner.Disabled() {
-		if err := runner.RegisterWithTimeout(
+		if err := runner.RegisterWith(
 			compactContextKind,
-			d.compactContextExecutor,
-			d.keeperCompactTimeoutDuration(),
+			d.compactContextHandler,
+			jobs.HandlerConfig{Timeout: d.keeperCompactTimeoutDuration()},
 		); err != nil {
 			d.logf("keeper compact: register compact_context: %v", err)
 		}
-		// Notebook narration shares the same durable runner (same root, same
-		// disabled-when-no-root gate). Both narration executors run native-tools
+		// Notebook narration shares the same durable queue (same root, same
+		// disabled-when-no-root gate). Both narration handlers run native-tools
 		// agents and verify a written file rather than committing a read-back.
-		if err := runner.RegisterWithTimeout(
+		if err := runner.RegisterWith(
 			notebookSummarizeSessionKind,
-			d.summarizeSessionExecutor,
-			notebookSummarizeSessionTimeout,
+			d.summarizeSessionHandler,
+			jobs.HandlerConfig{Timeout: notebookSummarizeSessionTimeout},
 		); err != nil {
 			d.logf("notebook narration: register summarize_session: %v", err)
 		}
-		if err := runner.RegisterWithTimeout(
+		if err := runner.RegisterWith(
 			notebookNarrateWorkspaceKind,
-			d.narrateWorkspaceExecutor,
-			notebookNarrateWorkspaceTimeout,
+			d.narrateWorkspaceHandler,
+			jobs.HandlerConfig{Timeout: notebookNarrateWorkspaceTimeout},
 		); err != nil {
 			d.logf("notebook narration: register narrate_workspace: %v", err)
 		}
-		// Orphaned-ticket reconciliation joins the same durable runner as a task
+		// Orphaned-ticket reconciliation joins the same durable queue as a job
 		// kind. It runs regardless of notebook config and is the one kind that wants
 		// real concurrency: a workspace teardown can kill several delegated sessions
 		// at once, so cap it at ticketReconcileConcurrency classifier subprocesses
-		// (the per-kind bound the runner now owns, replacing the old semaphore).
+		// (the per-kind bound the queue owns, replacing the old semaphore).
 		if err := runner.RegisterWith(
 			reconcileKind,
-			d.reconcileTaskExecutor,
-			tasks.ExecutorConfig{
+			d.reconcileJobHandler,
+			jobs.HandlerConfig{
 				Timeout:       ticketReconcileTimeout(),
 				MaxConcurrent: ticketReconcileConcurrency,
 			},
 		); err != nil {
 			d.logf("ticket reconcile: register reconcile: %v", err)
+		}
+		// The daemon's two periodic duties are cron entries on this same queue, so
+		// every recurring thing the daemon does has one mechanism, one durable
+		// record of when it next fires, and one place to look when it stops.
+		if err := runner.RegisterCron(
+			notebookCronKind,
+			defaultNotebookCronInterval,
+			d.notebookCronHandler,
+			jobs.HandlerConfig{Timeout: notebookCronTickTimeout},
+		); err != nil {
+			d.logf("notebook cron: register tick: %v", err)
+		}
+		if err := runner.RegisterCron(
+			automationScheduleKind,
+			automationScheduleInterval,
+			d.automationScheduleHandler,
+			jobs.HandlerConfig{Timeout: automationScheduleTickTimeout},
+		); err != nil {
+			d.logf("automation schedule: register tick: %v", err)
 		}
 	}
 	// Surface lifecycle transitions to any open task panel. OnChange may fire
@@ -276,13 +292,13 @@ func (d *Daemon) startCompactRunner() {
 	// to the bus and then projects to a non-blocking broadcast that drops on a
 	// full channel, so it can never stall a run — but it IS a durable write on
 	// the runner's goroutine, of the same order as the store.Save it follows.
-	runner.OnChange(func(taskID string) { d.publishFact(FactTaskChanged, taskID, nil) })
-	// Surface a durable notification when a task exhausts its retries (reaches the
-	// terminal dead state). OnTerminalFailure fires exactly once per task, on the
-	// runner's goroutine with a cloned record; notifyTaskTerminalFailure persists a
+	runner.OnChange(func(jobID string) { d.publishFact(FactTaskChanged, jobID, nil) })
+	// Surface a durable notification when a job exhausts its retries (reaches the
+	// terminal dead state). OnTerminalFailure fires exactly once per job, on the
+	// queue's goroutine with a cloned record; notifyTaskTerminalFailure persists a
 	// notification and broadcasts the new unread count, both non-blocking.
-	runner.OnTerminalFailure(func(t *tasks.Task) { d.notifyTaskTerminalFailure(t) })
-	d.setCompactRunner(runner)
+	runner.OnTerminalFailure(func(j *jobs.Job) { d.notifyTaskTerminalFailure(j) })
+	d.setJobQueue(runner)
 	_ = runner.Start()
 }
 
@@ -310,7 +326,7 @@ func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.Workspace
 	if len([]byte(canonical.Content)) <= d.keeperCompactSizeThreshold() {
 		return
 	}
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil || runner.Disabled() {
 		// Inline fallback: no durable queue, no debounce, no retry. Compaction
 		// still happens, synchronously, on the trigger.
@@ -320,45 +336,46 @@ func (d *Daemon) enqueueWorkspaceContextCompaction(canonical *protocol.Workspace
 		}
 		return
 	}
-	if _, err := runner.Enqueue(compactContextKind, canonical.WorkspaceID, tasks.EnqueueOptions{
-		Debounce: d.keeperCompactDebounceDuration(),
+	if _, err := runner.Enqueue(compactContextKind, jobs.EnqueueOptions{
+		UniqueKey: canonical.WorkspaceID,
+		Delay:     d.keeperCompactDebounceDuration(),
 	}); err != nil {
 		d.logf("keeper compact: enqueue %s: %v", canonical.WorkspaceID, err)
 	}
 }
 
-// compactContextExecutor is the runner-registered ExecutorFunc for
-// compact_context. The runner supplies the timeout context and the per-run
-// CommitGuard; this body loads the current context, re-checks the size threshold
-// (the doc may have shrunk during the debounce window), runs the agentic
-// compaction, validates, and commits under the guard.
-func (d *Daemon) compactContextExecutor(ctx context.Context, task *tasks.Task) error {
+// compactContextHandler is the queue-registered HandlerFunc for compact_context.
+// The queue supplies the timeout context and the per-run CommitGuard; this body
+// loads the current context, re-checks the size threshold (the doc may have
+// shrunk during the debounce window), runs the agentic compaction, validates,
+// and commits under the guard.
+func (d *Daemon) compactContextHandler(ctx context.Context, job *jobs.Job) (any, error) {
 	// Master switch: a run queued before the user disabled the keeper must not fire
 	// background work after the toggle is off. No-op success so the stale record is
 	// retired rather than retried. The user-triggered inline/manual compaction path
 	// does not route through here and stays ungated.
 	if !d.notebookTasksEnabled() {
-		return nil
+		return nil, nil
 	}
-	workspaceID := task.Subject
+	workspaceID := jobSubject(job)
 	config, err := d.keeperCompactConfig()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if config.Agent == "" {
-		return errors.New("keeper compact is disabled")
+		return nil, errors.New("keeper compact is disabled")
 	}
 	canonical, err := d.store.GetWorkspaceContext(workspaceID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Re-check the size gate after the debounce: a doc edited down below the
 	// threshold should not burn an LLM pass. No-op success.
 	if len([]byte(canonical.Content)) <= d.keeperCompactSizeThreshold() {
-		return nil
+		return nil, nil
 	}
-	_, err = d.applyWorkspaceContextCompaction(ctx, config, canonical, task.CommitGuard)
-	return err
+	_, err = d.applyWorkspaceContextCompaction(ctx, config, canonical, job.CommitGuard)
+	return nil, err
 }
 
 // runWorkspaceContextCompactionInline runs execute+validate+apply synchronously
@@ -378,7 +395,7 @@ func (d *Daemon) runWorkspaceContextCompactionInline(
 ) (*protocol.WorkspaceContextMaintenanceResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, d.keeperCompactTimeoutDuration())
 	defer cancel()
-	return d.applyWorkspaceContextCompaction(ctx, config, canonical, &tasks.CommitGuard{})
+	return d.applyWorkspaceContextCompaction(ctx, config, canonical, &jobs.CommitGuard{})
 }
 
 // applyWorkspaceContextCompaction is the single execute+validate+apply helper
@@ -390,7 +407,7 @@ func (d *Daemon) applyWorkspaceContextCompaction(
 	ctx context.Context,
 	config keeperCompactConfig,
 	canonical *protocol.WorkspaceContext,
-	guard *tasks.CommitGuard,
+	guard *jobs.CommitGuard,
 ) (*protocol.WorkspaceContextMaintenanceResult, error) {
 	if canonical == nil || strings.TrimSpace(canonical.WorkspaceID) == "" {
 		return nil, errors.New("workspace context is required")

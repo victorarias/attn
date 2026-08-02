@@ -143,17 +143,54 @@ they are not the unbounded growth trimming exists to bound.
    and no frontend work.
 3. Cron entries. The queue owns firing; `startNotebookCronEnqueuer` and
    `startAutomationScheduleLoop` stop hand-rolling `time.NewTicker` and become
-   cron entries. The notebook's `NarrateCronState` anchor is retired in favor
-   of the cron cursor (identical semantics: anchor on first observation, fire
-   only the newest due instant, collapse missed slots into one catch-up).
-   `internal/automation` keeps its per-definition cursor, five-minute skip
-   grace, million-instant storm cap, and startup-recovery interlock inside the
-   fired job — those are product semantics, not queue mechanics.
+   cron entries (`Runner.RegisterCron`). `internal/automation` keeps its
+   per-definition cursor, five-minute skip grace, million-instant storm cap,
+   and startup-recovery interlock inside the fired job — those are product
+   semantics, not queue mechanics.
+
+### What a cron entry is
+
+A recurring duty is an ordinary job that re-arms itself: one durable record per
+kind, coalesced on a fixed key, returned to `queued` at `now + interval` when
+its fire finishes. A ticker's next fire lives only in memory, so a restart
+silently resets it and nothing can be asked when it stops; a cron entry's next
+fire is a row.
+
+Two properties are deliberate:
+
+- **A cron entry never dies.** An ordinary job that keeps failing is abandoned
+  at the attempt cap, because nobody wants a broken job retried forever. A
+  heartbeat that stops is a silent outage instead, so a failing fire is logged
+  and recorded on the record and the entry re-arms.
+- **Arming does not reset an existing entry.** Re-arming on every boot would
+  mean a daemon restarted more often than the interval never ticks at all.
+
+Cron entries are excluded from `Runner.List()` — the work list answers "what
+does the daemon owe", and two permanently-queued rows at the top of it answer
+nothing — and their arming and fires do not go through the change hook.
+Receipt for that second exclusion: two entries firing once a minute is ~5,800
+change events a day, each one a durable bus row plus a snapshot re-push, for
+the lifetime of the daemon. Operator reads go through `Runner.CronEntry(kind)`.
+
+### Deviation: `NarrateCronState` stays
+
+The plan above said the notebook's nightly anchor would move onto the cron
+entry. It does not, and this is the reason rather than an omission.
+
+The queue fires on a fixed interval; the notebook's nightly pass is a
+timezone-aware cron expression the user configures. The per-minute tick is
+therefore still the thing that evaluates that expression against an anchor, and
+the anchor still has to live somewhere. Moving it from its own file onto the
+job record would trade one small file format for a subtler contract — the
+anchor would ride in the job's `Result`, where any early return in the handler
+silently erases it — and buys nothing the file does not already do correctly.
+Retiring it is worth doing when the notebook's schedule and the queue's
+scheduling model are the same shape; that is not this change.
 
 **The four kinds do not run on two runners at once.** The gate says they
 migrate one at a time against a parity checklist; that is the order of the
 work, not a shipped dual-runner state. All four are reached through a single
-`compactRunnerRef()` and feed a single panel, so coexistence would mean two
+`jobQueueRef()` and feed a single panel, so coexistence would mean two
 locks, two dead-job notification paths, and a panel unioning two lists — all
 of it thrown away at the end. The per-kind rigor is kept as one commit and one
 checklist pass per kind.
@@ -172,6 +209,80 @@ checklist pass per kind.
 - The kind's own inputs survive the move from `Subject`/`Meta` to `Payload` —
   notably `summarize_session`, whose run reads a transcript path recorded
   before the session and workspace rows were deleted.
+
+### Parity result
+
+The queue owns the mechanics, so the eight checklist items are proven once
+against `internal/jobs` rather than re-proven per kind — re-running the same
+assertions through four handlers would exercise the same code path four times.
+What is checked per kind is what each kind actually brought with it: its inputs,
+its enqueue sites, and its success gate.
+
+Mechanics (`internal/jobs`):
+
+| Item | Test |
+| --- | --- |
+| Coalescing | `TestUniqueKeyCoalescesABurstIntoOneRun` |
+| Coalesce-during-run | `TestATriggerArrivingMidRunRunsTheJobAgain` |
+| `RunNow` not demoted to a delay | `TestRunNowOverridesAPendingDebounce` |
+| Commit fence | `TestCancelWaitsForTheCommitFence`, `TestCancelBeforeTheFenceStopsTheWrite` |
+| Cancel blocks until exit | `TestCancelWaitsForTheCommitFence`, `TestStopDrainsInFlightRuns` |
+| Backoff, then `dead` once | `TestFailuresBackOffThenGoDeadOnce` |
+| Crash recovery | `TestStartRequeuesAJobLeftRunningByACrash` |
+| Removal leaves no row | `TestRemoveByKeyForgetsTheJob` |
+| Retention keeps `dead` | `TestRetentionTrimsCompletedJobsAndKeepsDeadOnes` |
+
+Per kind (`internal/daemon`):
+
+- **compact_context** — unique key is the workspace id, no payload. The fence is
+  exercised against the real commit in
+  `TestCompactContextCancellationWaitsForAdmittedCommit`; timeout and cancel in
+  `TestCompactContextTimeoutAndCancellationProtectContext`; removal in
+  `TestWorkspaceDeletionCancelsCompactionBeforeRemovingContext`; the
+  re-check after the debounce window in
+  `TestWorkspaceContextCompactionReChecksThresholdAfterDebounce`; the
+  no-store fallback in
+  `TestWorkspaceContextCompactionInlineFallbackWhenQueueDisabled`; the nil-safe
+  pre-queue teardown in
+  `TestWorkspaceTeardownDoesNotPanicBeforeTheJobQueueExists`.
+- **summarize_session** — the transcript path and workspace bucket moved from
+  `Meta` to `summarizeSessionPayload`:
+  `TestHandleStopCarriesTranscriptAndWorkspaceOnThePayload` (written at enqueue)
+  and `TestSummarizeSessionExecutorUsesCarriedPayloadWhenRowGone` (read after
+  the rows are deleted). Enqueue sites:
+  `TestHandleStopEnqueuesNarrationForWorkspaceSession`,
+  `TestHandleStopEnqueuesOnlyDigestForSoloSession`. Success gate unchanged:
+  `TestSummarizeSessionExecutorVerifiesDigestLedger`,
+  `…FailsWhenDigestMissing`, `…RequiresFreshDigest`.
+- **narrate_workspace** — the daily-pass flag moved from a `"1"` meta string to
+  `narrateWorkspacePayload.DailyPass`, and it still selects the relaxed gate:
+  `TestNarrateWorkspaceDailyPassUnchangedIsDone`,
+  `TestNarrateWorkspaceDailyPassAbsentIsDone`,
+  `TestNarrateWorkspaceDailyFlagRemovalPassStillStrict`,
+  `TestNarrateWorkspaceRoutinePassUnchangedStillFails`. The removal boundary
+  now uses `RunNow` instead of a zero debounce:
+  `TestWorkspaceRemovalEnqueuesFinalNarrate`.
+- **reconcile** — the inputs moved from a JSON-in-a-meta-string to the payload
+  (`reconcileInputsFromJob`), covered by
+  `TestRunTicketReconciliationPostsVerdict` and its sibling verdict tests; the
+  sweep's "already enqueued" check moved from an id guess to
+  `GetByKey`: `TestSweepSkipsTicketWithExistingTask`. Its concurrency cap of
+  two is a `HandlerConfig` value; the per-kind bound itself is proven in
+  `TestAKindIsSerializedWithItselfButNotWithOthers`.
+
+Handover and wire:
+
+- One-time import of owed `tasks` rows, inputs and ids preserved:
+  `TestImportCarriesEachKindsInputsOntoItsPayload`,
+  `TestImportKeepsARowWithUnreadableMeta`,
+  `TestDrainLegacyTasksReturnsOwedWorkAndEmptiesTheTable`,
+  `TestDrainLegacyTasksDropsCompletedRows`.
+- Wire shape unchanged, and neither `Payload` nor `Result` reaches a client:
+  `TestTaskToProtocolMapsFieldsAndOmitsPayload`, `TestSendTaskListWSResult`,
+  `TestSendTaskRetryWSResultRequeuesDeadTask`,
+  `TestTasksChangedBroadcastReachesClient`.
+- Both periodic duties are armed by the queue rather than by a ticker:
+  `TestStartJobQueueArmsThePeriodicTicks`.
 
 ### Verification
 

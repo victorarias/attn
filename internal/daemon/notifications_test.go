@@ -3,21 +3,21 @@ package daemon
 import (
 	"testing"
 
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/store"
-	"github.com/victorarias/attn/internal/tasks"
 )
 
 // TestNotifyTaskTerminalFailurePersistsNotification closes the producer→store
-// leg: the runner's terminal-failure sink turns a dead task into a durable,
+// leg: the queue's terminal-failure sink turns a dead job into a durable,
 // unread notification with the fields the detail dialog + Retry need.
 func TestNotifyTaskTerminalFailurePersistsNotification(t *testing.T) {
 	d := &Daemon{store: store.New()} // nil wsHub: broadcast is a guarded no-op
 
-	d.notifyTaskTerminalFailure(&tasks.Task{
-		ID:        "compact_context:ws-1",
+	d.notifyTaskTerminalFailure(&jobs.Job{
+		ID:        "job-1",
 		Kind:      compactContextKind,
-		Subject:   "ws-1",
-		State:     tasks.StateDead,
+		UniqueKey: "ws-1",
+		State:     jobs.StateDead,
 		Attempts:  3,
 		LastError: "boom: context deadline exceeded",
 	})
@@ -39,8 +39,8 @@ func TestNotifyTaskTerminalFailurePersistsNotification(t *testing.T) {
 	if n.Detail != "boom: context deadline exceeded" {
 		t.Fatalf("detail = %q", n.Detail)
 	}
-	if n.SourceKind != "task" || n.SourceID != "compact_context:ws-1" {
-		t.Fatalf("source = %s/%s, want task/compact_context:ws-1", n.SourceKind, n.SourceID)
+	if n.SourceKind != "task" || n.SourceID != "job-1" {
+		t.Fatalf("source = %s/%s, want task/job-1", n.SourceKind, n.SourceID)
 	}
 	if !n.ReadAt.IsZero() {
 		t.Fatalf("expected unread notification")
@@ -53,14 +53,14 @@ func TestNotifyTaskTerminalFailurePersistsNotification(t *testing.T) {
 // A nil store (the runner-disabled mode) drops the notification without panicking.
 func TestNotifyTaskTerminalFailureNilStoreIsNoop(t *testing.T) {
 	d := &Daemon{}
-	d.notifyTaskTerminalFailure(&tasks.Task{Kind: reconcileKind, State: tasks.StateDead})
+	d.notifyTaskTerminalFailure(&jobs.Job{Kind: reconcileKind, State: jobs.StateDead})
 	// no panic == pass
 }
 
 func TestRenderTaskFailureNotification(t *testing.T) {
 	// Known kind → friendly title; singular attempt wording.
-	got := renderTaskFailureNotification(&tasks.Task{
-		ID: "reconcile:t-9", Kind: reconcileKind, Subject: "t-9", Attempts: 1, LastError: "nope",
+	got := renderTaskFailureNotification(&jobs.Job{
+		ID: "job-9", Kind: reconcileKind, UniqueKey: "t-9", Attempts: 1, LastError: "nope",
 	})
 	if got.Title != "Ticket reconciliation failed" {
 		t.Fatalf("title = %q", got.Title)
@@ -69,7 +69,7 @@ func TestRenderTaskFailureNotification(t *testing.T) {
 		t.Fatalf("singular body = %q, want %q", got.Body, want)
 	}
 	// Unknown kind → generic title carrying the raw kind; plural wording.
-	other := renderTaskFailureNotification(&tasks.Task{ID: "mystery:x", Kind: "mystery", Attempts: 2})
+	other := renderTaskFailureNotification(&jobs.Job{ID: "job-x", Kind: "mystery", Attempts: 2})
 	if other.Title != "Background task failed: mystery" {
 		t.Fatalf("unknown-kind title = %q", other.Title)
 	}
